@@ -1,0 +1,52 @@
+name: CI
+
+# Run on every push to main and on every PR opened against main.
+# `workflow_dispatch` lets you re-run from the Actions tab without a new commit.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Minimum-needed permissions. We only read the source.
+permissions:
+  contents: read
+
+# Cancel an in-flight run when a newer commit lands on the same ref.
+# Saves runner minutes and produces faster feedback on the latest commit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # `--frozen-lockfile` makes the install fail if `bun.lock` is out of
+      # sync with `package.json`. That catches forgotten lockfile updates
+      # before they reach Cloudflare's build runner.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build
+        run: bun run build
+
+      # Quick smoke that the build produced the entry point Cloudflare expects.
+      # If this ever fails, our Vite config or output directory drifted.
+      - name: Verify dist output
+        run: test -f dist/index.html && test -d dist/assets

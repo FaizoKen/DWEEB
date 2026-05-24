@@ -1,5 +1,7 @@
 # Discord Webhook Builder
 
+[![CI](https://github.com/FaizoKen/Discord-Webhook-Builder/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/FaizoKen/Discord-Webhook-Builder/actions/workflows/ci.yml)
+
 A visual editor for Discord webhook messages using **Components V2**. Build rich
 messages with containers, sections, buttons, media, and files, watch a
 pixel-accurate live preview, and share the result through a single URL — no
