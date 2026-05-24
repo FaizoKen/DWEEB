@@ -11,7 +11,9 @@ import { ButtonStyle, type ButtonComponent } from "@/core/schema/types";
 import { cn } from "@/lib/cn";
 import styles from "./ButtonRenderer.module.css";
 
-const STYLE_CLASS: Record<number, string> = {
+// CSS-module values are `string | undefined` under `noUncheckedIndexedAccess`;
+// the fallback below (`?? styles.secondary`) absorbs the undefined.
+const STYLE_CLASS: Record<number, string | undefined> = {
   [ButtonStyle.Primary]: styles.primary,
   [ButtonStyle.Secondary]: styles.secondary,
   [ButtonStyle.Success]: styles.success,

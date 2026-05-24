@@ -69,18 +69,13 @@ function renderByType(node: AnyComponent) {
       return <ButtonRenderer node={node} />;
     case ComponentType.Thumbnail:
       return <ThumbnailRenderer node={node} />;
-    // The interactive selects/text input aren't part of the V2 webhook surface
-    // but the schema declares them; show a placeholder so the editor stays robust.
-    case ComponentType.StringSelect:
-    case ComponentType.UserSelect:
-    case ComponentType.RoleSelect:
-    case ComponentType.MentionableSelect:
-    case ComponentType.ChannelSelect:
-    case ComponentType.TextInput:
-      return (
-        <div className={styles.unsupported}>
-          This component requires interactions (a bot) and isn't supported by webhook messages.
-        </div>
-      );
   }
+  // Unreachable for any `AnyComponent` value. The fallback exists so that
+  // imported JSON carrying an unknown / interactive-only type (selects,
+  // text input) renders an explainer instead of throwing.
+  return (
+    <div className={styles.unsupported}>
+      This component requires interactions (a bot) and isn't supported by webhook messages.
+    </div>
+  );
 }
