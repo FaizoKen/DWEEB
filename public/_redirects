@@ -1,0 +1,2 @@
+# Share state lives in the URL hash (#s=...), so any path lands on the SPA shell.
+/*  /index.html  200

@@ -1,0 +1,28 @@
+.sectionThumbnail,
+.sectionButton {
+  display: grid;
+  gap: 12px;
+  align-items: start;
+}
+
+.sectionThumbnail {
+  grid-template-columns: 1fr auto;
+}
+
+.sectionButton {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.accessory {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}

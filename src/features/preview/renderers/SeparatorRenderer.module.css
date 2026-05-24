@@ -1,0 +1,19 @@
+.separator {
+  height: 8px;
+}
+.large {
+  height: 20px;
+}
+.divider {
+  position: relative;
+}
+.divider::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--discord-bg-quote);
+  opacity: 0.7;
+}

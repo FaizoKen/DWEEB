@@ -1,0 +1,38 @@
+.builder {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  height: 100%;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-bg-elevated);
+}
+
+.tab {
+  flex: 1;
+  padding: 10px 12px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 2px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.tab:hover {
+  color: var(--app-text);
+}
+.tabActive {
+  color: var(--app-text);
+  border-bottom-color: var(--app-accent);
+}
+
+.panels {
+  display: grid;
+  grid-template-rows: minmax(180px, 45%) 1fr;
+  min-height: 0;
+  border-top: 1px solid var(--app-border);
+}

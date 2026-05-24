@@ -1,0 +1,26 @@
+.textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: var(--app-font-sans);
+  transition: border-color 120ms ease;
+  min-height: 80px;
+}
+
+.textarea::placeholder {
+  color: var(--app-text-subtle);
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--app-border-focus);
+}
+
+.invalid {
+  border-color: var(--app-danger);
+}

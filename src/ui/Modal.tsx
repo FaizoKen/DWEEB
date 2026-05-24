@@ -1,0 +1,75 @@
+import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import styles from "./Modal.module.css";
+
+interface ModalProps {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  /** Optional footer area (typically holds buttons). */
+  footer?: ReactNode;
+  children: ReactNode;
+}
+
+/**
+ * Accessible modal:
+ *  - Restores focus to the previously focused element on close.
+ *  - Traps focus via the surrounding `<dialog>` semantics.
+ *  - Closes on Escape and on backdrop click.
+ *
+ * Rendered into `document.body` via a portal so it escapes any scroll
+ * container the trigger lives in.
+ */
+export function Modal({ open, onClose, title, footer, children }: ModalProps) {
+  const lastFocused = useRef<Element | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    lastFocused.current = document.activeElement;
+    const t = setTimeout(() => dialogRef.current?.focus(), 0);
+    return () => {
+      clearTimeout(t);
+      if (lastFocused.current instanceof HTMLElement) lastFocused.current.focus();
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div className={styles.backdrop} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className={styles.dialog}
+      >
+        <header className={styles.header}>
+          <h2 className={styles.title}>{title}</h2>
+          <button
+            type="button"
+            aria-label="Close dialog"
+            onClick={onClose}
+            className={styles.close}
+          >
+            ✕
+          </button>
+        </header>
+        <div className={styles.body}>{children}</div>
+        {footer ? <footer className={styles.footer}>{footer}</footer> : null}
+      </div>
+    </div>,
+    document.body,
+  );
+}

@@ -1,0 +1,73 @@
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--app-bg);
+  padding: 4px;
+  border-radius: var(--app-radius);
+  border: 1px solid var(--app-border);
+  align-self: flex-start;
+}
+
+.tab {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-text-muted);
+  border-radius: var(--app-radius-sm);
+  transition: background 120ms ease, color 120ms ease;
+}
+.tab:hover {
+  color: var(--app-text);
+  background: var(--app-bg-hover);
+}
+.tabActive {
+  background: var(--app-bg-elevated);
+  color: var(--app-text);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lead {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+.lead code {
+  font-family: var(--app-font-mono);
+  background: var(--app-bg-input);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.statsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.statChip {
+  font-size: 11px;
+  color: var(--app-text-muted);
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--app-font-mono);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mono { font-family: var(--app-font-mono); font-size: 12px; }
+
+.error {
+  font-size: 12px;
+  color: var(--app-danger);
+}

@@ -1,0 +1,27 @@
+.input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  font-size: 13px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.input::placeholder {
+  color: var(--app-text-subtle);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--app-border-focus);
+  background: var(--app-bg-active);
+}
+
+.invalid {
+  border-color: var(--app-danger);
+}
+.invalid:focus {
+  border-color: var(--app-danger);
+}

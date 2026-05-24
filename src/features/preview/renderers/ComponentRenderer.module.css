@@ -1,0 +1,18 @@
+.wrapper {
+  position: relative;
+  border-radius: var(--discord-radius);
+  transition: box-shadow 120ms ease;
+}
+
+.selected {
+  box-shadow: 0 0 0 2px var(--discord-accent);
+}
+
+.unsupported {
+  color: var(--discord-text-muted);
+  font-size: 13px;
+  font-style: italic;
+  padding: 8px 10px;
+  border: 1px dashed var(--discord-bg-quote);
+  border-radius: var(--discord-radius);
+}

@@ -1,0 +1,62 @@
+.listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.addItem {
+  font-size: 11px;
+  color: var(--app-accent);
+  padding: 2px 6px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-accent-soft);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.addItem:hover { background: rgba(88, 101, 242, 0.28); }
+.addItem:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card {
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cardTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--app-text-subtle);
+}
+.note code {
+  font-family: var(--app-font-mono);
+  background: var(--app-bg-input);
+  padding: 0 4px;
+  border-radius: 3px;
+}

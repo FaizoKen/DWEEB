@@ -1,0 +1,85 @@
+/*
+ * Design tokens.
+ *
+ * Two palettes coexist:
+ *   --app-*       drive the builder shell (toolbar, sidebar, inspector).
+ *   --discord-*   are reserved for the preview renderer so it stays visually
+ *                 identical to Discord regardless of the shell theme.
+ *
+ * Anything outside the preview should only touch `--app-*` tokens.
+ */
+
+:root {
+  /* ── App shell (builder chrome) ───────────────────────────────────── */
+  --app-bg: #0f1013;
+  --app-bg-elevated: #16181d;
+  --app-bg-input: #1c1f25;
+  --app-bg-hover: #20232a;
+  --app-bg-active: #262a33;
+
+  --app-border: #262932;
+  --app-border-strong: #353945;
+  --app-border-focus: #5865f2;
+
+  --app-text: #e6e8ef;
+  --app-text-muted: #9ba1ad;
+  --app-text-subtle: #6b7280;
+  --app-text-inverted: #0f1013;
+
+  --app-accent: #5865f2;
+  --app-accent-hover: #4752c4;
+  --app-accent-soft: rgba(88, 101, 242, 0.18);
+
+  --app-danger: #ed4245;
+  --app-danger-hover: #c43539;
+  --app-success: #23a559;
+  --app-warning: #f0b232;
+
+  --app-radius-sm: 4px;
+  --app-radius: 8px;
+  --app-radius-lg: 12px;
+
+  --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --app-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --app-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+
+  --app-font-sans:
+    "gg sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --app-font-mono:
+    ui-monospace, "JetBrains Mono", "Fira Code", "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --app-z-toolbar: 10;
+  --app-z-modal: 50;
+  --app-z-tooltip: 60;
+
+  /* ── Discord preview surface ──────────────────────────────────────── */
+  --discord-bg-primary: #313338;
+  --discord-bg-secondary: #2b2d31;
+  --discord-bg-tertiary: #1e1f22;
+  --discord-bg-mention: rgba(88, 101, 242, 0.3);
+  --discord-bg-mention-soft: rgba(88, 101, 242, 0.15);
+  --discord-bg-code: #1e1f22;
+  --discord-bg-quote: #4e5058;
+
+  --discord-text-normal: #dbdee1;
+  --discord-text-muted: #949ba4;
+  --discord-text-link: #00a8fc;
+  --discord-text-positive: #23a559;
+
+  --discord-accent: #5865f2;
+  --discord-button-primary: #5865f2;
+  --discord-button-primary-hover: #4752c4;
+  --discord-button-secondary: #4e5058;
+  --discord-button-secondary-hover: #6d6f78;
+  --discord-button-success: #248046;
+  --discord-button-success-hover: #1a6334;
+  --discord-button-danger: #da373c;
+  --discord-button-danger-hover: #a12828;
+
+  --discord-radius-sm: 4px;
+  --discord-radius: 8px;
+
+  --discord-font:
+    "gg sans", "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}

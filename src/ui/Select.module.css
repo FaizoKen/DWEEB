@@ -1,0 +1,36 @@
+.wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.select {
+  width: 100%;
+  padding: 8px 28px 8px 10px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  font-size: 13px;
+  appearance: none;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--app-border-focus);
+}
+
+.invalid {
+  border-color: var(--app-danger);
+}
+
+.chevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--app-text-muted);
+  font-size: 11px;
+  pointer-events: none;
+}

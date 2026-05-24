@@ -1,0 +1,41 @@
+.wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.swatch {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid var(--app-border);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.colorInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+}
+
+.value {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.clear {
+  font-size: 11px;
+  color: var(--app-text-subtle);
+  background: transparent;
+  padding: 2px 6px;
+  border-radius: var(--app-radius-sm);
+}
+.clear:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}

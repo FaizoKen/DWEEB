@@ -1,0 +1,13 @@
+# Normalize line endings so the repo behaves identically on every OS.
+* text=auto eol=lf
+
+# Binaries that must not be touched.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.woff  binary
+*.woff2 binary
+*.lockb binary

@@ -1,0 +1,47 @@
+.gallery {
+  display: grid;
+  gap: 4px;
+  border-radius: var(--discord-radius);
+  overflow: hidden;
+  max-width: 520px;
+}
+
+.gallery[data-count="1"] {
+  grid-template-columns: 1fr;
+}
+.gallery[data-count="2"] {
+  grid-template-columns: 1fr 1fr;
+}
+.gallery[data-count="3"],
+.gallery[data-count="4"] {
+  grid-template-columns: 1fr 1fr;
+}
+.gallery[data-count="5"] {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.item {
+  margin: 0;
+  aspect-ratio: 1 / 1;
+  background: var(--discord-bg-tertiary);
+  overflow: hidden;
+  position: relative;
+}
+
+.gallery[data-count="1"] .item {
+  aspect-ratio: 16 / 10;
+}
+
+.item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.spoiler img {
+  filter: blur(40px);
+  transition: filter 200ms ease;
+}
+.spoiler:hover img {
+  filter: blur(20px);
+}

@@ -1,0 +1,113 @@
+.tree {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 0;
+}
+
+.scroll {
+  overflow-y: auto;
+  padding: 6px 4px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px max-content 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--app-radius-sm);
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+}
+.row:hover {
+  background: var(--app-bg-hover);
+}
+.rowSelected {
+  background: var(--app-accent-soft);
+}
+.rowSelected:hover {
+  background: var(--app-accent-soft);
+}
+
+.glyph {
+  width: 16px;
+  text-align: center;
+  color: var(--app-text-muted);
+  font-size: 13px;
+}
+
+.label {
+  font-weight: 500;
+  color: var(--app-text);
+  white-space: nowrap;
+}
+
+.summary {
+  color: var(--app-text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.row:hover .actions,
+.rowSelected .actions {
+  opacity: 1;
+}
+
+.adder {
+  display: block;
+  padding: 2px 0 4px;
+}
+
+.addChild {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+  border-radius: var(--app-radius-sm);
+  transition: background 120ms ease, color 120ms ease;
+}
+.addChild:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+
+.addChildPlus {
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+  color: var(--app-text-subtle);
+}
+
+.empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--app-text-muted);
+  font-size: 13px;
+}
+
+.footer {
+  border-top: 1px solid var(--app-border);
+  padding: 10px;
+  background: var(--app-bg-elevated);
+}

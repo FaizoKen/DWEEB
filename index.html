@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e1f22" />
+    <meta name="color-scheme" content="dark" />
+
+    <title>Discord Webhook Builder — Visual Components V2 Editor</title>
+    <meta
+      name="description"
+      content="Visually build, preview, and share Discord webhook messages using Components V2. No JSON, no backend — design rich messages with containers, sections, buttons, and media, then export or share via a single URL."
+    />
+    <meta
+      name="keywords"
+      content="Discord webhook builder, Discord components builder, Discord message builder, Components V2 editor, Discord embed builder, webhook message editor"
+    />
+    <meta name="author" content="Discord Webhook Builder" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://discord-webhook-builder.pages.dev/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Discord Webhook Builder" />
+    <meta property="og:title" content="Discord Webhook Builder — Visual Components V2 Editor" />
+    <meta
+      property="og:description"
+      content="Design Discord webhook messages with Components V2 visually. Live preview, shareable URLs, no backend required."
+    />
+    <meta property="og:url" content="https://discord-webhook-builder.pages.dev/" />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Discord Webhook Builder" />
+    <meta
+      name="twitter:description"
+      content="Design Discord webhook messages with Components V2 visually. Live preview, shareable URLs, no backend required."
+    />
+    <meta name="twitter:image" content="/og-image.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Preconnect to fonts only if loaded externally; we ship system stack by default. -->
+    <link rel="preload" href="/src/main.tsx" as="script" crossorigin />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Discord Webhook Builder",
+        "description": "Visual editor for Discord webhook messages using Components V2.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Web",
+        "offers": { "@type": "Offer", "price": "0" }
+      }
+    </script>
+  </head>
+  <body>
+    <noscript>
+      <p style="font-family: system-ui; padding: 2rem; color: #f2f3f5; background: #1e1f22">
+        Discord Webhook Builder requires JavaScript to run. Enable JavaScript and reload the page.
+      </p>
+    </noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
