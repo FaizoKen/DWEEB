@@ -24,9 +24,13 @@ bun run preview      # serve dist/ locally
 bun run typecheck    # tsc -b --noEmit
 ```
 
-**Before claiming a task is done:** run `bun run typecheck`. The TypeScript
-config is strict (`noUncheckedIndexedAccess`, `noUnusedLocals`,
-`noUnusedParameters`) so most logic bugs surface there.
+**Before claiming a task is done:** run `bun run typecheck` (or
+`bun run build`). The dev server uses Vite's on-the-fly transform and
+**skips `tsc`** — code that runs locally can still fail the production
+build. The TypeScript config is strict
+(`noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`) so
+most logic bugs surface there. The first Cloudflare deploy failed on 40+
+errors because of exactly this mistake.
 
 ## Layer rule (read this once, never forget)
 
