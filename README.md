@@ -7,6 +7,44 @@ messages with containers, sections, buttons, media, and files, watch a
 pixel-accurate live preview, and share the result through a single URL — no
 backend, no account, no database.
 
+## First-time users
+
+Open the app and a welcome dialog walks you through four ways to begin:
+
+1. **Continue previous work** — restores the message you were editing in this
+   browser (only shown when a saved draft exists).
+2. **Start with a template** — pick a ready-made example like a release-notes
+   card or an event RSVP, then tweak.
+3. **Start blank** — an empty text box for when you know exactly what you want.
+4. **Import existing message** — paste a share URL, share token, or
+   Components V2 JSON payload.
+
+After that, the editor auto-saves your work to this browser only
+(`localStorage`); a refresh or revisit picks up where you left off. The
+**Start over** button in the top-right re-opens the welcome dialog at any
+time without discarding the saved draft.
+
+Editor at a glance:
+
+- **Left** — the component tree. Click any block to edit it. Use the `+`
+  buttons to add new components (text, buttons, containers, media…).
+- **Right** — the Discord-style live preview. It matches exactly what
+  Discord renders, so you can iterate in seconds.
+- **Top-right** — **Send** posts to your webhook in one click;
+  **Share / Export** opens a dialog with everything else:
+  - **Send** — POST the message to your webhook URL (or PATCH the original
+    when the editor was populated via Restore).
+  - **Restore** — pull a message your webhook previously posted back into
+    the editor so you can keep iterating. Paste the webhook URL + the
+    message ID (right-click → *Copy Message ID* with Developer Mode on) or
+    the Discord message link.
+  - **Share link** — a compressed URL that contains the entire message.
+  - **JSON export** — the wire payload, ready to POST manually.
+  - **Import** — same as the welcome dialog's import path.
+
+Privacy: webhook URLs and your draft never leave your browser. Share URLs put
+the message in the `#hash` fragment, which the server never sees.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │   ▭ Toolbar      Undo / Redo · Presets ·                  [ Share ]      │
@@ -123,7 +161,10 @@ from the wire format, and it is stripped on export.
   which is the mirror image of the inspector dispatcher.
 - **`share/`** — the share/export/import modal. Stateless w.r.t. the
   store; reads on open, writes through `replaceMessage` on import.
-- **`toolbar/`** — top bar (brand, undo/redo, presets, share button).
+- **`welcome/`** — first-launch onboarding dialog. Four paths
+  (continue / template / blank / import) that all dispatch through normal
+  store actions, so undo/redo and auto-save behave identically afterwards.
+- **`toolbar/`** — top bar (brand, undo/redo, presets, start over, share).
 
 ### Layer 4 — App shell (`src/app`)
 
@@ -134,6 +175,11 @@ from the wire format, and it is stripped on export.
   editor still opens.
 - **`useKeyboardShortcuts`** — global `Cmd/Ctrl+Z` and `Cmd/Ctrl+Shift+Z`
   for undo/redo. Ignored while the user is typing in a field.
+- **`useAutoSaveDraft`** — subscribes to the message store and writes the
+  wire payload to `localStorage` (debounced 300ms). Combined with the
+  bootstrap path in `messageStore`, this is what makes a refresh resume the
+  in-progress message. The draft is keyed `dwb.draft.v1` and is plain text
+  — no credentials live there.
 
 An `ErrorBoundary` wraps the whole app so a bad inspector edit can't blank
 the page.
@@ -160,7 +206,7 @@ This is the test of how well the layers hold up. Adding a hypothetical
 No other file needs to change. The dispatchers are exhaustive switches, so
 TypeScript will flag any place you forgot.
 
-## Sending to Discord
+## Sending, restoring, and updating
 
 The **Send** tab in *Share / Send / Export* posts the current message to a
 Discord webhook directly from the browser (Discord allows CORS on the
@@ -168,12 +214,26 @@ webhook execute endpoint). The webhook URL never leaves your machine — there
 is no backend to forward it through, and history is opt-in per submission
 and stored in `localStorage` only.
 
-`src/core/webhook/send.ts` owns the HTTP call (status mapping, rate-limit
-parsing, abort support); `src/core/webhook/history.ts` owns the localStorage
-list. The CSP in `public/_headers` allow-lists `discord.com`,
-`canary.discord.com`, `ptb.discord.com`, and `discordapp.com` under
-`connect-src`. If you fork the app to talk to a different host, edit that
-header.
+The **Restore** tab does the inverse: paste a webhook URL plus a message ID
+(or link) and the editor pulls the message back via
+`GET /webhooks/{id}/{token}/messages/{message_id}`. After restoring, the
+Send tab automatically switches into "Update the original" mode, which
+sends a **PATCH** instead of a POST so your edits replace the live message
+rather than posting a copy. You can switch back to "Send as a copy" with
+one click — both modes share the same webhook input.
+
+Authorization caveat: only the webhook that *originally posted* a message
+can fetch or edit it. A user-, bot-, or different-webhook-authored message
+in the same channel will 404. We surface that explicitly in the Restore
+panel because the raw error is misleading.
+
+`src/core/webhook/send.ts` owns all three HTTP calls (`sendToWebhook`,
+`fetchWebhookMessage`, `updateWebhookMessage`) — status mapping,
+rate-limit parsing, and abort support are shared. `src/core/webhook/history.ts`
+owns the localStorage list of remembered webhooks. The CSP in
+`public/_headers` allow-lists `discord.com`, `canary.discord.com`,
+`ptb.discord.com`, and `discordapp.com` under `connect-src`. If you fork
+the app to talk to a different host, edit that header.
 
 ## Wire-format compatibility
 

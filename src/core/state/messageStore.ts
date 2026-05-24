@@ -23,7 +23,8 @@ import {
   type ContainerChildFactoryKey,
   type TopLevelFactoryKey,
 } from "@/core/factory/createComponent";
-import { DEFAULT_PRESET, PRESETS } from "@/data/presets";
+import { BLANK_PRESET, DEFAULT_PRESET, PRESETS } from "@/data/presets";
+import { hasSeenWelcome, loadDraftMessage } from "./draftStorage";
 import {
   ComponentType,
   isContainer,
@@ -51,9 +52,28 @@ interface HistoryFrame {
   message: WebhookMessage;
 }
 
+/**
+ * Origin of the active message when it was loaded by fetching a previously
+ * posted webhook message. Held in memory only (never persisted to draft,
+ * URL, or JSON export) so that "Update existing" in the Send panel can
+ * default to PATCH-ing the same message instead of POST-ing a new one.
+ *
+ * Reset to `null` whenever a different message replaces the editor state
+ * (preset, import, blank, share URL) — only an active restore opts in.
+ */
+export interface RestoredOrigin {
+  /** Canonical webhook execute URL (no query/fragment). */
+  webhookUrl: string;
+  /** Message snowflake. */
+  messageId: string;
+  /** Optional thread the message lives in. */
+  threadId?: string;
+}
+
 export interface MessageState {
   message: WebhookMessage;
   selectedId: EditorId | null;
+  restoredFrom: RestoredOrigin | null;
 
   past: HistoryFrame[];
   future: HistoryFrame[];
@@ -63,8 +83,13 @@ export interface MessageState {
 
   // Whole-message ops --------------------------------------------------
   replaceMessage(next: WebhookMessage): void;
+  /** Like `replaceMessage` but records the restore origin for the Send flow. */
+  replaceMessageFromRestore(next: WebhookMessage, origin: RestoredOrigin): void;
+  /** Drop the restore origin (e.g. user picks "Send as new" in the Send panel). */
+  clearRestoreOrigin(): void;
   loadPresetById(presetId: string): void;
   loadDefaultPreset(): void;
+  loadBlank(): void;
   setUsername(value: string | undefined): void;
   setAvatarUrl(value: string | undefined): void;
 
@@ -124,13 +149,29 @@ function pushHistory(state: MessageState): Pick<MessageState, "past" | "future">
   return { past, future: [] };
 }
 
+/**
+ * Initial editor state.
+ *
+ * Returning users (welcome-modal already dismissed) silently pick up where
+ * they left off via the persisted draft. First-time visitors and users with
+ * no saved draft get the showcase preset; the welcome dialog handles the
+ * "pick a starter" UX in the App layer.
+ *
+ * If the URL hash carries a share token, `useShareUrlBootstrap` will
+ * overwrite this value shortly after first mount.
+ */
 function bootstrap(): WebhookMessage {
+  if (hasSeenWelcome()) {
+    const draft = loadDraftMessage();
+    if (draft) return draft.message;
+  }
   return reassignIds(DEFAULT_PRESET.message);
 }
 
 export const useMessageStore = create<MessageState>((set, get) => ({
   message: bootstrap(),
   selectedId: null,
+  restoredFrom: null,
   past: [],
   future: [],
 
@@ -139,7 +180,25 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   replaceMessage(next) {
-    set((s) => ({ ...pushHistory(s), message: reassignIds(next), selectedId: null }));
+    set((s) => ({
+      ...pushHistory(s),
+      message: reassignIds(next),
+      selectedId: null,
+      restoredFrom: null,
+    }));
+  },
+
+  replaceMessageFromRestore(next, origin) {
+    set((s) => ({
+      ...pushHistory(s),
+      message: reassignIds(next),
+      selectedId: null,
+      restoredFrom: origin,
+    }));
+  },
+
+  clearRestoreOrigin() {
+    set({ restoredFrom: null });
   },
 
   loadPresetById(presetId) {
@@ -149,6 +208,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       ...pushHistory(s),
       message: reassignIds(preset.message),
       selectedId: null,
+      restoredFrom: null,
     }));
   },
 
@@ -157,6 +217,16 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       ...pushHistory(s),
       message: reassignIds(DEFAULT_PRESET.message),
       selectedId: null,
+      restoredFrom: null,
+    }));
+  },
+
+  loadBlank() {
+    set((s) => ({
+      ...pushHistory(s),
+      message: reassignIds(BLANK_PRESET.message),
+      selectedId: null,
+      restoredFrom: null,
     }));
   },
 

@@ -1,9 +1,13 @@
 /**
- * Top toolbar: brand, undo/redo, presets, share.
+ * Top toolbar: brand, undo/redo, presets, start-over, send, share.
  *
  * The toolbar is a thin shell — every action is a single store call (`undo`,
- * `redo`, `loadPresetById`) or opens a dialog. The dialog is owned by the
+ * `redo`, `loadPresetById`) or opens a dialog. Dialogs are owned by the
  * parent so the toolbar stays presentational.
+ *
+ * Why two primary-ish CTAs on the right (Send + Share / Export): hiding
+ * Send inside the Share dialog made the "what now?" step invisible to
+ * first-time users. The dedicated button removes the guess.
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
@@ -12,6 +16,7 @@ import { IconButton } from "@/ui/IconButton";
 import {
   LogoMark,
   RedoIcon,
+  SendIcon,
   ShareIcon,
   SparkleIcon,
   UndoIcon,
@@ -21,10 +26,17 @@ import { Select } from "@/ui/Select";
 import styles from "./Toolbar.module.css";
 
 interface ToolbarProps {
+  /** Opens the Share / Export dialog on the Share-link tab. */
   onShare: () => void;
+  /** Opens the Share / Export dialog focused on the Send panel. */
+  onSend: () => void;
+  /** Opens the Share / Export dialog focused on the Restore panel. */
+  onRestore: () => void;
+  /** Re-opens the welcome dialog so the user can pick a fresh starting point. */
+  onStartOver: () => void;
 }
 
-export function Toolbar({ onShare }: ToolbarProps) {
+export function Toolbar({ onShare, onSend, onRestore, onStartOver }: ToolbarProps) {
   const undo = useMessageStore((s) => s.undo);
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
@@ -74,8 +86,35 @@ export function Toolbar({ onShare }: ToolbarProps) {
       </div>
 
       <div className={styles.right}>
-        <Button variant="primary" leadingIcon={<ShareIcon />} onClick={onShare}>
+        <Button
+          variant="ghost"
+          onClick={onStartOver}
+          title="Pick a fresh starting point — your current draft stays saved"
+        >
+          Start over
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={onRestore}
+          title="Pull a message your webhook previously posted back into the editor"
+        >
+          Restore
+        </Button>
+        <Button
+          variant="secondary"
+          leadingIcon={<ShareIcon />}
+          onClick={onShare}
+          title="Share link, copy JSON, or import another message"
+        >
           Share / Export
+        </Button>
+        <Button
+          variant="primary"
+          leadingIcon={<SendIcon />}
+          onClick={onSend}
+          title="Post this message to your Discord webhook"
+        >
+          Send
         </Button>
       </div>
     </header>

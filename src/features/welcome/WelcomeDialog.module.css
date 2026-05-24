@@ -1,0 +1,183 @@
+.lead {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
+  line-height: 1.5;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* When the card count is odd, the last card lands on a row by itself.
+ * Stretch it to the full row so the grid stays balanced. */
+.cards > .card:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 540px) {
+  .cards { grid-template-columns: 1fr; }
+  .cards > .card:last-child:nth-child(odd) { grid-column: auto; }
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px 14px 12px;
+  text-align: left;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  color: var(--app-text);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 60ms ease;
+}
+.card:hover {
+  background: var(--app-bg-hover);
+  border-color: var(--app-border-strong);
+}
+.card:active { transform: translateY(1px); }
+.card:focus-visible {
+  outline: 2px solid var(--app-border-focus);
+  outline-offset: 2px;
+}
+
+.cardHighlighted {
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+}
+.cardHighlighted:hover {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+}
+
+.cardBadge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-text-muted);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+
+.cardTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cardDesc {
+  font-size: 12px;
+  color: var(--app-text-muted);
+  line-height: 1.45;
+}
+
+.cardCta {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-accent);
+}
+
+.tips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+}
+
+.tipsTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.tipsList {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+  line-height: 1.5;
+}
+
+.tipsList strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.back {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--app-text-muted);
+  padding: 4px 6px;
+  border-radius: var(--app-radius-sm);
+}
+.back:hover {
+  color: var(--app-text);
+  background: var(--app-bg-hover);
+}
+
+.templateList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.templateRow {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.templateRow:hover {
+  background: var(--app-bg-hover);
+  border-color: var(--app-border-strong);
+}
+.templateRow:focus-visible {
+  outline: 2px solid var(--app-border-focus);
+  outline-offset: 2px;
+}
+
+.templateName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.templateDesc {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.importActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.error {
+  font-size: 12px;
+  color: var(--app-danger);
+}

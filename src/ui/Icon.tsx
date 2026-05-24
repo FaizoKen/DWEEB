@@ -59,6 +59,13 @@ export const ShareIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const SendIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M22 2L11 13" />
+    <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+  </svg>
+);
+
 export const UndoIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M3 7v6h6" />

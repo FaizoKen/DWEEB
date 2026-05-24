@@ -30,6 +30,20 @@ const id = newId;
 
 export const PRESETS: MessagePreset[] = [
   {
+    id: "blank",
+    name: "Blank message",
+    description: "Empty starter — a single text box waiting for your content.",
+    message: {
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "",
+        },
+      ],
+    },
+  },
+  {
     id: "release-notes",
     name: "Release notes",
     description: "Containered changelog with a CTA button.",
@@ -148,4 +162,12 @@ export const PRESETS: MessagePreset[] = [
   },
 ];
 
-export const DEFAULT_PRESET = PRESETS[0]!;
+/**
+ * Preset used as a fallback when no draft and no share URL is present.
+ * Kept as the showcase "release-notes" message rather than the blank one
+ * so first-time-loads-with-welcome-dismissed still see something useful.
+ */
+export const DEFAULT_PRESET = PRESETS.find((p) => p.id === "release-notes")!;
+
+/** Convenience: the empty starter, used by the welcome dialog's "Blank" path. */
+export const BLANK_PRESET = PRESETS.find((p) => p.id === "blank")!;

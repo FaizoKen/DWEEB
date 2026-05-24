@@ -1,19 +1,25 @@
 /**
- * Share dialog — four tabs:
- *  - Send        : POST the current message to a Discord webhook.
+ * Share dialog — five tabs:
+ *  - Send        : POST the current message to a Discord webhook (or PATCH
+ *                  the original when the editor holds a restored message).
+ *  - Restore     : GET a previously-posted webhook message back into the
+ *                  editor by webhook URL + message ID/link.
  *  - Share link  : compressed URL containing the entire message state.
  *  - JSON export : the wire-format payload, ready to POST manually.
  *  - Import      : paste either a share token or a raw JSON payload.
  *
  * The dialog is stateless w.r.t. the message — it reads from the store on
- * open and pushes the parsed message back through `replaceMessage` on import.
+ * open and pushes the parsed message back through `replaceMessage` (or
+ * `replaceMessageFromRestore`) on import.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
+import { Field } from "@/ui/Field";
 import { TextArea } from "@/ui/TextArea";
+import { TextInput } from "@/ui/TextInput";
 import {
   buildShareUrl,
   copyText,
@@ -23,26 +29,47 @@ import {
   encodeShare,
   writeShareTokenToHash,
 } from "@/core/serialization";
+import {
+  fetchWebhookMessage,
+  parseMessageIdInput,
+  parseWebhookUrl,
+} from "@/core/webhook";
 import { pushToast } from "@/ui/Toast";
 import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
 import { SendPanel } from "./SendPanel";
 import styles from "./ShareDialog.module.css";
 
+type Tab = "send" | "restore" | "share" | "json" | "import";
+
 interface ShareDialogProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * Tab to land on when the dialog opens. The toolbar's dedicated "Send"
+   * button uses this to drop the user straight onto the Send panel; the
+   * generic "Share / Export" entry defaults to Send too, since that's the
+   * action a beginner is most likely looking for after building.
+   */
+  initialTab?: Tab;
 }
 
-type Tab = "send" | "share" | "json" | "import";
+export function ShareDialog({ open, onClose, initialTab = "send" }: ShareDialogProps) {
+  const [tab, setTab] = useState<Tab>(initialTab);
 
-export function ShareDialog({ open, onClose }: ShareDialogProps) {
-  const [tab, setTab] = useState<Tab>("send");
+  // Snap to the requested tab whenever the dialog re-opens, so opening from
+  // a different entry point doesn't show the last tab the user was on.
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [open, initialTab]);
   return (
     <Modal open={open} onClose={onClose} title="Share / Send / Export">
       <div className={styles.tabs} role="tablist">
         <TabButton active={tab === "send"} onClick={() => setTab("send")}>
           Send
+        </TabButton>
+        <TabButton active={tab === "restore"} onClick={() => setTab("restore")}>
+          Restore
         </TabButton>
         <TabButton active={tab === "share"} onClick={() => setTab("share")}>
           Share link
@@ -56,6 +83,7 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
       </div>
       <div className={styles.body}>
         {tab === "send" ? <SendPanel /> : null}
+        {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}
         {tab === "share" ? <ShareLinkPanel /> : null}
         {tab === "json" ? <JsonExportPanel /> : null}
         {tab === "import" ? <ImportPanel onDone={onClose} /> : null}
@@ -229,6 +257,162 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
       <div className={styles.actions}>
         <Button variant="primary" onClick={handleImport}>
           Replace message
+        </Button>
+      </div>
+    </>
+  );
+}
+
+/* ── Restore panel ─────────────────────────────────────────────────────
+ *
+ * Fetches a message that was previously posted by the same webhook and
+ * loads it into the editor. Only the webhook that originally sent the
+ * message can read it back — Discord 404s for anything else, even messages
+ * from the same channel posted by users or other bots/webhooks.
+ *
+ * On success we record the origin in the store so the Send panel can offer
+ * "Update existing" (PATCH) instead of "Send as new" (POST) by default.
+ */
+function RestorePanel({ onDone }: { onDone: () => void }) {
+  const replaceFromRestore = useMessageStore((s) => s.replaceMessageFromRestore);
+  const restoredFrom = useMessageStore((s) => s.restoredFrom);
+
+  // Prefill when the user reopens the panel against an already-restored message.
+  const [url, setUrl] = useState(() => restoredFrom?.webhookUrl ?? "");
+  const [revealUrl, setRevealUrl] = useState(false);
+  const [idInput, setIdInput] = useState(() => restoredFrom?.messageId ?? "");
+  const [threadId, setThreadId] = useState(() => restoredFrom?.threadId ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const parsedUrl = useMemo(() => parseWebhookUrl(url), [url]);
+  const messageId = useMemo(() => parseMessageIdInput(idInput), [idInput]);
+  const urlInvalid = url.trim().length > 0 && !parsedUrl;
+  const idInvalid = idInput.trim().length > 0 && !messageId;
+
+  const handleFetch = async () => {
+    setError(null);
+    if (!parsedUrl) {
+      setError("Enter a valid Discord webhook URL.");
+      return;
+    }
+    if (!messageId) {
+      setError("Enter a message ID or a Discord message link.");
+      return;
+    }
+
+    setBusy(true);
+    const result = await fetchWebhookMessage(parsedUrl, messageId, {
+      threadId: threadId.trim() || undefined,
+    });
+    setBusy(false);
+
+    if (!result.ok) {
+      // 404 from this endpoint almost always means "wrong webhook for that
+      // message" — call that out explicitly, the raw error is unhelpful.
+      if (result.status === 404) {
+        setError(
+          "Discord couldn't find that message under this webhook. Only messages that " +
+            "this same webhook originally posted can be restored.",
+        );
+      } else {
+        setError(result.error);
+      }
+      return;
+    }
+
+    const validation = validateMessage(result.message);
+    replaceFromRestore(result.message, {
+      webhookUrl: parsedUrl.url,
+      messageId,
+      threadId: threadId.trim() || undefined,
+    });
+    if (!validation.ok) {
+      pushToast(
+        `Restored with ${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}.`,
+        "info",
+      );
+    } else {
+      pushToast("Restored. Edits will update the original by default.", "success");
+    }
+    onDone();
+  };
+
+  return (
+    <>
+      <p className={styles.lead}>
+        Pull a previously-posted webhook message back into the editor. Discord only allows this
+        for messages <strong>this webhook</strong> originally sent — not for user or bot
+        messages, even in the same channel.
+      </p>
+
+      <Field
+        label="Webhook URL"
+        hint="The same URL you used (or would use) to post."
+        error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
+      >
+        {(id) => (
+          <div className={styles.urlRow}>
+            <TextInput
+              id={id}
+              type={revealUrl ? "text" : "password"}
+              autoComplete="off"
+              spellCheck={false}
+              value={url}
+              onChange={(e) => setUrl(e.currentTarget.value)}
+              invalid={urlInvalid}
+              placeholder="https://discord.com/api/webhooks/…"
+            />
+            <button
+              type="button"
+              className={styles.revealBtn}
+              onClick={() => setRevealUrl((v) => !v)}
+              aria-pressed={revealUrl}
+            >
+              {revealUrl ? "Hide" : "Show"}
+            </button>
+          </div>
+        )}
+      </Field>
+
+      <Field
+        label="Message ID or link"
+        hint="Right-click the message in Discord → Copy Message ID (Developer Mode), or paste the message URL."
+        error={idInvalid ? "Not a valid message ID or Discord message link." : undefined}
+      >
+        {(id) => (
+          <TextInput
+            id={id}
+            value={idInput}
+            onChange={(e) => setIdInput(e.currentTarget.value)}
+            invalid={idInvalid}
+            placeholder="1185234567890123456  ·  or  https://discord.com/channels/…"
+            spellCheck={false}
+          />
+        )}
+      </Field>
+
+      <Field label="Thread ID (optional)" hint="Required only if the message lives in a thread.">
+        {(id) => (
+          <TextInput
+            id={id}
+            value={threadId}
+            onChange={(e) => setThreadId(e.currentTarget.value.replace(/[^\d]/g, ""))}
+            placeholder="e.g. 1185234567890123456"
+            inputMode="numeric"
+          />
+        )}
+      </Field>
+
+      {error ? <div className={styles.error}>{error}</div> : null}
+
+      <div className={styles.actions}>
+        <Button
+          variant="primary"
+          onClick={handleFetch}
+          disabled={busy || !parsedUrl || !messageId}
+        >
+          {busy ? "Fetching…" : "Restore into editor"}
         </Button>
       </div>
     </>

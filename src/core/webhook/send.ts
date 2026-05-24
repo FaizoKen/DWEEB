@@ -17,7 +17,7 @@ import {
   MESSAGE_FLAG_IS_COMPONENTS_V2,
   type WebhookMessage,
 } from "@/core/schema/types";
-import { stripEditorFields } from "@/core/serialization/normalize";
+import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
 
 /** Discord limits us to webhooks under one of these origins. */
 const WEBHOOK_HOST_RE =
@@ -42,6 +42,24 @@ export function parseWebhookUrl(input: string): ParsedWebhookUrl | null {
   const m = WEBHOOK_HOST_RE.exec(noQuery);
   if (!m) return null;
   return { id: m[1]!, url: noQuery.replace(/\/$/, "") };
+}
+
+/**
+ * Extract a message snowflake from either:
+ *  - a raw numeric ID (`1185234567890123456`), or
+ *  - a Discord client/web URL of the form
+ *    `https://discord.com/channels/{guild_id}/{channel_id}/{message_id}`.
+ *
+ * The guild/channel parts are discarded — webhook GET/PATCH only need the
+ * message id (the webhook URL itself proves authorization).
+ */
+export function parseMessageIdInput(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (/^\d{15,25}$/.test(trimmed)) return trimmed;
+  const linkMatch =
+    /discord(?:app)?\.com\/channels\/(?:\d+|@me)\/\d+\/(\d{15,25})/i.exec(trimmed);
+  return linkMatch?.[1] ?? null;
 }
 
 export interface SendOptions {
@@ -173,4 +191,161 @@ function describeError(status: number, body: unknown): string {
   if (status === 404) return "Discord could not find that webhook (404). It may have been deleted.";
   if (status === 400) return "Discord rejected the payload (400). See the body for details.";
   return `Discord returned an unexpected ${status} response.`;
+}
+
+/* ─── Restore (GET) ──────────────────────────────────────────────────── */
+
+export interface FetchOk {
+  ok: true;
+  status: number;
+  message: WebhookMessage;
+}
+export interface FetchErr {
+  ok: false;
+  status: number;
+  error: string;
+  body?: unknown;
+}
+export type FetchResult = FetchOk | FetchErr;
+
+export interface FetchOptions {
+  threadId?: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * Fetch a message that was previously posted by THIS webhook. The webhook
+ * token authenticates the request — there's no way to fetch a message a
+ * user/bot/other webhook posted, even in the same channel.
+ *
+ * The returned message goes through `attachEditorFields` so callers can drop
+ * it straight into the editor. Unknown wire fields are ignored; the
+ * validator will surface anything structurally wrong on the next render.
+ */
+export async function fetchWebhookMessage(
+  parsed: ParsedWebhookUrl,
+  messageId: string,
+  options: FetchOptions = {},
+): Promise<FetchResult> {
+  const url = new URL(`${parsed.url}/messages/${encodeURIComponent(messageId)}`);
+  if (options.threadId) url.searchParams.set("thread_id", options.threadId);
+  url.searchParams.set("with_components", "true");
+
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: options.signal,
+    });
+  } catch (e) {
+    if ((e as DOMException)?.name === "AbortError") {
+      return { ok: false, status: 0, error: "Fetch was cancelled." };
+    }
+    return {
+      ok: false,
+      status: 0,
+      error:
+        "Network request failed. Check the URL, your connection, or any browser extensions blocking requests to discord.com.",
+    };
+  }
+
+  let body: unknown = null;
+  const text = await res.text().catch(() => "");
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: describeError(res.status, body), body };
+  }
+
+  try {
+    const message = attachEditorFields(body);
+    return { ok: true, status: res.status, message };
+  } catch (e) {
+    return {
+      ok: false,
+      status: res.status,
+      error: `Fetched message did not look like a Components V2 payload: ${(e as Error).message}`,
+      body,
+    };
+  }
+}
+
+/* ─── Update (PATCH) ─────────────────────────────────────────────────── */
+
+/**
+ * Replace a previously-posted webhook message in place. Same authorization
+ * rule as `fetchWebhookMessage`: only messages this webhook originally sent
+ * are editable. Discord 404s otherwise.
+ */
+export async function updateWebhookMessage(
+  parsed: ParsedWebhookUrl,
+  messageId: string,
+  message: WebhookMessage,
+  options: SendOptions = {},
+): Promise<SendResult> {
+  const url = new URL(`${parsed.url}/messages/${encodeURIComponent(messageId)}`);
+  if (options.threadId) url.searchParams.set("thread_id", options.threadId);
+  url.searchParams.set("with_components", "true");
+
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildWirePayload(message)),
+      signal: options.signal,
+    });
+  } catch (e) {
+    if ((e as DOMException)?.name === "AbortError") {
+      return { ok: false, status: 0, error: "Update was cancelled." };
+    }
+    return {
+      ok: false,
+      status: 0,
+      error:
+        "Network request failed. Check the URL, your connection, or any browser extensions blocking requests to discord.com.",
+    };
+  }
+
+  let body: unknown = null;
+  const text = await res.text().catch(() => "");
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+
+  if (res.ok) return { ok: true, status: res.status, body };
+
+  if (res.status === 429) {
+    const retryHeader = res.headers.get("retry-after");
+    const retryFromHeader = retryHeader ? Number.parseFloat(retryHeader) : NaN;
+    const retryFromBody =
+      body && typeof body === "object" && "retry_after" in body
+        ? Number((body as { retry_after: unknown }).retry_after)
+        : NaN;
+    const retryAfter = Number.isFinite(retryFromHeader)
+      ? retryFromHeader
+      : Number.isFinite(retryFromBody)
+        ? retryFromBody
+        : undefined;
+    return {
+      ok: false,
+      status: 429,
+      error: "Rate limited by Discord. Try again shortly.",
+      retryAfter,
+      body,
+    };
+  }
+
+  return { ok: false, status: res.status, error: describeError(res.status, body), body };
 }

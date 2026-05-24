@@ -1,5 +1,14 @@
 /**
- * "Send" panel — POSTs the current message directly to a Discord webhook.
+ * "Send" panel — POSTs the current message directly to a Discord webhook,
+ * or PATCHes the original when the editor was populated from a restore.
+ *
+ * Mode logic:
+ *  - With no restore origin set, the panel POSTs (creates a new message).
+ *  - When the user just restored a message via the Restore tab, the store's
+ *    `restoredFrom` field is set, and the panel defaults to "Update existing"
+ *    (PATCH) with the webhook + message ID pre-filled. The user can switch
+ *    back to "Send as new" — that simply ignores the restore origin for the
+ *    next click; it doesn't clear it (so they can still hit Update later).
  *
  * The webhook URL is treated as a credential:
  *  - The input is `type="password"` with a show/hide toggle so it doesn't
@@ -18,10 +27,12 @@ import { validateMessage } from "@/core/schema/validation";
 import {
   forgetWebhook,
   loadHistory,
+  parseMessageIdInput,
   parseWebhookUrl,
   rememberWebhook,
   sendToWebhook,
   touchWebhook,
+  updateWebhookMessage,
   type WebhookHistoryEntry,
 } from "@/core/webhook";
 import { Button } from "@/ui/Button";
@@ -31,6 +42,7 @@ import { TextInput } from "@/ui/TextInput";
 import { TrashIcon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
 import { pushToast } from "@/ui/Toast";
+import { cn } from "@/lib/cn";
 import styles from "./SendPanel.module.css";
 
 type SendState =
@@ -41,9 +53,14 @@ type SendState =
 
 export function SendPanel() {
   const message = useMessageStore((s) => s.message);
+  const restoredFrom = useMessageStore((s) => s.restoredFrom);
 
-  const [url, setUrl] = useState("");
-  const [threadId, setThreadId] = useState("");
+  // Prefill from the restore origin when the editor was just restored from a
+  // previously-posted message; otherwise start empty.
+  const [url, setUrl] = useState(() => restoredFrom?.webhookUrl ?? "");
+  const [threadId, setThreadId] = useState(() => restoredFrom?.threadId ?? "");
+  const [messageIdInput, setMessageIdInput] = useState(() => restoredFrom?.messageId ?? "");
+  const [mode, setMode] = useState<"new" | "update">(() => (restoredFrom ? "update" : "new"));
   const [label, setLabel] = useState("");
   const [remember, setRemember] = useState(false);
   const [revealUrl, setRevealUrl] = useState(false);
@@ -54,8 +71,22 @@ export function SendPanel() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // If a restore happens while the panel is open (e.g. user switched to the
+  // Restore tab, fetched, and came back), pull the new origin into the form.
+  useEffect(() => {
+    if (!restoredFrom) return;
+    setUrl(restoredFrom.webhookUrl);
+    setMessageIdInput(restoredFrom.messageId);
+    setThreadId(restoredFrom.threadId ?? "");
+    setMode("update");
+  }, [restoredFrom]);
+
   const parsedUrl = useMemo(() => parseWebhookUrl(url), [url]);
   const urlInvalid = url.trim().length > 0 && !parsedUrl;
+
+  const parsedMessageId = useMemo(() => parseMessageIdInput(messageIdInput), [messageIdInput]);
+  const messageIdInvalid =
+    mode === "update" && messageIdInput.trim().length > 0 && !parsedMessageId;
 
   const validation = useMemo(() => validateMessage(message), [message]);
   const blockingIssues = validation.issues.filter((i) => i.severity === "error");
@@ -65,6 +96,13 @@ export function SendPanel() {
   const handleSend = async () => {
     if (!parsedUrl) {
       setState({ kind: "error", message: "Enter a valid Discord webhook URL." });
+      return;
+    }
+    if (mode === "update" && !parsedMessageId) {
+      setState({
+        kind: "error",
+        message: "Enter the ID (or link) of the message to update.",
+      });
       return;
     }
     if (blockingIssues.length > 0) {
@@ -80,14 +118,24 @@ export function SendPanel() {
     abortRef.current = ac;
 
     setState({ kind: "sending" });
-    const result = await sendToWebhook(parsedUrl, message, {
-      threadId: threadId.trim() || undefined,
-      signal: ac.signal,
-    });
+
+    const result =
+      mode === "update" && parsedMessageId
+        ? await updateWebhookMessage(parsedUrl, parsedMessageId, message, {
+            threadId: threadId.trim() || undefined,
+            signal: ac.signal,
+          })
+        : await sendToWebhook(parsedUrl, message, {
+            threadId: threadId.trim() || undefined,
+            signal: ac.signal,
+          });
 
     if (result.ok) {
       setState({ kind: "ok", status: result.status });
-      pushToast("Message delivered to Discord.", "success");
+      pushToast(
+        mode === "update" ? "Original message updated." : "Message delivered to Discord.",
+        "success",
+      );
       if (remember) {
         const entry = rememberWebhook(parsedUrl.url, label);
         if (entry) setHistory(loadHistory());
@@ -130,6 +178,31 @@ export function SendPanel() {
         Send the current message straight to a Discord webhook. The request goes from your browser
         to Discord — nothing is uploaded to our servers (there are none).
       </p>
+
+      {restoredFrom ? (
+        <div className={styles.modeToggle} role="radiogroup" aria-label="Send mode">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === "update"}
+            className={cn(styles.modeOption, mode === "update" && styles.modeOptionActive)}
+            onClick={() => setMode("update")}
+          >
+            <strong>Update the original</strong>
+            <span>Edit the message you restored in place (PATCH).</span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === "new"}
+            className={cn(styles.modeOption, mode === "new" && styles.modeOptionActive)}
+            onClick={() => setMode("new")}
+          >
+            <strong>Send as a copy</strong>
+            <span>Post a new message; leaves the original untouched.</span>
+          </button>
+        </div>
+      ) : null}
 
       <div className={styles.warning} role="note">
         <strong>Treat the webhook URL like a password.</strong> Anyone with it can post to your
@@ -206,6 +279,25 @@ export function SendPanel() {
         )}
       </Field>
 
+      {mode === "update" ? (
+        <Field
+          label="Message ID or link to update"
+          hint="Pre-filled from the message you restored. Change it to update a different message instead."
+          error={messageIdInvalid ? "Not a valid message ID or link." : undefined}
+        >
+          {(id) => (
+            <TextInput
+              id={id}
+              value={messageIdInput}
+              onChange={(e) => setMessageIdInput(e.currentTarget.value)}
+              invalid={messageIdInvalid}
+              placeholder="1185234567890123456  ·  or  https://discord.com/channels/…"
+              spellCheck={false}
+            />
+          )}
+        </Field>
+      ) : null}
+
       <div className={styles.rememberRow}>
         <Switch
           checked={remember}
@@ -242,7 +334,8 @@ export function SendPanel() {
 
       {state.kind === "ok" ? (
         <div className={styles.success} role="status">
-          Sent. Discord returned {state.status === 204 ? "204 No Content" : state.status}.
+          {mode === "update" ? "Updated. " : "Sent. "}
+          Discord returned {state.status === 204 ? "204 No Content" : state.status}.
         </div>
       ) : null}
 
@@ -266,9 +359,20 @@ export function SendPanel() {
         <Button
           variant="primary"
           onClick={handleSend}
-          disabled={sending || !parsedUrl || blockingIssues.length > 0}
+          disabled={
+            sending ||
+            !parsedUrl ||
+            blockingIssues.length > 0 ||
+            (mode === "update" && !parsedMessageId)
+          }
         >
-          {sending ? "Sending…" : "Send to webhook"}
+          {sending
+            ? mode === "update"
+              ? "Updating…"
+              : "Sending…"
+            : mode === "update"
+              ? "Update message"
+              : "Send to webhook"}
         </Button>
       </div>
     </>
