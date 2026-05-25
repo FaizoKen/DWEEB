@@ -490,12 +490,6 @@
 }
 
 @media (max-width: 640px) {
-  /* Meta header username/avatar stack vertically below 640px so each input
-   * keeps a usable hit target instead of getting halved. */
-  .row2 {
-    grid-template-columns: 1fr;
-  }
-
   .row {
     gap: 6px;
     padding: 9px 6px;

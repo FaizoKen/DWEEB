@@ -1,7 +1,7 @@
 {
   "name": "discord-webhook-builder",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Visual Discord webhook builder for Components V2 messages. Build, preview, and share Discord messages without writing JSON.",
   "scripts": {

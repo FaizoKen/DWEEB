@@ -495,8 +495,29 @@ function TreeNode({
     longPressTimer: number | null;
     pressClientX: number;
     pressClientY: number;
+    /**
+     * Non-passive `touchmove` listener attached to document for the lifetime
+     * of this touch gesture. React's own pointer/touch listeners are passive,
+     * so `e.preventDefault()` inside onPointerMove can't actually suppress the
+     * browser's scroll interpretation — we have to do it from a listener we
+     * registered with `{ passive: false }`. Without this, iOS/Android fire
+     * `pointercancel` the moment the finger moves after long-press, which
+     * looks to the user like the drag "auto-released".
+     */
+    touchMoveBlocker: ((ev: TouchEvent) => void) | null;
   }
   const stateRef = useRef<PointerState | null>(null);
+
+  const releasePointerState = useCallback((state: PointerState) => {
+    if (state.longPressTimer !== null) {
+      window.clearTimeout(state.longPressTimer);
+      state.longPressTimer = null;
+    }
+    if (state.touchMoveBlocker) {
+      document.removeEventListener("touchmove", state.touchMoveBlocker);
+      state.touchMoveBlocker = null;
+    }
+  }, []);
   const lastDropRef = useRef<{ id: EditorId; position: DropPosition } | null>(null);
   const justDraggedRef = useRef(false);
 
@@ -561,6 +582,7 @@ function TreeNode({
         longPressTimer: null,
         pressClientX: e.clientX,
         pressClientY: e.clientY,
+        touchMoveBlocker: null,
       };
 
       if (e.pointerType === "touch" || e.pointerType === "pen") {
@@ -576,6 +598,20 @@ function TreeNode({
             try { navigator.vibrate(15); } catch { /* not supported */ }
           }
         }, LONG_PRESS_MS);
+
+        // Register a non-passive touchmove listener so we can actually block
+        // native scrolling once the gesture promotes to a drag. React's
+        // synthetic pointermove is passive, so its `preventDefault` is a
+        // no-op. Without this, the browser interprets the first post-press
+        // finger movement as a scroll and fires pointercancel — which makes
+        // the drag look like it "auto-releases" after the hold.
+        const blocker = (ev: TouchEvent) => {
+          if (stateRef.current === state && state.isDragging && ev.cancelable) {
+            ev.preventDefault();
+          }
+        };
+        state.touchMoveBlocker = blocker;
+        document.addEventListener("touchmove", blocker, { passive: false });
       }
 
       stateRef.current = state;
@@ -647,8 +683,7 @@ function TreeNode({
           // Pre-drag touch: if the finger moves before the long-press fires,
           // we assume the user is trying to scroll. Bail and release capture.
           if (adx > TOUCH_CANCEL_TOLERANCE || ady > TOUCH_CANCEL_TOLERANCE) {
-            window.clearTimeout(state.longPressTimer);
-            state.longPressTimer = null;
+            releasePointerState(state);
             try {
               e.currentTarget.releasePointerCapture(e.pointerId);
             } catch { /* ignore */ }
@@ -683,10 +718,7 @@ function TreeNode({
     (e: ReactPointerEvent<HTMLDivElement>) => {
       const state = stateRef.current;
       if (!state || state.pointerId !== e.pointerId) return;
-      if (state.longPressTimer !== null) {
-        window.clearTimeout(state.longPressTimer);
-        state.longPressTimer = null;
-      }
+      releasePointerState(state);
       if (state.isDragging) {
         endDrag(true);
         justDraggedRef.current = true;
@@ -696,35 +728,30 @@ function TreeNode({
         e.currentTarget.releasePointerCapture(e.pointerId);
       } catch { /* ignore */ }
     },
-    [endDrag],
+    [endDrag, releasePointerState],
   );
 
   const onPointerCancel = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       const state = stateRef.current;
       if (!state || state.pointerId !== e.pointerId) return;
-      if (state.longPressTimer !== null) {
-        window.clearTimeout(state.longPressTimer);
-        state.longPressTimer = null;
-      }
+      releasePointerState(state);
       if (state.isDragging) {
         endDrag(false);
       }
       stateRef.current = null;
     },
-    [endDrag],
+    [endDrag, releasePointerState],
   );
 
-  // Unmount cleanup: clear any pending long-press timer so it can't fire
-  // against an unmounted component.
+  // Unmount cleanup: clear any pending long-press timer and detach the
+  // touchmove blocker so neither can fire against an unmounted component.
   useEffect(() => {
     return () => {
       const state = stateRef.current;
-      if (state?.longPressTimer != null) {
-        window.clearTimeout(state.longPressTimer);
-      }
+      if (state) releasePointerState(state);
     };
-  }, []);
+  }, [releasePointerState]);
 
   const onRowClick = useCallback(
     (e: ReactMouseEvent<HTMLDivElement>) => {
