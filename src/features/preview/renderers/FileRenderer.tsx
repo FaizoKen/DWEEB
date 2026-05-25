@@ -32,23 +32,61 @@ export function FileRenderer({ node }: { node: FileComponent }) {
           ? "Attachment by id"
           : "Needs a URL or attachment id";
 
+  // Discord renders image/video files inline as a preview rather than a plain
+  // download card, so mirror that here whenever the source actually resolves.
+  const previewKind = resolved ? mediaKindFromName(filename, node.file.content_type) : null;
+
   return (
     <div className={cn(styles.file, node.spoiler && styles.spoiler)}>
-      <div className={styles.icon} aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-          <path
-            d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9l-6-6z"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-          <path d="M13 3v6h6" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-        </svg>
-      </div>
-      <div className={styles.body}>
-        <div className={styles.name}>{filename}</div>
-        <div className={styles.sub}>{subtitle}</div>
+      {previewKind === "image" && resolved ? (
+        <img
+          className={styles.preview}
+          src={resolved}
+          alt={filename}
+          loading="lazy"
+          decoding="async"
+        />
+      ) : previewKind === "video" && resolved ? (
+        <video
+          className={styles.preview}
+          src={resolved}
+          controls
+          preload="metadata"
+        />
+      ) : null}
+      <div className={styles.card}>
+        <div className={styles.icon} aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+            <path
+              d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9l-6-6z"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+            />
+            <path d="M13 3v6h6" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <div className={styles.body}>
+          <div className={styles.name}>{filename}</div>
+          <div className={styles.sub}>{subtitle}</div>
+        </div>
       </div>
     </div>
   );
+}
+
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "apng"]);
+const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "m4v", "ogv"]);
+
+function mediaKindFromName(name: string, contentType?: string): "image" | "video" | null {
+  if (contentType) {
+    if (contentType.startsWith("image/")) return "image";
+    if (contentType.startsWith("video/")) return "video";
+  }
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return null;
+  const ext = name.slice(dot + 1).toLowerCase();
+  if (IMAGE_EXTS.has(ext)) return "image";
+  if (VIDEO_EXTS.has(ext)) return "video";
+  return null;
 }

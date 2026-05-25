@@ -1,12 +1,29 @@
 .file {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+
+.preview {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  width: auto;
+  height: auto;
+  border-radius: var(--discord-radius);
+  background: var(--discord-bg-tertiary);
+  object-fit: contain;
+}
+
+.card {
+  display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
   background: var(--discord-bg-secondary);
   border: 1px solid var(--discord-bg-tertiary);
   border-radius: var(--discord-radius);
-  max-width: 420px;
 }
 
 .icon {
@@ -33,5 +50,7 @@
   font-size: 12px;
 }
 
+.spoiler .preview { filter: blur(20px); }
+.spoiler:hover .preview { filter: none; }
 .spoiler .name { filter: blur(4px); }
 .spoiler:hover .name { filter: none; }
