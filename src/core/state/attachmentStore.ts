@@ -37,7 +37,16 @@ interface BlobRecord {
 const blobs = new Map<string, BlobRecord>();
 const listeners = new Set<() => void>();
 
+/**
+ * Version counter incremented on every add/remove. `useSyncExternalStore`
+ * compares snapshots with `Object.is`, so we can't return the mutable `blobs`
+ * Map — its reference never changes and React would skip re-renders after
+ * `notify()`. The dev-only StrictMode double-render hides this; prod doesn't.
+ */
+let version = 0;
+
 function notify() {
+  version++;
   for (const fn of listeners) fn();
 }
 
@@ -49,9 +58,9 @@ export function subscribeAttachments(fn: () => void): () => void {
   };
 }
 
-/** Stable snapshot accessor for `useSyncExternalStore`. */
-export function getAttachmentSnapshot(): Map<string, BlobRecord> {
-  return blobs;
+/** Stable snapshot for `useSyncExternalStore` — changes whenever the registry mutates. */
+export function getAttachmentSnapshot(): number {
+  return version;
 }
 
 /** Register a new blob. Returns the session URL to store in editor state. */
