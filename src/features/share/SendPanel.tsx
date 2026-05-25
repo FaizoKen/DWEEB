@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { validateMessage } from "@/core/schema/validation";
+import { inspectCapabilities } from "@/core/schema/capability";
 import {
   forgetWebhook,
   loadHistory,
@@ -90,6 +91,11 @@ export function SendPanel() {
 
   const validation = useMemo(() => validateMessage(message), [message]);
   const blockingIssues = validation.issues.filter((i) => i.severity === "error");
+
+  const capabilities = useMemo(
+    () => inspectCapabilities(message, { threadIdProvided: threadId.trim().length > 0 }),
+    [message, threadId],
+  );
 
   const sending = state.kind === "sending";
 
@@ -318,6 +324,32 @@ export function SendPanel() {
             />
           )}
         </Field>
+      ) : null}
+
+      {capabilities.length > 0 ? (
+        <section className={styles.capability} aria-label="Pre-send capability check">
+          <header className={styles.capabilityHeader}>
+            <span>Heads up — this message expects…</span>
+          </header>
+          <ul className={styles.capabilityList}>
+            {capabilities.map((c, i) => (
+              <li key={i} className={styles.capabilityItem}>
+                <span
+                  className={cn(
+                    styles.capabilityBadge,
+                    c.severity === "warning" ? styles.capabilityWarn : styles.capabilityInfo,
+                  )}
+                >
+                  {c.severity === "warning" ? "Needs" : "Note"}
+                </span>
+                <div>
+                  <div className={styles.capabilityTitle}>{c.title}</div>
+                  <div className={styles.capabilityDetail}>{c.detail}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       {blockingIssues.length > 0 ? (

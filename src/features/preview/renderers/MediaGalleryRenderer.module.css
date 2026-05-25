@@ -12,12 +12,40 @@
 .gallery[data-count="2"] {
   grid-template-columns: 1fr 1fr;
 }
-.gallery[data-count="3"],
+.gallery[data-count="3"] {
+  grid-template-columns: 1.6fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  aspect-ratio: 5 / 4;
+}
 .gallery[data-count="4"] {
   grid-template-columns: 1fr 1fr;
 }
-.gallery[data-count="5"] {
-  grid-template-columns: 1fr 1fr 1fr;
+.gallery[data-count="6"],
+.gallery[data-count="7"],
+.gallery[data-count="9"],
+.gallery[data-count="10"] {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Counts 5 and 8: row of 2 wide cells on top, rows of 3 narrower cells below.
+   We use a 6-col base so 3-span (top) and 2-span (bottom) line up. */
+.gallery[data-count="5"],
+.gallery[data-count="8"] {
+  grid-template-columns: repeat(6, 1fr);
+}
+.gallery[data-count="5"] .item:nth-child(-n + 2),
+.gallery[data-count="8"] .item:nth-child(-n + 2) {
+  grid-column: span 3;
+}
+.gallery[data-count="5"] .item:nth-child(n + 3),
+.gallery[data-count="8"] .item:nth-child(n + 3) {
+  grid-column: span 2;
+}
+
+.gallery[data-count="7"] .item:first-child,
+.gallery[data-count="10"] .item:first-child {
+  grid-column: 1 / -1;
+  aspect-ratio: 16 / 9;
 }
 
 .item {
@@ -32,6 +60,28 @@
   aspect-ratio: 16 / 10;
 }
 
+.gallery[data-count="3"] .item {
+  aspect-ratio: auto;
+}
+.gallery[data-count="3"] .item:first-child {
+  grid-row: 1 / span 2;
+}
+
+.altBadge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
 .item img {
   width: 100%;
   height: 100%;
@@ -42,6 +92,21 @@
   filter: blur(40px);
   transition: filter 200ms ease;
 }
-.spoiler:hover img {
+.spoiler:hover img,
+.spoiler:focus-within img,
+.spoiler:active img {
   filter: blur(20px);
+}
+
+.placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--app-text-muted);
+  background: var(--discord-bg-tertiary);
+  text-align: center;
+  padding: 8px;
 }

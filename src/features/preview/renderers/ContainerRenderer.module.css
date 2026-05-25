@@ -1,6 +1,6 @@
 .container {
   background: var(--discord-bg-secondary);
-  border-left: 4px solid var(--discord-bg-quote);
+  border-left: 4px solid transparent;
   border-radius: var(--discord-radius);
   overflow: hidden;
   max-width: 560px;
@@ -13,8 +13,18 @@
   gap: 8px;
 }
 
+@media (max-width: 480px) {
+  .body {
+    padding: 10px 12px;
+    gap: 6px;
+  }
+}
+
 .spoiler {
   filter: blur(6px);
   transition: filter 200ms ease;
 }
 .spoiler:hover { filter: none; }
+/* Touch devices can't hover — let a tap reveal the container. */
+.spoiler:focus-within,
+.spoiler:active { filter: none; }

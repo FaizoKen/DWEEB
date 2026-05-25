@@ -1,0 +1,63 @@
+.select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px 6px 14px;
+  background: var(--discord-bg-tertiary);
+  border: 1px solid rgba(78, 80, 88, 0.48);
+  border-radius: 8px;
+  color: var(--discord-text-normal);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.select:hover {
+  border-color: rgba(78, 80, 88, 0.9);
+}
+
+.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.placeholder {
+  color: var(--discord-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--discord-bg-quote);
+  color: var(--discord-text-normal);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--discord-text-muted);
+}

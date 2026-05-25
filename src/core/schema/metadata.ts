@@ -5,7 +5,7 @@
  * any UI strings. The builder, share dialog, and tree all read from here.
  */
 
-import { ComponentType, type ComponentTypeValue } from "./types";
+import { ChannelType, ComponentType, type ComponentTypeValue } from "./types";
 
 interface ComponentMeta {
   label: string;
@@ -47,7 +47,7 @@ export const COMPONENT_META: Record<ComponentTypeValue, ComponentMeta> = {
   },
   [ComponentType.ActionRow]: {
     label: "Buttons Row",
-    description: "Up to 5 buttons side-by-side.",
+    description: "Up to 5 buttons or one select side-by-side.",
     glyph: "⬚",
   },
   [ComponentType.Button]: {
@@ -60,44 +60,41 @@ export const COMPONENT_META: Record<ComponentTypeValue, ComponentMeta> = {
     description: "Small image used as a section accessory.",
     glyph: "▣",
   },
-  // Selects/TextInput aren't part of the V2 webhook editor surface but the
-  // map is exhaustive so component-type switches stay total.
   [ComponentType.StringSelect]: {
     label: "String Select",
-    description: "Interactive select (requires a bot).",
+    description: "Dropdown of custom options (needs a bot to handle clicks).",
     glyph: "▾",
   },
   [ComponentType.TextInput]: {
     label: "Text Input",
-    description: "Modal text input (requires a bot).",
+    description: "Modal text input (not allowed in messages).",
     glyph: "▭",
   },
   [ComponentType.UserSelect]: {
     label: "User Select",
-    description: "Interactive user picker (requires a bot).",
+    description: "Pick guild members (needs a bot to handle clicks).",
     glyph: "▾",
   },
   [ComponentType.RoleSelect]: {
     label: "Role Select",
-    description: "Interactive role picker (requires a bot).",
+    description: "Pick guild roles (needs a bot to handle clicks).",
     glyph: "▾",
   },
   [ComponentType.MentionableSelect]: {
     label: "Mentionable Select",
-    description: "Interactive mentionable picker (requires a bot).",
+    description: "Pick users or roles (needs a bot to handle clicks).",
     glyph: "▾",
   },
   [ComponentType.ChannelSelect]: {
     label: "Channel Select",
-    description: "Interactive channel picker (requires a bot).",
+    description: "Pick channels (needs a bot to handle clicks).",
     glyph: "▾",
   },
 };
 
 /**
  * Components V2 component types the editor exposes in the "add" menu.
- * Selects and TextInput are excluded because they require interactions which
- * a webhook-only app cannot handle.
+ * TextInput is excluded because it only appears inside modals.
  */
 export const TOP_LEVEL_PICKER: ComponentTypeValue[] = [
   ComponentType.Container,
@@ -117,3 +114,36 @@ export const CONTAINER_PICKER: ComponentTypeValue[] = [
   ComponentType.File,
   ComponentType.ActionRow,
 ];
+
+/**
+ * Picker entries used for the "fill empty action row with…" menu — covers
+ * the five select component types. A row holds EITHER buttons OR a single
+ * select; once content is added the other class is hidden by the UI.
+ */
+export const ROW_SELECT_PICKER: ComponentTypeValue[] = [
+  ComponentType.StringSelect,
+  ComponentType.UserSelect,
+  ComponentType.RoleSelect,
+  ComponentType.MentionableSelect,
+  ComponentType.ChannelSelect,
+];
+
+/**
+ * Human-facing labels for the channel-type filter on Channel Select. Used by
+ * the inspector; numeric values mirror `ChannelType` in `types.ts`.
+ */
+export const CHANNEL_TYPE_LABELS: Record<number, string> = {
+  [ChannelType.GuildText]: "Text",
+  [ChannelType.DM]: "DM",
+  [ChannelType.GuildVoice]: "Voice",
+  [ChannelType.GroupDM]: "Group DM",
+  [ChannelType.GuildCategory]: "Category",
+  [ChannelType.GuildAnnouncement]: "Announcement",
+  [ChannelType.AnnouncementThread]: "Announcement thread",
+  [ChannelType.PublicThread]: "Public thread",
+  [ChannelType.PrivateThread]: "Private thread",
+  [ChannelType.GuildStageVoice]: "Stage",
+  [ChannelType.GuildDirectory]: "Directory",
+  [ChannelType.GuildForum]: "Forum",
+  [ChannelType.GuildMedia]: "Media",
+};

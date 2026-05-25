@@ -1,15 +1,33 @@
-.menu {
+/* Owns the fixed placement (including translateY(-100%) when popping above
+ * the trigger). Kept separate from .menu so the entry animation on .menu
+ * can use transform without fighting the placement transform — that
+ * conflict was causing the menu to flicker into the wrong spot on open. */
+.positioner {
   position: fixed;
   z-index: var(--app-z-modal);
-  background: var(--app-bg-elevated);
-  border: 1px solid var(--app-border);
+}
+
+.menu {
+  /* One step brighter than --app-bg-elevated (the builder pane) so the
+   * popover floats clearly instead of blending into the editor. */
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border-strong);
   border-radius: var(--app-radius);
-  box-shadow: var(--app-shadow);
+  box-shadow: var(--app-shadow-lg);
   padding: 4px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  animation: fade 100ms ease-out;
+  transform-origin: top center;
+  animation: menuIn 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
+}
+
+/* When the menu pops above its trigger the wrapper translates it up; anchor
+ * the scale-in animation to the bottom edge so it feels rooted to the
+ * trigger instead of floating in from the top. */
+.menu[data-align="top"] {
+  transform-origin: bottom center;
 }
 
 .item {
@@ -24,7 +42,7 @@
   transition: background 120ms ease;
 }
 .item:hover {
-  background: var(--app-bg-hover);
+  background: var(--app-bg-active);
 }
 
 .itemGlyph {
@@ -36,6 +54,14 @@
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
   color: var(--app-text-muted);
+  font-size: 13px;
+  line-height: 1;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.item:hover .itemGlyph {
+  border-color: var(--app-border-strong);
+  color: var(--app-text);
 }
 
 .itemBody { display: flex; flex-direction: column; }
@@ -50,7 +76,13 @@
   color: var(--app-text-muted);
 }
 
-@keyframes fade {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: none; }
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }

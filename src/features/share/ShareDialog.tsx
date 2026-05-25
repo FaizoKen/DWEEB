@@ -13,7 +13,7 @@
  * `replaceMessageFromRestore`) on import.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -22,12 +22,15 @@ import { TextArea } from "@/ui/TextArea";
 import { TextInput } from "@/ui/TextInput";
 import {
   buildShareUrl,
+  convertV1Payload,
   copyText,
   decodeJson,
   decodeShare,
+  detectV1Fields,
   encodeJson,
   encodeShare,
   writeShareTokenToHash,
+  type V1ImportNote,
 } from "@/core/serialization";
 import {
   fetchWebhookMessage,
@@ -46,10 +49,9 @@ interface ShareDialogProps {
   open: boolean;
   onClose: () => void;
   /**
-   * Tab to land on when the dialog opens. The toolbar's dedicated "Send"
-   * button uses this to drop the user straight onto the Send panel; the
-   * generic "Share / Export" entry defaults to Send too, since that's the
-   * action a beginner is most likely looking for after building.
+   * Tab to land on when the dialog opens. The Builder's action bar uses this
+   * to drop the user straight onto the right panel for the button they
+   * clicked (Send / Share / Restore).
    */
   initialTab?: Tab;
 }
@@ -193,13 +195,33 @@ function JsonExportPanel() {
   );
 }
 
+/**
+ * Import panel.
+ *
+ * Accepts three shapes:
+ *  1. A share URL or bare share token — decoded via `decodeShare`.
+ *  2. A Components V2 JSON payload — decoded via `decodeJson`.
+ *  3. A pre-V2 (V1) webhook payload (`content` / `embeds` / `poll` /
+ *     `stickers`). The panel detects these as the user types, shows a
+ *     preview of what the converter will do, and offers a typed
+ *     "Convert to V2 and import" action so the conversion never happens
+ *     by surprise.
+ *
+ * For (3), the converter `convertV1Payload` rewrites the payload into a V2
+ * component tree, returning a list of notes describing every conversion or
+ * drop so users can spot data loss (poll, video, icons) before committing.
+ */
 function ImportPanel({ onDone }: { onDone: () => void }) {
   const replace = useMessageStore((s) => s.replaceMessage);
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Live V1 detection — only meaningful when the input parses as JSON. Share
+  // tokens / share URLs go through their own paths and never preview V1.
+  const v1Preview = useMemo(() => analyseInput(text), [text]);
+
   const handleImport = () => {
-    const value = ref.current?.value.trim() ?? "";
+    const value = text.trim();
     if (!value) {
       setError("Paste a share URL, share token, or JSON payload.");
       return;
@@ -207,19 +229,36 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
     // Try share URL first.
     const urlMatch = /#s=([^&]+)/.exec(value);
     if (urlMatch) {
-      const result = decodeShare(urlMatch[1]!);
-      finish(result);
+      finish(decodeShare(urlMatch[1]!));
       return;
     }
     // Maybe a bare token (`v.body`).
     if (/^\d+\./.test(value)) {
-      const result = decodeShare(value);
-      finish(result);
+      finish(decodeShare(value));
       return;
     }
-    // Fall back to JSON.
-    const result = decodeJson(value);
-    finish(result);
+    // JSON path — if V1 fields are present, route through the converter so the
+    // editor never silently drops `content`/`embeds`/etc.
+    if (v1Preview.kind === "v1") {
+      try {
+        const { message, notes } = convertV1Payload(v1Preview.parsed);
+        replace(message);
+        const dropped = notes.filter((n) => n.level === "warning").length;
+        pushToast(
+          dropped > 0
+            ? `Converted V1 payload to V2 — ${dropped} field${dropped === 1 ? "" : "s"} dropped (see preview).`
+            : "Converted V1 payload to V2.",
+          dropped > 0 ? "info" : "success",
+        );
+        setError(null);
+        onDone();
+        return;
+      } catch (e) {
+        setError((e as Error).message);
+        return;
+      }
+    }
+    finish(decodeJson(value));
   };
 
   function finish(result: ReturnType<typeof decodeJson>) {
@@ -244,22 +283,115 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
   return (
     <>
       <p className={styles.lead}>
-        Paste a share URL, a share token, or a Components V2 JSON payload. This replaces the
-        current message.
+        Paste a share URL, a share token, or a webhook JSON payload. V1
+        payloads (with <code>content</code>, <code>embeds</code>,{" "}
+        <code>poll</code>, or <code>stickers</code>) are auto-converted to V2
+        — the panel previews what happens before you commit.
       </p>
       <TextArea
-        ref={ref}
         rows={10}
-        placeholder='{ "components": [ … ] }'
+        placeholder='{ "components": [ … ] }  ·  or  { "content": "...", "embeds": [...] }'
         invalid={!!error}
+        value={text}
+        onChange={(e) => setText(e.currentTarget.value)}
       />
+      {v1Preview.kind === "v1" ? (
+        <V1ConversionPreview
+          fields={v1Preview.detection.fields}
+          notes={v1Preview.notes}
+        />
+      ) : null}
       {error ? <div className={styles.error}>{error}</div> : null}
       <div className={styles.actions}>
         <Button variant="primary" onClick={handleImport}>
-          Replace message
+          {v1Preview.kind === "v1" ? "Convert to V2 and import" : "Replace message"}
         </Button>
       </div>
     </>
+  );
+}
+
+type Analysis =
+  | { kind: "empty" }
+  | { kind: "not-json" }
+  | { kind: "v2" }
+  | { kind: "v1"; parsed: unknown; detection: ReturnType<typeof detectV1Fields>; notes: V1ImportNote[] };
+
+/**
+ * Try to parse the input as JSON and decide whether it carries V1 fields.
+ * Share URLs / tokens / non-JSON return `not-json` (or `empty`) — the
+ * preview only fires for JSON that actually has V1-only fields.
+ */
+function analyseInput(text: string): Analysis {
+  const trimmed = text.trim();
+  if (!trimmed) return { kind: "empty" };
+  // Skip share URLs and bare tokens — those have their own decode path.
+  if (trimmed.startsWith("http") || trimmed.includes("#s=") || /^\d+\./.test(trimmed)) {
+    return { kind: "not-json" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return { kind: "not-json" };
+  }
+  const detection = detectV1Fields(parsed);
+  if (!detection.hasV1Fields) return { kind: "v2" };
+  // Dry-run the converter to surface notes without applying them.
+  try {
+    const { notes } = convertV1Payload(parsed);
+    return { kind: "v1", parsed, detection, notes };
+  } catch {
+    // Converter throws only when the payload isn't an object — already filtered.
+    return { kind: "v2" };
+  }
+}
+
+function V1ConversionPreview({
+  fields,
+  notes,
+}: {
+  fields: string[];
+  notes: V1ImportNote[];
+}) {
+  return (
+    <section className={styles.v1Preview} aria-label="V1 → V2 conversion preview">
+      <header className={styles.v1PreviewHeader}>
+        <span className={styles.v1PreviewTitle}>V1 payload detected — preview</span>
+        <div className={styles.v1PreviewChips}>
+          {fields.map((f) => (
+            <span key={f} className={styles.v1PreviewChip}>{f}</span>
+          ))}
+        </div>
+      </header>
+      {notes.length > 0 ? (
+        <ul className={styles.v1PreviewList}>
+          {notes.map((n, i) => (
+            <li key={i} className={styles.v1PreviewItem}>
+              <span
+                className={cn(
+                  styles.v1PreviewBadge,
+                  n.level === "warning"
+                    ? styles.v1PreviewBadgeWarn
+                    : styles.v1PreviewBadgeInfo,
+                )}
+              >
+                {n.level === "warning" ? "Drop" : "Map"}
+              </span>
+              <div>
+                <span className={styles.v1PreviewSource}>{n.source}</span>
+                {" — "}
+                {n.message}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className={styles.lead}>
+          V1 fields will be converted with no data loss.
+        </p>
+      )}
+    </section>
   );
 }
 

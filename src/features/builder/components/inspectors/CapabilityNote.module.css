@@ -1,0 +1,23 @@
+.note {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: var(--app-radius-sm);
+  border-left: 3px solid transparent;
+}
+
+.warn {
+  background: rgba(240, 178, 50, 0.08);
+  border-left-color: rgba(240, 178, 50, 0.7);
+  color: var(--app-text);
+}
+
+.info {
+  background: rgba(88, 101, 242, 0.08);
+  border-left-color: rgba(88, 101, 242, 0.7);
+  color: var(--app-text);
+}
+
+.note strong {
+  font-weight: 600;
+}

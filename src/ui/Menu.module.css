@@ -1,0 +1,68 @@
+.wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  min-width: 180px;
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-md);
+  box-shadow: var(--app-shadow-lg);
+  padding: 4px;
+  z-index: var(--app-z-toolbar);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: menuRise 100ms ease-out;
+}
+
+.alignStart { left: 0; }
+.alignEnd { right: 0; }
+
+.item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--app-text);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+}
+.item:hover:not(:disabled),
+.item:focus-visible {
+  background: var(--app-bg-hover);
+  outline: none;
+}
+.item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.itemIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--app-text-muted);
+  flex: 0 0 auto;
+}
+.itemLabel { flex: 1; }
+
+.divider {
+  height: 1px;
+  background: var(--app-border);
+  margin: 4px 0;
+}
+
+@keyframes menuRise {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}

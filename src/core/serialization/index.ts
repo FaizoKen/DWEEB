@@ -4,3 +4,4 @@ export * from "./url";
 export * from "./clipboard";
 export * from "./version";
 export * from "./normalize";
+export * from "./v1Import";

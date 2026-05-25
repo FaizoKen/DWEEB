@@ -11,8 +11,10 @@
  */
 
 import { ComponentType, type AnyComponent } from "@/core/schema/types";
+import { isSelect } from "@/core/schema/guards";
 import { useMessageStore } from "@/core/state/messageStore";
 import { cn } from "@/lib/cn";
+import { usePreviewClose } from "../previewCloseContext";
 import { ContainerRenderer } from "./ContainerRenderer";
 import { SectionRenderer } from "./SectionRenderer";
 import { TextDisplayRenderer } from "./TextDisplayRenderer";
@@ -22,26 +24,39 @@ import { FileRenderer } from "./FileRenderer";
 import { ActionRowRenderer } from "./ActionRowRenderer";
 import { ButtonRenderer } from "./ButtonRenderer";
 import { ThumbnailRenderer } from "./ThumbnailRenderer";
+import { SelectRenderer } from "./SelectRenderer";
 import styles from "./ComponentRenderer.module.css";
 
 interface ComponentRendererProps {
   node: AnyComponent;
-  /** Hide the selection ring on a sub-component (e.g. accessory). */
-  noSelectionRing?: boolean;
 }
 
-export function ComponentRenderer({ node, noSelectionRing }: ComponentRendererProps) {
+export function ComponentRenderer({ node }: ComponentRendererProps) {
   const selectedId = useMessageStore((s) => s.selectedId);
   const select = useMessageStore((s) => s.select);
+  const closePreview = usePreviewClose();
   const isSelected = selectedId === node._id;
 
   return (
     <div
       data-node-id={node._id}
-      className={cn(styles.wrapper, !noSelectionRing && isSelected && styles.selected)}
+      className={cn(styles.wrapper, isSelected && styles.selected)}
       onClick={(e) => {
         e.stopPropagation();
         select(node._id);
+        // On mobile this dismisses the preview slide-over so the editor
+        // (and its now-revealed inspector) becomes visible. No-op on desktop.
+        closePreview?.();
+        // Bring the matching tree row into the builder's viewport. Deferred
+        // one frame so the freshly-selected row's inline inspector has
+        // mounted before `scrollIntoView` measures positions.
+        const targetId = node._id;
+        requestAnimationFrame(() => {
+          const row = document.querySelector<HTMLElement>(
+            `[data-tree-row="true"][data-row-id="${CSS.escape(targetId)}"]`,
+          );
+          row?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
       }}
     >
       {renderByType(node)}
@@ -50,6 +65,7 @@ export function ComponentRenderer({ node, noSelectionRing }: ComponentRendererPr
 }
 
 function renderByType(node: AnyComponent) {
+  if (isSelect(node)) return <SelectRenderer node={node} />;
   switch (node.type) {
     case ComponentType.Container:
       return <ContainerRenderer node={node} />;
@@ -70,12 +86,14 @@ function renderByType(node: AnyComponent) {
     case ComponentType.Thumbnail:
       return <ThumbnailRenderer node={node} />;
   }
-  // Unreachable for any `AnyComponent` value. The fallback exists so that
-  // imported JSON carrying an unknown / interactive-only type (selects,
-  // text input) renders an explainer instead of throwing.
+  // Anything not handled above — e.g. TextInput which can never appear in a
+  // message — renders as an explainer block instead of throwing. After the
+  // exhaustive switch on `AnyComponent` the type narrows to `never`; the cast
+  // lets us still read `.type` for the user-facing diagnostic.
+  const unknownType = (node as { type?: number }).type;
   return (
     <div className={styles.unsupported}>
-      This component requires interactions (a bot) and isn't supported by webhook messages.
+      This component type ({String(unknownType)}) cannot appear in a webhook message.
     </div>
   );
 }

@@ -1,11 +1,36 @@
 import type { FileComponent } from "@/core/schema/types";
 import { cn } from "@/lib/cn";
+import { parseSessionUrl } from "@/core/state/attachmentStore";
+import { useResolvedMediaUrl } from "./useResolvedMediaUrl";
 import styles from "./FileRenderer.module.css";
 
 export function FileRenderer({ node }: { node: FileComponent }) {
-  const filename = node.file.url.startsWith("attachment://")
-    ? node.file.url.slice("attachment://".length)
-    : node.file.url.split("/").pop() || node.file.url;
+  const url = node.file.url ?? "";
+  const attachmentId = node.file.attachment_id;
+  const session = parseSessionUrl(url);
+  const resolved = useResolvedMediaUrl(url);
+
+  const filename = session
+    ? session.filename
+    : url.startsWith("attachment://")
+      ? url.slice("attachment://".length)
+      : url
+        ? url.split("/").pop() || url
+        : attachmentId
+          ? `Attachment ${attachmentId.slice(-6)}`
+          : "(no source)";
+
+  const subtitle = session
+    ? resolved
+      ? "Will upload on send"
+      : "Re-attach before sending"
+    : url.startsWith("attachment://")
+      ? "Webhook attachment"
+      : url
+        ? "External file"
+        : attachmentId
+          ? "Attachment by id"
+          : "Needs a URL or attachment id";
 
   return (
     <div className={cn(styles.file, node.spoiler && styles.spoiler)}>
@@ -22,7 +47,7 @@ export function FileRenderer({ node }: { node: FileComponent }) {
       </div>
       <div className={styles.body}>
         <div className={styles.name}>{filename}</div>
-        <div className={styles.sub}>Webhook attachment</div>
+        <div className={styles.sub}>{subtitle}</div>
       </div>
     </div>
   );

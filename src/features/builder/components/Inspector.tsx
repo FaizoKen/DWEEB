@@ -9,7 +9,6 @@
 
 import { useMessageStore } from "@/core/state/messageStore";
 import { findById } from "@/core/schema/traversal";
-import { COMPONENT_META } from "@/core/schema/metadata";
 import { ComponentType, type AnyComponent } from "@/core/schema/types";
 import { TextDisplayInspector } from "./inspectors/TextDisplayInspector";
 import { ContainerInspector } from "./inspectors/ContainerInspector";
@@ -20,6 +19,12 @@ import { FileInspector } from "./inspectors/FileInspector";
 import { ButtonInspector } from "./inspectors/ButtonInspector";
 import { ThumbnailInspector } from "./inspectors/ThumbnailInspector";
 import { ActionRowInspector } from "./inspectors/ActionRowInspector";
+import { StringSelectInspector } from "./inspectors/StringSelectInspector";
+import { UserSelectInspector } from "./inspectors/UserSelectInspector";
+import { RoleSelectInspector } from "./inspectors/RoleSelectInspector";
+import { MentionableSelectInspector } from "./inspectors/MentionableSelectInspector";
+import { ChannelSelectInspector } from "./inspectors/ChannelSelectInspector";
+import { ComponentIdField } from "./inspectors/ComponentIdField";
 import styles from "./Inspector.module.css";
 
 export function Inspector() {
@@ -42,18 +47,12 @@ export function Inspector() {
     );
   }
 
-  const meta = COMPONENT_META[node.type];
-
   return (
     <div className={styles.inspector}>
-      <header className={styles.header}>
-        <span className={styles.glyph}>{meta.glyph}</span>
-        <div>
-          <div className={styles.title}>{meta.label}</div>
-          <div className={styles.sub}>{meta.description}</div>
-        </div>
-      </header>
-      <div className={styles.body}>{renderInspector(node)}</div>
+      <div className={styles.body}>
+        {renderInspector(node)}
+        <ComponentIdField node={node} />
+      </div>
     </div>
   );
 }
@@ -78,6 +77,16 @@ function renderInspector(node: AnyComponent) {
       return <ThumbnailInspector node={node} />;
     case ComponentType.ActionRow:
       return <ActionRowInspector node={node} />;
+    case ComponentType.StringSelect:
+      return <StringSelectInspector node={node} />;
+    case ComponentType.UserSelect:
+      return <UserSelectInspector node={node} />;
+    case ComponentType.RoleSelect:
+      return <RoleSelectInspector node={node} />;
+    case ComponentType.MentionableSelect:
+      return <MentionableSelectInspector node={node} />;
+    case ComponentType.ChannelSelect:
+      return <ChannelSelectInspector node={node} />;
     default:
       return (
         <p className={styles.notImplemented}>

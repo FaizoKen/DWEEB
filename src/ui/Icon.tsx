@@ -50,6 +50,18 @@ export const ArrowDownIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const ChevronRightIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M9 6l6 6-6 6" />
+  </svg>
+);
+
+export const ChevronDownIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+);
+
 export const ShareIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <circle cx="18" cy="5" r="3" />
@@ -80,9 +92,46 @@ export const RedoIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const DownloadIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M12 3v12" />
+    <path d="M7 10l5 5 5-5" />
+    <path d="M5 21h14" />
+  </svg>
+);
+
+export const UploadIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M12 21V9" />
+    <path d="M7 14l5-5 5 5" />
+    <path d="M5 3h14" />
+  </svg>
+);
+
+export const HistoryIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+    <path d="M3 3v5h5" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+);
+
 export const SparkleIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.5 5.5l2.8 2.8M15.7 15.7l2.8 2.8M5.5 18.5l2.8-2.8M15.7 8.3l2.8-2.8" />
+  </svg>
+);
+
+export const EyeIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+export const CloseIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M6 6l12 12M18 6L6 18" />
   </svg>
 );
 

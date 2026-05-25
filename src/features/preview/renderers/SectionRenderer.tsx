@@ -20,7 +20,7 @@ export function SectionRenderer({ node }: { node: SectionComponent }) {
         ))}
       </div>
       <div className={styles.accessory}>
-        <ComponentRenderer node={node.accessory} noSelectionRing />
+        <ComponentRenderer node={node.accessory} />
       </div>
     </div>
   );

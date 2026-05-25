@@ -1,10 +1,9 @@
 /**
- * Example messages shown to first-time users.
+ * Default example message shown to first-time users.
  *
- * Each preset is fully self-contained — applying one replaces the active
- * message wholesale. Presets carry no editor ids; the loader assigns fresh
- * ones (see `messageStore.loadPreset`) so users can apply the same preset
- * twice without colliding ids.
+ * Self-contained — applying it replaces the active message wholesale. Carries
+ * no editor ids; the loader assigns fresh ones (see `messageStore.bootstrap`
+ * and `replaceMessage`) so it can be applied repeatedly without colliding ids.
  */
 
 import {
@@ -15,159 +14,109 @@ import {
 } from "@/core/schema/types";
 import { newId } from "@/lib/id";
 
-/**
- * A preset describes the message minus editor ids. The loader walks it once
- * and assigns ids so the in-memory tree satisfies the BaseComponent invariant.
- */
-export interface MessagePreset {
-  id: string;
-  name: string;
-  description: string;
-  message: WebhookMessage;
-}
-
 const id = newId;
 
-export const PRESETS: MessagePreset[] = [
-  {
-    id: "blank",
-    name: "Blank message",
-    description: "Empty starter — a single text box waiting for your content.",
-    message: {
+const DEFAULT_MESSAGE: WebhookMessage = {
+  username: "Webhook Builder",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: 0x5865f2,
       components: [
         {
           _id: id(),
           type: ComponentType.TextDisplay,
-          content: "",
+          content:
+            "# 🧩 Components V2 — the full kit\nA quick tour of every block this editor supports. Click any component on the left to edit it.",
         },
-      ],
-    },
-  },
-  {
-    id: "release-notes",
-    name: "Release notes",
-    description: "Containered changelog with a CTA button.",
-    message: {
-      username: "Release Bot",
-      components: [
         {
           _id: id(),
-          type: ComponentType.Container,
-          accent_color: 0x5865f2,
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.Section,
           components: [
             {
               _id: id(),
               type: ComponentType.TextDisplay,
               content:
-                "# 🚀 Release v1.4.0\nSeveral quality-of-life improvements and a few performance wins.",
-            },
-            {
-              _id: id(),
-              type: ComponentType.Separator,
-              divider: true,
-              spacing: SeparatorSpacing.Small,
-            },
-            {
-              _id: id(),
-              type: ComponentType.TextDisplay,
-              content:
-                "**Highlights**\n- ⚡ 30% faster cold start\n- 🧩 New plugin API\n- 🐛 Fixed crash on Windows ARM",
-            },
-            {
-              _id: id(),
-              type: ComponentType.ActionRow,
-              components: [
-                {
-                  _id: id(),
-                  type: ComponentType.Button,
-                  style: ButtonStyle.Link,
-                  label: "Read the changelog",
-                  url: "https://github.com",
-                },
-                {
-                  _id: id(),
-                  type: ComponentType.Button,
-                  style: ButtonStyle.Link,
-                  label: "Download",
-                  url: "https://github.com",
-                },
-              ],
+                "**Sections** pair 1–3 text blocks with a single accessory — either a Thumbnail (like this) or a Button. Great for headshots, product cards, or call-outs.",
             },
           ],
+          accessory: {
+            _id: id(),
+            type: ComponentType.Thumbnail,
+            media: { url: "https://picsum.photos/seed/wb-thumb/256/256" },
+            description: "Showcase thumbnail",
+          },
         },
-      ],
-    },
-  },
-  {
-    id: "event-card",
-    name: "Event card",
-    description: "Section with a thumbnail and a join button.",
-    message: {
-      components: [
         {
           _id: id(),
-          type: ComponentType.Container,
-          accent_color: 0xeb459e,
-          components: [
+          type: ComponentType.MediaGallery,
+          items: [
             {
-              _id: id(),
-              type: ComponentType.Section,
-              components: [
-                {
-                  _id: id(),
-                  type: ComponentType.TextDisplay,
-                  content:
-                    "## Community Game Night 🎮\n**Friday · 8 PM UTC** — bring a friend.",
-                },
-              ],
-              accessory: {
-                _id: id(),
-                type: ComponentType.Thumbnail,
-                media: {
-                  url: "https://placehold.co/256x256/eb459e/ffffff/png?text=Event",
-                },
-              },
+              media: { url: "https://picsum.photos/seed/wb-g1/600/400" },
+              description: "Galleries support up to 10 items",
             },
             {
-              _id: id(),
-              type: ComponentType.ActionRow,
-              components: [
-                {
-                  _id: id(),
-                  type: ComponentType.Button,
-                  style: ButtonStyle.Link,
-                  label: "RSVP",
-                  url: "https://discord.com/events",
-                },
-              ],
+              media: { url: "https://picsum.photos/seed/wb-g2/600/400" },
+              description: "Each item can have a description",
+            },
+            {
+              media: { url: "https://picsum.photos/seed/wb-g3/600/400" },
+              description: "Mark individual items as spoilers",
             },
           ],
         },
-      ],
-    },
-  },
-  {
-    id: "minimal-text",
-    name: "Minimal text",
-    description: "Just a single TextDisplay — the smallest valid V2 message.",
-    message: {
-      components: [
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Large,
+        },
         {
           _id: id(),
           type: ComponentType.TextDisplay,
-          content: "Hello, world! This message uses **Components V2**.",
+          content:
+            "**Also in the kit**\n- 📝 Text displays with full markdown (you're reading two)\n- 🪟 Containers with an accent stripe (this one!)\n- 🔗 Link buttons that open URLs (below)",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Discord docs",
+              url: "https://discord.com/developers/docs/components/reference",
+            },
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Source on GitHub",
+              url: "https://github.com",
+            },
+          ],
         },
       ],
     },
-  },
-];
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# There's more in this editor than the tour shows — dropdown menus, clickable (non-link) buttons, and file uploads all work too. File uploads go through any webhook, but menus and clickable buttons only respond to clicks if the webhook URL you paste in was created by a bot or app (Discord routes the interaction back to whoever owns the webhook). This app sends to whatever webhook URL you give it either way. Hit **Reset** any time to bring this tour back.",
+    },
+  ],
+};
 
 /**
- * Preset used as a fallback when no draft and no share URL is present.
- * Kept as the showcase "release-notes" message rather than the blank one
- * so first-time-loads-with-welcome-dismissed still see something useful.
+ * Used as the initial message on first visit (no draft, no share URL) and
+ * by the Builder's "Reset" button.
  */
-export const DEFAULT_PRESET = PRESETS.find((p) => p.id === "release-notes")!;
-
-/** Convenience: the empty starter, used by the welcome dialog's "Blank" path. */
-export const BLANK_PRESET = PRESETS.find((p) => p.id === "blank")!;
+export const DEFAULT_PRESET: { message: WebhookMessage } = { message: DEFAULT_MESSAGE };

@@ -21,6 +21,21 @@
 .compact .h2 { font-size: 18px; }
 .compact .h3 { font-size: 15px; }
 
+@media (max-width: 480px) {
+  .h1 { font-size: 20px; }
+  .h2 { font-size: 17px; }
+  .h3 { font-size: 15px; }
+}
+
+.subtext {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.375;
+  color: var(--discord-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .quote {
   margin: 4px 0;
   padding-left: 12px;

@@ -183,3 +183,77 @@
   background: var(--app-accent-soft);
   border-color: var(--app-accent);
 }
+
+.capability {
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  padding: 10px 12px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.capabilityHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.capabilityList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.capabilityItem {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 6px 0;
+  border-top: 1px solid var(--app-border);
+}
+.capabilityItem:first-child { border-top: none; padding-top: 0; }
+
+.capabilityBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.capabilityWarn {
+  background: rgba(240, 178, 50, 0.16);
+  color: rgb(240, 178, 50);
+}
+.capabilityInfo {
+  background: rgba(88, 101, 242, 0.18);
+  color: rgb(120, 130, 255);
+}
+
+.capabilityTitle {
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.capabilityDetail {
+  margin-top: 2px;
+  color: var(--app-text-muted);
+  line-height: 1.45;
+}

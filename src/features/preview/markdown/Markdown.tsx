@@ -41,6 +41,12 @@ function renderBlock(block: BlockNode, key: number): ReactNode {
       if (block.level === 2) return <h2 key={key} className={cls}>{inner}</h2>;
       return <h3 key={key} className={cls}>{inner}</h3>;
     }
+    case "subtext":
+      return (
+        <p key={key} className={styles.subtext}>
+          {renderInline(block.children)}
+        </p>
+      );
     case "quote":
       return (
         <blockquote key={key} className={styles.quote}>

@@ -1,47 +1,151 @@
 /**
- * Builder pane — split into a tree panel (top) and an inspector panel (bottom).
+ * Builder pane — owns every editor control.
  *
- * The pane intentionally renders the same tree shape Discord sees, mirrored
- * 1:1 with the preview. Selecting in either pane updates the same store
- * slice, so the two stay in sync without prop drilling.
+ * Layout (top to bottom):
+ *   1. ActionBar     — undo/redo + reset/restore/share/send (the former toolbar)
+ *   2. ComponentTree — webhook meta + tree; the selected row reveals its value
+ *                      editor inline (no separate docked panel).
+ *
+ * Selecting in the tree or the preview updates the same store slice, so the
+ * two stay in sync without prop drilling.
  */
 
-import { useState } from "react";
+import { useMessageStore } from "@/core/state/messageStore";
+import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
+import {
+  ChevronDownIcon,
+  DownloadIcon,
+  HistoryIcon,
+  RedoIcon,
+  SendIcon,
+  ShareIcon,
+  UndoIcon,
+  UploadIcon,
+} from "@/ui/Icon";
+import { Menu, MenuItem } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
-import { Inspector } from "./components/Inspector";
-import { MessageMetaPanel } from "./components/MessageMetaPanel";
 import styles from "./Builder.module.css";
-import { cn } from "@/lib/cn";
 
-type Tab = "tree" | "meta";
+interface BuilderProps {
+  /** Opens the Share / Export dialog on the Share-link tab. */
+  onShare: () => void;
+  /** Opens the Share / Export dialog on the JSON export tab. */
+  onExport: () => void;
+  /** Opens the Share / Export dialog on the Import tab. */
+  onImport: () => void;
+  /** Opens the Share / Export dialog focused on the Send panel. */
+  onSend: () => void;
+  /** Opens the Share / Export dialog focused on the Restore panel. */
+  onRestore: () => void;
+}
 
-export function Builder() {
-  const [tab, setTab] = useState<Tab>("tree");
-
+export function Builder({ onShare, onExport, onImport, onSend, onRestore }: BuilderProps) {
   return (
     <div className={styles.builder}>
-      <div className={styles.tabs} role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === "tree"}
-          className={cn(styles.tab, tab === "tree" && styles.tabActive)}
-          onClick={() => setTab("tree")}
+      <ActionBar
+        onShare={onShare}
+        onExport={onExport}
+        onImport={onImport}
+        onSend={onSend}
+        onRestore={onRestore}
+      />
+
+      <ComponentTree />
+    </div>
+  );
+}
+
+function ActionBar({ onShare, onExport, onImport, onSend, onRestore }: BuilderProps) {
+  const undo = useMessageStore((s) => s.undo);
+  const redo = useMessageStore((s) => s.redo);
+  const canUndo = useMessageStore((s) => s.past.length > 0);
+  const canRedo = useMessageStore((s) => s.future.length > 0);
+  const loadDefaultPreset = useMessageStore((s) => s.loadDefaultPreset);
+
+  return (
+    <div className={styles.actionBar}>
+      <div className={styles.actionGroup}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={loadDefaultPreset}
+          title="Replace the current message with the default template (undoable)"
         >
-          Components
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "meta"}
-          className={cn(styles.tab, tab === "meta" && styles.tabActive)}
-          onClick={() => setTab("meta")}
-        >
-          Message
-        </button>
+          Reset
+        </Button>
+        <IconButton label="Undo" onClick={undo} disabled={!canUndo}>
+          <UndoIcon />
+        </IconButton>
+        <IconButton label="Redo" onClick={redo} disabled={!canRedo}>
+          <RedoIcon />
+        </IconButton>
       </div>
 
-      <div className={styles.panels}>
-        {tab === "tree" ? <ComponentTree /> : <MessageMetaPanel />}
-        <Inspector />
+      <div className={styles.actionGroup}>
+        <Menu
+          trigger={
+            <Button
+              variant="secondary"
+              size="sm"
+              leadingIcon={<ShareIcon />}
+              trailingIcon={<ChevronDownIcon />}
+              title="Share link, export JSON, or import another message"
+            >
+              Share
+            </Button>
+          }
+        >
+          {(close) => (
+            <>
+              <MenuItem
+                icon={<ShareIcon />}
+                onSelect={() => {
+                  close();
+                  onShare();
+                }}
+              >
+                Share link
+              </MenuItem>
+              <MenuItem
+                icon={<DownloadIcon />}
+                onSelect={() => {
+                  close();
+                  onExport();
+                }}
+              >
+                Export JSON
+              </MenuItem>
+              <MenuItem
+                icon={<UploadIcon />}
+                onSelect={() => {
+                  close();
+                  onImport();
+                }}
+              >
+                Import…
+              </MenuItem>
+            </>
+          )}
+        </Menu>
+        <Button
+          variant="secondary"
+          size="sm"
+          leadingIcon={<HistoryIcon />}
+          onClick={onRestore}
+          title="Pull a message your webhook previously posted back into the editor"
+        >
+          Restore
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          leadingIcon={<SendIcon />}
+          onClick={onSend}
+          title="Post this message to your Discord webhook"
+        >
+          Send
+        </Button>
       </div>
     </div>
   );

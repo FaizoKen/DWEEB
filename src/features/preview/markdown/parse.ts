@@ -38,6 +38,7 @@ export type MentionKind = "user" | "role" | "channel" | "everyone" | "here";
 export type BlockNode =
   | { kind: "paragraph"; children: InlineNode[] }
   | { kind: "heading"; level: 1 | 2 | 3; children: InlineNode[] }
+  | { kind: "subtext"; children: InlineNode[] }
   | { kind: "quote"; children: BlockNode[] }
   | { kind: "list"; ordered: boolean; items: InlineNode[][] }
   | { kind: "codeblock"; lang: string | null; value: string };
@@ -66,6 +67,19 @@ export function parseMarkdown(input: string): MarkdownAst {
       // skip closing fence (if any)
       if (i < lines.length) i++;
       blocks.push({ kind: "codeblock", lang, value: body.join("\n") });
+      continue;
+    }
+
+    // Subtext (`-# `) — Discord's small/muted text. Consecutive `-# ` lines
+    // merge into a single block joined by hard breaks, matching paragraphs.
+    if (/^-#\s+/.test(line)) {
+      const buf: string[] = [line.replace(/^-#\s+/, "")];
+      i++;
+      while (i < lines.length && /^-#\s+/.test(lines[i]!)) {
+        buf.push(lines[i]!.replace(/^-#\s+/, ""));
+        i++;
+      }
+      blocks.push({ kind: "subtext", children: parseInline(buf.join("\n")) });
       continue;
     }
 
@@ -128,6 +142,7 @@ export function parseMarkdown(input: string): MarkdownAst {
       lines[i]!.trim() !== "" &&
       !lines[i]!.startsWith("```") &&
       !/^(#{1,3})\s+/.test(lines[i]!) &&
+      !/^-#\s+/.test(lines[i]!) &&
       !lines[i]!.startsWith("> ") &&
       !lines[i]!.startsWith(">>> ") &&
       !/^[-*]\s+/.test(lines[i]!) &&

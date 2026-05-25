@@ -60,3 +60,54 @@
   padding: 0 4px;
   border-radius: 3px;
 }
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .row2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--app-text);
+  cursor: pointer;
+  user-select: none;
+}
+.chip:hover { border-color: var(--app-accent); }
+.chipActive {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+  color: var(--app-text);
+}
+.chipRemove {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.subPanel {
+  border-top: 1px dashed var(--app-border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+

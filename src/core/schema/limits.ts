@@ -36,7 +36,26 @@ export const LIMITS = {
   BUTTON_URL: 512,
   MEDIA_DESCRIPTION: 1024,
 
+  /** Select-component caps. */
+  SELECT_CUSTOM_ID: 100,
+  SELECT_PLACEHOLDER: 150,
+  SELECT_OPTIONS: 25,
+  SELECT_MIN_VALUES: 0,
+  SELECT_MAX_VALUES: 25,
+  SELECT_OPTION_LABEL: 100,
+  SELECT_OPTION_VALUE: 100,
+  SELECT_OPTION_DESCRIPTION: 100,
+  SELECT_DEFAULT_VALUES: 25,
+
   /** Webhook execution overrides. */
   WEBHOOK_USERNAME: 80,
   WEBHOOK_AVATAR_URL: 2048,
+  THREAD_NAME: 100,
+  APPLIED_TAGS: 5,
+
+  /** Max length of any Discord snowflake (used for input clamping). */
+  SNOWFLAKE_MAX: 25,
+
+  /** RGB integer maximum (0xFFFFFF). */
+  COLOR_MAX: 0xffffff,
 } as const;

@@ -17,6 +17,7 @@ import {
   isContainer,
   isMediaGallery,
   isSection,
+  isStringSelect,
 } from "./guards";
 import type {
   AnyComponent,
@@ -39,7 +40,7 @@ function* walkNode(node: AnyComponent): Generator<AnyComponent> {
     for (const text of node.components) yield text;
     yield node.accessory;
   } else if (isActionRow(node)) {
-    for (const btn of node.components) yield btn;
+    for (const child of node.components) yield child;
   } else if (isMediaGallery(node)) {
     // gallery items are not standalone components — skip
   }
@@ -55,6 +56,10 @@ export function countComponents(message: WebhookMessage): number {
 /**
  * Sum of every text-bearing field across the message. Used to enforce the
  * 4000-character message-wide cap that Discord applies on top of Components V2.
+ *
+ * Counts: TextDisplay.content, Button.label, Thumbnail/MediaGallery.description,
+ * Select.placeholder, StringSelect option label/description, plus the
+ * webhook username override.
  */
 export function countCharacters(message: WebhookMessage): number {
   let n = 0;
@@ -62,6 +67,13 @@ export function countCharacters(message: WebhookMessage): number {
     if ("content" in c && typeof c.content === "string") n += c.content.length;
     if ("label" in c && typeof c.label === "string") n += c.label.length;
     if ("description" in c && typeof c.description === "string") n += c.description.length;
+    if ("placeholder" in c && typeof c.placeholder === "string") n += c.placeholder.length;
+    if (isStringSelect(c)) {
+      for (const opt of c.options) {
+        n += opt.label.length;
+        if (opt.description) n += opt.description.length;
+      }
+    }
   }
   if (message.username) n += message.username.length;
   return n;
@@ -106,8 +118,8 @@ function findInside(node: AnyComponent, id: EditorId): NodeLocation | null {
       return { node: node.accessory, parent: node, index: 0 };
   } else if (isActionRow(node)) {
     for (let i = 0; i < node.components.length; i++) {
-      const btn = node.components[i]!;
-      if (btn._id === id) return { node: btn, parent: node, index: i };
+      const child = node.components[i]!;
+      if (child._id === id) return { node: child, parent: node, index: i };
     }
   }
   return null;
@@ -169,7 +181,9 @@ function mapNode<T extends AnyComponent>(
       if (next !== c) changed = true;
       return next;
     });
-    return changed ? { ...node, components } : node;
+    return changed
+      ? ({ ...node, components: components as typeof node.components } as AnyComponent)
+      : node;
   }
 
   return node;
@@ -208,7 +222,7 @@ function removeInside(node: AnyComponent, id: EditorId): AnyComponent {
   if (isActionRow(node)) {
     return {
       ...node,
-      components: node.components.filter((c) => c._id !== id),
+      components: node.components.filter((c) => c._id !== id) as typeof node.components,
     };
   }
   return node;

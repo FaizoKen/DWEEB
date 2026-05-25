@@ -7,17 +7,21 @@
  * machine.
  *
  * The body Discord receives is the wire-format payload (from
- * `serialization/normalize.ts`) plus the `IS_COMPONENTS_V2` flag. With that
+ * `serialization/normalize.ts`) plus a `flags` integer combining
+ * `IS_COMPONENTS_V2` and optionally `SUPPRESS_NOTIFICATIONS`. With the V2
  * flag set Discord rejects any payload that also includes `content` or
  * `embeds`, so the message-level fields we attach (`username`, `avatar_url`,
- * `tts`) are the only extras allowed.
+ * `tts`, `allowed_mentions`, `message_reference`, `thread_name`,
+ * `applied_tags`) are the only extras allowed.
  */
 
 import {
   MESSAGE_FLAG_IS_COMPONENTS_V2,
+  MESSAGE_FLAG_SUPPRESS_NOTIFICATIONS,
   type WebhookMessage,
 } from "@/core/schema/types";
 import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
+import { collectSessionAttachments } from "@/core/serialization/attachments";
 
 /** Discord limits us to webhooks under one of these origins. */
 const WEBHOOK_HOST_RE =
@@ -98,10 +102,65 @@ export interface SendErr {
 
 export type SendResult = SendOk | SendErr;
 
+/**
+ * Combine `IS_COMPONENTS_V2` with any opt-in message-level flags the editor
+ * exposes (currently `SUPPRESS_NOTIFICATIONS`). Always returns the V2 bit
+ * because we never post without Components V2.
+ */
+function flagsFor(message: WebhookMessage): number {
+  let f = MESSAGE_FLAG_IS_COMPONENTS_V2;
+  if (message.suppress_notifications) f |= MESSAGE_FLAG_SUPPRESS_NOTIFICATIONS;
+  return f;
+}
+
 /** Build the JSON payload Discord expects on a Components V2 webhook execute. */
 export function buildWirePayload(message: WebhookMessage): Record<string, unknown> {
   const stripped = stripEditorFields(message) as Record<string, unknown>;
-  return { ...stripped, flags: MESSAGE_FLAG_IS_COMPONENTS_V2 };
+  return { ...stripped, flags: flagsFor(message) };
+}
+
+/**
+ * Wrap a payload + its attachments into a Discord-compatible request body.
+ *
+ * When the message references no session blobs we keep posting JSON — that
+ * path stays free of any multipart bookkeeping. Once at least one blob is
+ * referenced we switch to `multipart/form-data` with:
+ *   - `payload_json`: the JSON body (Discord parses it identically),
+ *   - `files[i]`: the actual file bytes for each attachment index `i`,
+ *   - an `attachments` array in the payload that maps each `files[i]` to its
+ *     descriptive filename so `attachment://<filename>` references resolve.
+ */
+interface PreparedBody {
+  body: BodyInit;
+  headers?: Record<string, string>;
+}
+
+function prepareBody(message: WebhookMessage): PreparedBody {
+  const { payload, files } = collectSessionAttachments(message);
+  const enriched = { ...payload, flags: flagsFor(message) };
+
+  if (files.length === 0) {
+    return {
+      body: JSON.stringify(enriched),
+      headers: { "Content-Type": "application/json" },
+    };
+  }
+
+  // Discord wants an `attachments` entry for every uploaded file so it can
+  // map `attachment://<filename>` references to the right multipart part.
+  const finalPayload = {
+    ...enriched,
+    attachments: files.map((f, i) => ({ id: i, filename: f.filename })),
+  };
+
+  const form = new FormData();
+  form.append("payload_json", JSON.stringify(finalPayload));
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i]!;
+    form.append(`files[${i}]`, f.file, f.filename);
+  }
+  // Let the browser pick the multipart boundary by NOT setting Content-Type.
+  return { body: form };
 }
 
 export async function sendToWebhook(
@@ -116,12 +175,13 @@ export async function sendToWebhook(
   // does not silently downgrade the message when V2 components are present.
   url.searchParams.set("with_components", "true");
 
+  const prepared = prepareBody(message);
   let res: Response;
   try {
     res = await fetch(url.toString(), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildWirePayload(message)),
+      headers: prepared.headers,
+      body: prepared.body,
       signal: options.signal,
     });
   } catch (e) {
@@ -221,6 +281,10 @@ export interface FetchOptions {
  * The returned message goes through `attachEditorFields` so callers can drop
  * it straight into the editor. Unknown wire fields are ignored; the
  * validator will surface anything structurally wrong on the next render.
+ *
+ * Discord's response includes a numeric `flags`; if `SUPPRESS_NOTIFICATIONS`
+ * is on we lift it back to the editor's `suppress_notifications` boolean so
+ * the toggle reflects the live state.
  */
 export async function fetchWebhookMessage(
   parsed: ParsedWebhookUrl,
@@ -266,6 +330,14 @@ export async function fetchWebhookMessage(
 
   try {
     const message = attachEditorFields(body);
+    // Lift the suppress_notifications bit out of the response's flags so the
+    // restored message preserves the silent-send state.
+    if (body && typeof body === "object" && "flags" in body) {
+      const flags = Number((body as { flags?: unknown }).flags);
+      if (Number.isFinite(flags) && (flags & MESSAGE_FLAG_SUPPRESS_NOTIFICATIONS) !== 0) {
+        message.suppress_notifications = true;
+      }
+    }
     return { ok: true, status: res.status, message };
   } catch (e) {
     return {
@@ -294,12 +366,13 @@ export async function updateWebhookMessage(
   if (options.threadId) url.searchParams.set("thread_id", options.threadId);
   url.searchParams.set("with_components", "true");
 
+  const prepared = prepareBody(message);
   let res: Response;
   try {
     res = await fetch(url.toString(), {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildWirePayload(message)),
+      headers: prepared.headers,
+      body: prepared.body,
       signal: options.signal,
     });
   } catch (e) {

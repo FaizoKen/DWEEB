@@ -17,13 +17,13 @@ import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from
 
 import type { WebhookMessage } from "@/core/schema/types";
 import { CURRENT_VERSION, migrate } from "./version";
-import { attachEditorFields, stripEditorFields } from "./normalize";
+import { attachEditorFields, stripEditorFields, stripSessionAttachments } from "./normalize";
 
 const SEPARATOR = ".";
 
 /** Encode a message for inclusion in a URL hash. */
 export function encodeShare(message: WebhookMessage): string {
-  const wire = stripEditorFields(message);
+  const wire = stripSessionAttachments(stripEditorFields(message));
   const json = JSON.stringify(wire);
   const compressed = compressToEncodedURIComponent(json);
   return `${CURRENT_VERSION}${SEPARATOR}${compressed}`;
@@ -76,7 +76,7 @@ export function decodeShare(token: string): DecodeResult {
 
 /** JSON-encode for download/clipboard. Indented for human review. */
 export function encodeJson(message: WebhookMessage): string {
-  return JSON.stringify(stripEditorFields(message), null, 2);
+  return JSON.stringify(stripSessionAttachments(stripEditorFields(message)), null, 2);
 }
 
 /** Parse a JSON string (as produced by `encodeJson` or pasted from Discord). */

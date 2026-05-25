@@ -16,12 +16,14 @@ import {
   type ButtonStyleValue,
   type InteractiveButtonComponent,
   type LinkButtonComponent,
+  type PartialEmoji,
   type PremiumButtonComponent,
 } from "@/core/schema/types";
 import { Field } from "@/ui/Field";
 import { Select } from "@/ui/Select";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
+import { CapabilityNote } from "./CapabilityNote";
 
 interface Props {
   node: ButtonComponent;
@@ -51,8 +53,25 @@ export function ButtonInspector({ node }: Props) {
     }
   };
 
+  const isInteractive =
+    node.style !== ButtonStyle.Link && node.style !== ButtonStyle.Premium;
+
   return (
     <>
+      {isInteractive ? (
+        <CapabilityNote>
+          <strong>Needs an application-owned webhook.</strong> Regular
+          user-created webhooks display this button but the click goes nowhere.
+          Use a Link button if you just want a hyperlink.
+        </CapabilityNote>
+      ) : null}
+      {node.style === ButtonStyle.Premium ? (
+        <CapabilityNote>
+          <strong>Needs app monetization.</strong> Premium buttons require the
+          webhook's application to have a configured SKU; without that, the
+          button can't actually charge anyone.
+        </CapabilityNote>
+      ) : null}
       <Field label="Style">
         {(id) => (
           <Select
@@ -138,6 +157,8 @@ export function ButtonInspector({ node }: Props) {
         </Field>
       ) : null}
 
+      {node.style !== ButtonStyle.Premium ? <EmojiEditor node={node} /> : null}
+
       <Switch
         checked={node.disabled ?? false}
         onChange={(e) =>
@@ -158,6 +179,7 @@ function makeLink(prev: ButtonComponent): Omit<LinkButtonComponent, "_id"> {
     label: "label" in prev ? prev.label : "Open link",
     url: "url" in prev ? prev.url : "https://discord.com",
     disabled: prev.disabled,
+    emoji: "emoji" in prev ? prev.emoji : undefined,
   };
 }
 
@@ -180,5 +202,99 @@ function makeInteractive(
     label: "label" in prev ? prev.label : "Click me",
     custom_id: "custom_id" in prev ? prev.custom_id : "btn_action",
     disabled: prev.disabled,
+    emoji: "emoji" in prev ? prev.emoji : undefined,
+  };
+}
+
+/**
+ * Emoji editor for Link/Interactive buttons.
+ *
+ * Discord's `PartialEmoji` shape covers two distinct cases:
+ *  - Unicode emoji (🔥): `{ name: "🔥" }` — no id.
+ *  - Custom guild emoji: `{ id: "<snowflake>", name: "<alias>", animated?: bool }`.
+ *
+ * We expose three controls (unicode/name + id + animated) and accept a paste
+ * of the raw Discord token (`<:name:id>` / `<a:name:id>`) as a shortcut — most
+ * users grab those from the client by escaping a message.
+ */
+type EmojiEditableButton = LinkButtonComponent | InteractiveButtonComponent;
+
+function EmojiEditor({ node }: { node: EmojiEditableButton }) {
+  const patch = useMessageStore((s) => s.patchNode);
+  const emoji = node.emoji ?? {};
+
+  const setEmoji = (next: PartialEmoji | undefined) => {
+    const cleaned =
+      next && (next.name || next.id)
+        ? {
+            ...(next.id ? { id: next.id } : {}),
+            ...(next.name ? { name: next.name } : {}),
+            ...(next.animated ? { animated: true } : {}),
+          }
+        : undefined;
+    patch<EmojiEditableButton>(node._id, { emoji: cleaned });
+  };
+
+  const onNameChange = (raw: string) => {
+    const parsed = parseDiscordEmojiToken(raw);
+    if (parsed) {
+      setEmoji(parsed);
+      return;
+    }
+    setEmoji({ ...emoji, name: raw || undefined });
+  };
+
+  return (
+    <>
+      <Field
+        label="Emoji"
+        hint={
+          <>
+            Paste a unicode emoji (🔥) or a custom token like{" "}
+            <code>{"<:name:123…>"}</code>.
+          </>
+        }
+      >
+        {(id) => (
+          <TextInput
+            id={id}
+            value={emoji.name ?? ""}
+            onChange={(e) => onNameChange(e.currentTarget.value)}
+            placeholder="🔥  ·  thinking  ·  <a:wave:123…>"
+          />
+        )}
+      </Field>
+      <Field label="Custom emoji ID" hint="Required for guild emoji; leave blank for unicode.">
+        {(id) => (
+          <TextInput
+            id={id}
+            value={emoji.id ?? ""}
+            inputMode="numeric"
+            onChange={(e) =>
+              setEmoji({ ...emoji, id: e.currentTarget.value.replace(/[^\d]/g, "") || undefined })
+            }
+            placeholder="e.g. 1185234567890123456"
+          />
+        )}
+      </Field>
+      {emoji.id ? (
+        <Switch
+          checked={emoji.animated ?? false}
+          onChange={(e) => setEmoji({ ...emoji, animated: e.currentTarget.checked || undefined })}
+          label="Animated (GIF)"
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** Parse `<:name:id>` / `<a:name:id>` into a PartialEmoji. Returns null when not a token. */
+function parseDiscordEmojiToken(raw: string): PartialEmoji | null {
+  const m = /^<(a)?:([\w~]+):(\d{15,25})>$/.exec(raw.trim());
+  if (!m) return null;
+  return {
+    id: m[3]!,
+    name: m[2]!,
+    ...(m[1] ? { animated: true } : {}),
   };
 }

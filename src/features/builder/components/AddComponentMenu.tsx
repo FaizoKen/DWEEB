@@ -12,6 +12,7 @@ import {
   isValidElement,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactElement,
@@ -26,12 +27,17 @@ interface AddComponentMenuProps {
   onPick: (type: ComponentTypeValue) => void;
   disabled?: boolean;
   align?: "top" | "bottom";
-  trigger: ReactElement;
+  /**
+   * The trigger element. Pass a render function to react to open state — e.g.
+   * to swap the label/icon to a "Close" affordance while the menu is open.
+   */
+  trigger: ReactElement | ((state: { open: boolean }) => ReactElement);
 }
 
 interface AnchorPos {
   left: number;
   top: number;
+  bottom: number;
   width: number;
 }
 
@@ -44,8 +50,12 @@ export function AddComponentMenu({
 }: AddComponentMenuProps) {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<AnchorPos | null>(null);
+  const [effectiveAlign, setEffectiveAlign] = useState<"top" | "bottom">(align);
+  const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
+  const [leftShift, setLeftShift] = useState(0);
   const triggerRef = useRef<HTMLElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const innerMenuRef = useRef<HTMLDivElement | null>(null);
   const labelId = useId();
 
   useEffect(() => {
@@ -73,31 +83,87 @@ export function AddComponentMenu({
     };
   }, [open]);
 
-  const openMenu = () => {
+  const toggleMenu = () => {
     if (disabled) return;
+    if (open) {
+      setOpen(false);
+      return;
+    }
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setAnchor({ left: rect.left, top: rect.top + rect.height, width: rect.width });
+    setAnchor({ left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width });
+    // Reset to caller's preferred placement; the layout effect will flip if it
+    // doesn't fit. Without this reset, a previously-flipped menu would keep
+    // its old align on the next open before measurement runs.
+    setEffectiveAlign(align);
+    setMaxHeight(undefined);
+    setLeftShift(0);
     setOpen(true);
   };
 
-  const child = isValidElement(trigger)
-    ? cloneElement(trigger as ReactElement<Record<string, unknown>>, {
+  // After the menu mounts, measure it and flip / clamp so it stays inside the
+  // viewport. Runs before paint so the user never sees the cut-off position.
+  useLayoutEffect(() => {
+    if (!open || !anchor || !innerMenuRef.current) return;
+    const menuEl = innerMenuRef.current;
+    const margin = 8;
+    const gap = 4;
+    const viewportH = window.innerHeight;
+    const viewportW = window.innerWidth;
+
+    const naturalHeight = menuEl.scrollHeight;
+    const naturalWidth = menuEl.offsetWidth;
+
+    const spaceBelow = viewportH - anchor.bottom - margin - gap;
+    const spaceAbove = anchor.top - margin - gap;
+
+    let chosenAlign: "top" | "bottom";
+    let availableHeight: number;
+    if (align === "bottom") {
+      if (naturalHeight <= spaceBelow || spaceBelow >= spaceAbove) {
+        chosenAlign = "bottom";
+        availableHeight = spaceBelow;
+      } else {
+        chosenAlign = "top";
+        availableHeight = spaceAbove;
+      }
+    } else {
+      if (naturalHeight <= spaceAbove || spaceAbove >= spaceBelow) {
+        chosenAlign = "top";
+        availableHeight = spaceAbove;
+      } else {
+        chosenAlign = "bottom";
+        availableHeight = spaceBelow;
+      }
+    }
+
+    setEffectiveAlign(chosenAlign);
+    setMaxHeight(naturalHeight > availableHeight ? Math.max(120, availableHeight) : undefined);
+
+    let left = anchor.left;
+    if (left + naturalWidth > viewportW - margin) left = viewportW - naturalWidth - margin;
+    if (left < margin) left = margin;
+    setLeftShift(left - anchor.left);
+  }, [open, anchor, align]);
+
+  const resolvedTrigger = typeof trigger === "function" ? trigger({ open }) : trigger;
+  const child = isValidElement(resolvedTrigger)
+    ? cloneElement(resolvedTrigger as ReactElement<Record<string, unknown>>, {
         ref: (el: HTMLElement | null) => {
           triggerRef.current = el;
         },
-        onClick: () => openMenu(),
+        onClick: () => toggleMenu(),
         "aria-haspopup": "menu",
         "aria-expanded": open,
         "aria-controls": labelId,
       })
-    : trigger;
+    : resolvedTrigger;
 
   const placement =
-    align === "top" && anchor
-      ? { left: anchor.left, top: anchor.top - 8, transform: "translateY(-100%)" }
+    effectiveAlign === "top" && anchor
+      ? { left: anchor.left + leftShift, top: anchor.top - 8, transform: "translateY(-100%)" }
       : anchor
-        ? { left: anchor.left, top: anchor.top + 4 }
+        ? { left: anchor.left + leftShift, top: anchor.bottom + 4 }
         : {};
 
   return (
@@ -107,32 +173,42 @@ export function AddComponentMenu({
         ? createPortal(
             <div
               ref={menuRef}
-              id={labelId}
-              role="menu"
-              className={styles.menu}
-              style={{ ...placement, minWidth: Math.max(220, anchor.width) }}
+              className={styles.positioner}
+              style={placement}
             >
-              {allowed.map((t) => {
-                const meta = COMPONENT_META[t];
-                return (
-                  <button
-                    key={t}
-                    role="menuitem"
-                    type="button"
-                    className={styles.item}
-                    onClick={() => {
-                      onPick(t);
-                      setOpen(false);
-                    }}
-                  >
-                    <span className={styles.itemGlyph}>{meta.glyph}</span>
-                    <span className={styles.itemBody}>
-                      <span className={styles.itemTitle}>{meta.label}</span>
-                      <span className={styles.itemSub}>{meta.description}</span>
-                    </span>
-                  </button>
-                );
-              })}
+              <div
+                ref={innerMenuRef}
+                id={labelId}
+                role="menu"
+                className={styles.menu}
+                data-align={effectiveAlign}
+                style={{
+                  minWidth: Math.max(220, anchor.width),
+                  ...(maxHeight !== undefined ? { maxHeight, overflowY: "auto" } : {}),
+                }}
+              >
+                {allowed.map((t) => {
+                  const meta = COMPONENT_META[t];
+                  return (
+                    <button
+                      key={t}
+                      role="menuitem"
+                      type="button"
+                      className={styles.item}
+                      onClick={() => {
+                        onPick(t);
+                        setOpen(false);
+                      }}
+                    >
+                      <span className={styles.itemGlyph}>{meta.glyph}</span>
+                      <span className={styles.itemBody}>
+                        <span className={styles.itemTitle}>{meta.label}</span>
+                        <span className={styles.itemSub}>{meta.description}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>,
             document.body,
           )

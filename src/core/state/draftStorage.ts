@@ -7,7 +7,7 @@
  *
  * What gets saved:
  *  - The wire-format payload (no editor `_id`s) — same shape as a share URL.
- *  - A `savedAt` timestamp so the welcome dialog can show "last edited X ago".
+ *  - A `savedAt` timestamp so callers can show "last edited X ago".
  *
  * What does NOT get saved:
  *  - Webhook URLs (those are credentials and live in `webhook/history.ts`,
@@ -22,7 +22,6 @@ import type { WebhookMessage } from "@/core/schema/types";
 import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
 
 const STORAGE_KEY = "dwb.draft.v1";
-const WELCOME_SEEN_KEY = "dwb.welcome_seen.v1";
 
 export interface DraftRecord {
   /** Unix millis when the draft was last written. */
@@ -79,27 +78,5 @@ export function saveDraft(message: WebhookMessage): void {
   } catch {
     // Quota exceeded or storage disabled — losing the draft is preferable to
     // throwing inside the auto-save subscriber.
-  }
-}
-
-/** Drop the stored draft (used by the "Start over" flow). */
-export function clearDraft(): void {
-  if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(STORAGE_KEY);
-}
-
-/** True if the welcome dialog has already been dismissed at least once. */
-export function hasSeenWelcome(): boolean {
-  if (typeof localStorage === "undefined") return true;
-  return localStorage.getItem(WELCOME_SEEN_KEY) === "1";
-}
-
-/** Mark the welcome dialog as seen so it doesn't auto-show again. */
-export function markWelcomeSeen(): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(WELCOME_SEEN_KEY, "1");
-  } catch {
-    // ignore
   }
 }

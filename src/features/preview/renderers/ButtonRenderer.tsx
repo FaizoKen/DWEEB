@@ -3,8 +3,8 @@
  * fills, hover transition, optional emoji, leading external-link arrow on
  * Link buttons.
  *
- * Interactive (custom_id) buttons render as no-op buttons here — the preview
- * is read-only. URL buttons open the destination in a new tab.
+ * All buttons render as no-op buttons here — the preview is for editing,
+ * so clicks select the node rather than firing the button's action.
  */
 
 import { ButtonStyle, type ButtonComponent } from "@/core/schema/types";
@@ -27,11 +27,22 @@ export function ButtonRenderer({ node }: { node: ButtonComponent }) {
   const isLink = node.style === ButtonStyle.Link;
   const isPremium = node.style === ButtonStyle.Premium;
 
+  const emoji = "emoji" in node ? node.emoji : undefined;
+  const emojiNode = emoji?.id ? (
+    <img
+      className={styles.emojiImg}
+      src={`https://cdn.discordapp.com/emojis/${emoji.id}.${emoji.animated ? "gif" : "webp"}?size=24&quality=lossless`}
+      alt={emoji.name ?? ""}
+      width={18}
+      height={18}
+    />
+  ) : emoji?.name ? (
+    <span className={styles.emoji}>{emoji.name}</span>
+  ) : null;
+
   const content = (
     <>
-      {"emoji" in node && node.emoji?.name ? (
-        <span className={styles.emoji}>{node.emoji.name}</span>
-      ) : null}
+      {emojiNode}
       {isPremium ? (
         <span>SKU&nbsp;{node.sku_id || "unset"}</span>
       ) : (
@@ -58,25 +69,12 @@ export function ButtonRenderer({ node }: { node: ButtonComponent }) {
     </>
   );
 
-  if (isLink) {
-    return (
-      <a
-        className={cn(styles.btn, cls, node.disabled && styles.disabled)}
-        href={node.disabled ? undefined : (node as { url: string }).url}
-        target="_blank"
-        rel="noreferrer noopener"
-        aria-disabled={node.disabled || undefined}
-      >
-        {content}
-      </a>
-    );
-  }
-
   return (
     <button
       type="button"
       className={cn(styles.btn, cls, node.disabled && styles.disabled)}
       disabled={node.disabled}
+      aria-disabled={node.disabled || undefined}
       onClick={(e) => e.preventDefault()}
     >
       {content}

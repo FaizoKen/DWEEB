@@ -19,23 +19,30 @@
 import { create } from "zustand";
 import { newId } from "@/lib/id";
 import {
+  createSelect,
   createTopLevel,
   type ContainerChildFactoryKey,
   type TopLevelFactoryKey,
 } from "@/core/factory/createComponent";
-import { BLANK_PRESET, DEFAULT_PRESET, PRESETS } from "@/data/presets";
-import { hasSeenWelcome, loadDraftMessage } from "./draftStorage";
+import { DEFAULT_PRESET } from "@/data/presets";
+import { LIMITS } from "@/core/schema/limits";
+import { loadDraftMessage } from "./draftStorage";
 import {
   ComponentType,
+  findById,
   isContainer,
+  isSelect,
   removeById,
   updateById,
+  type ActionRowComponent,
+  type AllowedMentions,
   type AnyComponent,
   type ContainerChild,
   type ContainerComponent,
   type EditorId,
   type SectionAccessory,
   type SectionComponent,
+  type SelectComponent,
   type TextDisplayComponent,
   type TopLevelComponent,
   type WebhookMessage,
@@ -87,21 +94,41 @@ export interface MessageState {
   replaceMessageFromRestore(next: WebhookMessage, origin: RestoredOrigin): void;
   /** Drop the restore origin (e.g. user picks "Send as new" in the Send panel). */
   clearRestoreOrigin(): void;
-  loadPresetById(presetId: string): void;
   loadDefaultPreset(): void;
-  loadBlank(): void;
   setUsername(value: string | undefined): void;
   setAvatarUrl(value: string | undefined): void;
+  setTts(value: boolean): void;
+  setSuppressNotifications(value: boolean): void;
+  setAllowedMentions(value: AllowedMentions | undefined): void;
+  setThreadName(value: string | undefined): void;
+  setAppliedTags(value: string[] | undefined): void;
 
   // Structural ops ------------------------------------------------------
   addTopLevel(type: TopLevelFactoryKey): void;
   addContainerChild(containerId: EditorId, type: ContainerChildFactoryKey): void;
   addSectionText(sectionId: EditorId): void;
   addRowButton(rowId: EditorId): void;
+  addRowSelect(rowId: EditorId, type: SelectComponent["type"]): void;
   addGalleryItem(galleryId: EditorId): void;
   setSectionAccessoryKind(sectionId: EditorId, kind: "button" | "thumbnail"): void;
 
   moveSibling(id: EditorId, direction: -1 | 1): void;
+  /**
+   * Drag-and-drop move. Relocates `id` into `targetParentId`'s children at
+   * `targetIndex`. `targetParentId === null` targets the top-level list.
+   *
+   * Same-parent calls behave as a reorder (`targetIndex` is the insertion
+   * index *before* removing the source — the action compensates when moving
+   * forward).
+   *
+   * Cross-parent moves are only honoured between the top-level list and a
+   * Container's children. Other slots (Section accessory, Section texts,
+   * ActionRow buttons/selects) carry specialized types and cannot accept
+   * arbitrary components, so the action silently no-ops if the move would
+   * produce an invalid tree (incompatible target, capacity exceeded, or a
+   * Container being nested inside another Container).
+   */
+  moveToParent(id: EditorId, targetParentId: EditorId | null, targetIndex: number): void;
   duplicate(id: EditorId): void;
   remove(id: EditorId): void;
 
@@ -152,19 +179,16 @@ function pushHistory(state: MessageState): Pick<MessageState, "past" | "future">
 /**
  * Initial editor state.
  *
- * Returning users (welcome-modal already dismissed) silently pick up where
- * they left off via the persisted draft. First-time visitors and users with
- * no saved draft get the showcase preset; the welcome dialog handles the
- * "pick a starter" UX in the App layer.
+ * Returning users silently pick up where they left off via the persisted
+ * draft. First-time visitors and users with no saved draft get the showcase
+ * preset so the editor opens with something illustrative.
  *
  * If the URL hash carries a share token, `useShareUrlBootstrap` will
  * overwrite this value shortly after first mount.
  */
 function bootstrap(): WebhookMessage {
-  if (hasSeenWelcome()) {
-    const draft = loadDraftMessage();
-    if (draft) return draft.message;
-  }
+  const draft = loadDraftMessage();
+  if (draft) return draft.message;
   return reassignIds(DEFAULT_PRESET.message);
 }
 
@@ -201,30 +225,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set({ restoredFrom: null });
   },
 
-  loadPresetById(presetId) {
-    const preset = PRESETS.find((p) => p.id === presetId);
-    if (!preset) return;
-    set((s) => ({
-      ...pushHistory(s),
-      message: reassignIds(preset.message),
-      selectedId: null,
-      restoredFrom: null,
-    }));
-  },
-
   loadDefaultPreset() {
     set((s) => ({
       ...pushHistory(s),
       message: reassignIds(DEFAULT_PRESET.message),
-      selectedId: null,
-      restoredFrom: null,
-    }));
-  },
-
-  loadBlank() {
-    set((s) => ({
-      ...pushHistory(s),
-      message: reassignIds(BLANK_PRESET.message),
       selectedId: null,
       restoredFrom: null,
     }));
@@ -241,6 +245,41 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set((s) => ({
       ...pushHistory(s),
       message: { ...s.message, avatar_url: value || undefined },
+    }));
+  },
+
+  setTts(value) {
+    set((s) => ({
+      ...pushHistory(s),
+      message: { ...s.message, tts: value || undefined },
+    }));
+  },
+
+  setSuppressNotifications(value) {
+    set((s) => ({
+      ...pushHistory(s),
+      message: { ...s.message, suppress_notifications: value || undefined },
+    }));
+  },
+
+  setAllowedMentions(value) {
+    set((s) => ({
+      ...pushHistory(s),
+      message: { ...s.message, allowed_mentions: value },
+    }));
+  },
+
+  setThreadName(value) {
+    set((s) => ({
+      ...pushHistory(s),
+      message: { ...s.message, thread_name: value || undefined },
+    }));
+  },
+
+  setAppliedTags(value) {
+    set((s) => ({
+      ...pushHistory(s),
+      message: { ...s.message, applied_tags: value && value.length > 0 ? value : undefined },
     }));
   },
 
@@ -286,15 +325,35 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   addRowButton(rowId) {
     set((s) => {
       const btn = createLinkButton();
-      return {
-        ...pushHistory(s),
-        message: updateById(s.message, rowId, (row) =>
-          row.type === ComponentType.ActionRow
-            ? { ...row, components: [...row.components, btn] }
-            : row,
-        ),
-        selectedId: btn._id,
-      };
+      let nextSelection: EditorId | null = null;
+      const message = updateById<ActionRowComponent>(s.message, rowId, (row) => {
+        // Refuse if the row already holds a select — buttons and selects can't mix.
+        const first = row.components[0];
+        if (first && isSelect(first)) return row;
+        nextSelection = btn._id;
+        return {
+          ...row,
+          components: [...(row.components as ActionRowComponent["components"]), btn] as ActionRowComponent["components"],
+        };
+      });
+      if (!nextSelection) return s;
+      return { ...pushHistory(s), message, selectedId: nextSelection };
+    });
+  },
+
+  addRowSelect(rowId, type) {
+    set((s) => {
+      const sel = createSelect(type);
+      let nextSelection: EditorId | null = null;
+      const message = updateById<ActionRowComponent>(s.message, rowId, (row) => {
+        // Only empty rows accept a select — a row already holding a button OR
+        // a select cannot be silently swapped.
+        if (row.components.length > 0) return row;
+        nextSelection = sel._id;
+        return { ...row, components: [sel] };
+      });
+      if (!nextSelection) return s;
+      return { ...pushHistory(s), message, selectedId: nextSelection };
     });
   },
 
@@ -331,72 +390,176 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   moveSibling(id, direction) {
-    set((s) => {
-      const reorder = <T extends { _id: EditorId }>(arr: T[]): T[] => {
-        const idx = arr.findIndex((c) => c._id === id);
-        if (idx === -1) return arr;
-        const target = idx + direction;
-        if (target < 0 || target >= arr.length) return arr;
-        const next = arr.slice();
-        const [item] = next.splice(idx, 1);
-        next.splice(target, 0, item!);
-        return next;
-      };
+    // Mirrors drag-and-drop semantics so the arrow buttons can navigate the
+    // same boundaries the pointer can: between top-level and Containers, the
+    // move can step into an adjacent Container or escape to the grandparent's
+    // sibling list. Section/ActionRow children stay scoped to their parent
+    // because those slots carry specialized types.
+    const state = get();
+    const loc = findById(state.message, id);
+    if (!loc) return;
+    const parent = loc.parent;
+    const node = loc.node;
 
-      // Try top-level first.
-      const topReordered = reorder(s.message.components);
-      if (topReordered !== s.message.components) {
-        return {
-          ...pushHistory(s),
-          message: { ...s.message, components: topReordered as TopLevelComponent[] },
-        };
+    const siblings: AnyComponent[] =
+      parent === null
+        ? state.message.components
+        : ((parent as unknown as { components?: AnyComponent[] }).components ?? []);
+    const idx = siblings.findIndex((c) => c._id === id);
+    if (idx === -1) return;
+
+    const canCrossParent = parent === null || isContainer(parent);
+    const newIdx = idx + direction;
+    const parentId = parent === null ? null : parent._id;
+
+    if (canCrossParent) {
+      // Adjacent sibling is a Container we can enter — dive in instead of
+      // swapping past it.
+      if (newIdx >= 0 && newIdx < siblings.length) {
+        const neighbor = siblings[newIdx]!;
+        if (
+          isContainer(neighbor) &&
+          node.type !== ComponentType.Container &&
+          neighbor.components.length < LIMITS.CONTAINER_CHILDREN
+        ) {
+          const insertAt = direction === -1 ? neighbor.components.length : 0;
+          get().moveToParent(id, neighbor._id, insertAt);
+          return;
+        }
       }
 
-      // Walk containers/sections/rows looking for the sibling list that owns
-      // this node. We do this immutably via updateById on the parent.
-      const reorderInside = (msg: WebhookMessage): WebhookMessage => {
-        const walkNode = (node: AnyComponent): AnyComponent => {
-          if (isContainer(node)) {
-            const reordered = reorder(node.components);
-            if (reordered !== node.components)
-              return { ...node, components: reordered as ContainerChild[] };
-          }
-          if ("components" in node && Array.isArray((node as { components?: unknown }).components)) {
-            const arr = (node as unknown as { components: AnyComponent[] }).components;
-            const reordered = reorder(arr);
-            if (reordered !== arr)
-              return { ...node, components: reordered } as AnyComponent;
-          }
-          return node;
+      // Out of bounds → pop out to the grandparent's sibling list.
+      if (newIdx < 0 || newIdx >= siblings.length) {
+        if (parent === null) return; // already at the top, nowhere higher
+        const parentLoc = findById(state.message, parent._id);
+        if (!parentLoc) return;
+        const grand = parentLoc.parent;
+        const grandSiblings: AnyComponent[] =
+          grand === null
+            ? state.message.components
+            : ((grand as unknown as { components?: AnyComponent[] }).components ?? []);
+        const pIdx = grandSiblings.findIndex((c) => c._id === parent._id);
+        if (pIdx === -1) return;
+        const insertAt = direction === -1 ? pIdx : pIdx + 1;
+        get().moveToParent(id, grand === null ? null : grand._id, insertAt);
+        return;
+      }
+    }
+
+    // Same-parent swap. Covers reorderable top-level/Container moves that
+    // don't cross a boundary as well as Section text and ActionRow button
+    // reorders, which moveToParent handles via its same-parent branch.
+    if (newIdx < 0 || newIdx >= siblings.length) return;
+    const targetIndex = direction === 1 ? newIdx + 1 : newIdx;
+    get().moveToParent(id, parentId, targetIndex);
+  },
+
+  moveToParent(id, targetParentId, targetIndex) {
+    set((s) => {
+      const sourceLoc = findById(s.message, id);
+      if (!sourceLoc) return s;
+
+      const sourceParentId = sourceLoc.parent ? sourceLoc.parent._id : null;
+
+      // Source must live in a reorderable sibling array. Section accessory has
+      // a dedicated slot and isn't draggable.
+      if (sourceLoc.parent !== null) {
+        const parent = sourceLoc.parent;
+        const hasSiblingList =
+          "components" in parent &&
+          Array.isArray((parent as { components?: unknown }).components) &&
+          (parent as unknown as { components: AnyComponent[] }).components.some(
+            (c) => c._id === id,
+          );
+        if (!hasSiblingList) return s;
+      }
+
+      // Same parent → reorder.
+      if (sourceParentId === targetParentId) {
+        const reorder = <T extends { _id: EditorId }>(arr: T[]): T[] | null => {
+          const idx = arr.findIndex((c) => c._id === id);
+          if (idx === -1) return null;
+          let target = Math.max(0, Math.min(targetIndex, arr.length));
+          if (target > idx) target -= 1;
+          if (target === idx) return null;
+          const next = arr.slice();
+          const [item] = next.splice(idx, 1);
+          next.splice(target, 0, item!);
+          return next;
         };
 
-        const recurse = (node: AnyComponent): AnyComponent => {
-          const next = walkNode(node);
-          if (next !== node) return next;
-          if (isContainer(node)) {
-            let changed = false;
-            const components = node.components.map((c) => {
-              const r = recurse(c) as ContainerChild;
-              if (r !== c) changed = true;
-              return r;
-            });
-            return changed ? { ...node, components } : node;
-          }
-          return node;
-        };
+        if (sourceParentId === null) {
+          const next = reorder(s.message.components);
+          if (!next) return s;
+          return {
+            ...pushHistory(s),
+            message: { ...s.message, components: next as TopLevelComponent[] },
+          };
+        }
 
-        let changed = false;
-        const components = msg.components.map((c) => {
-          const r = recurse(c) as TopLevelComponent;
-          if (r !== c) changed = true;
-          return r;
+        const message = updateById(s.message, sourceParentId, (p) => {
+          const arr = (p as unknown as { components: AnyComponent[] }).components;
+          const reordered = reorder(arr);
+          if (!reordered) return p;
+          return { ...p, components: reordered } as typeof p;
         });
-        return changed ? { ...msg, components } : msg;
-      };
+        if (message === s.message) return s;
+        return { ...pushHistory(s), message };
+      }
 
-      const moved = reorderInside(s.message);
-      if (moved === s.message) return s;
-      return { ...pushHistory(s), message: moved };
+      // Cross-parent → validate, then remove + insert.
+      const node = sourceLoc.node;
+
+      // Only top-level ↔ Container moves are supported. The Section/ActionRow
+      // sibling lists carry specialized types that can't accept arbitrary
+      // components, so we refuse those transitions.
+      if (targetParentId === null) {
+        if (s.message.components.length >= LIMITS.TOP_LEVEL_COMPONENTS) return s;
+      } else {
+        const targetLoc = findById(s.message, targetParentId);
+        if (!targetLoc || !isContainer(targetLoc.node)) return s;
+        // Containers can't be nested.
+        if (node.type === ComponentType.Container) return s;
+        if (targetLoc.node.components.length >= LIMITS.CONTAINER_CHILDREN) return s;
+      }
+
+      // Source must currently live at top-level or in a Container; otherwise
+      // it carries a specialized parent type (Section text, ActionRow button)
+      // that we won't relocate.
+      if (sourceParentId !== null) {
+        const sourceParent = sourceLoc.parent!;
+        if (!isContainer(sourceParent)) return s;
+      }
+
+      let next = s.message;
+
+      if (sourceParentId === null) {
+        next = {
+          ...next,
+          components: next.components.filter((c) => c._id !== id) as TopLevelComponent[],
+        };
+      } else {
+        next = updateById(next, sourceParentId, (p) => {
+          const arr = (p as unknown as { components: AnyComponent[] }).components;
+          return { ...p, components: arr.filter((c) => c._id !== id) } as typeof p;
+        });
+      }
+
+      if (targetParentId === null) {
+        const arr = next.components.slice();
+        const insertAt = Math.max(0, Math.min(targetIndex, arr.length));
+        arr.splice(insertAt, 0, node as TopLevelComponent);
+        next = { ...next, components: arr };
+      } else {
+        next = updateById<ContainerComponent>(next, targetParentId, (p) => {
+          const arr = p.components.slice();
+          const insertAt = Math.max(0, Math.min(targetIndex, arr.length));
+          arr.splice(insertAt, 0, node as ContainerChild);
+          return { ...p, components: arr };
+        });
+      }
+
+      return { ...pushHistory(s), message: next };
     });
   },
 

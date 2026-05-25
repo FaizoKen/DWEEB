@@ -26,3 +26,12 @@
   align-items: flex-start;
   justify-content: flex-end;
 }
+
+/* On phones the side-by-side layout needs a little less breathing room
+ * so the text column doesn't get squeezed to a sliver. */
+@media (max-width: 480px) {
+  .sectionThumbnail,
+  .sectionButton {
+    gap: 8px;
+  }
+}

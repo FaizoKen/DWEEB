@@ -9,57 +9,54 @@ backend, no account, no database.
 
 ## First-time users
 
-Open the app and a welcome dialog walks you through four ways to begin:
+The editor opens straight to a showcase message so you can see how the
+pieces fit together. Start editing in place, or click **Reset** in the
+top-left action bar to discard your changes and reload the showcase.
 
-1. **Continue previous work** — restores the message you were editing in this
-   browser (only shown when a saved draft exists).
-2. **Start with a template** — pick a ready-made example like a release-notes
-   card or an event RSVP, then tweak.
-3. **Start blank** — an empty text box for when you know exactly what you want.
-4. **Import existing message** — paste a share URL, share token, or
-   Components V2 JSON payload.
+The editor auto-saves your work to this browser only (`localStorage`); a
+refresh or revisit picks up where you left off.
 
-After that, the editor auto-saves your work to this browser only
-(`localStorage`); a refresh or revisit picks up where you left off. The
-**Start over** button in the top-right re-opens the welcome dialog at any
-time without discarding the saved draft.
+Layout at a glance:
 
-Editor at a glance:
+- **Left pane** — the editor. A compact action bar at the top hosts every
+  global control (undo / redo / Reset / Restore / Share / Send); below it
+  the Components ↔ Message tabs flip between the component tree and the
+  webhook's username/avatar. Selecting a node opens its inspector below.
+- **Right pane** — the Discord-style live preview. Pixel-accurate, so you
+  iterate in seconds.
 
-- **Left** — the component tree. Click any block to edit it. Use the `+`
-  buttons to add new components (text, buttons, containers, media…).
-- **Right** — the Discord-style live preview. It matches exactly what
-  Discord renders, so you can iterate in seconds.
-- **Top-right** — **Send** posts to your webhook in one click;
-  **Share / Export** opens a dialog with everything else:
-  - **Send** — POST the message to your webhook URL (or PATCH the original
-    when the editor was populated via Restore).
-  - **Restore** — pull a message your webhook previously posted back into
-    the editor so you can keep iterating. Paste the webhook URL + the
-    message ID (right-click → *Copy Message ID* with Developer Mode on) or
-    the Discord message link.
-  - **Share link** — a compressed URL that contains the entire message.
-  - **JSON export** — the wire payload, ready to POST manually.
-  - **Import** — same as the welcome dialog's import path.
+The action-bar buttons:
+
+- **Send** — POST the current message to your webhook URL (or PATCH the
+  original when the editor was populated via Restore).
+- **Share** — opens the Share / Export dialog (share link, JSON export,
+  Import from URL or JSON).
+- **Restore** — pull a message your webhook previously posted back into
+  the editor so you can keep iterating. Paste the webhook URL + the
+  message ID (right-click → *Copy Message ID* with Developer Mode on) or
+  the Discord message link.
+- **Reset** — replace the current message with the default template
+  (undoable).
 
 Privacy: webhook URLs and your draft never leave your browser. Share URLs put
 the message in the `#hash` fragment, which the server never sees.
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│   ▭ Toolbar      Undo / Redo · Presets ·                  [ Share ]      │
-├─────────────────────────────────┬────────────────────────────────────────┤
-│  Components │ Message            │                                       │
-│  ───────────┴──────────         │                                       │
-│  ▤ Container                    │     Discord-style live preview        │
-│   ◧ Section                     │                                       │
-│   ¶ Text                        │                                       │
-│   ⬚ Buttons Row                 │                                       │
-│                                 │                                       │
-│  ┌─ Inspector ──────────────┐   │                                       │
-│  │  fields for the selected │   │                                       │
-│  │  component               │   │                                       │
-│  └──────────────────────────┘   │                                       │
+┌─────────────────────────────────┬────────────────────────────────────────┐
+│ [↶] [↷]    Reset · Restore ·    │                                        │
+│            [Share]  [ Send ▸ ]  │                                        │
+├─────────────────────────────────┤                                        │
+│  Components │ Message            │     Discord-style live preview        │
+│  ───────────┴──────────         │                                        │
+│  ▤ Container                    │                                        │
+│   ◧ Section                     │                                        │
+│   ¶ Text                        │                                        │
+│   ⬚ Buttons Row                 │                                        │
+│                                 │                                        │
+│  ┌─ Inspector ──────────────┐   │                                        │
+│  │  fields for the selected │   │                                        │
+│  │  component               │   │                                        │
+│  └──────────────────────────┘   │                                        │
 └─────────────────────────────────┴────────────────────────────────────────┘
 ```
 
@@ -95,7 +92,6 @@ ones; that is the rule that keeps the editor scalable.
 ```
                       ┌────────────────────────────┐
                       │  src/features/             │   <-- React UI
-                      │  · toolbar/                │
                       │  · builder/  · preview/    │
                       │  · share/                  │
                       └──────────────┬─────────────┘
@@ -161,10 +157,6 @@ from the wire format, and it is stripped on export.
   which is the mirror image of the inspector dispatcher.
 - **`share/`** — the share/export/import modal. Stateless w.r.t. the
   store; reads on open, writes through `replaceMessage` on import.
-- **`welcome/`** — first-launch onboarding dialog. Four paths
-  (continue / template / blank / import) that all dispatch through normal
-  store actions, so undo/redo and auto-save behave identically afterwards.
-- **`toolbar/`** — top bar (brand, undo/redo, presets, start over, share).
 
 ### Layer 4 — App shell (`src/app`)
 

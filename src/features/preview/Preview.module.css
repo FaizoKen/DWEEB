@@ -8,10 +8,43 @@
   min-height: 0;
 }
 
+/* Mobile slide-over chrome — desktop hides this entire bar via the media
+ * query below so the preview stays uncluttered. */
+.mobileBar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--discord-bg-tertiary);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+}
+
+.mobileTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.mobileClose {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--discord-radius-sm);
+  color: var(--discord-text-normal);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease;
+}
+.mobileClose:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .scroll {
   flex: 1;
   overflow-y: auto;
   padding: 24px 16px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .message {
@@ -24,10 +57,9 @@
   border-radius: 4px;
 }
 
-.message:hover {
-  background: rgba(4, 4, 5, 0.07);
-}
-
+/* The avatar is a real <button> so it can be clicked to jump to the avatar
+ * URL field in the builder. Reset the native button chrome but keep the
+ * circular Discord look. */
 .avatar {
   width: 40px;
   height: 40px;
@@ -36,6 +68,19 @@
   background: var(--discord-accent);
   display: grid;
   place-items: center;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  transition: box-shadow 120ms ease, transform 120ms ease;
+}
+.avatar:hover,
+.avatar:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--discord-bg-primary), 0 0 0 4px var(--discord-accent);
+}
+.avatar:active {
+  transform: scale(0.96);
 }
 .avatar img {
   width: 100%;
@@ -43,9 +88,9 @@
   object-fit: cover;
 }
 .avatarFallback {
+  width: 60%;
+  height: 60%;
   color: #fff;
-  font-weight: 600;
-  font-size: 16px;
 }
 
 .body {
@@ -60,10 +105,32 @@
   flex-wrap: wrap;
 }
 
+/* Like .avatar, the displayed username is a button so users can jump
+ * straight to the username field. Keep Discord typography; add only a
+ * subtle hover underline + focus ring so the affordance is discoverable
+ * without distracting from the preview. */
 .name {
   color: #fff;
   font-weight: 600;
   font-size: 15px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: inherit;
+  border-radius: 3px;
+  transition: color 120ms ease, text-decoration-color 120ms ease, box-shadow 120ms ease;
+  text-decoration: underline transparent;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.name:hover {
+  text-decoration-color: rgba(255, 255, 255, 0.5);
+}
+.name:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--discord-accent);
 }
 
 .badge {
@@ -88,9 +155,56 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-width: 560px;
+  min-width: 0;
 }
 
 .empty {
   color: var(--discord-text-muted);
   font-style: italic;
+}
+
+@media (max-width: 900px) {
+  .mobileBar {
+    display: flex;
+  }
+  .scroll {
+    padding: 16px 10px;
+  }
+  .message {
+    grid-template-columns: 32px 1fr;
+    gap: 10px;
+    padding: 4px 8px;
+  }
+  .avatar {
+    width: 32px;
+    height: 32px;
+  }
+  .content {
+    font-size: 14.5px;
+  }
+}
+
+/* Very narrow phones — pull back chrome so the content column gets the
+ * full ~300px it needs. Without this, container + section nesting leaves
+ * <200px of text width on a 360px viewport. */
+@media (max-width: 480px) {
+  .scroll {
+    padding: 12px 6px;
+  }
+  .message {
+    grid-template-columns: 28px 1fr;
+    gap: 8px;
+    padding: 2px 4px;
+  }
+  .avatar {
+    width: 28px;
+    height: 28px;
+  }
+  .name {
+    font-size: 14px;
+  }
+  .time {
+    font-size: 11px;
+  }
 }

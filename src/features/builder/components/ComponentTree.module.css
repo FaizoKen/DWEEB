@@ -6,7 +6,27 @@
 
 .scroll {
   overflow-y: auto;
-  padding: 6px 4px;
+  /* Bottom padding clears the floating Add-component pill (and Preview FAB on mobile). */
+  padding: 6px 8px 88px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 4px 14px;
+  border-bottom: 1px solid var(--app-border);
+  margin-bottom: 10px;
+}
+
+.stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--app-text-muted);
+  font-family: var(--app-font-mono);
 }
 
 .list {
@@ -15,39 +35,217 @@
   padding: 0;
 }
 
+/* Nested lists carry the indent + a vertical rail so hierarchy reads at a
+ * glance. The outer (top-level) .list keeps its flush position. */
+.list .list {
+  position: relative;
+  padding-left: 22px;
+  margin-top: 2px;
+}
+
+.list .list::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 2px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--app-border);
+  border-radius: 1px;
+  transition: background 120ms ease;
+}
+
+.list .list:hover::before {
+  background: var(--app-border-strong);
+}
+
+/* Tiny breathing room between sibling rows. */
+.list > li + li {
+  margin-top: 2px;
+}
+
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: 16px max-content 1fr auto;
+  grid-template-columns: 18px 24px max-content 1fr auto;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 7px 8px;
   border-radius: var(--app-radius-sm);
   cursor: pointer;
   user-select: none;
   font-size: 13px;
+  color: var(--app-text);
+  transition: background 120ms ease, box-shadow 120ms ease;
 }
+
 .row:hover {
   background: var(--app-bg-hover);
 }
+
 .rowSelected {
   background: var(--app-accent-soft);
+  box-shadow: inset 2px 0 0 var(--app-accent);
 }
+
 .rowSelected:hover {
   background: var(--app-accent-soft);
 }
 
+/* Drag-and-drop affordances. The row that's being dragged fades; the row the
+ * pointer is currently above shows a 2px caret on the top OR bottom edge to
+ * preview where the dropped node will land. */
+.rowDragging {
+  opacity: 0.4;
+}
+
+.rowDropBefore::before,
+.rowDropAfter::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background: var(--app-accent);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.rowDropBefore::before {
+  top: -1px;
+}
+
+.rowDropAfter::after {
+  bottom: -1px;
+}
+
+/* "Into" indicator for dropping into a Container row. Outlines the whole row
+ * so it reads as "this is the new parent" rather than "between rows". */
+.rowDropInto {
+  box-shadow: inset 0 0 0 2px var(--app-accent);
+  background: var(--app-accent-soft);
+}
+
+/* Cursor hint so users discover the row is draggable. Touch devices ignore
+ * this so we don't surprise them with a grab cursor that does nothing. */
+@media (hover: hover) {
+  .row[data-tree-row="true"] {
+    cursor: grab;
+  }
+  .row[data-tree-row="true"]:active {
+    cursor: grabbing;
+  }
+}
+
+/* Floating ghost chip that mirrors the dragged component. Lives in <body>
+ * (rendered via portal) so it isn't clipped by the tree's overflow box.
+ * Positioned imperatively from the source row's pointermove handler — only
+ * `left` and `top` change, the rest stays static. */
+.ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px 5px 6px;
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-accent);
+  border-radius: var(--app-radius-sm);
+  box-shadow: var(--app-shadow-lg);
+  font-size: 12px;
+  color: var(--app-text);
+  white-space: nowrap;
+  /* Slight tilt so the ghost reads as "in motion" rather than a UI panel. */
+  transform: rotate(-1.5deg);
+  transform-origin: top left;
+  opacity: 0.94;
+}
+
+.ghostGlyph {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  color: var(--app-text-muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ghostLabel {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* While a drag is active the body gets `.dnd-active` (set from React). This
+ * is what stops a finger drag from being intercepted as a page scroll on
+ * touch devices, and stops text selection from kicking in on long-press. */
+:global(body.dnd-active) {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grabbing;
+}
+
+:global(body.dnd-active) .row[data-tree-row="true"] {
+  cursor: grabbing;
+}
+
+.chevron {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: var(--app-text-subtle);
+  transition: color 120ms ease;
+}
+
+.row:hover .chevron {
+  color: var(--app-text-muted);
+}
+
+.rowSelected .chevron {
+  color: var(--app-text);
+}
+
+/* Small icon chip so each component type has a visual anchor instead of a
+ * lone unicode character floating against the background. */
 .glyph {
-  width: 16px;
-  text-align: center;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: 5px;
   color: var(--app-text-muted);
   font-size: 13px;
+  line-height: 1;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.row:hover .glyph {
+  color: var(--app-text);
+  border-color: var(--app-border-strong);
+}
+
+.rowSelected .glyph {
+  background: var(--app-bg);
+  border-color: var(--app-accent);
+  color: var(--app-text);
 }
 
 .label {
-  font-weight: 500;
+  font-weight: 600;
   color: var(--app-text);
   white-space: nowrap;
+  letter-spacing: 0.01em;
 }
 
 .summary {
@@ -57,6 +255,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.rowSelected .summary {
+  color: var(--app-text);
+  opacity: 0.85;
 }
 
 .actions {
@@ -71,43 +274,242 @@
   opacity: 1;
 }
 
-.adder {
-  display: block;
-  padding: 2px 0 4px;
+/* Touch and narrow viewports: hover-based reveal isn't reliable, so the
+ * inline row actions stay visible. */
+@media (hover: none), (max-width: 900px) {
+  .actions {
+    opacity: 1;
+  }
+}
+
+/* "Add" affordance — a dashed pill so it's clearly an action, not another
+ * component row. Lives inside the same nested <ul> as its siblings so it
+ * inherits the rail and indent automatically. */
+.adderItem {
+  list-style: none;
+  margin: 4px 0 2px;
 }
 
 .addChild {
-  width: 100%;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 3px 11px 3px 4px;
   font-size: 12px;
   color: var(--app-text-muted);
-  border-radius: var(--app-radius-sm);
-  transition: background 120ms ease, color 120ms ease;
+  background: transparent;
+  border: 1px dashed rgba(88, 101, 242, 0.4);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
+
 .addChild:hover {
-  background: var(--app-bg-hover);
+  background: var(--app-accent-soft);
   color: var(--app-text);
+  border-color: var(--app-accent);
+}
+
+.addChild:disabled,
+.addChild[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .addChildPlus {
+  position: relative;
   display: inline-block;
-  width: 14px;
-  text-align: center;
-  color: var(--app-text-subtle);
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(88, 101, 242, 0.1);
+  border: 1px solid rgba(88, 101, 242, 0.45);
+  font-size: 0;
+  color: transparent;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.addChildPlus::before,
+.addChildPlus::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: var(--app-accent);
+  border-radius: 1px;
+  transition: background 120ms ease;
+}
+
+.addChildPlus::before {
+  width: 7px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+}
+
+.addChildPlus::after {
+  width: 2px;
+  height: 7px;
+  transform: translate(-50%, -50%);
+}
+
+.addChild:hover .addChildPlus {
+  background: var(--app-bg-input);
+  border-color: var(--app-accent);
+}
+
+.addChild:hover .addChildPlus::before,
+.addChild:hover .addChildPlus::after {
+  background: var(--app-accent);
+}
+
+/* Inline inspector card. The accent left bar ties it visually to the
+ * selected row above it. */
+.editorPanel {
+  margin: 6px 0 12px;
+  border: 1px solid var(--app-border);
+  border-left: 2px solid var(--app-accent);
+  border-radius: var(--app-radius);
+  overflow: hidden;
+  background: var(--app-bg-input);
+  box-shadow: var(--app-shadow-sm);
 }
 
 .empty {
-  padding: 24px 16px;
+  margin: 16px 4px;
+  padding: 28px 16px;
   text-align: center;
   color: var(--app-text-muted);
   font-size: 13px;
+  border: 1px dashed var(--app-border);
+  border-radius: var(--app-radius);
+  background: var(--app-bg);
 }
 
+/* The Add-component CTA always floats over the bottom-left of the builder
+ * pane as a pill, mirroring the mobile preview FAB. The AddComponentMenu
+ * portal still anchors to this trigger so the picker pops up above it. */
 .footer {
-  border-top: 1px solid var(--app-border);
-  padding: 10px;
+  position: fixed;
+  left: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--app-z-toolbar);
+  width: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.footer button {
+  width: auto !important;
+  height: auto !important;
+  padding: 12px 18px !important;
+  border-radius: 999px !important;
+  font-size: 13px !important;
+  box-shadow: var(--app-shadow-lg);
+}
+
+.advanced {
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
   background: var(--app-bg-elevated);
+  overflow: hidden;
+}
+
+.advancedSummary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.advancedSummary::-webkit-details-marker { display: none; }
+.advancedSummary::after {
+  content: "▾";
+  font-size: 10px;
+  opacity: 0.6;
+}
+.advanced[open] .advancedSummary::after {
+  content: "▴";
+}
+
+.advancedBody {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--app-border);
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--app-text);
+  cursor: pointer;
+  user-select: none;
+}
+.chip:hover { border-color: var(--app-accent); }
+.chipActive {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+  color: var(--app-text);
+}
+
+.sectionHint {
+  font-size: 11px;
+  color: var(--app-text-muted);
+  padding: 6px 8px;
+  background: var(--app-bg);
+  border-left: 2px solid var(--app-accent);
+  border-radius: 2px;
+  margin-top: 4px;
+}
+
+@media (max-width: 640px) {
+  /* Meta header username/avatar stack vertically below 640px so each input
+   * keeps a usable hit target instead of getting halved. */
+  .row2 {
+    grid-template-columns: 1fr;
+  }
+
+  .row {
+    gap: 6px;
+    padding: 9px 6px;
+  }
+
+  .summary {
+    font-size: 11px;
+  }
+
+  /* Tighter rail indent on phones so deep nests don't push content off-screen. */
+  .list .list {
+    padding-left: 18px;
+  }
+  .list .list::before {
+    left: 8px;
+  }
 }
