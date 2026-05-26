@@ -316,6 +316,71 @@ function flattenDiscordErrors(errors: unknown, path = ""): string[] {
   return out;
 }
 
+/* ─── Verify (GET webhook) ───────────────────────────────────────────── */
+
+export interface VerifyOk {
+  ok: true;
+  status: number;
+  /** The webhook object Discord returned (includes `name`, `channel_id`, …). */
+  webhook: Record<string, unknown>;
+}
+export interface VerifyErr {
+  ok: false;
+  status: number;
+  error: string;
+  body?: unknown;
+}
+export type VerifyResult = VerifyOk | VerifyErr;
+
+/**
+ * Confirm a webhook actually exists before we store it. A GET on the execute
+ * URL returns the webhook object when the id+token are valid, and 401/404 when
+ * the token is wrong or the webhook was deleted — so it doubles as a "is this
+ * URL real?" check without posting anything to the channel.
+ */
+export async function verifyWebhook(
+  parsed: ParsedWebhookUrl,
+  options: { signal?: AbortSignal } = {},
+): Promise<VerifyResult> {
+  let res: Response;
+  try {
+    res = await fetch(parsed.url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: options.signal,
+    });
+  } catch (e) {
+    if ((e as DOMException)?.name === "AbortError") {
+      return { ok: false, status: 0, error: "Check was cancelled." };
+    }
+    return {
+      ok: false,
+      status: 0,
+      error:
+        "Network request failed. Check the URL, your connection, or any browser extensions blocking requests to discord.com.",
+    };
+  }
+
+  let body: unknown = null;
+  const text = await res.text().catch(() => "");
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+
+  if (res.ok) {
+    return {
+      ok: true,
+      status: res.status,
+      webhook: body && typeof body === "object" ? (body as Record<string, unknown>) : {},
+    };
+  }
+  return { ok: false, status: res.status, error: describeError(res.status, body), body };
+}
+
 /* ─── Restore (GET) ──────────────────────────────────────────────────── */
 
 export interface FetchOk {

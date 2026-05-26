@@ -34,6 +34,7 @@ import {
   sendToWebhook,
   touchWebhook,
   updateWebhookMessage,
+  verifyWebhook,
   type WebhookHistoryEntry,
 } from "@/core/webhook";
 import { Button } from "@/ui/Button";
@@ -78,10 +79,18 @@ export function SendPanel() {
   const [history, setHistory] = useState<WebhookHistoryEntry[]>(() => loadHistory());
   const [state, setState] = useState<SendState>({ kind: "idle" });
   const [showRaw, setShowRaw] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+  const saveAbortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      saveAbortRef.current?.abort();
+    },
+    [],
+  );
 
   // If a restore happens while the panel is open (e.g. user switched to the
   // Restore tab, fetched, and came back), pull the new origin into the form.
@@ -171,6 +180,42 @@ export function SendPanel() {
         status: result.status,
         body: result.body,
       });
+    }
+  };
+
+  // Verify the webhook with Discord (GET), then store it — no message is posted.
+  const handleSaveWebhook = async () => {
+    if (!parsedUrl) {
+      setState({ kind: "error", message: "Enter a valid Discord webhook URL." });
+      return;
+    }
+
+    saveAbortRef.current?.abort();
+    const ac = new AbortController();
+    saveAbortRef.current = ac;
+
+    setSaving(true);
+    setShowRaw(false);
+    const result = await verifyWebhook(parsedUrl, { signal: ac.signal });
+    setSaving(false);
+
+    if (!result.ok) {
+      if (result.status === 0 && result.error === "Check was cancelled.") return;
+      setState({ kind: "error", message: result.error, status: result.status, body: result.body });
+      return;
+    }
+
+    const remoteName = typeof result.webhook.name === "string" ? result.webhook.name : "";
+    const entry = rememberWebhook(parsedUrl.url, label.trim() || remoteName);
+    if (entry) {
+      setHistory(loadHistory());
+      setRemember(true);
+      if (!label.trim() && remoteName) setLabel(remoteName);
+      setState({ kind: "idle" });
+      pushToast(
+        remoteName ? `Verified and saved “${remoteName}”.` : "Webhook verified and saved.",
+        "success",
+      );
     }
   };
 
@@ -418,10 +463,18 @@ export function SendPanel() {
           </Button>
         ) : null}
         <Button
+          variant="secondary"
+          onClick={handleSaveWebhook}
+          disabled={saving || sending || !parsedUrl}
+        >
+          {saving ? "Checking…" : "Save webhook"}
+        </Button>
+        <Button
           variant="primary"
           onClick={handleSend}
           disabled={
             sending ||
+            saving ||
             !parsedUrl ||
             blockingIssues.length > 0 ||
             (mode === "update" && !parsedMessageId)
