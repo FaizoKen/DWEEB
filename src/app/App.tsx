@@ -79,6 +79,16 @@ export function App() {
       </section>
 
       <div className="fab-stack">
+        <button
+          type="button"
+          className="preview-fab"
+          onClick={() => setPreviewOpen(true)}
+          aria-label="Show preview"
+        >
+          <EyeIcon size={18} />
+          <span>Preview</span>
+        </button>
+
         <a
           className="support-fab"
           href="https://discord.gg/2wB7rHRDg2"
@@ -89,16 +99,6 @@ export function App() {
           <SupportIcon size={20} />
           <span>Support</span>
         </a>
-
-        <button
-          type="button"
-          className="preview-fab"
-          onClick={() => setPreviewOpen(true)}
-          aria-label="Show preview"
-        >
-          <EyeIcon size={18} />
-          <span>Preview</span>
-        </button>
       </div>
 
       <ShareDialog
