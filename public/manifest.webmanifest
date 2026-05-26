@@ -1,12 +1,17 @@
 {
   "name": "Discord Webhook Builder",
   "short_name": "Webhook Builder",
-  "description": "Visual editor for Discord webhook messages using Components V2.",
+  "description": "Visually build, preview, and share Discord webhook messages using Components V2 — no JSON, no backend.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#1e1f22",
   "theme_color": "#1e1f22",
+  "categories": ["developer", "productivity", "utilities"],
   "icons": [
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
