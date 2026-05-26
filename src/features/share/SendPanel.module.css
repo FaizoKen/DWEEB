@@ -139,6 +139,36 @@
   color: var(--app-text-muted);
 }
 
+.errorRaw {
+  margin-top: 8px;
+}
+
+.errorRawToggle {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--app-accent, #5865f2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.errorRawBody {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 240px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: var(--app-radius-sm);
+  font-family: var(--app-font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--app-text);
+}
+
 .actions {
   display: flex;
   gap: 8px;

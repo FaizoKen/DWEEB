@@ -50,7 +50,17 @@ type SendState =
   | { kind: "idle" }
   | { kind: "sending" }
   | { kind: "ok"; status: number }
-  | { kind: "error"; message: string; retryAfter?: number };
+  | { kind: "error"; message: string; retryAfter?: number; status?: number; body?: unknown };
+
+/** Pretty-print a Discord error body for the raw-response view. */
+function formatRawBody(body: unknown): string {
+  if (typeof body === "string") return body;
+  try {
+    return JSON.stringify(body, null, 2);
+  } catch {
+    return String(body);
+  }
+}
 
 export function SendPanel() {
   const message = useMessageStore((s) => s.message);
@@ -67,6 +77,7 @@ export function SendPanel() {
   const [revealUrl, setRevealUrl] = useState(false);
   const [history, setHistory] = useState<WebhookHistoryEntry[]>(() => loadHistory());
   const [state, setState] = useState<SendState>({ kind: "idle" });
+  const [showRaw, setShowRaw] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -124,6 +135,7 @@ export function SendPanel() {
     abortRef.current = ac;
 
     setState({ kind: "sending" });
+    setShowRaw(false);
 
     const result =
       mode === "update" && parsedMessageId
@@ -156,6 +168,8 @@ export function SendPanel() {
         kind: "error",
         message: result.error,
         retryAfter: result.retryAfter,
+        status: result.status,
+        body: result.body,
       });
     }
   };
@@ -377,6 +391,21 @@ export function SendPanel() {
           {state.retryAfter ? (
             <div className={styles.errorSub}>
               Discord asked us to wait {state.retryAfter.toFixed(1)}s.
+            </div>
+          ) : null}
+          {state.body != null ? (
+            <div className={styles.errorRaw}>
+              <button
+                type="button"
+                className={styles.errorRawToggle}
+                onClick={() => setShowRaw((v) => !v)}
+                aria-expanded={showRaw}
+              >
+                {showRaw ? "Hide raw Discord response" : "Show raw Discord response"}
+              </button>
+              {showRaw ? (
+                <pre className={styles.errorRawBody}>{formatRawBody(state.body)}</pre>
+              ) : null}
             </div>
           ) : null}
         </div>
