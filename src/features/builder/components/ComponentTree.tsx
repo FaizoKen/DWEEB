@@ -289,7 +289,7 @@ export function ComponentTree() {
               <p>Nothing here yet. Add your first component to get started.</p>
             </div>
           ) : (
-            <ul className={styles.list}>
+            <ul className={cn(styles.list, styles.topList)}>
               {components.map((c, idx) => (
                 <TreeNode
                   key={c._id}
