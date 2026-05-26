@@ -23,7 +23,7 @@ import { Builder } from "@/features/builder/Builder";
 import { Preview } from "@/features/preview/Preview";
 import { ShareDialog } from "@/features/share/ShareDialog";
 import { ToastViewport } from "@/ui/Toast";
-import { EyeIcon, DiscordIcon } from "@/ui/Icon";
+import { EyeIcon, SupportIcon } from "@/ui/Icon";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAutoSaveDraft } from "./useAutoSaveDraft";
@@ -95,7 +95,7 @@ export function App() {
         rel="noopener noreferrer"
         aria-label="Join our Discord support server"
       >
-        <DiscordIcon size={20} />
+        <SupportIcon size={20} />
         <span>Support</span>
       </a>
 
