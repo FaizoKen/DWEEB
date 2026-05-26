@@ -31,9 +31,15 @@
       content="Design Discord webhook messages with Components V2 visually. Live preview, shareable URLs, no backend required."
     />
     <meta property="og:url" content="https://discordwebhookbuilder.faizo.net/" />
-    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content="https://discordwebhookbuilder.faizo.net/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Discord Webhook Builder — visually build, preview and share Components V2 messages."
+    />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Discord Webhook Builder" />
@@ -41,10 +47,16 @@
       name="twitter:description"
       content="Design Discord webhook messages with Components V2 visually. Live preview, shareable URLs, no backend required."
     />
-    <meta name="twitter:image" content="/og-image.png" />
+    <meta name="twitter:image" content="https://discordwebhookbuilder.faizo.net/og-image.png" />
+    <meta
+      name="twitter:image:alt"
+      content="Discord Webhook Builder — visually build, preview and share Components V2 messages."
+    />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
 
     <!-- Preconnect to fonts only if loaded externally; we ship system stack by default. -->
@@ -55,18 +67,80 @@
         "@context": "https://schema.org",
         "@type": "WebApplication",
         "name": "Discord Webhook Builder",
-        "description": "Visual editor for Discord webhook messages using Components V2.",
+        "url": "https://discordwebhookbuilder.faizo.net/",
+        "description": "Visually build, preview, and share Discord webhook messages using Components V2 — no JSON, no backend, no account.",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Web",
-        "offers": { "@type": "Offer", "price": "0" }
+        "browserRequirements": "Requires JavaScript. Requires a modern browser.",
+        "image": "https://discordwebhookbuilder.faizo.net/og-image.png",
+        "inLanguage": "en",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "featureList": [
+          "Visual Components V2 editor with containers, sections, buttons and media",
+          "Pixel-accurate live Discord preview",
+          "Share any message through a single URL",
+          "Export and import message JSON",
+          "Send directly to a Discord webhook",
+          "Runs entirely in the browser — no backend or account"
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is the Discord Webhook Builder?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "It is a free visual editor for designing Discord webhook messages with Components V2. You build rich messages with containers, sections, buttons and media, preview them live, then export or share them via a single URL."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to write JSON or run a backend?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. The builder is fully visual and runs entirely in your browser. There is no JSON to write, no backend to host, and no account to create."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does sharing work?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Your message is encoded into the URL hash fragment, so a single link reproduces the exact message. The fragment is never sent to a server, keeping your draft private."
+            }
+          }
+        ]
       }
     </script>
   </head>
   <body>
     <noscript>
-      <p style="font-family: system-ui; padding: 2rem; color: #f2f3f5; background: #1e1f22">
-        Discord Webhook Builder requires JavaScript to run. Enable JavaScript and reload the page.
-      </p>
+      <main style="font-family: system-ui; max-width: 48rem; margin: 0 auto; padding: 2rem; color: #f2f3f5; background: #1e1f22; line-height: 1.6">
+        <h1>Discord Webhook Builder — Visual Components V2 Editor</h1>
+        <p>
+          Discord Webhook Builder is a free, browser-based visual editor for crafting Discord
+          webhook messages with Components V2. Design rich messages with containers, sections,
+          buttons, and media, watch a pixel-accurate live preview, then export or share the
+          result through a single URL — no JSON, no backend, and no account required.
+        </p>
+        <h2>What you can do</h2>
+        <ul>
+          <li>Build messages visually with containers, sections, buttons, and media galleries.</li>
+          <li>See a pixel-accurate, Discord-style live preview as you edit.</li>
+          <li>Share any message through a single URL, or export and import message JSON.</li>
+          <li>Send messages straight to your Discord webhook.</li>
+        </ul>
+        <p>
+          <strong>This app requires JavaScript.</strong> Please enable JavaScript and reload the
+          page to use the editor.
+        </p>
+      </main>
     </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
