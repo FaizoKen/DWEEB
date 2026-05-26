@@ -135,6 +135,12 @@ export const CloseIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const DiscordIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" {...rest}>
+    <path d="M19.27 5.33A16.6 16.6 0 0 0 15.1 4l-.21.42a14.7 14.7 0 0 0-5.79 0L8.89 4a16.6 16.6 0 0 0-4.17 1.33C2.07 9.27 1.35 13.1 1.71 16.88a16.7 16.7 0 0 0 5.07 2.57l.41-.65a10.7 10.7 0 0 1-1.62-.78l.4-.31a11.9 11.9 0 0 0 10.06 0l.4.31c-.51.3-1.05.56-1.62.78l.41.65a16.6 16.6 0 0 0 5.07-2.57c.43-4.4-.72-8.19-3.03-11.55ZM8.36 14.56c-.99 0-1.81-.91-1.81-2.03 0-1.12.8-2.03 1.81-2.03 1.02 0 1.83.92 1.81 2.03 0 1.12-.8 2.03-1.81 2.03Zm7.28 0c-.99 0-1.81-.91-1.81-2.03 0-1.12.8-2.03 1.81-2.03 1.02 0 1.83.92 1.81 2.03 0 1.12-.79 2.03-1.81 2.03Z" />
+  </svg>
+);
+
 export const LogoMark = ({ size = 22, ...rest }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 32 32" fill="none" {...rest}>
     <rect width="32" height="32" rx="8" fill="#5865F2" />

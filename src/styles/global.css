@@ -74,6 +74,39 @@
   flex-shrink: 0;
 }
 
+/* Floating Discord support button, anchored bottom-right on every viewport.
+ * Uses Discord blurple so it reads as an external community link rather than
+ * an app action. On mobile it stacks above the preview-fab (see media query). */
+.support-fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--app-z-toolbar);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: #5865f2;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--app-shadow-lg);
+  border: none;
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+.support-fab:hover {
+  background: #4752c4;
+}
+.support-fab:active {
+  transform: scale(0.97);
+}
+.support-fab svg {
+  flex-shrink: 0;
+}
+
 /* Mobile: single pane visible, preview slides over from the right. */
 @media (max-width: 900px) {
   .app-shell {
@@ -107,5 +140,16 @@
 
   .app-shell[data-preview-open="true"] .preview-fab {
     display: none;
+  }
+
+  /* Preview-fab owns the bottom-right corner on mobile; lift the support
+   * button above it so the two don't overlap. Once the preview slides over,
+   * the fab is hidden and the support button drops back to the corner. */
+  .support-fab {
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-shell[data-preview-open="true"] .support-fab {
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   }
 }

@@ -23,7 +23,7 @@ import { Builder } from "@/features/builder/Builder";
 import { Preview } from "@/features/preview/Preview";
 import { ShareDialog } from "@/features/share/ShareDialog";
 import { ToastViewport } from "@/ui/Toast";
-import { EyeIcon } from "@/ui/Icon";
+import { EyeIcon, DiscordIcon } from "@/ui/Icon";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAutoSaveDraft } from "./useAutoSaveDraft";
@@ -87,6 +87,17 @@ export function App() {
         <EyeIcon size={18} />
         <span>Preview</span>
       </button>
+
+      <a
+        className="support-fab"
+        href="https://discord.gg/2wB7rHRDg2"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Join our Discord support server"
+      >
+        <DiscordIcon size={20} />
+        <span>Support</span>
+      </a>
 
       <ShareDialog
         open={shareOpen}
