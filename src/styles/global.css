@@ -124,7 +124,8 @@
 
   .app-shell__pane--preview {
     position: fixed;
-    inset: 0;
+    inset: auto 0 0 0;
+    height: 85dvh;
     z-index: calc(var(--app-z-modal) - 1);
     transform: translateY(100%);
     transition: transform 260ms cubic-bezier(0.4, 0, 0.2, 1);

@@ -8,16 +8,14 @@
   min-height: 0;
 }
 
-/* Mobile sheet chrome — desktop hides this entire bar via the media query
- * below so the preview stays uncluttered. Doubles as the swipe-to-dismiss
- * drag handle, so `touch-action: none` keeps the browser from treating a
- * downward drag here as a scroll. */
+/* Mobile sheet chrome — desktop hides this bar via the media query below so
+ * the preview stays uncluttered. It carries only the drag-handle pill;
+ * `touch-action: none` keeps the browser from treating a downward drag here
+ * as a scroll. */
 .mobileBar {
   display: none;
-  flex-direction: column;
-  padding: 8px 14px 10px;
-  background: var(--discord-bg-tertiary);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+  justify-content: center;
+  padding: 8px 14px 6px;
   flex-shrink: 0;
   touch-action: none;
   cursor: grab;
@@ -29,38 +27,12 @@
   height: 4px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.25);
-  margin: 0 auto 8px;
-}
-
-.mobileBarRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.mobileTitle {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-}
-
-.mobileClose {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--discord-radius-sm);
-  color: var(--discord-text-normal);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 120ms ease;
-}
-.mobileClose:hover {
-  background: rgba(255, 255, 255, 0.06);
 }
 
 .scroll {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px 16px;
   -webkit-overflow-scrolling: touch;
 }

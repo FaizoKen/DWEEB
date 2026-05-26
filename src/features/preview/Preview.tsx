@@ -7,35 +7,33 @@
  * doesn't trigger preview re-renders.
  *
  * On mobile this pane becomes a bottom sheet (see `app-shell__pane--preview`
- * in global.css). The optional `onClose` is the dismissal handler used by the
- * mobile-only close button; `dragHandleProps` wires the top handle for
- * swipe-down-to-dismiss.
+ * in global.css). The optional `onClose` is the dismissal handler; `swipeProps`
+ * wires the whole sheet for swipe-down-to-dismiss.
  */
 
 import type { HTMLAttributes } from "react";
 import { useMessageStore, selectMessage } from "@/core/state/messageStore";
-import { CloseIcon } from "@/ui/Icon";
 import { ComponentRenderer } from "./renderers/ComponentRenderer";
 import { PreviewCloseContext } from "./previewCloseContext";
 import styles from "./Preview.module.css";
 
 interface PreviewProps {
-  /** Dismiss handler — only invoked from the mobile sheet's close button. */
+  /** Dismiss handler — invoked by the mobile swipe-down gesture. */
   onClose?: () => void;
-  /** Touch handlers for the mobile sheet's drag handle (swipe to dismiss). */
-  dragHandleProps?: HTMLAttributes<HTMLElement>;
+  /** Touch handlers wiring the mobile sheet for swipe-to-dismiss. */
+  swipeProps?: HTMLAttributes<HTMLElement>;
 }
 
-export function Preview({ onClose, dragHandleProps }: PreviewProps = {}) {
+export function Preview({ onClose, swipeProps }: PreviewProps = {}) {
   const message = useMessageStore(selectMessage);
   const displayName = message.username || "Webhook";
   const avatar = message.avatar_url;
 
   const focusMetaField = (field: "username" | "avatar") => {
-    // Close the mobile slide-over first so the builder is visible. No-op on
+    // Close the mobile sheet first so the builder is visible. No-op on
     // desktop since the preview pane is always shown there.
     onClose?.();
-    // Defer so the slide-over has begun unmounting before we scroll/focus.
+    // Defer so the sheet has begun closing before we scroll/focus.
     requestAnimationFrame(() => {
       const el = document.querySelector<HTMLInputElement>(`[data-meta-field="${field}"]`);
       if (!el) return;
@@ -47,24 +45,13 @@ export function Preview({ onClose, dragHandleProps }: PreviewProps = {}) {
 
   return (
     <PreviewCloseContext.Provider value={onClose ?? null}>
-    <div className={styles.surface} data-preview-root>
+    <div className={styles.surface} data-preview-root {...swipeProps}>
       {onClose ? (
-        <header className={styles.mobileBar} {...dragHandleProps}>
+        <div className={styles.mobileBar}>
           <span className={styles.grabber} aria-hidden="true" />
-          <div className={styles.mobileBarRow}>
-            <span className={styles.mobileTitle}>Preview</span>
-            <button
-              type="button"
-              className={styles.mobileClose}
-              onClick={onClose}
-              aria-label="Close preview"
-            >
-              <CloseIcon size={18} />
-            </button>
-          </div>
-        </header>
+        </div>
       ) : null}
-      <div className={styles.scroll}>
+      <div className={styles.scroll} data-preview-scroll>
         <article className={styles.message} aria-label="Message preview">
           <button
             type="button"
