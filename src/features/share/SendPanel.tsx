@@ -13,8 +13,9 @@
  * The webhook URL is treated as a credential:
  *  - The input is `type="password"` with a show/hide toggle so it doesn't
  *    appear in screen shares by default.
- *  - Saving to history is **opt-in per submission** — unchecking "Remember"
- *    sends without ever touching localStorage.
+ *  - Saving to history is an **explicit action** — sending never touches
+ *    localStorage; only the "Save webhook" button does (after verifying the
+ *    webhook with Discord first).
  *  - `autoComplete="off"` keeps the browser password manager out of it.
  *
  * The send call is cancellable via AbortController. A second click while a
@@ -34,11 +35,11 @@ import {
   sendToWebhook,
   touchWebhook,
   updateWebhookMessage,
+  verifyWebhook,
   type WebhookHistoryEntry,
 } from "@/core/webhook";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
-import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { TrashIcon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
@@ -73,15 +74,22 @@ export function SendPanel() {
   const [messageIdInput, setMessageIdInput] = useState(() => restoredFrom?.messageId ?? "");
   const [mode, setMode] = useState<"new" | "update">(() => (restoredFrom ? "update" : "new"));
   const [label, setLabel] = useState("");
-  const [remember, setRemember] = useState(false);
   const [revealUrl, setRevealUrl] = useState(false);
   const [history, setHistory] = useState<WebhookHistoryEntry[]>(() => loadHistory());
   const [state, setState] = useState<SendState>({ kind: "idle" });
   const [showRaw, setShowRaw] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+  const saveAbortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      saveAbortRef.current?.abort();
+    },
+    [],
+  );
 
   // If a restore happens while the panel is open (e.g. user switched to the
   // Restore tab, fetched, and came back), pull the new origin into the form.
@@ -154,15 +162,11 @@ export function SendPanel() {
         mode === "update" ? "Original message updated." : "Message delivered to Discord.",
         "success",
       );
-      if (remember) {
-        const entry = rememberWebhook(parsedUrl.url, label);
-        if (entry) setHistory(loadHistory());
-      } else {
-        // Even when not remembering, refresh lastUsedAt on a known entry so
-        // recents stay ordered by most-recent.
-        touchWebhook(parsedUrl.id);
-        setHistory(loadHistory());
-      }
+      // Sending never saves the URL on its own — that's the "Save webhook"
+      // button's job. We only refresh lastUsedAt on an already-saved entry so
+      // recents stay ordered by most-recent.
+      touchWebhook(parsedUrl.id);
+      setHistory(loadHistory());
     } else {
       setState({
         kind: "error",
@@ -174,6 +178,41 @@ export function SendPanel() {
     }
   };
 
+  // Verify the webhook with Discord (GET), then store it — no message is posted.
+  const handleSaveWebhook = async () => {
+    if (!parsedUrl) {
+      setState({ kind: "error", message: "Enter a valid Discord webhook URL." });
+      return;
+    }
+
+    saveAbortRef.current?.abort();
+    const ac = new AbortController();
+    saveAbortRef.current = ac;
+
+    setSaving(true);
+    setShowRaw(false);
+    const result = await verifyWebhook(parsedUrl, { signal: ac.signal });
+    setSaving(false);
+
+    if (!result.ok) {
+      if (result.status === 0 && result.error === "Check was cancelled.") return;
+      setState({ kind: "error", message: result.error, status: result.status, body: result.body });
+      return;
+    }
+
+    const remoteName = typeof result.webhook.name === "string" ? result.webhook.name : "";
+    const entry = rememberWebhook(parsedUrl.url, label.trim() || remoteName);
+    if (entry) {
+      setHistory(loadHistory());
+      if (!label.trim() && remoteName) setLabel(remoteName);
+      setState({ kind: "idle" });
+      pushToast(
+        remoteName ? `Verified and saved “${remoteName}”.` : "Webhook verified and saved.",
+        "success",
+      );
+    }
+  };
+
   const handleCancel = () => {
     abortRef.current?.abort();
     setState({ kind: "idle" });
@@ -182,7 +221,6 @@ export function SendPanel() {
   const handleUseHistoryEntry = (entry: WebhookHistoryEntry) => {
     setUrl(entry.url);
     setLabel(entry.label);
-    setRemember(true);
     setState({ kind: "idle" });
   };
 
@@ -318,27 +356,20 @@ export function SendPanel() {
         </Field>
       ) : null}
 
-      <div className={styles.rememberRow}>
-        <Switch
-          checked={remember}
-          onChange={(e) => setRemember(e.currentTarget.checked)}
-          label="Remember this URL in this browser"
-        />
-      </div>
-
-      {remember ? (
-        <Field label="Label (optional)" hint="Helps you identify the webhook in the recents list.">
-          {(id) => (
-            <TextInput
-              id={id}
-              value={label}
-              onChange={(e) => setLabel(e.currentTarget.value)}
-              placeholder="e.g. Releases · #announcements"
-              maxLength={60}
-            />
-          )}
-        </Field>
-      ) : null}
+      <Field
+        label="Label (optional)"
+        hint="Used when you click “Save webhook” to identify it in the recents list."
+      >
+        {(id) => (
+          <TextInput
+            id={id}
+            value={label}
+            onChange={(e) => setLabel(e.currentTarget.value)}
+            placeholder="e.g. Releases · #announcements"
+            maxLength={60}
+          />
+        )}
+      </Field>
 
       {capabilities.length > 0 ? (
         <section className={styles.capability} aria-label="Pre-send capability check">
@@ -418,10 +449,18 @@ export function SendPanel() {
           </Button>
         ) : null}
         <Button
+          variant="secondary"
+          onClick={handleSaveWebhook}
+          disabled={saving || sending || !parsedUrl}
+        >
+          {saving ? "Checking…" : "Save webhook"}
+        </Button>
+        <Button
           variant="primary"
           onClick={handleSend}
           disabled={
             sending ||
+            saving ||
             !parsedUrl ||
             blockingIssues.length > 0 ||
             (mode === "update" && !parsedMessageId)

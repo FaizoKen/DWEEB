@@ -33,11 +33,6 @@
 }
 .revealBtn:hover { color: var(--app-text); background: var(--app-bg-hover); }
 
-.rememberRow {
-  display: flex;
-  align-items: center;
-}
-
 .history {
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
