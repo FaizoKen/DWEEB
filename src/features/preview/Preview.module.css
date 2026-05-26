@@ -8,16 +8,34 @@
   min-height: 0;
 }
 
-/* Mobile slide-over chrome — desktop hides this entire bar via the media
- * query below so the preview stays uncluttered. */
+/* Mobile sheet chrome — desktop hides this entire bar via the media query
+ * below so the preview stays uncluttered. Doubles as the swipe-to-dismiss
+ * drag handle, so `touch-action: none` keeps the browser from treating a
+ * downward drag here as a scroll. */
 .mobileBar {
   display: none;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
+  flex-direction: column;
+  padding: 8px 14px 10px;
   background: var(--discord-bg-tertiary);
   border-bottom: 1px solid rgba(0, 0, 0, 0.3);
   flex-shrink: 0;
+  touch-action: none;
+  cursor: grab;
+}
+
+/* The little pill that signals the sheet can be dragged down to dismiss. */
+.grabber {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  margin: 0 auto 8px;
+}
+
+.mobileBarRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .mobileTitle {
