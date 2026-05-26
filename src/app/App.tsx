@@ -78,26 +78,28 @@ export function App() {
         <Preview onClose={() => setPreviewOpen(false)} />
       </section>
 
-      <button
-        type="button"
-        className="preview-fab"
-        onClick={() => setPreviewOpen(true)}
-        aria-label="Show preview"
-      >
-        <EyeIcon size={18} />
-        <span>Preview</span>
-      </button>
+      <div className="fab-stack">
+        <a
+          className="support-fab"
+          href="https://discord.gg/2wB7rHRDg2"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Join our Discord support server"
+        >
+          <SupportIcon size={20} />
+          <span>Support</span>
+        </a>
 
-      <a
-        className="support-fab"
-        href="https://discord.gg/2wB7rHRDg2"
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Join our Discord support server"
-      >
-        <SupportIcon size={20} />
-        <span>Support</span>
-      </a>
+        <button
+          type="button"
+          className="preview-fab"
+          onClick={() => setPreviewOpen(true)}
+          aria-label="Show preview"
+        >
+          <EyeIcon size={18} />
+          <span>Preview</span>
+        </button>
+      </div>
 
       <ShareDialog
         open={shareOpen}

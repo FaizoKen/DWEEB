@@ -42,14 +42,21 @@
   background: var(--discord-bg-primary);
 }
 
-/* Floating preview-toggle: hidden on desktop, shown on mobile.
- * Anchored to the true bottom-right; the safe-area inset keeps it clear of
- * the iOS home indicator. The Add-component pill mirrors it on the left. */
-.preview-fab {
+/* Floating action stack, anchored to the true bottom-right corner. The
+ * safe-area inset keeps it clear of the iOS home indicator. Buttons inside
+ * sit in a row so the support button lands beside the preview toggle. */
+.fab-stack {
   position: fixed;
   right: 16px;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   z-index: var(--app-z-toolbar);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Preview-toggle: hidden on desktop, shown on mobile. */
+.preview-fab {
   display: none;
   align-items: center;
   gap: 8px;
@@ -74,14 +81,9 @@
   flex-shrink: 0;
 }
 
-/* Floating Discord support button, anchored bottom-right on every viewport.
- * Uses Discord blurple so it reads as an external community link rather than
- * an app action. On mobile it stacks above the preview-fab (see media query). */
+/* Discord support button, shown on every viewport. Uses Discord blurple so it
+ * reads as an external community link rather than an app action. */
 .support-fab {
-  position: fixed;
-  right: 16px;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  z-index: var(--app-z-toolbar);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -142,11 +144,9 @@
     display: none;
   }
 
-  /* Preview-fab owns the bottom-right corner on mobile; lift the support
-   * button above it so the two don't overlap. Once the preview slides over,
-   * the fab is hidden and the support button drops back to the corner. */
+  /* Beside the preview toggle in the corner, collapsed to an icon-only
+   * circle so the pair fits comfortably on narrow screens. */
   .support-fab {
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     gap: 0;
     width: 48px;
     height: 48px;
@@ -154,12 +154,7 @@
     justify-content: center;
   }
 
-  /* Mobile collapses to an icon-only circle. */
   .support-fab span {
     display: none;
-  }
-
-  .app-shell[data-preview-open="true"] .support-fab {
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   }
 }
