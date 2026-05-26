@@ -262,10 +262,38 @@ function describeError(status: number, body: unknown): string {
         .join("\n")}`;
     }
   }
+
+  // The body didn't match Discord's `{ message, errors }` shape (e.g. a plain
+  // string, an empty body, or an unfamiliar structure). Surface whatever came
+  // back rather than hiding it behind a generic message.
+  const raw = rawBodySnippet(body);
   if (status === 401) return "Discord rejected the webhook token (401 Unauthorized).";
   if (status === 404) return "Discord could not find that webhook (404). It may have been deleted.";
-  if (status === 400) return "Discord rejected the payload (400) but gave no details.";
-  return `Discord returned an unexpected ${status} response.`;
+  if (status === 400) {
+    return raw
+      ? `Discord rejected the payload (400):\n${raw}`
+      : "Discord rejected the payload (400) with an empty response body.";
+  }
+  return raw
+    ? `Discord returned an unexpected ${status} response:\n${raw}`
+    : `Discord returned an unexpected ${status} response.`;
+}
+
+/** Compact, length-capped textual view of an unrecognized response body. */
+function rawBodySnippet(body: unknown): string | null {
+  if (body == null) return null;
+  let text: string;
+  if (typeof body === "string") {
+    text = body.trim();
+  } else {
+    try {
+      text = JSON.stringify(body);
+    } catch {
+      return null;
+    }
+  }
+  if (!text) return null;
+  return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
 /**
