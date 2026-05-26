@@ -135,6 +135,15 @@ export const CloseIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const SupportIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
+    <path d="M18 19a2 2 0 0 1-2 2h-3" />
+    <rect x="2" y="13" width="4" height="6" rx="1.5" />
+    <rect x="18" y="13" width="4" height="6" rx="1.5" />
+  </svg>
+);
+
 export const LogoMark = ({ size = 22, ...rest }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 32 32" fill="none" {...rest}>
     <rect width="32" height="32" rx="8" fill="#5865F2" />
