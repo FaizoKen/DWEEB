@@ -264,36 +264,18 @@ function describeError(status: number, body: unknown): string {
   }
 
   // The body didn't match Discord's `{ message, errors }` shape (e.g. a plain
-  // string, an empty body, or an unfamiliar structure). Surface whatever came
-  // back rather than hiding it behind a generic message.
-  const raw = rawBodySnippet(body);
+  // string, an empty body, or an unfamiliar structure). We don't inline the
+  // raw body here — it's returned separately on `SendErr.body` so the UI can
+  // offer a "show raw response" toggle without duplicating it in the message.
+  const hasBody = body != null && (typeof body !== "string" || body.trim().length > 0);
   if (status === 401) return "Discord rejected the webhook token (401 Unauthorized).";
   if (status === 404) return "Discord could not find that webhook (404). It may have been deleted.";
   if (status === 400) {
-    return raw
-      ? `Discord rejected the payload (400):\n${raw}`
+    return hasBody
+      ? "Discord rejected the payload (400) with a non-standard error."
       : "Discord rejected the payload (400) with an empty response body.";
   }
-  return raw
-    ? `Discord returned an unexpected ${status} response:\n${raw}`
-    : `Discord returned an unexpected ${status} response.`;
-}
-
-/** Compact, length-capped textual view of an unrecognized response body. */
-function rawBodySnippet(body: unknown): string | null {
-  if (body == null) return null;
-  let text: string;
-  if (typeof body === "string") {
-    text = body.trim();
-  } else {
-    try {
-      text = JSON.stringify(body);
-    } catch {
-      return null;
-    }
-  }
-  if (!text) return null;
-  return text.length > 500 ? `${text.slice(0, 500)}…` : text;
+  return `Discord returned an unexpected ${status} response.`;
 }
 
 /**
