@@ -64,6 +64,15 @@
   margin-top: 2px;
 }
 
+/* Top-level items get a visible divider so each component reads as a distinct
+ * entry rather than blending into the next one, especially when children are
+ * expanded below a row. */
+.topList > li + li {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--app-border);
+}
+
 .row {
   position: relative;
   display: grid;
