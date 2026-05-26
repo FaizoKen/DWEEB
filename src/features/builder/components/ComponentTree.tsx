@@ -462,6 +462,15 @@ function TreeNode({
   const isReorderable = parentSiblingIds !== null && parentKind !== null;
   const isDragging = drag?.id === node._id;
 
+  // A node is "stuck" at an edge only when there's truly nowhere for it to go.
+  // Container children at the edge of their sibling list can still pop out to
+  // the grandparent (see `moveSibling`), so they keep both arrows.
+  const lastSiblingIndex = parentSiblingIds ? parentSiblingIds.length - 1 : -1;
+  const canMoveUp =
+    isReorderable && (siblingIndex > 0 || parentKind === "container");
+  const canMoveDown =
+    isReorderable && (siblingIndex < lastSiblingIndex || parentKind === "container");
+
   const showDropBefore =
     !!drag && dropTarget?.id === node._id && dropTarget?.position === "before";
   const showDropAfter =
@@ -809,12 +818,16 @@ function TreeNode({
         <span className={styles.summary}>{summarize(node)}</span>
 
         <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
-          <IconButton size="sm" label="Move up" onClick={() => moveSibling(node._id, -1)}>
-            <ArrowUpIcon size={12} />
-          </IconButton>
-          <IconButton size="sm" label="Move down" onClick={() => moveSibling(node._id, 1)}>
-            <ArrowDownIcon size={12} />
-          </IconButton>
+          {canMoveUp ? (
+            <IconButton size="sm" label="Move up" onClick={() => moveSibling(node._id, -1)}>
+              <ArrowUpIcon size={12} />
+            </IconButton>
+          ) : null}
+          {canMoveDown ? (
+            <IconButton size="sm" label="Move down" onClick={() => moveSibling(node._id, 1)}>
+              <ArrowDownIcon size={12} />
+            </IconButton>
+          ) : null}
           <IconButton size="sm" label="Duplicate" onClick={() => duplicate(node._id)}>
             <CopyIcon size={12} />
           </IconButton>
