@@ -242,15 +242,68 @@ export async function sendToWebhook(
 function describeError(status: number, body: unknown): string {
   // Discord shapes: { code, message, errors? }
   if (body && typeof body === "object") {
-    const obj = body as { message?: unknown; code?: unknown };
-    if (typeof obj.message === "string" && obj.message.length > 0) {
-      return `Discord (${status}, code ${obj.code ?? "?"}): ${obj.message}`;
+    const obj = body as { message?: unknown; code?: unknown; errors?: unknown };
+    const head =
+      typeof obj.message === "string" && obj.message.length > 0
+        ? `Discord (${status}, code ${obj.code ?? "?"}): ${obj.message}`
+        : null;
+
+    // For "Invalid Form Body" (and similar) the actionable info lives in the
+    // nested `errors` tree, not the top-level message. Flatten it into
+    // field-pathed lines so the user knows exactly what to fix.
+    const details = flattenDiscordErrors(obj.errors);
+    if (head && details.length > 0) {
+      return `${head}\n${details.map((d) => `• ${d}`).join("\n")}`;
+    }
+    if (head) return head;
+    if (details.length > 0) {
+      return `Discord rejected the payload (${status}):\n${details
+        .map((d) => `• ${d}`)
+        .join("\n")}`;
     }
   }
   if (status === 401) return "Discord rejected the webhook token (401 Unauthorized).";
   if (status === 404) return "Discord could not find that webhook (404). It may have been deleted.";
-  if (status === 400) return "Discord rejected the payload (400). See the body for details.";
+  if (status === 400) return "Discord rejected the payload (400) but gave no details.";
   return `Discord returned an unexpected ${status} response.`;
+}
+
+/**
+ * Walk Discord's nested validation-error tree and produce flat, human-readable
+ * lines. The wire shape interleaves object keys and array indices with
+ * `_errors` arrays at the leaves, e.g.
+ *
+ *   { components: { 0: { components: { 1: { custom_id: {
+ *       _errors: [{ code: "BASE_TYPE_REQUIRED", message: "This field is required" }]
+ *   } } } } } }
+ *
+ * becomes `components[0].components[1].custom_id: This field is required`.
+ */
+function flattenDiscordErrors(errors: unknown, path = ""): string[] {
+  if (!errors || typeof errors !== "object") return [];
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(errors as Record<string, unknown>)) {
+    if (key === "_errors") {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          const msg =
+            item && typeof item === "object" && typeof (item as { message?: unknown }).message === "string"
+              ? (item as { message: string }).message
+              : String(item);
+          out.push(path ? `${path}: ${msg}` : msg);
+        }
+      }
+      continue;
+    }
+    // Numeric keys are array indices; everything else is an object field.
+    const nextPath = /^\d+$/.test(key)
+      ? `${path}[${key}]`
+      : path
+        ? `${path}.${key}`
+        : key;
+    out.push(...flattenDiscordErrors(value, nextPath));
+  }
+  return out;
 }
 
 /* ─── Restore (GET) ──────────────────────────────────────────────────── */
