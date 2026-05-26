@@ -8,41 +8,31 @@
   min-height: 0;
 }
 
-/* Mobile slide-over chrome — desktop hides this entire bar via the media
- * query below so the preview stays uncluttered. */
+/* Mobile sheet chrome — desktop hides this bar via the media query below so
+ * the preview stays uncluttered. It carries only the drag-handle pill;
+ * `touch-action: none` keeps the browser from treating a downward drag here
+ * as a scroll. */
 .mobileBar {
   display: none;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: var(--discord-bg-tertiary);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.3);
-  flex-shrink: 0;
-}
-
-.mobileTitle {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-}
-
-.mobileClose {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--discord-radius-sm);
-  color: var(--discord-text-normal);
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  transition: background 120ms ease;
+  padding: 8px 14px 6px;
+  flex-shrink: 0;
+  touch-action: none;
+  cursor: grab;
 }
-.mobileClose:hover {
-  background: rgba(255, 255, 255, 0.06);
+
+/* The little pill that signals the sheet can be dragged down to dismiss. */
+.grabber {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
 }
 
 .scroll {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px 16px;
   -webkit-overflow-scrolling: touch;
 }
