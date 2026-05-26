@@ -20,6 +20,7 @@ import {
   RedoIcon,
   SendIcon,
   ShareIcon,
+  SparkleIcon,
   UndoIcon,
   UploadIcon,
 } from "@/ui/Icon";
@@ -28,6 +29,8 @@ import { ComponentTree } from "./components/ComponentTree";
 import styles from "./Builder.module.css";
 
 interface BuilderProps {
+  /** Opens the Share / Export dialog on the AI assistant tab. */
+  onAi: () => void;
   /** Opens the Share / Export dialog on the Share-link tab. */
   onShare: () => void;
   /** Opens the Share / Export dialog on the JSON export tab. */
@@ -40,10 +43,11 @@ interface BuilderProps {
   onRestore: () => void;
 }
 
-export function Builder({ onShare, onExport, onImport, onSend, onRestore }: BuilderProps) {
+export function Builder({ onAi, onShare, onExport, onImport, onSend, onRestore }: BuilderProps) {
   return (
     <div className={styles.builder}>
       <ActionBar
+        onAi={onAi}
         onShare={onShare}
         onExport={onExport}
         onImport={onImport}
@@ -56,7 +60,7 @@ export function Builder({ onShare, onExport, onImport, onSend, onRestore }: Buil
   );
 }
 
-function ActionBar({ onShare, onExport, onImport, onSend, onRestore }: BuilderProps) {
+function ActionBar({ onAi, onShare, onExport, onImport, onSend, onRestore }: BuilderProps) {
   const undo = useMessageStore((s) => s.undo);
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
@@ -83,6 +87,15 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore }: BuilderPr
       </div>
 
       <div className={styles.actionGroup}>
+        <Button
+          variant="secondary"
+          size="sm"
+          leadingIcon={<SparkleIcon />}
+          onClick={onAi}
+          title="Build or edit this message with an on-device AI (works offline)"
+        >
+          AI
+        </Button>
         <Menu
           trigger={
             <Button

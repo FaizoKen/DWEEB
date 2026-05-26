@@ -118,7 +118,7 @@ export function App() {
   // though they reuse the same dialog.
   const [shareOpen, setShareOpen] = useState(false);
   const [shareInitialTab, setShareInitialTab] = useState<
-    "send" | "share" | "restore" | "json" | "import"
+    "ai" | "send" | "share" | "restore" | "json" | "import"
   >("send");
 
   // `previewOpen` only matters on mobile, where the preview pane is a
@@ -137,11 +137,9 @@ export function App() {
         Discord Webhook Builder — visually build, preview, and share Discord webhook messages with
         Components V2
       </h1>
-      <section
-        className="app-shell__pane app-shell__pane--builder"
-        aria-label="Component builder"
-      >
+      <section className="app-shell__pane app-shell__pane--builder" aria-label="Component builder">
         <Builder
+          onAi={() => openShareDialog("ai")}
           onShare={() => openShareDialog("share")}
           onExport={() => openShareDialog("json")}
           onImport={() => openShareDialog("import")}

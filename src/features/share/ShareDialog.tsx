@@ -1,5 +1,7 @@
 /**
- * Share dialog — five tabs:
+ * Share dialog — six tabs:
+ *  - AI          : describe a message in plain language; an on-device model
+ *                  (WebLLM, WebGPU) rewrites the editor tree to match — offline.
  *  - Send        : POST the current message to a Discord webhook (or PATCH
  *                  the original when the editor holds a restored message).
  *  - Restore     : GET a previously-posted webhook message back into the
@@ -40,10 +42,12 @@ import {
 import { pushToast } from "@/ui/Toast";
 import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
+import { SparkleIcon } from "@/ui/Icon";
+import { AiPanel } from "@/features/ai/AiPanel";
 import { SendPanel } from "./SendPanel";
 import styles from "./ShareDialog.module.css";
 
-type Tab = "send" | "restore" | "share" | "json" | "import";
+type Tab = "ai" | "send" | "restore" | "share" | "json" | "import";
 
 interface ShareDialogProps {
   open: boolean;
@@ -67,6 +71,11 @@ export function ShareDialog({ open, onClose, initialTab = "send" }: ShareDialogP
   return (
     <Modal open={open} onClose={onClose} title="Share / Send / Export">
       <div className={styles.tabs} role="tablist">
+        <TabButton active={tab === "ai"} onClick={() => setTab("ai")}>
+          <span className={styles.aiTabLabel}>
+            <SparkleIcon size={13} /> AI
+          </span>
+        </TabButton>
         <TabButton active={tab === "send"} onClick={() => setTab("send")}>
           Send
         </TabButton>
@@ -84,6 +93,7 @@ export function ShareDialog({ open, onClose, initialTab = "send" }: ShareDialogP
         </TabButton>
       </div>
       <div className={styles.body}>
+        {tab === "ai" ? <AiPanel /> : null}
         {tab === "send" ? <SendPanel /> : null}
         {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}
         {tab === "share" ? <ShareLinkPanel /> : null}
