@@ -9,6 +9,9 @@
   /* Bottom padding clears the floating Add-component pill (and Preview FAB on mobile). */
   padding: 6px 8px 88px;
   -webkit-overflow-scrolling: touch;
+  /* Recessed surface so the list reads as its own panel against the elevated
+   * action bar / builder pane rather than blending into it. */
+  background: var(--app-bg);
 }
 
 .meta {
