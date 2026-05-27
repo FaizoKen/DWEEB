@@ -44,6 +44,7 @@ export function SavedMessagesMenu() {
   const removeEntry = useSavedMessagesStore((s) => s.remove);
 
   const [saveOpen, setSaveOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<SavedMessageRecord | null>(null);
 
   const handleSave = (name: string) => {
     saveEntry(name, currentMessage);
@@ -61,9 +62,11 @@ export function SavedMessagesMenu() {
     pushToast(`Loaded "${entry.name}"`, "success");
   };
 
-  const handleDelete = (entry: SavedMessageRecord) => {
-    removeEntry(entry.id);
-    pushToast(`Deleted "${entry.name}"`, "info");
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    removeEntry(pendingDelete.id);
+    pushToast(`Deleted "${pendingDelete.name}"`, "info");
+    setPendingDelete(null);
   };
 
   return (
@@ -118,7 +121,10 @@ export function SavedMessagesMenu() {
                       close();
                       handleLoad(entry);
                     }}
-                    onDelete={() => handleDelete(entry)}
+                    onDelete={() => {
+                      close();
+                      setPendingDelete(entry);
+                    }}
                   />
                 ))}
               </div>
@@ -133,7 +139,44 @@ export function SavedMessagesMenu() {
         onCancel={() => setSaveOpen(false)}
         onSave={handleSave}
       />
+
+      <DeleteConfirmDialog
+        entry={pendingDelete}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+      />
     </>
+  );
+}
+
+interface DeleteConfirmDialogProps {
+  entry: SavedMessageRecord | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+function DeleteConfirmDialog({ entry, onCancel, onConfirm }: DeleteConfirmDialogProps) {
+  return (
+    <Modal open={!!entry} onClose={onCancel} title="Delete saved message?">
+      <div className={styles.confirmBody}>
+        <p className={styles.confirmText}>
+          Permanently delete <strong>"{entry?.name}"</strong>? This can't be undone.
+        </p>
+        <div className={styles.saveActions}>
+          <Button variant="ghost" onClick={onCancel} type="button">
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            onClick={onConfirm}
+            type="button"
+            leadingIcon={<TrashIcon />}
+          >
+            Delete
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
