@@ -118,7 +118,8 @@ export const HistoryIcon = ({ size = 16, ...rest }: IconProps) => (
 
 export const SparkleIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
-    <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.5 5.5l2.8 2.8M15.7 15.7l2.8 2.8M5.5 18.5l2.8-2.8M15.7 8.3l2.8-2.8" />
+    <path d="M12 2.5l1.9 5.6a3 3 0 0 0 1.9 1.9l5.6 1.9-5.6 1.9a3 3 0 0 0-1.9 1.9L12 21.5l-1.9-5.6a3 3 0 0 0-1.9-1.9L2.6 12l5.6-1.9a3 3 0 0 0 1.9-1.9z" />
+    <path d="M19 3.5v3M20.5 5h-3" />
   </svg>
 );
 
@@ -171,16 +172,6 @@ export const SettingsIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <circle cx="12" cy="12" r="3" />
     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-  </svg>
-);
-
-export const RobotIcon = ({ size = 16, ...rest }: IconProps) => (
-  <svg {...base(size)} {...rest}>
-    <rect x="4" y="8" width="16" height="11" rx="2.5" />
-    <path d="M12 8V4M12 4h-1.5M12 4h1.5" />
-    <circle cx="9" cy="13" r="1.1" fill="currentColor" stroke="none" />
-    <circle cx="15" cy="13" r="1.1" fill="currentColor" stroke="none" />
-    <path d="M2 13v2M22 13v2" />
   </svg>
 );
 
