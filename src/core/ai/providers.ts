@@ -149,25 +149,37 @@ function networkErrorMessage(provider: AiProvider): string {
   }
 }
 
-/** Pull a human-readable error out of a provider's JSON error body. */
-function describeHttpError(status: number, body: unknown): string {
-  if (body && typeof body === "object") {
-    const err = (body as { error?: unknown }).error;
-    if (
-      err &&
-      typeof err === "object" &&
-      typeof (err as { message?: unknown }).message === "string"
-    ) {
-      return `Provider error (${status}): ${(err as { message: string }).message}`;
-    }
-    if (typeof err === "string") return `Provider error (${status}): ${err}`;
-    const msg = (body as { message?: unknown }).message;
-    if (typeof msg === "string") return `Provider error (${status}): ${msg}`;
+/** Pull the human-readable message out of a provider's JSON error body. */
+function extractProviderMessage(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const err = (body as { error?: unknown }).error;
+  if (err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string") {
+    return (err as { message: string }).message;
   }
+  if (typeof err === "string") return err;
+  const msg = (body as { message?: unknown }).message;
+  if (typeof msg === "string") return msg;
+  return null;
+}
+
+function describeHttpError(status: number, body: unknown): string {
+  const providerText = extractProviderMessage(body);
+
+  // Rate limits get a dedicated, actionable framing even when the provider
+  // included its own (often terse) message — free models throttle hard.
+  if (status === 429) {
+    const detail = providerText ? `: ${providerText}` : "";
+    return (
+      `Rate limited (429)${detail}.\n\n` +
+      "Free models can be busy — wait a few seconds and try again, pick a different " +
+      "model, or switch provider (Groq's free tier is usually the most reliable)."
+    );
+  }
+
+  if (providerText) return `Provider error (${status}): ${providerText}`;
   if (status === 401) return "Provider rejected the API key (401). Double-check the key.";
   if (status === 403) return "Provider denied the request (403). Check key permissions / billing.";
   if (status === 404) return "Endpoint not found (404). Check the model id and base URL.";
-  if (status === 429) return "Rate limited by the provider (429). Try again shortly.";
   return `Provider returned an unexpected ${status} response.`;
 }
 
@@ -222,12 +234,20 @@ async function callOpenAiCompatible(
   signal?: AbortSignal,
 ): Promise<AiCallResult> {
   const url = `${resolvedBaseUrl(settings)}/chat/completions`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${settings.apiKey}`,
+  };
+  // OpenRouter recommends identifying the calling app. These are set on the
+  // server-side proxy request, so the browser's forbidden-header rules (Referer)
+  // don't apply.
+  if (settings.provider === "openrouter") {
+    if (typeof location !== "undefined") headers["HTTP-Referer"] = location.origin;
+    headers["X-Title"] = "Discord Webhook Builder";
+  }
   const res = await proxiedFetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.apiKey}`,
-    },
+    headers,
     body: JSON.stringify({
       model: settings.model,
       temperature: 0.4,
