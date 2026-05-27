@@ -135,6 +135,29 @@ export const CloseIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const BookmarkIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" />
+  </svg>
+);
+
+export const SaveIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M5 3h11l3 3v15H5z" />
+    <path d="M8 3v6h8V3" />
+    <path d="M8 21v-7h8v7" />
+  </svg>
+);
+
+export const RefreshIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M3 12a9 9 0 0 1 15.5-6.3L21 8" />
+    <path d="M21 3v5h-5" />
+    <path d="M21 12a9 9 0 0 1-15.5 6.3L3 16" />
+    <path d="M3 21v-5h5" />
+  </svg>
+);
+
 export const SupportIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
