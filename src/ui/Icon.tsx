@@ -146,12 +146,9 @@ export const SupportIcon = ({ size = 16, ...rest }: IconProps) => (
 
 export const LogoMark = ({ size = 22, ...rest }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 32 32" fill="none" {...rest}>
-    <rect width="32" height="32" rx="8" fill="#5865F2" />
-    <path
-      d="M11.5 9.5h9a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3h-3.5L11 23.5v-3.5a3 3 0 0 1-2.5-2.95v-4.55a3 3 0 0 1 3-3z"
-      fill="#fff"
-    />
-    <circle cx="13.5" cy="14.75" r="1.25" fill="#5865F2" />
-    <circle cx="18.5" cy="14.75" r="1.25" fill="#5865F2" />
+    <rect width="32" height="32" rx="9" fill="#5865F2" />
+    <rect x="6" y="6" width="15" height="15" rx="5" fill="#fff" opacity="0.4" />
+    <rect x="11" y="11" width="15" height="15" rx="5" fill="#fff" />
+    <rect x="14" y="17" width="9" height="3" rx="1.5" fill="#57F287" />
   </svg>
 );
