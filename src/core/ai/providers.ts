@@ -46,7 +46,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
   },
   gemini: {
     label: "Google Gemini",
-    defaultModel: "gemini-1.5-flash",
+    defaultModel: "gemini-2.0-flash",
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
     requiresBaseUrl: false,
     keysUrl: "https://aistudio.google.com/app/apikey",
@@ -136,7 +136,7 @@ function networkErrorMessage(provider: AiProvider): string {
     case "anthropic":
       return `${base}\n\nTips: confirm the key (sk-ant-…) and model id are correct. The browser-access header is already sent; a corporate network or extension may still be blocking the request.`;
     case "gemini":
-      return `${base}\n\nTips: confirm the API key and model id (e.g. gemini-1.5-flash) are correct, and that nothing is blocking generativelanguage.googleapis.com.`;
+      return `${base}\n\nTips: confirm the API key and model id (e.g. gemini-2.0-flash) are correct, and that nothing is blocking generativelanguage.googleapis.com.`;
     case "openai-compatible":
     default:
       return `${base}\n\nTips: double-check the Base URL points at a real OpenAI-compatible endpoint (…/v1) and that it returns CORS headers for browser requests.`;
