@@ -25,8 +25,10 @@ import type { TouchEvent as ReactTouchEvent } from "react";
 import { Builder } from "@/features/builder/Builder";
 import { Preview } from "@/features/preview/Preview";
 import { ShareDialog } from "@/features/share/ShareDialog";
+import { AiChatPanel } from "@/features/ai/AiChatPanel";
+import { useAiStore } from "@/core/ai/aiStore";
 import { ToastViewport } from "@/ui/Toast";
-import { EyeIcon, SupportIcon } from "@/ui/Icon";
+import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAutoSaveDraft } from "./useAutoSaveDraft";
@@ -126,21 +128,27 @@ export function App() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const { sheetRef, swipeProps } = usePreviewSwipeToClose(() => setPreviewOpen(false));
 
+  // The AI assistant docks as a third column on desktop and a full-screen
+  // overlay on mobile; `aiOpen` drives the app-shell grid switch.
+  const aiOpen = useAiStore((s) => s.open);
+  const openAi = useAiStore((s) => s.openPanel);
+
   const openShareDialog = (tab: typeof shareInitialTab) => {
     setShareInitialTab(tab);
     setShareOpen(true);
   };
 
   return (
-    <div className="app-shell" data-preview-open={previewOpen ? "true" : "false"}>
+    <div
+      className="app-shell"
+      data-preview-open={previewOpen ? "true" : "false"}
+      data-ai-open={aiOpen ? "true" : "false"}
+    >
       <h1 className="sr-only">
         Discord Webhook Builder — visually build, preview, and share Discord webhook messages with
         Components V2
       </h1>
-      <section
-        className="app-shell__pane app-shell__pane--builder"
-        aria-label="Component builder"
-      >
+      <section className="app-shell__pane app-shell__pane--builder" aria-label="Component builder">
         <Builder
           onShare={() => openShareDialog("share")}
           onExport={() => openShareDialog("json")}
@@ -158,6 +166,8 @@ export function App() {
         <Preview onClose={() => setPreviewOpen(false)} swipeProps={swipeProps} />
       </section>
 
+      <AiChatPanel />
+
       <div className="fab-stack">
         <button
           type="button"
@@ -169,16 +179,15 @@ export function App() {
           <span>Preview</span>
         </button>
 
-        <a
-          className="support-fab"
-          href="https://discord.gg/2wB7rHRDg2"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Join our Discord support server"
+        <button
+          type="button"
+          className="ai-fab"
+          onClick={openAi}
+          aria-label="Open the AI assistant"
         >
-          <SupportIcon size={20} />
-          <span>Support</span>
-        </a>
+          <SparkleIcon size={20} />
+          <span>AI Assistant</span>
+        </button>
       </div>
 
       <ShareDialog

@@ -24,6 +24,20 @@
   background: var(--app-bg);
 }
 
+/* When the AI assistant is open it becomes a third column; the builder gives
+ * up a little minimum width so the preview stays comfortably visible. */
+.app-shell[data-ai-open="true"] {
+  grid-template-columns: minmax(360px, 1fr) minmax(0, 1fr) clamp(320px, 26vw, 420px);
+}
+
+/* The AI pane is a grid child only while open on desktop; hidden otherwise. */
+.app-shell .app-shell__pane--ai {
+  display: none;
+}
+.app-shell[data-ai-open="true"] .app-shell__pane--ai {
+  display: flex;
+}
+
 .app-shell__pane {
   position: relative;
   min-width: 0;
@@ -69,7 +83,9 @@
   box-shadow: var(--app-shadow-lg);
   border: none;
   cursor: pointer;
-  transition: background 120ms ease, transform 120ms ease;
+  transition:
+    background 120ms ease,
+    transform 120ms ease;
 }
 .preview-fab:hover {
   background: var(--app-accent-hover);
@@ -81,39 +97,54 @@
   flex-shrink: 0;
 }
 
-/* Discord support button, shown on every viewport. Uses Discord blurple so it
- * reads as an external community link rather than an app action. */
-.support-fab {
+/* AI assistant launcher, shown on every viewport. Uses the app accent so it
+ * reads as a primary in-app action. Hidden once the panel is open (the panel
+ * carries its own close control). */
+.ai-fab {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 12px 18px;
   border-radius: 999px;
-  background: #5865f2;
+  background: var(--app-accent);
   color: #fff;
   font-size: 13px;
   font-weight: 600;
-  text-decoration: none;
   box-shadow: var(--app-shadow-lg);
   border: none;
   cursor: pointer;
-  transition: background 120ms ease, transform 120ms ease;
+  transition:
+    background 120ms ease,
+    transform 120ms ease;
 }
-.support-fab:hover {
-  background: #4752c4;
+.ai-fab:hover {
+  background: var(--app-accent-hover);
 }
-.support-fab:active {
+.ai-fab:active {
   transform: scale(0.97);
 }
-.support-fab svg {
+.ai-fab svg {
   flex-shrink: 0;
+}
+
+.app-shell[data-ai-open="true"] .ai-fab {
+  display: none;
 }
 
 /* Mobile: single pane visible, preview slides up from the bottom as a sheet. */
 @media (max-width: 900px) {
-  .app-shell {
+  .app-shell,
+  .app-shell[data-ai-open="true"] {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
+  }
+
+  /* The AI pane leaves the grid and becomes a fixed full-screen overlay
+   * (positioning in AiChatPanel.module.css), so keep it rendered even when
+   * "closed" — it just sits off-screen ready to slide in. */
+  .app-shell .app-shell__pane--ai,
+  .app-shell[data-ai-open="true"] .app-shell__pane--ai {
+    display: flex;
   }
 
   .app-shell__pane--builder {
@@ -148,7 +179,7 @@
 
   /* Beside the preview toggle in the corner, collapsed to an icon-only
    * circle so the pair fits comfortably on narrow screens. */
-  .support-fab {
+  .ai-fab {
     gap: 0;
     width: 48px;
     height: 48px;
@@ -156,7 +187,7 @@
     justify-content: center;
   }
 
-  .support-fab span {
+  .ai-fab span {
     display: none;
   }
 }
