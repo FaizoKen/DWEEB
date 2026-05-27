@@ -104,7 +104,10 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
               spellCheck={false}
               placeholder={meta.keyPlaceholder}
               value={draft.apiKey}
-              onChange={(e) => setDraft((d) => ({ ...d, apiKey: e.currentTarget.value }))}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((d) => ({ ...d, apiKey: value }));
+              }}
             />
             <button
               type="button"
@@ -130,7 +133,10 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
             placeholder={meta.defaultModel || "model id"}
             value={draft.model}
             invalid={modelMissing}
-            onChange={(e) => setDraft((d) => ({ ...d, model: e.currentTarget.value }))}
+            onChange={(e) => {
+              const value = e.currentTarget.value;
+              setDraft((d) => ({ ...d, model: value }));
+            }}
           />
         )}
       </Field>
@@ -151,7 +157,10 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
             placeholder={meta.defaultBaseUrl || "https://…"}
             value={draft.baseUrl}
             invalid={baseUrlMissing}
-            onChange={(e) => setDraft((d) => ({ ...d, baseUrl: e.currentTarget.value }))}
+            onChange={(e) => {
+              const value = e.currentTarget.value;
+              setDraft((d) => ({ ...d, baseUrl: value }));
+            }}
           />
         )}
       </Field>
