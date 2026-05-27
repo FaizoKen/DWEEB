@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "@/lib/cn";
 import styles from "./Modal.module.css";
 
 interface ModalProps {
@@ -8,6 +9,8 @@ interface ModalProps {
   title: string;
   /** Optional footer area (typically holds buttons). */
   footer?: ReactNode;
+  /** "sm" renders a compact centered dialog that stays small on mobile. */
+  size?: "sm" | "md";
   children: ReactNode;
 }
 
@@ -20,7 +23,7 @@ interface ModalProps {
  * Rendered into `document.body` via a portal so it escapes any scroll
  * container the trigger lives in.
  */
-export function Modal({ open, onClose, title, footer, children }: ModalProps) {
+export function Modal({ open, onClose, title, footer, size = "md", children }: ModalProps) {
   const lastFocused = useRef<Element | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -53,7 +56,7 @@ export function Modal({ open, onClose, title, footer, children }: ModalProps) {
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={styles.dialog}
+        className={cn(styles.dialog, size === "sm" && styles.dialogSm)}
       >
         <header className={styles.header}>
           <h2 className={styles.title}>{title}</h2>

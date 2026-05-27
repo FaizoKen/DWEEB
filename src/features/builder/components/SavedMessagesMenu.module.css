@@ -107,3 +107,15 @@
   font-size: 12px;
   color: var(--app-danger);
 }
+
+.confirmBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.confirmText {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
