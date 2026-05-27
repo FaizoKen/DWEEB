@@ -251,6 +251,10 @@ The exporter strips:
 The first-paint bundle is the editor only; `lz-string` is split into its own
 chunk because decoding is only needed when landing on a share URL.
 
+## Deployment
+
+Hosted on Cloudflare Pages with automatic builds on every push.
+
 ## License
 
 MIT.
