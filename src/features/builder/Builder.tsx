@@ -25,6 +25,7 @@ import {
 } from "@/ui/Icon";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
+import { SavedMessagesMenu } from "./components/SavedMessagesMenu";
 import styles from "./Builder.module.css";
 
 interface BuilderProps {
@@ -61,19 +62,11 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore }: BuilderPr
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
   const canRedo = useMessageStore((s) => s.future.length > 0);
-  const loadDefaultPreset = useMessageStore((s) => s.loadDefaultPreset);
 
   return (
     <div className={styles.actionBar}>
       <div className={styles.actionGroup}>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={loadDefaultPreset}
-          title="Replace the current message with the default template (undoable)"
-        >
-          Reset
-        </Button>
+        <SavedMessagesMenu />
         <IconButton label="Undo" onClick={undo} disabled={!canUndo}>
           <UndoIcon />
         </IconButton>
