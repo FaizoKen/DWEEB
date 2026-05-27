@@ -68,14 +68,6 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     keysUrl: "https://openrouter.ai/keys",
     keyPlaceholder: "sk-or-…",
   },
-  "openai-compatible": {
-    label: "OpenAI-compatible (custom)",
-    defaultModel: "",
-    defaultBaseUrl: "",
-    requiresBaseUrl: true,
-    keysUrl: "",
-    keyPlaceholder: "your provider's API key",
-  },
 };
 
 export interface AiTurn {
@@ -125,7 +117,6 @@ export async function callAI(
       case "gemini":
         return await callGemini(settings, system, turns, signal);
       case "openai":
-      case "openai-compatible":
       default:
         return await callOpenAiCompatible(settings, system, turns, signal);
     }
@@ -153,9 +144,8 @@ function networkErrorMessage(provider: AiProvider): string {
       return `${base}\n\nTips: confirm the key (sk-ant-…) and model id are correct. The browser-access header is already sent; a corporate network or extension may still be blocking the request.`;
     case "gemini":
       return `${base}\n\nTips: confirm the API key and model id (e.g. gemini-2.0-flash) are correct, and that nothing is blocking generativelanguage.googleapis.com.`;
-    case "openai-compatible":
     default:
-      return `${base}\n\nTips: double-check the Base URL points at a real OpenAI-compatible endpoint (…/v1) and that it returns CORS headers for browser requests.`;
+      return `${base}\n\nTips: confirm the API key and model id are correct, and that the endpoint allows the request.`;
   }
 }
 

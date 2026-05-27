@@ -7,19 +7,8 @@
  * `providers.ts`.
  */
 
-/**
- * Supported provider families. `openai-compatible` is the escape hatch for the
- * long tail (OpenRouter, Groq, Together, local llama.cpp servers, …) — anything
- * that speaks the OpenAI `/chat/completions` contract works by pointing
- * `baseUrl` at it.
- */
-export type AiProvider =
-  | "openai"
-  | "anthropic"
-  | "gemini"
-  | "groq"
-  | "openrouter"
-  | "openai-compatible";
+/** Supported provider families. Groq and OpenRouter speak the OpenAI API. */
+export type AiProvider = "openai" | "anthropic" | "gemini" | "groq" | "openrouter";
 
 /**
  * Persisted assistant configuration. The API key is a credential — it lives in
@@ -31,8 +20,8 @@ export interface AiSettings {
   apiKey: string;
   model: string;
   /**
-   * Override the provider's API origin. Required for `openai-compatible`;
-   * optional elsewhere (e.g. a proxy). Empty string means "use the default".
+   * Override the provider's API origin (e.g. a proxy). Empty string means
+   * "use the provider default".
    */
   baseUrl: string;
 }
