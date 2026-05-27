@@ -157,7 +157,7 @@ interface DeleteConfirmDialogProps {
 
 function DeleteConfirmDialog({ entry, onCancel, onConfirm }: DeleteConfirmDialogProps) {
   return (
-    <Modal open={!!entry} onClose={onCancel} title="Delete saved message?">
+    <Modal open={!!entry} onClose={onCancel} title="Delete saved message?" size="sm">
       <div className={styles.confirmBody}>
         <p className={styles.confirmText}>
           Permanently delete <strong>"{entry?.name}"</strong>? This can't be undone.
@@ -249,7 +249,7 @@ function SaveMessageDialog({ open, existingNames, onCancel, onSave }: SaveMessag
   };
 
   return (
-    <Modal open={open} onClose={onCancel} title="Save message">
+    <Modal open={open} onClose={onCancel} title="Save message" size="sm">
       <form className={styles.saveForm} onSubmit={submit}>
         <Field
           label="Name"
