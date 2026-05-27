@@ -12,6 +12,7 @@
 
 import {
   isActionRow,
+  isButton,
   isChannelSelect,
   isContainer,
   isFile,
@@ -26,7 +27,7 @@ import {
   isUserSelect,
 } from "./guards";
 import { LIMITS } from "./limits";
-import { countCharacters, countComponents } from "./traversal";
+import { countCharacters, countComponents, walk } from "./traversal";
 import {
   ButtonStyle,
   type AnyComponent,
@@ -104,7 +105,57 @@ export function validateMessage(message: WebhookMessage): ValidationResult {
 
   for (const top of message.components) validateNode(top, issues);
 
+  validateUniqueIds(message, issues);
+
   return { ok: issues.every((i) => i.severity !== "error"), issues };
+}
+
+/**
+ * Discord rejects a message when two components share the same numeric `id`
+ * (Components V2), or when two interactive components (buttons / selects)
+ * share the same `custom_id`. Flag every offending node so the UI can
+ * highlight all of them, not just the second occurrence.
+ */
+function validateUniqueIds(message: WebhookMessage, issues: ValidationIssue[]): void {
+  const byNumericId = new Map<number, EditorId[]>();
+  const byCustomId = new Map<string, EditorId[]>();
+
+  for (const node of walk(message)) {
+    if (typeof node.id === "number" && Number.isInteger(node.id)) {
+      const seen = byNumericId.get(node.id);
+      if (seen) seen.push(node._id);
+      else byNumericId.set(node.id, [node._id]);
+    }
+    if ((isButton(node) || isSelect(node)) && "custom_id" in node && node.custom_id) {
+      const seen = byCustomId.get(node.custom_id);
+      if (seen) seen.push(node._id);
+      else byCustomId.set(node.custom_id, [node._id]);
+    }
+  }
+
+  for (const [id, nodeIds] of byNumericId) {
+    if (nodeIds.length < 2) continue;
+    for (const nodeId of nodeIds) {
+      issues.push({
+        nodeId,
+        severity: "error",
+        code: "COMPONENT_ID_DUPLICATE",
+        message: `Component id ${id} is used by ${nodeIds.length} components — each id must be unique within a message.`,
+      });
+    }
+  }
+
+  for (const [customId, nodeIds] of byCustomId) {
+    if (nodeIds.length < 2) continue;
+    for (const nodeId of nodeIds) {
+      issues.push({
+        nodeId,
+        severity: "error",
+        code: "CUSTOM_ID_DUPLICATE",
+        message: `custom_id "${customId}" is used by ${nodeIds.length} components — each custom_id must be unique within a message.`,
+      });
+    }
+  }
 }
 
 function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]): void {
