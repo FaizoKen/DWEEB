@@ -9,13 +9,14 @@ import path from "node:path";
 
 const pub = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 
-// Stacked component rows where the top row is shaped like a send arrow —
-// "compose components → send webhook". Authored on a 512 grid.
+// Two softly-rounded cards offset on the diagonal, with a small accent
+// pill on the front card — reads as "layered components/builder" without
+// any sharp angles. Authored on a 512 grid.
 const mark = (radius) => `
   <rect width="512" height="512" rx="${radius}" fill="#5865F2"/>
-  <path d="M128 128h224l64 32-64 32H128a32 32 0 0 1 0-64z" fill="#fff"/>
-  <rect x="96" y="224" width="256" height="64" rx="32" fill="#b5bac1"/>
-  <rect x="96" y="320" width="192" height="64" rx="32" fill="#57F287"/>`;
+  <rect x="96" y="96" width="240" height="240" rx="80" fill="#fff" opacity="0.4"/>
+  <rect x="176" y="176" width="240" height="240" rx="80" fill="#fff"/>
+  <rect x="224" y="272" width="144" height="48" rx="24" fill="#57F287"/>`;
 
 const rounded = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${mark(128)}</svg>`;
 const fullBleed = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${mark(0)}</svg>`;
