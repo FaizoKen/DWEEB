@@ -165,6 +165,13 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
         )}
       </Field>
 
+      <p className={styles.note}>
+        Requests go straight from your browser to the provider, so the provider
+        must allow browser (CORS) calls. Google Gemini and Anthropic work
+        directly; if a provider blocks browser requests, point the Base URL at a
+        proxy you control.
+      </p>
+
       <div className={styles.settingsActions}>
         {showCancel ? (
           <Button variant="ghost" onClick={onCancel}>

@@ -117,12 +117,29 @@ export async function callAI(
     if ((e as DOMException)?.name === "AbortError") {
       return { ok: false, error: "Request cancelled." };
     }
-    return {
-      ok: false,
-      error:
-        "Network request failed. Check your API key, the base URL, your connection, " +
-        "or whether your provider allows direct browser (CORS) requests.",
-    };
+    return { ok: false, error: networkErrorMessage(settings.provider) };
+  }
+}
+
+/**
+ * `fetch` only throws (vs. returning an error response) when the request never
+ * completes — a CORS rejection, a DNS/connection failure, or a content blocker.
+ * Since the cause is provider-dependent, tailor the guidance per provider.
+ */
+function networkErrorMessage(provider: AiProvider): string {
+  const base =
+    "Couldn't reach the provider — the request was blocked before any response came back. " +
+    "This is usually a CORS restriction, a network/DNS problem, or a browser ad-block/privacy extension.";
+  switch (provider) {
+    case "openai":
+      return `${base}\n\nTips: make sure the key is an OpenAI key (sk-…) and that no extension is blocking api.openai.com. If your provider doesn't allow browser calls, set the Base URL to a proxy you control.`;
+    case "anthropic":
+      return `${base}\n\nTips: confirm the key (sk-ant-…) and model id are correct. The browser-access header is already sent; a corporate network or extension may still be blocking the request.`;
+    case "gemini":
+      return `${base}\n\nTips: confirm the API key and model id (e.g. gemini-1.5-flash) are correct, and that nothing is blocking generativelanguage.googleapis.com.`;
+    case "openai-compatible":
+    default:
+      return `${base}\n\nTips: double-check the Base URL points at a real OpenAI-compatible endpoint (…/v1) and that it returns CORS headers for browser requests.`;
   }
 }
 
