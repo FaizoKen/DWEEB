@@ -9,16 +9,17 @@ import path from "node:path";
 
 const pub = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 
-// Chat-bubble + stacked component blocks, authored on a 512 grid.
-const bubble = (radius) => `
+// Two softly-rounded cards offset on the diagonal, with a small accent
+// pill on the front card — reads as "layered components/builder" without
+// any sharp angles. Authored on a 512 grid.
+const mark = (radius) => `
   <rect width="512" height="512" rx="${radius}" fill="#5865F2"/>
-  <path d="M128 128h256a32 32 0 0 1 32 32v144a32 32 0 0 1-32 32h-128l-80 64v-64h-48a32 32 0 0 1-32-32V160a32 32 0 0 1 32-32z" fill="#fff"/>
-  <rect x="168" y="176" width="176" height="35" rx="17.5" fill="#5865F2"/>
-  <rect x="168" y="234" width="128" height="35" rx="17.5" fill="#b5bac1"/>
-  <rect x="168" y="291" width="88" height="35" rx="17.5" fill="#57F287"/>`;
+  <rect x="96" y="96" width="240" height="240" rx="80" fill="#fff" opacity="0.4"/>
+  <rect x="176" y="176" width="240" height="240" rx="80" fill="#fff"/>
+  <rect x="224" y="272" width="144" height="48" rx="24" fill="#57F287"/>`;
 
-const rounded = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${bubble(128)}</svg>`;
-const fullBleed = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${bubble(0)}</svg>`;
+const rounded = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${mark(128)}</svg>`;
+const fullBleed = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${mark(0)}</svg>`;
 
 const og = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
   <rect width="1200" height="630" fill="#1e1f22"/>
@@ -30,7 +31,7 @@ const og = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
     </radialGradient>
   </defs>
   <!-- brand icon -->
-  <g transform="translate(80,86) scale(0.32)">${bubble(128)}</g>
+  <g transform="translate(80,86) scale(0.32)">${mark(128)}</g>
   <text x="262" y="158" font-family="system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="60" font-weight="700" fill="#ffffff">Discord Webhook Builder</text>
   <text x="84" y="286" font-family="system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="35" font-weight="600" fill="#d8dae0">Visually build, preview &amp; share Components V2 messages.</text>
   <!-- feature chips -->
