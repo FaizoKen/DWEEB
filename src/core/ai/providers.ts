@@ -52,6 +52,22 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     keysUrl: "https://aistudio.google.com/app/apikey",
     keyPlaceholder: "AIza…",
   },
+  groq: {
+    label: "Groq (free)",
+    defaultModel: "llama-3.3-70b-versatile",
+    defaultBaseUrl: "https://api.groq.com/openai/v1",
+    requiresBaseUrl: false,
+    keysUrl: "https://console.groq.com/keys",
+    keyPlaceholder: "gsk_…",
+  },
+  openrouter: {
+    label: "OpenRouter (free models)",
+    defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    requiresBaseUrl: false,
+    keysUrl: "https://openrouter.ai/keys",
+    keyPlaceholder: "sk-or-…",
+  },
   "openai-compatible": {
     label: "OpenAI-compatible (custom)",
     defaultModel: "",

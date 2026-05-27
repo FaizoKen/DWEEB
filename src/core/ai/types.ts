@@ -13,7 +13,13 @@
  * that speaks the OpenAI `/chat/completions` contract works by pointing
  * `baseUrl` at it.
  */
-export type AiProvider = "openai" | "anthropic" | "gemini" | "openai-compatible";
+export type AiProvider =
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "groq"
+  | "openrouter"
+  | "openai-compatible";
 
 /**
  * Persisted assistant configuration. The API key is a credential — it lives in
