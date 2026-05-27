@@ -12,7 +12,7 @@ import { DEFAULT_PROVIDER, defaultSettingsFor } from "./providers";
 
 const STORAGE_KEY = "dwb.ai.v1";
 
-const PROVIDERS: AiProvider[] = ["openai", "anthropic", "gemini", "openai-compatible"];
+const PROVIDERS: AiProvider[] = ["openai", "anthropic", "gemini", "groq", "openrouter"];
 
 export function loadAiSettings(): AiSettings {
   const fallback = defaultSettingsFor(DEFAULT_PROVIDER);

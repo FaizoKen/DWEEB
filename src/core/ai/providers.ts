@@ -46,19 +46,27 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
   },
   gemini: {
     label: "Google Gemini",
-    defaultModel: "gemini-1.5-flash",
+    defaultModel: "gemini-2.0-flash",
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
     requiresBaseUrl: false,
     keysUrl: "https://aistudio.google.com/app/apikey",
     keyPlaceholder: "AIza…",
   },
-  "openai-compatible": {
-    label: "OpenAI-compatible (custom)",
-    defaultModel: "",
-    defaultBaseUrl: "",
-    requiresBaseUrl: true,
-    keysUrl: "",
-    keyPlaceholder: "your provider's API key",
+  groq: {
+    label: "Groq (free)",
+    defaultModel: "llama-3.3-70b-versatile",
+    defaultBaseUrl: "https://api.groq.com/openai/v1",
+    requiresBaseUrl: false,
+    keysUrl: "https://console.groq.com/keys",
+    keyPlaceholder: "gsk_…",
+  },
+  openrouter: {
+    label: "OpenRouter (free models)",
+    defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    requiresBaseUrl: false,
+    keysUrl: "https://openrouter.ai/keys",
+    keyPlaceholder: "sk-or-…",
   },
 };
 
@@ -109,7 +117,6 @@ export async function callAI(
       case "gemini":
         return await callGemini(settings, system, turns, signal);
       case "openai":
-      case "openai-compatible":
       default:
         return await callOpenAiCompatible(settings, system, turns, signal);
     }
@@ -136,10 +143,9 @@ function networkErrorMessage(provider: AiProvider): string {
     case "anthropic":
       return `${base}\n\nTips: confirm the key (sk-ant-…) and model id are correct. The browser-access header is already sent; a corporate network or extension may still be blocking the request.`;
     case "gemini":
-      return `${base}\n\nTips: confirm the API key and model id (e.g. gemini-1.5-flash) are correct, and that nothing is blocking generativelanguage.googleapis.com.`;
-    case "openai-compatible":
+      return `${base}\n\nTips: confirm the API key and model id (e.g. gemini-2.0-flash) are correct, and that nothing is blocking generativelanguage.googleapis.com.`;
     default:
-      return `${base}\n\nTips: double-check the Base URL points at a real OpenAI-compatible endpoint (…/v1) and that it returns CORS headers for browser requests.`;
+      return `${base}\n\nTips: confirm the API key and model id are correct, and that the endpoint allows the request.`;
   }
 }
 
