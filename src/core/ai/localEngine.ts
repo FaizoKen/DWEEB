@@ -362,6 +362,24 @@ async function ensureEngine(
   }
 }
 
+/**
+ * Caps that keep the local model's context small. The system prompt already
+ * carries the full schema and the live message state (~1k+ tokens), so on a
+ * weak iGPU the cheapest way to avoid the GPU buffer races (a long
+ * prefill/decode is what stresses it) is to send less. Cloud providers get the
+ * untrimmed history; these caps are local-only.
+ *
+ *   • `MAX_LOCAL_HISTORY_TURNS` — only the most recent turns are sent. The
+ *     live message lives in the system prompt, so older chit-chat adds prefill
+ *     cost without adding much signal.
+ *   • `MAX_LOCAL_TOKENS` — fewer decoded tokens means fewer per-token logit
+ *     readbacks (each is a GPU `mapAsync`), so fewer chances to hit the race,
+ *     and the input+output stays comfortably inside the 4096 context window.
+ *     Plenty for an incremental Discord-message edit.
+ */
+const MAX_LOCAL_HISTORY_TURNS = 12;
+const MAX_LOCAL_TOKENS = 1024;
+
 export async function callLocal(
   settings: AiSettings,
   system: string,
@@ -431,9 +449,11 @@ async function runOnce(
   signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
+    const recentTurns =
+      turns.length > MAX_LOCAL_HISTORY_TURNS ? turns.slice(-MAX_LOCAL_HISTORY_TURNS) : turns;
     const messages: ChatCompletionMessageParam[] = [
       { role: "system", content: system },
-      ...turns.map((t) => ({ role: t.role, content: t.content })),
+      ...recentTurns.map((t) => ({ role: t.role, content: t.content })),
     ];
     // Stream the reply, exactly like chat.webllm.ai. The streaming path is the
     // well-exercised one in the worker engine; the one-shot non-streaming call
@@ -441,12 +461,14 @@ async function runOnce(
     // accumulate the chunks here and still hand the whole text back, so the rest
     // of the app (which parses a JSON payload out of the full reply) is
     // unchanged — the UI just doesn't render token-by-token.
+    //
+    // No `stream_options.include_usage`: we never show token counts, and that
+    // final usage chunk is one more end-of-stream GPU readback we don't need.
     const stream = await activeEngine.chat.completions.create({
       messages,
       temperature: 0.4,
-      max_tokens: 2048,
+      max_tokens: MAX_LOCAL_TOKENS,
       stream: true,
-      stream_options: { include_usage: true },
     });
 
     let text = "";
