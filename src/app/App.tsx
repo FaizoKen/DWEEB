@@ -126,12 +126,21 @@ export function App() {
   // `previewOpen` only matters on mobile, where the preview pane is a
   // bottom sheet. On desktop the CSS keeps both panes visible regardless.
   const [previewOpen, setPreviewOpen] = useState(false);
-  const { sheetRef, swipeProps } = usePreviewSwipeToClose(() => setPreviewOpen(false));
 
-  // The AI assistant docks as a third column on desktop and a full-screen
-  // overlay on mobile; `aiOpen` drives the app-shell grid switch.
+  // The AI assistant docks as a third column on desktop and a floating window
+  // over the preview on mobile; `aiOpen` drives the app-shell grid switch.
   const aiOpen = useAiStore((s) => s.open);
   const openAi = useAiStore((s) => s.openPanel);
+  const closeAi = useAiStore((s) => s.closePanel);
+
+  // The mobile chat floats over the preview, so dismissing the preview also
+  // dismisses the chat — leaving a stranded chat over the builder would be odd.
+  const closePreview = () => {
+    setPreviewOpen(false);
+    if (aiOpen) closeAi();
+  };
+
+  const { sheetRef, swipeProps } = usePreviewSwipeToClose(closePreview);
 
   const openShareDialog = (tab: typeof shareInitialTab) => {
     setShareInitialTab(tab);
@@ -171,7 +180,11 @@ export function App() {
         aria-label="Message preview"
         aria-hidden={previewOpen ? undefined : "true"}
       >
-        <Preview onClose={() => setPreviewOpen(false)} swipeProps={swipeProps} />
+        <Preview
+          onClose={closePreview}
+          onOpenAi={aiOpen ? undefined : openAi}
+          swipeProps={swipeProps}
+        />
       </section>
 
       <AiChatPanel />
