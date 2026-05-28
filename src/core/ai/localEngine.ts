@@ -116,19 +116,66 @@ export function isLikelyMobile(): boolean {
 }
 
 /**
- * Patch `navigator.gpu.requestAdapter` so that a null result from the default
- * (`powerPreference: "high-performance"`) request transparently falls back to
- * no-preference and then "low-power".
+ * Wrap a GPUAdapter so the experimental `subgroups` feature is never requested
+ * at device creation.
  *
- * WebLLM's internal `detectGPUDevice` hard-codes
- * `requestAdapter({ powerPreference: "high-performance" })` and throws a
- * generic "no compatible GPU" error if it gets null. On a handful of older
- * Chromium builds with only integrated graphics, the high-performance path can
- * return null even though a no-preference request would yield the iGPU. Since
- * WebLLM exposes no hook to change the power preference, we wrap the call here.
+ * WebLLM's `detectGPUDevice` opportunistically adds every advertised feature it
+ * likes — including `subgroups` — to the `requestDevice()` call. None of the
+ * models we ship actually require it (their model libs only list `shader-f16`),
+ * but several Windows / Intel iGPU drivers fault when a D3D12 device is created
+ * with subgroups enabled, taking the device down with
+ * `DXGI_ERROR_DEVICE_REMOVED` before a single byte of inference runs. Stripping
+ * it is pure upside here: we lose a perf optimization we weren't relying on and
+ * dodge a driver crash. This also matches how older WebLLM builds — like the
+ * ones some official demos still run — behaved before subgroups was added.
+ */
+function wrapAdapterStripSubgroups<T>(adapter: T): T {
+  const a = adapter as unknown as {
+    requestDevice?: (
+      descriptor?: { requiredFeatures?: string[] } & Record<string, unknown>,
+    ) => unknown;
+    __dwbDeviceWrapped?: boolean;
+  } | null;
+  if (!a || typeof a.requestDevice !== "function" || a.__dwbDeviceWrapped) return adapter;
+
+  const original = a.requestDevice.bind(a);
+  try {
+    a.requestDevice = function patchedRequestDevice(descriptor) {
+      let desc = descriptor;
+      if (
+        desc &&
+        Array.isArray(desc.requiredFeatures) &&
+        desc.requiredFeatures.includes("subgroups")
+      ) {
+        desc = {
+          ...desc,
+          requiredFeatures: desc.requiredFeatures.filter((f) => f !== "subgroups"),
+        };
+      }
+      return original(desc);
+    };
+    a.__dwbDeviceWrapped = true;
+  } catch {
+    // Some platforms hand back a non-extensible adapter; leave it untouched.
+  }
+  return adapter;
+}
+
+/**
+ * Patch `navigator.gpu.requestAdapter` so that:
  *
- * Idempotent — the second call is a no-op because the wrapped function is
- * tagged. No-op if WebGPU isn't exposed at all.
+ *   1. A null result from the default (`powerPreference: "high-performance"`)
+ *      request transparently falls back to no-preference, then "low-power".
+ *      WebLLM hard-codes the high-performance request and throws a generic "no
+ *      compatible GPU" error on null; on some older Chromium + iGPU builds the
+ *      high-performance path returns null even though a no-preference request
+ *      yields the iGPU.
+ *   2. Every adapter it hands back has the crash-prone `subgroups` feature
+ *      stripped from device creation (see `wrapAdapterStripSubgroups`).
+ *
+ * WebLLM exposes no hook for either, so we wrap the call here. Idempotent — the
+ * second call is a no-op because the wrapped function is tagged. No-op if
+ * WebGPU isn't exposed at all.
  */
 function patchRequestAdapterOnce(): void {
   type AdapterRequestOptions = { powerPreference?: string } & Record<string, unknown>;
@@ -144,14 +191,14 @@ function patchRequestAdapterOnce(): void {
     options?: AdapterRequestOptions,
   ) {
     const first = await original(options);
-    if (first) return first;
+    if (first) return wrapAdapterStripSubgroups(first);
     if (options && options.powerPreference === "high-performance") {
       const { powerPreference: _ignored, ...rest } = options;
       const restKeys = Object.keys(rest).length > 0 ? rest : undefined;
       const noPref = await original(restKeys as AdapterRequestOptions | undefined);
-      if (noPref) return noPref;
+      if (noPref) return wrapAdapterStripSubgroups(noPref);
       const lowPower = await original({ ...rest, powerPreference: "low-power" });
-      if (lowPower) return lowPower;
+      if (lowPower) return wrapAdapterStripSubgroups(lowPower);
     }
     return first;
   };
@@ -239,12 +286,14 @@ function explainEngineLoadError(modelId: string, raw: string): string {
 
 function gpuStuckMessage(modelId: string, raw: string): string {
   return (
-    `Couldn't load the local model "${modelId}" — the browser's GPU device kept getting reset by the driver.\n\n` +
-    "We retried automatically a few times and it didn't recover. Try one of these:\n" +
-    "• Reload the page (Ctrl+Shift+R / Cmd+Shift+R) to reset Chrome's GPU process.\n" +
-    "• Close other GPU-heavy tabs (video calls, games, 3D apps, other AI tabs) and reload.\n" +
-    "• On Windows, an outdated GPU driver is the most common root cause — updating it usually fixes this for good.\n" +
-    "• If it keeps happening, switch to a free cloud provider (Groq or OpenRouter) under AI settings.\n\n" +
+    `Couldn't load the local model "${modelId}" — the browser's GPU device was reset by the driver (Windows TDR / device-removed) before the model could load.\n\n` +
+    "Once Chrome's GPU process is in this state, a tab reload usually isn't enough — the process is shared across the whole browser. Try, in order:\n" +
+    "• Fully quit Chrome (close every window, then check the tray) and reopen it. This is what restarts the GPU process; a plain reload often doesn't.\n" +
+    "• Close other GPU-heavy apps/tabs (video calls, games, 3D, other AI tabs) before retrying.\n" +
+    "• Update your GPU driver (Intel/AMD/NVIDIA) — on Windows an outdated driver is the most common root cause of a device-removed loop.\n" +
+    "• Sanity-check at https://webgpureport.org/ — when the GPU process is healthy it shows an adapter; if the official https://webllm.mlc.ai demo loads a model, this page will too after a clean restart.\n" +
+    '• In the model list, the "Llama 3.2 1B — recommended" option is the most broadly compatible.\n' +
+    "• Still looping? Switch to a free cloud provider (Groq or OpenRouter) under AI settings — no GPU needed.\n\n" +
     `Underlying error: ${raw}`
   );
 }
@@ -267,18 +316,19 @@ async function acquireEngineLock(): Promise<() => void> {
 }
 
 /**
- * Tear down the cached engine. Best-effort `engine.unload()` releases the
- * WebGPU device and model weights before we drop the reference, so a fresh
- * `CreateMLCEngine` starts from a clean slate.
+ * Tear down the cached engine. `engine.unload()` releases the WebGPU device and
+ * model weights; we *await* it (capped) before letting a fresh
+ * `CreateMLCEngine` create another device — two live WebGPU devices on a
+ * memory-tight iGPU can themselves provoke `DXGI_ERROR_DEVICE_REMOVED`. The cap
+ * keeps a hung unload from blocking recovery.
  */
-function resetEngine(): void {
+async function resetEngine(): Promise<void> {
   const e = engine;
   engine = null;
   currentModelId = null;
   if (e) {
-    // unload is async; fire and forget — the engine is already considered
-    // dead from our perspective.
-    void e.unload().catch(() => {});
+    const done = e.unload().catch(() => {});
+    await Promise.race([done, delay(2000)]);
   }
 }
 
@@ -295,7 +345,7 @@ async function ensureEngine(
     return engine;
   }
 
-  resetEngine();
+  await resetEngine();
 
   const webllm = await import("@mlc-ai/web-llm");
 
@@ -382,7 +432,7 @@ async function runWithRetry(
     const retryable = isTransientGpuError(message) || isNoAdapterError(message);
 
     if (retryable && attempt < RETRY_DELAYS_MS.length) {
-      resetEngine();
+      await resetEngine();
       await delay(RETRY_DELAYS_MS[attempt]!);
       return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
     }
@@ -429,7 +479,7 @@ async function runWithRetry(
 
     if (attempt < RETRY_DELAYS_MS.length && isTransientGpuError(message)) {
       signal?.removeEventListener("abort", onAbort);
-      resetEngine();
+      await resetEngine();
       await delay(RETRY_DELAYS_MS[attempt]!);
       return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
     }
