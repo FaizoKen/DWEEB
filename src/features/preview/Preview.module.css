@@ -36,7 +36,9 @@
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 24px 16px;
+  /* Extra bottom padding keeps the last message clear of the fixed AI
+   * assistant FAB in the corner. */
+  padding: 24px 16px 96px;
   -webkit-overflow-scrolling: touch;
   /* Tell the browser the only intended gesture here is vertical pan, so it
    * can begin scrolling immediately without waiting on touch handlers. */
@@ -165,7 +167,7 @@
     display: flex;
   }
   .scroll {
-    padding: 16px 10px;
+    padding: 16px 10px 96px;
   }
   .message {
     grid-template-columns: 32px 1fr;
@@ -186,7 +188,7 @@
  * <200px of text width on a 360px viewport. */
 @media (max-width: 480px) {
   .scroll {
-    padding: 12px 6px;
+    padding: 12px 6px 88px;
   }
   .message {
     grid-template-columns: 28px 1fr;
