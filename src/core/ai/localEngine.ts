@@ -56,25 +56,41 @@ export interface LocalModelInfo {
 }
 
 /**
- * Curated subset of WebLLM's prebuilt models, ordered from lightest to
- * heaviest. Anything in the prebuilt registry can be pasted in by hand, but
- * the dropdown stays short and decision-friendly.
+ * Curated subset of WebLLM's prebuilt models, ordered from lightest GPU load to
+ * heaviest. Anything in the prebuilt registry can be pasted in by hand, but the
+ * dropdown stays short and decision-friendly.
+ *
+ * The default leads with the gentlest model on purpose. "Local" is the
+ * zero-friction, no-key option, so it's the one a brand-new user (often on an
+ * integrated GPU) tries first — and on weak GPUs the heavier models trip the
+ * driver's ~2-second watchdog while compiling/prefilling and reset the device.
+ * `SmolLM2-135M-q0f16` is the smoothest of the bunch: it's tiny *and* uses raw
+ * f16 weights (`q0`, no int quantization), so its kernels skip the
+ * dequantization work the `q4*` models do — far less per-op GPU load, which is
+ * exactly why it runs smoothly on low-end hardware (and on chat.webllm.ai). It
+ * does need the `shader-f16` extension, which desktop Chrome/Edge GPUs expose;
+ * a user whose GPU lacks it gets a clear "pick another model" error.
  */
 export const LOCAL_MODELS: LocalModelInfo[] = [
   {
-    id: "Llama-3.2-1B-Instruct-q4f32_1-MLC",
-    label: "Llama 3.2 1B — recommended",
-    sizeMB: 879,
-  },
-  {
-    id: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
-    label: "Qwen 2.5 0.5B — smallest, fastest",
-    sizeMB: 314,
+    id: "SmolLM2-135M-Instruct-q0f16-MLC",
+    label: "SmolLM2 135M — smoothest, best for low-end GPUs",
+    sizeMB: 271,
   },
   {
     id: "SmolLM2-360M-Instruct-q4f32_1-MLC",
-    label: "SmolLM2 360M — tiniest",
+    label: "SmolLM2 360M — tiny",
     sizeMB: 290,
+  },
+  {
+    id: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
+    label: "Qwen 2.5 0.5B — small, fast",
+    sizeMB: 314,
+  },
+  {
+    id: "Llama-3.2-1B-Instruct-q4f32_1-MLC",
+    label: "Llama 3.2 1B — more capable",
+    sizeMB: 879,
   },
   {
     id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
@@ -175,7 +191,7 @@ function gpuResetMessage(modelId: string, raw: string): string {
     "and a plain tab reload usually isn't enough either. In order of what actually fixes it:\n" +
     "• Fully quit Chrome — close every window, check the tray/Task Manager — then reopen. That's what restarts the GPU process.\n" +
     "• Update your GPU driver (Intel/AMD/NVIDIA). On Windows an outdated driver is the most common cause of a device-removed loop.\n" +
-    '• Try a smaller model — "Qwen 2.5 0.5B" or "SmolLM2 360M". They upload and compile far faster, so they\'re much less likely to trip the GPU\'s ~2-second watchdog while loading.\n' +
+    "• Switch to the smoothest model — \"SmolLM2 135M\" (the default). It's tiny and uses lighter GPU kernels, so it rarely trips the GPU's ~2-second watchdog the heavier models hit while loading.\n" +
     "• Close other GPU-heavy apps/tabs (video calls, games, 3D, other AI tabs) before retrying.\n\n" +
     "Want to keep working right now? Switch to a free cloud model (Groq or OpenRouter) under AI settings — it runs server-side, so no local GPU is involved.\n\n" +
     `Underlying error: ${raw}`
@@ -194,7 +210,7 @@ function softGlitchMessage(modelId: string, raw: string): string {
     `torn down before the response finished.\n\n` +
     "The GPU itself is fine; the model just needs reloading. Usually this clears on its own:\n" +
     "• Send your message again — the model reloads and the reply normally goes through.\n" +
-    '• If it keeps happening, try a smaller model ("Qwen 2.5 0.5B" or "SmolLM2 360M") — they\'re less likely to trip the GPU\'s watchdog.\n' +
+    '• If it keeps happening, switch to "SmolLM2 135M" (the smoothest, default) — its lighter GPU kernels are far less likely to trip the watchdog.\n' +
     "• Or reload the page (Ctrl+Shift+R) to start the GPU process fresh.\n\n" +
     "Prefer not to fight it? Switch to a free cloud model (Groq or OpenRouter) under AI settings — no local GPU involved.\n\n" +
     `Underlying error: ${raw}`
@@ -252,7 +268,7 @@ function explainEngineLoadError(modelId: string, raw: string): string {
   if (/out of memory|oom|allocation|cannot initialize runtime/i.test(raw)) {
     return (
       `${head}\n\n` +
-      "Your device ran out of memory loading this model. Try a smaller option — SmolLM2 360M or Qwen 2.5 0.5B — or switch to a free cloud provider (Groq, OpenRouter) under AI settings."
+      "Your device ran out of memory loading this model. Try the smallest option — SmolLM2 135M (the default) — or switch to a free cloud provider (Groq, OpenRouter) under AI settings."
     );
   }
   return `${head}\n\n${raw}`;
