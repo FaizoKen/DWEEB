@@ -435,15 +435,29 @@ async function runOnce(
       { role: "system", content: system },
       ...turns.map((t) => ({ role: t.role, content: t.content })),
     ];
-    const reply = await activeEngine.chat.completions.create({
+    // Stream the reply, exactly like chat.webllm.ai. The streaming path is the
+    // well-exercised one in the worker engine; the one-shot non-streaming call
+    // is where this setup hit "Object has already been disposed" mid-reply. We
+    // accumulate the chunks here and still hand the whole text back, so the rest
+    // of the app (which parses a JSON payload out of the full reply) is
+    // unchanged — the UI just doesn't render token-by-token.
+    const stream = await activeEngine.chat.completions.create({
       messages,
       temperature: 0.4,
       max_tokens: 2048,
+      stream: true,
+      stream_options: { include_usage: true },
     });
+
+    let text = "";
+    for await (const chunk of stream) {
+      if (signal?.aborted) return { ok: false, error: "Request cancelled." };
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (typeof delta === "string") text += delta;
+    }
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 
-    const text = reply.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || text.length === 0) {
+    if (text.length === 0) {
       return { ok: false, error: "The local model returned an empty response." };
     }
     return { ok: true, text };
