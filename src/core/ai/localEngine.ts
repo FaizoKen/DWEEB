@@ -113,8 +113,8 @@ export function isLikelyMobile(): boolean {
 }
 
 /**
- * Classify an engine error as a transient GPU/driver hiccup that a single
- * retry will likely recover from. Covers:
+ * Classify an engine error as a transient GPU/driver hiccup that a retry
+ * with a fresh engine will likely recover from. Covers:
  *
  *   • `DXGI_ERROR_DEVICE_REMOVED` and friends — D3D12 / Vulkan / Metal can
  *     yank the GPU device out from under WebGPU. On Windows this commonly
@@ -124,13 +124,18 @@ export function isLikelyMobile(): boolean {
  *   • "Buffer was unmapped" / mapAsync races — WebLLM's internal GPU state
  *     can desync when an interrupt or model swap collides with an in-flight
  *     buffer map. The cached engine is corrupted but a fresh one is fine.
+ *   • "Object has already been disposed" — thrown by TVM when its internal
+ *     handle is 0. WebLLM's `device.lost` handler auto-calls `unload()`
+ *     behind our back when the GPU drops the device, leaving our cached
+ *     engine as a zombie. The next call into it trips this. Cure: drop the
+ *     cached engine and rebuild.
  *
  * We deliberately do NOT match "Failed to fetch" here — that's almost always
  * a real CORS/connectivity problem, not a transient driver issue, and
  * retrying immediately won't help.
  */
 function isTransientGpuError(message: string): boolean {
-  return /device[_\s]?removed|device lost|device was lost|dxgi_error|d3d12|mapasync|buffer was unmapped|buffer is unmapped|command queue/i.test(
+  return /device[_\s]?removed|device lost|device was lost|dxgi_error|d3d12|mapasync|buffer was unmapped|buffer is unmapped|command queue|object has (?:already )?been disposed|tensor has already been disposed/i.test(
     message,
   );
 }
@@ -288,10 +293,35 @@ async function ensureEngine(
   }
 }
 
-const TRANSIENT_RETRY_DELAY_MS = 250;
+/**
+ * Backoff schedule for transient GPU errors. The first retry fires almost
+ * immediately for the common "first attempt got unlucky" case; subsequent
+ * delays give Windows D3D12 time to actually release a stuck device handle
+ * (releases are asynchronous in the driver and can take 1–2 seconds to drain).
+ */
+const TRANSIENT_RETRY_DELAYS_MS = [400, 1500, 3000];
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Terminal message shown when every retry hit the same GPU-driver wall.
+ * At this point the device handle is genuinely stuck — there is nothing
+ * the engine can do from inside the page that the user hasn't already had
+ * us try. A page reload (or, on Windows, a driver update) is the only
+ * reliable cure.
+ */
+function gpuStuckMessage(modelId: string, raw: string): string {
+  return (
+    `Couldn't load the local model "${modelId}" — the browser's GPU device kept getting reset by the driver.\n\n` +
+    "We retried automatically a few times and it didn't recover. Try one of these:\n" +
+    "• Reload the page (Ctrl+Shift+R / Cmd+Shift+R) to reset Chrome's GPU process.\n" +
+    "• Close other GPU-heavy tabs (video calls, games, 3D apps, other AI tabs) and reload.\n" +
+    "• On Windows, an outdated GPU driver is the most common root cause — updating it usually fixes this for good.\n" +
+    "• If it keeps happening, switch to a free cloud provider (Groq or OpenRouter) under AI settings.\n\n" +
+    `Underlying error: ${raw}`
+  );
 }
 
 export async function callLocal(
@@ -348,10 +378,15 @@ async function runWithRetry(
     mlcEngine = await ensureEngine(modelId, onProgress);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    if (attempt === 0 && isTransientGpuError(message)) {
+    if (attempt < TRANSIENT_RETRY_DELAYS_MS.length && isTransientGpuError(message)) {
       await resetEngine();
-      await delay(TRANSIENT_RETRY_DELAY_MS);
+      await delay(TRANSIENT_RETRY_DELAYS_MS[attempt]!);
       return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
+    }
+    // Out of retries on a transient error → the driver/device really is wedged
+    // and only a page reload (or driver update) will clear it.
+    if (isTransientGpuError(message)) {
+      return { ok: false, error: gpuStuckMessage(modelId, message) };
     }
     return { ok: false, error: explainEngineLoadError(modelId, message) };
   }
@@ -385,11 +420,14 @@ async function runWithRetry(
   } catch (e) {
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
     const message = e instanceof Error ? e.message : String(e);
-    if (attempt === 0 && isTransientGpuError(message)) {
+    if (attempt < TRANSIENT_RETRY_DELAYS_MS.length && isTransientGpuError(message)) {
       signal?.removeEventListener("abort", onAbort);
       await resetEngine();
-      await delay(TRANSIENT_RETRY_DELAY_MS);
+      await delay(TRANSIENT_RETRY_DELAYS_MS[attempt]!);
       return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
+    }
+    if (isTransientGpuError(message)) {
+      return { ok: false, error: gpuStuckMessage(modelId, message) };
     }
     return { ok: false, error: `Local model error: ${message}` };
   } finally {
