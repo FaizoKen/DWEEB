@@ -24,17 +24,10 @@
   background: var(--app-bg);
 }
 
-/* When the AI assistant is open it becomes a third column; the builder gives
- * up a little minimum width so the preview stays comfortably visible. */
-.app-shell[data-ai-open="true"] {
-  grid-template-columns: minmax(360px, 1fr) minmax(0, 1fr) clamp(320px, 26vw, 420px);
-}
-
-/* The AI pane is a grid child only while open on desktop; hidden otherwise. */
+/* The AI pane floats over the layout on every viewport (positioning lives in
+ * AiChatPanel.module.css), so it never participates in the grid — keep it
+ * mounted at all times so the slide animation runs in both directions. */
 .app-shell .app-shell__pane--ai {
-  display: none;
-}
-.app-shell[data-ai-open="true"] .app-shell__pane--ai {
   display: flex;
 }
 
@@ -140,18 +133,9 @@
 
 /* Mobile: single pane visible, preview slides up from the bottom as a sheet. */
 @media (max-width: 900px) {
-  .app-shell,
-  .app-shell[data-ai-open="true"] {
+  .app-shell {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
-  }
-
-  /* The AI pane leaves the grid and becomes a fixed full-screen overlay
-   * (positioning in AiChatPanel.module.css), so keep it rendered even when
-   * "closed" — it just sits off-screen ready to slide in. */
-  .app-shell .app-shell__pane--ai,
-  .app-shell[data-ai-open="true"] .app-shell__pane--ai {
-    display: flex;
   }
 
   .app-shell__pane--builder {

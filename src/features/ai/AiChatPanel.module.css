@@ -1,18 +1,39 @@
 /*
  * AI chat panel.
  *
- * On desktop the panel is the third grid column of the app shell (see
- * global.css). It fills its column, so the slide animation here is only used
- * on mobile, where the panel becomes a fixed full-screen overlay.
+ * The panel floats over the layout on every viewport, anchored to the
+ * bottom-right corner. It slides up from below the viewport when opened and
+ * tucks back down when closed, so the message render behind it stays visible.
  */
 
 .panel {
+  position: fixed;
+  left: auto;
+  top: auto;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  width: min(94vw, 420px);
+  height: min(72dvh, 620px);
+  max-height: calc(100dvh - 32px);
+  z-index: var(--app-z-modal);
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: 100%;
   background: var(--app-bg-elevated);
-  border-left: 1px solid var(--app-border);
+  border: 1px solid var(--app-border);
+  border-radius: 16px;
+  box-shadow: var(--app-shadow-lg);
+  overflow: hidden;
+  transform: translateY(calc(100% + 32px));
+  transition:
+    transform 260ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 200ms ease;
+  opacity: 0;
+  will-change: transform;
+}
+.panel[data-open="true"] {
+  transform: none;
+  opacity: 1;
 }
 
 .header {
@@ -340,35 +361,14 @@
   color: var(--app-accent);
 }
 
-/* ── Mobile: floating chat window, anchored bottom-right ─────────────────
- * The preview fills the screen behind it (see global.css), so the chat is a
- * compact floating panel over the bottom-right corner rather than a full-screen
- * overlay — you can read the live message render while you chat. It slides up
- * from the bottom and tucks away below the viewport when closed. */
+/* ── Mobile tweaks: a touch closer to the edge on small screens. */
 @media (max-width: 900px) {
   .panel {
-    position: fixed;
-    left: auto;
-    top: auto;
     right: 10px;
     bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     width: min(94vw, 400px);
     height: min(68dvh, 560px);
     max-height: calc(100dvh - 20px);
-    z-index: var(--app-z-modal);
-    border: 1px solid var(--app-border);
-    border-radius: 16px;
-    box-shadow: var(--app-shadow-lg);
-    overflow: hidden;
     transform: translateY(calc(100% + 20px));
-    transition:
-      transform 260ms cubic-bezier(0.4, 0, 0.2, 1),
-      opacity 200ms ease;
-    opacity: 0;
-    will-change: transform;
-  }
-  .panel[data-open="true"] {
-    transform: none;
-    opacity: 1;
   }
 }
