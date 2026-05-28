@@ -120,7 +120,7 @@ export function App() {
   // though they reuse the same dialog.
   const [shareOpen, setShareOpen] = useState(false);
   const [shareInitialTab, setShareInitialTab] = useState<
-    "send" | "share" | "restore" | "json" | "import"
+    "send" | "share" | "restore" | "json" | "import" | "about"
   >("send");
 
   // `previewOpen` only matters on mobile, where the preview pane is a
@@ -172,6 +172,7 @@ export function App() {
           onImport={() => openShareDialog("import")}
           onSend={() => openShareDialog("send")}
           onRestore={() => openShareDialog("restore")}
+          onAbout={() => openShareDialog("about")}
         />
       </section>
       <section

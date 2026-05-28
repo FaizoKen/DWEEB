@@ -43,7 +43,7 @@ import { cn } from "@/lib/cn";
 import { SendPanel } from "./SendPanel";
 import styles from "./ShareDialog.module.css";
 
-type Tab = "send" | "restore" | "share" | "json" | "import";
+type Tab = "send" | "restore" | "share" | "json" | "import" | "about";
 
 interface ShareDialogProps {
   open: boolean;
@@ -82,6 +82,9 @@ export function ShareDialog({ open, onClose, initialTab = "send" }: ShareDialogP
         <TabButton active={tab === "import"} onClick={() => setTab("import")}>
           Import
         </TabButton>
+        <TabButton active={tab === "about"} onClick={() => setTab("about")}>
+          About
+        </TabButton>
       </div>
       <div className={styles.body}>
         {tab === "send" ? <SendPanel /> : null}
@@ -89,6 +92,7 @@ export function ShareDialog({ open, onClose, initialTab = "send" }: ShareDialogP
         {tab === "share" ? <ShareLinkPanel /> : null}
         {tab === "json" ? <JsonExportPanel /> : null}
         {tab === "import" ? <ImportPanel onDone={onClose} /> : null}
+        {tab === "about" ? <AboutPanel /> : null}
       </div>
     </Modal>
   );
@@ -191,6 +195,39 @@ function JsonExportPanel() {
           Download file
         </Button>
       </div>
+    </>
+  );
+}
+
+/**
+ * About panel — surfaces a short description of the app, the author
+ * credit, and the support-server invite. Lives in the Share dialog so
+ * it's reachable from the same place as Import/Export.
+ */
+function AboutPanel() {
+  return (
+    <>
+      <p className={styles.lead}>
+        Discord Webhook Builder is a visual editor for Discord webhook
+        messages using <strong>Components V2</strong>. Build rich messages
+        with containers, sections, buttons, media, and files, watch a
+        pixel-accurate live preview, and share the result through a single
+        URL — no backend, no account, no database. Your draft and any
+        webhook URLs you paste stay in this browser.
+      </p>
+      <p className={styles.lead}>
+        Made by <strong>Faizo</strong>.
+      </p>
+      <p className={styles.lead}>
+        Feedback or questions? Join the support server:{" "}
+        <a
+          href="https://discord.gg/2wB7rHRDg2"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          discord.gg/2wB7rHRDg2
+        </a>
+      </p>
     </>
   );
 }

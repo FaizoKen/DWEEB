@@ -19,6 +19,7 @@ import {
   HistoryIcon,
   RedoIcon,
   SendIcon,
+  SettingsIcon,
   ShareIcon,
   UndoIcon,
   UploadIcon,
@@ -39,9 +40,11 @@ interface BuilderProps {
   onSend: () => void;
   /** Opens the Share / Export dialog focused on the Restore panel. */
   onRestore: () => void;
+  /** Opens the Share / Export dialog focused on the About panel. */
+  onAbout: () => void;
 }
 
-export function Builder({ onShare, onExport, onImport, onSend, onRestore }: BuilderProps) {
+export function Builder({ onShare, onExport, onImport, onSend, onRestore, onAbout }: BuilderProps) {
   return (
     <div className={styles.builder}>
       <ActionBar
@@ -50,6 +53,7 @@ export function Builder({ onShare, onExport, onImport, onSend, onRestore }: Buil
         onImport={onImport}
         onSend={onSend}
         onRestore={onRestore}
+        onAbout={onAbout}
       />
 
       <ComponentTree />
@@ -57,7 +61,7 @@ export function Builder({ onShare, onExport, onImport, onSend, onRestore }: Buil
   );
 }
 
-function ActionBar({ onShare, onExport, onImport, onSend, onRestore }: BuilderProps) {
+function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: BuilderProps) {
   const undo = useMessageStore((s) => s.undo);
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
@@ -83,9 +87,9 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore }: BuilderPr
               size="sm"
               leadingIcon={<ShareIcon />}
               trailingIcon={<ChevronDownIcon />}
-              title="Share link, export JSON, or import another message"
+              title="Share link, export JSON, import another message, or view info"
             >
-              Share
+              More
             </Button>
           }
         >
@@ -117,6 +121,15 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore }: BuilderPr
                 }}
               >
                 Import…
+              </MenuItem>
+              <MenuItem
+                icon={<SettingsIcon />}
+                onSelect={() => {
+                  close();
+                  onAbout();
+                }}
+              >
+                About
               </MenuItem>
             </>
           )}

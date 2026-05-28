@@ -36,6 +36,7 @@
 .lead {
   margin: 0;
   font-size: 12px;
+  line-height: 1.55;
   color: var(--app-text-muted);
 }
 .lead code {
@@ -43,6 +44,13 @@
   background: var(--app-bg-input);
   padding: 0 4px;
   border-radius: 3px;
+}
+.lead strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+.lead a {
+  color: var(--app-accent);
 }
 
 .statsRow {
