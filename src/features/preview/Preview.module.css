@@ -35,6 +35,9 @@
   overscroll-behavior: contain;
   padding: 24px 16px;
   -webkit-overflow-scrolling: touch;
+  /* Tell the browser the only intended gesture here is vertical pan, so it
+   * can begin scrolling immediately without waiting on touch handlers. */
+  touch-action: pan-y;
 }
 
 .message {
