@@ -110,7 +110,7 @@ const DEFAULT_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# There's more in this editor than the tour shows — dropdown menus, clickable (non-link) buttons, and file uploads all work too. File uploads go through any webhook, but menus and clickable buttons only respond to clicks if the webhook URL you paste in was created by a bot or app (Discord routes the interaction back to whoever owns the webhook). This app sends to whatever webhook URL you give it either way. Hit **Reset** any time to bring this tour back.",
+        "-# There's more in this editor than the tour shows — dropdown menus, clickable (non-link) buttons, and file uploads all work too. File uploads go through any webhook, but Discord only accepts interactive components (clickable buttons, select menus) when the webhook URL was created by a bot or app — on regular user-created webhooks the message will be rejected. Link buttons and layout-only components are fine on any webhook. Hit **Reset** any time to bring this tour back.",
     },
   ],
 };

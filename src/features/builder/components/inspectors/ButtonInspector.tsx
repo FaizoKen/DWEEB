@@ -60,9 +60,9 @@ export function ButtonInspector({ node }: Props) {
     <>
       {isInteractive ? (
         <CapabilityNote>
-          <strong>Needs an application-owned webhook.</strong> Regular
-          user-created webhooks display this button but the click goes nowhere.
-          Use a Link button if you just want a hyperlink.
+          <strong>Needs an application-owned webhook.</strong> Discord rejects
+          messages with interactive buttons when sent through a regular
+          user-created webhook. Use a Link button if you just want a hyperlink.
         </CapabilityNote>
       ) : null}
       {node.style === ButtonStyle.Premium ? (
