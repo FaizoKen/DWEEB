@@ -14,7 +14,7 @@ import { Select } from "@/ui/Select";
 import { TextInput } from "@/ui/TextInput";
 import { useAiStore } from "@/core/ai/aiStore";
 import { PROVIDERS, defaultSettingsFor } from "@/core/ai/providers";
-import { LOCAL_MODELS, isWebGpuSupported } from "@/core/ai/localEngine";
+import { LOCAL_MODELS, isLikelyMobile, isWebGpuSupported } from "@/core/ai/localEngine";
 import type { AiProvider, AiSettings } from "@/core/ai/types";
 import styles from "./AiChatPanel.module.css";
 
@@ -62,6 +62,7 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
 
   const selectedLocalModel = LOCAL_MODELS.find((m) => m.id === draft.model);
   const webGpuOk = isWebGpuSupported();
+  const mobile = isLikelyMobile();
 
   return (
     <div className={styles.settings}>
@@ -102,6 +103,12 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
               WebGPU isn't available in this browser. Local AI needs the latest Chrome / Edge
               (desktop) or Safari 17.4+. On Firefox enable <code>dom.webgpu.enabled</code> in{" "}
               <code>about:config</code>.
+            </div>
+          ) : mobile ? (
+            <div className={styles.localWarn}>
+              Local AI is desktop-only in practice. Mobile GPUs cap WebGPU buffer sizes well below
+              what these models need, so loading will fail before the download finishes. Pick a
+              free cloud provider (Groq or OpenRouter) instead — no download, works on mobile.
             </div>
           ) : null}
 
