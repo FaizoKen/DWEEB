@@ -12,6 +12,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
   },
   "dependencies": {
+    "@mlc-ai/web-llm": "^0.2.79",
     "lz-string": "^1.5.0",
     "nanoid": "^5.0.7",
     "react": "^18.3.1",

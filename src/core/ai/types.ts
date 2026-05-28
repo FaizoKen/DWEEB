@@ -7,8 +7,12 @@
  * `providers.ts`.
  */
 
-/** Supported provider families. Groq and OpenRouter speak the OpenAI API. */
-export type AiProvider = "openai" | "anthropic" | "gemini" | "groq" | "openrouter";
+/**
+ * Supported provider families. Groq and OpenRouter speak the OpenAI API.
+ * "local" runs a model entirely in the browser via WebGPU — no API key, no
+ * network requests during inference (only the one-time model download).
+ */
+export type AiProvider = "openai" | "anthropic" | "gemini" | "groq" | "openrouter" | "local";
 
 /**
  * Persisted assistant configuration. The API key is a credential — it lives in
