@@ -22,6 +22,10 @@ export default defineConfig({
           // Split the compression lib so the main bundle stays tiny.
           // Decoding is only needed when the user lands on a share URL.
           serializer: ["lz-string"],
+          // Pin the WebLLM runtime to its own chunk so the chunk name is stable
+          // and obvious in network panels. It's only fetched when the user
+          // actually sends a message with the local provider.
+          "web-llm": ["@mlc-ai/web-llm"],
         },
       },
     },
