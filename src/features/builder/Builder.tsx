@@ -17,9 +17,9 @@ import {
   ChevronDownIcon,
   DownloadIcon,
   HistoryIcon,
+  InfoIcon,
   RedoIcon,
   SendIcon,
-  SettingsIcon,
   ShareIcon,
   UndoIcon,
   UploadIcon,
@@ -123,7 +123,7 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
                 Import…
               </MenuItem>
               <MenuItem
-                icon={<SettingsIcon />}
+                icon={<InfoIcon />}
                 onSelect={() => {
                   close();
                   onAbout();

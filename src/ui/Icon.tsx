@@ -168,6 +168,14 @@ export const SupportIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const InfoIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5" />
+    <circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 export const SettingsIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <circle cx="12" cy="12" r="3" />

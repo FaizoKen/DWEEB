@@ -208,25 +208,23 @@ function AboutPanel() {
   return (
     <>
       <p className={styles.lead}>
-        Discord Webhook Builder is a visual editor for Discord webhook
-        messages using <strong>Components V2</strong>. Build rich messages
-        with containers, sections, buttons, media, and files, watch a
-        pixel-accurate live preview, and share the result through a single
-        URL — no backend, no account, no database. Your draft and any
-        webhook URLs you paste stay in this browser.
+        A visual editor for Discord webhook messages with{" "}
+        <strong>Components V2</strong>. Build, preview, and share — all in
+        your browser.
       </p>
       <p className={styles.lead}>
         Made by <strong>Faizo</strong>.
       </p>
       <p className={styles.lead}>
-        Feedback or questions? Join the support server:{" "}
+        Feedback?{" "}
         <a
           href="https://discord.gg/2wB7rHRDg2"
           target="_blank"
           rel="noopener noreferrer"
         >
-          discord.gg/2wB7rHRDg2
+          Join the support server
         </a>
+        .
       </p>
     </>
   );
