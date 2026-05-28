@@ -132,6 +132,19 @@ function isGpuResetError(message: string): boolean {
 }
 
 /**
+ * Softer, genuinely transient GPU errors — a buffer unmapped mid-readback, or
+ * an object disposed by a racing teardown. These are NOT a wedged GPU process
+ * (unlike `isGpuResetError`): the device is still alive, so simply re-running
+ * the generation on the *same* engine almost always clears them. Retrying these
+ * creates no new WebGPU device, so it cannot affect Chrome's GPU-crash guard.
+ */
+function isSoftGpuError(message: string): boolean {
+  return /mapasync|buffer (?:was|is) unmapped|object has (?:already )?been disposed|tensor has already been disposed/i.test(
+    message,
+  );
+}
+
+/**
  * "Couldn't get a GPU adapter." On a machine that genuinely has WebGPU (the
  * page exposes `navigator.gpu`), a null adapter is usually a transient
  * GPU-process blip — the process is restarting after a crash, or is briefly
@@ -355,23 +368,46 @@ async function runOnce(
       { role: "system", content: system },
       ...turns.map((t) => ({ role: t.role, content: t.content })),
     ];
-    const reply = await activeEngine.chat.completions.create({
-      messages,
-      temperature: 0.4,
-      max_tokens: 2048,
-    });
-    if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 
-    const text = reply.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || text.length === 0) {
-      return { ok: false, error: "The local model returned an empty response." };
+    // A soft GPU error during generation (a buffer unmapped mid-readback, an
+    // object disposed by a racing teardown) clears on a second pass: the model
+    // is already loaded and the device is still alive, so we re-run generation
+    // exactly once on the SAME engine. That creates no new WebGPU device, so —
+    // unlike a device-recreating retry — it can't provoke Chrome's GPU-process
+    // crash guard. A device reset or any other error is surfaced immediately.
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (signal?.aborted) return { ok: false, error: "Request cancelled." };
+      try {
+        const reply = await activeEngine.chat.completions.create({
+          messages,
+          temperature: 0.4,
+          max_tokens: 2048,
+        });
+        if (signal?.aborted) return { ok: false, error: "Request cancelled." };
+
+        const text = reply.choices?.[0]?.message?.content;
+        if (typeof text !== "string" || text.length === 0) {
+          return { ok: false, error: "The local model returned an empty response." };
+        }
+        return { ok: true, text };
+      } catch (e) {
+        lastErr = e;
+        const message = e instanceof Error ? e.message : String(e);
+        if (attempt === 0 && !signal?.aborted && isSoftGpuError(message)) {
+          await delay(250);
+          continue;
+        }
+        throw e;
+      }
     }
-    return { ok: true, text };
+    // The loop always returns or throws; this only guards a future logic change.
+    throw lastErr ?? new Error("Local generation failed.");
   } catch (e) {
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
     const message = e instanceof Error ? e.message : String(e);
-    // The engine's WebGPU device may be dead (GPU reset) or otherwise unusable;
-    // drop it so a later send starts from a clean engine.
+    // The engine's WebGPU device may be dead (GPU reset) or its state corrupted
+    // by the failure; drop it so the next send starts from a clean engine.
     await resetEngine();
     if (isGpuResetError(message)) {
       return { ok: false, error: gpuResetMessage(modelId, message) };
