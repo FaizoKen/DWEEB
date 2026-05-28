@@ -175,6 +175,31 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
           Save
         </Button>
       </div>
+
+      <section className={styles.about} aria-label="About this app">
+        <h3 className={styles.aboutTitle}>About</h3>
+        <p className={styles.aboutText}>
+          Discord Webhook Builder is a visual editor for Discord webhook messages
+          using Components V2. Build rich messages with containers, sections,
+          buttons, media, and files, watch a pixel-accurate live preview, and
+          share the result through a single URL — no backend, no account, no
+          database. Your draft and any webhook URLs you paste stay in this
+          browser.
+        </p>
+        <p className={styles.aboutCredit}>
+          Made by <strong>Faizo</strong>
+        </p>
+        <p className={styles.aboutText}>
+          Feedback or questions? Join the support server:{" "}
+          <a
+            href="https://discord.gg/2wB7rHRDg2"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            discord.gg/2wB7rHRDg2
+          </a>
+        </p>
+      </section>
     </div>
   );
 }

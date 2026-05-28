@@ -340,6 +340,39 @@
   color: var(--app-accent);
 }
 
+/* ── About section (app info + credits) ─────────────────────────────── */
+.about {
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--app-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.aboutTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-text-muted);
+}
+.aboutText {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--app-text-muted);
+}
+.aboutCredit {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--app-text);
+}
+.aboutCredit strong {
+  color: var(--app-accent);
+  font-weight: 600;
+}
+
 /* ── Mobile: floating chat window, anchored bottom-right ─────────────────
  * The preview fills the screen behind it (see global.css), so the chat is a
  * compact floating panel over the bottom-right corner rather than a full-screen
