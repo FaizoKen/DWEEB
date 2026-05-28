@@ -1,35 +1,31 @@
 /**
  * Local (in-browser) AI provider — WebGPU inference via @mlc-ai/web-llm.
  *
- * The engine, the WebGPU device, and the model weights all live on the main
- * thread via `CreateMLCEngine`. This is exactly what the official WebLLM
- * get-started demo (https://webllm.mlc.ai) does, and it is the most reliable
- * path in practice:
+ * This drives the library the same hands-off way the official WebLLM chat app
+ * (chat.webllm.ai) does: create the engine, let WebLLM pick the GPU adapter and
+ * device itself, and do nothing clever around WebGPU. We deliberately do NOT:
  *
- *   • The main thread is where WebGPU is most widely exposed. Some Chrome
- *     configurations (older versions, certain integrated-GPU drivers, some
- *     enterprise policies) don't expose `navigator.gpu` to *workers* at all,
- *     so a worker-hosted engine fails on machines where the page itself runs
- *     WebGPU fine.
- *   • Hosting the engine in a worker also means a GPU hiccup inside the worker
- *     can drag down Chrome's shared GPU process, which then makes the main
- *     thread's next `requestAdapter()` return null — i.e. a worker failure can
- *     manufacture a "no compatible GPU" error on a machine that otherwise
- *     works. Running in-page avoids that cross-context cascade.
+ *   • monkey-patch `navigator.gpu` / `requestAdapter`,
+ *   • strip or add any GPU device features (e.g. `subgroups`),
+ *   • force a `powerPreference`, or
+ *   • auto-retry a failed load by recreating the engine/device.
  *
- * Recovery is tiered by failure type (see `nextRetryDelayMs`): a soft GPU
- * hiccup or a momentarily-null adapter gets a few quick retries with a fresh
- * engine, while a removed/lost device (a Windows TDR reset) gets a single
- * patient retry. Once Chrome's *shared* GPU process is wedged, no in-page retry
- * can revive it — `requestAdapter()` keeps handing back the same dead D3D12
- * device until the process itself restarts — so when retries are exhausted the
- * surfaced message points at the only fixes that actually work: restart
- * Chrome's GPU process, update the driver, try a smaller model, or switch to a
- * cloud provider.
+ * That last point is what actually cures the `DXGI_ERROR_DEVICE_REMOVED` loop
+ * on this project. When a Windows TDR resets the GPU mid-load, recreating the
+ * device hammers Chrome's *shared* GPU process while it is still restarting.
+ * After a few such crashes Chrome blocklists the GPU for the entire browser
+ * session — which is why the old retry storm took down every other WebGPU tab
+ * (including chat.webllm.ai) until Chrome was fully quit, and why the app
+ * "never worked" afterwards: it re-tripped the guard on every send. The fix is
+ * simply to stop hammering. We make exactly one attempt, surface a clear
+ * message if it fails, and let the user act (reload, smaller model, cloud) —
+ * precisely what chat.webllm.ai does.
  *
- * The @mlc-ai/web-llm package is heavy, so the import is *dynamic* — it only
- * pulls into the bundle when the user picks the local provider and sends a
- * message.
+ * The engine runs in-page on the main thread via `CreateMLCEngine`, the path
+ * the official webllm.mlc.ai get-started demo uses and the one confirmed to
+ * work on this user's Windows iGPU. The @mlc-ai/web-llm package is heavy, so
+ * the import is *dynamic* — it only pulls into the bundle when the user picks
+ * the local provider and sends a message.
  */
 
 import type { MLCEngine, InitProgressReport, ChatCompletionMessageParam } from "@mlc-ai/web-llm";
@@ -121,134 +117,25 @@ export function isLikelyMobile(): boolean {
 }
 
 /**
- * Wrap a GPUAdapter so the experimental `subgroups` feature is never requested
- * at device creation.
- *
- * WebLLM's `detectGPUDevice` opportunistically adds every advertised feature it
- * likes — including `subgroups` — to the `requestDevice()` call. None of the
- * models we ship actually require it (their model libs only list `shader-f16`),
- * but several Windows / Intel iGPU drivers fault when a D3D12 device is created
- * with subgroups enabled, taking the device down with
- * `DXGI_ERROR_DEVICE_REMOVED` before a single byte of inference runs. Stripping
- * it is pure upside here: we lose a perf optimization we weren't relying on and
- * dodge a driver crash. This also matches how older WebLLM builds — like the
- * ones some official demos still run — behaved before subgroups was added.
+ * The "GPU was reset" signature: a removed/lost D3D12 device, a DXGI
+ * device-removed code, or a failure creating the D3D12 command queue (the first
+ * backend op, which fails instantly when the adapter is backed by an
+ * already-dead device). On Windows this is almost always a TDR (Timeout
+ * Detection & Recovery) reset of the GPU. We don't try to recover from it
+ * in-page — once Chrome's shared GPU process is wedged, only restarting that
+ * process (a full Chrome quit) brings it back — so we just explain it well.
  */
-function wrapAdapterStripSubgroups<T>(adapter: T): T {
-  const a = adapter as unknown as {
-    requestDevice?: (
-      descriptor?: { requiredFeatures?: string[] } & Record<string, unknown>,
-    ) => unknown;
-    __dwbDeviceWrapped?: boolean;
-  } | null;
-  if (!a || typeof a.requestDevice !== "function" || a.__dwbDeviceWrapped) return adapter;
-
-  const original = a.requestDevice.bind(a);
-  try {
-    a.requestDevice = function patchedRequestDevice(descriptor) {
-      let desc = descriptor;
-      if (
-        desc &&
-        Array.isArray(desc.requiredFeatures) &&
-        desc.requiredFeatures.includes("subgroups")
-      ) {
-        desc = {
-          ...desc,
-          requiredFeatures: desc.requiredFeatures.filter((f) => f !== "subgroups"),
-        };
-      }
-      return original(desc);
-    };
-    a.__dwbDeviceWrapped = true;
-  } catch {
-    // Some platforms hand back a non-extensible adapter; leave it untouched.
-  }
-  return adapter;
-}
-
-/**
- * Patch `navigator.gpu.requestAdapter` so that:
- *
- *   1. A null result from the default (`powerPreference: "high-performance"`)
- *      request transparently falls back to no-preference, then "low-power".
- *      WebLLM hard-codes the high-performance request and throws a generic "no
- *      compatible GPU" error on null; on some older Chromium + iGPU builds the
- *      high-performance path returns null even though a no-preference request
- *      yields the iGPU.
- *   2. Every adapter it hands back has the crash-prone `subgroups` feature
- *      stripped from device creation (see `wrapAdapterStripSubgroups`).
- *
- * WebLLM exposes no hook for either, so we wrap the call here. Idempotent — the
- * second call is a no-op because the wrapped function is tagged. No-op if
- * WebGPU isn't exposed at all.
- */
-function patchRequestAdapterOnce(): void {
-  type AdapterRequestOptions = { powerPreference?: string } & Record<string, unknown>;
-  type RequestAdapterFn = (options?: AdapterRequestOptions) => Promise<unknown>;
-  const nav = navigator as unknown as {
-    gpu?: { requestAdapter?: RequestAdapterFn & { __dwbPatched?: boolean } };
-  };
-  const gpu = nav.gpu;
-  if (!gpu || typeof gpu.requestAdapter !== "function" || gpu.requestAdapter.__dwbPatched) return;
-
-  const original = gpu.requestAdapter.bind(gpu);
-  const patched: RequestAdapterFn & { __dwbPatched?: boolean } = async function patched(
-    options?: AdapterRequestOptions,
-  ) {
-    const first = await original(options);
-    if (first) return wrapAdapterStripSubgroups(first);
-    if (options && options.powerPreference === "high-performance") {
-      const { powerPreference: _ignored, ...rest } = options;
-      const restKeys = Object.keys(rest).length > 0 ? rest : undefined;
-      const noPref = await original(restKeys as AdapterRequestOptions | undefined);
-      if (noPref) return wrapAdapterStripSubgroups(noPref);
-      const lowPower = await original({ ...rest, powerPreference: "low-power" });
-      if (lowPower) return wrapAdapterStripSubgroups(lowPower);
-    }
-    return first;
-  };
-  patched.__dwbPatched = true;
-  gpu.requestAdapter = patched;
-}
-
-/**
- * The "wedged GPU process" signature: a removed/lost D3D12 device, a DXGI
- * device-removed code, or a failure creating the D3D12 command queue — the
- * first backend op, which fails instantly when the adapter is backed by an
- * already-dead device. On Windows this is almost always a TDR (Timeout
- * Detection & Recovery) reset of the GPU. Kept separate from the softer hiccups
- * below because it recovers differently (see `nextRetryDelayMs`).
- */
-function isDeviceRemovedError(message: string): boolean {
+function isGpuResetError(message: string): boolean {
   return /device[_\s]?removed|device(?:\s+was)?\s+lost|dxgi_error|d3d12|create command queue/i.test(
     message,
   );
 }
 
 /**
- * Softer, genuinely transient GPU errors — a buffer unmapped mid-flight, or an
- * object disposed by a racing teardown. A fresh engine almost always clears
- * these on the next try.
- */
-function isSoftGpuError(message: string): boolean {
-  return /mapasync|buffer (?:was|is) unmapped|object has (?:already )?been disposed|tensor has already been disposed/i.test(
-    message,
-  );
-}
-
-/**
- * Any GPU/driver error a retry might recover from. Used only to decide which
- * user-facing message to surface once retries are exhausted.
- */
-function isTransientGpuError(message: string): boolean {
-  return isDeviceRemovedError(message) || isSoftGpuError(message);
-}
-
-/**
  * "Couldn't get a GPU adapter." On a machine that genuinely has WebGPU (the
- * page exposes `navigator.gpu`), a null adapter is almost always a transient
+ * page exposes `navigator.gpu`), a null adapter is usually a transient
  * GPU-process blip — the process is restarting after a crash, or is briefly
- * saturated. Worth a couple of quick retries before giving up.
+ * saturated. A plain page reload almost always clears it.
  */
 function isNoAdapterError(message: string): boolean {
   return /unable to find a compatible gpu|find a compatible gpu|requestadapter.*null|no.*gpu adapter/i.test(
@@ -256,18 +143,35 @@ function isNoAdapterError(message: string): boolean {
   );
 }
 
+/** The message shown when the GPU device was reset (Windows TDR / device-removed). */
+function gpuResetMessage(modelId: string, raw: string): string {
+  return (
+    `Couldn't load the local model "${modelId}". The browser's GPU device was reset by its ` +
+    `driver (a Windows TDR / "device-removed").\n\n` +
+    "Once Chrome's shared GPU process is in this state, JavaScript on the page can't revive it, " +
+    "and a plain tab reload usually isn't enough either. In order of what actually fixes it:\n" +
+    "• Fully quit Chrome — close every window, check the tray/Task Manager — then reopen. That's what restarts the GPU process.\n" +
+    "• Update your GPU driver (Intel/AMD/NVIDIA). On Windows an outdated driver is the most common cause of a device-removed loop.\n" +
+    '• Try a smaller model — "Qwen 2.5 0.5B" or "SmolLM2 360M". They upload and compile far faster, so they\'re much less likely to trip the GPU\'s ~2-second watchdog while loading.\n' +
+    "• Close other GPU-heavy apps/tabs (video calls, games, 3D, other AI tabs) before retrying.\n\n" +
+    "Want to keep working right now? Switch to a free cloud model (Groq or OpenRouter) under AI settings — it runs server-side, so no local GPU is involved.\n\n" +
+    `Underlying error: ${raw}`
+  );
+}
+
 /**
- * Translate a non-transient engine load failure into something the user can
- * act on. Transient driver hiccups are handled by the retry loop and never
- * reach this function.
+ * Translate an engine load failure into something the user can act on.
  */
 function explainEngineLoadError(modelId: string, raw: string): string {
   const head = `Couldn't load the local model "${modelId}".`;
 
+  if (isGpuResetError(raw)) {
+    return gpuResetMessage(modelId, raw);
+  }
   if (isNoAdapterError(raw)) {
     return (
       `${head}\n\n` +
-      "The browser exposes WebGPU but didn't hand back a GPU adapter, even after a few retries. " +
+      "The browser exposes WebGPU but didn't hand back a GPU adapter. " +
       "On a machine that can run WebGPU at all, this is almost always a temporary GPU-process hiccup or a system-graphics setting — not a missing GPU.\n\n" +
       "Try these, in order:\n" +
       "• Reload the page (Ctrl+Shift+R / Cmd+Shift+R). This restarts the browser's GPU process and clears most adapter hiccups.\n" +
@@ -312,20 +216,6 @@ function explainEngineLoadError(modelId: string, raw: string): string {
   return `${head}\n\n${raw}`;
 }
 
-function gpuStuckMessage(modelId: string, raw: string): string {
-  return (
-    `Couldn't load the local model "${modelId}". The browser's GPU device was reset by its driver ` +
-    `(a Windows TDR / "device-removed") and didn't recover — even after an automatic retry with a fresh adapter.\n\n` +
-    "Once Chrome's shared GPU process is in this state, JavaScript on the page can't revive it, and a plain tab reload usually isn't enough either. In order of what actually fixes it:\n" +
-    "• Fully quit Chrome — close every window, check the tray/Task Manager — then reopen. That's what restarts the GPU process.\n" +
-    "• Update your GPU driver (Intel/AMD/NVIDIA). On Windows an outdated driver is the most common cause of a device-removed loop.\n" +
-    '• Try a smaller model — "Qwen 2.5 0.5B" or "SmolLM2 360M". They upload and compile far faster, so they\'re much less likely to trip the GPU\'s ~2-second watchdog while loading.\n' +
-    "• Close other GPU-heavy apps/tabs (video calls, games, 3D, other AI tabs) before retrying.\n\n" +
-    "Want to keep working right now? Switch to a free cloud model (Groq or OpenRouter) under AI settings — it runs server-side, so no local GPU is involved.\n\n" +
-    `Underlying error: ${raw}`
-  );
-}
-
 // ── Engine singleton ─────────────────────────────────────────────────────────
 let engine: MLCEngine | null = null;
 let currentModelId: string | null = null;
@@ -343,12 +233,18 @@ async function acquireEngineLock(): Promise<() => void> {
   return release;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 /**
  * Tear down the cached engine. `engine.unload()` releases the WebGPU device and
  * model weights; we *await* it (capped) before letting a fresh
  * `CreateMLCEngine` create another device — two live WebGPU devices on a
  * memory-tight iGPU can themselves provoke `DXGI_ERROR_DEVICE_REMOVED`. The cap
- * keeps a hung unload from blocking recovery.
+ * keeps a hung unload from blocking. This runs on a model switch and after a
+ * failed load/generate (so a dead or half-initialized engine is never cached),
+ * never as part of an automatic retry loop.
  */
 async function resetEngine(): Promise<void> {
   const e = engine;
@@ -377,58 +273,12 @@ async function ensureEngine(
 
   const webllm = await import("@mlc-ai/web-llm");
 
-  // Apply the requestAdapter fallback to navigator.gpu before the engine asks
-  // for an adapter.
-  patchRequestAdapterOnce();
-
-  try {
-    const created = await webllm.CreateMLCEngine(modelId, {
-      initProgressCallback: progressCb,
-    });
-    engine = created;
-    currentModelId = modelId;
-    return created;
-  } catch (e) {
-    engine = null;
-    currentModelId = null;
-    throw e;
-  }
-}
-
-/**
- * Backoff schedule for soft/transient load failures. The first retry fires
- * almost immediately for the common "first attempt got unlucky" case;
- * subsequent delays give Chrome's GPU process time to come back up after a
- * crash (asynchronous, can take 1–2 seconds to settle).
- */
-const RETRY_DELAYS_MS = [400, 1500, 3000];
-
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/**
- * How long to wait before the next retry, or `null` to stop and surface an
- * error. The policy depends on the failure:
- *
- *   • Removed/lost device (Windows TDR) → the *shared* GPU process is wedged.
- *     Re-requesting an adapter hands back the same dead D3D12 device, so a
- *     retry only helps if Chrome's GPU process restarts in the gap. Give it one
- *     patient shot (~3s, enough for a process restart to land) — then stop.
- *     Rapid-fire retries can't revive a removed device and risk tripping
- *     Chrome's "GPU process crashed too often" guard, which disables the GPU
- *     for the rest of the browser session.
- *   • Soft hiccup / momentarily-null adapter → far more likely a passing blip;
- *     a few quick retries clear it.
- */
-function nextRetryDelayMs(message: string, attempt: number): number | null {
-  if (isDeviceRemovedError(message)) {
-    return attempt < 1 ? 3000 : null;
-  }
-  if (isSoftGpuError(message) || isNoAdapterError(message)) {
-    return attempt < RETRY_DELAYS_MS.length ? RETRY_DELAYS_MS[attempt]! : null;
-  }
-  return null;
+  const created = await webllm.CreateMLCEngine(modelId, {
+    initProgressCallback: progressCb,
+  });
+  engine = created;
+  currentModelId = modelId;
+  return created;
 }
 
 export async function callLocal(
@@ -452,26 +302,28 @@ export async function callLocal(
 
   const release = await acquireEngineLock();
   try {
-    return await runWithRetry(modelId, system, turns, signal, onProgress, 0);
+    return await runOnce(modelId, system, turns, signal, onProgress);
   } finally {
     release();
   }
 }
 
 /**
- * Run one load+generate cycle. Two escape hatches:
+ * Load the model (if needed) and generate one reply. A single attempt — there
+ * is no automatic retry. If the GPU was reset, recreating the device here would
+ * only hammer Chrome's restarting GPU process and risk a browser-wide GPU
+ * blocklist; instead we surface a clear message and let the user act.
  *
- *   1. Transient GPU error, or a null adapter on a WebGPU-capable machine →
- *      unload, wait per the backoff schedule, try again with a fresh engine.
- *   2. Anything else → surface a user-facing message.
+ * On any failure we drop the cached engine: a load failure may leave a
+ * half-initialized engine, and a generate failure on a GPU reset leaves the
+ * engine's device dead. Either way the next user attempt must start fresh.
  */
-async function runWithRetry(
+async function runOnce(
   modelId: string,
   system: string,
   turns: AiTurn[],
   signal: AbortSignal | undefined,
   onProgress: ((p: LocalLoadProgress) => void) | undefined,
-  attempt: number,
 ): Promise<AiCallResult> {
   if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 
@@ -479,17 +331,8 @@ async function runWithRetry(
   try {
     activeEngine = await ensureEngine(modelId, onProgress);
   } catch (e) {
+    await resetEngine();
     const message = e instanceof Error ? e.message : String(e);
-    const wait = nextRetryDelayMs(message, attempt);
-
-    if (wait !== null) {
-      await resetEngine();
-      await delay(wait);
-      return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
-    }
-    if (isTransientGpuError(message)) {
-      return { ok: false, error: gpuStuckMessage(modelId, message) };
-    }
     return { ok: false, error: explainEngineLoadError(modelId, message) };
   }
 
@@ -527,16 +370,11 @@ async function runWithRetry(
   } catch (e) {
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
     const message = e instanceof Error ? e.message : String(e);
-    const wait = nextRetryDelayMs(message, attempt);
-
-    if (wait !== null) {
-      signal?.removeEventListener("abort", onAbort);
-      await resetEngine();
-      await delay(wait);
-      return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
-    }
-    if (isTransientGpuError(message)) {
-      return { ok: false, error: gpuStuckMessage(modelId, message) };
+    // The engine's WebGPU device may be dead (GPU reset) or otherwise unusable;
+    // drop it so a later send starts from a clean engine.
+    await resetEngine();
+    if (isGpuResetError(message)) {
+      return { ok: false, error: gpuResetMessage(modelId, message) };
     }
     return { ok: false, error: `Local model error: ${message}` };
   } finally {
