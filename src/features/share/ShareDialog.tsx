@@ -43,7 +43,7 @@ import { cn } from "@/lib/cn";
 import { SendPanel } from "./SendPanel";
 import styles from "./ShareDialog.module.css";
 
-type Tab = "send" | "restore" | "share" | "json" | "import";
+type Tab = "send" | "restore" | "share" | "json" | "import" | "about";
 
 interface ShareDialogProps {
   open: boolean;
@@ -82,6 +82,9 @@ export function ShareDialog({ open, onClose, initialTab = "send" }: ShareDialogP
         <TabButton active={tab === "import"} onClick={() => setTab("import")}>
           Import
         </TabButton>
+        <TabButton active={tab === "about"} onClick={() => setTab("about")}>
+          About
+        </TabButton>
       </div>
       <div className={styles.body}>
         {tab === "send" ? <SendPanel /> : null}
@@ -89,6 +92,7 @@ export function ShareDialog({ open, onClose, initialTab = "send" }: ShareDialogP
         {tab === "share" ? <ShareLinkPanel /> : null}
         {tab === "json" ? <JsonExportPanel /> : null}
         {tab === "import" ? <ImportPanel onDone={onClose} /> : null}
+        {tab === "about" ? <AboutPanel /> : null}
       </div>
     </Modal>
   );
@@ -191,6 +195,37 @@ function JsonExportPanel() {
           Download file
         </Button>
       </div>
+    </>
+  );
+}
+
+/**
+ * About panel — surfaces a short description of the app, the author
+ * credit, and the support-server invite. Lives in the Share dialog so
+ * it's reachable from the same place as Import/Export.
+ */
+function AboutPanel() {
+  return (
+    <>
+      <p className={styles.lead}>
+        A visual editor for Discord webhook messages with{" "}
+        <strong>Components V2</strong>. Build, preview, and share — all in
+        your browser.
+      </p>
+      <p className={styles.lead}>
+        Made by <strong>Faizo</strong>.
+      </p>
+      <p className={styles.lead}>
+        Feedback?{" "}
+        <a
+          href="https://discord.gg/2wB7rHRDg2"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Join the support server
+        </a>
+        .
+      </p>
     </>
   );
 }
