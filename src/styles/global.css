@@ -97,28 +97,35 @@
   flex-shrink: 0;
 }
 
-/* AI assistant launcher, shown on every viewport. Uses the app accent so it
- * reads as a primary in-app action. Hidden once the panel is open (the panel
- * carries its own close control). */
+/* AI assistant launcher, shown on every viewport. Carries a vibrant violet→pink
+ * gradient so it stands apart from the blue accent actions and reads as the
+ * "magic" entry point. Hidden once the panel is open (the panel carries its own
+ * close control). */
 .ai-fab {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 12px 18px;
   border-radius: 999px;
-  background: var(--app-accent);
+  background: linear-gradient(120deg, #7c3aed 0%, #c026d3 50%, #ec4899 100%);
   color: #fff;
   font-size: 13px;
   font-weight: 600;
-  box-shadow: var(--app-shadow-lg);
+  box-shadow:
+    var(--app-shadow-lg),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
   border: none;
   cursor: pointer;
   transition:
-    background 120ms ease,
+    filter 120ms ease,
+    box-shadow 120ms ease,
     transform 120ms ease;
 }
 .ai-fab:hover {
-  background: var(--app-accent-hover);
+  filter: brightness(1.08) saturate(1.05);
+  box-shadow:
+    var(--app-shadow-lg),
+    0 0 18px rgba(192, 38, 211, 0.45);
 }
 .ai-fab:active {
   transform: scale(0.97);
