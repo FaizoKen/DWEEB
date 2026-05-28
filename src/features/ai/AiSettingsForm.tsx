@@ -165,12 +165,6 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
         )}
       </Field>
 
-      <p className={styles.note}>
-        Requests are relayed through this site's own server so they work with
-        any provider (no browser CORS issues). Your key is sent only to the
-        provider you pick — never to anyone else.
-      </p>
-
       <div className={styles.settingsActions}>
         {showCancel ? (
           <Button variant="ghost" onClick={onCancel}>

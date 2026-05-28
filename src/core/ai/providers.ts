@@ -31,7 +31,7 @@ export interface ProviderMeta {
 // and the default lands on a free tier so a new user can get going at no cost.
 export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
   groq: {
-    label: "Groq (free)",
+    label: "Groq (LPU Cloud)",
     defaultModel: "llama-3.3-70b-versatile",
     defaultBaseUrl: "https://api.groq.com/openai/v1",
     requiresBaseUrl: false,
@@ -39,7 +39,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     keyPlaceholder: "gsk_…",
   },
   openrouter: {
-    label: "OpenRouter (free models)",
+    label: "OpenRouter (Models API)",
     defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     requiresBaseUrl: false,
@@ -47,7 +47,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     keyPlaceholder: "sk-or-…",
   },
   gemini: {
-    label: "Google Gemini (free tier)",
+    label: "Google (Gemini)",
     defaultModel: "gemini-2.0-flash",
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
     requiresBaseUrl: false,
@@ -55,7 +55,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     keyPlaceholder: "AIza…",
   },
   openai: {
-    label: "OpenAI",
+    label: "OpenAI (ChatGPT)",
     defaultModel: "gpt-4o-mini",
     defaultBaseUrl: "https://api.openai.com/v1",
     requiresBaseUrl: false,
