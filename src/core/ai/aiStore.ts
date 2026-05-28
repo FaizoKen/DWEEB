@@ -19,7 +19,7 @@ import { attachEditorFields } from "@/core/serialization/normalize";
 import { validateMessage } from "@/core/schema/validation";
 import type { AiSettings, ChatMessage } from "./types";
 import { callAI, toTurns } from "./providers";
-import { buildSystemPrompt } from "./systemPrompt";
+import { buildSystemPrompt, buildLocalSystemPrompt } from "./systemPrompt";
 import { extractReply } from "./extractReply";
 import { loadAiSettings, saveAiSettings } from "./settingsStorage";
 import { isLikelyMobile, type LocalLoadProgress } from "./localEngine";
@@ -123,7 +123,10 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     const { settings, messages } = get();
     const current = useMessageStore.getState().message;
-    const system = buildSystemPrompt(current);
+    // The local (WebGPU) provider gets a compact prompt to keep GPU memory
+    // pressure down on integrated GPUs; cloud providers get the full schema.
+    const system =
+      settings.provider === "local" ? buildLocalSystemPrompt(current) : buildSystemPrompt(current);
 
     inflight = new AbortController();
     const result = await callAI(settings, system, toTurns(messages), inflight.signal, (p) => {

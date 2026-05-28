@@ -344,9 +344,13 @@ async function ensureEngine(
 
   const w = new Worker(new URL("./webllmWorker.ts", import.meta.url), { type: "module" });
   try {
-    const created = await webllm.CreateWebWorkerMLCEngine(w, modelId, {
-      initProgressCallback: progressCb,
-    });
+    const created = await webllm.CreateWebWorkerMLCEngine(
+      w,
+      modelId,
+      { initProgressCallback: progressCb },
+      // Shrink the KV cache to fit a memory-tight iGPU (see LOCAL_CONTEXT_WINDOW).
+      { context_window_size: LOCAL_CONTEXT_WINDOW },
+    );
     worker = w;
     engine = created;
     currentModelId = modelId;
@@ -363,22 +367,27 @@ async function ensureEngine(
 }
 
 /**
- * Caps that keep the local model's context small. The system prompt already
- * carries the full schema and the live message state (~1k+ tokens), so on a
- * weak iGPU the cheapest way to avoid the GPU buffer races (a long
- * prefill/decode is what stresses it) is to send less. Cloud providers get the
- * untrimmed history; these caps are local-only.
+ * Caps that keep the local model's GPU memory footprint small. On a memory-tight
+ * integrated GPU the driver resets the device ("device lost" → a mid-reply
+ * `mapAsync` AbortError) when the model weights + KV cache + the page's own GPU
+ * use exceed VRAM. The biggest lever we control is the KV cache, which WebLLM
+ * allocates up front from the context window — so we ask for a smaller one for
+ * local models, and keep input+output inside it. Cloud providers have no such
+ * limit and are untouched.
  *
- *   • `MAX_LOCAL_HISTORY_TURNS` — only the most recent turns are sent. The
- *     live message lives in the system prompt, so older chit-chat adds prefill
- *     cost without adding much signal.
- *   • `MAX_LOCAL_TOKENS` — fewer decoded tokens means fewer per-token logit
- *     readbacks (each is a GPU `mapAsync`), so fewer chances to hit the race,
- *     and the input+output stays comfortably inside the 4096 context window.
- *     Plenty for an incremental Discord-message edit.
+ *   • `LOCAL_CONTEXT_WINDOW` — overrides the model's default (4096) when the
+ *     engine loads. Halving it roughly halves the KV-cache VRAM, which is what
+ *     pushes a weak iGPU over its memory ceiling. 2048 comfortably holds the
+ *     compact local prompt + a normal message + a few turns + the reply.
+ *   • `MAX_LOCAL_TOKENS` — caps the reply so input+output stay inside the
+ *     window (no context-window sliding, which is itself GPU-heavy), and means
+ *     fewer per-token logit readbacks (each is a GPU `mapAsync`).
+ *   • `MAX_LOCAL_HISTORY_TURNS` — only recent turns are sent; the live message
+ *     already rides in the system prompt, so older turns add cost without signal.
  */
-const MAX_LOCAL_HISTORY_TURNS = 12;
-const MAX_LOCAL_TOKENS = 1024;
+const LOCAL_CONTEXT_WINDOW = 2048;
+const MAX_LOCAL_TOKENS = 768;
+const MAX_LOCAL_HISTORY_TURNS = 8;
 
 export async function callLocal(
   settings: AiSettings,

@@ -87,3 +87,50 @@ export function buildSystemPrompt(current: WebhookMessage): string {
   }
   return `${SCHEMA_GUIDE}\n\n## CURRENT MESSAGE (the editor's live state)\n\`\`\`json\n${currentJson}\n\`\`\``;
 }
+
+/**
+ * Compact schema guide for the local (in-browser) provider. ~1/3 the tokens of
+ * the full one above.
+ *
+ * The local models run on WebGPU, and on a memory-tight integrated GPU the
+ * driver resets the device ("device lost") when the model weights + KV cache +
+ * the page's own GPU use exceed VRAM. A shorter prompt means a shorter prefill
+ * and a smaller live context, which (together with the reduced context window
+ * the engine requests for local models) keeps GPU memory pressure down. It
+ * keeps the same output contract — chat normally, emit ONE complete ```json
+ * message when changing it — just with terser schema docs. Cloud providers,
+ * which have no such limit, still get the full `SCHEMA_GUIDE`.
+ */
+const LOCAL_SCHEMA_GUIDE = `\
+You are an assistant in a visual Discord Webhook Builder using the Components V2
+layout system. The legacy \`content\` and \`embeds\` fields are forbidden — the
+whole message is expressed through \`components\`.
+
+Reply briefly in plain language. When the user wants to create or change the
+message, include EXACTLY ONE \`\`\`json fenced block holding the COMPLETE message
+object (never a partial diff). If no change is needed, omit the JSON. Never
+output \`_id\`, \`content\`, or \`embeds\` at the top level.
+
+Shape: { "username"?: string, "avatar_url"?: string, "components": [ ... ] }
+
+Every component needs a numeric "type":
+- 10 Text Display: { "type": 10, "content": "markdown" }  (\\n = newline; **bold**, # heading, > quote, [text](url), <@123>, :emoji:)
+- 14 Separator: { "type": 14, "divider"?: boolean, "spacing"?: 1|2 }
+- 17 Container (colored accent box, cannot nest): { "type": 17, "accent_color"?: integer, "components": [ children ] }
+- 9 Section: { "type": 9, "components": [ 1-3 Text Displays ], "accessory": a Button or Thumbnail }
+- 1 Action Row: { "type": 1, "components": [ up to ${LIMITS.ACTION_ROW_BUTTONS} buttons OR one select ] }
+- 2 Button: link { "type": 2, "style": 5, "label": "x", "url": "https://…" } or colored { "type": 2, "style": 1|2|3|4, "label": "x", "custom_id": "id" }
+- 12 Media Gallery: { "type": 12, "items": [ { "media": { "url": "https://…" } } ] }
+
+Limits: ≤${LIMITS.TOP_LEVEL_COMPONENTS} top-level components, ≤${LIMITS.TOTAL_CHARACTERS} characters total. Start from the CURRENT MESSAGE and change only what the user asks.`;
+
+/** Compact system prompt for the local provider — see `LOCAL_SCHEMA_GUIDE`. */
+export function buildLocalSystemPrompt(current: WebhookMessage): string {
+  let currentJson: string;
+  try {
+    currentJson = encodeJson(current);
+  } catch {
+    currentJson = '{ "components": [] }';
+  }
+  return `${LOCAL_SCHEMA_GUIDE}\n\n## CURRENT MESSAGE\n\`\`\`json\n${currentJson}\n\`\`\``;
+}
