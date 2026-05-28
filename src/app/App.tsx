@@ -49,7 +49,16 @@ import { useAttachmentGc } from "./useAttachmentGc";
  * 1:1 with `translateY`; on release we restore the CSS timing and either
  * finish the slide down (a drag past the threshold dismisses) or snap back
  * to the open position.
+ *
+ * The handler short-circuits whenever the viewport is wider than the mobile
+ * breakpoint (e.g. phone in landscape, tablets, desktop). On those layouts
+ * the preview is a side column, not a sheet — `translateY` would break it
+ * and hijack native scrolling.
  */
+// Must match the `@media (max-width: 900px)` breakpoint in global.css /
+// Preview.module.css that switches the preview from side column to sheet.
+const MOBILE_SHEET_QUERY = "(max-width: 900px)";
+
 function usePreviewSwipeToClose(onClose: () => void) {
   const sheetRef = useRef<HTMLElement>(null);
   const startY = useRef(0);
@@ -59,7 +68,11 @@ function usePreviewSwipeToClose(onClose: () => void) {
   const eligible = useRef<boolean | null>(null);
   const inScrollArea = useRef(false);
 
+  const isMobileSheetLayout = () =>
+    typeof window !== "undefined" && window.matchMedia(MOBILE_SHEET_QUERY).matches;
+
   const onTouchStart = (e: ReactTouchEvent) => {
+    if (!isMobileSheetLayout()) return;
     const touch = e.touches[0];
     const el = sheetRef.current;
     if (!touch || !el) return;
@@ -72,6 +85,7 @@ function usePreviewSwipeToClose(onClose: () => void) {
   };
 
   const onTouchMove = (e: ReactTouchEvent) => {
+    if (!isMobileSheetLayout()) return;
     const touch = e.touches[0];
     const el = sheetRef.current;
     if (!touch || !el) return;
