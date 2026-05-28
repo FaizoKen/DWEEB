@@ -176,6 +176,14 @@
     transform: none;
   }
 
+  /* While the AI assistant is open the preview fills the screen and the chat
+   * floats over its bottom-right corner, so the message render is fully
+   * visible as the assistant builds it. */
+  .app-shell[data-ai-open="true"] .app-shell__pane--preview {
+    height: 100dvh;
+    border-radius: 0;
+  }
+
   .preview-fab {
     display: inline-flex;
   }
