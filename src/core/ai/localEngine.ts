@@ -164,7 +164,19 @@ function isTransientGpuError(message: string): boolean {
 function explainEngineLoadError(modelId: string, raw: string): string {
   const head = `Couldn't load the local model "${modelId}".`;
 
-  if (/webgpu.*not.*available|gpu adapter|navigator\.gpu/i.test(raw)) {
+  if (/unable to find a compatible gpu|find a compatible gpu|no.*gpu adapter|requestadapter.*null/i.test(raw)) {
+    return (
+      `${head}\n\n` +
+      "Your browser exposes WebGPU but couldn't find a usable GPU adapter — even after we retried with every power-preference setting.\n\n" +
+      "Most common causes on a system with integrated graphics:\n" +
+      "• Chrome's WebGPU is disabled for your GPU. Open chrome://flags/#enable-unsafe-webgpu, set it to Enabled, and restart Chrome.\n" +
+      "• Hardware acceleration is off. Open chrome://settings/system and make sure \"Use graphics acceleration when available\" is on.\n" +
+      "• Your GPU driver is outdated. Updating it (Intel/AMD/NVIDIA control panel) fixes this most of the time on Windows.\n" +
+      "• Confirm the diagnosis at https://webgpureport.org/ — if it shows no adapter, the engine can't run here either.\n\n" +
+      "If none of those help, switch to a free cloud provider (Groq or OpenRouter) under AI settings — they run on the server, no GPU needed."
+    );
+  }
+  if (/webgpu.*not.*available|navigator\.gpu/i.test(raw)) {
     return (
       `${head}\n\n` +
       "Your browser doesn't expose WebGPU. Try the latest Chrome or Edge (desktop), or Safari 17.4+. " +
