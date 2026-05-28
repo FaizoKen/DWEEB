@@ -10,7 +10,7 @@
  * picks the local provider and sends a message. The engine itself is held in a
  * module-level singleton: the first `callLocal()` downloads + compiles the
  * model, subsequent calls reuse it. Switching to a different local model
- * unloads the old one before loading the new.
+ * reloads weights on the same engine instance.
  */
 
 import type { MLCEngine, InitProgressReport, ChatCompletionMessageParam } from "@mlc-ai/web-llm";
@@ -30,13 +30,6 @@ export interface LocalModelInfo {
   label: string;
   /** Approximate compressed download size in MB — shown in the picker. */
   sizeMB: number;
-  /**
-   * Some WebLLM prebuilts (q*f16 variants of certain models) declare
-   * `required_features: ["shader-f16"]`. On adapters that lack the f16 shader
-   * extension — common on mobile GPUs — the load fails with an opaque
-   * "Failed to fetch". We probe the adapter for this feature before loading.
-   */
-  requiresShaderF16?: boolean;
 }
 
 /**
@@ -44,9 +37,11 @@ export interface LocalModelInfo {
  * heaviest. Anything in the prebuilt registry can be pasted in by hand, but
  * the dropdown stays short and decision-friendly.
  *
- * The SmolLM2 360M entry uses the q4f32_1 variant (not q4f16_1), because the
- * f16 variant is gated on the WebGPU `shader-f16` feature that mobile GPUs
- * often lack. q4f32_1 is ~70 MB larger but loads on any WebGPU device.
+ * Quantization choice: q4f32_1 for the smallest models, q4f16_1 for the
+ * larger ones. The f16 variants require the WebGPU `shader-f16` feature and
+ * fail on adapters without it; q4f32_1 loads on any WebGPU device (at the
+ * cost of a slightly larger download). For models where both variants exist
+ * we keep the smallest model on q4f32_1 to maximize device coverage.
  */
 export const LOCAL_MODELS: LocalModelInfo[] = [
   {
@@ -92,38 +87,18 @@ export function isLocalModelKnown(id: string): boolean {
   return LOCAL_MODELS.some((m) => m.id === id);
 }
 
-/**
- * WebGPU types aren't in the default DOM lib and we don't want to pull in
- * `@webgpu/types` just to probe one feature. Narrow shape of what we touch.
- */
-interface WebGpuAdapterLike {
-  features: { has(name: string): boolean };
-  limits: {
-    maxBufferSize?: number;
-    maxStorageBufferBindingSize?: number;
-  };
-}
-interface WebGpuLike {
-  requestAdapter(): Promise<WebGpuAdapterLike | null>;
-}
-function getWebGpu(): WebGpuLike | null {
-  if (typeof navigator === "undefined") return null;
-  const gpu = (navigator as unknown as { gpu?: WebGpuLike }).gpu;
-  return gpu ?? null;
-}
-
 /** Cheap synchronous check — the user-facing form uses this to warn early. */
 export function isWebGpuSupported(): boolean {
-  return getWebGpu() !== null;
+  if (typeof navigator === "undefined") return false;
+  return Boolean((navigator as unknown as { gpu?: unknown }).gpu);
 }
 
 /**
  * Best-effort detection of mobile/tablet form factors. WebGPU on mobile browsers
- * exposes adapters with the spec's *minimum* buffer limits (256 MiB), which
- * isn't enough to host any of the curated models — WebLLM's allocation failure
- * is surfaced as "Failed to fetch", which is misleading. Combining UA hints
- * with coarse-pointer + small-viewport gives us a reliable signal without a
- * dependency.
+ * exposes adapters with the spec's *minimum* buffer limits, which often isn't
+ * enough to host these models reliably; combined with flaky cellular downloads
+ * of hundreds of MB, local AI on mobile is impractical. We use this only as a
+ * soft warning in settings — never as a hard block from inside the engine.
  */
 export function isLikelyMobile(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -137,154 +112,73 @@ export function isLikelyMobile(): boolean {
   return false;
 }
 
-// Every model in the curated list needs activation/parameter buffers larger
-// than the WebGPU spec's 256 MiB floor. A 1 GiB ceiling on the adapter's
-// `maxBufferSize` cleanly separates mobile GPUs (which sit at the floor) from
-// desktop GPUs (which expose 2 GiB+). The 512 MiB storage-binding threshold
-// catches the same class of device on the secondary limit.
-const MIN_MAX_BUFFER_SIZE = 1024 * 1024 * 1024; // 1 GiB
-const MIN_STORAGE_BINDING_SIZE = 512 * 1024 * 1024; // 512 MiB
-
 /**
- * Probe the WebGPU adapter for the features and limits needed to load
- * `modelId`. Returns `null` on success, or a user-facing error string when the
- * adapter is unavailable, missing a required feature, or too constrained to
- * host any of the curated models. The probe is best-effort: an outright
- * adapter-request *exception* is treated as "unknown — let the engine try", so
- * we never block a load on a flaky preflight. A successful request that
- * returns `null` or an adapter with too-small limits *does* block — that's the
- * exact case mobile WebGPU hits today, and letting it through means burning
- * hundreds of MB of bandwidth before the inevitable failure.
+ * Classify an engine error as a transient GPU/driver hiccup that a single
+ * retry will likely recover from. Covers:
+ *
+ *   • `DXGI_ERROR_DEVICE_REMOVED` and friends — D3D12 / Vulkan / Metal can
+ *     yank the GPU device out from under WebGPU. On Windows this commonly
+ *     fires from `requestDevice()` itself when a prior device's destruction
+ *     hasn't fully drained through the driver yet.
+ *   • "Device lost" / "device was lost" — same class on other platforms.
+ *   • "Buffer was unmapped" / mapAsync races — WebLLM's internal GPU state
+ *     can desync when an interrupt or model swap collides with an in-flight
+ *     buffer map. The cached engine is corrupted but a fresh one is fine.
+ *
+ * We deliberately do NOT match "Failed to fetch" here — that's almost always
+ * a real CORS/connectivity problem, not a transient driver issue, and
+ * retrying immediately won't help.
  */
-export async function probeWebGpuFor(modelId: string): Promise<string | null> {
-  // Mobile is a non-starter for any of the curated WebLLM models: even when a
-  // mobile adapter advertises adequate limits, the actual fetch / compile path
-  // falls over on cellular/WiFi-throttled connections. Reject up front so the
-  // user sees a clear message instead of a half-finished download that ends in
-  // "Failed to fetch" — and so the heavy webllm bundle never loads.
-  if (isLikelyMobile()) {
-    return (
-      "Local AI is desktop-only in practice — mobile browsers either can't allocate the buffers WebLLM needs " +
-      "or can't reliably download the model files. " +
-      "Open AI settings and switch to a free cloud provider — Groq and OpenRouter both have free tiers and work on mobile."
-    );
-  }
-
-  const gpu = getWebGpu();
-  if (!gpu) {
-    return (
-      "Your browser doesn't support WebGPU, which is required to run AI locally. " +
-      "Try the latest Chrome or Edge (desktop), or Safari 17.4+. " +
-      "On Firefox you may need to enable WebGPU under about:config (dom.webgpu.enabled)."
-    );
-  }
-
-  let adapter: WebGpuAdapterLike | null;
-  try {
-    adapter = await gpu.requestAdapter();
-  } catch {
-    return null;
-  }
-  if (!adapter) {
-    return (
-      "Your browser exposes WebGPU but no GPU adapter is available. " +
-      "This usually means the GPU driver doesn't support WebGPU yet — " +
-      "switch to a free cloud provider (Groq or OpenRouter) under AI settings."
-    );
-  }
-
-  const info = LOCAL_MODELS.find((m) => m.id === modelId);
-  if (info?.requiresShaderF16 && !adapter.features.has("shader-f16")) {
-    return (
-      `The "${modelId}" model needs the WebGPU "shader-f16" extension, which this device's GPU doesn't expose. ` +
-      "Pick a different model from the list — Llama 3.2 1B or SmolLM2 360M work on more devices."
-    );
-  }
-
-  const maxBuffer = adapter.limits.maxBufferSize ?? 0;
-  const maxBinding = adapter.limits.maxStorageBufferBindingSize ?? 0;
-  if (maxBuffer < MIN_MAX_BUFFER_SIZE || maxBinding < MIN_STORAGE_BINDING_SIZE) {
-    const mobile = isLikelyMobile();
-    return (
-      `This device's GPU is too constrained to run a local model in the browser ` +
-      `(maxBufferSize ${formatBytes(maxBuffer)}, ${formatBytes(maxBinding)} per binding — ` +
-      `at least ${formatBytes(MIN_MAX_BUFFER_SIZE)} / ${formatBytes(MIN_STORAGE_BINDING_SIZE)} needed). ` +
-      (mobile
-        ? "Local AI is desktop-only in practice — mobile WebGPU drivers cap buffer sizes well below what these models need. "
-        : "") +
-      "Open AI settings and switch to a free cloud provider — Groq and OpenRouter both have free tiers and no download."
-    );
-  }
-
-  return null;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GiB`;
-  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MiB`;
-  return `${bytes} B`;
+function isTransientGpuError(message: string): boolean {
+  return /device[_\s]?removed|device lost|device was lost|dxgi_error|d3d12|mapasync|buffer was unmapped|buffer is unmapped|command queue/i.test(
+    message,
+  );
 }
 
 /**
- * Map a raw error thrown by the WebLLM engine load into a message the user can
- * act on. `Failed to fetch` is the most common one and is almost never
- * literally a network failure — it's how the browser surfaces CORS preflight
- * issues, blocked requests, and GPU/feature mismatches that WebLLM doesn't
- * pre-check. The default branch is kept generic but actionable.
+ * Translate a non-transient engine load failure into something the user can
+ * act on. Transient driver hiccups are handled by the retry loop and never
+ * reach this function.
  */
 function explainEngineLoadError(modelId: string, raw: string): string {
   const head = `Couldn't load the local model "${modelId}".`;
-  // D3D12 / Vulkan / Metal can yank the GPU device out from under WebGPU
-  // (driver TDR, driver crash, another GPU-heavy tab grabbing the device,
-  // out-of-VRAM under contention). The browser surfaces this as a
-  // `requestDevice()` failure with `DXGI_ERROR_DEVICE_REMOVED` (Windows) or
-  // `device lost` (other platforms). Almost always transient.
-  if (/device[_\s]?removed|device lost|dxgi_error|requestdevice/i.test(raw)) {
+
+  if (/webgpu.*not.*available|gpu adapter|navigator\.gpu/i.test(raw)) {
     return (
       `${head}\n\n` +
-      "Your GPU was reset by its driver mid-load — usually transient. Try this in order:\n" +
-      "• Send your message again. The cached engine is cleared, so it'll rebuild from scratch.\n" +
-      "• Close other GPU-heavy tabs (video calls, games, 3D apps) and retry — they may be holding the device.\n" +
-      "• Restart the browser to clear any stuck GPU state.\n" +
-      "• On Windows, an outdated GPU driver is the most common root cause — updating it usually fixes this for good.\n" +
-      "• If it keeps happening, switch to a free cloud provider (Groq or OpenRouter) under AI settings.\n\n" +
+      "Your browser doesn't expose WebGPU. Try the latest Chrome or Edge (desktop), or Safari 17.4+. " +
+      "On Firefox you may need to enable WebGPU under about:config (dom.webgpu.enabled)."
+    );
+  }
+  if (/shader-?f16/i.test(raw)) {
+    return (
+      `${head}\n\n` +
+      "This model needs the WebGPU \"shader-f16\" extension, which this device's GPU doesn't expose. " +
+      "Pick a different model from the list — Llama 3.2 1B or SmolLM2 360M work on more devices."
+    );
+  }
+  if (/failed to fetch|networkerror|load failed|err_network/i.test(raw)) {
+    return (
+      `${head}\n\n` +
+      "The browser couldn't download the model files. Common causes:\n" +
+      "• A network or extension is blocking huggingface.co or its CDN.\n" +
+      "• You're offline.\n" +
+      "• A previous download was cached as corrupted — clear site data and retry.\n\n" +
       `Underlying error: ${raw}`
     );
   }
-  if (/failed to fetch|networkerror|load failed/i.test(raw)) {
-    const mobile = isLikelyMobile();
-    if (mobile) {
-      return (
-        `${head}\n\n` +
-        "Local AI is desktop-only in practice — mobile browsers either can't allocate the buffers WebLLM needs or can't reliably download the model files.\n\n" +
-        "Open AI settings and switch to a free cloud provider — Groq and OpenRouter both have free tiers and work on mobile.\n\n" +
-        `Underlying error: ${raw}`
-      );
-    }
+  if (/out of memory|oom|allocation|cannot initialize runtime/i.test(raw)) {
     return (
       `${head}\n\n` +
-      "The browser couldn't download the model files. This usually means:\n" +
-      "• Your network blocked huggingface.co or raw.githubusercontent.com (try another network).\n" +
-      "• Your device's GPU can't run this specific quantization — try a different model from the list, or switch to a free cloud provider (Groq, OpenRouter) under AI settings.\n" +
-      "• You're offline.\n\n" +
-      `Underlying error: ${raw}`
+      "Your device ran out of memory loading this model. Try a smaller option — SmolLM2 360M or Qwen 2.5 0.5B — or switch to a free cloud provider (Groq, OpenRouter) under AI settings."
     );
   }
-  if (/out of memory|oom|allocation/i.test(raw)) {
-    return (
-      `${head}\n\n` +
-      "Your device ran out of memory loading this model. Try the SmolLM2 360M or Qwen 2.5 0.5B options, or switch to a free cloud provider (Groq, OpenRouter) under AI settings."
-    );
-  }
-  return (
-    `${head}\n\n${raw}\n\n` +
-    "Make sure the model id is one of WebLLM's prebuilt ids and that your device has enough memory."
-  );
+  return `${head}\n\n${raw}`;
 }
 
 // ── Engine singleton ────────────────────────────────────────────────────────
 // One engine per page lifetime; reloading swaps models on the same instance.
-let enginePromise: Promise<MLCEngine> | null = null;
+let engine: MLCEngine | null = null;
 let currentModelId: string | null = null;
 
 /**
@@ -300,9 +194,6 @@ let currentModelId: string | null = null;
  *     send. Reload tears down the prior model's GPU buffers; if a prior
  *     completion's mapAsync hasn't resolved yet, that surfaces as
  *     "Buffer was unmapped before mapping was resolved".
- *
- * The lock drains both: a new caller waits for the prior one to finish before
- * touching the engine.
  */
 let engineLock: Promise<void> = Promise.resolve();
 
@@ -317,61 +208,90 @@ async function acquireEngineLock(): Promise<() => void> {
   return release;
 }
 
-async function getEngine(
+/**
+ * Tear down the cached engine and release its GPU resources. Safe to call
+ * when `engine` is already null. Errors during unload are swallowed — a
+ * failed unload still leaves us better off than an orphaned reference.
+ */
+async function resetEngine(): Promise<void> {
+  const e = engine;
+  engine = null;
+  currentModelId = null;
+  if (e) {
+    try {
+      await e.unload();
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
+}
+
+/**
+ * Ensure an MLCEngine is loaded for `modelId`. Uses one process-wide engine
+ * instance:
+ *   • Same model already loaded → reuse, re-attach the progress callback.
+ *   • Different model loaded   → call `engine.reload(modelId)` to swap.
+ *   • No engine yet            → `CreateMLCEngine(modelId)`.
+ *
+ * Throws on any failure. Caller is responsible for retrying transient
+ * driver errors (see `callLocal`).
+ */
+async function ensureEngine(
   modelId: string,
   onProgress?: (p: LocalLoadProgress) => void,
 ): Promise<MLCEngine> {
-  // Same model already (loading or loaded) — reuse.
-  if (enginePromise && currentModelId === modelId) {
-    // Re-attach the progress callback so a fresh load in flight still surfaces
-    // updates to the new caller's listener.
-    const engine = await enginePromise;
-    if (onProgress) {
-      engine.setInitProgressCallback((r: InitProgressReport) => {
-        onProgress({ text: r.text, progress: r.progress });
-      });
-    }
+  const progressCb = (report: InitProgressReport) => {
+    onProgress?.({ text: report.text, progress: report.progress });
+  };
+
+  // Already loaded — reuse without touching the GPU device.
+  if (engine && currentModelId === modelId) {
+    engine.setInitProgressCallback(progressCb);
     return engine;
   }
 
-  // Different model (or first load): reload weights in place on a single
-  // engine instance instead of `unload() + CreateMLCEngine()`. The two-step
-  // teardown/recreate path destroys the WebGPU device while in-flight mapAsync
-  // operations may still be pending, surfacing later as the cryptic
-  // "Failed to execute 'mapAsync' on 'GPUBuffer': Buffer was unmapped before
-  // mapping was resolved" on the next completion. `reload()` is WebLLM's
-  // documented swap path and reuses the device cleanly.
-  const prior = enginePromise;
-  currentModelId = modelId;
-  enginePromise = (async () => {
-    const webllm = await import("@mlc-ai/web-llm");
-    const progressCb = (report: InitProgressReport) => {
-      onProgress?.({ text: report.text, progress: report.progress });
-    };
+  const webllm = await import("@mlc-ai/web-llm");
 
-    if (prior) {
-      try {
-        const existing = await prior;
-        existing.setInitProgressCallback(progressCb);
-        await existing.reload(modelId);
-        return existing;
-      } catch {
-        // Prior engine failed to load (or to reload onto the new model) — fall
-        // through and create a fresh instance.
-      }
+  // Model swap: ask the existing engine to reload onto the new weights.
+  // `reload()` internally unloads first, so it cleanly hands the device off
+  // from one model to the next without leaving two pipelines resident.
+  if (engine) {
+    try {
+      engine.setInitProgressCallback(progressCb);
+      await engine.reload(modelId);
+      currentModelId = modelId;
+      return engine;
+    } catch (e) {
+      // Reload failed mid-swap. The existing engine is in an unknown state
+      // (possibly with its device destroyed) so drop it before propagating —
+      // the next attempt will create a fresh one.
+      await resetEngine();
+      throw e;
     }
+  }
 
-    return webllm.CreateMLCEngine(modelId, { initProgressCallback: progressCb });
-  })();
-
+  // First load on this page.
   try {
-    return await enginePromise;
+    const created = await webllm.CreateMLCEngine(modelId, {
+      initProgressCallback: progressCb,
+    });
+    engine = created;
+    currentModelId = modelId;
+    return created;
   } catch (e) {
-    // Reset so the next attempt can retry instead of returning the rejection.
-    enginePromise = null;
+    // CreateMLCEngine = `new MLCEngine().reload()`. If reload threw, the
+    // engine var was never assigned — nothing to clean up — but make sure
+    // module state is in sync.
+    engine = null;
     currentModelId = null;
     throw e;
   }
+}
+
+const TRANSIENT_RETRY_DELAY_MS = 250;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export async function callLocal(
@@ -383,72 +303,96 @@ export async function callLocal(
 ): Promise<AiCallResult> {
   const modelId = settings.model.trim() || DEFAULT_LOCAL_MODEL;
 
-  const preflight = await probeWebGpuFor(modelId);
-  if (preflight) return { ok: false, error: preflight };
+  if (!isWebGpuSupported()) {
+    return {
+      ok: false,
+      error:
+        "Your browser doesn't support WebGPU, which is required to run AI locally. " +
+        "Try the latest Chrome or Edge (desktop), or Safari 17.4+. " +
+        "On Firefox you may need to enable WebGPU under about:config (dom.webgpu.enabled).",
+    };
+  }
 
   // Hold the lock across getEngine + chat.completions.create so a swap or a
   // second send can't race the in-flight GPU work. See engineLock for the why.
   const release = await acquireEngineLock();
   try {
-    if (signal?.aborted) return { ok: false, error: "Request cancelled." };
-
-    let engine: MLCEngine;
-    try {
-      engine = await getEngine(modelId, onProgress);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      return { ok: false, error: explainEngineLoadError(modelId, message) };
-    }
-
-    if (signal?.aborted) return { ok: false, error: "Request cancelled." };
-
-    // Wire the abort signal up to the engine's interrupt API. The engine
-    // resolves the in-flight promise with whatever it has so far on interrupt.
-    const onAbort = () => {
-      void engine.interruptGenerate();
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-
-    try {
-      const messages: ChatCompletionMessageParam[] = [
-        { role: "system", content: system },
-        ...turns.map((t) => ({ role: t.role, content: t.content })),
-      ];
-      const reply = await engine.chat.completions.create({
-        messages,
-        temperature: 0.4,
-        max_tokens: 2048,
-      });
-      if (signal?.aborted) return { ok: false, error: "Request cancelled." };
-
-      const text = reply.choices?.[0]?.message?.content;
-      if (typeof text !== "string" || text.length === 0) {
-        return { ok: false, error: "The local model returned an empty response." };
-      }
-      return { ok: true, text };
-    } catch (e) {
-      if (signal?.aborted) return { ok: false, error: "Request cancelled." };
-      const message = e instanceof Error ? e.message : String(e);
-      // WebGPU buffer race inside WebLLM: a pending mapAsync read collides with
-      // a buffer that was unmapped (typically by an interrupt or model swap).
-      // Drop the cached engine so the next send rebuilds it from scratch
-      // instead of inheriting the corrupted GPU state.
-      if (/mapAsync|buffer was unmapped|buffer is unmapped/i.test(message)) {
-        enginePromise = null;
-        currentModelId = null;
-        return {
-          ok: false,
-          error:
-            "The local model's GPU state got out of sync (a known WebLLM bug). " +
-            "Send your message again — the engine will reload itself. " +
-            "If it keeps happening, switch to a free cloud provider (Groq or OpenRouter) under AI settings.",
-        };
-      }
-      return { ok: false, error: `Local model error: ${message}` };
-    } finally {
-      signal?.removeEventListener("abort", onAbort);
-    }
+    return await runWithRetry(modelId, system, turns, signal, onProgress, 0);
   } finally {
     release();
+  }
+}
+
+/**
+ * Run one load+generate cycle, with a single automatic retry when the failure
+ * looks like a transient GPU driver hiccup. The retry path fully tears down
+ * the cached engine and waits briefly for the driver to drain pending device
+ * destructions before trying again.
+ *
+ * The official webllm.mlc.ai demo recovers from these errors by relying on
+ * the user to refresh and try again; here we do that step for them so a
+ * single bad device-create doesn't dead-end the conversation.
+ */
+async function runWithRetry(
+  modelId: string,
+  system: string,
+  turns: AiTurn[],
+  signal: AbortSignal | undefined,
+  onProgress: ((p: LocalLoadProgress) => void) | undefined,
+  attempt: number,
+): Promise<AiCallResult> {
+  if (signal?.aborted) return { ok: false, error: "Request cancelled." };
+
+  let mlcEngine: MLCEngine;
+  try {
+    mlcEngine = await ensureEngine(modelId, onProgress);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (attempt === 0 && isTransientGpuError(message)) {
+      await resetEngine();
+      await delay(TRANSIENT_RETRY_DELAY_MS);
+      return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
+    }
+    return { ok: false, error: explainEngineLoadError(modelId, message) };
+  }
+
+  if (signal?.aborted) return { ok: false, error: "Request cancelled." };
+
+  // Wire the abort signal up to the engine's interrupt API. The engine
+  // resolves the in-flight promise with whatever it has so far on interrupt.
+  const onAbort = () => {
+    void mlcEngine.interruptGenerate();
+  };
+  signal?.addEventListener("abort", onAbort, { once: true });
+
+  try {
+    const messages: ChatCompletionMessageParam[] = [
+      { role: "system", content: system },
+      ...turns.map((t) => ({ role: t.role, content: t.content })),
+    ];
+    const reply = await mlcEngine.chat.completions.create({
+      messages,
+      temperature: 0.4,
+      max_tokens: 2048,
+    });
+    if (signal?.aborted) return { ok: false, error: "Request cancelled." };
+
+    const text = reply.choices?.[0]?.message?.content;
+    if (typeof text !== "string" || text.length === 0) {
+      return { ok: false, error: "The local model returned an empty response." };
+    }
+    return { ok: true, text };
+  } catch (e) {
+    if (signal?.aborted) return { ok: false, error: "Request cancelled." };
+    const message = e instanceof Error ? e.message : String(e);
+    if (attempt === 0 && isTransientGpuError(message)) {
+      signal?.removeEventListener("abort", onAbort);
+      await resetEngine();
+      await delay(TRANSIENT_RETRY_DELAY_MS);
+      return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
+    }
+    return { ok: false, error: `Local model error: ${message}` };
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
 }
