@@ -1,34 +1,42 @@
 /**
  * Local (in-browser) AI provider — WebGPU inference via @mlc-ai/web-llm.
  *
- * This drives the library the same hands-off way the official WebLLM chat app
- * (chat.webllm.ai) does: create the engine, let WebLLM pick the GPU adapter and
- * device itself, and do nothing clever around WebGPU. We deliberately do NOT:
+ * The engine runs inside a dedicated Web Worker (see `webllmWorker.ts`), driven
+ * through `CreateWebWorkerMLCEngine`. This is how the official chat.webllm.ai
+ * app runs WebLLM, and on a weak integrated GPU it is the difference between
+ * "works" and "freezes then crashes":
+ *
+ *   • In-page inference pins both the main thread and the GPU queue. The tab
+ *     locks up mid-reply and the iGPU eventually trips its watchdog (a Windows
+ *     TDR / "device-removed"), which wedges Chrome's *shared* GPU process for
+ *     every tab until a full restart. Off-main-thread inference keeps the UI
+ *     responsive and isolates the GPU submission, so the watchdog isn't tripped.
+ *
+ * Beyond that we stay completely hands-off, exactly like chat.webllm.ai. We
+ * deliberately do NOT:
  *
  *   • monkey-patch `navigator.gpu` / `requestAdapter`,
  *   • strip or add any GPU device features (e.g. `subgroups`),
  *   • force a `powerPreference`, or
- *   • auto-retry a failed load by recreating the engine/device.
+ *   • auto-retry a failed load/generate by recreating the engine/device.
  *
- * That last point is what actually cures the `DXGI_ERROR_DEVICE_REMOVED` loop
- * on this project. When a Windows TDR resets the GPU mid-load, recreating the
- * device hammers Chrome's *shared* GPU process while it is still restarting.
- * After a few such crashes Chrome blocklists the GPU for the entire browser
- * session — which is why the old retry storm took down every other WebGPU tab
- * (including chat.webllm.ai) until Chrome was fully quit, and why the app
- * "never worked" afterwards: it re-tripped the guard on every send. The fix is
- * simply to stop hammering. We make exactly one attempt, surface a clear
- * message if it fails, and let the user act (reload, smaller model, cloud) —
- * precisely what chat.webllm.ai does.
+ * That last point matters: when a TDR does reset the GPU, recreating the device
+ * hammers Chrome's GPU process while it is still restarting, and after a few
+ * such crashes Chrome blocklists the GPU browser-wide for the session. So we
+ * make exactly one attempt, surface a clear message if it fails, and let the
+ * user act (resend, smaller model, reload, cloud). On any failure we tear the
+ * worker down so the *next* user send starts from a clean GPU context.
  *
- * The engine runs in-page on the main thread via `CreateMLCEngine`, the path
- * the official webllm.mlc.ai get-started demo uses and the one confirmed to
- * work on this user's Windows iGPU. The @mlc-ai/web-llm package is heavy, so
- * the import is *dynamic* — it only pulls into the bundle when the user picks
- * the local provider and sends a message.
+ * The @mlc-ai/web-llm package is heavy, so the main-thread import is *dynamic* —
+ * it only loads when the user picks the local provider and sends a message; the
+ * worker is likewise only spawned at that point.
  */
 
-import type { MLCEngine, InitProgressReport, ChatCompletionMessageParam } from "@mlc-ai/web-llm";
+import type {
+  WebWorkerMLCEngine,
+  InitProgressReport,
+  ChatCompletionMessageParam,
+} from "@mlc-ai/web-llm";
 import type { AiSettings } from "./types";
 import type { AiCallResult, AiTurn } from "./providers";
 
@@ -251,7 +259,8 @@ function explainEngineLoadError(modelId: string, raw: string): string {
 }
 
 // ── Engine singleton ─────────────────────────────────────────────────────────
-let engine: MLCEngine | null = null;
+let engine: WebWorkerMLCEngine | null = null;
+let worker: Worker | null = null;
 let currentModelId: string | null = null;
 
 let engineLock: Promise<void> = Promise.resolve();
@@ -272,28 +281,38 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Tear down the cached engine. `engine.unload()` releases the WebGPU device and
- * model weights; we *await* it (capped) before letting a fresh
- * `CreateMLCEngine` create another device — two live WebGPU devices on a
- * memory-tight iGPU can themselves provoke `DXGI_ERROR_DEVICE_REMOVED`. The cap
- * keeps a hung unload from blocking. This runs on a model switch and after a
+ * Tear down the cached engine and its worker. `engine.unload()` releases the
+ * WebGPU device and model weights; we *await* it (capped) before terminating
+ * the worker so the device is freed cleanly. Terminating the worker disposes
+ * the whole GPU context, so the next `ensureEngine` spawns a fresh worker with
+ * a brand-new device — the cleanest possible recovery after a GPU reset, and
+ * something an in-page engine can't do. This runs on a model switch and after a
  * failed load/generate (so a dead or half-initialized engine is never cached),
  * never as part of an automatic retry loop.
  */
 async function resetEngine(): Promise<void> {
   const e = engine;
+  const w = worker;
   engine = null;
+  worker = null;
   currentModelId = null;
   if (e) {
     const done = e.unload().catch(() => {});
     await Promise.race([done, delay(2000)]);
+  }
+  if (w) {
+    try {
+      w.terminate();
+    } catch {
+      // Already gone; nothing to clean up.
+    }
   }
 }
 
 async function ensureEngine(
   modelId: string,
   onProgress?: (p: LocalLoadProgress) => void,
-): Promise<MLCEngine> {
+): Promise<WebWorkerMLCEngine> {
   const progressCb = (report: InitProgressReport) => {
     onProgress?.({ text: report.text, progress: report.progress });
   };
@@ -307,12 +326,24 @@ async function ensureEngine(
 
   const webllm = await import("@mlc-ai/web-llm");
 
-  const created = await webllm.CreateMLCEngine(modelId, {
-    initProgressCallback: progressCb,
-  });
-  engine = created;
-  currentModelId = modelId;
-  return created;
+  const w = new Worker(new URL("./webllmWorker.ts", import.meta.url), { type: "module" });
+  try {
+    const created = await webllm.CreateWebWorkerMLCEngine(w, modelId, {
+      initProgressCallback: progressCb,
+    });
+    worker = w;
+    engine = created;
+    currentModelId = modelId;
+    return created;
+  } catch (e) {
+    // The engine never came up; don't leak the worker we just spawned.
+    try {
+      w.terminate();
+    } catch {
+      // ignore
+    }
+    throw e;
+  }
 }
 
 export async function callLocal(
@@ -361,7 +392,7 @@ async function runOnce(
 ): Promise<AiCallResult> {
   if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 
-  let activeEngine: MLCEngine;
+  let activeEngine: WebWorkerMLCEngine;
   try {
     activeEngine = await ensureEngine(modelId, onProgress);
   } catch (e) {
@@ -374,10 +405,9 @@ async function runOnce(
 
   const onAbort = () => {
     try {
-      const result = activeEngine.interruptGenerate();
-      if (result && typeof (result as Promise<void>).then === "function") {
-        void (result as Promise<void>).catch(() => {});
-      }
+      // On the worker engine this is fire-and-forget (it posts an interrupt
+      // message to the worker and returns void).
+      activeEngine.interruptGenerate();
     } catch {
       // The engine may already be gone; nothing to interrupt.
     }
