@@ -157,6 +157,19 @@ const MIN_STORAGE_BINDING_SIZE = 512 * 1024 * 1024; // 512 MiB
  * hundreds of MB of bandwidth before the inevitable failure.
  */
 export async function probeWebGpuFor(modelId: string): Promise<string | null> {
+  // Mobile is a non-starter for any of the curated WebLLM models: even when a
+  // mobile adapter advertises adequate limits, the actual fetch / compile path
+  // falls over on cellular/WiFi-throttled connections. Reject up front so the
+  // user sees a clear message instead of a half-finished download that ends in
+  // "Failed to fetch" — and so the heavy webllm bundle never loads.
+  if (isLikelyMobile()) {
+    return (
+      "Local AI is desktop-only in practice — mobile browsers either can't allocate the buffers WebLLM needs " +
+      "or can't reliably download the model files. " +
+      "Open AI settings and switch to a free cloud provider — Groq and OpenRouter both have free tiers and work on mobile."
+    );
+  }
+
   const gpu = getWebGpu();
   if (!gpu) {
     return (

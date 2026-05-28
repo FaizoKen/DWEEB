@@ -22,7 +22,7 @@ import { callAI, toTurns } from "./providers";
 import { buildSystemPrompt } from "./systemPrompt";
 import { extractReply } from "./extractReply";
 import { loadAiSettings, saveAiSettings } from "./settingsStorage";
-import type { LocalLoadProgress } from "./localEngine";
+import { isLikelyMobile, type LocalLoadProgress } from "./localEngine";
 
 interface AiState {
   open: boolean;
@@ -96,8 +96,12 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   isConfigured() {
     const { settings } = get();
-    // Local provider runs in-browser — no credential needed.
-    if (settings.provider === "local") return true;
+    if (settings.provider === "local") {
+      // Mobile WebGPU can't host these models and mobile networks can't reliably
+      // deliver the weights — treat saved local config as unconfigured so the
+      // panel routes the user back through settings to a working provider.
+      return !isLikelyMobile();
+    }
     return settings.apiKey.trim().length > 0;
   },
 
