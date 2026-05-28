@@ -1,19 +1,36 @@
 /**
- * Local (in-browser) AI provider — WebGPU inference via @mlc-ai/web-llm.
+ * Local (in-browser) AI provider — WebGPU inference via @mlc-ai/web-llm,
+ * hosted in a dedicated Web Worker.
  *
  * Everything runs on the user's machine: weights are downloaded once from
  * Hugging Face, cached by the browser, and inference happens on the GPU via
  * WebGPU. Nothing leaves the device, no API key is needed.
  *
- * The @mlc-ai/web-llm package is heavy (compiled tokenizer / runtime), so the
- * import is *dynamic* — it only pulls into the bundle when the user actually
- * picks the local provider and sends a message. The engine itself is held in a
- * module-level singleton: the first `callLocal()` downloads + compiles the
- * model, subsequent calls reuse it. Switching to a different local model
- * reloads weights on the same engine instance.
+ * Why a worker? The official chat.webllm.ai pattern. Two reliability wins
+ * over an in-page engine on Windows / D3D12:
+ *
+ *   1. GPU device isolation. The WebGPU device is created inside the
+ *      worker's JS context, so it doesn't compete with the main thread's
+ *      React renders or anything else that touches `navigator.gpu`.
+ *      Main-thread contention during `requestDevice()` is the most common
+ *      cause of `DXGI_ERROR_DEVICE_REMOVED` we'd otherwise see.
+ *   2. Hard reset on failure. If the device wedges, `worker.terminate()`
+ *      tears the whole worker down — the OS reclaims the GPU resources —
+ *      and we recreate from scratch. `engine.unload()` alone can leave
+ *      residual handles that keep the device stuck for the rest of the
+ *      page's lifetime.
+ *
+ * The @mlc-ai/web-llm package is heavy, so the import is *dynamic* — it only
+ * pulls into the main bundle when the user picks the local provider and
+ * sends a message. The heavy runtime lives in the worker chunk; the main
+ * thread only holds the thin client (`WebWorkerMLCEngine`).
  */
 
-import type { MLCEngine, InitProgressReport, ChatCompletionMessageParam } from "@mlc-ai/web-llm";
+import type {
+  WebWorkerMLCEngine,
+  InitProgressReport,
+  ChatCompletionMessageParam,
+} from "@mlc-ai/web-llm";
 import type { AiSettings } from "./types";
 import type { AiCallResult, AiTurn } from "./providers";
 
@@ -114,7 +131,7 @@ export function isLikelyMobile(): boolean {
 
 /**
  * Classify an engine error as a transient GPU/driver hiccup that a retry
- * with a fresh engine will likely recover from. Covers:
+ * with a fresh worker will likely recover from. Covers:
  *
  *   • `DXGI_ERROR_DEVICE_REMOVED` and friends — D3D12 / Vulkan / Metal can
  *     yank the GPU device out from under WebGPU. On Windows this commonly
@@ -123,12 +140,11 @@ export function isLikelyMobile(): boolean {
  *   • "Device lost" / "device was lost" — same class on other platforms.
  *   • "Buffer was unmapped" / mapAsync races — WebLLM's internal GPU state
  *     can desync when an interrupt or model swap collides with an in-flight
- *     buffer map. The cached engine is corrupted but a fresh one is fine.
+ *     buffer map.
  *   • "Object has already been disposed" — thrown by TVM when its internal
  *     handle is 0. WebLLM's `device.lost` handler auto-calls `unload()`
  *     behind our back when the GPU drops the device, leaving our cached
- *     engine as a zombie. The next call into it trips this. Cure: drop the
- *     cached engine and rebuild.
+ *     engine as a zombie. The next call into it trips this.
  *
  * We deliberately do NOT match "Failed to fetch" here — that's almost always
  * a real CORS/connectivity problem, not a transient driver issue, and
@@ -181,130 +197,6 @@ function explainEngineLoadError(modelId: string, raw: string): string {
   return `${head}\n\n${raw}`;
 }
 
-// ── Engine singleton ────────────────────────────────────────────────────────
-// One engine per page lifetime; reloading swaps models on the same instance.
-let engine: MLCEngine | null = null;
-let currentModelId: string | null = null;
-
-/**
- * Serializes all engine usage — load, model swap, and chat completion all run
- * under this lock. Without it, two paths race against each other on the same
- * GPU-resident engine and tear its state:
- *
- *   • Cancelling a send flips `thinking: false` in the store immediately, so
- *     the user can fire a new send while the prior `chat.completions.create()`
- *     is still settling its interrupt. Two concurrent completions on one engine
- *     surface as "Model not loaded before trying to complete ChatCompletionRequest".
- *   • Changing the local model in settings triggers a `reload()` on the next
- *     send. Reload tears down the prior model's GPU buffers; if a prior
- *     completion's mapAsync hasn't resolved yet, that surfaces as
- *     "Buffer was unmapped before mapping was resolved".
- */
-let engineLock: Promise<void> = Promise.resolve();
-
-async function acquireEngineLock(): Promise<() => void> {
-  let release!: () => void;
-  const next = new Promise<void>((r) => {
-    release = r;
-  });
-  const prior = engineLock;
-  engineLock = next;
-  await prior.catch(() => {});
-  return release;
-}
-
-/**
- * Tear down the cached engine and release its GPU resources. Safe to call
- * when `engine` is already null. Errors during unload are swallowed — a
- * failed unload still leaves us better off than an orphaned reference.
- */
-async function resetEngine(): Promise<void> {
-  const e = engine;
-  engine = null;
-  currentModelId = null;
-  if (e) {
-    try {
-      await e.unload();
-    } catch {
-      // Best-effort cleanup.
-    }
-  }
-}
-
-/**
- * Ensure an MLCEngine is loaded for `modelId`. Uses one process-wide engine
- * instance:
- *   • Same model already loaded → reuse, re-attach the progress callback.
- *   • Different model loaded   → call `engine.reload(modelId)` to swap.
- *   • No engine yet            → `CreateMLCEngine(modelId)`.
- *
- * Throws on any failure. Caller is responsible for retrying transient
- * driver errors (see `callLocal`).
- */
-async function ensureEngine(
-  modelId: string,
-  onProgress?: (p: LocalLoadProgress) => void,
-): Promise<MLCEngine> {
-  const progressCb = (report: InitProgressReport) => {
-    onProgress?.({ text: report.text, progress: report.progress });
-  };
-
-  // Already loaded — reuse without touching the GPU device.
-  if (engine && currentModelId === modelId) {
-    engine.setInitProgressCallback(progressCb);
-    return engine;
-  }
-
-  const webllm = await import("@mlc-ai/web-llm");
-
-  // Model swap: ask the existing engine to reload onto the new weights.
-  // `reload()` internally unloads first, so it cleanly hands the device off
-  // from one model to the next without leaving two pipelines resident.
-  if (engine) {
-    try {
-      engine.setInitProgressCallback(progressCb);
-      await engine.reload(modelId);
-      currentModelId = modelId;
-      return engine;
-    } catch (e) {
-      // Reload failed mid-swap. The existing engine is in an unknown state
-      // (possibly with its device destroyed) so drop it before propagating —
-      // the next attempt will create a fresh one.
-      await resetEngine();
-      throw e;
-    }
-  }
-
-  // First load on this page.
-  try {
-    const created = await webllm.CreateMLCEngine(modelId, {
-      initProgressCallback: progressCb,
-    });
-    engine = created;
-    currentModelId = modelId;
-    return created;
-  } catch (e) {
-    // CreateMLCEngine = `new MLCEngine().reload()`. If reload threw, the
-    // engine var was never assigned — nothing to clean up — but make sure
-    // module state is in sync.
-    engine = null;
-    currentModelId = null;
-    throw e;
-  }
-}
-
-/**
- * Backoff schedule for transient GPU errors. The first retry fires almost
- * immediately for the common "first attempt got unlucky" case; subsequent
- * delays give Windows D3D12 time to actually release a stuck device handle
- * (releases are asynchronous in the driver and can take 1–2 seconds to drain).
- */
-const TRANSIENT_RETRY_DELAYS_MS = [400, 1500, 3000];
-
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 /**
  * Terminal message shown when every retry hit the same GPU-driver wall.
  * At this point the device handle is genuinely stuck — there is nothing
@@ -322,6 +214,135 @@ function gpuStuckMessage(modelId: string, raw: string): string {
     "• If it keeps happening, switch to a free cloud provider (Groq or OpenRouter) under AI settings.\n\n" +
     `Underlying error: ${raw}`
   );
+}
+
+// ── Engine + worker singletons ──────────────────────────────────────────────
+// One worker hosts one engine. Model swaps and recovery from transient errors
+// both terminate the worker and create a fresh one — that's the only way to
+// reliably release the GPU device on Windows D3D12.
+let engine: WebWorkerMLCEngine | null = null;
+let worker: Worker | null = null;
+let currentModelId: string | null = null;
+
+/**
+ * Serializes all engine usage — load, model swap, and chat completion all run
+ * under this lock. Without it, two paths race against each other:
+ *
+ *   • Cancelling a send flips `thinking: false` in the store immediately, so
+ *     the user can fire a new send while the prior `chat.completions.create()`
+ *     is still settling its interrupt.
+ *   • Changing the local model in settings triggers a new worker on the
+ *     next send. A new worker created while the prior one is still
+ *     terminating can collide on the GPU device on its way out.
+ */
+let engineLock: Promise<void> = Promise.resolve();
+
+async function acquireEngineLock(): Promise<() => void> {
+  let release!: () => void;
+  const next = new Promise<void>((r) => {
+    release = r;
+  });
+  const prior = engineLock;
+  engineLock = next;
+  await prior.catch(() => {});
+  return release;
+}
+
+/**
+ * Create the worker that hosts the engine. Vite bundles the worker as its
+ * own chunk via the `new URL(..., import.meta.url)` pattern; the worker
+ * module imports `@mlc-ai/web-llm` and runs the heavy runtime there.
+ */
+function spawnWorker(): Worker {
+  return new Worker(new URL("./llmWorker.ts", import.meta.url), {
+    type: "module",
+    name: "webllm-engine",
+  });
+}
+
+/**
+ * Tear down the cached engine + worker. Always safe to call. Terminates the
+ * worker process unconditionally — that's the point of the worker pattern:
+ * the OS reclaims the GPU device when the worker dies, which we can't
+ * reliably achieve from within a single page context.
+ */
+function resetEngine(): void {
+  const w = worker;
+  engine = null;
+  worker = null;
+  currentModelId = null;
+  if (w) {
+    try {
+      w.terminate();
+    } catch {
+      // terminate is fire-and-forget; ignore any throw.
+    }
+  }
+}
+
+/**
+ * Ensure an engine is loaded for `modelId`. If a different model is loaded,
+ * fully tear down and respawn — terminating the prior worker is much more
+ * reliable than asking the in-page engine to swap weights, since it gives
+ * the GPU driver a clean slate.
+ *
+ * Throws on any failure. Caller is responsible for retrying transient
+ * driver errors (see `runWithRetry`).
+ */
+async function ensureEngine(
+  modelId: string,
+  onProgress?: (p: LocalLoadProgress) => void,
+): Promise<WebWorkerMLCEngine> {
+  const progressCb = (report: InitProgressReport) => {
+    onProgress?.({ text: report.text, progress: report.progress });
+  };
+
+  // Already loaded — reuse without spawning a new worker.
+  if (engine && currentModelId === modelId) {
+    engine.setInitProgressCallback(progressCb);
+    return engine;
+  }
+
+  // Anything else (different model, or a stale worker hanging around) →
+  // start completely fresh.
+  resetEngine();
+
+  const webllm = await import("@mlc-ai/web-llm");
+  const newWorker = spawnWorker();
+  worker = newWorker;
+
+  try {
+    const created = await webllm.CreateWebWorkerMLCEngine(newWorker, modelId, {
+      initProgressCallback: progressCb,
+    });
+    engine = created;
+    currentModelId = modelId;
+    return created;
+  } catch (e) {
+    // The worker was spawned but the engine never came up. Kill the worker
+    // so we don't leak a process holding a stuck GPU device handle.
+    engine = null;
+    currentModelId = null;
+    worker = null;
+    try {
+      newWorker.terminate();
+    } catch {
+      // ignore
+    }
+    throw e;
+  }
+}
+
+/**
+ * Backoff schedule for transient GPU errors. The first retry fires almost
+ * immediately for the common "first attempt got unlucky" case; subsequent
+ * delays give Windows D3D12 time to actually release a stuck device handle
+ * (releases are asynchronous in the driver and can take 1–2 seconds to drain).
+ */
+const TRANSIENT_RETRY_DELAYS_MS = [400, 1500, 3000];
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export async function callLocal(
@@ -354,14 +375,13 @@ export async function callLocal(
 }
 
 /**
- * Run one load+generate cycle, with a single automatic retry when the failure
- * looks like a transient GPU driver hiccup. The retry path fully tears down
- * the cached engine and waits briefly for the driver to drain pending device
- * destructions before trying again.
+ * Run one load+generate cycle. On a transient GPU error, terminate the
+ * worker (releasing the GPU device at the OS level), wait per the backoff
+ * schedule, and try again with a fresh worker.
  *
- * The official webllm.mlc.ai demo recovers from these errors by relying on
- * the user to refresh and try again; here we do that step for them so a
- * single bad device-create doesn't dead-end the conversation.
+ * The official chat.webllm.ai relies on this same pattern — running the
+ * engine in a worker — for its reliability; here we add automatic retry on
+ * top so a single bad device-create doesn't dead-end the conversation.
  */
 async function runWithRetry(
   modelId: string,
@@ -373,18 +393,16 @@ async function runWithRetry(
 ): Promise<AiCallResult> {
   if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 
-  let mlcEngine: MLCEngine;
+  let mlcEngine: WebWorkerMLCEngine;
   try {
     mlcEngine = await ensureEngine(modelId, onProgress);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     if (attempt < TRANSIENT_RETRY_DELAYS_MS.length && isTransientGpuError(message)) {
-      await resetEngine();
+      resetEngine();
       await delay(TRANSIENT_RETRY_DELAYS_MS[attempt]!);
       return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
     }
-    // Out of retries on a transient error → the driver/device really is wedged
-    // and only a page reload (or driver update) will clear it.
     if (isTransientGpuError(message)) {
       return { ok: false, error: gpuStuckMessage(modelId, message) };
     }
@@ -396,7 +414,11 @@ async function runWithRetry(
   // Wire the abort signal up to the engine's interrupt API. The engine
   // resolves the in-flight promise with whatever it has so far on interrupt.
   const onAbort = () => {
-    void mlcEngine.interruptGenerate();
+    try {
+      mlcEngine.interruptGenerate();
+    } catch {
+      // The worker may already be gone; nothing to interrupt.
+    }
   };
   signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -422,7 +444,7 @@ async function runWithRetry(
     const message = e instanceof Error ? e.message : String(e);
     if (attempt < TRANSIENT_RETRY_DELAYS_MS.length && isTransientGpuError(message)) {
       signal?.removeEventListener("abort", onAbort);
-      await resetEngine();
+      resetEngine();
       await delay(TRANSIENT_RETRY_DELAYS_MS[attempt]!);
       return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
     }
