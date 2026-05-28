@@ -70,7 +70,11 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   setSettings(next) {
     saveAiSettings(next);
-    set({ settings: next });
+    // Clear the transcript: prior turns were produced under the old provider/
+    // model/key and shouldn't carry into a freshly configured assistant.
+    inflight?.abort();
+    inflight = null;
+    set({ settings: next, messages: [], thinking: false, error: null });
   },
 
   isConfigured() {
