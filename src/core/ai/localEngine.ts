@@ -30,12 +30,23 @@ export interface LocalModelInfo {
   label: string;
   /** Approximate compressed download size in MB — shown in the picker. */
   sizeMB: number;
+  /**
+   * Some WebLLM prebuilts (q*f16 variants of certain models) declare
+   * `required_features: ["shader-f16"]`. On adapters that lack the f16 shader
+   * extension — common on mobile GPUs — the load fails with an opaque
+   * "Failed to fetch". We probe the adapter for this feature before loading.
+   */
+  requiresShaderF16?: boolean;
 }
 
 /**
  * Curated subset of WebLLM's prebuilt models, ordered from lightest to
  * heaviest. Anything in the prebuilt registry can be pasted in by hand, but
  * the dropdown stays short and decision-friendly.
+ *
+ * The SmolLM2 360M entry uses the q4f32_1 variant (not q4f16_1), because the
+ * f16 variant is gated on the WebGPU `shader-f16` feature that mobile GPUs
+ * often lack. q4f32_1 is ~70 MB larger but loads on any WebGPU device.
  */
 export const LOCAL_MODELS: LocalModelInfo[] = [
   {
@@ -49,9 +60,9 @@ export const LOCAL_MODELS: LocalModelInfo[] = [
     sizeMB: 314,
   },
   {
-    id: "SmolLM2-360M-Instruct-q4f16_1-MLC",
+    id: "SmolLM2-360M-Instruct-q4f32_1-MLC",
     label: "SmolLM2 360M — tiniest",
-    sizeMB: 217,
+    sizeMB: 290,
   },
   {
     id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
@@ -67,13 +78,109 @@ export const LOCAL_MODELS: LocalModelInfo[] = [
 
 export const DEFAULT_LOCAL_MODEL: string = LOCAL_MODELS[0]!.id;
 
+/**
+ * Model ids that the curated list previously offered but that fail on common
+ * devices. `loadAiSettings()` migrates saved settings off these ids so users
+ * don't get stuck with a model that can't load.
+ */
+export const RETIRED_LOCAL_MODELS: Record<string, string> = {
+  // Required shader-f16, broke on mobile GPUs — replaced with q4f32_1.
+  "SmolLM2-360M-Instruct-q4f16_1-MLC": "SmolLM2-360M-Instruct-q4f32_1-MLC",
+};
+
 export function isLocalModelKnown(id: string): boolean {
   return LOCAL_MODELS.some((m) => m.id === id);
 }
 
+/**
+ * WebGPU types aren't in the default DOM lib and we don't want to pull in
+ * `@webgpu/types` just to probe one feature. Narrow shape of what we touch.
+ */
+interface WebGpuAdapterLike {
+  features: { has(name: string): boolean };
+}
+interface WebGpuLike {
+  requestAdapter(): Promise<WebGpuAdapterLike | null>;
+}
+function getWebGpu(): WebGpuLike | null {
+  if (typeof navigator === "undefined") return null;
+  const gpu = (navigator as unknown as { gpu?: WebGpuLike }).gpu;
+  return gpu ?? null;
+}
+
 /** Cheap synchronous check — the user-facing form uses this to warn early. */
 export function isWebGpuSupported(): boolean {
-  return typeof navigator !== "undefined" && "gpu" in navigator;
+  return getWebGpu() !== null;
+}
+
+/**
+ * Probe the WebGPU adapter for the features needed to load `modelId`. Returns
+ * `null` on success, or a user-facing error string when the adapter is
+ * unavailable or missing a required feature. The probe is best-effort:
+ * adapter-request failures are treated as "unknown — let the engine try", so
+ * we never block a load on a flaky preflight.
+ */
+export async function probeWebGpuFor(modelId: string): Promise<string | null> {
+  const gpu = getWebGpu();
+  if (!gpu) {
+    return (
+      "Your browser doesn't support WebGPU, which is required to run AI locally. " +
+      "Try the latest Chrome or Edge (desktop), or Safari 17.4+. " +
+      "On Firefox you may need to enable WebGPU under about:config (dom.webgpu.enabled)."
+    );
+  }
+  const info = LOCAL_MODELS.find((m) => m.id === modelId);
+  if (!info?.requiresShaderF16) return null;
+  let adapter: WebGpuAdapterLike | null;
+  try {
+    adapter = await gpu.requestAdapter();
+  } catch {
+    return null;
+  }
+  if (!adapter) {
+    return (
+      "Your browser exposes WebGPU but no GPU adapter is available. " +
+      "This usually means the GPU driver doesn't support WebGPU yet."
+    );
+  }
+  if (!adapter.features.has("shader-f16")) {
+    return (
+      `The "${modelId}" model needs the WebGPU "shader-f16" extension, which this device's GPU doesn't expose. ` +
+      "Pick a different model from the list — Llama 3.2 1B or SmolLM2 360M work on more devices."
+    );
+  }
+  return null;
+}
+
+/**
+ * Map a raw error thrown by the WebLLM engine load into a message the user can
+ * act on. `Failed to fetch` is the most common one and is almost never
+ * literally a network failure — it's how the browser surfaces CORS preflight
+ * issues, blocked requests, and GPU/feature mismatches that WebLLM doesn't
+ * pre-check. The default branch is kept generic but actionable.
+ */
+function explainEngineLoadError(modelId: string, raw: string): string {
+  const head = `Couldn't load the local model "${modelId}".`;
+  if (/failed to fetch|networkerror|load failed/i.test(raw)) {
+    return (
+      `${head}\n\n` +
+      "The browser couldn't download the model files. This usually means:\n" +
+      "• Your network blocked huggingface.co or raw.githubusercontent.com (try another network).\n" +
+      "• Your device's GPU can't run this specific quantization — try a different model from the list.\n" +
+      "• You're offline.\n\n" +
+      `Underlying error: ${raw}`
+    );
+  }
+  if (/out of memory|oom|allocation/i.test(raw)) {
+    return (
+      `${head}\n\n` +
+      "Your device ran out of memory loading this model. Try the SmolLM2 360M or Qwen 2.5 0.5B options."
+    );
+  }
+  return (
+    `${head}\n\n${raw}\n\n` +
+    "Make sure the model id is one of WebLLM's prebuilt ids and that your device has enough memory."
+  );
 }
 
 // ── Engine singleton ────────────────────────────────────────────────────────
@@ -136,29 +243,17 @@ export async function callLocal(
   signal?: AbortSignal,
   onProgress?: (p: LocalLoadProgress) => void,
 ): Promise<AiCallResult> {
-  if (!isWebGpuSupported()) {
-    return {
-      ok: false,
-      error:
-        "Your browser doesn't support WebGPU, which is required to run AI locally. " +
-        "Try the latest Chrome or Edge (desktop), or Safari 17.4+. " +
-        "On Firefox you may need to enable WebGPU under about:config (dom.webgpu.enabled).",
-    };
-  }
-
   const modelId = settings.model.trim() || DEFAULT_LOCAL_MODEL;
+
+  const preflight = await probeWebGpuFor(modelId);
+  if (preflight) return { ok: false, error: preflight };
 
   let engine: MLCEngine;
   try {
     engine = await getEngine(modelId, onProgress);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return {
-      ok: false,
-      error:
-        `Couldn't load the local model "${modelId}".\n\n${message}\n\n` +
-        "Make sure the model id is one of WebLLM's prebuilt ids and that your device has enough memory.",
-    };
+    return { ok: false, error: explainEngineLoadError(modelId, message) };
   }
 
   if (signal?.aborted) return { ok: false, error: "Request cancelled." };
