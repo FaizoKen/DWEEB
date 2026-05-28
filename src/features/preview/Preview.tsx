@@ -8,7 +8,8 @@
  *
  * On mobile this pane becomes a bottom sheet (see `app-shell__pane--preview`
  * in global.css). The optional `onClose` is the dismissal handler; `swipeProps`
- * wires the whole sheet for swipe-down-to-dismiss.
+ * wires the drag handle for swipe-down-to-dismiss while leaving the scroll
+ * area free to scroll natively.
  */
 
 import type { HTMLAttributes } from "react";
@@ -20,8 +21,8 @@ import styles from "./Preview.module.css";
 interface PreviewProps {
   /** Dismiss handler — invoked by the mobile swipe-down gesture. */
   onClose?: () => void;
-  /** Touch handlers wiring the mobile sheet for swipe-to-dismiss. */
-  swipeProps?: HTMLAttributes<HTMLElement>;
+  /** Touch handlers wiring the mobile drag handle for swipe-to-dismiss. */
+  swipeProps?: HTMLAttributes<HTMLDivElement>;
 }
 
 export function Preview({ onClose, swipeProps }: PreviewProps = {}) {
@@ -45,9 +46,9 @@ export function Preview({ onClose, swipeProps }: PreviewProps = {}) {
 
   return (
     <PreviewCloseContext.Provider value={onClose ?? null}>
-    <div className={styles.surface} data-preview-root {...swipeProps}>
+    <div className={styles.surface} data-preview-root>
       {onClose ? (
-        <div className={styles.mobileBar}>
+        <div className={styles.mobileBar} {...swipeProps}>
           <span className={styles.grabber} aria-hidden="true" />
         </div>
       ) : null}

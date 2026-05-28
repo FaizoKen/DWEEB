@@ -38,45 +38,35 @@ import { useAttachmentGc } from "./useAttachmentGc";
  * Drives the mobile preview sheet's swipe-to-dismiss gesture.
  *
  * The sheet's resting open/close slide lives in CSS (driven by
- * `data-preview-open`). The whole sheet is swipeable: a downward drag engages
- * either when it starts on the drag handle (outside the scroll area) or when
- * the message scroll is already at the top, so the gesture never steals a
- * normal scroll. Once engaged we disable the CSS transition inline and follow
- * the finger 1:1 with `translateY`; on release we restore the CSS timing and
- * either finish the slide down (a drag past the threshold dismisses) or snap
- * back to the open position.
+ * `data-preview-open`). Only the drag handle at the top of the sheet is
+ * swipeable — leaving the scroll area untouched lets the message preview
+ * scroll natively without the handler interfering with finger gestures.
+ * While dragging we disable the CSS transition inline and follow the finger
+ * 1:1 with `translateY`; on release we restore the CSS timing and either
+ * finish the slide down (a drag past the threshold dismisses) or snap back
+ * to the open position.
  */
 function usePreviewSwipeToClose(onClose: () => void) {
   const sheetRef = useRef<HTMLElement>(null);
   const startY = useRef(0);
   const deltaY = useRef(0);
-  const engageable = useRef(false);
   const active = useRef(false);
 
   const onTouchStart = (e: ReactTouchEvent) => {
     const touch = e.touches[0];
-    const el = sheetRef.current;
-    if (!touch || !el) return;
-    const scroll = el.querySelector<HTMLElement>("[data-preview-scroll]");
-    const inScroll = scroll ? scroll.contains(e.target as Node) : false;
-    // The handle always grabs; content only grabs once scrolled to the top.
-    engageable.current = !inScroll || (scroll?.scrollTop ?? 0) <= 0;
-    active.current = false;
+    if (!touch) return;
+    active.current = true;
     startY.current = touch.clientY;
     deltaY.current = 0;
+    const el = sheetRef.current;
+    if (el) el.style.transition = "none";
   };
 
   const onTouchMove = (e: ReactTouchEvent) => {
     const touch = e.touches[0];
     const el = sheetRef.current;
-    if (!touch || !el) return;
+    if (!touch || !el || !active.current) return;
     const dy = touch.clientY - startY.current;
-    if (!active.current) {
-      // Wait for a clear downward intent before hijacking the touch.
-      if (!engageable.current || dy <= 6) return;
-      active.current = true;
-      el.style.transition = "none";
-    }
     const clamped = Math.max(0, dy);
     deltaY.current = clamped;
     el.style.transform = `translateY(${clamped}px)`;
@@ -105,7 +95,7 @@ function usePreviewSwipeToClose(onClose: () => void) {
 
   return {
     sheetRef,
-    swipeProps: { onTouchStart, onTouchMove, onTouchEnd },
+    swipeProps: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd },
   };
 }
 
