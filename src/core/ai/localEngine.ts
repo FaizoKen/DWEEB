@@ -17,10 +17,15 @@
  *     manufacture a "no compatible GPU" error on a machine that otherwise
  *     works. Running in-page avoids that cross-context cascade.
  *
- * A wedged GPU device is recovered by `engine.unload()` + a fresh
- * `CreateMLCEngine`, with a short backoff. If that still fails, the surfaced
- * message tells the user to reload the page (which fully restarts Chrome's GPU
- * process) or switch to a cloud provider.
+ * Recovery is tiered by failure type (see `nextRetryDelayMs`): a soft GPU
+ * hiccup or a momentarily-null adapter gets a few quick retries with a fresh
+ * engine, while a removed/lost device (a Windows TDR reset) gets a single
+ * patient retry. Once Chrome's *shared* GPU process is wedged, no in-page retry
+ * can revive it — `requestAdapter()` keeps handing back the same dead D3D12
+ * device until the process itself restarts — so when retries are exhausted the
+ * surfaced message points at the only fixes that actually work: restart
+ * Chrome's GPU process, update the driver, try a smaller model, or switch to a
+ * cloud provider.
  *
  * The @mlc-ai/web-llm package is heavy, so the import is *dynamic* — it only
  * pulls into the bundle when the user picks the local provider and sends a
@@ -207,13 +212,36 @@ function patchRequestAdapterOnce(): void {
 }
 
 /**
- * Classify an engine error as a transient GPU/driver hiccup that a retry
- * with a fresh engine will likely recover from.
+ * The "wedged GPU process" signature: a removed/lost D3D12 device, a DXGI
+ * device-removed code, or a failure creating the D3D12 command queue — the
+ * first backend op, which fails instantly when the adapter is backed by an
+ * already-dead device. On Windows this is almost always a TDR (Timeout
+ * Detection & Recovery) reset of the GPU. Kept separate from the softer hiccups
+ * below because it recovers differently (see `nextRetryDelayMs`).
  */
-function isTransientGpuError(message: string): boolean {
-  return /device[_\s]?removed|device lost|device was lost|dxgi_error|d3d12|mapasync|buffer was unmapped|buffer is unmapped|command queue|object has (?:already )?been disposed|tensor has already been disposed/i.test(
+function isDeviceRemovedError(message: string): boolean {
+  return /device[_\s]?removed|device(?:\s+was)?\s+lost|dxgi_error|d3d12|create command queue/i.test(
     message,
   );
+}
+
+/**
+ * Softer, genuinely transient GPU errors — a buffer unmapped mid-flight, or an
+ * object disposed by a racing teardown. A fresh engine almost always clears
+ * these on the next try.
+ */
+function isSoftGpuError(message: string): boolean {
+  return /mapasync|buffer (?:was|is) unmapped|object has (?:already )?been disposed|tensor has already been disposed/i.test(
+    message,
+  );
+}
+
+/**
+ * Any GPU/driver error a retry might recover from. Used only to decide which
+ * user-facing message to surface once retries are exhausted.
+ */
+function isTransientGpuError(message: string): boolean {
+  return isDeviceRemovedError(message) || isSoftGpuError(message);
 }
 
 /**
@@ -286,14 +314,14 @@ function explainEngineLoadError(modelId: string, raw: string): string {
 
 function gpuStuckMessage(modelId: string, raw: string): string {
   return (
-    `Couldn't load the local model "${modelId}" — the browser's GPU device was reset by the driver (Windows TDR / device-removed) before the model could load.\n\n` +
-    "Once Chrome's GPU process is in this state, a tab reload usually isn't enough — the process is shared across the whole browser. Try, in order:\n" +
-    "• Fully quit Chrome (close every window, then check the tray) and reopen it. This is what restarts the GPU process; a plain reload often doesn't.\n" +
-    "• Close other GPU-heavy apps/tabs (video calls, games, 3D, other AI tabs) before retrying.\n" +
-    "• Update your GPU driver (Intel/AMD/NVIDIA) — on Windows an outdated driver is the most common root cause of a device-removed loop.\n" +
-    "• Sanity-check at https://webgpureport.org/ — when the GPU process is healthy it shows an adapter; if the official https://webllm.mlc.ai demo loads a model, this page will too after a clean restart.\n" +
-    '• In the model list, the "Llama 3.2 1B — recommended" option is the most broadly compatible.\n' +
-    "• Still looping? Switch to a free cloud provider (Groq or OpenRouter) under AI settings — no GPU needed.\n\n" +
+    `Couldn't load the local model "${modelId}". The browser's GPU device was reset by its driver ` +
+    `(a Windows TDR / "device-removed") and didn't recover — even after an automatic retry with a fresh adapter.\n\n` +
+    "Once Chrome's shared GPU process is in this state, JavaScript on the page can't revive it, and a plain tab reload usually isn't enough either. In order of what actually fixes it:\n" +
+    "• Fully quit Chrome — close every window, check the tray/Task Manager — then reopen. That's what restarts the GPU process.\n" +
+    "• Update your GPU driver (Intel/AMD/NVIDIA). On Windows an outdated driver is the most common cause of a device-removed loop.\n" +
+    '• Try a smaller model — "Qwen 2.5 0.5B" or "SmolLM2 360M". They upload and compile far faster, so they\'re much less likely to trip the GPU\'s ~2-second watchdog while loading.\n' +
+    "• Close other GPU-heavy apps/tabs (video calls, games, 3D, other AI tabs) before retrying.\n\n" +
+    "Want to keep working right now? Switch to a free cloud model (Groq or OpenRouter) under AI settings — it runs server-side, so no local GPU is involved.\n\n" +
     `Underlying error: ${raw}`
   );
 }
@@ -368,16 +396,39 @@ async function ensureEngine(
 }
 
 /**
- * Backoff schedule for retryable load failures. The first retry fires almost
- * immediately for the common "first attempt got unlucky" case; subsequent
- * delays give Windows D3D12 time to actually release a stuck device handle and
- * give Chrome's GPU process time to come back up after a crash (both are
- * asynchronous and can take 1–2 seconds to settle).
+ * Backoff schedule for soft/transient load failures. The first retry fires
+ * almost immediately for the common "first attempt got unlucky" case;
+ * subsequent delays give Chrome's GPU process time to come back up after a
+ * crash (asynchronous, can take 1–2 seconds to settle).
  */
 const RETRY_DELAYS_MS = [400, 1500, 3000];
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * How long to wait before the next retry, or `null` to stop and surface an
+ * error. The policy depends on the failure:
+ *
+ *   • Removed/lost device (Windows TDR) → the *shared* GPU process is wedged.
+ *     Re-requesting an adapter hands back the same dead D3D12 device, so a
+ *     retry only helps if Chrome's GPU process restarts in the gap. Give it one
+ *     patient shot (~3s, enough for a process restart to land) — then stop.
+ *     Rapid-fire retries can't revive a removed device and risk tripping
+ *     Chrome's "GPU process crashed too often" guard, which disables the GPU
+ *     for the rest of the browser session.
+ *   • Soft hiccup / momentarily-null adapter → far more likely a passing blip;
+ *     a few quick retries clear it.
+ */
+function nextRetryDelayMs(message: string, attempt: number): number | null {
+  if (isDeviceRemovedError(message)) {
+    return attempt < 1 ? 3000 : null;
+  }
+  if (isSoftGpuError(message) || isNoAdapterError(message)) {
+    return attempt < RETRY_DELAYS_MS.length ? RETRY_DELAYS_MS[attempt]! : null;
+  }
+  return null;
 }
 
 export async function callLocal(
@@ -429,11 +480,11 @@ async function runWithRetry(
     activeEngine = await ensureEngine(modelId, onProgress);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    const retryable = isTransientGpuError(message) || isNoAdapterError(message);
+    const wait = nextRetryDelayMs(message, attempt);
 
-    if (retryable && attempt < RETRY_DELAYS_MS.length) {
+    if (wait !== null) {
       await resetEngine();
-      await delay(RETRY_DELAYS_MS[attempt]!);
+      await delay(wait);
       return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
     }
     if (isTransientGpuError(message)) {
@@ -476,11 +527,12 @@ async function runWithRetry(
   } catch (e) {
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
     const message = e instanceof Error ? e.message : String(e);
+    const wait = nextRetryDelayMs(message, attempt);
 
-    if (attempt < RETRY_DELAYS_MS.length && isTransientGpuError(message)) {
+    if (wait !== null) {
       signal?.removeEventListener("abort", onAbort);
       await resetEngine();
-      await delay(RETRY_DELAYS_MS[attempt]!);
+      await delay(wait);
       return runWithRetry(modelId, system, turns, signal, onProgress, attempt + 1);
     }
     if (isTransientGpuError(message)) {
