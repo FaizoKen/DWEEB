@@ -30,11 +30,26 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
   const saved = useAiStore((s) => s.settings);
   const setSettings = useAiStore((s) => s.setSettings);
 
-  const [draft, setDraft] = useState<AiSettings>(saved);
+  const mobile = isLikelyMobile();
+  const webGpuOk = isWebGpuSupported();
+
+  // On mobile the local provider is a non-starter (WebGPU buffer limits +
+  // unreliable downloads), so if the saved provider is "local" we seed the draft
+  // with a free cloud provider instead — the dropdown also hides "local", so the
+  // form should never present an option the user can't actually use.
+  const [draft, setDraft] = useState<AiSettings>(() =>
+    mobile && saved.provider === "local"
+      ? { ...defaultSettingsFor("groq"), apiKey: saved.apiKey }
+      : saved,
+  );
   const [revealKey, setRevealKey] = useState(false);
 
   const meta = PROVIDERS[draft.provider];
   const isLocal = draft.provider === "local";
+
+  const visibleProviders = (Object.keys(PROVIDERS) as AiProvider[]).filter(
+    (p) => !(mobile && p === "local"),
+  );
 
   const changeProvider = (provider: AiProvider) => {
     const seed = defaultSettingsFor(provider);
@@ -61,8 +76,6 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
   };
 
   const selectedLocalModel = LOCAL_MODELS.find((m) => m.id === draft.model);
-  const webGpuOk = isWebGpuSupported();
-  const mobile = isLikelyMobile();
 
   return (
     <div className={styles.settings}>
@@ -87,7 +100,7 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
             value={draft.provider}
             onChange={(e) => changeProvider(e.currentTarget.value as AiProvider)}
           >
-            {(Object.keys(PROVIDERS) as AiProvider[]).map((p) => (
+            {visibleProviders.map((p) => (
               <option key={p} value={p}>
                 {PROVIDERS[p].label}
               </option>
