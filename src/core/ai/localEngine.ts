@@ -132,14 +132,16 @@ function isGpuResetError(message: string): boolean {
 }
 
 /**
- * Softer, genuinely transient GPU errors — a buffer unmapped mid-readback, or
- * an object disposed by a racing teardown. These are NOT a wedged GPU process
- * (unlike `isGpuResetError`): the device is still alive, so simply re-running
- * the generation on the *same* engine almost always clears them. Retrying these
- * creates no new WebGPU device, so it cannot affect Chrome's GPU-crash guard.
+ * Softer, genuinely transient GPU errors — a buffer unmapped mid-readback, an
+ * object/tensor disposed by a racing teardown, or the follow-on "model not
+ * loaded" once that teardown has dropped the model. These are NOT a wedged GPU
+ * process (unlike `isGpuResetError`): the device is still alive. We don't
+ * auto-retry them in-request — the teardown disposes the engine's model, so a
+ * same-engine retry just hits "model not loaded" — but resending works because
+ * `runOnce` resets the cached engine first, so the next send reloads cleanly.
  */
 function isSoftGpuError(message: string): boolean {
-  return /mapasync|buffer (?:was|is) unmapped|object has (?:already )?been disposed|tensor has already been disposed/i.test(
+  return /mapasync|buffer (?:was|is) unmapped|object has (?:already )?been disposed|tensor has already been disposed|model not loaded/i.test(
     message,
   );
 }
@@ -168,6 +170,25 @@ function gpuResetMessage(modelId: string, raw: string): string {
     '• Try a smaller model — "Qwen 2.5 0.5B" or "SmolLM2 360M". They upload and compile far faster, so they\'re much less likely to trip the GPU\'s ~2-second watchdog while loading.\n' +
     "• Close other GPU-heavy apps/tabs (video calls, games, 3D, other AI tabs) before retrying.\n\n" +
     "Want to keep working right now? Switch to a free cloud model (Groq or OpenRouter) under AI settings — it runs server-side, so no local GPU is involved.\n\n" +
+    `Underlying error: ${raw}`
+  );
+}
+
+/**
+ * A transient mid-generation GPU glitch (buffers torn down during readback,
+ * leaving the model disposed). The device itself is fine, so resending almost
+ * always works — `runOnce` resets the cached engine on this failure, so the
+ * next send reloads from a clean state.
+ */
+function softGlitchMessage(modelId: string, raw: string): string {
+  return (
+    `The local model "${modelId}" hit a transient GPU glitch mid-reply — its buffers were ` +
+    `torn down before the response finished.\n\n` +
+    "The GPU itself is fine; the model just needs reloading. Usually this clears on its own:\n" +
+    "• Send your message again — the model reloads and the reply normally goes through.\n" +
+    '• If it keeps happening, try a smaller model ("Qwen 2.5 0.5B" or "SmolLM2 360M") — they\'re less likely to trip the GPU\'s watchdog.\n' +
+    "• Or reload the page (Ctrl+Shift+R) to start the GPU process fresh.\n\n" +
+    "Prefer not to fight it? Switch to a free cloud model (Groq or OpenRouter) under AI settings — no local GPU involved.\n\n" +
     `Underlying error: ${raw}`
   );
 }
@@ -368,49 +389,31 @@ async function runOnce(
       { role: "system", content: system },
       ...turns.map((t) => ({ role: t.role, content: t.content })),
     ];
+    const reply = await activeEngine.chat.completions.create({
+      messages,
+      temperature: 0.4,
+      max_tokens: 2048,
+    });
+    if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 
-    // A soft GPU error during generation (a buffer unmapped mid-readback, an
-    // object disposed by a racing teardown) clears on a second pass: the model
-    // is already loaded and the device is still alive, so we re-run generation
-    // exactly once on the SAME engine. That creates no new WebGPU device, so —
-    // unlike a device-recreating retry — it can't provoke Chrome's GPU-process
-    // crash guard. A device reset or any other error is surfaced immediately.
-    let lastErr: unknown;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (signal?.aborted) return { ok: false, error: "Request cancelled." };
-      try {
-        const reply = await activeEngine.chat.completions.create({
-          messages,
-          temperature: 0.4,
-          max_tokens: 2048,
-        });
-        if (signal?.aborted) return { ok: false, error: "Request cancelled." };
-
-        const text = reply.choices?.[0]?.message?.content;
-        if (typeof text !== "string" || text.length === 0) {
-          return { ok: false, error: "The local model returned an empty response." };
-        }
-        return { ok: true, text };
-      } catch (e) {
-        lastErr = e;
-        const message = e instanceof Error ? e.message : String(e);
-        if (attempt === 0 && !signal?.aborted && isSoftGpuError(message)) {
-          await delay(250);
-          continue;
-        }
-        throw e;
-      }
+    const text = reply.choices?.[0]?.message?.content;
+    if (typeof text !== "string" || text.length === 0) {
+      return { ok: false, error: "The local model returned an empty response." };
     }
-    // The loop always returns or throws; this only guards a future logic change.
-    throw lastErr ?? new Error("Local generation failed.");
+    return { ok: true, text };
   } catch (e) {
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
     const message = e instanceof Error ? e.message : String(e);
-    // The engine's WebGPU device may be dead (GPU reset) or its state corrupted
-    // by the failure; drop it so the next send starts from a clean engine.
+    // The engine's WebGPU device may be dead (GPU reset) or its model disposed
+    // by a soft teardown; either way drop the cached engine so the next send
+    // starts from a clean reload. No in-request retry — recreating the engine
+    // here is exactly what could hammer a restarting GPU process.
     await resetEngine();
     if (isGpuResetError(message)) {
       return { ok: false, error: gpuResetMessage(modelId, message) };
+    }
+    if (isSoftGpuError(message)) {
+      return { ok: false, error: softGlitchMessage(modelId, message) };
     }
     return { ok: false, error: `Local model error: ${message}` };
   } finally {
