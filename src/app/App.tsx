@@ -38,10 +38,14 @@ import { useAttachmentGc } from "./useAttachmentGc";
  * Drives the mobile preview sheet's swipe-to-dismiss gesture.
  *
  * The sheet's resting open/close slide lives in CSS (driven by
- * `data-preview-open`). Only the drag handle at the top of the sheet is
- * swipeable — leaving the scroll area untouched lets the message preview
- * scroll natively without the handler interfering with finger gestures.
- * While dragging we disable the CSS transition inline and follow the finger
+ * `data-preview-open`). The whole sheet is swipeable so the user doesn't
+ * have to hunt for the drag handle: the gesture engages either on the
+ * handle (which has `touch-action: none`) or on the message area when the
+ * scroll is already at the top. We re-check `scrollTop` on each move so
+ * that if native scrolling has happened first, the swipe-to-dismiss never
+ * steals the gesture — the user can scroll freely.
+ *
+ * Once engaged we disable the CSS transition inline and follow the finger
  * 1:1 with `translateY`; on release we restore the CSS timing and either
  * finish the slide down (a drag past the threshold dismisses) or snap back
  * to the open position.
@@ -51,22 +55,58 @@ function usePreviewSwipeToClose(onClose: () => void) {
   const startY = useRef(0);
   const deltaY = useRef(0);
   const active = useRef(false);
+  // null = undecided, true = eligible to engage, false = abandon for this gesture.
+  const eligible = useRef<boolean | null>(null);
+  const inScrollArea = useRef(false);
 
   const onTouchStart = (e: ReactTouchEvent) => {
     const touch = e.touches[0];
-    if (!touch) return;
-    active.current = true;
+    const el = sheetRef.current;
+    if (!touch || !el) return;
+    const scroll = el.querySelector<HTMLElement>("[data-preview-scroll]");
+    inScrollArea.current = scroll ? scroll.contains(e.target as Node) : false;
+    active.current = false;
+    eligible.current = null;
     startY.current = touch.clientY;
     deltaY.current = 0;
-    const el = sheetRef.current;
-    if (el) el.style.transition = "none";
   };
 
   const onTouchMove = (e: ReactTouchEvent) => {
     const touch = e.touches[0];
     const el = sheetRef.current;
-    if (!touch || !el || !active.current) return;
+    if (!touch || !el) return;
     const dy = touch.clientY - startY.current;
+
+    if (active.current) {
+      const clamped = Math.max(0, dy);
+      deltaY.current = clamped;
+      el.style.transform = `translateY(${clamped}px)`;
+      return;
+    }
+    if (eligible.current === false) return;
+
+    // Treat any upward intent or sideways drag as "user is scrolling, not
+    // dismissing" and abandon for the rest of the gesture so native scroll
+    // owns it.
+    if (dy < -2) {
+      eligible.current = false;
+      return;
+    }
+    // Wait for a clear downward intent before deciding.
+    if (dy <= 10) return;
+
+    // Re-check the scroll position now, not just at touchstart — if native
+    // scroll has carried us off the top, we yield to it.
+    const scroll = el.querySelector<HTMLElement>("[data-preview-scroll]");
+    const atTop = !scroll || scroll.scrollTop <= 0;
+    if (inScrollArea.current && !atTop) {
+      eligible.current = false;
+      return;
+    }
+
+    eligible.current = true;
+    active.current = true;
+    el.style.transition = "none";
     const clamped = Math.max(0, dy);
     deltaY.current = clamped;
     el.style.transform = `translateY(${clamped}px)`;
