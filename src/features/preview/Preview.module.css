@@ -9,24 +9,27 @@
 }
 
 /* Mobile sheet chrome — desktop hides this bar via the media query below so
- * the preview stays uncluttered. It carries only the drag-handle pill;
- * `touch-action: none` keeps the browser from treating a downward drag here
- * as a scroll. */
+ * the preview stays uncluttered. The padding is generous so the entire bar
+ * (not just the visible pill) is an easy drag target — the pill itself is
+ * only a visual affordance. `touch-action: none` keeps the browser from
+ * treating a downward drag here as a scroll. */
 .mobileBar {
   display: none;
   justify-content: center;
-  padding: 8px 14px 6px;
+  align-items: center;
+  padding: 14px 14px 12px;
+  min-height: 32px;
   flex-shrink: 0;
   touch-action: none;
   cursor: grab;
 }
 
-/* The little pill that signals the sheet can be dragged down to dismiss. */
+/* The pill that signals the sheet can be dragged down to dismiss. */
 .grabber {
-  width: 36px;
-  height: 4px;
+  width: 44px;
+  height: 5px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .scroll {
