@@ -9,6 +9,7 @@
 
 import type { AiProvider, AiSettings } from "./types";
 import { DEFAULT_PROVIDER, defaultSettingsFor } from "./providers";
+import { RETIRED_LOCAL_MODELS } from "./localEngine";
 
 const STORAGE_KEY = "dwb.ai.v1";
 
@@ -26,10 +27,17 @@ export function loadAiSettings(): AiSettings {
         ? (parsed.provider as AiProvider)
         : DEFAULT_PROVIDER;
     const seed = defaultSettingsFor(provider);
+    let model =
+      typeof parsed.model === "string" && parsed.model ? parsed.model : seed.model;
+    // Migrate ids that we used to ship but have since retired (e.g. a model
+    // that requires a WebGPU feature missing on common devices).
+    if (provider === "local" && RETIRED_LOCAL_MODELS[model]) {
+      model = RETIRED_LOCAL_MODELS[model]!;
+    }
     return {
       provider,
       apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",
-      model: typeof parsed.model === "string" && parsed.model ? parsed.model : seed.model,
+      model,
       baseUrl: typeof parsed.baseUrl === "string" ? parsed.baseUrl : seed.baseUrl,
     };
   } catch {
