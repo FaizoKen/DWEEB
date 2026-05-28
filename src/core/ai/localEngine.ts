@@ -234,6 +234,23 @@ function formatBytes(bytes: number): string {
  */
 function explainEngineLoadError(modelId: string, raw: string): string {
   const head = `Couldn't load the local model "${modelId}".`;
+  // D3D12 / Vulkan / Metal can yank the GPU device out from under WebGPU
+  // (driver TDR, driver crash, another GPU-heavy tab grabbing the device,
+  // out-of-VRAM under contention). The browser surfaces this as a
+  // `requestDevice()` failure with `DXGI_ERROR_DEVICE_REMOVED` (Windows) or
+  // `device lost` (other platforms). Almost always transient.
+  if (/device[_\s]?removed|device lost|dxgi_error|requestdevice/i.test(raw)) {
+    return (
+      `${head}\n\n` +
+      "Your GPU was reset by its driver mid-load — usually transient. Try this in order:\n" +
+      "• Send your message again. The cached engine is cleared, so it'll rebuild from scratch.\n" +
+      "• Close other GPU-heavy tabs (video calls, games, 3D apps) and retry — they may be holding the device.\n" +
+      "• Restart the browser to clear any stuck GPU state.\n" +
+      "• On Windows, an outdated GPU driver is the most common root cause — updating it usually fixes this for good.\n" +
+      "• If it keeps happening, switch to a free cloud provider (Groq or OpenRouter) under AI settings.\n\n" +
+      `Underlying error: ${raw}`
+    );
+  }
   if (/failed to fetch|networkerror|load failed/i.test(raw)) {
     const mobile = isLikelyMobile();
     if (mobile) {
@@ -270,6 +287,36 @@ function explainEngineLoadError(modelId: string, raw: string): string {
 let enginePromise: Promise<MLCEngine> | null = null;
 let currentModelId: string | null = null;
 
+/**
+ * Serializes all engine usage — load, model swap, and chat completion all run
+ * under this lock. Without it, two paths race against each other on the same
+ * GPU-resident engine and tear its state:
+ *
+ *   • Cancelling a send flips `thinking: false` in the store immediately, so
+ *     the user can fire a new send while the prior `chat.completions.create()`
+ *     is still settling its interrupt. Two concurrent completions on one engine
+ *     surface as "Model not loaded before trying to complete ChatCompletionRequest".
+ *   • Changing the local model in settings triggers a `reload()` on the next
+ *     send. Reload tears down the prior model's GPU buffers; if a prior
+ *     completion's mapAsync hasn't resolved yet, that surfaces as
+ *     "Buffer was unmapped before mapping was resolved".
+ *
+ * The lock drains both: a new caller waits for the prior one to finish before
+ * touching the engine.
+ */
+let engineLock: Promise<void> = Promise.resolve();
+
+async function acquireEngineLock(): Promise<() => void> {
+  let release!: () => void;
+  const next = new Promise<void>((r) => {
+    release = r;
+  });
+  const prior = engineLock;
+  engineLock = next;
+  await prior.catch(() => {});
+  return release;
+}
+
 async function getEngine(
   modelId: string,
   onProgress?: (p: LocalLoadProgress) => void,
@@ -287,25 +334,34 @@ async function getEngine(
     return engine;
   }
 
-  // Different model: release the previous one so we don't keep two sets of
-  // weights resident on the GPU.
-  if (enginePromise) {
-    try {
-      const oldEngine = await enginePromise;
-      await oldEngine.unload();
-    } catch {
-      // The old engine may have failed to load — ignore.
-    }
-  }
-
+  // Different model (or first load): reload weights in place on a single
+  // engine instance instead of `unload() + CreateMLCEngine()`. The two-step
+  // teardown/recreate path destroys the WebGPU device while in-flight mapAsync
+  // operations may still be pending, surfacing later as the cryptic
+  // "Failed to execute 'mapAsync' on 'GPUBuffer': Buffer was unmapped before
+  // mapping was resolved" on the next completion. `reload()` is WebLLM's
+  // documented swap path and reuses the device cleanly.
+  const prior = enginePromise;
   currentModelId = modelId;
   enginePromise = (async () => {
     const webllm = await import("@mlc-ai/web-llm");
-    return webllm.CreateMLCEngine(modelId, {
-      initProgressCallback: (report: InitProgressReport) => {
-        onProgress?.({ text: report.text, progress: report.progress });
-      },
-    });
+    const progressCb = (report: InitProgressReport) => {
+      onProgress?.({ text: report.text, progress: report.progress });
+    };
+
+    if (prior) {
+      try {
+        const existing = await prior;
+        existing.setInitProgressCallback(progressCb);
+        await existing.reload(modelId);
+        return existing;
+      } catch {
+        // Prior engine failed to load (or to reload onto the new model) — fall
+        // through and create a fresh instance.
+      }
+    }
+
+    return webllm.CreateMLCEngine(modelId, { initProgressCallback: progressCb });
   })();
 
   try {
@@ -330,45 +386,69 @@ export async function callLocal(
   const preflight = await probeWebGpuFor(modelId);
   if (preflight) return { ok: false, error: preflight };
 
-  let engine: MLCEngine;
+  // Hold the lock across getEngine + chat.completions.create so a swap or a
+  // second send can't race the in-flight GPU work. See engineLock for the why.
+  const release = await acquireEngineLock();
   try {
-    engine = await getEngine(modelId, onProgress);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: explainEngineLoadError(modelId, message) };
-  }
-
-  if (signal?.aborted) return { ok: false, error: "Request cancelled." };
-
-  // Wire the abort signal up to the engine's interrupt API. The engine
-  // resolves the in-flight promise with whatever it has so far on interrupt.
-  const onAbort = () => {
-    void engine.interruptGenerate();
-  };
-  signal?.addEventListener("abort", onAbort, { once: true });
-
-  try {
-    const messages: ChatCompletionMessageParam[] = [
-      { role: "system", content: system },
-      ...turns.map((t) => ({ role: t.role, content: t.content })),
-    ];
-    const reply = await engine.chat.completions.create({
-      messages,
-      temperature: 0.4,
-      max_tokens: 2048,
-    });
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 
-    const text = reply.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || text.length === 0) {
-      return { ok: false, error: "The local model returned an empty response." };
+    let engine: MLCEngine;
+    try {
+      engine = await getEngine(modelId, onProgress);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: explainEngineLoadError(modelId, message) };
     }
-    return { ok: true, text };
-  } catch (e) {
+
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
-    const message = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: `Local model error: ${message}` };
+
+    // Wire the abort signal up to the engine's interrupt API. The engine
+    // resolves the in-flight promise with whatever it has so far on interrupt.
+    const onAbort = () => {
+      void engine.interruptGenerate();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    try {
+      const messages: ChatCompletionMessageParam[] = [
+        { role: "system", content: system },
+        ...turns.map((t) => ({ role: t.role, content: t.content })),
+      ];
+      const reply = await engine.chat.completions.create({
+        messages,
+        temperature: 0.4,
+        max_tokens: 2048,
+      });
+      if (signal?.aborted) return { ok: false, error: "Request cancelled." };
+
+      const text = reply.choices?.[0]?.message?.content;
+      if (typeof text !== "string" || text.length === 0) {
+        return { ok: false, error: "The local model returned an empty response." };
+      }
+      return { ok: true, text };
+    } catch (e) {
+      if (signal?.aborted) return { ok: false, error: "Request cancelled." };
+      const message = e instanceof Error ? e.message : String(e);
+      // WebGPU buffer race inside WebLLM: a pending mapAsync read collides with
+      // a buffer that was unmapped (typically by an interrupt or model swap).
+      // Drop the cached engine so the next send rebuilds it from scratch
+      // instead of inheriting the corrupted GPU state.
+      if (/mapAsync|buffer was unmapped|buffer is unmapped/i.test(message)) {
+        enginePromise = null;
+        currentModelId = null;
+        return {
+          ok: false,
+          error:
+            "The local model's GPU state got out of sync (a known WebLLM bug). " +
+            "Send your message again — the engine will reload itself. " +
+            "If it keeps happening, switch to a free cloud provider (Groq or OpenRouter) under AI settings.",
+        };
+      }
+      return { ok: false, error: `Local model error: ${message}` };
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
   } finally {
-    signal?.removeEventListener("abort", onAbort);
+    release();
   }
 }

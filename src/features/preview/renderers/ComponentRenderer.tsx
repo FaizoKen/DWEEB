@@ -13,6 +13,7 @@
 import { ComponentType, type AnyComponent } from "@/core/schema/types";
 import { isSelect } from "@/core/schema/guards";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useAiStore } from "@/core/ai/aiStore";
 import { cn } from "@/lib/cn";
 import { usePreviewClose } from "../previewCloseContext";
 import { ContainerRenderer } from "./ContainerRenderer";
@@ -35,6 +36,7 @@ export function ComponentRenderer({ node }: ComponentRendererProps) {
   const selectedId = useMessageStore((s) => s.selectedId);
   const select = useMessageStore((s) => s.select);
   const closePreview = usePreviewClose();
+  const aiOpen = useAiStore((s) => s.open);
   const isSelected = selectedId === node._id;
 
   return (
@@ -46,7 +48,10 @@ export function ComponentRenderer({ node }: ComponentRendererProps) {
         select(node._id);
         // On mobile this dismisses the preview slide-over so the editor
         // (and its now-revealed inspector) becomes visible. No-op on desktop.
-        closePreview?.();
+        // When the AI chat is open the preview close cascades into closing
+        // the chat too (see App.closePreview), so skip the dismiss and let
+        // the user keep chatting while picking nodes.
+        if (!aiOpen) closePreview?.();
         // Bring the matching tree row into the builder's viewport. Deferred
         // one frame so the freshly-selected row's inline inspector has
         // mounted before `scrollIntoView` measures positions.
