@@ -138,6 +138,14 @@ export function App() {
     setShareOpen(true);
   };
 
+  // On mobile the AI chat floats over the preview, so opening the assistant
+  // brings the (full-screen) preview up first — you watch the message build as
+  // you chat. On desktop both panes are always visible, so this is harmless.
+  const openAiWithPreview = () => {
+    setPreviewOpen(true);
+    openAi();
+  };
+
   return (
     <div
       className="app-shell"
@@ -182,7 +190,7 @@ export function App() {
         <button
           type="button"
           className="ai-fab"
-          onClick={openAi}
+          onClick={openAiWithPreview}
           aria-label="Open the AI assistant"
         >
           <SparkleIcon size={20} />

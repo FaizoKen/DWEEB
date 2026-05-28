@@ -27,31 +27,9 @@ export interface ProviderMeta {
   keyPlaceholder: string;
 }
 
+// Ordered so the free providers come first — that's what the dropdown shows,
+// and the default lands on a free tier so a new user can get going at no cost.
 export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
-  openai: {
-    label: "OpenAI",
-    defaultModel: "gpt-4o-mini",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    requiresBaseUrl: false,
-    keysUrl: "https://platform.openai.com/api-keys",
-    keyPlaceholder: "sk-…",
-  },
-  anthropic: {
-    label: "Anthropic (Claude)",
-    defaultModel: "claude-3-5-sonnet-latest",
-    defaultBaseUrl: "https://api.anthropic.com",
-    requiresBaseUrl: false,
-    keysUrl: "https://console.anthropic.com/settings/keys",
-    keyPlaceholder: "sk-ant-…",
-  },
-  gemini: {
-    label: "Google Gemini",
-    defaultModel: "gemini-2.0-flash",
-    defaultBaseUrl: "https://generativelanguage.googleapis.com",
-    requiresBaseUrl: false,
-    keysUrl: "https://aistudio.google.com/app/apikey",
-    keyPlaceholder: "AIza…",
-  },
   groq: {
     label: "Groq (free)",
     defaultModel: "llama-3.3-70b-versatile",
@@ -67,6 +45,30 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     requiresBaseUrl: false,
     keysUrl: "https://openrouter.ai/keys",
     keyPlaceholder: "sk-or-…",
+  },
+  gemini: {
+    label: "Google Gemini (free tier)",
+    defaultModel: "gemini-2.0-flash",
+    defaultBaseUrl: "https://generativelanguage.googleapis.com",
+    requiresBaseUrl: false,
+    keysUrl: "https://aistudio.google.com/app/apikey",
+    keyPlaceholder: "AIza…",
+  },
+  openai: {
+    label: "OpenAI",
+    defaultModel: "gpt-4o-mini",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    requiresBaseUrl: false,
+    keysUrl: "https://platform.openai.com/api-keys",
+    keyPlaceholder: "sk-…",
+  },
+  anthropic: {
+    label: "Anthropic (Claude)",
+    defaultModel: "claude-3-5-sonnet-latest",
+    defaultBaseUrl: "https://api.anthropic.com",
+    requiresBaseUrl: false,
+    keysUrl: "https://console.anthropic.com/settings/keys",
+    keyPlaceholder: "sk-ant-…",
   },
 };
 
@@ -338,8 +340,8 @@ async function callGemini(
   return { ok: true, text };
 }
 
-/** Provider key the settings form starts on. */
-export const DEFAULT_PROVIDER: AiProvider = "openai";
+/** Provider key the settings form starts on — a free tier by default. */
+export const DEFAULT_PROVIDER: AiProvider = "groq";
 
 /** Build a fresh settings object for a provider, seeding sensible defaults. */
 export function defaultSettingsFor(provider: AiProvider): AiSettings {
