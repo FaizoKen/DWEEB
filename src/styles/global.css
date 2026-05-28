@@ -184,6 +184,12 @@
     border-radius: 0;
   }
 
+  /* The preview sheet sits above the default toolbar layer, so lift the fab
+   * stack over it — the AI launcher stays tappable while the preview is open. */
+  .fab-stack {
+    z-index: var(--app-z-modal);
+  }
+
   .preview-fab {
     display: inline-flex;
   }

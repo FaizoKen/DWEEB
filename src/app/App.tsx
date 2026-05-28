@@ -180,11 +180,7 @@ export function App() {
         aria-label="Message preview"
         aria-hidden={previewOpen ? undefined : "true"}
       >
-        <Preview
-          onClose={closePreview}
-          onOpenAi={aiOpen ? undefined : openAi}
-          swipeProps={swipeProps}
-        />
+        <Preview onClose={closePreview} swipeProps={swipeProps} />
       </section>
 
       <AiChatPanel />

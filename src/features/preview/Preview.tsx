@@ -13,7 +13,6 @@
 
 import type { HTMLAttributes } from "react";
 import { useMessageStore, selectMessage } from "@/core/state/messageStore";
-import { SparkleIcon } from "@/ui/Icon";
 import { ComponentRenderer } from "./renderers/ComponentRenderer";
 import { PreviewCloseContext } from "./previewCloseContext";
 import styles from "./Preview.module.css";
@@ -21,13 +20,11 @@ import styles from "./Preview.module.css";
 interface PreviewProps {
   /** Dismiss handler — invoked by the mobile swipe-down gesture. */
   onClose?: () => void;
-  /** Opens the AI assistant from the preview's mobile chrome, when provided. */
-  onOpenAi?: () => void;
   /** Touch handlers wiring the mobile sheet for swipe-to-dismiss. */
   swipeProps?: HTMLAttributes<HTMLElement>;
 }
 
-export function Preview({ onClose, onOpenAi, swipeProps }: PreviewProps = {}) {
+export function Preview({ onClose, swipeProps }: PreviewProps = {}) {
   const message = useMessageStore(selectMessage);
   const displayName = message.username || "Webhook";
   const avatar = message.avatar_url;
@@ -52,17 +49,6 @@ export function Preview({ onClose, onOpenAi, swipeProps }: PreviewProps = {}) {
       {onClose ? (
         <div className={styles.mobileBar}>
           <span className={styles.grabber} aria-hidden="true" />
-          {onOpenAi ? (
-            <button
-              type="button"
-              className={styles.aiButton}
-              onClick={onOpenAi}
-              aria-label="Open the AI assistant"
-            >
-              <SparkleIcon size={14} />
-              <span>AI Assistant</span>
-            </button>
-          ) : null}
         </div>
       ) : null}
       <div className={styles.scroll} data-preview-scroll>

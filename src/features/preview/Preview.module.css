@@ -14,8 +14,6 @@
  * as a scroll. */
 .mobileBar {
   display: none;
-  position: relative;
-  align-items: center;
   justify-content: center;
   padding: 8px 14px 6px;
   flex-shrink: 0;
@@ -29,35 +27,6 @@
   height: 4px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.25);
-}
-
-/* Launches the AI chat from the preview itself — the grabber stays centered,
- * so this is pinned to the right. `touch-action: auto` lets a tap through even
- * though the surrounding bar disables touch gestures for the swipe handle. */
-.aiButton {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  border: none;
-  border-radius: 999px;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  background: linear-gradient(120deg, #7c3aed 0%, #c026d3 50%, #ec4899 100%);
-  cursor: pointer;
-  touch-action: auto;
-}
-.aiButton:active {
-  transform: translateY(-50%) scale(0.96);
-}
-.aiButton svg {
-  flex-shrink: 0;
 }
 
 .scroll {
