@@ -91,7 +91,7 @@ export function inspectCapabilities(
       severity: "warning",
       title: `Needs an application-owned webhook (${interactive.length} interactive component${interactive.length === 1 ? "" : "s"})`,
       detail:
-        "Buttons with custom_id and select menus only fire interactions when the webhook is owned by an application/bot. Regular user-created webhooks render them but clicks are inert.",
+        "Discord only accepts interactive components (buttons with custom_id, select menus) from webhooks owned by an application/bot. Sending this message through a regular user-created webhook will be rejected by Discord.",
       nodes: interactive,
     });
   }

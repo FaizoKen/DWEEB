@@ -36,10 +36,10 @@ export function SelectBaseFields({ node }: Props) {
   return (
     <>
       <CapabilityNote>
-        <strong>Needs an application-owned webhook.</strong> Select menus
-        render fine on any webhook but only fire interactions when an
-        application/bot owns the webhook. On regular webhooks the selection
-        goes nowhere.
+        <strong>Needs an application-owned webhook.</strong> Discord rejects
+        messages containing select menus when sent through a regular
+        user-created webhook — only application/bot-owned webhooks can post
+        them.
       </CapabilityNote>
       <Field
         label="custom_id"
