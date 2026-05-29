@@ -89,42 +89,48 @@ export function buildSystemPrompt(current: WebhookMessage): string {
 }
 
 /**
- * Compact schema guide for the local (in-browser) provider. ~1/3 the tokens of
- * the full one above.
+ * Compact schema guide for the local (in-browser) provider.
  *
- * The local models run on WebGPU, and on a memory-tight integrated GPU the
- * driver resets the device ("device lost") when the model weights + KV cache +
- * the page's own GPU use exceed VRAM. A shorter prompt means a shorter prefill
- * and a smaller live context, which (together with the reduced context window
- * the engine requests for local models) keeps GPU memory pressure down. It
- * keeps the same output contract — chat normally, emit ONE complete ```json
- * message when changing it — just with terser schema docs. Cloud providers,
- * which have no such limit, still get the full `SCHEMA_GUIDE`.
+ * On a weak integrated GPU the costly step is the *prefill* — processing the
+ * prompt before the first token. Measured side-by-side, chat.webllm.ai sends a
+ * tiny prompt and prefills it instantly, while a big prompt spikes the GPU and
+ * can trip the driver watchdog. So the local prompt is kept short: terser schema
+ * docs here, and `buildLocalSystemPrompt` drops the live-message JSON when it's
+ * large (see below). Same output contract — chat normally, emit ONE complete
+ * ```json message when changing it. Cloud providers still get the full
+ * `SCHEMA_GUIDE`.
  */
 const LOCAL_SCHEMA_GUIDE = `\
-You are an assistant in a visual Discord Webhook Builder using the Components V2
-layout system. The legacy \`content\` and \`embeds\` fields are forbidden — the
-whole message is expressed through \`components\`.
+You are an assistant in a Discord Webhook Builder using Components V2 (the legacy
+\`content\` and \`embeds\` fields are forbidden — the whole message is \`components\`).
 
-Reply briefly in plain language. When the user wants to create or change the
-message, include EXACTLY ONE \`\`\`json fenced block holding the COMPLETE message
-object (never a partial diff). If no change is needed, omit the JSON. Never
-output \`_id\`, \`content\`, or \`embeds\` at the top level.
+Reply briefly. To create or change the message, output EXACTLY ONE \`\`\`json block
+holding the COMPLETE message object (never a diff); omit it if no change is needed.
+Never output \`_id\`, \`content\`, or \`embeds\` at the top level.
 
-Shape: { "username"?: string, "avatar_url"?: string, "components": [ ... ] }
-
-Every component needs a numeric "type":
-- 10 Text Display: { "type": 10, "content": "markdown" }  (\\n = newline; **bold**, # heading, > quote, [text](url), <@123>, :emoji:)
+Shape: { "username"?, "avatar_url"?, "components": [ ... ] }
+Each component has a numeric "type":
+- 10 Text Display: { "type": 10, "content": "markdown" }
+- 17 Container (accent box): { "type": 17, "accent_color"?: integer, "components": [ ... ] }
 - 14 Separator: { "type": 14, "divider"?: boolean, "spacing"?: 1|2 }
-- 17 Container (colored accent box, cannot nest): { "type": 17, "accent_color"?: integer, "components": [ children ] }
-- 9 Section: { "type": 9, "components": [ 1-3 Text Displays ], "accessory": a Button or Thumbnail }
-- 1 Action Row: { "type": 1, "components": [ up to ${LIMITS.ACTION_ROW_BUTTONS} buttons OR one select ] }
-- 2 Button: link { "type": 2, "style": 5, "label": "x", "url": "https://…" } or colored { "type": 2, "style": 1|2|3|4, "label": "x", "custom_id": "id" }
-- 12 Media Gallery: { "type": 12, "items": [ { "media": { "url": "https://…" } } ] }
+- 9 Section: { "type": 9, "components": [ 1-3 type-10 ], "accessory": a Button or Thumbnail }
+- 1 Action Row: { "type": 1, "components": [ ≤${LIMITS.ACTION_ROW_BUTTONS} buttons OR 1 select ] }
+- 2 Button: { "type": 2, "style": 5, "label", "url" } (link) or { "type": 2, "style": 1-4, "label", "custom_id" }
+- 12 Media Gallery: { "type": 12, "items": [ { "media": { "url" } } ] }
 
-Limits: ≤${LIMITS.TOP_LEVEL_COMPONENTS} top-level components, ≤${LIMITS.TOTAL_CHARACTERS} characters total. Start from the CURRENT MESSAGE and change only what the user asks.`;
+Limits: ≤${LIMITS.TOP_LEVEL_COMPONENTS} top-level components, ≤${LIMITS.TOTAL_CHARACTERS} characters total.`;
 
-/** Compact system prompt for the local provider — see `LOCAL_SCHEMA_GUIDE`. */
+/** ~tokens budget for the live message JSON before we summarize it instead. */
+const MAX_LOCAL_MESSAGE_CHARS = 1500;
+
+/**
+ * Compact system prompt for the local provider — see `LOCAL_SCHEMA_GUIDE`.
+ *
+ * The live-message JSON is the largest, most variable part of the prompt, so on
+ * a weak GPU it's the main thing that bloats the prefill (a "full kit" message
+ * is huge). When it's large we send a one-line summary instead of the full JSON;
+ * the common chat case and edits to small messages keep full context.
+ */
 export function buildLocalSystemPrompt(current: WebhookMessage): string {
   let currentJson: string;
   try {
@@ -132,5 +138,16 @@ export function buildLocalSystemPrompt(current: WebhookMessage): string {
   } catch {
     currentJson = '{ "components": [] }';
   }
-  return `${LOCAL_SCHEMA_GUIDE}\n\n## CURRENT MESSAGE\n\`\`\`json\n${currentJson}\n\`\`\``;
+
+  let context: string;
+  if (currentJson.length <= MAX_LOCAL_MESSAGE_CHARS) {
+    context = `## CURRENT MESSAGE\n\`\`\`json\n${currentJson}\n\`\`\``;
+  } else {
+    const n = Array.isArray(current.components) ? current.components.length : 0;
+    context =
+      `## CURRENT MESSAGE\n` +
+      `It has ${n} top-level component${n === 1 ? "" : "s"} (full JSON omitted to keep the local model fast). ` +
+      `If the user asks to change it, rebuild the complete message from their description.`;
+  }
+  return `${LOCAL_SCHEMA_GUIDE}\n\n${context}`;
 }

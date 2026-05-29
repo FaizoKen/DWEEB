@@ -342,13 +342,12 @@ async function ensureEngine(
 
   const w = new Worker(new URL("./webllmWorker.ts", import.meta.url), { type: "module" });
   try {
-    const created = await webllm.CreateWebWorkerMLCEngine(
-      w,
-      modelId,
-      { initProgressCallback: progressCb },
-      // Shrink the KV cache to fit a memory-tight iGPU (see LOCAL_CONTEXT_WINDOW).
-      { context_window_size: LOCAL_CONTEXT_WINDOW },
-    );
+    // Use the model's default context window (like chat.webllm.ai) — memory was
+    // never the constraint here, and the extra headroom avoids context-window
+    // sliding when a message is large.
+    const created = await webllm.CreateWebWorkerMLCEngine(w, modelId, {
+      initProgressCallback: progressCb,
+    });
     worker = w;
     engine = created;
     currentModelId = modelId;
@@ -365,25 +364,19 @@ async function ensureEngine(
 }
 
 /**
- * Caps that keep the local model's GPU memory footprint small. On a memory-tight
- * integrated GPU the driver resets the device ("device lost" → a mid-reply
- * `mapAsync` AbortError) when the model weights + KV cache + the page's own GPU
- * use exceed VRAM. The biggest lever we control is the KV cache, which WebLLM
- * allocates up front from the context window — so we ask for a smaller one for
- * local models, and keep input+output inside it. Cloud providers have no such
- * limit and are untouched.
+ * Caps that keep the local prompt small — to keep the *prefill* fast.
  *
- *   • `LOCAL_CONTEXT_WINDOW` — overrides the model's default (4096) when the
- *     engine loads. Halving it roughly halves the KV-cache VRAM, which is what
- *     pushes a weak iGPU over its memory ceiling. 2048 comfortably holds the
- *     compact local prompt + a normal message + a few turns + the reply.
- *   • `MAX_LOCAL_TOKENS` — caps the reply so input+output stay inside the
- *     window (no context-window sliding, which is itself GPU-heavy), and means
- *     fewer per-token logit readbacks (each is a GPU `mapAsync`).
- *   • `MAX_LOCAL_HISTORY_TURNS` — only recent turns are sent; the live message
- *     already rides in the system prompt, so older turns add cost without signal.
+ * Side-by-side with chat.webllm.ai on the same machine, memory was NOT the
+ * limiter (chat.webllm.ai happily runs at 93% RAM; we crashed with 2.8 GB
+ * free). What differs is the prompt: chat.webllm.ai sends a tiny prompt and
+ * prefills it in a blink, while this app injects the whole live-message JSON
+ * plus the schema every turn. Prefilling a large prompt is the GPU-heavy step
+ * that spikes a weak iGPU and trips the driver watchdog (decode itself barely
+ * touches the GPU — chat.webllm.ai shows ~1% GPU while decoding). So the lever
+ * is fewer prompt tokens: a compact system prompt (see `buildLocalSystemPrompt`,
+ * which also drops the message JSON when it's large) and a bounded history.
+ * Cloud providers are untouched.
  */
-const LOCAL_CONTEXT_WINDOW = 2048;
 const MAX_LOCAL_TOKENS = 768;
 const MAX_LOCAL_HISTORY_TURNS = 8;
 
@@ -407,18 +400,6 @@ let gpuFailureStreak = 0;
 
 /** Internal: a run result that also says whether a fresh-worker retry might help. */
 type LocalRunResult = AiCallResult & { gpuRetryable?: boolean };
-
-/**
-/**
- * Pause between streamed tokens. The worker generates one token per `next()`,
- * so this gap is what stops the GPU running flat-out at 100%: during the gap the
- * GPU is idle (no forward pass queued) and the page paints the partial reply. On
- * a weak shared iGPU, keeping the GPU below saturation is what avoids the driver
- * watchdog reset. ~35 ms ≈ 25 tokens/s — plenty fast for short chat replies, and
- * `setTimeout` (unlike requestAnimationFrame) keeps progressing in a backgrounded
- * tab so generation never stalls.
- */
-const LOCAL_TOKEN_GAP_MS = 35;
 
 /**
  * Warm the local engine ahead of the first message — compile the WebGPU
@@ -548,15 +529,11 @@ async function runOnce(
     ];
     // Stream the reply, exactly like chat.webllm.ai. The streaming path is the
     // well-exercised one in the worker engine; the one-shot non-streaming call
-    // is where this setup hit "Object has already been disposed" mid-reply.
-    //
-    // The worker generates tokens pull-style — one per `next()` — so the rate is
-    // set by how fast we ask for the next one. We emit each partial reply
-    // (`onToken`) and then pause ~35 ms (`LOCAL_TOKEN_GAP_MS`): the page paints
-    // the live text and, crucially, the GPU sits idle in the gap instead of
-    // running flat out at 100%. On a weak shared iGPU that breather is what keeps
-    // it under the driver's watchdog and away from the device-reset edge. We
-    // still return the whole text so payload parsing is unchanged.
+    // is where this setup hit "Object has already been disposed" mid-reply. We
+    // emit each partial reply (`onToken`) for the live UI and still return the
+    // whole text so payload parsing is unchanged. No artificial delay between
+    // tokens: decode barely touches the GPU (chat.webllm.ai shows ~1% GPU while
+    // decoding), and the worker round-trip per token already yields to paint.
     //
     // No `stream_options.include_usage`: we never show token counts, and that
     // final usage chunk is one more end-of-stream GPU readback we don't need.
@@ -574,7 +551,6 @@ async function runOnce(
       if (typeof delta === "string" && delta.length > 0) {
         text += delta;
         onToken?.(text);
-        await delay(LOCAL_TOKEN_GAP_MS);
       }
     }
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
