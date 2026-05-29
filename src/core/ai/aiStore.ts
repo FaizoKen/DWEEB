@@ -35,6 +35,11 @@ interface AiState {
    * `null` once the model is resident (or for any non-local provider).
    */
   loadProgress: LocalLoadProgress | null;
+  /**
+   * The partial assistant reply while a local model streams its answer, so the
+   * panel can render it live (like chat.webllm.ai). `null` when not streaming.
+   */
+  streamingText: string | null;
   /** Last error surfaced to the user (cleared on the next send). */
   error: string | null;
 
@@ -67,6 +72,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   messages: [],
   thinking: false,
   loadProgress: null,
+  streamingText: null,
   error: null,
 
   openPanel() {
@@ -90,6 +96,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       messages: [],
       thinking: false,
       loadProgress: null,
+      streamingText: null,
       error: null,
     });
   },
@@ -118,6 +125,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       messages: appendMessage(s.messages, userMsg),
       thinking: true,
       loadProgress: null,
+      streamingText: null,
       error: null,
     }));
 
@@ -129,15 +137,31 @@ export const useAiStore = create<AiState>((set, get) => ({
       settings.provider === "local" ? buildLocalSystemPrompt(current) : buildSystemPrompt(current);
 
     inflight = new AbortController();
-    const result = await callAI(settings, system, toTurns(messages), inflight.signal, (p) => {
-      // Only surface progress while we're still the in-flight request; a
-      // finished load shouldn't redraw the spinner.
-      if (get().thinking) set({ loadProgress: p.progress < 1 ? p : null });
-    });
+    const result = await callAI(
+      settings,
+      system,
+      toTurns(messages),
+      inflight.signal,
+      (p) => {
+        // Only surface progress while we're still the in-flight request; a
+        // finished load shouldn't redraw the spinner.
+        if (get().thinking) set({ loadProgress: p.progress < 1 ? p : null });
+      },
+      (textSoFar) => {
+        // Live partial reply from a streaming local model. The first token also
+        // means loading is done, so clear the progress bar.
+        if (get().thinking) set({ streamingText: textSoFar, loadProgress: null });
+      },
+    );
     inflight = null;
 
     if (!result.ok) {
-      set({ thinking: false, loadProgress: null, error: result.error ?? "Request failed." });
+      set({
+        thinking: false,
+        loadProgress: null,
+        streamingText: null,
+        error: result.error ?? "Request failed.",
+      });
       return;
     }
 
@@ -174,18 +198,19 @@ export const useAiStore = create<AiState>((set, get) => ({
       messages: appendMessage(s.messages, assistantMsg),
       thinking: false,
       loadProgress: null,
+      streamingText: null,
     }));
   },
 
   cancel() {
     inflight?.abort();
     inflight = null;
-    set({ thinking: false, loadProgress: null });
+    set({ thinking: false, loadProgress: null, streamingText: null });
   },
 
   clearChat() {
     inflight?.abort();
     inflight = null;
-    set({ messages: [], thinking: false, loadProgress: null, error: null });
+    set({ messages: [], thinking: false, loadProgress: null, streamingText: null, error: null });
   },
 }));

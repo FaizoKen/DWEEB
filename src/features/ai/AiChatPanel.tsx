@@ -33,6 +33,7 @@ export function AiChatPanel() {
   const messages = useAiStore((s) => s.messages);
   const thinking = useAiStore((s) => s.thinking);
   const loadProgress = useAiStore((s) => s.loadProgress);
+  const streamingText = useAiStore((s) => s.streamingText);
   const error = useAiStore((s) => s.error);
   const send = useAiStore((s) => s.send);
   const cancel = useAiStore((s) => s.cancel);
@@ -48,11 +49,12 @@ export function AiChatPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Keep the transcript pinned to the latest turn.
+  // Keep the transcript pinned to the latest turn (and to the growing reply
+  // while a local model streams).
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, thinking, view]);
+  }, [messages, thinking, streamingText, view]);
 
   // Focus the composer when the panel opens onto the chat view.
   useEffect(() => {
@@ -127,7 +129,13 @@ export function AiChatPanel() {
               </ul>
             )}
             {thinking ? (
-              loadProgress ? <LoadingBubble progress={loadProgress} /> : <ThinkingBubble />
+              streamingText ? (
+                <StreamingBubble text={streamingText} />
+              ) : loadProgress ? (
+                <LoadingBubble progress={loadProgress} />
+              ) : (
+                <ThinkingBubble />
+              )
             ) : null}
             {error ? <div className={styles.error}>{error}</div> : null}
           </div>
@@ -219,6 +227,38 @@ function ThinkingBubble() {
       <span className={styles.dot} />
       <span className={styles.dot} />
       <span className={styles.dot} />
+    </div>
+  );
+}
+
+/**
+ * Split the live partial reply into the prose to show and whether the model has
+ * started emitting the ```json message block. We only show the conversational
+ * prose as it streams; the JSON itself stays hidden behind a "writing the
+ * message…" note (it lands in the editor once parsed, not in the chat).
+ */
+function streamPreview(raw: string): { text: string; writingMessage: boolean } {
+  const fence = raw.indexOf("```");
+  if (fence === -1) return { text: raw, writingMessage: false };
+  return { text: raw.slice(0, fence).trimEnd(), writingMessage: true };
+}
+
+function StreamingBubble({ text }: { text: string }) {
+  const { text: prose, writingMessage } = streamPreview(text);
+  // Nothing legible yet (leading whitespace before the first word) — keep the
+  // dots so the panel doesn't flash an empty bubble.
+  if (!prose && !writingMessage) return <ThinkingBubble />;
+  return (
+    <div className={styles.rowTheirs} aria-live="polite">
+      <div className={styles.bubbleTheirs}>
+        {prose ? <p className={styles.bubbleText}>{prose}</p> : null}
+        {writingMessage ? (
+          <div className={styles.applied}>
+            <SparkleIcon size={13} />
+            <span>Writing the message…</span>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -389,12 +389,33 @@ const LOCAL_CONTEXT_WINDOW = 2048;
 const MAX_LOCAL_TOKENS = 768;
 const MAX_LOCAL_HISTORY_TURNS = 8;
 
+/**
+ * Yield to the next paint frame. Used between streamed tokens so the page can
+ * render the partial reply (the per-token main-thread work that paces a weak
+ * iGPU — see the streaming loop in `runOnce`). The setTimeout race guarantees
+ * progress even when `requestAnimationFrame` is throttled (e.g. a backgrounded
+ * tab), so generation never stalls.
+ */
+function yieldToPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(finish);
+    setTimeout(finish, 50);
+  });
+}
+
 export async function callLocal(
   settings: AiSettings,
   system: string,
   turns: AiTurn[],
   signal?: AbortSignal,
   onProgress?: (p: LocalLoadProgress) => void,
+  onToken?: (textSoFar: string) => void,
 ): Promise<AiCallResult> {
   const modelId = settings.model.trim() || DEFAULT_LOCAL_MODEL;
 
@@ -410,7 +431,7 @@ export async function callLocal(
 
   const release = await acquireEngineLock();
   try {
-    return await runOnce(modelId, system, turns, signal, onProgress);
+    return await runOnce(modelId, system, turns, signal, onProgress, onToken);
   } finally {
     release();
   }
@@ -432,6 +453,7 @@ async function runOnce(
   turns: AiTurn[],
   signal: AbortSignal | undefined,
   onProgress: ((p: LocalLoadProgress) => void) | undefined,
+  onToken: ((textSoFar: string) => void) | undefined,
 ): Promise<AiCallResult> {
   if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 
@@ -466,10 +488,16 @@ async function runOnce(
     ];
     // Stream the reply, exactly like chat.webllm.ai. The streaming path is the
     // well-exercised one in the worker engine; the one-shot non-streaming call
-    // is where this setup hit "Object has already been disposed" mid-reply. We
-    // accumulate the chunks here and still hand the whole text back, so the rest
-    // of the app (which parses a JSON payload out of the full reply) is
-    // unchanged — the UI just doesn't render token-by-token.
+    // is where this setup hit "Object has already been disposed" mid-reply.
+    //
+    // The worker generates tokens pull-style — one per `next()` — so the rate is
+    // set by how fast we ask for the next one. We emit each partial reply
+    // (`onToken`) and then yield a paint frame: that renders the live text and,
+    // crucially, lets the GPU idle between tokens instead of running flat out at
+    // 100%. It's the same balance chat.webllm.ai strikes by rendering each
+    // token, and on a weak iGPU the breather keeps it cooler and further from
+    // the device-reset edge. We still return the whole text so payload parsing
+    // is unchanged.
     //
     // No `stream_options.include_usage`: we never show token counts, and that
     // final usage chunk is one more end-of-stream GPU readback we don't need.
@@ -484,7 +512,11 @@ async function runOnce(
     for await (const chunk of stream) {
       if (signal?.aborted) return { ok: false, error: "Request cancelled." };
       const delta = chunk.choices?.[0]?.delta?.content;
-      if (typeof delta === "string") text += delta;
+      if (typeof delta === "string" && delta.length > 0) {
+        text += delta;
+        onToken?.(text);
+        await yieldToPaint();
+      }
     }
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 

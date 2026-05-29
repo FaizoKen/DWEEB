@@ -7,9 +7,10 @@
  * cross-origin browser requests; for Anthropic we opt in with the documented
  * `anthropic-dangerous-direct-browser-access` header.
  *
- * Calls are non-streaming: a single request returns the whole reply. That keeps
- * the adapter logic small and uniform across providers, which matters far more
- * here than token-by-token rendering.
+ * The cloud adapters are non-streaming: a single request returns the whole
+ * reply, which keeps the adapter logic small and uniform. The local provider
+ * streams internally (it paces a weak GPU and renders live via `onLocalToken`)
+ * but still resolves to the whole reply here, so callers see one uniform result.
  */
 
 import type { AiProvider, AiSettings, ChatMessage } from "./types";
@@ -114,8 +115,9 @@ export function toTurns(messages: ChatMessage[]): AiTurn[] {
 /**
  * Make one completion request. `system` is the schema/instruction prompt,
  * `turns` is the running conversation (oldest first, ending with the latest
- * user turn). `onLocalProgress` is only invoked when the chosen provider is
- * `local` and we are downloading / compiling a model in the background.
+ * user turn). `onLocalProgress` and `onLocalToken` are only invoked when the
+ * chosen provider is `local`: the former while a model downloads / compiles,
+ * the latter with the partial reply as each token streams in.
  */
 export async function callAI(
   settings: AiSettings,
@@ -123,6 +125,7 @@ export async function callAI(
   turns: AiTurn[],
   signal?: AbortSignal,
   onLocalProgress?: (p: LocalLoadProgress) => void,
+  onLocalToken?: (textSoFar: string) => void,
 ): Promise<AiCallResult> {
   try {
     switch (settings.provider) {
@@ -131,7 +134,7 @@ export async function callAI(
       case "gemini":
         return await callGemini(settings, system, turns, signal);
       case "local":
-        return await callLocal(settings, system, turns, signal, onLocalProgress);
+        return await callLocal(settings, system, turns, signal, onLocalProgress, onLocalToken);
       case "openai":
       default:
         return await callOpenAiCompatible(settings, system, turns, signal);
@@ -169,7 +172,11 @@ function networkErrorMessage(provider: AiProvider): string {
 function extractProviderMessage(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const err = (body as { error?: unknown }).error;
-  if (err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string") {
+  if (
+    err &&
+    typeof err === "object" &&
+    typeof (err as { message?: unknown }).message === "string"
+  ) {
     return (err as { message: string }).message;
   }
   if (typeof err === "string") return err;
