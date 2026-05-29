@@ -22,7 +22,7 @@ import { callAI, toTurns } from "./providers";
 import { buildSystemPrompt, buildLocalSystemPrompt } from "./systemPrompt";
 import { extractReply } from "./extractReply";
 import { loadAiSettings, saveAiSettings } from "./settingsStorage";
-import { isLikelyMobile, type LocalLoadProgress } from "./localEngine";
+import { isLikelyMobile, preloadLocalModel, type LocalLoadProgress } from "./localEngine";
 
 interface AiState {
   open: boolean;
@@ -58,6 +58,12 @@ interface AiState {
   send(prompt: string): Promise<void>;
   cancel(): void;
   clearChat(): void;
+  /**
+   * Warm the local model in the background (compile + upload) so the first
+   * message doesn't pay the one-time ~100% GPU compile mid-chat. No-op unless
+   * the configured provider is `local`. Safe to call repeatedly.
+   */
+  preloadLocal(): void;
 }
 
 let inflight: AbortController | null = null;
@@ -212,5 +218,19 @@ export const useAiStore = create<AiState>((set, get) => ({
     inflight?.abort();
     inflight = null;
     set({ messages: [], thinking: false, loadProgress: null, streamingText: null, error: null });
+  },
+
+  preloadLocal() {
+    const { settings } = get();
+    if (settings.provider !== "local" || !get().isConfigured()) return;
+    // Don't interfere with an in-flight send or a load already underway.
+    if (get().thinking || get().loadProgress) return;
+    void preloadLocalModel(settings, (p) => {
+      // Surface the warm-up via the same loading bar, but never stomp on an
+      // in-flight send that may have started meanwhile.
+      if (!get().thinking) set({ loadProgress: p.progress < 1 ? p : null });
+    }).finally(() => {
+      if (!get().thinking) set({ loadProgress: null });
+    });
   },
 }));

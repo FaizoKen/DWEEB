@@ -420,6 +420,35 @@ type LocalRunResult = AiCallResult & { gpuRetryable?: boolean };
  */
 const LOCAL_TOKEN_GAP_MS = 35;
 
+/**
+ * Warm the local engine ahead of the first message — compile the WebGPU
+ * shaders and upload the weights now (e.g. when the AI panel opens) so that
+ * one-time ~100% GPU burst doesn't land in the middle of the user's first chat.
+ * This is how chat.webllm.ai feels smooth: it loads the model behind a progress
+ * bar before you talk to it. Best-effort: any failure is swallowed here and
+ * left for the first real send to classify and surface. Reuses the engine
+ * singleton, so it's a no-op once the model is resident.
+ */
+export async function preloadLocalModel(
+  settings: AiSettings,
+  onProgress?: (p: LocalLoadProgress) => void,
+): Promise<void> {
+  const modelId = settings.model.trim() || DEFAULT_LOCAL_MODEL;
+  if (!isWebGpuSupported()) return;
+  if (engine && currentModelId === modelId) return; // already warm
+  const release = await acquireEngineLock();
+  try {
+    if (engine && currentModelId === modelId) return;
+    await ensureEngine(modelId, onProgress);
+  } catch {
+    // Couldn't warm it (e.g. a GPU reset during compile) — drop any half-built
+    // engine; the first send will retry and surface a real message.
+    await resetEngine();
+  } finally {
+    release();
+  }
+}
+
 export async function callLocal(
   settings: AiSettings,
   system: string,

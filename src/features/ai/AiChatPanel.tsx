@@ -38,6 +38,7 @@ export function AiChatPanel() {
   const send = useAiStore((s) => s.send);
   const cancel = useAiStore((s) => s.cancel);
   const clearChat = useAiStore((s) => s.clearChat);
+  const preloadLocal = useAiStore((s) => s.preloadLocal);
   const settings = useAiStore((s) => s.settings);
   const isConfigured = useAiStore((s) => s.isConfigured());
 
@@ -61,15 +62,22 @@ export function AiChatPanel() {
     if (open && view === "chat") inputRef.current?.focus();
   }, [open, view]);
 
-  // While the AI is working, mark the document so CSS can pause animations and
-  // free GPU cycles for inference (see global.css). Matters most for the local
-  // WebGPU provider on a weak/integrated GPU; harmless for cloud providers.
+  // Warm the local model as soon as the chat view is open, so the one-time
+  // ~100% GPU compile happens here (behind the loading bar) instead of landing
+  // in the middle of the first message. No-op for cloud providers / when warm.
+  useEffect(() => {
+    if (open && view === "chat") preloadLocal();
+  }, [open, view, settings.provider, preloadLocal]);
+
+  // While the AI is working OR warming up, mark the document so CSS can pause
+  // animations and free GPU cycles for the model (see global.css). Matters most
+  // for the local WebGPU provider on a weak/integrated GPU.
   useEffect(() => {
     const root = document.documentElement;
-    if (thinking) root.setAttribute("data-ai-busy", "true");
+    if (thinking || loadProgress) root.setAttribute("data-ai-busy", "true");
     else root.removeAttribute("data-ai-busy");
     return () => root.removeAttribute("data-ai-busy");
-  }, [thinking]);
+  }, [thinking, loadProgress]);
 
   const submit = (value: string) => {
     const text = value.trim();
@@ -138,11 +146,11 @@ export function AiChatPanel() {
                 ))}
               </ul>
             )}
-            {thinking ? (
+            {loadProgress ? (
+              <LoadingBubble progress={loadProgress} />
+            ) : thinking ? (
               streamingText ? (
                 <StreamingBubble text={streamingText} />
-              ) : loadProgress ? (
-                <LoadingBubble progress={loadProgress} />
               ) : (
                 <ThinkingBubble />
               )
