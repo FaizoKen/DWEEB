@@ -25,6 +25,7 @@ import type { TouchEvent as ReactTouchEvent } from "react";
 import { Builder } from "@/features/builder/Builder";
 import { Preview } from "@/features/preview/Preview";
 import { ShareDialog } from "@/features/share/ShareDialog";
+import { RemoveInteractiveConfirm } from "@/features/share/RemoveInteractiveConfirm";
 import { AiChatPanel } from "@/features/ai/AiChatPanel";
 import { useAiStore } from "@/core/ai/aiStore";
 import { ToastViewport } from "@/ui/Toast";
@@ -167,6 +168,10 @@ export function App() {
     "send" | "share" | "restore" | "json" | "import" | "about"
   >("send");
 
+  // Confirmation popup for clearing interactive components. It opens *after*
+  // the Share dialog closes, so it floats over the editor rather than the menu.
+  const [confirmStripOpen, setConfirmStripOpen] = useState(false);
+
   // `previewOpen` only matters on mobile, where the preview pane is a
   // bottom sheet. On desktop the CSS keeps both panes visible regardless.
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -189,6 +194,12 @@ export function App() {
   const openShareDialog = (tab: typeof shareInitialTab) => {
     setShareInitialTab(tab);
     setShareOpen(true);
+  };
+
+  // Close the Share dialog and hand off to the confirmation popup over the editor.
+  const requestRemoveInteractive = () => {
+    setShareOpen(false);
+    setConfirmStripOpen(true);
   };
 
   // On mobile the AI chat floats over the preview, so opening the assistant
@@ -256,6 +267,11 @@ export function App() {
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         initialTab={shareInitialTab}
+        onRequestRemoveInteractive={requestRemoveInteractive}
+      />
+      <RemoveInteractiveConfirm
+        open={confirmStripOpen}
+        onClose={() => setConfirmStripOpen(false)}
       />
       <ToastViewport />
     </div>

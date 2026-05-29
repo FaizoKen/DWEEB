@@ -31,6 +31,13 @@ export const TrashIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const PencilIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+  </svg>
+);
+
 export const CopyIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <rect x="9" y="9" width="13" height="13" rx="2" />

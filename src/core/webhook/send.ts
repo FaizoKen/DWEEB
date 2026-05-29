@@ -61,8 +61,7 @@ export function parseMessageIdInput(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
   if (/^\d{15,25}$/.test(trimmed)) return trimmed;
-  const linkMatch =
-    /discord(?:app)?\.com\/channels\/(?:\d+|@me)\/\d+\/(\d{15,25})/i.exec(trimmed);
+  const linkMatch = /discord(?:app)?\.com\/channels\/(?:\d+|@me)\/\d+\/(\d{15,25})/i.exec(trimmed);
   return linkMatch?.[1] ?? null;
 }
 
@@ -297,7 +296,9 @@ function flattenDiscordErrors(errors: unknown, path = ""): string[] {
       if (Array.isArray(value)) {
         for (const item of value) {
           const msg =
-            item && typeof item === "object" && typeof (item as { message?: unknown }).message === "string"
+            item &&
+            typeof item === "object" &&
+            typeof (item as { message?: unknown }).message === "string"
               ? (item as { message: string }).message
               : String(item);
           out.push(path ? `${path}: ${msg}` : msg);
@@ -306,11 +307,7 @@ function flattenDiscordErrors(errors: unknown, path = ""): string[] {
       continue;
     }
     // Numeric keys are array indices; everything else is an object field.
-    const nextPath = /^\d+$/.test(key)
-      ? `${path}[${key}]`
-      : path
-        ? `${path}.${key}`
-        : key;
+    const nextPath = /^\d+$/.test(key) ? `${path}[${key}]` : path ? `${path}.${key}` : key;
     out.push(...flattenDiscordErrors(value, nextPath));
   }
   return out;
@@ -379,6 +376,75 @@ export async function verifyWebhook(
     };
   }
   return { ok: false, status: res.status, error: describeError(res.status, body), body };
+}
+
+/* ─── Owner classification ───────────────────────────────────────────── */
+
+export type WebhookOwnerKind = "bot" | "user" | "follower" | "unknown";
+
+export interface WebhookOwner {
+  /** bot/app · person · channel-follower · couldn't tell. */
+  kind: WebhookOwnerKind;
+  /** The bot/OAuth2 application id when an app created it; null otherwise. */
+  applicationId: string | null;
+  /** Raw webhook `type` — 1 Incoming · 2 Channel Follower · 3 Application. */
+  type: number | null;
+  /** Short chip text, e.g. "Bot". */
+  badge: string;
+  /** One-line explanation for under the webhook name. */
+  label: string;
+}
+
+export const OWNER_COPY: Record<WebhookOwnerKind, { badge: string; label: string }> = {
+  bot: { badge: "Bot", label: "Created by a bot / app." },
+  user: { badge: "User", label: "Created by a user in Server Settings." },
+  follower: { badge: "Follower", label: "Channel-follower webhook (Channel Following)." },
+  unknown: { badge: "?", label: "Couldn't determine who created this webhook." },
+};
+
+/**
+ * Work out who owns a webhook from the object `verifyWebhook` returns — no
+ * message is sent.
+ *
+ * Discord omits the `user` object on the token endpoint, so we can't name the
+ * exact creator, but `application_id` reliably tells a bot from a human:
+ *   - non-null → a bot/OAuth2 app created it
+ *   - null     → a person made it in Server Settings (or it's a follower)
+ */
+export function classifyWebhookOwner(webhook: Record<string, unknown>): WebhookOwner {
+  const applicationId =
+    typeof webhook.application_id === "string" && webhook.application_id.length > 0
+      ? webhook.application_id
+      : null;
+  const type = typeof webhook.type === "number" ? webhook.type : null;
+
+  let kind: WebhookOwnerKind;
+  if (applicationId) kind = "bot";
+  else if (type === 1) kind = "user";
+  else if (type === 2) kind = "follower";
+  else kind = "unknown";
+
+  return { kind, applicationId, type, ...OWNER_COPY[kind] };
+}
+
+/** Pull the avatar hash out of a webhook object; null when it has none. */
+export function webhookAvatarHash(webhook: Record<string, unknown>): string | null {
+  return typeof webhook.avatar === "string" && webhook.avatar.length > 0 ? webhook.avatar : null;
+}
+
+/**
+ * CDN URL for a webhook's avatar. Discord serves webhook avatars under the
+ * webhook id; a null hash means the webhook has no custom picture, so we fall
+ * back to Discord's default avatar. Animated hashes (`a_…`) are served as gifs.
+ */
+export function webhookAvatarUrl(
+  id: string,
+  avatar: string | null | undefined,
+  size = 64,
+): string {
+  if (!avatar) return "https://cdn.discordapp.com/embed/avatars/0.png";
+  const ext = avatar.startsWith("a_") ? "gif" : "png";
+  return `https://cdn.discordapp.com/avatars/${id}/${avatar}.${ext}?size=${size}`;
 }
 
 /* ─── Restore (GET) ──────────────────────────────────────────────────── */

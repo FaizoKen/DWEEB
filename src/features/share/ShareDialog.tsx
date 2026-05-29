@@ -32,11 +32,7 @@ import {
   writeShareTokenToHash,
   type V1ImportNote,
 } from "@/core/serialization";
-import {
-  fetchWebhookMessage,
-  parseMessageIdInput,
-  parseWebhookUrl,
-} from "@/core/webhook";
+import { fetchWebhookMessage, parseMessageIdInput, parseWebhookUrl } from "@/core/webhook";
 import { pushToast } from "@/ui/Toast";
 import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
@@ -54,9 +50,20 @@ interface ShareDialogProps {
    * clicked (Send / Share / Restore).
    */
   initialTab?: Tab;
+  /**
+   * Forwarded to the Send panel: invoked when the user opts to clear the
+   * interactive components a non-app webhook can't deliver. The App closes
+   * the dialog and shows a confirmation over the editor.
+   */
+  onRequestRemoveInteractive?: () => void;
 }
 
-export function ShareDialog({ open, onClose, initialTab = "send" }: ShareDialogProps) {
+export function ShareDialog({
+  open,
+  onClose,
+  initialTab = "send",
+  onRequestRemoveInteractive,
+}: ShareDialogProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
 
   // Snap to the requested tab whenever the dialog re-opens, so opening from
@@ -87,7 +94,9 @@ export function ShareDialog({ open, onClose, initialTab = "send" }: ShareDialogP
         </TabButton>
       </div>
       <div className={styles.body}>
-        {tab === "send" ? <SendPanel /> : null}
+        {tab === "send" ? (
+          <SendPanel onRequestRemoveInteractive={onRequestRemoveInteractive} />
+        ) : null}
         {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}
         {tab === "share" ? <ShareLinkPanel /> : null}
         {tab === "json" ? <JsonExportPanel /> : null}
@@ -128,8 +137,8 @@ function ShareLinkPanel() {
   return (
     <>
       <p className={styles.lead}>
-        Anyone who opens this URL loads the exact message tree below. The state lives entirely
-        in the URL hash — nothing is uploaded.
+        Anyone who opens this URL loads the exact message tree below. The state lives entirely in
+        the URL hash — nothing is uploaded.
       </p>
       <TextArea readOnly rows={4} value={url} />
       <div className={styles.statsRow}>
@@ -208,9 +217,8 @@ function AboutPanel() {
   return (
     <>
       <p className={styles.lead}>
-        A visual editor for Discord webhook messages with{" "}
-        <strong>Components V2</strong>. Build, preview, and share — all in
-        your browser.
+        A visual editor for Discord webhook messages with <strong>Components V2</strong>. Build,
+        preview, and share — all in your browser.
       </p>
       <p className={styles.lead}>
         Made with 💖 by{" "}
@@ -221,11 +229,7 @@ function AboutPanel() {
       </p>
       <p className={styles.lead}>
         Feedback?{" "}
-        <a
-          href="https://discord.gg/2wB7rHRDg2"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
+        <a href="https://discord.gg/2wB7rHRDg2" target="_blank" rel="noopener noreferrer">
           Join the support server
         </a>
         .
@@ -322,10 +326,9 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
   return (
     <>
       <p className={styles.lead}>
-        Paste a share URL, a share token, or a webhook JSON payload. V1
-        payloads (with <code>content</code>, <code>embeds</code>,{" "}
-        <code>poll</code>, or <code>stickers</code>) are auto-converted to V2
-        — the panel previews what happens before you commit.
+        Paste a share URL, a share token, or a webhook JSON payload. V1 payloads (with{" "}
+        <code>content</code>, <code>embeds</code>, <code>poll</code>, or <code>stickers</code>) are
+        auto-converted to V2 — the panel previews what happens before you commit.
       </p>
       <TextArea
         rows={10}
@@ -335,10 +338,7 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
         onChange={(e) => setText(e.currentTarget.value)}
       />
       {v1Preview.kind === "v1" ? (
-        <V1ConversionPreview
-          fields={v1Preview.detection.fields}
-          notes={v1Preview.notes}
-        />
+        <V1ConversionPreview fields={v1Preview.detection.fields} notes={v1Preview.notes} />
       ) : null}
       {error ? <div className={styles.error}>{error}</div> : null}
       <div className={styles.actions}>
@@ -354,7 +354,12 @@ type Analysis =
   | { kind: "empty" }
   | { kind: "not-json" }
   | { kind: "v2" }
-  | { kind: "v1"; parsed: unknown; detection: ReturnType<typeof detectV1Fields>; notes: V1ImportNote[] };
+  | {
+      kind: "v1";
+      parsed: unknown;
+      detection: ReturnType<typeof detectV1Fields>;
+      notes: V1ImportNote[];
+    };
 
 /**
  * Try to parse the input as JSON and decide whether it carries V1 fields.
@@ -386,20 +391,16 @@ function analyseInput(text: string): Analysis {
   }
 }
 
-function V1ConversionPreview({
-  fields,
-  notes,
-}: {
-  fields: string[];
-  notes: V1ImportNote[];
-}) {
+function V1ConversionPreview({ fields, notes }: { fields: string[]; notes: V1ImportNote[] }) {
   return (
     <section className={styles.v1Preview} aria-label="V1 → V2 conversion preview">
       <header className={styles.v1PreviewHeader}>
         <span className={styles.v1PreviewTitle}>V1 payload detected — preview</span>
         <div className={styles.v1PreviewChips}>
           {fields.map((f) => (
-            <span key={f} className={styles.v1PreviewChip}>{f}</span>
+            <span key={f} className={styles.v1PreviewChip}>
+              {f}
+            </span>
           ))}
         </div>
       </header>
@@ -410,9 +411,7 @@ function V1ConversionPreview({
               <span
                 className={cn(
                   styles.v1PreviewBadge,
-                  n.level === "warning"
-                    ? styles.v1PreviewBadgeWarn
-                    : styles.v1PreviewBadgeInfo,
+                  n.level === "warning" ? styles.v1PreviewBadgeWarn : styles.v1PreviewBadgeInfo,
                 )}
               >
                 {n.level === "warning" ? "Drop" : "Map"}
@@ -426,9 +425,7 @@ function V1ConversionPreview({
           ))}
         </ul>
       ) : (
-        <p className={styles.lead}>
-          V1 fields will be converted with no data loss.
-        </p>
+        <p className={styles.lead}>V1 fields will be converted with no data loss.</p>
       )}
     </section>
   );
@@ -512,9 +509,9 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   return (
     <>
       <p className={styles.lead}>
-        Pull a previously-posted webhook message back into the editor. Discord only allows this
-        for messages <strong>this webhook</strong> originally sent — not for user or bot
-        messages, even in the same channel.
+        Pull a previously-posted webhook message back into the editor. Discord only allows this for
+        messages <strong>this webhook</strong> originally sent — not for user or bot messages, even
+        in the same channel.
       </p>
 
       <Field
@@ -578,11 +575,7 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
       {error ? <div className={styles.error}>{error}</div> : null}
 
       <div className={styles.actions}>
-        <Button
-          variant="primary"
-          onClick={handleFetch}
-          disabled={busy || !parsedUrl || !messageId}
-        >
+        <Button variant="primary" onClick={handleFetch} disabled={busy || !parsedUrl || !messageId}>
           {busy ? "Fetching…" : "Restore into editor"}
         </Button>
       </div>

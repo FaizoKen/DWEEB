@@ -10,12 +10,17 @@
  *    back to "Send as new" — that simply ignores the restore origin for the
  *    next click; it doesn't clear it (so they can still hit Update later).
  *
+ * Before posting, the panel confirms who owns the webhook (a GET) whenever the
+ * owner isn't already known from a prior check or saved entry. That keeps the
+ * "this webhook isn't app-owned" block from being missed on a freshly-typed
+ * URL — Discord rejects interactive components sent through a person/follower
+ * webhook, so we catch it here instead of after the send bounces.
+ *
  * The webhook URL is treated as a credential:
  *  - The input is `type="password"` with a show/hide toggle so it doesn't
  *    appear in screen shares by default.
- *  - Saving to history is an **explicit action** — sending never touches
- *    localStorage; only the "Save webhook" button does (after verifying the
- *    webhook with Discord first).
+ *  - A successful send saves the webhook to history (this browser only); the
+ *    "Save webhook" button does the same up front. Both record who owns it.
  *  - `autoComplete="off"` keeps the browser password manager out of it.
  *
  * The send call is cancellable via AbortController. A second click while a
@@ -27,21 +32,27 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { validateMessage } from "@/core/schema/validation";
 import { inspectCapabilities } from "@/core/schema/capability";
 import {
+  classifyWebhookOwner,
   forgetWebhook,
   loadHistory,
+  OWNER_COPY,
   parseMessageIdInput,
   parseWebhookUrl,
   rememberWebhook,
+  renameWebhook,
   sendToWebhook,
-  touchWebhook,
   updateWebhookMessage,
   verifyWebhook,
+  webhookAvatarHash,
+  webhookAvatarUrl,
   type WebhookHistoryEntry,
+  type WebhookOwner,
+  type WebhookOwnerKind,
 } from "@/core/webhook";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
-import { TrashIcon } from "@/ui/Icon";
+import { CloseIcon, PencilIcon, TrashIcon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
@@ -50,8 +61,15 @@ import styles from "./SendPanel.module.css";
 type SendState =
   | { kind: "idle" }
   | { kind: "sending" }
-  | { kind: "ok"; status: number }
   | { kind: "error"; message: string; retryAfter?: number; status?: number; body?: unknown };
+
+/** CSS-module class for each owner chip, by kind. */
+const OWNER_BADGE_CLASS: Record<WebhookOwnerKind, string | undefined> = {
+  bot: styles.ownerBot,
+  user: styles.ownerUser,
+  follower: styles.ownerFollower,
+  unknown: styles.ownerUnknown,
+};
 
 /** Pretty-print a Discord error body for the raw-response view. */
 function formatRawBody(body: unknown): string {
@@ -63,7 +81,15 @@ function formatRawBody(body: unknown): string {
   }
 }
 
-export function SendPanel() {
+export function SendPanel({
+  onRequestRemoveInteractive,
+}: {
+  /**
+   * Asked when the user clicks "Remove them" on the app-owned-webhook block.
+   * The App closes the dialog and pops a confirmation over the editor.
+   */
+  onRequestRemoveInteractive?: () => void;
+} = {}) {
   const message = useMessageStore((s) => s.message);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
 
@@ -73,12 +99,17 @@ export function SendPanel() {
   const [threadId, setThreadId] = useState(() => restoredFrom?.threadId ?? "");
   const [messageIdInput, setMessageIdInput] = useState(() => restoredFrom?.messageId ?? "");
   const [mode, setMode] = useState<"new" | "update">(() => (restoredFrom ? "update" : "new"));
-  const [label, setLabel] = useState("");
   const [revealUrl, setRevealUrl] = useState(false);
   const [history, setHistory] = useState<WebhookHistoryEntry[]>(() => loadHistory());
+  // Inline rename of a saved recents entry: which id is being edited + its draft.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingLabel, setEditingLabel] = useState("");
   const [state, setState] = useState<SendState>({ kind: "idle" });
   const [showRaw, setShowRaw] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Result of the last "Save webhook" verify GET — used to show who owns the
+  // webhook (bot vs. person) before any message is sent.
+  const [verified, setVerified] = useState<{ name: string; owner: WebhookOwner } | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const saveAbortRef = useRef<AbortController | null>(null);
@@ -104,6 +135,10 @@ export function SendPanel() {
   const parsedUrl = useMemo(() => parseWebhookUrl(url), [url]);
   const urlInvalid = url.trim().length > 0 && !parsedUrl;
 
+  // A verified result only describes the URL it was fetched for; editing the
+  // URL (or restoring a different one) invalidates it.
+  useEffect(() => setVerified(null), [url]);
+
   const parsedMessageId = useMemo(() => parseMessageIdInput(messageIdInput), [messageIdInput]);
   const messageIdInvalid =
     mode === "update" && messageIdInput.trim().length > 0 && !parsedMessageId;
@@ -115,6 +150,41 @@ export function SendPanel() {
     () => inspectCapabilities(message, { threadIdProvided: threadId.trim().length > 0 }),
     [message, threadId],
   );
+
+  // Best-known owner for the URL currently entered: a fresh verify result, or
+  // the kind we persisted on a saved (recents) entry. Undefined until verified.
+  const knownOwnerKind: WebhookOwnerKind | undefined = useMemo(() => {
+    if (verified) return verified.owner.kind;
+    if (!parsedUrl) return undefined;
+    return history.find((e) => e.id === parsedUrl.id)?.ownerKind;
+  }, [verified, parsedUrl, history]);
+
+  // Best-known display name for the URL — from a fresh verify or a saved entry —
+  // so the ownership banners can name the webhook instead of "this webhook".
+  const knownName = useMemo(() => {
+    if (verified?.name) return verified.name;
+    if (!parsedUrl) return undefined;
+    return history.find((e) => e.id === parsedUrl.id)?.name || undefined;
+  }, [verified, parsedUrl, history]);
+
+  // The capability inspector flags interactive components, but what that flag
+  // means depends on who owns the webhook:
+  //  - person/follower → hard block: Discord rejects the send outright.
+  //  - app/bot         → satisfied: Discord accepts them, so the generic
+  //                      "needs an app-owned webhook" warning is just noise.
+  //                      Swap it for a calmer note explaining that the clicks
+  //                      are actually handled by the bot's own backend.
+  const appWebhookNote = capabilities.find((c) => c.kind === "app_webhook");
+  const ownershipBlocked =
+    appWebhookNote != null && (knownOwnerKind === "user" || knownOwnerKind === "follower");
+  const ownershipSatisfied = appWebhookNote != null && knownOwnerKind === "bot";
+
+  // Don't say the same thing twice: a dedicated banner (blocked or app-owned)
+  // supersedes the generic capability note.
+  const visibleCapabilities =
+    ownershipBlocked || ownershipSatisfied
+      ? capabilities.filter((c) => c.kind !== "app_webhook")
+      : capabilities;
 
   const sending = state.kind === "sending";
 
@@ -137,13 +207,46 @@ export function SendPanel() {
       });
       return;
     }
-
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
 
     setState({ kind: "sending" });
     setShowRaw(false);
+
+    // Always confirm who owns the webhook before posting. When we don't yet
+    // know (no prior "Save webhook" or saved entry), GET it first so the
+    // ownership block fires here instead of letting an interactive message slip
+    // through to Discord and bounce back as a rejection.
+    let ownerKind = knownOwnerKind;
+    // The webhook's own name + avatar, captured if we end up verifying here.
+    // Used to label and picture the recents entry without asking for input.
+    let resolvedName: string | undefined;
+    let resolvedAvatar: string | null | undefined;
+    if (!ownerKind) {
+      const check = await verifyWebhook(parsedUrl, { signal: ac.signal });
+      if (!check.ok) {
+        if (check.status === 0 && check.error === "Check was cancelled.") {
+          setState({ kind: "idle" });
+          return;
+        }
+        setState({ kind: "error", message: check.error, status: check.status, body: check.body });
+        return;
+      }
+      const owner = classifyWebhookOwner(check.webhook);
+      ownerKind = owner.kind;
+      resolvedName = typeof check.webhook.name === "string" ? check.webhook.name : undefined;
+      resolvedAvatar = webhookAvatarHash(check.webhook);
+      setVerified({ name: resolvedName ?? "", owner });
+    }
+
+    if (appWebhookNote != null && (ownerKind === "user" || ownerKind === "follower")) {
+      // Setting `verified` above flips `ownershipBlocked`, so the banner (with
+      // the "Remove interactive components" action) now renders on its own —
+      // don't duplicate it as an error line. Just leave the send un-started.
+      setState({ kind: "idle" });
+      return;
+    }
 
     const result =
       mode === "update" && parsedMessageId
@@ -157,15 +260,17 @@ export function SendPanel() {
           });
 
     if (result.ok) {
-      setState({ kind: "ok", status: result.status });
+      // Success is surfaced by the toast below; no inline banner needed.
+      setState({ kind: "idle" });
       pushToast(
         mode === "update" ? "Original message updated." : "Message delivered to Discord.",
         "success",
       );
-      // Sending never saves the URL on its own — that's the "Save webhook"
-      // button's job. We only refresh lastUsedAt on an already-saved entry so
-      // recents stay ordered by most-recent.
-      touchWebhook(parsedUrl.id);
+      // Always remember the webhook on a successful send so it shows up in
+      // recents without a separate "Save webhook" click. Records the name +
+      // owner we resolved above; any inline label is preserved by the upsert,
+      // which also refreshes lastUsedAt so recents stay ordered by most-recent.
+      rememberWebhook(parsedUrl.url, { name: resolvedName, ownerKind, avatar: resolvedAvatar });
       setHistory(loadHistory());
     } else {
       setState({
@@ -201,13 +306,20 @@ export function SendPanel() {
     }
 
     const remoteName = typeof result.webhook.name === "string" ? result.webhook.name : "";
-    const entry = rememberWebhook(parsedUrl.url, label.trim() || remoteName);
+    const owner = classifyWebhookOwner(result.webhook);
+    setVerified({ name: remoteName, owner });
+    const entry = rememberWebhook(parsedUrl.url, {
+      name: remoteName,
+      ownerKind: owner.kind,
+      avatar: webhookAvatarHash(result.webhook),
+    });
     if (entry) {
       setHistory(loadHistory());
-      if (!label.trim() && remoteName) setLabel(remoteName);
       setState({ kind: "idle" });
       pushToast(
-        remoteName ? `Verified and saved “${remoteName}”.` : "Webhook verified and saved.",
+        remoteName
+          ? `Verified “${remoteName}” — ${owner.badge.toLowerCase()}. Saved.`
+          : `Webhook verified — ${owner.badge.toLowerCase()}. Saved.`,
         "success",
       );
     }
@@ -220,7 +332,6 @@ export function SendPanel() {
 
   const handleUseHistoryEntry = (entry: WebhookHistoryEntry) => {
     setUrl(entry.url);
-    setLabel(entry.label);
     setState({ kind: "idle" });
   };
 
@@ -228,6 +339,23 @@ export function SendPanel() {
     forgetWebhook(entry.id);
     setHistory(loadHistory());
     pushToast("Webhook removed from this browser.", "info");
+  };
+
+  const startEditLabel = (entry: WebhookHistoryEntry) => {
+    setEditingId(entry.id);
+    setEditingLabel(entry.label);
+  };
+
+  const cancelEditLabel = () => {
+    setEditingId(null);
+    setEditingLabel("");
+  };
+
+  const commitEditLabel = (id: string) => {
+    renameWebhook(id, editingLabel);
+    setHistory(loadHistory());
+    setEditingId(null);
+    setEditingLabel("");
   };
 
   return (
@@ -272,26 +400,86 @@ export function SendPanel() {
         <div className={styles.history}>
           <div className={styles.historyTitle}>Recent webhooks (this browser)</div>
           <ul className={styles.historyList}>
-            {history.map((entry) => (
-              <li key={entry.id} className={styles.historyItem}>
-                <button
-                  type="button"
-                  className={styles.historyButton}
-                  onClick={() => handleUseHistoryEntry(entry)}
-                >
-                  <span className={styles.historyLabel}>{entry.label || "(unlabeled)"}</span>
-                  <span className={styles.historyId}>id · {entry.id}</span>
-                </button>
-                <IconButton
-                  size="sm"
-                  variant="danger"
-                  label="Forget this webhook"
-                  onClick={() => handleForget(entry)}
-                >
-                  <TrashIcon size={12} />
-                </IconButton>
-              </li>
-            ))}
+            {history.map((entry) =>
+              editingId === entry.id ? (
+                <li key={entry.id} className={styles.historyItem}>
+                  <form
+                    className={styles.historyEdit}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      commitEditLabel(entry.id);
+                    }}
+                  >
+                    <TextInput
+                      autoFocus
+                      value={editingLabel}
+                      onChange={(e) => setEditingLabel(e.currentTarget.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") cancelEditLabel();
+                      }}
+                      placeholder={entry.name || "Add a label"}
+                      maxLength={60}
+                      aria-label="Webhook label"
+                    />
+                    <Button size="sm" variant="primary" type="submit">
+                      Save
+                    </Button>
+                    <IconButton size="sm" label="Cancel rename" onClick={cancelEditLabel}>
+                      <CloseIcon size={12} />
+                    </IconButton>
+                  </form>
+                </li>
+              ) : (
+                <li key={entry.id} className={styles.historyItem}>
+                  <button
+                    type="button"
+                    className={styles.historyButton}
+                    onClick={() => handleUseHistoryEntry(entry)}
+                  >
+                    <span className={styles.historyLabel}>
+                      <img
+                        className={styles.historyAvatar}
+                        src={webhookAvatarUrl(entry.id, entry.avatar)}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          const img = e.currentTarget;
+                          const fallback = webhookAvatarUrl(entry.id, null);
+                          if (img.src !== fallback) img.src = fallback;
+                        }}
+                      />
+                      <span className={styles.historyText}>
+                        {entry.label || entry.name || "(unlabeled)"}
+                      </span>
+                      {entry.ownerKind && entry.ownerKind !== "unknown" ? (
+                        <span
+                          className={cn(
+                            styles.ownerBadge,
+                            styles.ownerBadgeSm,
+                            OWNER_BADGE_CLASS[entry.ownerKind],
+                          )}
+                          title={OWNER_COPY[entry.ownerKind].label}
+                        >
+                          {OWNER_COPY[entry.ownerKind].badge}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className={styles.historyId}>id · {entry.id}</span>
+                  </button>
+                  <IconButton size="sm" label="Edit label" onClick={() => startEditLabel(entry)}>
+                    <PencilIcon size={12} />
+                  </IconButton>
+                  <IconButton
+                    size="sm"
+                    variant="danger"
+                    label="Forget this webhook"
+                    onClick={() => handleForget(entry)}
+                  >
+                    <TrashIcon size={12} />
+                  </IconButton>
+                </li>
+              ),
+            )}
           </ul>
         </div>
       ) : null}
@@ -356,28 +544,53 @@ export function SendPanel() {
         </Field>
       ) : null}
 
-      <Field
-        label="Label (optional)"
-        hint="Used when you click “Save webhook” to identify it in the recents list."
-      >
-        {(id) => (
-          <TextInput
-            id={id}
-            value={label}
-            onChange={(e) => setLabel(e.currentTarget.value)}
-            placeholder="e.g. Releases · #announcements"
-            maxLength={60}
-          />
-        )}
-      </Field>
+      {ownershipBlocked ? (
+        <div className={styles.blocking} role="alert">
+          <strong>
+            Can’t send: this webhook is owned by{" "}
+            {knownOwnerKind === "follower" ? "Channel Following" : "a person"}, not an app.
+          </strong>
+          <p className={styles.blockingDetail}>
+            Discord only accepts interactive components (buttons with custom_id, select menus) from
+            application-owned webhooks. Sending “{knownName || "this webhook"}” would be rejected.
+            Use a bot/app-owned webhook, or remove the interactive components.
+          </p>
+          {onRequestRemoveInteractive ? (
+            <div className={styles.blockingActions}>
+              <Button variant="danger" size="sm" onClick={onRequestRemoveInteractive}>
+                Remove interactive components
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
-      {capabilities.length > 0 ? (
+      {ownershipSatisfied ? (
+        <div className={styles.appOwned} role="note">
+          <strong>Interactive responses are handled by the bot’s server.</strong>
+          <p className={styles.appOwnedDetail}>
+            “{knownName || "This webhook"}” is app-owned, so Discord accepts and renders the buttons
+            and select menus. Clicks and selections are delivered to the application that owns it —
+            its backend has to be running to respond. This builder only posts the message.
+          </p>
+          <a
+            className={styles.appOwnedLink}
+            href="https://discord.com/developers/docs/interactions/receiving-and-responding"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            How Discord interactions work →
+          </a>
+        </div>
+      ) : null}
+
+      {visibleCapabilities.length > 0 ? (
         <section className={styles.capability} aria-label="Pre-send capability check">
           <header className={styles.capabilityHeader}>
             <span>Heads up — this message expects…</span>
           </header>
           <ul className={styles.capabilityList}>
-            {capabilities.map((c, i) => (
+            {visibleCapabilities.map((c, i) => (
               <li key={i} className={styles.capabilityItem}>
                 <span
                   className={cn(
@@ -406,13 +619,6 @@ export function SendPanel() {
             ))}
             {blockingIssues.length > 5 ? <li>…and {blockingIssues.length - 5} more</li> : null}
           </ul>
-        </div>
-      ) : null}
-
-      {state.kind === "ok" ? (
-        <div className={styles.success} role="status">
-          {mode === "update" ? "Updated. " : "Sent. "}
-          Discord returned {state.status === 204 ? "204 No Content" : state.status}.
         </div>
       ) : null}
 
@@ -463,6 +669,7 @@ export function SendPanel() {
             saving ||
             !parsedUrl ||
             blockingIssues.length > 0 ||
+            ownershipBlocked ||
             (mode === "update" && !parsedMessageId)
           }
         >

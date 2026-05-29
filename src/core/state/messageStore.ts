@@ -28,9 +28,13 @@ import { DEFAULT_PRESET } from "@/data/presets";
 import { LIMITS } from "@/core/schema/limits";
 import { loadDraftMessage } from "./draftStorage";
 import {
+  ButtonStyle,
   ComponentType,
   findById,
+  isActionRow,
+  isButton,
   isContainer,
+  isSection,
   isSelect,
   removeById,
   updateById,
@@ -131,6 +135,14 @@ export interface MessageState {
   moveToParent(id: EditorId, targetParentId: EditorId | null, targetIndex: number): void;
   duplicate(id: EditorId): void;
   remove(id: EditorId): void;
+  /**
+   * Strip every interactive component (select menus + custom_id buttons) from
+   * the tree so the message can be sent through a webhook that isn't
+   * application-owned. Action rows left empty are dropped; a Section's mandatory
+   * accessory button is downgraded to a Link button instead (the slot can't be
+   * empty). Returns how many interactive components were cleared.
+   */
+  stripInteractive(): number;
 
   // Field ops -----------------------------------------------------------
   patchNode<T extends AnyComponent>(id: EditorId, patch: Partial<T>): void;
@@ -155,7 +167,10 @@ function reassignIds(message: WebhookMessage): WebhookMessage {
       (next as unknown as ContainerComponent).components = (
         next as unknown as ContainerComponent
       ).components.map((c) => stamp(c)) as ContainerChild[];
-    } else if ("components" in next && Array.isArray((next as { components?: unknown }).components)) {
+    } else if (
+      "components" in next &&
+      Array.isArray((next as { components?: unknown }).components)
+    ) {
       (next as unknown as { components: AnyComponent[] }).components = (
         next as unknown as { components: AnyComponent[] }
       ).components.map((c) => stamp(c));
@@ -333,7 +348,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         nextSelection = btn._id;
         return {
           ...row,
-          components: [...(row.components as ActionRowComponent["components"]), btn] as ActionRowComponent["components"],
+          components: [
+            ...(row.components as ActionRowComponent["components"]),
+            btn,
+          ] as ActionRowComponent["components"],
         };
       });
       if (!nextSelection) return s;
@@ -626,7 +644,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             });
             return changed ? { ...node, components } : node;
           }
-          if ("components" in node && Array.isArray((node as { components?: unknown }).components)) {
+          if (
+            "components" in node &&
+            Array.isArray((node as { components?: unknown }).components)
+          ) {
             const arr = (node as unknown as { components: AnyComponent[] }).components;
             const dupd = dupArr(arr);
             if (dupd) return { ...node, components: dupd } as AnyComponent;
@@ -650,6 +671,80 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       message: removeById(s.message, id),
       selectedId: s.selectedId === id ? null : s.selectedId,
     }));
+  },
+
+  stripInteractive() {
+    // Mirrors the capability inspector's notion of "interactive": every select
+    // menu, plus buttons that carry a custom_id (anything that isn't Link or
+    // Premium). Premium buttons are a separate monetization concern, so they
+    // stay.
+    const isInteractive = (n: AnyComponent): boolean =>
+      isSelect(n) ||
+      (isButton(n) && n.style !== ButtonStyle.Link && n.style !== ButtonStyle.Premium);
+
+    let count = 0;
+
+    // Returns the transformed node, or null when the node should be dropped
+    // entirely (an action row / container left empty by the strip).
+    const transform = (node: AnyComponent): AnyComponent | null => {
+      if (isActionRow(node)) {
+        const kept = node.components.filter((c) => {
+          if (isInteractive(c)) {
+            count++;
+            return false;
+          }
+          return true;
+        });
+        if (kept.length === 0) return null;
+        if (kept.length === node.components.length) return node;
+        return { ...node, components: kept as ActionRowComponent["components"] };
+      }
+      if (isContainer(node)) {
+        let changed = false;
+        const kids: ContainerChild[] = [];
+        for (const child of node.components) {
+          const next = transform(child);
+          if (next === null) {
+            changed = true;
+            continue;
+          }
+          if (next !== child) changed = true;
+          kids.push(next as ContainerChild);
+        }
+        if (kids.length === 0) return null;
+        return changed ? { ...node, components: kids } : node;
+      }
+      if (isSection(node) && isInteractive(node.accessory)) {
+        // A Section must keep an accessory, so downgrade the interactive button
+        // to a Link button rather than removing it. Preserve the label.
+        count++;
+        const label = "label" in node.accessory ? node.accessory.label : undefined;
+        return { ...node, accessory: { ...createLinkButton(), label: label || "Open link" } };
+      }
+      return node;
+    };
+
+    const src = get().message;
+    let changed = false;
+    const components: TopLevelComponent[] = [];
+    for (const top of src.components) {
+      const next = transform(top);
+      if (next === null) {
+        changed = true;
+        continue;
+      }
+      if (next !== top) changed = true;
+      components.push(next as TopLevelComponent);
+    }
+
+    if (changed) {
+      set((s) => ({
+        ...pushHistory(s),
+        message: { ...s.message, components },
+        selectedId: null,
+      }));
+    }
+    return count;
   },
 
   patchNode(id, patch) {
