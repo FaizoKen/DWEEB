@@ -409,24 +409,16 @@ let gpuFailureStreak = 0;
 type LocalRunResult = AiCallResult & { gpuRetryable?: boolean };
 
 /**
- * Yield to the next paint frame. Used between streamed tokens so the page can
- * render the partial reply (the per-token main-thread work that paces a weak
- * iGPU — see the streaming loop in `runOnce`). The setTimeout race guarantees
- * progress even when `requestAnimationFrame` is throttled (e.g. a backgrounded
- * tab), so generation never stalls.
+/**
+ * Pause between streamed tokens. The worker generates one token per `next()`,
+ * so this gap is what stops the GPU running flat-out at 100%: during the gap the
+ * GPU is idle (no forward pass queued) and the page paints the partial reply. On
+ * a weak shared iGPU, keeping the GPU below saturation is what avoids the driver
+ * watchdog reset. ~35 ms ≈ 25 tokens/s — plenty fast for short chat replies, and
+ * `setTimeout` (unlike requestAnimationFrame) keeps progressing in a backgrounded
+ * tab so generation never stalls.
  */
-function yieldToPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(finish);
-    setTimeout(finish, 50);
-  });
-}
+const LOCAL_TOKEN_GAP_MS = 35;
 
 export async function callLocal(
   settings: AiSettings,
@@ -531,12 +523,11 @@ async function runOnce(
     //
     // The worker generates tokens pull-style — one per `next()` — so the rate is
     // set by how fast we ask for the next one. We emit each partial reply
-    // (`onToken`) and then yield a paint frame: that renders the live text and,
-    // crucially, lets the GPU idle between tokens instead of running flat out at
-    // 100%. It's the same balance chat.webllm.ai strikes by rendering each
-    // token, and on a weak iGPU the breather keeps it cooler and further from
-    // the device-reset edge. We still return the whole text so payload parsing
-    // is unchanged.
+    // (`onToken`) and then pause ~35 ms (`LOCAL_TOKEN_GAP_MS`): the page paints
+    // the live text and, crucially, the GPU sits idle in the gap instead of
+    // running flat out at 100%. On a weak shared iGPU that breather is what keeps
+    // it under the driver's watchdog and away from the device-reset edge. We
+    // still return the whole text so payload parsing is unchanged.
     //
     // No `stream_options.include_usage`: we never show token counts, and that
     // final usage chunk is one more end-of-stream GPU readback we don't need.
@@ -554,7 +545,7 @@ async function runOnce(
       if (typeof delta === "string" && delta.length > 0) {
         text += delta;
         onToken?.(text);
-        await yieldToPaint();
+        await delay(LOCAL_TOKEN_GAP_MS);
       }
     }
     if (signal?.aborted) return { ok: false, error: "Request cancelled." };

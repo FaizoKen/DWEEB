@@ -25,6 +25,18 @@
   transition: padding-right 260ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* While the local (WebGPU) AI is generating, the model competes with the page
+ * for a shared, often-integrated GPU. Pause every CSS animation so the
+ * compositor isn't redrawing them each frame — that hands those GPU cycles to
+ * inference and helps a weak iGPU stay under its driver watchdog. The attribute
+ * is set on <html> only while a reply is in flight, so animations resume the
+ * instant generation finishes. */
+html[data-ai-busy="true"] *,
+html[data-ai-busy="true"] *::before,
+html[data-ai-busy="true"] *::after {
+  animation-play-state: paused !important;
+}
+
 /* On desktop, opening the AI panel pushes the builder/preview grid in so the
  * docked AI column on the right edge has room to live. Mobile overrides this
  * back to 0 since the chat floats as a card there. */

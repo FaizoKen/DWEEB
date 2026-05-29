@@ -61,6 +61,16 @@ export function AiChatPanel() {
     if (open && view === "chat") inputRef.current?.focus();
   }, [open, view]);
 
+  // While the AI is working, mark the document so CSS can pause animations and
+  // free GPU cycles for inference (see global.css). Matters most for the local
+  // WebGPU provider on a weak/integrated GPU; harmless for cloud providers.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (thinking) root.setAttribute("data-ai-busy", "true");
+    else root.removeAttribute("data-ai-busy");
+    return () => root.removeAttribute("data-ai-busy");
+  }, [thinking]);
+
   const submit = (value: string) => {
     const text = value.trim();
     if (!text || thinking) return;
