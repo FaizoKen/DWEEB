@@ -15,13 +15,23 @@
 import { create } from "zustand";
 import { newId } from "@/lib/id";
 import { useMessageStore } from "@/core/state/messageStore";
-import { attachEditorFields } from "@/core/serialization/normalize";
-import { validateMessage } from "@/core/schema/validation";
 import type { AiSettings, ChatMessage } from "./types";
-import { callAI, toTurns } from "./providers";
-import { buildSystemPrompt } from "./systemPrompt";
-import { extractReply, streamingProse } from "./extractReply";
 import { loadAiSettings, saveAiSettings } from "./settingsStorage";
+
+// The chat engine (providers, system prompt, reply parsing, schema validation)
+// is only exercised once the user actually sends a turn, and it pulls in the
+// largest non-vendor modules in the app (the provider adapters and the
+// validator). Loading it lazily keeps all of that out of the initial bundle —
+// the store itself only carries the panel's open/settings/transcript state.
+function loadEngine() {
+  return Promise.all([
+    import("./providers"),
+    import("./systemPrompt"),
+    import("./extractReply"),
+    import("@/core/serialization/normalize"),
+    import("@/core/schema/validation"),
+  ]);
+}
 
 interface AiState {
   open: boolean;
@@ -97,7 +107,8 @@ export const useAiStore = create<AiState>((set, get) => ({
     // Append the user turn plus an empty assistant placeholder we stream into.
     // `thinking` stays true for the whole request so the composer keeps showing
     // Stop; the placeholder's empty content drives the typing dots until the
-    // first token lands.
+    // first token lands. This happens before the (lazy) engine resolves so the
+    // user's message and typing indicator appear instantly on first send.
     const userMsg: ChatMessage = { id: newId(), role: "user", content: text };
     const assistantId = newId();
     const history = appendMessage(get().messages, userMsg);
@@ -111,6 +122,26 @@ export const useAiStore = create<AiState>((set, get) => ({
       thinking: true,
       error: null,
     });
+
+    // Pull in the chat engine on first send (cached for subsequent turns).
+    let engine: Awaited<ReturnType<typeof loadEngine>>;
+    try {
+      engine = await loadEngine();
+    } catch {
+      set((s) => ({
+        messages: s.messages.filter((m) => m.id !== assistantId),
+        thinking: false,
+        error: "Couldn't load the AI assistant. Check your connection and try again.",
+      }));
+      return;
+    }
+    const [
+      { callAI, toTurns },
+      { buildSystemPrompt },
+      { extractReply, streamingProse },
+      { attachEditorFields },
+      { validateMessage },
+    ] = engine;
 
     const { settings } = get();
     const current = useMessageStore.getState().message;

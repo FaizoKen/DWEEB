@@ -13,7 +13,7 @@ import { Field } from "@/ui/Field";
 import { Select } from "@/ui/Select";
 import { TextInput } from "@/ui/TextInput";
 import { useAiStore } from "@/core/ai/aiStore";
-import { PROVIDERS, defaultSettingsFor } from "@/core/ai/providers";
+import { PROVIDERS, defaultSettingsFor } from "@/core/ai/providerMeta";
 import type { AiProvider, AiSettings } from "@/core/ai/types";
 import styles from "./AiChatPanel.module.css";
 

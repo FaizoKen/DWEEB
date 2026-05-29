@@ -429,7 +429,9 @@ function TreeNode({
   parentSiblingIds,
   siblingIndex,
 }: TreeNodeProps) {
-  const selectedId = useMessageStore((s) => s.selectedId);
+  // Subscribe to just this row's selected state so changing the selection only
+  // re-renders the two rows whose highlight flips, not every row in the tree.
+  const isSelected = useMessageStore((s) => s.selectedId === node._id);
   const select = useMessageStore((s) => s.select);
   const moveSibling = useMessageStore((s) => s.moveSibling);
   const moveToParent = useMessageStore((s) => s.moveToParent);
@@ -442,7 +444,6 @@ function TreeNode({
   const addGalleryItem = useMessageStore((s) => s.addGalleryItem);
   const { drag, dropTarget, ghostRef, setDrag, setGhostStart, setDropTarget } = useContext(DragContext);
 
-  const isSelected = selectedId === node._id;
   const meta = COMPONENT_META[node.type];
 
   const { siblings, extras } = childGroups(node);

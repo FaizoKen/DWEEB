@@ -18,10 +18,17 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Split the compression lib so the main bundle stays tiny.
-          // Decoding is only needed when the user lands on a share URL.
-          serializer: ["lz-string"],
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          // lz-string is only reached through lazy paths (share-link decode and
+          // the Share dialog), so keep it in its own chunk instead of letting it
+          // ride along in the always-loaded vendor chunk.
+          if (id.includes("lz-string")) return "serializer";
+          // Everything else from node_modules (React, ReactDOM, scheduler,
+          // zustand, nanoid) is on the critical path. Group it into one vendor
+          // chunk that only changes when dependencies do — so app-code edits
+          // don't bust its long-term cache.
+          return "vendor";
         },
       },
     },

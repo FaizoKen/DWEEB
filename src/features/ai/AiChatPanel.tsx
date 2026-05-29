@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 import { IconButton } from "@/ui/IconButton";
 import { CloseIcon, SendIcon, SettingsIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
 import { useAiStore } from "@/core/ai/aiStore";
-import { PROVIDERS } from "@/core/ai/providers";
+import { PROVIDERS } from "@/core/ai/providerMeta";
 import type { ChatMessage } from "@/core/ai/types";
 import { AiSettingsForm } from "./AiSettingsForm";
 import styles from "./AiChatPanel.module.css";
