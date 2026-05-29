@@ -213,7 +213,11 @@ function AboutPanel() {
         your browser.
       </p>
       <p className={styles.lead}>
-        Made by <strong>Faizo</strong>.
+        Made with 💖 by{" "}
+        <a href="https://faizo.net" target="_blank" rel="noopener noreferrer">
+          <strong>Faizo</strong>
+        </a>
+        .
       </p>
       <p className={styles.lead}>
         Feedback?{" "}
