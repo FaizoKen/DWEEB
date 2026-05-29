@@ -5,6 +5,10 @@ messages with containers, sections, buttons, media, and files, watch a
 pixel-accurate live preview, and share the result through a single URL — no
 backend, no account, no database.
 
+![Discord Webhook Builder — editor on the left, pixel-accurate Discord preview on the right](docs/screenshot.png)
+
+> Try it live at **[discordwebhookbuilder.faizo.net](https://discordwebhookbuilder.faizo.net)**
+
 ## First-time users
 
 The editor opens straight to a showcase message so you can see how the
