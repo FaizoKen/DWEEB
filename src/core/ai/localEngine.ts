@@ -182,37 +182,35 @@ function isNoAdapterError(message: string): boolean {
   );
 }
 
-/** The message shown when the GPU device was reset (Windows TDR / device-removed). */
+/** The message shown when the GPU device was reset (TDR / device-removed). */
 function gpuResetMessage(modelId: string, raw: string): string {
   return (
-    `Couldn't load the local model "${modelId}". The browser's GPU device was reset by its ` +
-    `driver (a Windows TDR / "device-removed").\n\n` +
-    "Once Chrome's shared GPU process is in this state, JavaScript on the page can't revive it, " +
-    "and a plain tab reload usually isn't enough either. In order of what actually fixes it:\n" +
-    "• Fully quit Chrome — close every window, check the tray/Task Manager — then reopen. That's what restarts the GPU process.\n" +
-    "• Update your GPU driver (Intel/AMD/NVIDIA). On Windows an outdated driver is the most common cause of a device-removed loop.\n" +
-    "• Switch to the smoothest model — \"SmolLM2 135M\" (the default). It's tiny and uses lighter GPU kernels, so it rarely trips the GPU's ~2-second watchdog the heavier models hit while loading.\n" +
-    "• Close other GPU-heavy apps/tabs (video calls, games, 3D, other AI tabs) before retrying.\n\n" +
-    "Want to keep working right now? Switch to a free cloud model (Groq or OpenRouter) under AI settings — it runs server-side, so no local GPU is involved.\n\n" +
+    `Couldn't run the local model "${modelId}" — the GPU device was reset by its driver ` +
+    `(a TDR / "device-removed") and didn't recover, even after an automatic reload.\n\n` +
+    "This is common on integrated GPUs with limited memory. What helps, in order:\n" +
+    "• Close other GPU-heavy apps/tabs (videos, games, 3D, other AI tabs) to free up the GPU, then try again.\n" +
+    "• Fully quit Chrome — every window, check the tray/Task Manager — then reopen, to restart the GPU process.\n" +
+    "• Update your GPU driver (Intel/AMD/NVIDIA) — outdated drivers are the most common cause on Windows.\n\n" +
+    "For a reliable experience on this machine, switch to a free cloud model (Groq or OpenRouter) under AI settings — it runs server-side, so no local GPU is involved.\n\n" +
     `Underlying error: ${raw}`
   );
 }
 
 /**
- * A transient mid-generation GPU glitch (buffers torn down during readback,
- * leaving the model disposed). The device itself is fine, so resending almost
- * always works — `runOnce` resets the cached engine on this failure, so the
- * next send reloads from a clean state.
+ * A mid-generation GPU glitch (buffers torn down during readback as the driver
+ * resets the device). Shown only after the automatic self-heal reload also
+ * failed (see `callLocal`), so the machine is clearly struggling — we lead with
+ * freeing the GPU and, for reliability, the cloud option.
  */
 function softGlitchMessage(modelId: string, raw: string): string {
   return (
-    `The local model "${modelId}" hit a transient GPU glitch mid-reply — its buffers were ` +
-    `torn down before the response finished.\n\n` +
-    "The GPU itself is fine; the model just needs reloading. Usually this clears on its own:\n" +
-    "• Send your message again — the model reloads and the reply normally goes through.\n" +
-    '• If it keeps happening, switch to "SmolLM2 135M" (the smoothest, default) — its lighter GPU kernels are far less likely to trip the watchdog.\n' +
-    "• Or reload the page (Ctrl+Shift+R) to start the GPU process fresh.\n\n" +
-    "Prefer not to fight it? Switch to a free cloud model (Groq or OpenRouter) under AI settings — no local GPU involved.\n\n" +
+    `The local model "${modelId}" hit a GPU glitch mid-reply and didn't recover, even after an ` +
+    `automatic reload — the GPU driver keeps resetting the device under load.\n\n` +
+    "This is common on integrated GPUs with limited memory. What helps:\n" +
+    "• Send again — it's intermittent, so the next try often goes through.\n" +
+    "• Close other GPU-heavy apps/tabs (videos, games, other AI tabs) to free up the GPU.\n" +
+    "• Reload the page (Ctrl+Shift+R) to start the GPU process fresh.\n\n" +
+    "For a reliable experience on this machine, switch to a free cloud model (Groq or OpenRouter) under AI settings — it runs server-side, so no local GPU is involved.\n\n" +
     `Underlying error: ${raw}`
   );
 }
@@ -390,6 +388,27 @@ const MAX_LOCAL_TOKENS = 768;
 const MAX_LOCAL_HISTORY_TURNS = 8;
 
 /**
+ * Self-heal budget for intermittent GPU device-losses.
+ *
+ * On a marginal integrated GPU (e.g. AMD Vega on a memory-tight laptop) the
+ * driver intermittently resets the device mid-reply — "sometimes works,
+ * sometimes crashes". Because it *usually* works, reloading the model in a fresh
+ * worker and trying again almost always succeeds, so we do that automatically
+ * once per send (the engine is torn down on failure, so the retry spins up a
+ * clean worker + device — this is safe in a way the old in-page retry storm was
+ * not). `gpuFailureStreak` caps consecutive auto-heals across sends: if the GPU
+ * keeps resetting (a genuinely overloaded machine), we stop retrying — rather
+ * than risk Chrome's "GPU crashed too often" browser-wide guard — and surface
+ * the message so the user can drop to a smaller model or a cloud provider. A
+ * successful generation resets the streak.
+ */
+const MAX_GPU_AUTOHEAL_STREAK = 3;
+let gpuFailureStreak = 0;
+
+/** Internal: a run result that also says whether a fresh-worker retry might help. */
+type LocalRunResult = AiCallResult & { gpuRetryable?: boolean };
+
+/**
  * Yield to the next paint frame. Used between streamed tokens so the page can
  * render the partial reply (the per-token main-thread work that paces a weak
  * iGPU — see the streaming loop in `runOnce`). The setTimeout race guarantees
@@ -431,21 +450,40 @@ export async function callLocal(
 
   const release = await acquireEngineLock();
   try {
-    return await runOnce(modelId, system, turns, signal, onProgress, onToken);
+    // One automatic self-heal: an intermittent GPU device-loss usually clears on
+    // a fresh-worker reload. `runOnce` tears the engine down on failure, so the
+    // retry starts clean. Bounded to one retry per send, and capped across the
+    // session by `gpuFailureStreak` so a truly overloaded GPU can't spiral.
+    for (let attempt = 0; ; attempt++) {
+      const result = await runOnce(modelId, system, turns, signal, onProgress, onToken);
+      if (result.ok) {
+        gpuFailureStreak = 0;
+        return result;
+      }
+      const canSelfHeal =
+        result.gpuRetryable === true &&
+        attempt < 1 &&
+        gpuFailureStreak < MAX_GPU_AUTOHEAL_STREAK &&
+        !signal?.aborted;
+      if (!canSelfHeal) return result;
+      gpuFailureStreak++;
+      // The engine was already torn down in runOnce; give the driver a moment to
+      // settle after the reset before reloading in a fresh worker.
+      await delay(1500);
+    }
   } finally {
     release();
   }
 }
 
 /**
- * Load the model (if needed) and generate one reply. A single attempt — there
- * is no automatic retry. If the GPU was reset, recreating the device here would
- * only hammer Chrome's restarting GPU process and risk a browser-wide GPU
- * blocklist; instead we surface a clear message and let the user act.
+ * Load the model (if needed) and generate one reply.
  *
  * On any failure we drop the cached engine: a load failure may leave a
  * half-initialized engine, and a generate failure on a GPU reset leaves the
- * engine's device dead. Either way the next user attempt must start fresh.
+ * engine's device dead. Either way the next attempt must start fresh. GPU
+ * device-loss / soft errors are flagged `gpuRetryable` so the caller can do one
+ * bounded self-heal (see `callLocal`); this function itself never retries.
  */
 async function runOnce(
   modelId: string,
@@ -454,7 +492,7 @@ async function runOnce(
   signal: AbortSignal | undefined,
   onProgress: ((p: LocalLoadProgress) => void) | undefined,
   onToken: ((textSoFar: string) => void) | undefined,
-): Promise<AiCallResult> {
+): Promise<LocalRunResult> {
   if (signal?.aborted) return { ok: false, error: "Request cancelled." };
 
   let activeEngine: WebWorkerMLCEngine;
@@ -463,7 +501,8 @@ async function runOnce(
   } catch (e) {
     await resetEngine();
     const message = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: explainEngineLoadError(modelId, message) };
+    const gpuRetryable = isGpuResetError(message) || isSoftGpuError(message);
+    return { ok: false, error: explainEngineLoadError(modelId, message), gpuRetryable };
   }
 
   if (signal?.aborted) return { ok: false, error: "Request cancelled." };
@@ -533,10 +572,10 @@ async function runOnce(
     // here is exactly what could hammer a restarting GPU process.
     await resetEngine();
     if (isGpuResetError(message)) {
-      return { ok: false, error: gpuResetMessage(modelId, message) };
+      return { ok: false, error: gpuResetMessage(modelId, message), gpuRetryable: true };
     }
     if (isSoftGpuError(message)) {
-      return { ok: false, error: softGlitchMessage(modelId, message) };
+      return { ok: false, error: softGlitchMessage(modelId, message), gpuRetryable: true };
     }
     return { ok: false, error: `Local model error: ${message}` };
   } finally {
