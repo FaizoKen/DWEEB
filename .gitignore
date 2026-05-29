@@ -13,3 +13,5 @@ bun.lockb
 package-lock.json
 # TypeScript incremental-build cache — regenerated on every build.
 *.tsbuildinfo
+# Local-only release-announcement artifacts (webhook payload + screenshots).
+release-v0.5.0/
