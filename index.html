@@ -1,6 +1,11 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Early connection hints so analytics never blocks first paint. -->
+    <link rel="preconnect" href="https://www.googletagmanager.com" crossorigin />
+    <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
+    <link rel="dns-prefetch" href="https://www.google-analytics.com" />
+
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS"></script>
     <script src="/gtag-init.js"></script>
@@ -17,12 +22,26 @@
     />
     <meta
       name="keywords"
-      content="Discord webhook builder, Discord components builder, Discord message builder, Components V2 editor, Discord embed builder, webhook message editor"
+      content="Discord webhook builder, Discord components builder, Discord message builder, Components V2 editor, Discord embed builder, webhook message editor, Discord webhook generator, Discord embed generator, free Discord webhook tool, send Discord webhook online, Discord webhook message maker, Discord components v2 builder, Discord webhook sender, Discord webhook editor online"
     />
     <meta name="author" content="Faizo" />
     <meta name="publisher" content="Faizo" />
-    <meta name="robots" content="index, follow" />
+    <meta name="application-name" content="Discord Webhook Builder" />
+    <meta name="apple-mobile-web-app-title" content="Webhook Builder" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <meta
+      name="googlebot"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
     <link rel="canonical" href="https://discordwebhookbuilder.faizo.net/" />
+    <link rel="alternate" hreflang="en" href="https://discordwebhookbuilder.faizo.net/" />
+    <link rel="alternate" hreflang="x-default" href="https://discordwebhookbuilder.faizo.net/" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Discord Webhook Builder" />
@@ -33,7 +52,12 @@
     />
     <meta property="og:url" content="https://discordwebhookbuilder.faizo.net/" />
     <meta property="og:locale" content="en_US" />
+    <meta property="og:updated_time" content="2026-05-29T00:00:00Z" />
     <meta property="og:image" content="https://discordwebhookbuilder.faizo.net/og-image.png" />
+    <meta
+      property="og:image:secure_url"
+      content="https://discordwebhookbuilder.faizo.net/og-image.png"
+    />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -129,6 +153,46 @@
               "@type": "Answer",
               "text": "Your message is encoded into the URL hash fragment, so a single link reproduces the exact message. The fragment is never sent to a server, keeping your draft private."
             }
+          },
+          {
+            "@type": "Question",
+            "name": "Is the Discord Webhook Builder free?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. It is completely free and runs entirely in your browser. There is no paywall, no sign-up, and no usage limit."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is Discord Components V2?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Components V2 is Discord's layout system for messages. Instead of a single content field and embeds, a message is built from components such as containers, sections, text displays, buttons, select menus, media galleries, files and separators. This builder supports every component a webhook can send."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I add buttons and select menus to a webhook message?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. You can add link buttons to any webhook message. Interactive buttons and select menus (which carry a custom_id) only work when the webhook is owned by a Discord application or bot, because a backend must receive the click. The builder detects who owns your webhook and warns you before sending."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need a Discord bot to send the message?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Any Discord webhook URL works for posting layout, text, media and link-button messages. A bot or application-owned webhook is only required if you want interactive components (custom_id buttons or select menus) to respond to clicks."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I edit a Discord message I already sent?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Use Restore to pull a message your webhook previously posted back into the editor with its webhook URL and message ID, make changes, and send an update in place. Only messages the same webhook originally posted can be edited."
+            }
           }
         ]
       }
@@ -147,10 +211,32 @@
         <h2>What you can do</h2>
         <ul>
           <li>Build messages visually with containers, sections, buttons, and media galleries.</li>
+          <li>Add text displays, thumbnails, file attachments, separators, and select menus.</li>
           <li>See a pixel-accurate, Discord-style live preview as you edit.</li>
           <li>Share any message through a single URL, or export and import message JSON.</li>
-          <li>Send messages straight to your Discord webhook.</li>
+          <li>Send messages straight to your Discord webhook, or edit one you already posted.</li>
         </ul>
+        <h2>Every Components V2 component, in one editor</h2>
+        <p>
+          The builder supports every component a Discord webhook can send: Containers, Sections,
+          Text Displays, Buttons (link, action, and premium styles), String / User / Role /
+          Mentionable / Channel select menus, Thumbnails, Media Galleries, Files, and Separators.
+          It enforces Discord's limits as you build and tells you when a message needs an
+          application-owned webhook.
+        </p>
+        <h2>Frequently asked questions</h2>
+        <h3>Is the Discord Webhook Builder free?</h3>
+        <p>Yes — it is completely free, requires no account, and runs entirely in your browser.</p>
+        <h3>Do I need a Discord bot?</h3>
+        <p>
+          No. Any webhook URL works for posting messages with text, media, and link buttons. A
+          bot- or application-owned webhook is only needed for interactive buttons and select menus
+          that respond to clicks.
+        </p>
+        <h3>Can I edit a message I already sent?</h3>
+        <p>
+          Yes. Restore a message your webhook posted, edit it, and update it in place.
+        </p>
         <p>
           <strong>This app requires JavaScript.</strong> Please enable JavaScript and reload the
           page to use the editor.
