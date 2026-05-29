@@ -10,6 +10,7 @@
  * attribute is applied.
  */
 
+import { memo } from "react";
 import { ComponentType, type AnyComponent } from "@/core/schema/types";
 import { isSelect } from "@/core/schema/guards";
 import { useMessageStore } from "@/core/state/messageStore";
@@ -32,12 +33,17 @@ interface ComponentRendererProps {
   node: AnyComponent;
 }
 
-export function ComponentRenderer({ node }: ComponentRendererProps) {
-  const selectedId = useMessageStore((s) => s.selectedId);
+// Memoized so a keystroke only re-renders the edited node's ancestor chain: the
+// store shares structure across edits (unchanged subtrees keep their `node`
+// reference), so memo lets every untouched node bail out. Selection state is
+// read as a per-node boolean below, so changing the selection only re-renders
+// the two nodes whose highlight actually flips — not the whole preview tree.
+export const ComponentRenderer = memo(function ComponentRenderer({
+  node,
+}: ComponentRendererProps) {
+  const isSelected = useMessageStore((s) => s.selectedId === node._id);
   const select = useMessageStore((s) => s.select);
   const closePreview = usePreviewClose();
-  const aiOpen = useAiStore((s) => s.open);
-  const isSelected = selectedId === node._id;
 
   return (
     <div
@@ -50,8 +56,9 @@ export function ComponentRenderer({ node }: ComponentRendererProps) {
         // (and its now-revealed inspector) becomes visible. No-op on desktop.
         // When the AI chat is open the preview close cascades into closing
         // the chat too (see App.closePreview), so skip the dismiss and let
-        // the user keep chatting while picking nodes.
-        if (!aiOpen) closePreview?.();
+        // the user keep chatting while picking nodes. Read the AI state lazily
+        // here so this node doesn't subscribe to (and re-render on) it.
+        if (!useAiStore.getState().open) closePreview?.();
         // Bring the matching tree row into the builder's viewport. Deferred
         // one frame so the freshly-selected row's inline inspector has
         // mounted before `scrollIntoView` measures positions.
@@ -67,7 +74,7 @@ export function ComponentRenderer({ node }: ComponentRendererProps) {
       {renderByType(node)}
     </div>
   );
-}
+});
 
 function renderByType(node: AnyComponent) {
   if (isSelect(node)) return <SelectRenderer node={node} />;

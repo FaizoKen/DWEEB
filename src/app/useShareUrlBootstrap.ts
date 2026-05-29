@@ -10,11 +10,11 @@
  */
 
 import { useEffect, useRef } from "react";
-import {
-  clearShareTokenFromHash,
-  decodeShare,
-  readShareTokenFromHash,
-} from "@/core/serialization";
+// Import the token readers directly from `url` (pure string ops, no lz-string)
+// so the compression/migration code stays out of the initial bundle. The
+// decoder — which pulls in lz-string — is loaded on demand below, only when a
+// share token is actually present.
+import { clearShareTokenFromHash, readShareTokenFromHash } from "@/core/serialization/url";
 import { useMessageStore } from "@/core/state/messageStore";
 import { pushToast } from "@/ui/Toast";
 
@@ -27,13 +27,16 @@ export function useShareUrlBootstrap(): void {
     ran.current = true;
     const token = readShareTokenFromHash(window.location.hash);
     if (!token) return;
-    const result = decodeShare(token);
-    if (result.ok) {
-      replaceMessage(result.message);
-      clearShareTokenFromHash();
-      pushToast("Loaded message from shared link.", "info");
-    } else {
-      pushToast(`Couldn't load shared link: ${result.error}`, "error");
-    }
+    // Defer the decoder (and lz-string) until we know there's a token to decode.
+    void import("@/core/serialization/encode").then(({ decodeShare }) => {
+      const result = decodeShare(token);
+      if (result.ok) {
+        replaceMessage(result.message);
+        clearShareTokenFromHash();
+        pushToast("Loaded message from shared link.", "info");
+      } else {
+        pushToast(`Couldn't load shared link: ${result.error}`, "error");
+      }
+    });
   }, [replaceMessage]);
 }

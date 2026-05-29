@@ -8,7 +8,7 @@
  */
 
 import type { AiProvider, AiSettings } from "./types";
-import { DEFAULT_PROVIDER, defaultSettingsFor } from "./providers";
+import { DEFAULT_PROVIDER, defaultSettingsFor } from "./providerMeta";
 
 const STORAGE_KEY = "dwb.ai.v1";
 

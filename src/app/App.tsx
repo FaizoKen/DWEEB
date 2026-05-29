@@ -20,14 +20,27 @@
  *     `useAutoSaveDraft` so a refresh restores the in-progress message.
  */
 
-import { useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { TouchEvent as ReactTouchEvent } from "react";
 import { Builder } from "@/features/builder/Builder";
 import { Preview } from "@/features/preview/Preview";
-import { ShareDialog } from "@/features/share/ShareDialog";
-import { RemoveInteractiveConfirm } from "@/features/share/RemoveInteractiveConfirm";
-import { AiChatPanel } from "@/features/ai/AiChatPanel";
 import { useAiStore } from "@/core/ai/aiStore";
+
+// Interaction-gated surfaces: none are needed for first paint, so they're code-
+// split out of the initial bundle and fetched the first time the user opens
+// them. Each is kept mounted afterwards (its chunk is cached and any in-progress
+// input — e.g. a typed webhook URL — survives close/reopen).
+const ShareDialog = lazy(() =>
+  import("@/features/share/ShareDialog").then((m) => ({ default: m.ShareDialog })),
+);
+const RemoveInteractiveConfirm = lazy(() =>
+  import("@/features/share/RemoveInteractiveConfirm").then((m) => ({
+    default: m.RemoveInteractiveConfirm,
+  })),
+);
+const AiChatPanel = lazy(() =>
+  import("@/features/ai/AiChatPanel").then((m) => ({ default: m.AiChatPanel })),
+);
 import { ToastViewport } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
@@ -167,10 +180,14 @@ export function App() {
   const [shareInitialTab, setShareInitialTab] = useState<
     "send" | "share" | "restore" | "json" | "import" | "about"
   >("send");
+  // Latches true on first open so the lazy chunk is fetched once and the dialog
+  // stays mounted thereafter (preserving SendPanel's in-progress input).
+  const [shareMounted, setShareMounted] = useState(false);
 
   // Confirmation popup for clearing interactive components. It opens *after*
   // the Share dialog closes, so it floats over the editor rather than the menu.
   const [confirmStripOpen, setConfirmStripOpen] = useState(false);
+  const [confirmMounted, setConfirmMounted] = useState(false);
 
   // `previewOpen` only matters on mobile, where the preview pane is a
   // bottom sheet. On desktop the CSS keeps both panes visible regardless.
@@ -182,6 +199,14 @@ export function App() {
   const openAi = useAiStore((s) => s.openPanel);
   const closeAi = useAiStore((s) => s.closePanel);
 
+  // Mount the AI panel the first time it opens through any path (FAB or
+  // keyboard shortcut), then keep it mounted so its slide animation and draft
+  // survive subsequent toggles.
+  const [aiMounted, setAiMounted] = useState(false);
+  useEffect(() => {
+    if (aiOpen) setAiMounted(true);
+  }, [aiOpen]);
+
   // The mobile chat floats over the preview, so dismissing the preview also
   // dismisses the chat — leaving a stranded chat over the builder would be odd.
   const closePreview = () => {
@@ -192,6 +217,7 @@ export function App() {
   const { sheetRef, swipeProps } = usePreviewSwipeToClose(closePreview);
 
   const openShareDialog = (tab: typeof shareInitialTab) => {
+    setShareMounted(true);
     setShareInitialTab(tab);
     setShareOpen(true);
   };
@@ -199,6 +225,7 @@ export function App() {
   // Close the Share dialog and hand off to the confirmation popup over the editor.
   const requestRemoveInteractive = () => {
     setShareOpen(false);
+    setConfirmMounted(true);
     setConfirmStripOpen(true);
   };
 
@@ -239,7 +266,11 @@ export function App() {
         <Preview onClose={closePreview} swipeProps={swipeProps} />
       </section>
 
-      <AiChatPanel />
+      {aiMounted ? (
+        <Suspense fallback={null}>
+          <AiChatPanel />
+        </Suspense>
+      ) : null}
 
       <div className="fab-stack">
         <button
@@ -263,16 +294,24 @@ export function App() {
         </button>
       </div>
 
-      <ShareDialog
-        open={shareOpen}
-        onClose={() => setShareOpen(false)}
-        initialTab={shareInitialTab}
-        onRequestRemoveInteractive={requestRemoveInteractive}
-      />
-      <RemoveInteractiveConfirm
-        open={confirmStripOpen}
-        onClose={() => setConfirmStripOpen(false)}
-      />
+      {shareMounted ? (
+        <Suspense fallback={null}>
+          <ShareDialog
+            open={shareOpen}
+            onClose={() => setShareOpen(false)}
+            initialTab={shareInitialTab}
+            onRequestRemoveInteractive={requestRemoveInteractive}
+          />
+        </Suspense>
+      ) : null}
+      {confirmMounted ? (
+        <Suspense fallback={null}>
+          <RemoveInteractiveConfirm
+            open={confirmStripOpen}
+            onClose={() => setConfirmStripOpen(false)}
+          />
+        </Suspense>
+      ) : null}
       <ToastViewport />
     </div>
   );
