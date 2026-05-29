@@ -17,11 +17,16 @@
  * webhook, so we catch it here instead of after the send bounces.
  *
  * The webhook URL is treated as a credential:
- *  - The input is `type="password"` with a show/hide toggle so it doesn't
- *    appear in screen shares by default.
+ *  - The input is a plain `type="text"` field masked with CSS
+ *    (`-webkit-text-security`, see `.masked`) plus a show/hide toggle, so it
+ *    doesn't appear in screen shares by default. We deliberately avoid
+ *    `type="password"` because browsers offer to save password fields to the
+ *    password manager (ignoring `autoComplete="off"`), which we don't want for
+ *    a per-message token.
  *  - A successful send saves the webhook to history (this browser only); the
  *    "Save webhook" button does the same up front. Both record who owns it.
- *  - `autoComplete="off"` keeps the browser password manager out of it.
+ *  - `autoComplete="off"` plus the password-manager opt-out attributes keep
+ *    browser and extension autofill out of it.
  *
  * The send call is cancellable via AbortController. A second click while a
  * send is in flight aborts the first.
@@ -493,9 +498,14 @@ export function SendPanel({
           <div className={styles.urlRow}>
             <TextInput
               id={id}
-              type={revealUrl ? "text" : "password"}
+              type="text"
+              className={revealUrl ? undefined : styles.masked}
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
               spellCheck={false}
+              data-1p-ignore
+              data-lpignore="true"
               value={url}
               onChange={(e) => setUrl(e.currentTarget.value)}
               invalid={urlInvalid}
