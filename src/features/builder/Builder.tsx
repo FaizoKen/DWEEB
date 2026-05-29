@@ -87,6 +87,7 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
               size="sm"
               leadingIcon={<ShareIcon />}
               trailingIcon={<ChevronDownIcon />}
+              collapseLabel
               title="Share link, export JSON, import another message, or view info"
             >
               More
@@ -139,6 +140,7 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
           size="sm"
           leadingIcon={<HistoryIcon />}
           onClick={onRestore}
+          collapseLabel
           title="Pull a message your webhook previously posted back into the editor"
         >
           Restore

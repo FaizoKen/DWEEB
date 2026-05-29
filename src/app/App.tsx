@@ -257,6 +257,13 @@ export function App() {
           onAbout={() => openShareDialog("about")}
         />
       </section>
+      {/* Dismiss scrim for the mobile preview sheet. The sheet only rises to
+          85dvh, leaving the top of the builder (action bar + username/avatar)
+          peeking above it — without this, a tap there edits those fields
+          instead of closing the preview. It sits just under the sheet, so it
+          catches the stray tap and dismisses. Driven by `data-preview-open`
+          in global.css; inert on desktop where the preview is a side column. */}
+      <div className="preview-scrim" aria-hidden="true" onClick={closePreview} />
       <section
         ref={sheetRef}
         className="app-shell__pane app-shell__pane--preview"

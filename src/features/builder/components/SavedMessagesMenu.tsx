@@ -23,13 +23,7 @@ import { Field } from "@/ui/Field";
 import { Menu, MenuDivider, MenuItem } from "@/ui/Menu";
 import { Modal } from "@/ui/Modal";
 import { TextInput } from "@/ui/TextInput";
-import {
-  BookmarkIcon,
-  ChevronDownIcon,
-  RefreshIcon,
-  SaveIcon,
-  TrashIcon,
-} from "@/ui/Icon";
+import { BookmarkIcon, ChevronDownIcon, RefreshIcon, SaveIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import styles from "./SavedMessagesMenu.module.css";
 
@@ -79,6 +73,7 @@ export function SavedMessagesMenu() {
             size="sm"
             leadingIcon={<BookmarkIcon />}
             trailingIcon={<ChevronDownIcon />}
+            collapseLabel
             title="Save the current message locally, load a saved one, or reset to the default template"
           >
             Saved
@@ -166,12 +161,7 @@ function DeleteConfirmDialog({ entry, onCancel, onConfirm }: DeleteConfirmDialog
           <Button variant="ghost" onClick={onCancel} type="button">
             Cancel
           </Button>
-          <Button
-            variant="danger"
-            onClick={onConfirm}
-            type="button"
-            leadingIcon={<TrashIcon />}
-          >
+          <Button variant="danger" onClick={onConfirm} type="button" leadingIcon={<TrashIcon />}>
             Delete
           </Button>
         </div>

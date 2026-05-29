@@ -25,9 +25,17 @@
 
 @media (max-width: 900px) {
   .actionBar {
+    /* Keep both control groups on a single row on phones; the labelled
+       buttons collapse to icon-only (Button `collapseLabel`) so the cluster
+       stays compact instead of wrapping onto a second line. */
     padding: 8px 10px;
     gap: 8px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+  }
+
+  .actionGroup {
+    flex-wrap: nowrap;
+    gap: 6px;
   }
 }
 

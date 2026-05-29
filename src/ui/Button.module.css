@@ -5,7 +5,10 @@
   gap: 6px;
   border-radius: var(--app-radius-sm);
   font-weight: 500;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
   white-space: nowrap;
   user-select: none;
   border: 1px solid transparent;
@@ -78,4 +81,21 @@
 .label {
   display: inline-flex;
   align-items: center;
+}
+
+/* ── Icon-only on mobile ───────────────────────────────────────────────── */
+/* With `collapseLabel`, drop the text on phones and tighten the horizontal
+   padding so the button shrinks to just its icon(s). Callers carry a
+   `title`/`aria-label`, so the control keeps an accessible name once the
+   visible text is gone. */
+@media (max-width: 900px) {
+  .collapseLabel .label {
+    display: none;
+  }
+
+  .collapseLabel.size-sm,
+  .collapseLabel.size-md {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
 }

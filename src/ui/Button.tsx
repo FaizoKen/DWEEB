@@ -11,6 +11,12 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   leadingIcon?: ReactNode;
   trailingIcon?: ReactNode;
   fullWidth?: boolean;
+  /**
+   * Collapse to an icon-only button on narrow (mobile) viewports: the text
+   * label is hidden and only the leading/trailing icons remain. Pair with a
+   * `title` (or `aria-label`) so the control keeps an accessible name.
+   */
+  collapseLabel?: boolean;
 }
 
 /**
@@ -24,6 +30,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     leadingIcon,
     trailingIcon,
     fullWidth,
+    collapseLabel,
     className,
     children,
     type = "button",
@@ -40,6 +47,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         styles[`variant-${variant}`],
         styles[`size-${size}`],
         fullWidth && styles.fullWidth,
+        collapseLabel && styles.collapseLabel,
         className,
       )}
       {...rest}
