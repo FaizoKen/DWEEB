@@ -7,5 +7,9 @@ dist
 .vite
 .cache
 bun.lockb
+# Bun is the canonical package manager (see engines + CI). Ignore npm's
+# lockfile so an `npm install` by a contributor doesn't create a second
+# lockfile and trip VS Code's "multiple lockfiles" warning.
+package-lock.json
 # TypeScript incremental-build cache — regenerated on every build.
 *.tsbuildinfo
