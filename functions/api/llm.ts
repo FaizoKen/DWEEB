@@ -68,8 +68,12 @@ export async function onRequestPost(context) {
     return json({ error: "The provider request failed upstream." }, 502);
   }
 
-  const text = await res.text();
-  return new Response(text, {
+  // Stream the upstream body straight back rather than buffering it with
+  // `res.text()`. For non-streaming calls this is just a pass-through; for
+  // streaming calls (Server-Sent Events) it lets tokens reach the browser as
+  // the provider emits them. We preserve the upstream content-type so the
+  // client can tell an SSE stream (`text/event-stream`) from a JSON error.
+  return new Response(res.body, {
     status: res.status,
     headers: {
       "Content-Type": res.headers.get("content-type") ?? "application/json",

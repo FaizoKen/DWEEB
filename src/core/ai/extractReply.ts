@@ -65,3 +65,18 @@ export function extractReply(raw: string): ParsedAssistantReply {
   }
   return { text: prose.trim(), payload };
 }
+
+/**
+ * Prose to show *while a reply is still streaming*.
+ *
+ * The model emits its message payload inside a ```json fence, usually after a
+ * sentence or two of prose. Rendering that raw JSON token-by-token would be
+ * noise, and a half-written fence can't be parsed yet — so we simply show
+ * everything up to the first code fence and hide the rest until the stream
+ * finishes, at which point `extractReply` does the precise split.
+ */
+export function streamingProse(raw: string): string {
+  const fence = (raw ?? "").indexOf("```");
+  const visible = fence >= 0 ? raw.slice(0, fence) : raw;
+  return visible.replace(/\s+$/, "");
+}

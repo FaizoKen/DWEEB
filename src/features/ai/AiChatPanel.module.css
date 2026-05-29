@@ -182,17 +182,13 @@
   background: rgba(35, 165, 89, 0.14);
 }
 
-/* ── Thinking indicator ──────────────────────────────────────────────── */
-.thinking {
+/* ── Streaming indicators ────────────────────────────────────────────── */
+/* Typing dots shown inside an assistant bubble that has no prose yet. */
+.typing {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  border-bottom-left-radius: 4px;
-  background: var(--app-bg);
-  border: 1px solid var(--app-border);
+  height: 1.2em;
 }
 .dot {
   width: 6px;
@@ -200,6 +196,26 @@
   border-radius: 50%;
   background: var(--app-text-muted);
   animation: dotPulse 1.2s infinite ease-in-out;
+}
+
+/* Blinking caret trailing the prose while it streams in. */
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: caretBlink 1s steps(2, start) infinite;
+}
+@keyframes caretBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 .dot:nth-child(2) {
   animation-delay: 0.2s;

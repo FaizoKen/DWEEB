@@ -42,6 +42,11 @@ export interface ChatMessage {
   appliedMessage?: boolean;
   /** Validation issue count when an edit was applied with warnings/errors. */
   issueCount?: number;
+  /**
+   * True while this assistant turn is still streaming in. Drives the live caret
+   * / typing dots; cleared once the reply is finalized.
+   */
+  streaming?: boolean;
 }
 
 /** What the model returned, after we split prose from any message payload. */

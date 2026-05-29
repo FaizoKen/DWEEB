@@ -125,7 +125,6 @@ export function AiChatPanel() {
                 ))}
               </ul>
             )}
-            {thinking ? <ThinkingBubble /> : null}
             {error ? <div className={styles.error}>{error}</div> : null}
           </div>
 
@@ -190,10 +189,24 @@ function EmptyState({ provider, onPick }: { provider: string; onPick: (v: string
 
 function MessageBubble({ message }: { message: ChatMessage }) {
   const mine = message.role === "user";
+  const streaming = message.streaming;
   return (
     <li className={mine ? styles.rowMine : styles.rowTheirs}>
       <div className={mine ? styles.bubbleMine : styles.bubbleTheirs}>
-        {message.content ? <p className={styles.bubbleText}>{message.content}</p> : null}
+        {message.content ? (
+          <p className={styles.bubbleText}>
+            {message.content}
+            {streaming ? <span className={styles.caret} aria-hidden="true" /> : null}
+          </p>
+        ) : streaming ? (
+          // Streaming but no prose yet (still waiting on the first token, or the
+          // reply opens straight into the JSON payload) — show typing dots.
+          <span className={styles.typing} aria-label="Generating response">
+            <span className={styles.dot} />
+            <span className={styles.dot} />
+            <span className={styles.dot} />
+          </span>
+        ) : null}
         {message.appliedMessage ? (
           <div className={styles.applied}>
             <SparkleIcon size={13} />
@@ -207,15 +220,5 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         ) : null}
       </div>
     </li>
-  );
-}
-
-function ThinkingBubble() {
-  return (
-    <div className={styles.thinking} aria-live="polite">
-      <span className={styles.dot} />
-      <span className={styles.dot} />
-      <span className={styles.dot} />
-    </div>
   );
 }

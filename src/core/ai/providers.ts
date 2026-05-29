@@ -7,9 +7,12 @@
  * cross-origin browser requests; for Anthropic we opt in with the documented
  * `anthropic-dangerous-direct-browser-access` header.
  *
- * Calls are non-streaming: a single request returns the whole reply. That keeps
- * the adapter logic small and uniform across providers, which matters far more
- * here than token-by-token rendering.
+ * Calls stream by default: when the caller passes an `onToken` callback we ask
+ * the provider for Server-Sent Events and forward each text delta as it lands,
+ * so the chat renders token-by-token like other AI web apps. Each provider's
+ * SSE event shape differs, so the adapters decode their own; a shared reader
+ * (`readSse`) handles the transport. Without `onToken` (or if the provider
+ * ignored the stream flag) we fall back to parsing the whole reply at once.
  */
 
 import type { AiProvider, AiSettings, ChatMessage } from "./types";
@@ -125,23 +128,26 @@ export function toTurns(messages: ChatMessage[]): AiTurn[] {
 /**
  * Make one completion request. `system` is the schema/instruction prompt,
  * `turns` is the running conversation (oldest first, ending with the latest
- * user turn).
+ * user turn). When `onToken` is supplied the reply is streamed and each text
+ * delta is delivered through it as it arrives; the resolved `text` is still the
+ * full reply so callers don't have to reassemble it themselves.
  */
 export async function callAI(
   settings: AiSettings,
   system: string,
   turns: AiTurn[],
   signal?: AbortSignal,
+  onToken?: (delta: string) => void,
 ): Promise<AiCallResult> {
   try {
     switch (settings.provider) {
       case "anthropic":
-        return await callAnthropic(settings, system, turns, signal);
+        return await callAnthropic(settings, system, turns, signal, onToken);
       case "gemini":
-        return await callGemini(settings, system, turns, signal);
+        return await callGemini(settings, system, turns, signal, onToken);
       case "openai":
       default:
-        return await callOpenAiCompatible(settings, system, turns, signal);
+        return await callOpenAiCompatible(settings, system, turns, signal, onToken);
     }
   } catch (e) {
     if ((e as DOMException)?.name === "AbortError") {
@@ -176,7 +182,11 @@ function networkErrorMessage(provider: AiProvider): string {
 function extractProviderMessage(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const err = (body as { error?: unknown }).error;
-  if (err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string") {
+  if (
+    err &&
+    typeof err === "object" &&
+    typeof (err as { message?: unknown }).message === "string"
+  ) {
     return (err as { message: string }).message;
   }
   if (typeof err === "string") return err;
@@ -214,6 +224,42 @@ async function readJson(res: Response): Promise<unknown> {
   } catch {
     return text;
   }
+}
+
+/** True when a response carries a Server-Sent Events stream we can read. */
+function isEventStream(res: Response): boolean {
+  return (res.headers.get("content-type") ?? "").includes("text/event-stream");
+}
+
+/**
+ * Read a Server-Sent Events stream line by line, handing the payload of each
+ * `data:` line to `onData` as it arrives. Returns once the stream ends. Every
+ * provider's streaming mode rides on this; they differ only in the JSON shape
+ * of each event, which the callers decode. Non-`data:` lines (SSE `event:`
+ * names, OpenRouter keep-alive comments) are ignored.
+ */
+async function readSse(res: Response, onData: (data: string) => void): Promise<void> {
+  const reader = res.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const flush = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) return;
+    const data = trimmed.slice(5).trim();
+    if (data) onData(data);
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      flush(buffer.slice(0, nl));
+      buffer = buffer.slice(nl + 1);
+    }
+  }
+  flush(buffer);
 }
 
 /** Same-origin Pages Function that forwards the provider request server-side. */
@@ -255,6 +301,7 @@ async function callOpenAiCompatible(
   system: string,
   turns: AiTurn[],
   signal?: AbortSignal,
+  onToken?: (delta: string) => void,
 ): Promise<AiCallResult> {
   const url = `${resolvedBaseUrl(settings)}/chat/completions`;
   const headers: Record<string, string> = {
@@ -276,18 +323,44 @@ async function callOpenAiCompatible(
     body: JSON.stringify({
       model: settings.model,
       temperature: 0.4,
+      stream: Boolean(onToken),
       messages: [{ role: "system", content: system }, ...turns],
     }),
     signal,
   });
-  const body = await readJson(res);
-  if (!res.ok) return { ok: false, error: describeHttpError(res.status, body) };
+  if (!res.ok) return { ok: false, error: describeHttpError(res.status, await readJson(res)) };
 
+  // Streaming chunks: `data: {choices:[{delta:{content}}]}`, ending in `[DONE]`.
+  if (onToken && isEventStream(res)) {
+    let full = "";
+    await readSse(res, (data) => {
+      if (data === "[DONE]") return;
+      let json: unknown;
+      try {
+        json = JSON.parse(data);
+      } catch {
+        return;
+      }
+      const delta = (json as { choices?: Array<{ delta?: { content?: unknown } }> })?.choices?.[0]
+        ?.delta?.content;
+      if (typeof delta === "string" && delta) {
+        full += delta;
+        onToken(delta);
+      }
+    });
+    return full
+      ? { ok: true, text: full }
+      : { ok: false, error: "Provider returned an empty response." };
+  }
+
+  // Non-streaming (or the server ignored `stream`): parse the whole reply.
+  const body = await readJson(res);
   const content = (body as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]
     ?.message?.content;
   if (typeof content !== "string") {
     return { ok: false, error: "Provider returned an unexpected response shape." };
   }
+  if (onToken) onToken(content);
   return { ok: true, text: content };
 }
 
@@ -296,6 +369,7 @@ async function callAnthropic(
   system: string,
   turns: AiTurn[],
   signal?: AbortSignal,
+  onToken?: (delta: string) => void,
 ): Promise<AiCallResult> {
   const url = `${resolvedBaseUrl(settings)}/v1/messages`;
   const res = await proxiedFetch(url, {
@@ -309,14 +383,48 @@ async function callAnthropic(
     body: JSON.stringify({
       model: settings.model,
       max_tokens: 4096,
+      stream: Boolean(onToken),
       system,
       messages: turns.map((t) => ({ role: t.role, content: t.content })),
     }),
     signal,
   });
-  const body = await readJson(res);
-  if (!res.ok) return { ok: false, error: describeHttpError(res.status, body) };
+  if (!res.ok) return { ok: false, error: describeHttpError(res.status, await readJson(res)) };
 
+  // Anthropic's stream is a sequence of typed events; text arrives as
+  // `content_block_delta` with a `text_delta`. Errors come as `error` events.
+  if (onToken && isEventStream(res)) {
+    let full = "";
+    let streamError: string | null = null;
+    await readSse(res, (data) => {
+      let json: unknown;
+      try {
+        json = JSON.parse(data);
+      } catch {
+        return;
+      }
+      const evt = json as {
+        type?: string;
+        delta?: { type?: string; text?: unknown };
+        error?: { message?: unknown };
+      };
+      if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+        if (typeof evt.delta.text === "string" && evt.delta.text) {
+          full += evt.delta.text;
+          onToken(evt.delta.text);
+        }
+      } else if (evt.type === "error") {
+        streamError =
+          typeof evt.error?.message === "string" ? evt.error.message : "Provider streaming error.";
+      }
+    });
+    if (streamError) return { ok: false, error: streamError };
+    return full
+      ? { ok: true, text: full }
+      : { ok: false, error: "Provider returned an empty response." };
+  }
+
+  const body = await readJson(res);
   const blocks = (body as { content?: Array<{ type?: string; text?: unknown }> })?.content;
   const text = Array.isArray(blocks)
     ? blocks
@@ -325,6 +433,7 @@ async function callAnthropic(
         .join("")
     : "";
   if (!text) return { ok: false, error: "Provider returned an empty response." };
+  if (onToken) onToken(text);
   return { ok: true, text };
 }
 
@@ -333,11 +442,16 @@ async function callGemini(
   system: string,
   turns: AiTurn[],
   signal?: AbortSignal,
+  onToken?: (delta: string) => void,
 ): Promise<AiCallResult> {
   const base = resolvedBaseUrl(settings);
+  // `streamGenerateContent?alt=sse` emits the same chunks as `generateContent`
+  // but one Server-Sent Event at a time instead of one buffered JSON array.
+  const endpoint = onToken ? "streamGenerateContent" : "generateContent";
+  const sse = onToken ? "&alt=sse" : "";
   const url =
-    `${base}/v1beta/models/${encodeURIComponent(settings.model)}:generateContent` +
-    `?key=${encodeURIComponent(settings.apiKey)}`;
+    `${base}/v1beta/models/${encodeURIComponent(settings.model)}:${endpoint}` +
+    `?key=${encodeURIComponent(settings.apiKey)}${sse}`;
   const res = await proxiedFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -350,16 +464,46 @@ async function callGemini(
     }),
     signal,
   });
-  const body = await readJson(res);
-  if (!res.ok) return { ok: false, error: describeHttpError(res.status, body) };
+  if (!res.ok) return { ok: false, error: describeHttpError(res.status, await readJson(res)) };
 
+  const partsToText = (parts: unknown): string =>
+    Array.isArray(parts)
+      ? parts
+          .map((p) =>
+            typeof (p as { text?: unknown })?.text === "string" ? (p as { text: string }).text : "",
+          )
+          .join("")
+      : "";
+
+  if (onToken && isEventStream(res)) {
+    let full = "";
+    await readSse(res, (data) => {
+      let json: unknown;
+      try {
+        json = JSON.parse(data);
+      } catch {
+        return;
+      }
+      const parts = (json as { candidates?: Array<{ content?: { parts?: unknown } }> })
+        ?.candidates?.[0]?.content?.parts;
+      const chunk = partsToText(parts);
+      if (chunk) {
+        full += chunk;
+        onToken(chunk);
+      }
+    });
+    return full
+      ? { ok: true, text: full }
+      : { ok: false, error: "Provider returned an empty response." };
+  }
+
+  const body = await readJson(res);
   const parts = (
     body as { candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }> }
   )?.candidates?.[0]?.content?.parts;
-  const text = Array.isArray(parts)
-    ? parts.map((p) => (typeof p?.text === "string" ? p.text : "")).join("")
-    : "";
+  const text = partsToText(parts);
   if (!text) return { ok: false, error: "Provider returned an empty response." };
+  if (onToken) onToken(text);
   return { ok: true, text };
 }
 
