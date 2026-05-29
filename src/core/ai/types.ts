@@ -8,9 +8,10 @@
  */
 
 /**
- * Supported provider families. Groq and OpenRouter speak the OpenAI API.
+ * Supported provider families. Groq, OpenRouter, and Ollama all speak the
+ * OpenAI API; Ollama is a self-hosted local server (no key required).
  */
-export type AiProvider = "openai" | "anthropic" | "gemini" | "groq" | "openrouter";
+export type AiProvider = "openai" | "anthropic" | "gemini" | "groq" | "openrouter" | "ollama";
 
 /**
  * Persisted assistant configuration. The API key is a credential — it lives in

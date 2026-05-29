@@ -22,7 +22,9 @@ export interface ProviderMeta {
   defaultBaseUrl: string;
   /** Whether the user must supply their own base URL (no sensible default). */
   requiresBaseUrl: boolean;
-  /** Where to get a key. */
+  /** Whether the provider needs an API key (local servers like Ollama don't). */
+  requiresKey: boolean;
+  /** Where to get a key. Empty for keyless providers. */
   keysUrl: string;
   keyPlaceholder: string;
 }
@@ -35,6 +37,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultModel: "llama-3.3-70b-versatile",
     defaultBaseUrl: "https://api.groq.com/openai/v1",
     requiresBaseUrl: false,
+    requiresKey: true,
     keysUrl: "https://console.groq.com/keys",
     keyPlaceholder: "gsk_…",
   },
@@ -43,6 +46,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     requiresBaseUrl: false,
+    requiresKey: true,
     keysUrl: "https://openrouter.ai/keys",
     keyPlaceholder: "sk-or-…",
   },
@@ -51,6 +55,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultModel: "gemini-2.0-flash",
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
     requiresBaseUrl: false,
+    requiresKey: true,
     keysUrl: "https://aistudio.google.com/app/apikey",
     keyPlaceholder: "AIza…",
   },
@@ -59,6 +64,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultModel: "gpt-4o-mini",
     defaultBaseUrl: "https://api.openai.com/v1",
     requiresBaseUrl: false,
+    requiresKey: true,
     keysUrl: "https://platform.openai.com/api-keys",
     keyPlaceholder: "sk-…",
   },
@@ -67,8 +73,23 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultModel: "claude-3-5-sonnet-latest",
     defaultBaseUrl: "https://api.anthropic.com",
     requiresBaseUrl: false,
+    requiresKey: true,
     keysUrl: "https://console.anthropic.com/settings/keys",
     keyPlaceholder: "sk-ant-…",
+  },
+  // Self-hosted Ollama. Speaks the OpenAI API at /v1 and needs no key. The
+  // deployed site reaches it through the same-origin proxy, which runs on the
+  // edge — it can't see your localhost and refuses non-https/private hosts. So
+  // there's no usable default: the user must supply the public https URL of
+  // their Ollama (e.g. a Cloudflare Tunnel), hence requiresBaseUrl.
+  ollama: {
+    label: "Ollama (self-hosted)",
+    defaultModel: "llama3.2",
+    defaultBaseUrl: "",
+    requiresBaseUrl: true,
+    requiresKey: false,
+    keysUrl: "",
+    keyPlaceholder: "(no key needed)",
   },
 };
 
@@ -238,8 +259,10 @@ async function callOpenAiCompatible(
   const url = `${resolvedBaseUrl(settings)}/chat/completions`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${settings.apiKey}`,
   };
+  // Keyless local servers (Ollama) need no auth; skip the empty bearer, which
+  // some OpenAI-compatible servers reject.
+  if (settings.apiKey.trim()) headers.Authorization = `Bearer ${settings.apiKey}`;
   // OpenRouter recommends identifying the calling app. These are set on the
   // server-side proxy request, so the browser's forbidden-header rules (Referer)
   // don't apply.

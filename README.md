@@ -157,6 +157,9 @@ from the wire format, and it is stripped on export.
   which is the mirror image of the inspector dispatcher.
 - **`share/`** — the share/export/import modal. Stateless w.r.t. the
   store; reads on open, writes through `replaceMessage` on import.
+- **`ai/`** — the bring-your-own-key assistant panel. Provider adapters
+  and the provider-neutral result type live in `src/core/ai`; see the
+  *AI assistant* section below.
 
 ### Layer 4 — App shell (`src/app`)
 
@@ -226,6 +229,38 @@ owns the localStorage list of remembered webhooks. The CSP in
 `public/_headers` allow-lists `discord.com`, `canary.discord.com`,
 `ptb.discord.com`, and `discordapp.com` under `connect-src`. If you fork
 the app to talk to a different host, edit that header.
+
+## AI assistant
+
+The **AI** panel lets you describe a message in plain language and have a
+model build or edit the Components V2 payload for you. It's
+bring-your-own-key: the key lives only in your browser's `localStorage` and
+is sent only to the provider you pick. `src/core/ai/providers.ts` holds one
+adapter per wire schema — OpenAI-compatible (`/chat/completions`), Anthropic
+(`/v1/messages`), and Gemini (`:generateContent`) — and normalizes all three
+to a single `{ ok, text, error }` result. Supported providers: **Groq**,
+**OpenRouter**, **OpenAI**, **Anthropic**, **Google Gemini**, and **Ollama**
+(Groq, OpenRouter, and Ollama all speak the OpenAI API, so they share one
+adapter).
+
+**Self-hosted models via Ollama.** Ollama has to be reachable at a public
+`https://` URL. Every provider call on the deployed site routes through the
+same-origin `functions/api/llm.ts` proxy (the CSP's `connect-src 'self'` blocks
+direct provider calls), and that proxy runs on Cloudflare's edge — it can't see
+your `localhost`, and its SSRF guard refuses non-https / private hosts anyway.
+So put Ollama behind a tunnel and use that URL:
+
+```bash
+ollama pull llama3.2
+cloudflared tunnel --url http://localhost:11434   # prints an https URL
+```
+
+Then pick *Ollama (self-hosted)* in the provider dropdown, set the Base URL to
+the tunnel origin plus `/v1` (e.g. `https://xxxx.trycloudflare.com/v1`), and
+leave the key blank. There is no default Base URL on purpose: `localhost` can't
+work from the deployed site, so you supply your own public endpoint. (The proxy
+calls Ollama server-to-server, so you don't need to set `OLLAMA_ORIGINS` — that
+only matters for direct browser calls.)
 
 ## Wire-format compatibility
 

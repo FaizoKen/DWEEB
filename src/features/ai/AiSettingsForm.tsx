@@ -40,7 +40,7 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
     setDraft({ provider, apiKey: draft.apiKey, model: seed.model, baseUrl: seed.baseUrl });
   };
 
-  const keyMissing = draft.apiKey.trim().length === 0;
+  const keyMissing = meta.requiresKey && draft.apiKey.trim().length === 0;
   const modelMissing = draft.model.trim().length === 0;
   const baseUrlMissing = meta.requiresBaseUrl && draft.baseUrl.trim().length === 0;
   const canSave = !keyMissing && !modelMissing && !baseUrlMissing;
@@ -80,7 +80,7 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
       </Field>
 
       <Field
-        label="API key"
+        label={meta.requiresKey ? "API key" : "API key (optional)"}
         hint={
           meta.keysUrl ? (
             <>
@@ -90,8 +90,10 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
               </a>
               .
             </>
-          ) : (
+          ) : meta.requiresKey ? (
             "Use the key your provider issued."
+          ) : (
+            "No API key is required for this provider."
           )
         }
       >
