@@ -150,6 +150,13 @@ export interface MediaGalleryComponent extends BaseComponent {
   items: MediaGalleryItem[];
 }
 
+/**
+ * Unlike Thumbnail / MediaGallery, a File's media only renders an *uploaded*
+ * attachment — its `url` must use the `attachment://<filename>` form (or carry
+ * an `attachment_id`). Discord rejects an external https URL here. Validation
+ * enforces this; the editor's in-session `session://` refs rewrite to
+ * `attachment://` at send time.
+ */
 export interface FileComponent extends BaseComponent {
   type: typeof ComponentType.File;
   file: UnfurledMediaItem;

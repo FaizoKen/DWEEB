@@ -29,7 +29,10 @@ export function FileInspector({ node }: Props) {
           })
         }
       />
-      <Field label="URL override" hint="Edit the raw URL Discord receives.">
+      <Field
+        label="URL override"
+        hint="File components only display uploaded attachments — use attachment://filename, not an external link."
+      >
         {(id) => (
           <TextInput
             id={id}

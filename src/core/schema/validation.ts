@@ -230,7 +230,8 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
       issues.push({
         severity: "warning",
         code: "APPLIED_TAGS_NO_THREAD",
-        message: "applied_tags are only honoured when posting to a forum channel with a thread_name.",
+        message:
+          "applied_tags are only honoured when posting to a forum channel with a thread_name.",
       });
     }
   }
@@ -281,7 +282,9 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
     if (
       node.accent_color !== undefined &&
       node.accent_color !== null &&
-      (node.accent_color < 0 || node.accent_color > LIMITS.COLOR_MAX || !Number.isInteger(node.accent_color))
+      (node.accent_color < 0 ||
+        node.accent_color > LIMITS.COLOR_MAX ||
+        !Number.isInteger(node.accent_color))
     ) {
       issues.push({
         nodeId: node._id,
@@ -341,7 +344,7 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
   }
 
   if (isFile(node)) {
-    validateMediaItem(node.file, node._id, issues, "File");
+    validateMediaItem(node.file, node._id, issues, "File", { requireAttachment: true });
   }
 
   if (isThumbnail(node)) {
@@ -687,10 +690,10 @@ function validateMediaItem(
   nodeId: EditorId,
   issues: ValidationIssue[],
   context: string,
+  opts: { requireAttachment?: boolean } = {},
 ): void {
   const hasUrl = typeof media.url === "string" && media.url.length > 0;
-  const hasAttachmentId =
-    typeof media.attachment_id === "string" && media.attachment_id.length > 0;
+  const hasAttachmentId = typeof media.attachment_id === "string" && media.attachment_id.length > 0;
 
   if (!hasUrl && !hasAttachmentId) {
     issues.push({
@@ -716,6 +719,19 @@ function validateMediaItem(
         severity: "warning",
         code: "MEDIA_URL_INVALID",
         message: `${context}: URL must be https://, attachment://filename, or an in-session upload.`,
+      });
+    } else if (
+      opts.requireAttachment &&
+      isExternalWebUrl(media.url!) &&
+      !isDiscordCdnUrl(media.url!)
+    ) {
+      // The File component's media only renders uploaded attachments — Discord
+      // rejects an external URL here (unlike Thumbnail / Media Gallery).
+      issues.push({
+        nodeId,
+        severity: "error",
+        code: "FILE_URL_NOT_ATTACHMENT",
+        message: `${context} can only display an uploaded attachment — upload a file or use an attachment://filename reference, not an external URL.`,
       });
     }
     checkAttachmentResolves(media.url!, nodeId, issues);
@@ -746,16 +762,33 @@ function isValidMediaUrl(url: string): boolean {
   return isValidUrl(url);
 }
 
+/** A plain external web URL — not an `attachment://` or in-session `session://` ref. */
+function isExternalWebUrl(url: string): boolean {
+  if (url.startsWith("attachment://") || url.startsWith("session://")) return false;
+  return isValidUrl(url);
+}
+
+/**
+ * Discord's own CDN hosts. A File component restored from a Discord message
+ * response can carry a CDN url in `url`, so we don't flag those — that keeps a
+ * restore → edit → resend round-trip from being blocked. Freshly-pasted
+ * external URLs are still rejected, since the File component won't render them.
+ */
+function isDiscordCdnUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "cdn.discordapp.com" || host === "media.discordapp.net";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * If `url` is a session blob ref, flag the component when the blob is no
  * longer in memory (page reload, manual eviction). Errors block send so the
  * user knows to re-attach the file before posting.
  */
-function checkAttachmentResolves(
-  url: string,
-  nodeId: EditorId,
-  issues: ValidationIssue[],
-): void {
+function checkAttachmentResolves(url: string, nodeId: EditorId, issues: ValidationIssue[]): void {
   const parsed = parseSessionUrl(url);
   if (!parsed) return;
   if (getAttachmentFile(parsed.blobId)) return;
