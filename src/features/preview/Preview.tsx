@@ -12,7 +12,7 @@
  * to native scrolling whenever the message isn't at its top.
  */
 
-import type { HTMLAttributes } from "react";
+import type { HTMLAttributes, MouseEvent as ReactMouseEvent } from "react";
 import { useMessageStore, selectMessage } from "@/core/state/messageStore";
 import { ComponentRenderer } from "./renderers/ComponentRenderer";
 import { PreviewCloseContext } from "./previewCloseContext";
@@ -27,8 +27,19 @@ interface PreviewProps {
 
 export function Preview({ onClose, swipeProps }: PreviewProps = {}) {
   const message = useMessageStore(selectMessage);
+  const select = useMessageStore((s) => s.select);
   const displayName = message.username || "Webhook";
   const avatar = message.avatar_url;
+
+  // Clicking empty preview space — anywhere that isn't a rendered component
+  // (each carries `data-node-id`) or an interactive control like the
+  // avatar/username buttons — clears the active selection, so the builder's
+  // inline inspector collapses. Read `selectedId` lazily via `getState()`
+  // rather than subscribing, so the preview doesn't re-render on selection.
+  const clearSelectionOnBackdrop = (e: ReactMouseEvent<HTMLElement>) => {
+    if ((e.target as HTMLElement).closest("[data-node-id], button, a, input, textarea")) return;
+    if (useMessageStore.getState().selectedId !== null) select(null);
+  };
 
   const focusMetaField = (field: "username" | "avatar") => {
     // Close the mobile sheet first so the builder is visible. No-op on
@@ -52,7 +63,7 @@ export function Preview({ onClose, swipeProps }: PreviewProps = {}) {
           <span className={styles.grabber} aria-hidden="true" />
         </div>
       ) : null}
-      <div className={styles.scroll} data-preview-scroll>
+      <div className={styles.scroll} data-preview-scroll onClick={clearSelectionOnBackdrop}>
         <article className={styles.message} aria-label="Message preview">
           <button
             type="button"

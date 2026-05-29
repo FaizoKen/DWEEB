@@ -83,17 +83,6 @@ import type {
 } from "@/core/factory/createComponent";
 
 /**
- * Inline editor visibility is tracked at the tree level (not per-node) since
- * there is only ever one selected node. Switching selection auto-expands the
- * editor so newcomers always see it; explicit minimize only suppresses it for
- * the *current* selection.
- */
-const InlineEditorContext = createContext<{
-  hidden: boolean;
-  setHidden: (v: boolean) => void;
-}>({ hidden: false, setHidden: () => {} });
-
-/**
  * Drag-and-drop session shared across every TreeNode. Only one node can be
  * dragged at a time; the active drop indicator lives here so a row can render
  * the caret regardless of where the source originated.
@@ -242,12 +231,24 @@ export function ComponentTree() {
   const components = useMessageStore((s) => s.message.components);
   const addTopLevel = useMessageStore((s) => s.addTopLevel);
   const selectedId = useMessageStore((s) => s.selectedId);
+  const select = useMessageStore((s) => s.select);
   const atLimit = components.length >= LIMITS.TOP_LEVEL_COMPONENTS;
 
-  const [hidden, setHidden] = useState(false);
-  useEffect(() => {
-    setHidden(false);
-  }, [selectedId]);
+  // Clicking empty tree space — not a row (rows stop propagation), its inline
+  // editor, or a meta-header control — clears the selection. This collapses
+  // any open inspector, minimizing the tree back to its bare outline.
+  const clearSelectionOnBackdrop = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      if (
+        (e.target as HTMLElement).closest(
+          "[data-tree-row], input, textarea, select, button, label, a, summary",
+        )
+      )
+        return;
+      if (selectedId !== null) select(null);
+    },
+    [selectedId, select],
+  );
 
   const [drag, setDrag] = useState<DragInfo | null>(null);
   const [ghostStart, setGhostStart] = useState<{ x: number; y: number } | null>(null);
@@ -278,10 +279,9 @@ export function ComponentTree() {
   const topLevelIds = useMemo(() => components.map((c) => c._id), [components]);
 
   return (
-    <InlineEditorContext.Provider value={{ hidden, setHidden }}>
-      <DragContext.Provider value={dragSession}>
+    <DragContext.Provider value={dragSession}>
       <div className={styles.tree}>
-        <div className={styles.scroll}>
+        <div className={styles.scroll} onClick={clearSelectionOnBackdrop}>
           <MetaHeader />
 
           {components.length === 0 ? (
@@ -325,8 +325,7 @@ export function ComponentTree() {
         </div>
       </div>
       <DragGhost />
-      </DragContext.Provider>
-    </InlineEditorContext.Provider>
+    </DragContext.Provider>
   );
 }
 
@@ -441,7 +440,6 @@ function TreeNode({
   const addRowButton = useMessageStore((s) => s.addRowButton);
   const addRowSelect = useMessageStore((s) => s.addRowSelect);
   const addGalleryItem = useMessageStore((s) => s.addGalleryItem);
-  const { hidden, setHidden } = useContext(InlineEditorContext);
   const { drag, dropTarget, ghostRef, setDrag, setGhostStart, setDropTarget } = useContext(DragContext);
 
   const isSelected = selectedId === node._id;
@@ -771,13 +769,30 @@ function TreeNode({
         justDraggedRef.current = false;
         return;
       }
+      // Click the already-open row again to minimize it — clearing the
+      // selection and collapsing the inline inspector.
       if (isSelected) {
-        setHidden(!hidden);
-      } else {
-        select(node._id);
+        select(null);
+        return;
       }
+      // Click an unselected row to select it, then (desktop only) scroll the
+      // preview to the matching rendered component — the mirror of the
+      // preview→tree scroll in ComponentRenderer. On mobile the preview is a
+      // hidden bottom sheet, so there's nothing to bring into view. Deferred a
+      // frame so the freshly-revealed inline inspector has settled the layout
+      // before `scrollIntoView` measures positions.
+      select(node._id);
+      if (window.matchMedia("(max-width: 900px)").matches) return;
+      const targetId = node._id;
+      requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>(
+            `[data-preview-scroll] [data-node-id="${CSS.escape(targetId)}"]`,
+          )
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
     },
-    [hidden, isSelected, node._id, select, setHidden],
+    [isSelected, node._id, select],
   );
 
   return (
@@ -807,7 +822,7 @@ function TreeNode({
         onClick={onRowClick}
       >
         <span className={styles.chevron} aria-hidden="true">
-          {isSelected && !hidden ? (
+          {isSelected ? (
             <ChevronDownIcon size={14} />
           ) : (
             <ChevronRightIcon size={14} />
@@ -837,7 +852,7 @@ function TreeNode({
         </div>
       </div>
 
-      {isSelected && !hidden ? (
+      {isSelected ? (
         <div className={styles.editorPanel} onClick={(e) => e.stopPropagation()}>
           <Inspector />
         </div>
