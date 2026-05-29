@@ -25,16 +25,6 @@
   min-width: 0;
 }
 
-/*
- * Masks the webhook token like a password field without being `type="password"`
- * (which makes browsers offer to save it to the password manager). Supported in
- * Chrome/Edge/Safari and Firefox 117+; older Firefox just shows the URL, which
- * is acceptable since the Show/Hide toggle still works.
- */
-.masked {
-  -webkit-text-security: disc;
-}
-
 .revealBtn {
   padding: 0 12px;
   background: var(--app-bg-input);

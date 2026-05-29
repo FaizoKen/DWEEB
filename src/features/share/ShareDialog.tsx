@@ -523,8 +523,7 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
           <div className={styles.urlRow}>
             <TextInput
               id={id}
-              type={revealUrl ? "text" : "password"}
-              autoComplete="off"
+              masked={!revealUrl}
               spellCheck={false}
               value={url}
               onChange={(e) => setUrl(e.currentTarget.value)}

@@ -25,3 +25,13 @@
 .invalid:focus {
   border-color: var(--app-danger);
 }
+
+/*
+ * Masks a secret value like a password field without being `type="password"`
+ * (which makes browsers offer to save it to the password manager). Supported in
+ * Chrome/Edge/Safari and Firefox 117+; older Firefox just shows the value,
+ * which is acceptable since the Show/Hide toggle still works.
+ */
+.masked {
+  -webkit-text-security: disc;
+}

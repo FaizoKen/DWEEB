@@ -101,8 +101,7 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
           <div className={styles.keyRow}>
             <TextInput
               id={id}
-              type={revealKey ? "text" : "password"}
-              autoComplete="off"
+              masked={!revealKey}
               spellCheck={false}
               placeholder={meta.keyPlaceholder}
               value={draft.apiKey}
