@@ -8,9 +8,19 @@ import path from "node:path";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    // React is aliased to Preact's compat layer to shrink the runtime: the
+    // vendor chunk drops from ~47 kB gzip to ~12 kB. The app keeps writing
+    // standard React + @types/react; only the bundled runtime changes. Exact
+    // regex matches avoid the `react` prefix swallowing `react/jsx-runtime` or
+    // `react-dom/client`.
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      { find: /^react$/, replacement: "preact/compat" },
+      { find: /^react-dom$/, replacement: "preact/compat" },
+      { find: /^react-dom\/client$/, replacement: "preact/compat/client" },
+      { find: /^react\/jsx-runtime$/, replacement: "preact/jsx-runtime" },
+      { find: /^react\/jsx-dev-runtime$/, replacement: "preact/jsx-dev-runtime" },
+    ],
   },
   build: {
     target: "es2022",
