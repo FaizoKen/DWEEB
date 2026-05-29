@@ -32,7 +32,6 @@ export function AiChatPanel() {
   const closePanel = useAiStore((s) => s.closePanel);
   const messages = useAiStore((s) => s.messages);
   const thinking = useAiStore((s) => s.thinking);
-  const loadProgress = useAiStore((s) => s.loadProgress);
   const error = useAiStore((s) => s.error);
   const send = useAiStore((s) => s.send);
   const cancel = useAiStore((s) => s.cancel);
@@ -126,9 +125,7 @@ export function AiChatPanel() {
                 ))}
               </ul>
             )}
-            {thinking ? (
-              loadProgress ? <LoadingBubble progress={loadProgress} /> : <ThinkingBubble />
-            ) : null}
+            {thinking ? <ThinkingBubble /> : null}
             {error ? <div className={styles.error}>{error}</div> : null}
           </div>
 
@@ -219,22 +216,6 @@ function ThinkingBubble() {
       <span className={styles.dot} />
       <span className={styles.dot} />
       <span className={styles.dot} />
-    </div>
-  );
-}
-
-function LoadingBubble({ progress }: { progress: { text: string; progress: number } }) {
-  const pct = Math.max(0, Math.min(100, Math.round(progress.progress * 100)));
-  return (
-    <div className={styles.loadBubble} aria-live="polite">
-      <div className={styles.loadHead}>
-        <span>Loading local model…</span>
-        <span className={styles.loadPct}>{pct}%</span>
-      </div>
-      <div className={styles.loadBar}>
-        <span className={styles.loadBarFill} style={{ width: `${pct}%` }} />
-      </div>
-      {progress.text ? <div className={styles.loadText}>{progress.text}</div> : null}
     </div>
   );
 }

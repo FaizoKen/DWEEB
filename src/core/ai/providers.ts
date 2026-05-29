@@ -13,7 +13,6 @@
  */
 
 import type { AiProvider, AiSettings, ChatMessage } from "./types";
-import { callLocal, DEFAULT_LOCAL_MODEL, type LocalLoadProgress } from "./localEngine";
 
 export interface ProviderMeta {
   label: string;
@@ -30,16 +29,7 @@ export interface ProviderMeta {
 
 // Ordered so the free providers come first — that's what the dropdown shows,
 // and the default lands on a free tier so a new user can get going at no cost.
-// "local" is listed first because it needs no key at all — true zero-friction.
 export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
-  local: {
-    label: "Local (runs in your browser, no key)",
-    defaultModel: DEFAULT_LOCAL_MODEL,
-    defaultBaseUrl: "",
-    requiresBaseUrl: false,
-    keysUrl: "",
-    keyPlaceholder: "",
-  },
   groq: {
     label: "Groq (LPU Cloud)",
     defaultModel: "llama-3.3-70b-versatile",
@@ -114,15 +104,13 @@ export function toTurns(messages: ChatMessage[]): AiTurn[] {
 /**
  * Make one completion request. `system` is the schema/instruction prompt,
  * `turns` is the running conversation (oldest first, ending with the latest
- * user turn). `onLocalProgress` is only invoked when the chosen provider is
- * `local` and we are downloading / compiling a model in the background.
+ * user turn).
  */
 export async function callAI(
   settings: AiSettings,
   system: string,
   turns: AiTurn[],
   signal?: AbortSignal,
-  onLocalProgress?: (p: LocalLoadProgress) => void,
 ): Promise<AiCallResult> {
   try {
     switch (settings.provider) {
@@ -130,8 +118,6 @@ export async function callAI(
         return await callAnthropic(settings, system, turns, signal);
       case "gemini":
         return await callGemini(settings, system, turns, signal);
-      case "local":
-        return await callLocal(settings, system, turns, signal, onLocalProgress);
       case "openai":
       default:
         return await callOpenAiCompatible(settings, system, turns, signal);

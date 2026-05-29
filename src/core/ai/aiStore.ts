@@ -22,7 +22,6 @@ import { callAI, toTurns } from "./providers";
 import { buildSystemPrompt } from "./systemPrompt";
 import { extractReply } from "./extractReply";
 import { loadAiSettings, saveAiSettings } from "./settingsStorage";
-import { isLikelyMobile, type LocalLoadProgress } from "./localEngine";
 
 interface AiState {
   open: boolean;
@@ -30,11 +29,6 @@ interface AiState {
   messages: ChatMessage[];
   /** True while a provider request is in flight. */
   thinking: boolean;
-  /**
-   * Set while the local provider is downloading or compiling a model.
-   * `null` once the model is resident (or for any non-local provider).
-   */
-  loadProgress: LocalLoadProgress | null;
   /** Last error surfaced to the user (cleared on the next send). */
   error: string | null;
 
@@ -43,11 +37,7 @@ interface AiState {
   togglePanel(): void;
 
   setSettings(next: AiSettings): void;
-  /**
-   * True when the assistant is ready to chat — for cloud providers that means a
-   * key is configured, for `local` it's always true (the model downloads on
-   * first send).
-   */
+  /** True when the assistant is ready to chat — a provider API key is configured. */
   isConfigured(): boolean;
 
   send(prompt: string): Promise<void>;
@@ -66,7 +56,6 @@ export const useAiStore = create<AiState>((set, get) => ({
   settings: loadAiSettings(),
   messages: [],
   thinking: false,
-  loadProgress: null,
   error: null,
 
   openPanel() {
@@ -89,20 +78,12 @@ export const useAiStore = create<AiState>((set, get) => ({
       settings: next,
       messages: [],
       thinking: false,
-      loadProgress: null,
       error: null,
     });
   },
 
   isConfigured() {
-    const { settings } = get();
-    if (settings.provider === "local") {
-      // Mobile WebGPU can't host these models and mobile networks can't reliably
-      // deliver the weights — treat saved local config as unconfigured so the
-      // panel routes the user back through settings to a working provider.
-      return !isLikelyMobile();
-    }
-    return settings.apiKey.trim().length > 0;
+    return get().settings.apiKey.trim().length > 0;
   },
 
   async send(prompt) {
@@ -117,7 +98,6 @@ export const useAiStore = create<AiState>((set, get) => ({
     set((s) => ({
       messages: appendMessage(s.messages, userMsg),
       thinking: true,
-      loadProgress: null,
       error: null,
     }));
 
@@ -126,15 +106,11 @@ export const useAiStore = create<AiState>((set, get) => ({
     const system = buildSystemPrompt(current);
 
     inflight = new AbortController();
-    const result = await callAI(settings, system, toTurns(messages), inflight.signal, (p) => {
-      // Only surface progress while we're still the in-flight request; a
-      // finished load shouldn't redraw the spinner.
-      if (get().thinking) set({ loadProgress: p.progress < 1 ? p : null });
-    });
+    const result = await callAI(settings, system, toTurns(messages), inflight.signal);
     inflight = null;
 
     if (!result.ok) {
-      set({ thinking: false, loadProgress: null, error: result.error ?? "Request failed." });
+      set({ thinking: false, error: result.error ?? "Request failed." });
       return;
     }
 
@@ -170,19 +146,18 @@ export const useAiStore = create<AiState>((set, get) => ({
     set((s) => ({
       messages: appendMessage(s.messages, assistantMsg),
       thinking: false,
-      loadProgress: null,
     }));
   },
 
   cancel() {
     inflight?.abort();
     inflight = null;
-    set({ thinking: false, loadProgress: null });
+    set({ thinking: false });
   },
 
   clearChat() {
     inflight?.abort();
     inflight = null;
-    set({ messages: [], thinking: false, loadProgress: null, error: null });
+    set({ messages: [], thinking: false, error: null });
   },
 }));

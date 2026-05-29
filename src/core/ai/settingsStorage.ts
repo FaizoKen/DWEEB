@@ -9,11 +9,10 @@
 
 import type { AiProvider, AiSettings } from "./types";
 import { DEFAULT_PROVIDER, defaultSettingsFor } from "./providers";
-import { RETIRED_LOCAL_MODELS } from "./localEngine";
 
 const STORAGE_KEY = "dwb.ai.v1";
 
-const PROVIDERS: AiProvider[] = ["openai", "anthropic", "gemini", "groq", "openrouter", "local"];
+const PROVIDERS: AiProvider[] = ["openai", "anthropic", "gemini", "groq", "openrouter"];
 
 export function loadAiSettings(): AiSettings {
   const fallback = defaultSettingsFor(DEFAULT_PROVIDER);
@@ -22,18 +21,16 @@ export function loadAiSettings(): AiSettings {
   if (!raw) return fallback;
   try {
     const parsed = JSON.parse(raw) as Partial<AiSettings>;
-    const provider =
-      typeof parsed.provider === "string" && PROVIDERS.includes(parsed.provider as AiProvider)
-        ? (parsed.provider as AiProvider)
-        : DEFAULT_PROVIDER;
+    const known =
+      typeof parsed.provider === "string" && PROVIDERS.includes(parsed.provider as AiProvider);
+    const provider = known ? (parsed.provider as AiProvider) : DEFAULT_PROVIDER;
     const seed = defaultSettingsFor(provider);
-    let model =
+    // When the stored provider is no longer supported (e.g. the retired "local"
+    // provider) we fall back to the default; the persisted model/base URL belong
+    // to the old provider, so seed fresh defaults rather than carry them over.
+    if (!known) return seed;
+    const model =
       typeof parsed.model === "string" && parsed.model ? parsed.model : seed.model;
-    // Migrate ids that we used to ship but have since retired (e.g. a model
-    // that requires a WebGPU feature missing on common devices).
-    if (provider === "local" && RETIRED_LOCAL_MODELS[model]) {
-      model = RETIRED_LOCAL_MODELS[model]!;
-    }
     return {
       provider,
       apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",
