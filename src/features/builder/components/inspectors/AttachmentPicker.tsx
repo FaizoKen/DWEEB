@@ -11,13 +11,9 @@
  * preview source lives in the renderers.
  */
 
-import { useId, useRef } from "react";
+import { useId, useRef, useState } from "react";
 import { Button } from "@/ui/Button";
-import {
-  isSessionUrl,
-  parseSessionUrl,
-  registerAttachment,
-} from "@/core/state/attachmentStore";
+import { isSessionUrl, parseSessionUrl, registerAttachment } from "@/core/state/attachmentStore";
 import { useAttachmentRecord } from "./useAttachmentRecord";
 import styles from "./AttachmentPicker.module.css";
 
@@ -33,6 +29,7 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
   const inputRef = useRef<HTMLInputElement>(null);
   const session = isSessionUrl(url) ? parseSessionUrl(url) : null;
   const record = useAttachmentRecord(session?.blobId ?? null);
+  const [dragOver, setDragOver] = useState(false);
 
   const handlePick = (file: File | null) => {
     if (!file) return;
@@ -46,9 +43,41 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
     onChange("");
   };
 
+  const isFileDrag = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (!dragOver) setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    // Ignore leaves that just cross into a child element (e.g. the file input).
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    if (!isFileDrag(e)) return;
+    // Cancel the file input's native drop so we don't double-handle.
+    e.preventDefault();
+    setDragOver(false);
+    handlePick(e.dataTransfer.files?.[0] ?? null);
+  };
+
+  const dropText = accept?.startsWith("image") ? "Drop image here" : "Drop file here";
+
   return (
     <div className={styles.wrap}>
-      <label htmlFor={fileInputId} className={styles.dropzone}>
+      <label
+        htmlFor={fileInputId}
+        className={dragOver ? `${styles.dropzone} ${styles.dragging}` : styles.dropzone}
+        onDragEnter={handleDragOver}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         <input
           ref={inputRef}
           id={fileInputId}
@@ -66,9 +95,7 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
           ) : (
             <div className={styles.fileMetaMissing}>
               <span className={styles.fileName}>{session.filename}</span>
-              <span className={styles.warningText}>
-                Lost on reload — re-attach to send.
-              </span>
+              <span className={styles.warningText}>Lost on reload — re-attach to send.</span>
             </div>
           )
         ) : (
@@ -77,13 +104,14 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
             <span>Held in this browser tab only; never uploaded to a third party.</span>
           </div>
         )}
+        {dragOver && (
+          <div className={styles.dropOverlay} aria-hidden="true">
+            {dropText}
+          </div>
+        )}
       </label>
       <div className={styles.actions}>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => inputRef.current?.click()}
-        >
+        <Button variant="secondary" size="sm" onClick={() => inputRef.current?.click()}>
           {session ? "Replace…" : "Choose file…"}
         </Button>
         {session ? (

@@ -15,11 +15,36 @@
   border-radius: var(--app-radius);
   background: var(--app-bg-elevated);
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
 }
 .dropzone:hover {
   border-color: var(--app-accent);
   background: var(--app-accent-soft);
+}
+.dropzone.dragging {
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+}
+
+.dropOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--app-accent);
+  border-radius: var(--app-radius);
+  /* Opaque accent-tinted surface over a solid base so the placeholder text
+     underneath never bleeds through the (translucent) accent-soft tint. */
+  background:
+    linear-gradient(var(--app-accent-soft), var(--app-accent-soft)), var(--app-bg-elevated);
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .fileInput {
