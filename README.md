@@ -267,14 +267,21 @@ only matters for direct browser calls.)
 ## Wire-format compatibility
 
 The exported payload (from the **JSON export** tab) is the body you POST to
-`https://discord.com/api/webhooks/{id}/{token}?with_components=true`. Set
-the `IS_COMPONENTS_V2` flag (`1 << 15`) on send — `MESSAGE_FLAG_IS_COMPONENTS_V2`
-in `src/core/schema/types.ts` is the same value. The **Send** tab attaches it
-automatically.
+`https://discord.com/api/webhooks/{id}/{token}?with_components=true`. Both
+the `?with_components=true` query parameter **and** the `IS_COMPONENTS_V2`
+message flag (`1 << 15`) are mandatory — Discord otherwise parses the body as
+legacy components and rejects a top-level Container. The exported body already
+includes the computed `flags` (`IS_COMPONENTS_V2`, plus `SUPPRESS_NOTIFICATIONS`
+when silent send is on), so it is postable as-is; `computeMessageFlags` in
+`src/core/schema/types.ts` is the single source of truth, shared by Send,
+JSON export, and share links.
 
 The exporter strips:
 - editor `_id` fields,
 - any `undefined` optional (kept null when the user explicitly cleared it).
+
+and emits the wire-only `flags` integer (read back into `suppress_notifications`
+on import, so the silent-send toggle round-trips).
 
 ## Tech stack
 

@@ -176,7 +176,8 @@ function JsonExportPanel() {
     <>
       <p className={styles.lead}>
         POST this body to your webhook URL with the <code>?with_components=true</code> query
-        parameter and the Components V2 message flag set on the receiving bot.
+        parameter. The required <code>flags</code> (Components V2, plus silent-send if enabled)
+        are already included below — Discord rejects the payload without them.
       </p>
       <TextArea readOnly rows={14} value={json} className={styles.mono} />
       <div className={styles.actions}>

@@ -15,11 +15,7 @@
  * `applied_tags`) are the only extras allowed.
  */
 
-import {
-  MESSAGE_FLAG_IS_COMPONENTS_V2,
-  MESSAGE_FLAG_SUPPRESS_NOTIFICATIONS,
-  type WebhookMessage,
-} from "@/core/schema/types";
+import { type WebhookMessage } from "@/core/schema/types";
 import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
 import { collectSessionAttachments } from "@/core/serialization/attachments";
 
@@ -102,20 +98,13 @@ export interface SendErr {
 export type SendResult = SendOk | SendErr;
 
 /**
- * Combine `IS_COMPONENTS_V2` with any opt-in message-level flags the editor
- * exposes (currently `SUPPRESS_NOTIFICATIONS`). Always returns the V2 bit
- * because we never post without Components V2.
+ * Build the JSON payload Discord expects on a Components V2 webhook execute.
+ * `stripEditorFields` already emits the computed `flags` (always
+ * `IS_COMPONENTS_V2`, plus `SUPPRESS_NOTIFICATIONS` when silent send is on),
+ * so this is just the wire shape with editor ids dropped.
  */
-function flagsFor(message: WebhookMessage): number {
-  let f = MESSAGE_FLAG_IS_COMPONENTS_V2;
-  if (message.suppress_notifications) f |= MESSAGE_FLAG_SUPPRESS_NOTIFICATIONS;
-  return f;
-}
-
-/** Build the JSON payload Discord expects on a Components V2 webhook execute. */
 export function buildWirePayload(message: WebhookMessage): Record<string, unknown> {
-  const stripped = stripEditorFields(message) as Record<string, unknown>;
-  return { ...stripped, flags: flagsFor(message) };
+  return stripEditorFields(message) as Record<string, unknown>;
 }
 
 /**
@@ -136,7 +125,9 @@ interface PreparedBody {
 
 function prepareBody(message: WebhookMessage): PreparedBody {
   const { payload, files } = collectSessionAttachments(message);
-  const enriched = { ...payload, flags: flagsFor(message) };
+  // `payload` already carries the computed `flags` — collectSessionAttachments
+  // builds it via stripEditorFields, which emits them.
+  const enriched = payload;
 
   if (files.length === 0) {
     return {
@@ -523,15 +514,9 @@ export async function fetchWebhookMessage(
   }
 
   try {
+    // attachEditorFields lifts the silent-send bit out of `flags` itself, so
+    // the restored message preserves suppress_notifications.
     const message = attachEditorFields(body);
-    // Lift the suppress_notifications bit out of the response's flags so the
-    // restored message preserves the silent-send state.
-    if (body && typeof body === "object" && "flags" in body) {
-      const flags = Number((body as { flags?: unknown }).flags);
-      if (Number.isFinite(flags) && (flags & MESSAGE_FLAG_SUPPRESS_NOTIFICATIONS) !== 0) {
-        message.suppress_notifications = true;
-      }
-    }
     return { ok: true, status: res.status, message };
   } catch (e) {
     return {

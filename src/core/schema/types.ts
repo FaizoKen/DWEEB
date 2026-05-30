@@ -437,3 +437,22 @@ export const MESSAGE_FLAG_IS_COMPONENTS_V2 = 1 << 15;
  * notification (mobile push, desktop toast, mention badge).
  */
 export const MESSAGE_FLAG_SUPPRESS_NOTIFICATIONS = 1 << 12;
+
+/**
+ * Compute the `flags` integer Discord expects on the wire. `IS_COMPONENTS_V2`
+ * is always present — every message this app emits is V2, and Discord rejects
+ * V2 components when the flag is absent — with `SUPPRESS_NOTIFICATIONS` OR-ed
+ * in when the user enabled silent send. This is the single source of truth for
+ * flags across send, JSON export, and share-link serialization.
+ */
+export function computeMessageFlags(message: WebhookMessage): number {
+  let flags = MESSAGE_FLAG_IS_COMPONENTS_V2;
+  if (message.suppress_notifications) flags |= MESSAGE_FLAG_SUPPRESS_NOTIFICATIONS;
+  return flags;
+}
+
+/** Inverse of {@link computeMessageFlags}: read the silent-send bit back. */
+export function flagsHaveSuppressNotifications(flags: unknown): boolean {
+  const n = Number(flags);
+  return Number.isFinite(n) && (n & MESSAGE_FLAG_SUPPRESS_NOTIFICATIONS) !== 0;
+}

@@ -5,16 +5,22 @@
  *
  *  - `stripEditorFields(msg)`  — turns the in-memory editor tree into a clean
  *    Discord-API-shaped payload. Drops every `_id` and any undefined optional
- *    so the JSON we copy out matches Discord's body schema exactly.
+ *    so the JSON we copy out matches Discord's body schema exactly, and emits
+ *    the computed `flags` integer so the payload is postable as-is (Discord
+ *    rejects V2 components when `IS_COMPONENTS_V2` is absent).
  *
  *  - `attachEditorFields(msg)` — takes an external payload (from a share URL
  *    or JSON import) and assigns fresh ids so it can be edited. Unknown
  *    fields are dropped silently; the validator surfaces structural problems.
+ *    `flags` is the one wire-only field we read back — its silent-send bit is
+ *    lifted into `suppress_notifications` so the toggle round-trips.
  */
 
 import { newId } from "@/lib/id";
 import {
   ComponentType,
+  computeMessageFlags,
+  flagsHaveSuppressNotifications,
   type AllowedMentions,
   type AnyComponent,
   type ContainerChild,
@@ -44,6 +50,7 @@ export function stripEditorFields(msg: WebhookMessage): unknown {
       ? { applied_tags: msg.applied_tags.slice() }
       : {}),
     components: msg.components.map(stripNode),
+    flags: computeMessageFlags(msg),
   };
 }
 
@@ -92,7 +99,7 @@ export function attachEditorFields(input: unknown): WebhookMessage {
     username: typeof obj.username === "string" ? obj.username : undefined,
     avatar_url: typeof obj.avatar_url === "string" ? obj.avatar_url : undefined,
     tts: typeof obj.tts === "boolean" ? obj.tts : undefined,
-    suppress_notifications: undefined, // derived from `flags` if present
+    suppress_notifications: flagsHaveSuppressNotifications(obj.flags) ? true : undefined,
     allowed_mentions,
     message_reference,
     thread_name: typeof obj.thread_name === "string" ? obj.thread_name : undefined,
