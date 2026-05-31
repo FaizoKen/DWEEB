@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react";
+import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { Select } from "@/ui/Select";
@@ -28,6 +29,8 @@ interface AiSettingsFormProps {
 export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsFormProps) {
   const saved = useAiStore((s) => s.settings);
   const setSettings = useAiStore((s) => s.setSettings);
+  // First run (no key yet) gets a nudge toward the most reliable free tier.
+  const isConfigured = useAiStore((s) => s.isConfigured());
 
   const [draft, setDraft] = useState<AiSettings>(() => saved);
   const [revealKey, setRevealKey] = useState(false);
@@ -58,6 +61,25 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
 
   return (
     <div className={styles.settings}>
+      {!isConfigured ? (
+        <div className={styles.onboard}>
+          <strong>New here? Start free with Groq.</strong> It's the most reliable free tier — a free
+          API key, no credit card. Other free providers have regional limits or daily caps.{" "}
+          {draft.provider === "groq" ? (
+            <a href={PROVIDERS.groq.keysUrl} target="_blank" rel="noopener noreferrer">
+              Get a free Groq key →
+            </a>
+          ) : (
+            <button
+              type="button"
+              className={styles.onboardSwitch}
+              onClick={() => changeProvider("groq")}
+            >
+              Switch to Groq
+            </button>
+          )}
+        </div>
+      ) : null}
       <p className={styles.settingsLead}>
         Bring your own API key. It is stored only in this browser and sent directly to your chosen
         provider — never to us.
@@ -65,17 +87,33 @@ export function AiSettingsForm({ onSaved, showCancel, onCancel }: AiSettingsForm
 
       <Field label="Provider">
         {(id) => (
-          <Select
-            id={id}
-            value={draft.provider}
-            onChange={(e) => changeProvider(e.currentTarget.value as AiProvider)}
-          >
-            {(Object.keys(PROVIDERS) as AiProvider[]).map((p) => (
-              <option key={p} value={p}>
-                {PROVIDERS[p].label}
-              </option>
-            ))}
-          </Select>
+          <div className={styles.providerControl}>
+            <Select
+              id={id}
+              value={draft.provider}
+              onChange={(e) => changeProvider(e.currentTarget.value as AiProvider)}
+            >
+              {(Object.keys(PROVIDERS) as AiProvider[]).map((p) => (
+                <option key={p} value={p}>
+                  {PROVIDERS[p].label}
+                  {PROVIDERS[p].freeTier ? " — Free" : ""}
+                </option>
+              ))}
+            </Select>
+            <span
+              className={cn(
+                styles.providerTag,
+                meta.freeTier ? styles.providerTagFree : styles.providerTagPaid,
+              )}
+            >
+              {meta.freeTier
+                ? (meta.freeTierNote ??
+                  (meta.requiresKey
+                    ? "Free tier — no credit card needed"
+                    : "Free — runs on your machine"))
+                : "Paid — requires API credit"}
+            </span>
+          </div>
         )}
       </Field>
 

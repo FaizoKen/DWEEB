@@ -327,6 +327,35 @@
   flex-direction: column;
   gap: 14px;
 }
+/* First-run nudge: point newcomers at the most reliable free tier before they
+ * discover the others' regional limits / daily caps the hard way. */
+.onboard {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+  background: var(--app-accent-soft);
+  border-radius: var(--app-radius);
+  padding: 10px 12px;
+}
+.onboard strong {
+  color: var(--app-accent);
+}
+.onboard a {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.onboardSwitch {
+  font: inherit;
+  font-weight: 600;
+  color: var(--app-accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
 .settingsLead {
   margin: 0;
   font-size: 12px;
@@ -335,6 +364,33 @@
 }
 .settingsLead + * {
   margin-top: 2px;
+}
+
+/* Free/paid marker under the provider picker, so users can spot the no-cost
+ * options without opening each provider's pricing page. The Field's `.control`
+ * is a flex row, so wrap the select + tag in a column to stack them. */
+.providerControl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.providerTag {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.providerTagFree {
+  color: var(--app-success);
+  background: rgba(35, 165, 89, 0.14);
+}
+.providerTagPaid {
+  color: var(--app-text-muted);
+  background: var(--app-bg-active);
 }
 
 .keyRow {

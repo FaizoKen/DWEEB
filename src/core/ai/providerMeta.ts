@@ -21,6 +21,18 @@ export interface ProviderMeta {
   requiresBaseUrl: boolean;
   /** Whether the provider needs an API key (local servers like Ollama don't). */
   requiresKey: boolean;
+  /**
+   * True when there's a no-cost path: a free cloud tier (Groq, Gemini,
+   * OpenRouter `:free` models) or a self-hosted server (Ollama). Drives the
+   * "Free" marker in the picker so users can avoid the pay-per-token providers.
+   */
+  freeTier: boolean;
+  /**
+   * Optional override for the "Free" badge text. Gemini's free tier is real but
+   * region-locked (some accounts get `limit: 0`), so it gets a qualified label
+   * instead of the unconditional "no credit card needed".
+   */
+  freeTierNote?: string;
   /** Where to get a key. Empty for keyless providers. */
   keysUrl: string;
   keyPlaceholder: string;
@@ -35,6 +47,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultBaseUrl: "https://api.groq.com/openai/v1",
     requiresBaseUrl: false,
     requiresKey: true,
+    freeTier: true,
     keysUrl: "https://console.groq.com/keys",
     keyPlaceholder: "gsk_…",
   },
@@ -44,6 +57,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     requiresBaseUrl: false,
     requiresKey: true,
+    freeTier: true,
     keysUrl: "https://openrouter.ai/keys",
     keyPlaceholder: "sk-or-…",
   },
@@ -53,6 +67,8 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
     requiresBaseUrl: false,
     requiresKey: true,
+    freeTier: true,
+    freeTierNote: "Free tier (region-limited)",
     keysUrl: "https://aistudio.google.com/app/apikey",
     keyPlaceholder: "AIza…",
   },
@@ -62,6 +78,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultBaseUrl: "https://api.openai.com/v1",
     requiresBaseUrl: false,
     requiresKey: true,
+    freeTier: false,
     keysUrl: "https://platform.openai.com/api-keys",
     keyPlaceholder: "sk-…",
   },
@@ -71,6 +88,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultBaseUrl: "https://api.anthropic.com",
     requiresBaseUrl: false,
     requiresKey: true,
+    freeTier: false,
     keysUrl: "https://console.anthropic.com/settings/keys",
     keyPlaceholder: "sk-ant-…",
   },
@@ -85,6 +103,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     defaultBaseUrl: "",
     requiresBaseUrl: true,
     requiresKey: false,
+    freeTier: true,
     keysUrl: "",
     keyPlaceholder: "(no key needed)",
   },

@@ -117,13 +117,46 @@ function extractProviderMessage(body: unknown): string | null {
   return null;
 }
 
-function describeHttpError(status: number, body: unknown): string {
+function describeHttpError(status: number, body: unknown, provider?: AiProvider): string {
   const providerText = extractProviderMessage(body);
 
   // Rate limits get a dedicated, actionable framing even when the provider
   // included its own (often terse) message — free models throttle hard.
   if (status === 429) {
     const detail = providerText ? `: ${providerText}` : "";
+
+    // Not every 429 is throttling. Gemini returns one with `limit: 0` (and a
+    // "check your plan and billing" message) when the account simply has no
+    // free-tier allowance — typically because the free tier isn't offered in
+    // the project's region, or billing isn't enabled. Those never clear on
+    // retry, so the provider's own "please retry in Ns" is actively
+    // misleading; detect them and steer the user somewhere that works.
+    const raw = typeof body === "string" ? body : JSON.stringify(body ?? "");
+    const noFreeQuota = /limit:\s*0(?![\d.])/.test(raw) || /check your plan and billing/i.test(raw);
+    if (noFreeQuota) {
+      return (
+        "No free quota available (429).\n\n" +
+        'The provider reports a free-tier limit of 0 for this model ("check your plan and ' +
+        'billing"). This is not a temporary throttle — retrying won\'t clear it. It usually ' +
+        "means the free tier isn't offered in your region, or billing isn't enabled on the " +
+        "key. Switch to Groq's free tier, or enable billing for this provider."
+      );
+    }
+
+    // OpenRouter routes `:free` models to shared upstream hosts, so its 429s
+    // (often the terse "Provider returned error") are that upstream throttling —
+    // and OpenRouter additionally caps free usage per day. The generic "wait a
+    // few seconds" undersells the daily cap, so spell out the real fix.
+    if (provider === "openrouter") {
+      return (
+        `Rate limited (429)${detail}.\n\n` +
+        "OpenRouter's :free models share heavily-used upstream hosts and are capped per day " +
+        "(currently ~50 requests/day until you've added $10 of credit once, then ~1000/day). " +
+        "Try a different :free model, add credit, or switch to Groq's free tier — it's the " +
+        "most reliable free option."
+      );
+    }
+
     return (
       `Rate limited (429)${detail}.\n\n` +
       "Free models can be busy — wait a few seconds and try again, pick a different " +
@@ -250,7 +283,8 @@ async function callOpenAiCompatible(
     }),
     signal,
   });
-  if (!res.ok) return { ok: false, error: describeHttpError(res.status, await readJson(res)) };
+  if (!res.ok)
+    return { ok: false, error: describeHttpError(res.status, await readJson(res), settings.provider) };
 
   // Streaming chunks: `data: {choices:[{delta:{content}}]}`, ending in `[DONE]`.
   if (onToken && isEventStream(res)) {
@@ -311,7 +345,8 @@ async function callAnthropic(
     }),
     signal,
   });
-  if (!res.ok) return { ok: false, error: describeHttpError(res.status, await readJson(res)) };
+  if (!res.ok)
+    return { ok: false, error: describeHttpError(res.status, await readJson(res), settings.provider) };
 
   // Anthropic's stream is a sequence of typed events; text arrives as
   // `content_block_delta` with a `text_delta`. Errors come as `error` events.
@@ -386,7 +421,8 @@ async function callGemini(
     }),
     signal,
   });
-  if (!res.ok) return { ok: false, error: describeHttpError(res.status, await readJson(res)) };
+  if (!res.ok)
+    return { ok: false, error: describeHttpError(res.status, await readJson(res), settings.provider) };
 
   const partsToText = (parts: unknown): string =>
     Array.isArray(parts)
