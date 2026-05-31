@@ -3,12 +3,12 @@
  *
  * Each row carries its node's id in a `data-node-id` attribute and uses the
  * store's `select` action on click. Reordering happens through the store
- * (`moveSibling` for the inline up/down buttons, `moveToParent` for
- * drag-and-drop) so the preview stays in lockstep with the tree without
- * intermediate state. Drag-and-drop supports same-parent reorders plus
- * cross-parent moves between the top-level list and Containers — Section
- * texts and ActionRow buttons stay scoped to their parent because those
- * sibling arrays carry specialized types.
+ * (`moveSibling` for the inline up/down buttons, `moveToParent` /
+ * `moveGalleryItemToGallery` for drag-and-drop) so the preview stays in
+ * lockstep with the tree without intermediate state. Drag-and-drop supports
+ * same-parent reorders plus cross-parent moves between any two lists of the
+ * same kind: top-level ↔ Container, an image to another gallery, a text to
+ * another section, and a button to another buttons row.
  *
  * The "add" affordance is contextual: the menu only offers component types
  * legal in the current parent. This avoids producing invalid trees that the
@@ -81,10 +81,10 @@ import type { ContainerChildFactoryKey, TopLevelFactoryKey } from "@/core/factor
  * dragged at a time; the active drop indicator lives here so a row can render
  * the caret regardless of where the source originated.
  *
- * Cross-parent moves are allowed between the top-level list and Containers
- * only — the Section/ActionRow sibling lists carry specialized types and are
- * refused. Each TreeNode receives a `parentKind` so it can validate drops
- * without re-walking the tree.
+ * Cross-parent moves are allowed between any two lists of the same kind:
+ * top-level ↔ Container, image → another gallery, text → another section, and
+ * button → another buttons row. Each TreeNode receives a `parentKind` so it
+ * can validate drops without re-walking the tree.
  */
 type DropPosition = "before" | "after" | "into";
 
@@ -183,25 +183,57 @@ function readRowData(el: Element): RowData | null {
   };
 }
 
+type DragSource = {
+  id: EditorId;
+  type: ComponentTypeValue;
+  parentKind: ParentKind;
+  parentId: EditorId | null;
+};
+
+/**
+ * Can `source` be appended *into* `target` when the pointer lands on the
+ * target row itself (rather than between rows)? This covers both collapsed and
+ * empty parents — e.g. dropping a button onto an empty Buttons Row — and the
+ * natural "drop on the header" gesture. Capacity isn't checked here; the store
+ * is the final arbiter and silently no-ops an over-capacity drop.
+ *
+ *  - Container → any top-level-ish component except another Container
+ *    (top ↔ container interop).
+ *  - Section / ActionRow / MediaGallery → a child of the same specialized kind
+ *    coming from a *different* parent of that kind (text→Section,
+ *    button→ActionRow, image→MediaGallery).
+ */
+function canDropInto(source: DragSource, target: RowData): boolean {
+  switch (target.nodeType) {
+    case ComponentType.Container:
+      return (
+        source.type !== ComponentType.Container &&
+        (source.parentKind === "top" || source.parentKind === "container")
+      );
+    case ComponentType.Section:
+      return source.parentKind === "section";
+    case ComponentType.ActionRow:
+      return source.parentKind === "actionRow" && source.type === ComponentType.Button;
+    case ComponentType.MediaGallery:
+      return source.parentKind === "gallery";
+    default:
+      return false;
+  }
+}
+
 /**
  * Which drop positions are legal when the given source lands on the given
  * target row?
  *
  *  - Same-parent reorder is always allowed (before/after the target row).
- *  - Cross-parent moves are accepted only between `top` ↔ `container`, and a
- *    Container can't nest inside another Container.
- *  - The `into` position fires when the target row itself is a Container the
- *    source can legally become a child of.
+ *  - Cross-parent before/after is allowed between two lists of the same kind:
+ *    `top` ↔ `container` interop (a Container can't nest in a Container),
+ *    image → another gallery, text → another section, and button → another
+ *    buttons row (selects don't move and never sit beside a button).
+ *  - The `into` position fires when the target row itself is a parent the
+ *    source can be appended into (see `canDropInto`).
  */
-function computeAllowedPositions(
-  source: {
-    id: EditorId;
-    type: ComponentTypeValue;
-    parentKind: ParentKind;
-    parentId: EditorId | null;
-  },
-  target: RowData,
-): DropPosition[] {
+function computeAllowedPositions(source: DragSource, target: RowData): DropPosition[] {
   if (target.id === source.id) return [];
   const out: DropPosition[] = [];
 
@@ -219,16 +251,21 @@ function computeAllowedPositions(
     if (!(target.parentKind === "container" && source.type === ComponentType.Container)) {
       out.push("before", "after");
     }
+  } else if (target.parentKind === source.parentKind) {
+    // Cross-parent move between two lists of the same specialized kind.
+    if (source.parentKind === "gallery" || source.parentKind === "section") {
+      out.push("before", "after");
+    } else if (
+      source.parentKind === "actionRow" &&
+      source.type === ComponentType.Button &&
+      target.nodeType === ComponentType.Button
+    ) {
+      out.push("before", "after");
+    }
   }
 
-  // into — target row IS a container the source can join.
-  if (
-    target.nodeType === ComponentType.Container &&
-    source.type !== ComponentType.Container &&
-    (source.parentKind === "top" || source.parentKind === "container")
-  ) {
-    out.push("into");
-  }
+  // into — target row IS a parent the source can join.
+  if (canDropInto(source, target)) out.push("into");
 
   return out;
 }
@@ -956,7 +993,7 @@ function GalleryItemNode({
   const isSelected = useMessageStore((s) => s.selectedId === item._id);
   const select = useMessageStore((s) => s.select);
   const moveGalleryItem = useMessageStore((s) => s.moveGalleryItem);
-  const moveGalleryItemToIndex = useMessageStore((s) => s.moveGalleryItemToIndex);
+  const moveGalleryItemToGallery = useMessageStore((s) => s.moveGalleryItemToGallery);
   const removeGalleryItem = useMessageStore((s) => s.removeGalleryItem);
   const duplicateGalleryItem = useMessageStore((s) => s.duplicateGalleryItem);
 
@@ -967,7 +1004,8 @@ function GalleryItemNode({
 
   // Drag-and-drop reorder, sharing the component-row gesture engine. The
   // `"gallery"` parent kind makes `computeAllowedPositions` permit before/after
-  // drops only among sibling images of the same gallery.
+  // drops among sibling images of the same gallery as well as images of any
+  // other gallery, plus an `into` drop onto a gallery row.
   const dragInfo = useMemo<DragInfo>(
     () => ({
       id: item._id,
@@ -983,10 +1021,17 @@ function GalleryItemNode({
   );
   const commit = useCallback(
     (target: RowData, position: DropPosition) => {
+      if (position === "into") {
+        // Dropped onto a gallery row — append into that gallery (`target.id`).
+        moveGalleryItemToGallery(galleryId, target.id, item._id, Number.MAX_SAFE_INTEGER);
+        return;
+      }
+      // before/after another image — `target.parentId` is its gallery, which
+      // may differ from this image's gallery (a cross-gallery move).
       const idx = target.siblingIndex + (position === "after" ? 1 : 0);
-      moveGalleryItemToIndex(galleryId, item._id, idx);
+      moveGalleryItemToGallery(galleryId, target.parentId ?? galleryId, item._id, idx);
     },
-    [moveGalleryItemToIndex, galleryId, item._id],
+    [moveGalleryItemToGallery, galleryId, item._id],
   );
   const {
     isDragging,

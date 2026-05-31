@@ -41,6 +41,7 @@ import {
   type ActionRowComponent,
   type AllowedMentions,
   type AnyComponent,
+  type ComponentTypeValue,
   type ContainerChild,
   type ContainerComponent,
   type EditorId,
@@ -125,6 +126,19 @@ export interface MessageState {
    * index, matching the tree's drop-position math.
    */
   moveGalleryItemToIndex(galleryId: EditorId, itemId: EditorId, targetIndex: number): void;
+  /**
+   * Move an image out of `sourceGalleryId` into `targetGalleryId` at
+   * `targetIndex` — the cross-gallery drag-and-drop commit. When the two ids
+   * match this collapses to an in-place reorder (delegates to
+   * `moveGalleryItemToIndex`). No-ops if it would empty the source gallery or
+   * overflow the destination (`GALLERY_ITEMS`).
+   */
+  moveGalleryItemToGallery(
+    sourceGalleryId: EditorId,
+    targetGalleryId: EditorId,
+    itemId: EditorId,
+    targetIndex: number,
+  ): void;
   /** Remove an image from a gallery (no-op if it's the last remaining image). */
   removeGalleryItem(galleryId: EditorId, itemId: EditorId): void;
   /** Clone an image in place, selecting the copy. No-op at the gallery cap. */
@@ -142,12 +156,12 @@ export interface MessageState {
    * index *before* removing the source — the action compensates when moving
    * forward).
    *
-   * Cross-parent moves are only honoured between the top-level list and a
-   * Container's children. Other slots (Section accessory, Section texts,
-   * ActionRow buttons/selects) carry specialized types and cannot accept
-   * arbitrary components, so the action silently no-ops if the move would
-   * produce an invalid tree (incompatible target, capacity exceeded, or a
-   * Container being nested inside another Container).
+   * Cross-parent moves are honoured whenever the destination can legally hold
+   * the node (see `canAcceptChild`): top-level ↔ Container interop, a
+   * TextDisplay between Sections, or a Button between ActionRows. The Section
+   * accessory slot and select rows can't take arbitrary children, so the
+   * action silently no-ops when the move would produce an invalid tree
+   * (incompatible target, capacity exceeded, or a nested Container).
    */
   moveToParent(id: EditorId, targetParentId: EditorId | null, targetIndex: number): void;
   duplicate(id: EditorId): void;
@@ -205,6 +219,59 @@ function reassignIds(message: WebhookMessage): WebhookMessage {
     return next;
   };
   return { ...message, components: message.components.map((c) => stamp(c)) };
+}
+
+/**
+ * Component types legal at the top level of a Components V2 message. Inside a
+ * Container the same set applies minus Container itself (no nesting), which
+ * `canAcceptChild` rejects explicitly.
+ */
+const TOP_LEVEL_TYPES: ReadonlySet<ComponentTypeValue> = new Set([
+  ComponentType.ActionRow,
+  ComponentType.Section,
+  ComponentType.TextDisplay,
+  ComponentType.MediaGallery,
+  ComponentType.Separator,
+  ComponentType.File,
+  ComponentType.Container,
+]);
+
+/**
+ * Whether `parent` (null === the top-level list) can take `node` as a new
+ * child, considering both type compatibility and the parent's capacity. This
+ * is the single gate every cross-parent drag-and-drop move passes through, so
+ * the tree can stay permissive about *showing* a drop indicator and let the
+ * store be the source of truth on what's actually legal.
+ *
+ *  - top level → any top-level-legal component
+ *  - Container  → any container child (no nested Container)
+ *  - Section    → TextDisplay only (the section's text list)
+ *  - ActionRow  → Button only, and never into a row already holding a select
+ */
+function canAcceptChild(
+  parent: AnyComponent | null,
+  node: AnyComponent,
+  message: WebhookMessage,
+): boolean {
+  if (parent === null) {
+    if (!TOP_LEVEL_TYPES.has(node.type)) return false;
+    return message.components.length < LIMITS.TOP_LEVEL_COMPONENTS;
+  }
+  if (isContainer(parent)) {
+    if (node.type === ComponentType.Container) return false;
+    if (!TOP_LEVEL_TYPES.has(node.type)) return false;
+    return parent.components.length < LIMITS.CONTAINER_CHILDREN;
+  }
+  if (isSection(parent)) {
+    if (node.type !== ComponentType.TextDisplay) return false;
+    return parent.components.length < LIMITS.SECTION_TEXTS_MAX;
+  }
+  if (isActionRow(parent)) {
+    if (node.type !== ComponentType.Button) return false;
+    if (parent.components.some(isSelect)) return false;
+    return parent.components.length < LIMITS.ACTION_ROW_BUTTONS;
+  }
+  return false;
 }
 
 function pushHistory(state: MessageState): Pick<MessageState, "past" | "future"> {
@@ -457,6 +524,46 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
   },
 
+  moveGalleryItemToGallery(sourceGalleryId, targetGalleryId, itemId, targetIndex) {
+    // Same gallery → it's just a reorder; reuse the index-aware path so the
+    // source-removal compensation stays in one place.
+    if (sourceGalleryId === targetGalleryId) {
+      get().moveGalleryItemToIndex(sourceGalleryId, itemId, targetIndex);
+      return;
+    }
+    set((s) => {
+      const sourceLoc = findById(s.message, sourceGalleryId);
+      const targetLoc = findById(s.message, targetGalleryId);
+      if (!sourceLoc || !targetLoc) return s;
+      const sourceGallery = sourceLoc.node;
+      const targetGallery = targetLoc.node;
+      if (sourceGallery.type !== ComponentType.MediaGallery) return s;
+      if (targetGallery.type !== ComponentType.MediaGallery) return s;
+      const item = sourceGallery.items.find((it) => it._id === itemId);
+      if (!item) return s;
+      // Keep both galleries valid: never empty the source, never overflow the
+      // destination.
+      if (sourceGallery.items.length <= 1) return s;
+      if (targetGallery.items.length >= LIMITS.GALLERY_ITEMS) return s;
+
+      // Detach from the source gallery.
+      let message = updateById<MediaGalleryComponent>(s.message, sourceGalleryId, (g) =>
+        g.type === ComponentType.MediaGallery
+          ? { ...g, items: g.items.filter((it) => it._id !== itemId) }
+          : g,
+      );
+      // Splice into the destination gallery at the requested slot.
+      message = updateById<MediaGalleryComponent>(message, targetGalleryId, (g) => {
+        if (g.type !== ComponentType.MediaGallery) return g;
+        const items = g.items.slice();
+        const at = Math.max(0, Math.min(targetIndex, items.length));
+        items.splice(at, 0, item);
+        return { ...g, items };
+      });
+      return { ...pushHistory(s), message };
+    });
+  },
+
   removeGalleryItem(galleryId, itemId) {
     set((s) => {
       let removed = false;
@@ -641,55 +748,40 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         return { ...pushHistory(s), message };
       }
 
-      // Cross-parent → validate, then remove + insert.
+      // Cross-parent → validate the destination can take this node, move it.
       const node = sourceLoc.node;
 
-      // Only top-level ↔ Container moves are supported. The Section/ActionRow
-      // sibling lists carry specialized types that can't accept arbitrary
-      // components, so we refuse those transitions.
-      if (targetParentId === null) {
-        if (s.message.components.length >= LIMITS.TOP_LEVEL_COMPONENTS) return s;
-      } else {
+      // Resolve the destination parent (null === the top-level list).
+      let targetParent: AnyComponent | null = null;
+      if (targetParentId !== null) {
         const targetLoc = findById(s.message, targetParentId);
-        if (!targetLoc || !isContainer(targetLoc.node)) return s;
-        // Containers can't be nested.
-        if (node.type === ComponentType.Container) return s;
-        if (targetLoc.node.components.length >= LIMITS.CONTAINER_CHILDREN) return s;
+        if (!targetLoc) return s;
+        targetParent = targetLoc.node;
       }
 
-      // Source must currently live at top-level or in a Container; otherwise
-      // it carries a specialized parent type (Section text, ActionRow button)
-      // that we won't relocate.
-      if (sourceParentId !== null) {
-        const sourceParent = sourceLoc.parent!;
-        if (!isContainer(sourceParent)) return s;
-      }
+      // One gate covers every supported transition: top-level ↔ Container,
+      // TextDisplay → another Section, Button → another ActionRow. Anything the
+      // destination can't legally hold (incompatible type, capacity exceeded,
+      // a select row, a nested Container) no-ops.
+      if (!canAcceptChild(targetParent, node, s.message)) return s;
 
-      let next = s.message;
-
-      if (sourceParentId === null) {
-        next = {
-          ...next,
-          components: next.components.filter((c) => c._id !== id) as TopLevelComponent[],
-        };
-      } else {
-        next = updateById(next, sourceParentId, (p) => {
-          const arr = (p as unknown as { components: AnyComponent[] }).components;
-          return { ...p, components: arr.filter((c) => c._id !== id) } as typeof p;
-        });
-      }
-
+      // Detach the node from its current sibling array (proven a member by the
+      // guard at the top), then splice it into the destination at the requested
+      // index. `removeById` rebuilds only the source path; the node object is
+      // untouched, so re-inserting it preserves its entire subtree.
+      const pruned = removeById(s.message, id);
+      let next: WebhookMessage;
       if (targetParentId === null) {
-        const arr = next.components.slice();
+        const arr = pruned.components.slice();
         const insertAt = Math.max(0, Math.min(targetIndex, arr.length));
         arr.splice(insertAt, 0, node as TopLevelComponent);
-        next = { ...next, components: arr };
+        next = { ...pruned, components: arr };
       } else {
-        next = updateById<ContainerComponent>(next, targetParentId, (p) => {
-          const arr = p.components.slice();
+        next = updateById(pruned, targetParentId, (p) => {
+          const arr = (p as unknown as { components: AnyComponent[] }).components.slice();
           const insertAt = Math.max(0, Math.min(targetIndex, arr.length));
-          arr.splice(insertAt, 0, node as ContainerChild);
-          return { ...p, components: arr };
+          arr.splice(insertAt, 0, node);
+          return { ...p, components: arr } as typeof p;
         });
       }
 
