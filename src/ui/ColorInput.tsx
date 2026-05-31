@@ -1,4 +1,4 @@
-import { useId, type ChangeEvent } from "react";
+import { useEffect, useId, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { cn } from "@/lib/cn";
 import styles from "./ColorInput.module.css";
 
@@ -19,14 +19,60 @@ const toHex = (value: number | null | undefined): string => {
 
 const fromHex = (value: string): number => parseInt(value.slice(1), 16);
 
+/** Parse a user-typed hex string (3 or 6 digits, optional leading #) into 0xRRGGBB, or null if invalid. */
+const parseHexInput = (raw: string): number | null => {
+  const cleaned = raw.trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{6}$/.test(cleaned)) return parseInt(cleaned, 16);
+  if (/^[0-9a-fA-F]{3}$/.test(cleaned)) {
+    const [r, g, b] = cleaned;
+    return parseInt(`${r}${r}${g}${g}${b}${b}`, 16);
+  }
+  return null;
+};
+
 export function ColorInput({ value, onChange, clearable, id, className }: ColorInputProps) {
   const generated = useId();
   const controlId = id ?? generated;
   const hex = toHex(value);
   const isSet = value != null;
+  const display = isSet ? hex.toUpperCase() : "";
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+  // Local draft lets the user type freely (including partial/invalid text)
+  // without fighting the canonical value derived from the prop.
+  const [draft, setDraft] = useState(display);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setDraft(display);
+  }, [display, editing]);
+
+  const handlePickerChange = (e: ChangeEvent<HTMLInputElement>) => {
     onChange(fromHex(e.currentTarget.value));
+  };
+
+  const handleTextChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const next = e.currentTarget.value;
+    setDraft(next);
+    // Commit live while the typed value is a complete, valid hex.
+    const parsed = parseHexInput(next);
+    if (parsed != null) onChange(parsed);
+  };
+
+  const commitDraft = () => {
+    setEditing(false);
+    if (draft.trim() === "") {
+      if (clearable) onChange(null);
+      return;
+    }
+    // Invalid input reverts to the canonical value via the effect.
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") e.currentTarget.blur();
+    if (e.key === "Escape") {
+      setDraft(display);
+      e.currentTarget.blur();
+    }
   };
 
   return (
@@ -37,12 +83,25 @@ export function ColorInput({ value, onChange, clearable, id, className }: ColorI
           id={controlId}
           type="color"
           value={hex}
-          onChange={handleChange}
+          onChange={handlePickerChange}
           className={styles.colorInput}
           aria-label="Pick color"
         />
       </label>
-      <span className={styles.value}>{isSet ? hex.toUpperCase() : "Not set"}</span>
+      <input
+        type="text"
+        className={styles.value}
+        value={draft}
+        placeholder="Not set"
+        spellCheck={false}
+        autoComplete="off"
+        maxLength={7}
+        aria-label="Hex color value"
+        onChange={handleTextChange}
+        onFocus={() => setEditing(true)}
+        onBlur={commitDraft}
+        onKeyDown={handleKeyDown}
+      />
       {clearable && isSet ? (
         <button type="button" className={styles.clear} onClick={() => onChange(null)}>
           Clear

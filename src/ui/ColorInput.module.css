@@ -23,9 +23,29 @@
 }
 
 .value {
+  /* fit "#5865F2" / "Not set" (7 mono chars) plus padding + border under box-sizing: border-box */
+  width: calc(8ch + 14px);
   font-family: var(--app-font-mono);
   font-size: 12px;
+  color: var(--app-text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-sm);
+  padding: 3px 6px;
+  text-transform: uppercase;
+}
+.value:hover {
+  border-color: var(--app-border);
+}
+.value:focus {
+  outline: none;
+  color: var(--app-text);
+  background: var(--app-bg-input);
+  border-color: var(--app-border-focus);
+}
+.value::placeholder {
   color: var(--app-text-muted);
+  text-transform: none;
 }
 
 .clear {
