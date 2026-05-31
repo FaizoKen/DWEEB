@@ -34,6 +34,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { validateMessage } from "@/core/schema/validation";
 import { inspectCapabilities } from "@/core/schema/capability";
+import { summarizePings } from "@/core/schema/mentions";
 import {
   classifyWebhookOwner,
   loadHistory,
@@ -54,6 +55,7 @@ import { TextInput } from "@/ui/TextInput";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
 import { WebhookRecents } from "./WebhookRecents";
+import { SendConfirm } from "./SendConfirm";
 import styles from "./SendPanel.module.css";
 
 type SendState =
@@ -94,6 +96,9 @@ export function SendPanel({
   const [state, setState] = useState<SendState>({ kind: "idle" });
   const [showRaw, setShowRaw] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Pre-send confirmation. Opened by `handleSend` once inputs validate; the
+  // actual POST/PATCH runs from `handleConfirmedSend` when the user confirms.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   // Result of the last "Save webhook" verify GET — used to show who owns the
   // webhook (bot vs. person) before any message is sent.
   const [verified, setVerified] = useState<{ name: string; owner: WebhookOwner } | null>(null);
@@ -133,6 +138,10 @@ export function SendPanel({
   const validation = useMemo(() => validateMessage(message), [message]);
   const blockingIssues = validation.issues.filter((i) => i.severity === "error");
 
+  // Who the message will actually ping, after applying allowed_mentions. Shown
+  // in the confirmation dialog so the blast radius is visible before sending.
+  const pings = useMemo(() => summarizePings(message), [message]);
+
   const capabilities = useMemo(
     () => inspectCapabilities(message, { threadIdProvided: threadId.trim().length > 0 }),
     [message, threadId],
@@ -153,6 +162,14 @@ export function SendPanel({
     if (!parsedUrl) return undefined;
     return history.find((e) => e.id === parsedUrl.id)?.name || undefined;
   }, [verified, parsedUrl, history]);
+
+  // Avatar hash for the URL, from a saved entry. Undefined for a freshly-typed
+  // webhook (only verified on confirm) — the confirm dialog then shows Discord's
+  // default avatar.
+  const knownAvatar = useMemo(() => {
+    if (!parsedUrl) return undefined;
+    return history.find((e) => e.id === parsedUrl.id)?.avatar ?? undefined;
+  }, [parsedUrl, history]);
 
   // The capability inspector flags interactive components, but what that flag
   // means depends on who owns the webhook:
@@ -175,7 +192,10 @@ export function SendPanel({
 
   const sending = state.kind === "sending";
 
-  const handleSend = async () => {
+  // Synchronous pre-flight. Validate the inputs the same way the send used to,
+  // then open the confirmation dialog instead of posting straight away — the
+  // user reviews the target webhook + ping list before anything reaches Discord.
+  const handleSend = () => {
     if (!parsedUrl) {
       setState({ kind: "error", message: "Enter a valid Discord webhook URL." });
       return;
@@ -194,6 +214,15 @@ export function SendPanel({
       });
       return;
     }
+    setState({ kind: "idle" });
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmedSend = async () => {
+    setConfirmOpen(false);
+    // Inputs were validated in handleSend; re-guard for type-narrowing.
+    if (!parsedUrl) return;
+    if (mode === "update" && !parsedMessageId) return;
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -563,6 +592,20 @@ export function SendPanel({
               : "Send to webhook"}
         </Button>
       </div>
+
+      <SendConfirm
+        open={confirmOpen}
+        mode={mode}
+        webhookName={knownName}
+        ownerKind={knownOwnerKind}
+        webhookId={parsedUrl?.id}
+        webhookAvatar={knownAvatar}
+        threadId={threadId.trim() || undefined}
+        messageId={mode === "update" ? (parsedMessageId ?? undefined) : undefined}
+        pings={pings}
+        onConfirm={handleConfirmedSend}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </>
   );
 }
