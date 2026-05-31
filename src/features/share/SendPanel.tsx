@@ -36,18 +36,14 @@ import { validateMessage } from "@/core/schema/validation";
 import { inspectCapabilities } from "@/core/schema/capability";
 import {
   classifyWebhookOwner,
-  forgetWebhook,
   loadHistory,
-  OWNER_COPY,
   parseMessageIdInput,
   parseWebhookUrl,
   rememberWebhook,
-  renameWebhook,
   sendToWebhook,
   updateWebhookMessage,
   verifyWebhook,
   webhookAvatarHash,
-  webhookAvatarUrl,
   type WebhookHistoryEntry,
   type WebhookOwner,
   type WebhookOwnerKind,
@@ -55,24 +51,15 @@ import {
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
-import { CloseIcon, PencilIcon, TrashIcon } from "@/ui/Icon";
-import { IconButton } from "@/ui/IconButton";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
+import { WebhookRecents } from "./WebhookRecents";
 import styles from "./SendPanel.module.css";
 
 type SendState =
   | { kind: "idle" }
   | { kind: "sending" }
   | { kind: "error"; message: string; retryAfter?: number; status?: number; body?: unknown };
-
-/** CSS-module class for each owner chip, by kind. */
-const OWNER_BADGE_CLASS: Record<WebhookOwnerKind, string | undefined> = {
-  bot: styles.ownerBot,
-  user: styles.ownerUser,
-  follower: styles.ownerFollower,
-  unknown: styles.ownerUnknown,
-};
 
 /** Pretty-print a Discord error body for the raw-response view. */
 function formatRawBody(body: unknown): string {
@@ -104,9 +91,6 @@ export function SendPanel({
   const [mode, setMode] = useState<"new" | "update">(() => (restoredFrom ? "update" : "new"));
   const [revealUrl, setRevealUrl] = useState(false);
   const [history, setHistory] = useState<WebhookHistoryEntry[]>(() => loadHistory());
-  // Inline rename of a saved recents entry: which id is being edited + its draft.
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingLabel, setEditingLabel] = useState("");
   const [state, setState] = useState<SendState>({ kind: "idle" });
   const [showRaw, setShowRaw] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -333,34 +317,6 @@ export function SendPanel({
     setState({ kind: "idle" });
   };
 
-  const handleUseHistoryEntry = (entry: WebhookHistoryEntry) => {
-    setUrl(entry.url);
-    setState({ kind: "idle" });
-  };
-
-  const handleForget = (entry: WebhookHistoryEntry) => {
-    forgetWebhook(entry.id);
-    setHistory(loadHistory());
-    pushToast("Webhook removed from this browser.", "info");
-  };
-
-  const startEditLabel = (entry: WebhookHistoryEntry) => {
-    setEditingId(entry.id);
-    setEditingLabel(entry.label);
-  };
-
-  const cancelEditLabel = () => {
-    setEditingId(null);
-    setEditingLabel("");
-  };
-
-  const commitEditLabel = (id: string) => {
-    renameWebhook(id, editingLabel);
-    setHistory(loadHistory());
-    setEditingId(null);
-    setEditingLabel("");
-  };
-
   return (
     <>
       <p className={styles.lead}>
@@ -399,93 +355,15 @@ export function SendPanel({
         localStorage only.
       </div>
 
-      {history.length > 0 ? (
-        <div className={styles.history}>
-          <div className={styles.historyTitle}>Recent webhooks (this browser)</div>
-          <ul className={styles.historyList}>
-            {history.map((entry) =>
-              editingId === entry.id ? (
-                <li key={entry.id} className={styles.historyItem}>
-                  <form
-                    className={styles.historyEdit}
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      commitEditLabel(entry.id);
-                    }}
-                  >
-                    <TextInput
-                      autoFocus
-                      value={editingLabel}
-                      onChange={(e) => setEditingLabel(e.currentTarget.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") cancelEditLabel();
-                      }}
-                      placeholder={entry.name || "Add a label"}
-                      maxLength={60}
-                      aria-label="Webhook label"
-                    />
-                    <Button size="sm" variant="primary" type="submit">
-                      Save
-                    </Button>
-                    <IconButton size="sm" label="Cancel rename" onClick={cancelEditLabel}>
-                      <CloseIcon size={12} />
-                    </IconButton>
-                  </form>
-                </li>
-              ) : (
-                <li key={entry.id} className={styles.historyItem}>
-                  <button
-                    type="button"
-                    className={styles.historyButton}
-                    onClick={() => handleUseHistoryEntry(entry)}
-                  >
-                    <span className={styles.historyLabel}>
-                      <img
-                        className={styles.historyAvatar}
-                        src={webhookAvatarUrl(entry.id, entry.avatar)}
-                        alt=""
-                        loading="lazy"
-                        onError={(e) => {
-                          const img = e.currentTarget;
-                          const fallback = webhookAvatarUrl(entry.id, null);
-                          if (img.src !== fallback) img.src = fallback;
-                        }}
-                      />
-                      <span className={styles.historyText}>
-                        {entry.label || entry.name || "(unlabeled)"}
-                      </span>
-                      {entry.ownerKind && entry.ownerKind !== "unknown" ? (
-                        <span
-                          className={cn(
-                            styles.ownerBadge,
-                            styles.ownerBadgeSm,
-                            OWNER_BADGE_CLASS[entry.ownerKind],
-                          )}
-                          title={OWNER_COPY[entry.ownerKind].label}
-                        >
-                          {OWNER_COPY[entry.ownerKind].badge}
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className={styles.historyId}>id · {entry.id}</span>
-                  </button>
-                  <IconButton size="sm" label="Edit label" onClick={() => startEditLabel(entry)}>
-                    <PencilIcon size={12} />
-                  </IconButton>
-                  <IconButton
-                    size="sm"
-                    variant="danger"
-                    label="Forget this webhook"
-                    onClick={() => handleForget(entry)}
-                  >
-                    <TrashIcon size={12} />
-                  </IconButton>
-                </li>
-              ),
-            )}
-          </ul>
-        </div>
-      ) : null}
+      <WebhookRecents
+        history={history}
+        activeId={parsedUrl?.id ?? null}
+        onUse={(entry) => {
+          setUrl(entry.url);
+          setState({ kind: "idle" });
+        }}
+        onChange={() => setHistory(loadHistory())}
+      />
 
       <Field
         label="Webhook URL"
@@ -510,6 +388,14 @@ export function SendPanel({
               aria-pressed={revealUrl}
             >
               {revealUrl ? "Hide" : "Show"}
+            </button>
+            <button
+              type="button"
+              className={styles.revealBtn}
+              onClick={handleSaveWebhook}
+              disabled={saving || sending || !parsedUrl}
+            >
+              {saving ? "Checking…" : "Save"}
             </button>
           </div>
         )}
@@ -656,13 +542,6 @@ export function SendPanel({
             Cancel
           </Button>
         ) : null}
-        <Button
-          variant="secondary"
-          onClick={handleSaveWebhook}
-          disabled={saving || sending || !parsedUrl}
-        >
-          {saving ? "Checking…" : "Save webhook"}
-        </Button>
         <Button
           variant="primary"
           onClick={handleSend}

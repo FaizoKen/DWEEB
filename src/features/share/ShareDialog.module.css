@@ -74,6 +74,19 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+.actionsEnd {
+  justify-content: flex-end;
+}
+
+.warning {
+  background: rgba(240, 178, 50, 0.1);
+  border: 1px solid rgba(240, 178, 50, 0.35);
+  color: var(--app-text);
+  padding: 10px 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: 12px;
+  line-height: 1.5;
+}
 
 .mono { font-family: var(--app-font-mono); font-size: 12px; }
 

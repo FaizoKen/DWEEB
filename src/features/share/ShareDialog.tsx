@@ -13,7 +13,7 @@
  * `replaceMessageFromRestore`) on import.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -32,11 +32,21 @@ import {
   writeShareTokenToHash,
   type V1ImportNote,
 } from "@/core/serialization";
-import { fetchWebhookMessage, parseMessageIdInput, parseWebhookUrl } from "@/core/webhook";
+import {
+  classifyWebhookOwner,
+  fetchWebhookMessage,
+  loadHistory,
+  parseMessageIdInput,
+  parseWebhookUrl,
+  rememberWebhook,
+  verifyWebhook,
+  webhookAvatarHash,
+} from "@/core/webhook";
 import { pushToast } from "@/ui/Toast";
 import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
 import { SendPanel } from "./SendPanel";
+import { WebhookRecents } from "./WebhookRecents";
 import styles from "./ShareDialog.module.css";
 
 type Tab = "send" | "restore" | "share" | "json" | "import" | "about";
@@ -452,7 +462,14 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   const [idInput, setIdInput] = useState(() => restoredFrom?.messageId ?? "");
   const [threadId, setThreadId] = useState(() => restoredFrom?.threadId ?? "");
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Webhooks saved in this browser — same list the Send panel shows, so the
+  // user can fill the URL field from a saved entry instead of re-pasting it.
+  const [history, setHistory] = useState(() => loadHistory());
+
+  const saveAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => saveAbortRef.current?.abort(), []);
 
   const parsedUrl = useMemo(() => parseWebhookUrl(url), [url]);
   const messageId = useMemo(() => parseMessageIdInput(idInput), [idInput]);
@@ -496,6 +513,13 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
       messageId,
       threadId: threadId.trim() || undefined,
     });
+    // A successful restore proves the webhook is valid, so remember it for the
+    // recents list (this browser only). The fetch returns the message, not the
+    // webhook object, so we can't capture a name/owner here — `rememberWebhook`
+    // keeps any details a prior save recorded and the user can enrich it via
+    // "Save webhook". Refresh local history so the list reflects it on reopen.
+    rememberWebhook(parsedUrl.url);
+    setHistory(loadHistory());
     if (!validation.ok) {
       pushToast(
         `Restored with ${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}.`,
@@ -507,6 +531,48 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
     onDone();
   };
 
+  // Verify the webhook with Discord (GET), then store it — no message is
+  // fetched. Mirrors the Send panel's "Save webhook" so a webhook can be saved
+  // (with its name + owner) from here without restoring a message first.
+  const handleSaveWebhook = async () => {
+    setError(null);
+    if (!parsedUrl) {
+      setError("Enter a valid Discord webhook URL.");
+      return;
+    }
+
+    saveAbortRef.current?.abort();
+    const ac = new AbortController();
+    saveAbortRef.current = ac;
+
+    setSaving(true);
+    const result = await verifyWebhook(parsedUrl, { signal: ac.signal });
+    setSaving(false);
+
+    if (!result.ok) {
+      if (result.status === 0 && result.error === "Check was cancelled.") return;
+      setError(result.error);
+      return;
+    }
+
+    const remoteName = typeof result.webhook.name === "string" ? result.webhook.name : "";
+    const owner = classifyWebhookOwner(result.webhook);
+    const entry = rememberWebhook(parsedUrl.url, {
+      name: remoteName,
+      ownerKind: owner.kind,
+      avatar: webhookAvatarHash(result.webhook),
+    });
+    if (entry) {
+      setHistory(loadHistory());
+      pushToast(
+        remoteName
+          ? `Verified “${remoteName}” — ${owner.badge.toLowerCase()}. Saved.`
+          : `Webhook verified — ${owner.badge.toLowerCase()}. Saved.`,
+        "success",
+      );
+    }
+  };
+
   return (
     <>
       <p className={styles.lead}>
@@ -514,6 +580,19 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
         messages <strong>this webhook</strong> originally sent — not for user or bot messages, even
         in the same channel.
       </p>
+
+      <div className={styles.warning} role="note">
+        <strong>Treat the webhook URL like a password.</strong> Anyone with it can post to your
+        channel. We never send it anywhere; saving to history stores it in this browser's
+        localStorage only.
+      </div>
+
+      <WebhookRecents
+        history={history}
+        activeId={parsedUrl?.id ?? null}
+        onUse={(entry) => setUrl(entry.url)}
+        onChange={() => setHistory(loadHistory())}
+      />
 
       <Field
         label="Webhook URL"
@@ -538,6 +617,14 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
               aria-pressed={revealUrl}
             >
               {revealUrl ? "Hide" : "Show"}
+            </button>
+            <button
+              type="button"
+              className={styles.revealBtn}
+              onClick={handleSaveWebhook}
+              disabled={saving || busy || !parsedUrl}
+            >
+              {saving ? "Checking…" : "Save"}
             </button>
           </div>
         )}
@@ -574,8 +661,12 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
 
       {error ? <div className={styles.error}>{error}</div> : null}
 
-      <div className={styles.actions}>
-        <Button variant="primary" onClick={handleFetch} disabled={busy || !parsedUrl || !messageId}>
+      <div className={cn(styles.actions, styles.actionsEnd)}>
+        <Button
+          variant="primary"
+          onClick={handleFetch}
+          disabled={busy || saving || !parsedUrl || !messageId}
+        >
           {busy ? "Fetching…" : "Restore into editor"}
         </Button>
       </div>
