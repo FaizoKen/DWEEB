@@ -12,6 +12,60 @@ import type { ParsedAssistantReply } from "./types";
 
 const FENCE_RE = /```(?:json|json5|jsonc)?\s*\n?([\s\S]*?)```/gi;
 
+/**
+ * Parse model-emitted JSON a little more forgivingly than `JSON.parse`.
+ *
+ * Cheap models occasionally decorate otherwise-correct JSON with trailing
+ * commas or `//` / block comments. Stripping those blindly would corrupt string
+ * contents (the `//` inside an `https://` URL, a `,]` inside prose), so we walk
+ * the text tracking whether we're inside a string literal and only edit
+ * structural characters. The strict parse is tried first so well-formed JSON
+ * pays no cost.
+ */
+function tolerantJsonParse(input: string): unknown {
+  const text = input.trim();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Fall through to the lenient, string-aware pass below.
+  }
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i++; // skip the closing slash
+      continue;
+    }
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j]!)) j++;
+      if (text[j] === "}" || text[j] === "]") continue; // drop the trailing comma
+    }
+    out += ch;
+  }
+  return JSON.parse(out);
+}
+
 function looksLikeMessage(value: unknown): boolean {
   return (
     !!value &&
@@ -31,7 +85,7 @@ export function extractReply(raw: string): ParsedAssistantReply {
     if (body === undefined) continue;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(body.trim());
+      parsed = tolerantJsonParse(body);
     } catch {
       continue;
     }
@@ -49,7 +103,7 @@ export function extractReply(raw: string): ParsedAssistantReply {
     const trimmed = text.trim();
     if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
       try {
-        const parsed = JSON.parse(trimmed);
+        const parsed = tolerantJsonParse(trimmed);
         if (looksLikeMessage(parsed)) {
           return { text: "", payload: parsed };
         }

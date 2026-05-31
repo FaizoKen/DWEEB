@@ -18,6 +18,16 @@
 import type { AiProvider, AiSettings, ChatMessage } from "./types";
 import { PROVIDERS } from "./providerMeta";
 
+/**
+ * Sampling temperature for every provider. The assistant's job is to emit a
+ * strict JSON schema, not creative prose, so determinism wins: cheap/free
+ * models in particular adhere to the Components V2 shape far more reliably when
+ * they sample narrowly. This is applied to ALL providers — previously only the
+ * OpenAI-compatible path set a temperature, so Anthropic and Gemini ran at
+ * their ~1.0 defaults, which measurably hurt schema accuracy on smaller models.
+ */
+const GENERATION_TEMPERATURE = 0.2;
+
 export interface AiTurn {
   role: "user" | "assistant";
   content: string;
@@ -137,7 +147,7 @@ function describeHttpError(status: number, body: unknown, provider?: AiProvider)
       return (
         "No free quota available (429).\n\n" +
         'The provider reports a free-tier limit of 0 for this model ("check your plan and ' +
-        'billing"). This is not a temporary throttle — retrying won\'t clear it. It usually ' +
+        "billing\"). This is not a temporary throttle — retrying won't clear it. It usually " +
         "means the free tier isn't offered in your region, or billing isn't enabled on the " +
         "key. Switch to Groq's free tier, or enable billing for this provider."
       );
@@ -277,14 +287,17 @@ async function callOpenAiCompatible(
     headers,
     body: JSON.stringify({
       model: settings.model,
-      temperature: 0.4,
+      temperature: GENERATION_TEMPERATURE,
       stream: Boolean(onToken),
       messages: [{ role: "system", content: system }, ...turns],
     }),
     signal,
   });
   if (!res.ok)
-    return { ok: false, error: describeHttpError(res.status, await readJson(res), settings.provider) };
+    return {
+      ok: false,
+      error: describeHttpError(res.status, await readJson(res), settings.provider),
+    };
 
   // Streaming chunks: `data: {choices:[{delta:{content}}]}`, ending in `[DONE]`.
   if (onToken && isEventStream(res)) {
@@ -339,6 +352,7 @@ async function callAnthropic(
     body: JSON.stringify({
       model: settings.model,
       max_tokens: 4096,
+      temperature: GENERATION_TEMPERATURE,
       stream: Boolean(onToken),
       system,
       messages: turns.map((t) => ({ role: t.role, content: t.content })),
@@ -346,7 +360,10 @@ async function callAnthropic(
     signal,
   });
   if (!res.ok)
-    return { ok: false, error: describeHttpError(res.status, await readJson(res), settings.provider) };
+    return {
+      ok: false,
+      error: describeHttpError(res.status, await readJson(res), settings.provider),
+    };
 
   // Anthropic's stream is a sequence of typed events; text arrives as
   // `content_block_delta` with a `text_delta`. Errors come as `error` events.
@@ -414,6 +431,7 @@ async function callGemini(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: system }] },
+      generationConfig: { temperature: GENERATION_TEMPERATURE },
       contents: turns.map((t) => ({
         role: t.role === "assistant" ? "model" : "user",
         parts: [{ text: t.content }],
@@ -422,7 +440,10 @@ async function callGemini(
     signal,
   });
   if (!res.ok)
-    return { ok: false, error: describeHttpError(res.status, await readJson(res), settings.provider) };
+    return {
+      ok: false,
+      error: describeHttpError(res.status, await readJson(res), settings.provider),
+    };
 
   const partsToText = (parts: unknown): string =>
     Array.isArray(parts)

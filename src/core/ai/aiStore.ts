@@ -15,8 +15,13 @@
 import { create } from "zustand";
 import { newId } from "@/lib/id";
 import { useMessageStore } from "@/core/state/messageStore";
+import type { WebhookMessage } from "@/core/schema/types";
 import type { AiSettings, ChatMessage } from "./types";
+import type { AiTurn } from "./providers";
 import { loadAiSettings, saveAiSettings } from "./settingsStorage";
+
+/** How many automatic validation-repair turns to attempt after the first reply. */
+const MAX_REPAIR_TURNS = 1;
 
 // The chat engine (providers, system prompt, reply parsing, schema validation)
 // is only exercised once the user actually sends a turn, and it pulls in the
@@ -137,69 +142,121 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
     const [
       { callAI, toTurns },
-      { buildSystemPrompt },
+      { buildSystemPrompt, buildRepairPrompt },
       { extractReply, streamingProse },
       { attachEditorFields },
       { validateMessage },
     ] = engine;
 
     const { settings } = get();
-    const current = useMessageStore.getState().message;
-    const system = buildSystemPrompt(current);
+    const system = buildSystemPrompt(useMessageStore.getState().message);
 
-    // Resolve the streamed reply into the placeholder: apply any message payload
-    // and replace the bubble text with the finished prose. `partial` reflects a
-    // stream cut short (Stop pressed) — its prose may carry a half-written JSON
-    // fence, so we hide it the same way the live view does.
-    const finalize = (raw: string, partial: boolean) => {
+    // Split a raw reply into prose + a validated, importable message (or null),
+    // and collect the error-severity issues that would make Discord reject it.
+    // Pure — no store/editor side effects, so it's safe to run on every pass.
+    interface Analysis {
+      prose: string;
+      /** Whether the reply carried a JSON payload at all. */
+      hasPayload: boolean;
+      /** The importable message, or null when import/parse failed. */
+      message: WebhookMessage | null;
+      /** Error-severity problems, as human-readable strings for a repair turn. */
+      errors: string[];
+      /** Total issue count for the bubble badge (only shown when errors exist). */
+      issueCount?: number;
+    }
+    const analyze = (raw: string): Analysis => {
       const { text: prose, payload } = extractReply(raw);
-      let appliedMessage = false;
-      let issueCount: number | undefined;
-      if (payload !== null) {
-        try {
-          const message = attachEditorFields(payload);
-          const validation = validateMessage(message);
-          useMessageStore.getState().replaceMessage(message);
-          appliedMessage = true;
-          issueCount = validation.ok ? undefined : validation.issues.length;
-        } catch {
-          // The model produced something we can't import; fall back to prose
-          // only so the user still sees the reply rather than a silent failure.
-          appliedMessage = false;
-        }
+      if (payload === null) {
+        return { prose, hasPayload: false, message: null, errors: [] };
       }
-      const proseText = payload !== null || !partial ? prose : streamingProse(raw);
-      const content =
-        proseText ||
-        (appliedMessage
-          ? "Done — I updated the message in the editor."
-          : "I wasn't sure how to change the message. Could you give me more detail?");
+      try {
+        const message = attachEditorFields(payload);
+        const validation = validateMessage(message);
+        const errors = validation.issues
+          .filter((i) => i.severity === "error")
+          .map((i) => i.message);
+        return {
+          prose,
+          hasPayload: true,
+          message,
+          errors,
+          issueCount: validation.ok ? undefined : validation.issues.length,
+        };
+      } catch (e) {
+        // Parsed as JSON but not importable as a message — still repairable.
+        return { prose, hasPayload: true, message: null, errors: [(e as Error).message] };
+      }
+    };
+
+    // Update only the assistant bubble (no editor side effects). `partial`
+    // reflects a stream cut short (Stop pressed) — its prose may carry a
+    // half-written JSON fence, so we hide it the same way the live view does.
+    // `streaming` keeps the caret alive while a repair pass is still running;
+    // the "updated the message" affordance is withheld until the turn settles,
+    // matching the convention that nothing is "applied" mid-stream (the editor
+    // commit happens only once, after every pass resolves).
+    const showBubble = (
+      analysis: Analysis,
+      { raw, partial, streaming }: { raw: string; partial: boolean; streaming: boolean },
+    ) => {
+      const settled = !streaming;
+      const appliedMessage = settled && analysis.message !== null;
+      const proseText = analysis.hasPayload || !partial ? analysis.prose : streamingProse(raw);
+      const content = settled
+        ? proseText ||
+          (appliedMessage
+            ? "Done — I updated the message in the editor."
+            : "I wasn't sure how to change the message. Could you give me more detail?")
+        : proseText;
       set((s) => ({
         messages: s.messages.map((m) =>
           m.id === assistantId
-            ? { ...m, content, appliedMessage, issueCount, streaming: false }
+            ? {
+                ...m,
+                content,
+                appliedMessage,
+                issueCount: appliedMessage ? analysis.issueCount : undefined,
+                streaming,
+              }
             : m,
         ),
       }));
     };
 
-    let raw = "";
-    inflight = new AbortController();
-    const result = await callAI(settings, system, toTurns(history), inflight.signal, (delta) => {
-      raw += delta;
-      const display = streamingProse(raw);
-      set((s) => ({
-        messages: s.messages.map((m) => (m.id === assistantId ? { ...m, content: display } : m)),
-      }));
-    });
-    inflight = null;
+    // Push the message into the editor — at most ONCE per send, since each call
+    // records an undo-history entry. Called after every pass (including repair)
+    // has resolved, so the user gets the final, best message in a single undo.
+    const commitMessage = (analysis: Analysis) => {
+      if (analysis.message) useMessageStore.getState().replaceMessage(analysis.message);
+    };
+
+    // Stream one provider turn into the assistant bubble; returns the result and
+    // the accumulated raw text (kept even on a mid-stream abort).
+    const streamTurn = async (turnSystem: string, turns: AiTurn[]) => {
+      let raw = "";
+      inflight = new AbortController();
+      const result = await callAI(settings, turnSystem, turns, inflight.signal, (delta) => {
+        raw += delta;
+        const display = streamingProse(raw);
+        set((s) => ({
+          messages: s.messages.map((m) => (m.id === assistantId ? { ...m, content: display } : m)),
+        }));
+      });
+      inflight = null;
+      return { result, raw };
+    };
+
+    const { result, raw } = await streamTurn(system, toTurns(history));
 
     if (!result.ok) {
       // A cancelled request with partial text is kept (the user stopped it on
       // purpose); anything else drops the placeholder and surfaces the error.
       const cancelled = result.error === "Request cancelled.";
       if (cancelled && raw.trim()) {
-        finalize(raw, true);
+        const partial = analyze(raw);
+        commitMessage(partial);
+        showBubble(partial, { raw, partial: true, streaming: false });
         set({ thinking: false });
       } else {
         set((s) => ({
@@ -211,7 +268,47 @@ export const useAiStore = create<AiState>((set, get) => ({
       return;
     }
 
-    finalize(result.text ?? raw, false);
+    let analysis = analyze(result.text ?? raw);
+
+    // Self-repair: when the payload won't pass validation, hand the exact errors
+    // back and let the model correct them. The validator's messages are precise,
+    // so even a cheap model usually fixes them — turning "updated · N issues"
+    // into a clean message. Bounded to MAX_REPAIR_TURNS, and only adopted when
+    // the result is importable and strictly closer to valid. The editor isn't
+    // touched until the loop settles, so a broken first pass never flashes into
+    // the preview and the whole turn collapses to a single undo step.
+    if (analysis.errors.length > 0) {
+      // Keep the caret alive (with the first pass's prose) while we refine.
+      showBubble(analysis, { raw, partial: false, streaming: true });
+      let priorRaw = result.text ?? raw;
+      for (let attempt = 0; attempt < MAX_REPAIR_TURNS && analysis.errors.length > 0; attempt++) {
+        // Show the model the payload it needs to fix as the CURRENT MESSAGE.
+        const broken = analysis.message ?? useMessageStore.getState().message;
+        const repairTurns: AiTurn[] = [
+          ...toTurns(history),
+          { role: "assistant", content: priorRaw },
+          { role: "user", content: buildRepairPrompt(analysis.errors) },
+        ];
+        inflight = new AbortController();
+        const repair = await callAI(
+          settings,
+          buildSystemPrompt(broken),
+          repairTurns,
+          inflight.signal,
+        );
+        inflight = null;
+        if (!repair.ok) break; // cancelled or failed — keep the best-effort message
+        const next = analyze(repair.text ?? "");
+        priorRaw = repair.text ?? "";
+        if (!next.message || next.errors.length >= analysis.errors.length) break;
+        // Adopt the cleaner payload but keep the first pass's conversational
+        // prose — the repair is invisible polish, not a new chat turn.
+        analysis = { ...next, prose: analysis.prose };
+      }
+    }
+
+    commitMessage(analysis);
+    showBubble(analysis, { raw, partial: false, streaming: false });
     set({ thinking: false });
   },
 

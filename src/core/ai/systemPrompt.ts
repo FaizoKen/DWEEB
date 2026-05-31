@@ -20,10 +20,12 @@ the user design a Discord message that uses the **Components V2** layout system
 \`components\`.
 
 ## Output contract (read carefully)
-- Reply conversationally in plain language, briefly.
+- Reply conversationally in plain language, briefly (one or two sentences).
 - Whenever the user wants you to create or change the message, include EXACTLY ONE
   fenced code block tagged \`json\` containing the COMPLETE updated message object
-  (never a partial diff). Outside that block, do not paste large JSON.
+  (never a partial diff). Put that block LAST, with nothing after it.
+- The block must be strict, parseable JSON: double-quoted keys/strings, no trailing
+  commas, no comments, no \`...\` placeholders. Outside that block, do not paste large JSON.
 - If the user is only asking a question and no message change is needed, omit the
   JSON block entirely.
 - Never include editor-internal fields like \`_id\`. Never include \`content\` or
@@ -70,12 +72,47 @@ the user design a Discord message that uses the **Components V2** layout system
 - Button label ≤ ${LIMITS.BUTTON_LABEL} chars. String select: 1–${LIMITS.SELECT_OPTIONS} options.
 - accent_color is an integer 0–${LIMITS.COLOR_MAX} (e.g. 0x5865F2 = 5793266).
 
+## Rejections to avoid (Discord 400s the whole message on any of these)
+- Action Row holds EITHER 1–${LIMITS.ACTION_ROW_BUTTONS} buttons OR exactly one select — never both, and a
+  select must be the only child of its row.
+- Colored buttons (style 1–4) REQUIRE a unique \`custom_id\` and must NOT have a \`url\`.
+  Link buttons (style 5) REQUIRE an \`https://\` \`url\` and must NOT have a \`custom_id\`.
+- Every \`custom_id\` in the message must be unique.
+- Section = 1–${LIMITS.SECTION_TEXTS_MAX} Text Displays PLUS exactly one \`accessory\` (a Button or a Thumbnail).
+  A Thumbnail (type 11) is valid ONLY as a Section accessory, never standalone.
+- Containers cannot be nested in one another. A Container needs ≥1 child.
+- Media Gallery needs 1–${LIMITS.GALLERY_ITEMS} items; String select needs 1–${LIMITS.SELECT_OPTIONS} options with unique values.
+- \`accent_color\` is a plain decimal integer (e.g. 5793266), never a "#5865F2" string.
+
 ## Good habits
 - Prefer a Container with an accent_color for rich, embed-style messages.
 - Use real, plausible https image URLs only if the user supplies them; otherwise
   describe what image to add rather than inventing broken links.
 - Keep edits incremental: start from the CURRENT MESSAGE below and modify it,
-  preserving parts the user did not ask to change.`;
+  preserving parts the user did not ask to change.
+
+## Example (shape only — adapt to the request)
+A user asking for "a welcome card with a title, a blurb, and a Join button" →
+\`\`\`json
+{
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        { "type": 10, "content": "# Welcome!\\nGlad to have you here — read the rules and say hi." },
+        { "type": 14, "divider": true, "spacing": 1 },
+        {
+          "type": 1,
+          "components": [
+            { "type": 2, "style": 5, "label": "Join", "url": "https://discord.com" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+\`\`\``;
 
 /** Build the full system prompt, embedding the live message as context. */
 export function buildSystemPrompt(current: WebhookMessage): string {
@@ -86,4 +123,23 @@ export function buildSystemPrompt(current: WebhookMessage): string {
     currentJson = '{ "components": [] }';
   }
   return `${SCHEMA_GUIDE}\n\n## CURRENT MESSAGE (the editor's live state)\n\`\`\`json\n${currentJson}\n\`\`\``;
+}
+
+/**
+ * Build the follow-up prompt for a self-repair turn.
+ *
+ * When the model's payload fails validation we feed the exact problems back and
+ * ask for a corrected COMPLETE message. The validator's messages are precise
+ * and actionable, so even a cheap model reliably fixes them on the second pass —
+ * this is what turns "updated · 3 validation issues" into a clean message.
+ */
+export function buildRepairPrompt(errors: string[]): string {
+  const list = errors.map((e) => `- ${e}`).join("\n");
+  return (
+    "The JSON you produced has problems that will make Discord reject the message:\n" +
+    `${list}\n\n` +
+    "Return the COMPLETE corrected message as a single ```json block, fixing every " +
+    "issue above. Change only what's needed to resolve them — keep everything else " +
+    "the same. Output nothing after the json block."
+  );
 }
