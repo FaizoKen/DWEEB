@@ -111,9 +111,7 @@ export function convertV1Payload(raw: unknown): V1ConversionResult {
   if (typeof obj.content === "string" && obj.content.trim().length > 0) {
     const text = String(obj.content);
     const truncated = text.length > LIMITS.TEXT_DISPLAY_CONTENT;
-    prepended.push(
-      mkTextDisplay(truncated ? text.slice(0, LIMITS.TEXT_DISPLAY_CONTENT) : text),
-    );
+    prepended.push(mkTextDisplay(truncated ? text.slice(0, LIMITS.TEXT_DISPLAY_CONTENT) : text));
     notes.push({
       level: "info",
       source: "content",
@@ -191,12 +189,14 @@ function embedToContainer(
   index: number,
   notes: V1ImportNote[],
 ): ContainerComponent | null {
-  const authorObj = embed.author && typeof embed.author === "object"
-    ? (embed.author as Record<string, unknown>)
-    : null;
-  const footerObj = embed.footer && typeof embed.footer === "object"
-    ? (embed.footer as Record<string, unknown>)
-    : null;
+  const authorObj =
+    embed.author && typeof embed.author === "object"
+      ? (embed.author as Record<string, unknown>)
+      : null;
+  const footerObj =
+    embed.footer && typeof embed.footer === "object"
+      ? (embed.footer as Record<string, unknown>)
+      : null;
   const fields = Array.isArray(embed.fields) ? (embed.fields as V1EmbedField[]) : [];
   const image = pickMedia(embed.image);
   const thumbnail = pickMedia(embed.thumbnail);
@@ -213,9 +213,7 @@ function embedToContainer(
 
   const description = typeof embed.description === "string" ? embed.description : "";
   const accentColor =
-    typeof embed.color === "number" && Number.isInteger(embed.color)
-      ? embed.color
-      : undefined;
+    typeof embed.color === "number" && Number.isInteger(embed.color) ? embed.color : undefined;
 
   const children: ContainerChild[] = [];
   let firstBlockSpent = false;
@@ -253,10 +251,7 @@ function embedToContainer(
     const name = typeof field.name === "string" ? field.name : "";
     const value = typeof field.value === "string" ? field.value : "";
     if (!name && !value) continue;
-    const body =
-      name && value
-        ? `**${name}**\n${value}`
-        : (name || value);
+    const body = name && value ? `**${name}**\n${value}` : name || value;
     children.push(mkTextDisplay(body));
     if (field.inline && !inlineLossWarned) {
       notes.push({
@@ -273,7 +268,10 @@ function embedToContainer(
     children.push(mkMediaGallery(image));
   }
 
-  const footerText = formatFooterLine(footerObj, typeof embed.timestamp === "string" ? embed.timestamp : undefined);
+  const footerText = formatFooterLine(
+    footerObj,
+    typeof embed.timestamp === "string" ? embed.timestamp : undefined,
+  );
   if (footerText) {
     children.push(mkTextDisplay(footerText));
   }
@@ -313,7 +311,9 @@ function embedToContainer(
     const overflow = children.length - LIMITS.CONTAINER_CHILDREN;
     children.length = LIMITS.CONTAINER_CHILDREN - 1;
     children.push(
-      mkTextDisplay(`*[${overflow} more component(s) dropped — V2 container cap is ${LIMITS.CONTAINER_CHILDREN}]*`),
+      mkTextDisplay(
+        `*[${overflow} more component(s) dropped — V2 container cap is ${LIMITS.CONTAINER_CHILDREN}]*`,
+      ),
     );
     notes.push({
       level: "warning",
@@ -422,7 +422,7 @@ function mkMediaGallery(url: string): MediaGalleryComponent {
   return {
     _id: newId(),
     type: ComponentType.MediaGallery,
-    items: [{ media: { url } }],
+    items: [{ _id: newId(), media: { url } }],
   };
 }
 

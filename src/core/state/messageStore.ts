@@ -44,6 +44,8 @@ import {
   type ContainerChild,
   type ContainerComponent,
   type EditorId,
+  type MediaGalleryComponent,
+  type MediaGalleryItem,
   type SectionAccessory,
   type SectionComponent,
   type SelectComponent,
@@ -52,6 +54,7 @@ import {
   type WebhookMessage,
 } from "@/core/schema";
 import {
+  createGalleryItem,
   createLinkButton,
   createTextDisplay,
   createThumbnail,
@@ -114,6 +117,20 @@ export interface MessageState {
   addRowButton(rowId: EditorId): void;
   addRowSelect(rowId: EditorId, type: SelectComponent["type"]): void;
   addGalleryItem(galleryId: EditorId): void;
+  /** Reorder an image within its gallery by one slot. */
+  moveGalleryItem(galleryId: EditorId, itemId: EditorId, direction: -1 | 1): void;
+  /**
+   * Move an image to an absolute insertion index within its gallery (the
+   * drag-and-drop reorder commit). `targetIndex` is the pre-removal insertion
+   * index, matching the tree's drop-position math.
+   */
+  moveGalleryItemToIndex(galleryId: EditorId, itemId: EditorId, targetIndex: number): void;
+  /** Remove an image from a gallery (no-op if it's the last remaining image). */
+  removeGalleryItem(galleryId: EditorId, itemId: EditorId): void;
+  /** Clone an image in place, selecting the copy. No-op at the gallery cap. */
+  duplicateGalleryItem(galleryId: EditorId, itemId: EditorId): void;
+  /** Patch a single image's fields (media/description/spoiler). */
+  patchGalleryItem(galleryId: EditorId, itemId: EditorId, patch: Partial<MediaGalleryItem>): void;
   setSectionAccessoryKind(sectionId: EditorId, kind: "button" | "thumbnail"): void;
 
   moveSibling(id: EditorId, direction: -1 | 1): void;
@@ -179,6 +196,11 @@ function reassignIds(message: WebhookMessage): WebhookMessage {
       (next as unknown as { accessory: AnyComponent }).accessory = stamp(
         (next as unknown as { accessory: AnyComponent }).accessory,
       );
+    }
+    if ("items" in next && Array.isArray((next as { items?: unknown }).items)) {
+      (next as unknown as { items: MediaGalleryItem[] }).items = (
+        next as unknown as { items: MediaGalleryItem[] }
+      ).items.map((it) => ({ ...it, _id: newId() }));
     }
     return next;
   };
@@ -376,20 +398,114 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   addGalleryItem(galleryId) {
+    set((s) => {
+      const item = createGalleryItem();
+      let added = false;
+      const message = updateById<MediaGalleryComponent>(s.message, galleryId, (g) => {
+        if (g.type !== ComponentType.MediaGallery) return g;
+        if (g.items.length >= LIMITS.GALLERY_ITEMS) return g;
+        added = true;
+        return { ...g, items: [...g.items, item] };
+      });
+      if (!added) return s;
+      // Select the new image so its tree row expands ready to edit — the
+      // "go to the last image" behavior, now expressed through selection.
+      return { ...pushHistory(s), message, selectedId: item._id };
+    });
+  },
+
+  moveGalleryItem(galleryId, itemId, direction) {
+    set((s) => {
+      let moved = false;
+      const message = updateById<MediaGalleryComponent>(s.message, galleryId, (g) => {
+        if (g.type !== ComponentType.MediaGallery) return g;
+        const idx = g.items.findIndex((it) => it._id === itemId);
+        if (idx === -1) return g;
+        const target = idx + direction;
+        if (target < 0 || target >= g.items.length) return g;
+        const items = g.items.slice();
+        const [picked] = items.splice(idx, 1);
+        items.splice(target, 0, picked!);
+        moved = true;
+        return { ...g, items };
+      });
+      if (!moved) return s;
+      return { ...pushHistory(s), message };
+    });
+  },
+
+  moveGalleryItemToIndex(galleryId, itemId, targetIndex) {
+    set((s) => {
+      let moved = false;
+      const message = updateById<MediaGalleryComponent>(s.message, galleryId, (g) => {
+        if (g.type !== ComponentType.MediaGallery) return g;
+        const idx = g.items.findIndex((it) => it._id === itemId);
+        if (idx === -1) return g;
+        // Clamp, then compensate for the source's own removal when it sits
+        // before the target — mirrors `moveToParent`'s same-parent reorder.
+        let target = Math.max(0, Math.min(targetIndex, g.items.length));
+        if (target > idx) target -= 1;
+        if (target === idx) return g;
+        const items = g.items.slice();
+        const [picked] = items.splice(idx, 1);
+        items.splice(target, 0, picked!);
+        moved = true;
+        return { ...g, items };
+      });
+      if (!moved) return s;
+      return { ...pushHistory(s), message };
+    });
+  },
+
+  removeGalleryItem(galleryId, itemId) {
+    set((s) => {
+      let removed = false;
+      const message = updateById<MediaGalleryComponent>(s.message, galleryId, (g) => {
+        if (g.type !== ComponentType.MediaGallery) return g;
+        if (g.items.length <= 1) return g; // keep at least one
+        const items = g.items.filter((it) => it._id !== itemId);
+        if (items.length === g.items.length) return g;
+        removed = true;
+        return { ...g, items };
+      });
+      if (!removed) return s;
+      // Fall back to selecting the parent gallery when the removed image was
+      // the active selection, so the inspector doesn't go blank.
+      return {
+        ...pushHistory(s),
+        message,
+        selectedId: s.selectedId === itemId ? galleryId : s.selectedId,
+      };
+    });
+  },
+
+  duplicateGalleryItem(galleryId, itemId) {
+    set((s) => {
+      let clonedId: EditorId | null = null;
+      const message = updateById<MediaGalleryComponent>(s.message, galleryId, (g) => {
+        if (g.type !== ComponentType.MediaGallery) return g;
+        if (g.items.length >= LIMITS.GALLERY_ITEMS) return g;
+        const idx = g.items.findIndex((it) => it._id === itemId);
+        if (idx === -1) return g;
+        const clone: MediaGalleryItem = { ...g.items[idx]!, _id: newId() };
+        clonedId = clone._id;
+        const items = g.items.slice();
+        items.splice(idx + 1, 0, clone);
+        return { ...g, items };
+      });
+      if (!clonedId) return s;
+      return { ...pushHistory(s), message, selectedId: clonedId };
+    });
+  },
+
+  patchGalleryItem(galleryId, itemId, patch) {
     set((s) => ({
       ...pushHistory(s),
-      message: updateById(s.message, galleryId, (g) =>
+      message: updateById<MediaGalleryComponent>(s.message, galleryId, (g) =>
         g.type === ComponentType.MediaGallery
           ? {
               ...g,
-              items: [
-                ...g.items,
-                {
-                  media: {
-                    url: "https://placehold.co/600x400/5865F2/ffffff/png?text=Image",
-                  },
-                },
-              ],
+              items: g.items.map((it) => (it._id === itemId ? { ...it, ...patch } : it)),
             }
           : g,
       ),
@@ -601,6 +717,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           (next as unknown as { accessory: AnyComponent }).accessory = cloneWithIds(
             (next as unknown as { accessory: AnyComponent }).accessory,
           );
+        }
+        if ("items" in next && Array.isArray((next as { items?: unknown }).items)) {
+          (next as unknown as { items: MediaGalleryItem[] }).items = (
+            node as unknown as { items: MediaGalleryItem[] }
+          ).items.map((it) => ({ ...it, _id: newId() }));
         }
         return next;
       };

@@ -33,19 +33,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
+import { scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
 import {
   COMPONENT_META,
   CONTAINER_PICKER,
   ROW_SELECT_PICKER,
   TOP_LEVEL_PICKER,
 } from "@/core/schema/metadata";
-import {
-  isActionRow,
-  isContainer,
-  isSection,
-  isSelect,
-  isSelectRow,
-} from "@/core/schema/guards";
+import { isActionRow, isContainer, isSection, isSelect, isSelectRow } from "@/core/schema/guards";
 import type { ComponentTypeValue, SelectComponent } from "@/core/schema/types";
 import { LIMITS } from "@/core/schema/limits";
 import { countCharacters, countComponents } from "@/core/schema/traversal";
@@ -55,6 +50,7 @@ import type {
   ContainerComponent,
   EditorId,
   MediaGalleryComponent,
+  MediaGalleryItem,
   SectionComponent,
 } from "@/core/schema/types";
 import { ComponentType } from "@/core/schema/types";
@@ -76,11 +72,9 @@ import {
 } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
 import { Inspector } from "./Inspector";
+import { GalleryItemInspector } from "./inspectors/GalleryItemInspector";
 import styles from "./ComponentTree.module.css";
-import type {
-  ContainerChildFactoryKey,
-  TopLevelFactoryKey,
-} from "@/core/factory/createComponent";
+import type { ContainerChildFactoryKey, TopLevelFactoryKey } from "@/core/factory/createComponent";
 
 /**
  * Drag-and-drop session shared across every TreeNode. Only one node can be
@@ -95,7 +89,7 @@ import type {
 type DropPosition = "before" | "after" | "into";
 
 /** What kind of list this node's parent is. Drop rules vary per kind. */
-type ParentKind = "top" | "container" | "section" | "actionRow";
+type ParentKind = "top" | "container" | "section" | "actionRow" | "gallery";
 
 interface DragInfo {
   id: EditorId;
@@ -167,12 +161,19 @@ function readRowData(el: Element): RowData | null {
   if (!id) return null;
   const rawKind = el.getAttribute("data-parent-kind") ?? "";
   const parentKind: ParentKind | null =
-    rawKind === "top" || rawKind === "container" || rawKind === "section" || rawKind === "actionRow"
+    rawKind === "top" ||
+    rawKind === "container" ||
+    rawKind === "section" ||
+    rawKind === "actionRow" ||
+    rawKind === "gallery"
       ? rawKind
       : null;
   const rawParentId = el.getAttribute("data-parent-id") ?? "";
   const siblingIndex = Number.parseInt(el.getAttribute("data-sibling-index") ?? "-1", 10);
-  const nodeType = Number.parseInt(el.getAttribute("data-node-type") ?? "0", 10) as ComponentTypeValue;
+  const nodeType = Number.parseInt(
+    el.getAttribute("data-node-type") ?? "0",
+    10,
+  ) as ComponentTypeValue;
   return {
     id,
     parentKind,
@@ -193,7 +194,12 @@ function readRowData(el: Element): RowData | null {
  *    source can legally become a child of.
  */
 function computeAllowedPositions(
-  source: { id: EditorId; type: ComponentTypeValue; parentKind: ParentKind; parentId: EditorId | null },
+  source: {
+    id: EditorId;
+    type: ComponentTypeValue;
+    parentKind: ParentKind;
+    parentId: EditorId | null;
+  },
   target: RowData,
 ): DropPosition[] {
   if (target.id === source.id) return [];
@@ -344,11 +350,15 @@ function DragGhost() {
   }, [drag, ghostStart, ghostRef]);
 
   if (!drag) return null;
-  const meta = COMPONENT_META[drag.type];
+  // Gallery images aren't components, so they carry no COMPONENT_META entry —
+  // give them a dedicated ghost. Everything else reads from its type meta.
+  const isImage = drag.parentKind === "gallery";
+  const glyph = isImage ? "▦" : COMPONENT_META[drag.type].glyph;
+  const label = isImage ? "Image" : COMPONENT_META[drag.type].label;
   return createPortal(
     <div ref={ghostRef} className={styles.ghost} aria-hidden="true">
-      <span className={styles.ghostGlyph}>{meta.glyph}</span>
-      <span className={styles.ghostLabel}>{meta.label}</span>
+      <span className={styles.ghostGlyph}>{glyph}</span>
+      <span className={styles.ghostLabel}>{label}</span>
     </div>,
     document.body,
   );
@@ -422,87 +432,42 @@ interface TreeNodeProps {
   siblingIndex: number;
 }
 
-function TreeNode({
-  node,
-  parentKind,
-  parentId,
-  parentSiblingIds,
-  siblingIndex,
-}: TreeNodeProps) {
-  // Subscribe to just this row's selected state so changing the selection only
-  // re-renders the two rows whose highlight flips, not every row in the tree.
-  const isSelected = useMessageStore((s) => s.selectedId === node._id);
-  const select = useMessageStore((s) => s.select);
-  const moveSibling = useMessageStore((s) => s.moveSibling);
-  const moveToParent = useMessageStore((s) => s.moveToParent);
-  const remove = useMessageStore((s) => s.remove);
-  const duplicate = useMessageStore((s) => s.duplicate);
-  const addContainerChild = useMessageStore((s) => s.addContainerChild);
-  const addSectionText = useMessageStore((s) => s.addSectionText);
-  const addRowButton = useMessageStore((s) => s.addRowButton);
-  const addRowSelect = useMessageStore((s) => s.addRowSelect);
-  const addGalleryItem = useMessageStore((s) => s.addGalleryItem);
-  const { drag, dropTarget, ghostRef, setDrag, setGhostStart, setDropTarget } = useContext(DragContext);
+/**
+ * Pointer-based drag-and-drop for a single tree row, shared by component rows
+ * (`TreeNode`) and gallery-image rows (`GalleryItemNode`).
+ *
+ * Owns the gesture state machine — long-press to start on touch, a small
+ * movement threshold on mouse, a non-passive `touchmove` blocker so the page
+ * doesn't scroll mid-drag, and `elementFromPoint` hit-testing to find the row
+ * under the pointer. The row-specific bits are injected:
+ *  - `dragInfo`  describes the dragged row (id / type / parent).
+ *  - `allowed`   decides which drop positions a hovered target accepts.
+ *  - `commit`    performs the actual move once the pointer is released.
+ *
+ * Returns the row's pointer handlers plus the derived drag/drop flags for this
+ * row and a `consumeJustDragged` guard the click handler uses to swallow the
+ * synthetic click some browsers fire after a drag.
+ */
+function usePointerDragRow({
+  isReorderable,
+  dragInfo,
+  allowed,
+  commit,
+}: {
+  isReorderable: boolean;
+  dragInfo: DragInfo;
+  allowed: (target: RowData) => DropPosition[];
+  commit: (target: RowData, position: DropPosition) => void;
+}) {
+  const { drag, dropTarget, ghostRef, setDrag, setGhostStart, setDropTarget } =
+    useContext(DragContext);
 
-  const meta = COMPONENT_META[node.type];
-
-  const { siblings, extras } = childGroups(node);
-  const siblingIds = useMemo(() => siblings.map((c) => c._id), [siblings]);
-  const ownChildKind = childParentKind(node);
-  const adders = collectAdders(node, {
-    addContainerChild,
-    addSectionText,
-    addRowButton,
-    addRowSelect,
-    addGalleryItem,
-  });
-  const hasNested = siblings.length > 0 || extras.length > 0 || adders.length > 0;
-
-  const isReorderable = parentSiblingIds !== null && parentKind !== null;
-  const isDragging = drag?.id === node._id;
-
-  // A node is "stuck" at an edge only when there's truly nowhere for it to go.
-  // Container children at the edge of their sibling list can still pop out to
-  // the grandparent (see `moveSibling`), so they keep both arrows.
-  const lastSiblingIndex = parentSiblingIds ? parentSiblingIds.length - 1 : -1;
-  const canMoveUp =
-    isReorderable && (siblingIndex > 0 || parentKind === "container");
-  const canMoveDown =
-    isReorderable && (siblingIndex < lastSiblingIndex || parentKind === "container");
-
-  const showDropBefore =
-    !!drag && dropTarget?.id === node._id && dropTarget?.position === "before";
-  const showDropAfter =
-    !!drag && dropTarget?.id === node._id && dropTarget?.position === "after";
-  const showDropInto =
-    !!drag && dropTarget?.id === node._id && dropTarget?.position === "into";
-
-  // -- Pointer-based drag-and-drop ----------------------------------------
-  //
-  // We don't use HTML5 DnD because it isn't fired from touch on mobile. The
-  // flow instead:
-  //
-  //   1. pointerdown on a row → record start coords, capture the pointer.
-  //   2. Touch/pen: start a long-press timer (so a normal tap still selects
-  //      and a finger-swipe still scrolls the list); cancel if the finger
-  //      moves before the timer fires.
-  //   3. Mouse: promote to drag once movement passes a small threshold.
-  //   4. While dragging: find the row under the pointer via
-  //      `document.elementFromPoint`, read its data attributes, and decide
-  //      where the source can land.
-  //   5. pointerup → commit, pointercancel → discard.
-  //
-  // Refs hold what pointer handlers need to read mid-gesture, since state
-  // updates batched into the current event task aren't visible to the next
-  // handler in the same task.
   interface PointerState {
     pointerId: number;
     startX: number;
     startY: number;
     isDragging: boolean;
     longPressTimer: number | null;
-    pressClientX: number;
-    pressClientY: number;
     /**
      * Non-passive `touchmove` listener attached to document for the lifetime
      * of this touch gesture. React's own pointer/touch listeners are passive,
@@ -515,6 +480,8 @@ function TreeNode({
     touchMoveBlocker: ((ev: TouchEvent) => void) | null;
   }
   const stateRef = useRef<PointerState | null>(null);
+  const lastDropRef = useRef<{ id: EditorId; position: DropPosition } | null>(null);
+  const justDraggedRef = useRef(false);
 
   const releasePointerState = useCallback((state: PointerState) => {
     if (state.longPressTimer !== null) {
@@ -526,46 +493,31 @@ function TreeNode({
       state.touchMoveBlocker = null;
     }
   }, []);
-  const lastDropRef = useRef<{ id: EditorId; position: DropPosition } | null>(null);
-  const justDraggedRef = useRef(false);
 
   const beginDrag = useCallback(
     (startX: number, startY: number) => {
       setGhostStart({ x: startX, y: startY });
-      setDrag({
-        id: node._id,
-        type: node.type,
-        parentKind: parentKind!,
-        parentId,
-      });
+      setDrag(dragInfo);
     },
-    [node._id, node.type, parentId, parentKind, setDrag, setGhostStart],
+    [dragInfo, setDrag, setGhostStart],
   );
 
   const endDrag = useCallback(
-    (commit: boolean) => {
+    (doCommit: boolean) => {
       const last = lastDropRef.current;
-      if (commit && last) {
-        if (last.position === "into") {
-          // Append. The store clamps `targetIndex` to the container's length.
-          moveToParent(node._id, last.id, Number.MAX_SAFE_INTEGER);
-        } else {
-          const targetEl = document.querySelector(
-            `[data-tree-row="true"][data-row-id="${CSS.escape(last.id)}"]`,
-          );
-          const data = targetEl ? readRowData(targetEl) : null;
-          if (data) {
-            const idx = data.siblingIndex + (last.position === "after" ? 1 : 0);
-            moveToParent(node._id, data.parentId, idx);
-          }
-        }
+      if (doCommit && last) {
+        const targetEl = document.querySelector(
+          `[data-tree-row="true"][data-row-id="${CSS.escape(last.id)}"]`,
+        );
+        const data = targetEl ? readRowData(targetEl) : null;
+        if (data) commit(data, last.position);
       }
       lastDropRef.current = null;
       setDrag(null);
       setGhostStart(null);
       setDropTarget(null);
     },
-    [moveToParent, node._id, setDrag, setDropTarget, setGhostStart],
+    [commit, setDrag, setDropTarget, setGhostStart],
   );
 
   const onPointerDown = useCallback(
@@ -588,8 +540,6 @@ function TreeNode({
         startY: e.clientY,
         isDragging: false,
         longPressTimer: null,
-        pressClientX: e.clientX,
-        pressClientY: e.clientY,
         touchMoveBlocker: null,
       };
 
@@ -603,16 +553,14 @@ function TreeNode({
           state.isDragging = true;
           beginDrag(x, y);
           if (typeof navigator.vibrate === "function") {
-            try { navigator.vibrate(15); } catch { /* not supported */ }
+            try {
+              navigator.vibrate(15);
+            } catch {
+              /* not supported */
+            }
           }
         }, LONG_PRESS_MS);
 
-        // Register a non-passive touchmove listener so we can actually block
-        // native scrolling once the gesture promotes to a drag. React's
-        // synthetic pointermove is passive, so its `preventDefault` is a
-        // no-op. Without this, the browser interprets the first post-press
-        // finger movement as a scroll and fires pointercancel — which makes
-        // the drag look like it "auto-releases" after the hold.
         const blocker = (ev: TouchEvent) => {
           if (stateRef.current === state && state.isDragging && ev.cancelable) {
             ev.preventDefault();
@@ -641,11 +589,8 @@ function TreeNode({
       const targetData = readRowData(targetEl);
       if (!targetData) return;
 
-      const allowed = computeAllowedPositions(
-        { id: node._id, type: node.type, parentKind: parentKind!, parentId },
-        targetData,
-      );
-      if (allowed.length === 0) {
+      const allowedPositions = allowed(targetData);
+      if (allowedPositions.length === 0) {
         if (lastDropRef.current !== null) {
           lastDropRef.current = null;
           setDropTarget(null);
@@ -655,18 +600,18 @@ function TreeNode({
 
       const rect = (targetEl as HTMLElement).getBoundingClientRect();
       const ratio = (clientY - rect.top) / rect.height;
-      const hasInto = allowed.includes("into");
+      const hasInto = allowedPositions.includes("into");
       let position: DropPosition;
       if (hasInto) {
-        if (ratio < 0.25 && allowed.includes("before")) position = "before";
-        else if (ratio > 0.75 && allowed.includes("after")) position = "after";
+        if (ratio < 0.25 && allowedPositions.includes("before")) position = "before";
+        else if (ratio > 0.75 && allowedPositions.includes("after")) position = "after";
         else position = "into";
-      } else if (ratio < 0.5 && allowed.includes("before")) {
+      } else if (ratio < 0.5 && allowedPositions.includes("before")) {
         position = "before";
-      } else if (allowed.includes("after")) {
+      } else if (allowedPositions.includes("after")) {
         position = "after";
       } else {
-        position = allowed[0]!;
+        position = allowedPositions[0]!;
       }
 
       const prev = lastDropRef.current;
@@ -675,7 +620,7 @@ function TreeNode({
         setDropTarget(lastDropRef.current);
       }
     },
-    [node._id, node.type, parentId, parentKind, setDropTarget],
+    [allowed, setDropTarget],
   );
 
   const onPointerMove = useCallback(
@@ -694,12 +639,17 @@ function TreeNode({
             releasePointerState(state);
             try {
               e.currentTarget.releasePointerCapture(e.pointerId);
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
             stateRef.current = null;
           }
           return;
         }
-        if (e.pointerType === "mouse" && (adx > MOUSE_DRAG_THRESHOLD || ady > MOUSE_DRAG_THRESHOLD)) {
+        if (
+          e.pointerType === "mouse" &&
+          (adx > MOUSE_DRAG_THRESHOLD || ady > MOUSE_DRAG_THRESHOLD)
+        ) {
           state.isDragging = true;
           beginDrag(e.clientX, e.clientY);
         } else {
@@ -719,7 +669,7 @@ function TreeNode({
 
       updateDropTargetFromPointer(e.clientX, e.clientY);
     },
-    [beginDrag, ghostRef, updateDropTargetFromPointer],
+    [beginDrag, ghostRef, releasePointerState, updateDropTargetFromPointer],
   );
 
   const onPointerUp = useCallback(
@@ -734,7 +684,9 @@ function TreeNode({
       stateRef.current = null;
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     },
     [endDrag, releasePointerState],
   );
@@ -761,15 +713,106 @@ function TreeNode({
     };
   }, [releasePointerState]);
 
+  const consumeJustDragged = useCallback(() => {
+    if (justDraggedRef.current) {
+      justDraggedRef.current = false;
+      return true;
+    }
+    return false;
+  }, []);
+
+  const id = dragInfo.id;
+  return {
+    isDragging: drag?.id === id,
+    showDropBefore: !!drag && dropTarget?.id === id && dropTarget.position === "before",
+    showDropAfter: !!drag && dropTarget?.id === id && dropTarget.position === "after",
+    showDropInto: !!drag && dropTarget?.id === id && dropTarget.position === "into",
+    consumeJustDragged,
+    pointerHandlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel },
+  };
+}
+
+function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }: TreeNodeProps) {
+  // Subscribe to just this row's selected state so changing the selection only
+  // re-renders the two rows whose highlight flips, not every row in the tree.
+  const isSelected = useMessageStore((s) => s.selectedId === node._id);
+  const select = useMessageStore((s) => s.select);
+  const moveSibling = useMessageStore((s) => s.moveSibling);
+  const moveToParent = useMessageStore((s) => s.moveToParent);
+  const remove = useMessageStore((s) => s.remove);
+  const duplicate = useMessageStore((s) => s.duplicate);
+  const addContainerChild = useMessageStore((s) => s.addContainerChild);
+  const addSectionText = useMessageStore((s) => s.addSectionText);
+  const addRowButton = useMessageStore((s) => s.addRowButton);
+  const addRowSelect = useMessageStore((s) => s.addRowSelect);
+  const addGalleryItem = useMessageStore((s) => s.addGalleryItem);
+  const meta = COMPONENT_META[node.type];
+
+  const { siblings, extras } = childGroups(node);
+  const siblingIds = useMemo(() => siblings.map((c) => c._id), [siblings]);
+  const ownChildKind = childParentKind(node);
+  const adders = collectAdders(node, {
+    addContainerChild,
+    addSectionText,
+    addRowButton,
+    addRowSelect,
+    addGalleryItem,
+  });
+  // Media-gallery images render as their own child rows (like Section texts),
+  // so they can be selected, collapsed/expanded, reordered, and removed.
+  const galleryItems =
+    node.type === ComponentType.MediaGallery ? (node as MediaGalleryComponent).items : null;
+  const hasNested =
+    siblings.length > 0 ||
+    extras.length > 0 ||
+    adders.length > 0 ||
+    (galleryItems?.length ?? 0) > 0;
+
+  const isReorderable = parentSiblingIds !== null && parentKind !== null;
+
+  // A node is "stuck" at an edge only when there's truly nowhere for it to go.
+  // Container children at the edge of their sibling list can still pop out to
+  // the grandparent (see `moveSibling`), so they keep both arrows.
+  const lastSiblingIndex = parentSiblingIds ? parentSiblingIds.length - 1 : -1;
+  const canMoveUp = isReorderable && (siblingIndex > 0 || parentKind === "container");
+  const canMoveDown =
+    isReorderable && (siblingIndex < lastSiblingIndex || parentKind === "container");
+
+  const dragInfo = useMemo<DragInfo>(
+    () => ({ id: node._id, type: node.type, parentKind: parentKind ?? "top", parentId }),
+    [node._id, node.type, parentKind, parentId],
+  );
+  const allowed = useCallback(
+    (target: RowData) => computeAllowedPositions(dragInfo, target),
+    [dragInfo],
+  );
+  const commit = useCallback(
+    (target: RowData, position: DropPosition) => {
+      if (position === "into") {
+        // Append. The store clamps `targetIndex` to the container's length.
+        moveToParent(node._id, target.id, Number.MAX_SAFE_INTEGER);
+      } else {
+        const idx = target.siblingIndex + (position === "after" ? 1 : 0);
+        moveToParent(node._id, target.parentId, idx);
+      }
+    },
+    [moveToParent, node._id],
+  );
+  const {
+    isDragging,
+    showDropBefore,
+    showDropAfter,
+    showDropInto,
+    consumeJustDragged,
+    pointerHandlers,
+  } = usePointerDragRow({ isReorderable, dragInfo, allowed, commit });
+
   const onRowClick = useCallback(
     (e: ReactMouseEvent<HTMLDivElement>) => {
       e.stopPropagation();
       // A completed drag also fires a click on the source row in some
       // browsers — swallow that so the row isn't accidentally selected.
-      if (justDraggedRef.current) {
-        justDraggedRef.current = false;
-        return;
-      }
+      if (consumeJustDragged()) return;
       // Click the already-open row again to minimize it — clearing the
       // selection and collapsing the inline inspector.
       if (isSelected) {
@@ -793,7 +836,7 @@ function TreeNode({
           ?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
     },
-    [isSelected, node._id, select],
+    [consumeJustDragged, isSelected, node._id, select],
   );
 
   return (
@@ -816,20 +859,15 @@ function TreeNode({
         data-parent-id={parentId ?? ""}
         data-sibling-index={siblingIndex}
         data-node-type={node.type}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerCancel}
+        {...pointerHandlers}
         onClick={onRowClick}
       >
         <span className={styles.chevron} aria-hidden="true">
-          {isSelected ? (
-            <ChevronDownIcon size={14} />
-          ) : (
-            <ChevronRightIcon size={14} />
-          )}
+          {isSelected ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
         </span>
-        <span className={styles.glyph} aria-hidden="true">{meta.glyph}</span>
+        <span className={styles.glyph} aria-hidden="true">
+          {meta.glyph}
+        </span>
         <span className={styles.label}>{meta.label}</span>
         <span className={styles.summary}>{summarize(node)}</span>
 
@@ -861,6 +899,15 @@ function TreeNode({
 
       {hasNested ? (
         <ul className={styles.list}>
+          {galleryItems?.map((item, idx) => (
+            <GalleryItemNode
+              key={item._id}
+              galleryId={node._id}
+              item={item}
+              index={idx}
+              total={galleryItems.length}
+            />
+          ))}
           {siblings.map((child, idx) => (
             <TreeNode
               key={(child as { _id: EditorId })._id}
@@ -886,6 +933,180 @@ function TreeNode({
       ) : null}
     </li>
   );
+}
+
+/**
+ * A single gallery image rendered as a tree row, mirroring `TreeNode`'s look
+ * and affordances (chevron, glyph, up/down/duplicate/delete) but operating on
+ * a `MediaGalleryItem` instead of a component. Hold-and-drag reordering uses
+ * the same `usePointerDragRow` engine as component rows, scoped to sibling
+ * images of the same gallery.
+ */
+function GalleryItemNode({
+  galleryId,
+  item,
+  index,
+  total,
+}: {
+  galleryId: EditorId;
+  item: MediaGalleryItem;
+  index: number;
+  total: number;
+}) {
+  const isSelected = useMessageStore((s) => s.selectedId === item._id);
+  const select = useMessageStore((s) => s.select);
+  const moveGalleryItem = useMessageStore((s) => s.moveGalleryItem);
+  const moveGalleryItemToIndex = useMessageStore((s) => s.moveGalleryItemToIndex);
+  const removeGalleryItem = useMessageStore((s) => s.removeGalleryItem);
+  const duplicateGalleryItem = useMessageStore((s) => s.duplicateGalleryItem);
+
+  const canMoveUp = index > 0;
+  const canMoveDown = index < total - 1;
+  const canDuplicate = total < LIMITS.GALLERY_ITEMS;
+  const canRemove = total > 1;
+
+  // Drag-and-drop reorder, sharing the component-row gesture engine. The
+  // `"gallery"` parent kind makes `computeAllowedPositions` permit before/after
+  // drops only among sibling images of the same gallery.
+  const dragInfo = useMemo<DragInfo>(
+    () => ({
+      id: item._id,
+      type: ComponentType.MediaGallery,
+      parentKind: "gallery",
+      parentId: galleryId,
+    }),
+    [item._id, galleryId],
+  );
+  const allowed = useCallback(
+    (target: RowData) => computeAllowedPositions(dragInfo, target),
+    [dragInfo],
+  );
+  const commit = useCallback(
+    (target: RowData, position: DropPosition) => {
+      const idx = target.siblingIndex + (position === "after" ? 1 : 0);
+      moveGalleryItemToIndex(galleryId, item._id, idx);
+    },
+    [moveGalleryItemToIndex, galleryId, item._id],
+  );
+  const {
+    isDragging,
+    showDropBefore,
+    showDropAfter,
+    showDropInto,
+    consumeJustDragged,
+    pointerHandlers,
+  } = usePointerDragRow({ isReorderable: true, dragInfo, allowed, commit });
+
+  const onRowClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    // Swallow the synthetic click a finished drag fires on the source row.
+    if (consumeJustDragged()) return;
+    // Click the open row again to collapse it.
+    if (isSelected) {
+      select(null);
+      return;
+    }
+    select(item._id);
+    // Desktop: mirror the row→preview scroll TreeNode does, landing on this
+    // image's rendered figure. On mobile the preview is a hidden sheet.
+    if (window.matchMedia("(max-width: 900px)").matches) return;
+    const targetId = item._id;
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(
+          `[data-preview-scroll] [data-node-id="${CSS.escape(targetId)}"]`,
+        )
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
+  return (
+    <li>
+      <div
+        className={cn(
+          styles.row,
+          isSelected && styles.rowSelected,
+          isDragging && styles.rowDragging,
+          showDropBefore && styles.rowDropBefore,
+          showDropAfter && styles.rowDropAfter,
+          showDropInto && styles.rowDropInto,
+        )}
+        data-tree-row="true"
+        data-row-id={item._id}
+        data-parent-kind="gallery"
+        data-parent-id={galleryId}
+        data-sibling-index={index}
+        {...pointerHandlers}
+        onClick={onRowClick}
+      >
+        <span className={styles.chevron} aria-hidden="true">
+          {isSelected ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
+        </span>
+        <span className={styles.glyph} aria-hidden="true">
+          ▦
+        </span>
+        <span className={styles.label}>Image</span>
+        <span className={styles.summary}>{summarizeGalleryItem(item)}</span>
+
+        <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
+          {canMoveUp ? (
+            <IconButton
+              size="sm"
+              label="Move up"
+              onClick={() => moveGalleryItem(galleryId, item._id, -1)}
+            >
+              <ArrowUpIcon size={12} />
+            </IconButton>
+          ) : null}
+          {canMoveDown ? (
+            <IconButton
+              size="sm"
+              label="Move down"
+              onClick={() => moveGalleryItem(galleryId, item._id, 1)}
+            >
+              <ArrowDownIcon size={12} />
+            </IconButton>
+          ) : null}
+          <IconButton
+            size="sm"
+            label="Duplicate"
+            disabled={!canDuplicate}
+            onClick={() => duplicateGalleryItem(galleryId, item._id)}
+          >
+            <CopyIcon size={12} />
+          </IconButton>
+          {canRemove ? (
+            <IconButton
+              size="sm"
+              variant="danger"
+              label="Delete image"
+              onClick={() => removeGalleryItem(galleryId, item._id)}
+            >
+              <TrashIcon size={12} />
+            </IconButton>
+          ) : null}
+        </div>
+      </div>
+
+      {isSelected ? (
+        <div className={styles.editorPanel} onClick={(e) => e.stopPropagation()}>
+          <GalleryItemInspector galleryId={galleryId} item={item} />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+/** Short right-aligned summary for a gallery image row: its filename or state. */
+function summarizeGalleryItem(item: MediaGalleryItem): string {
+  const url = item.media.url?.trim();
+  if (url) {
+    const withoutQuery = url.split(/[?#]/)[0] ?? url;
+    const segment = withoutQuery.split("/").filter(Boolean).pop();
+    return segment || url;
+  }
+  if (item.media.attachment_id) return `attachment ${item.media.attachment_id}`;
+  return "No image set";
 }
 
 interface AdderHandlers {
@@ -950,7 +1171,16 @@ function collectAdders(node: AnyComponent, h: AdderHandlers): ReactNode[] {
   ) {
     out.push(
       <li key="__add_gallery_item" className={styles.adderItem}>
-        <AddChildButton label="Add image" onClick={() => h.addGalleryItem(node._id)} />
+        <AddChildButton
+          label="Add image"
+          onClick={() => {
+            // addGalleryItem appends the image and selects it; scroll its new
+            // row into view so it's ready to edit.
+            h.addGalleryItem(node._id);
+            const newId = useMessageStore.getState().selectedId;
+            if (newId) scrollTreeRowIntoView(newId);
+          }}
+        />
       </li>,
     );
   }
@@ -969,14 +1199,10 @@ const AddChildButton = forwardRef<
   }
 >(function AddChildButton({ label, onClick, ...rest }, ref) {
   return (
-    <button
-      ref={ref}
-      type="button"
-      className={styles.addChild}
-      onClick={onClick}
-      {...rest}
-    >
-      <span className={styles.addChildPlus} aria-hidden="true">+</span>
+    <button ref={ref} type="button" className={styles.addChild} onClick={onClick} {...rest}>
+      <span className={styles.addChildPlus} aria-hidden="true">
+        +
+      </span>
       <span>{label}</span>
     </button>
   );
@@ -1017,7 +1243,7 @@ function summarize(node: AnyComponent): string {
     return `${n} ${n === 1 ? "button" : "buttons"}`;
   }
   if (node.type === ComponentType.Button) {
-    return "label" in node ? node.label ?? "" : "";
+    return "label" in node ? (node.label ?? "") : "";
   }
   if (isSelect(node)) {
     return node.custom_id || "";

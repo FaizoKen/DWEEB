@@ -64,6 +64,18 @@ function stripNode(node: AnyComponent): unknown {
   if ("accessory" in node && (node as { accessory?: AnyComponent }).accessory) {
     out.accessory = stripNode((node as { accessory: AnyComponent }).accessory);
   }
+  // Gallery items carry an editor-only `_id` like components do — drop it so
+  // the exported items match Discord's media-gallery item schema.
+  if (Array.isArray((node as { items?: unknown }).items)) {
+    out.items = (node as unknown as { items: Array<Record<string, unknown>> }).items.map((item) => {
+      const { _id: _dropItem, ...itemRest } = item as { _id?: string };
+      const itemOut: Record<string, unknown> = { ...itemRest };
+      for (const k of Object.keys(itemOut)) {
+        if (itemOut[k] === undefined) delete itemOut[k];
+      }
+      return itemOut;
+    });
+  }
   // Strip undefineds so JSON stays compact.
   for (const k of Object.keys(out)) {
     if (out[k] === undefined) delete out[k];
@@ -158,6 +170,15 @@ function attachNode(raw: unknown): AnyComponent {
   }
   if (stamped.accessory) {
     stamped.accessory = attachNode(stamped.accessory);
+  }
+  // Stamp a fresh editor id onto each gallery item so they're selectable and
+  // reorderable as tree rows. Mirrors the per-component stamping above.
+  if (Array.isArray(stamped.items)) {
+    stamped.items = (stamped.items as unknown[]).map((item) =>
+      item && typeof item === "object"
+        ? { ...(item as Record<string, unknown>), _id: newId() }
+        : item,
+    );
   }
   // Container children get constrained; the validator catches type mismatches.
   if (stamped.type === ComponentType.Container && Array.isArray(stamped.components)) {

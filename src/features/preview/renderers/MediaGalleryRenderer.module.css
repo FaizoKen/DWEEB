@@ -56,6 +56,18 @@
   position: relative;
 }
 
+.clickable {
+  cursor: pointer;
+}
+
+/* Selected-image ring, mirroring the accent outline a selected component gets
+   in the preview. `outline-offset: -2px` keeps it inside the cell so it paints
+   over the image and isn't clipped by the gallery's overflow. */
+.selectedItem {
+  outline: 2px solid var(--discord-accent);
+  outline-offset: -2px;
+}
+
 .gallery[data-count="1"] .item {
   aspect-ratio: 16 / 10;
 }

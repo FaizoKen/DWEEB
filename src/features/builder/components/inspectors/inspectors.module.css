@@ -18,8 +18,13 @@
   text-transform: none;
   letter-spacing: 0;
 }
-.addItem:hover { background: rgba(88, 101, 242, 0.28); }
-.addItem:disabled { opacity: 0.5; cursor: not-allowed; }
+.addItem:hover {
+  background: rgba(88, 101, 242, 0.28);
+}
+.addItem:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .cards {
   display: flex;
@@ -35,6 +40,23 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Body padding for an image's inline editor when it's expanded as a tree row.
+   Mirrors the shared Inspector `.body` so it reads identically to a component
+   inspector. */
+.itemBody {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+@media (max-width: 640px) {
+  .itemBody {
+    padding: 10px;
+    gap: 12px;
+  }
 }
 
 .cardHeader {
@@ -92,7 +114,9 @@
   cursor: pointer;
   user-select: none;
 }
-.chip:hover { border-color: var(--app-accent); }
+.chip:hover {
+  border-color: var(--app-accent);
+}
 .chipActive {
   background: var(--app-accent-soft);
   border-color: var(--app-accent);
@@ -110,4 +134,3 @@
   flex-direction: column;
   gap: 10px;
 }
-

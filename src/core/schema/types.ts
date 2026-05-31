@@ -140,6 +140,12 @@ export interface ThumbnailComponent extends BaseComponent {
 }
 
 export interface MediaGalleryItem {
+  /**
+   * Editor-only stable id so each image can be selected, reordered, and
+   * collapsed/expanded as its own tree row. Stripped at export (see
+   * `serialization/normalize.ts`) and stamped fresh on import.
+   */
+  _id: EditorId;
   media: UnfurledMediaItem;
   description?: string;
   spoiler?: boolean;

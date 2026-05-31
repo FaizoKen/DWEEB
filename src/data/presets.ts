@@ -59,14 +59,17 @@ const DEFAULT_MESSAGE: WebhookMessage = {
           type: ComponentType.MediaGallery,
           items: [
             {
+              _id: id(),
               media: { url: "https://picsum.photos/seed/wb-g1/600/400" },
               description: "Galleries support up to 10 items",
             },
             {
+              _id: id(),
               media: { url: "https://picsum.photos/seed/wb-g2/600/400" },
               description: "Each item can have a description",
             },
             {
+              _id: id(),
               media: { url: "https://picsum.photos/seed/wb-g3/600/400" },
               description: "Mark individual items as spoilers",
             },

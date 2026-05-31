@@ -18,6 +18,7 @@ import {
   type FileComponent,
   type LinkButtonComponent,
   type MediaGalleryComponent,
+  type MediaGalleryItem,
   type MentionableSelectComponent,
   type RoleSelectComponent,
   type SectionComponent,
@@ -70,13 +71,19 @@ export function createSection(): SectionComponent {
   };
 }
 
+/** A single gallery image with a fresh editor id. */
+export function createGalleryItem(): MediaGalleryItem {
+  return {
+    _id: newId(),
+    media: { url: "https://placehold.co/600x400/5865F2/ffffff/png?text=Image" },
+  };
+}
+
 export function createMediaGallery(): MediaGalleryComponent {
   return {
     _id: newId(),
     type: ComponentType.MediaGallery,
-    items: [
-      { media: { url: "https://placehold.co/600x400/5865F2/ffffff/png?text=Image+1" } },
-    ],
+    items: [createGalleryItem()],
   };
 }
 
