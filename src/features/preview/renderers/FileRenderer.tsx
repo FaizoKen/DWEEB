@@ -2,6 +2,7 @@ import type { FileComponent } from "@/core/schema/types";
 import { cn } from "@/lib/cn";
 import { parseSessionUrl } from "@/core/state/attachmentStore";
 import { useResolvedMediaUrl } from "./useResolvedMediaUrl";
+import { mediaKindFromName } from "./mediaKind";
 import styles from "./FileRenderer.module.css";
 
 export function FileRenderer({ node }: { node: FileComponent }) {
@@ -73,20 +74,4 @@ export function FileRenderer({ node }: { node: FileComponent }) {
       </div>
     </div>
   );
-}
-
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "apng"]);
-const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "m4v", "ogv"]);
-
-function mediaKindFromName(name: string, contentType?: string): "image" | "video" | null {
-  if (contentType) {
-    if (contentType.startsWith("image/")) return "image";
-    if (contentType.startsWith("video/")) return "video";
-  }
-  const dot = name.lastIndexOf(".");
-  if (dot < 0) return null;
-  const ext = name.slice(dot + 1).toLowerCase();
-  if (IMAGE_EXTS.has(ext)) return "image";
-  if (VIDEO_EXTS.has(ext)) return "video";
-  return null;
 }

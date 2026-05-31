@@ -28,7 +28,7 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
     <div className={styles.itemBody}>
       <AttachmentPicker
         url={item.media.url ?? ""}
-        accept="image/*"
+        accept="image/*,video/*"
         onChange={(next) =>
           patchItem(galleryId, item._id, {
             media: { url: next, attachment_id: undefined },

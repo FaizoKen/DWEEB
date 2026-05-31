@@ -12,10 +12,13 @@
 .gallery[data-count="2"] {
   grid-template-columns: 1fr 1fr;
 }
+/* 1.6fr left + two stacked 1fr rows. The 13/10 ratio is chosen so the right
+   column's two cells render square (1fr col ≈ row height); fixed rows keep the
+   left (spanning) image filling via object-fit cover with no leftover gap. */
 .gallery[data-count="3"] {
   grid-template-columns: 1.6fr 1fr;
   grid-template-rows: 1fr 1fr;
-  aspect-ratio: 5 / 4;
+  aspect-ratio: 13 / 10;
 }
 .gallery[data-count="4"] {
   grid-template-columns: 1fr 1fr;
@@ -72,11 +75,31 @@
   aspect-ratio: 16 / 10;
 }
 
+/* Cells fill their grid track (no intrinsic aspect) so nothing leaves a gap;
+   the first item spans both rows as the wide hero. */
 .gallery[data-count="3"] .item {
   aspect-ratio: auto;
 }
 .gallery[data-count="3"] .item:first-child {
   grid-row: 1 / span 2;
+}
+
+/* Centered play overlay on video items, matching Discord's gallery render. */
+.playButton {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 2px; /* optically center the triangle */
+  pointer-events: none;
 }
 
 .altBadge {
@@ -94,19 +117,31 @@
   pointer-events: none;
 }
 
-.item img {
+/* Video items pin the badge top-left (declared after .altBadge so its
+   bottom override wins at equal specificity). */
+.altBadgeTop {
+  top: 8px;
+  bottom: auto;
+}
+
+.item img,
+.item video {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.spoiler img {
+.spoiler img,
+.spoiler video {
   filter: blur(40px);
   transition: filter 200ms ease;
 }
 .spoiler:hover img,
 .spoiler:focus-within img,
-.spoiler:active img {
+.spoiler:active img,
+.spoiler:hover video,
+.spoiler:focus-within video,
+.spoiler:active video {
   filter: blur(20px);
 }
 

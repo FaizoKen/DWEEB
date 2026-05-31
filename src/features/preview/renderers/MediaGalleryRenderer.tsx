@@ -17,6 +17,7 @@ import { useAiStore } from "@/core/ai/aiStore";
 import { cn } from "@/lib/cn";
 import { usePreviewClose } from "../previewCloseContext";
 import { useResolvedMediaUrl } from "./useResolvedMediaUrl";
+import { mediaKindFromName, mediaNameFromUrl } from "./mediaKind";
 import styles from "./MediaGalleryRenderer.module.css";
 
 export function MediaGalleryRenderer({ node }: { node: MediaGalleryComponent }) {
@@ -65,9 +66,13 @@ function GalleryItem({
   selected: boolean;
   onPick: () => void;
 }) {
-  const src = useResolvedMediaUrl(item.media.url ?? "");
+  const url = item.media.url ?? "";
+  const src = useResolvedMediaUrl(url);
   const usesAttachmentId = !item.media.url && typeof item.media.attachment_id === "string";
   const hasAlt = Boolean(item.description);
+  // Galleries accept video items too — render a <video> for those so an mp4
+  // doesn't paint as a broken <img>. Default to image when the kind is unknown.
+  const kind = src ? mediaKindFromName(mediaNameFromUrl(url), item.media.content_type) : null;
   return (
     <figure
       // Lets the tree→preview scroll (and the editor selection highlight) target
@@ -86,13 +91,29 @@ function GalleryItem({
       }}
     >
       {src ? (
-        <img src={src} alt={item.description || ""} loading="lazy" decoding="async" />
+        kind === "video" ? (
+          <video src={src} muted playsInline preload="metadata" />
+        ) : (
+          <img src={src} alt={item.description || ""} loading="lazy" decoding="async" />
+        )
       ) : (
         <div className={styles.placeholder} aria-label="Attachment will be uploaded on send">
           {usesAttachmentId ? "Resolved on send" : "Will upload on send"}
         </div>
       )}
-      {hasAlt && src && <span className={styles.altBadge}>ALT</span>}
+      {kind === "video" && src && (
+        // Discord overlays a play button on gallery video items; mirror it.
+        <span className={styles.playButton} aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        </span>
+      )}
+      {hasAlt && src && (
+        // Discord pins the ALT badge top-left on video items (the play button
+        // occupies the center, the bottom edge reads as scrubber territory).
+        <span className={cn(styles.altBadge, kind === "video" && styles.altBadgeTop)}>ALT</span>
+      )}
     </figure>
   );
 }
