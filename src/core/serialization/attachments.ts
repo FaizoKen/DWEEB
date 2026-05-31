@@ -12,11 +12,15 @@
  * so the encoding for share URLs / JSON export stays free of any multipart
  * concerns — only the live send/update path uses this.
  *
- * Restored messages from Discord arrive with resolved fields on every media
- * item (`proxy_url`, `height`, `width`, `content_type`, `loading_state`).
- * These are server-side metadata that the execute endpoint does not accept
- * back; we drop them here so a "restore → edit → update" round-trip stays
- * accepted.
+ * Restored messages from Discord arrive with a pile of resolved fields on
+ * every media item (`id`, `proxy_url`, `height`, `width`, `content_type`,
+ * `loading_state`, `placeholder`, `placeholder_version`,
+ * `content_scan_metadata`, `flags`) plus both a CDN `url` and an
+ * `attachment_id`. The resolved fields are server-side metadata the execute
+ * endpoint rejects, and the `attachment_id` references the original message's
+ * upload — neither survives a re-post. We strip the metadata and keep the CDN
+ * `url` (which Discord re-resolves) so a "restore → edit → update / re-post"
+ * round-trip stays accepted.
  */
 
 import {
@@ -47,18 +51,33 @@ const RESOLVED_MEDIA_FIELDS = [
   "width",
   "content_type",
   "loading_state",
+  // Discord also stamps these onto every restored media item. They're all
+  // output-only — the execute/update endpoint 400s if any are sent back.
+  "id",
+  "placeholder",
+  "placeholder_version",
+  "content_scan_metadata",
+  "flags",
 ] as const;
 
 /** Drop server-only resolved fields and reconcile `url` vs `attachment_id`. */
 function cleanMedia(raw: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...raw };
   for (const k of RESOLVED_MEDIA_FIELDS) delete out[k];
-  // Prefer `attachment_id` when both are set; Discord rejects payloads carrying
-  // an attachment_id alongside an unrelated url.
-  if (typeof out.attachment_id === "string" && out.attachment_id.length > 0) {
+  // Discord rejects a media item that carries both `attachment_id` and an
+  // unrelated `url`, so we keep exactly one reference. Prefer a concrete `url`
+  // — for a restored message that's the CDN link Discord re-resolves from, and
+  // for an in-session upload it's the rewritten `attachment://<filename>` ref.
+  // The restore-only `attachment_id` points at the *original* message's upload,
+  // which isn't part of this send, so dropping it is what makes a
+  // restore → re-post / update round-trip succeed.
+  if (typeof out.url === "string" && out.url.length > 0) {
+    delete out.attachment_id;
+  } else {
     delete out.url;
-  } else if (typeof out.url !== "string" || out.url.length === 0) {
-    delete out.url;
+    if (typeof out.attachment_id !== "string" || out.attachment_id.length === 0) {
+      delete out.attachment_id;
+    }
   }
   return out;
 }
