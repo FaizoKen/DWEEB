@@ -7,7 +7,15 @@
  */
 
 import { memo, useState, type ReactNode } from "react";
-import { parseMarkdown, type BlockNode, type InlineNode, type MentionKind } from "./parse";
+import {
+  parseMarkdown,
+  type BlockNode,
+  type GuildNavType,
+  type InlineNode,
+  type MentionKind,
+} from "./parse";
+import { formatTimestamp } from "./timestamp";
+import { GUILD_NAV_BY_TYPE } from "@/ui/guildNav";
 import { cn } from "@/lib/cn";
 import styles from "./Markdown.module.css";
 
@@ -148,6 +156,8 @@ function renderInlineNode(node: InlineNode, key: number): ReactNode {
       );
     case "mention":
       return <Mention key={key} kind={node.mention} id={node.id} />;
+    case "guildNav":
+      return <GuildNav key={key} nav={node.nav} />;
     case "emoji":
       return (
         <img
@@ -181,30 +191,13 @@ function Mention({ kind, id }: { kind: MentionKind; id: string }) {
   return <span className={styles.mention}>#channel-{id.slice(-4)}</span>;
 }
 
-function formatTimestamp(unix: number, style: string): string {
-  const d = new Date(unix * 1000);
-  switch (style) {
-    case "t":
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    case "T":
-      return d.toLocaleTimeString();
-    case "d":
-      return d.toLocaleDateString();
-    case "D":
-      return d.toLocaleDateString([], { dateStyle: "long" });
-    case "F":
-      return d.toLocaleString([], { dateStyle: "full", timeStyle: "short" });
-    case "R": {
-      const diff = (Date.now() - d.getTime()) / 1000;
-      const abs = Math.abs(diff);
-      const fmt = (n: number, unit: string) =>
-        diff >= 0 ? `${Math.floor(n)} ${unit} ago` : `in ${Math.floor(n)} ${unit}`;
-      if (abs < 60) return fmt(abs, "seconds");
-      if (abs < 3600) return fmt(abs / 60, "minutes");
-      if (abs < 86400) return fmt(abs / 3600, "hours");
-      return fmt(abs / 86400, "days");
-    }
-    default:
-      return d.toLocaleString();
-  }
+/** Built-in server navigation mention (Browse Channels, Server Guide, …). */
+function GuildNav({ nav }: { nav: GuildNavType }) {
+  const { Icon, label } = GUILD_NAV_BY_TYPE[nav];
+  return (
+    <span className={styles.mention}>
+      <Icon className={styles.navIcon} />
+      {label}
+    </span>
+  );
 }

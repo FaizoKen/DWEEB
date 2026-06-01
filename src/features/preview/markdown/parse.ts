@@ -11,6 +11,7 @@
  *   - `||spoiler||`
  *   - `[label](url)` — masked links
  *   - User/role/channel mentions `<@id>`, `<@&id>`, `<#id>`
+ *   - Guild navigation `<id:browse>`, `<id:guide>`, `<id:customize>`, `<id:linked-roles>`
  *   - Custom emoji `<:name:id>` / `<a:name:id>`
  *   - Timestamps `<t:unix:style>`
  *
@@ -29,11 +30,15 @@ export type InlineNode =
   | { kind: "code"; value: string }
   | { kind: "link"; href: string; children: InlineNode[] }
   | { kind: "mention"; mention: MentionKind; id: string }
+  | { kind: "guildNav"; nav: GuildNavType }
   | { kind: "emoji"; name: string; id: string; animated: boolean }
   | { kind: "timestamp"; unix: number; style: string }
   | { kind: "break" };
 
 export type MentionKind = "user" | "role" | "channel" | "everyone" | "here";
+
+/** Discord's built-in "guild navigation" mentions (`<id:type>`). */
+export type GuildNavType = "customize" | "browse" | "guide" | "linked-roles";
 
 export type BlockNode =
   | { kind: "paragraph"; children: InlineNode[] }
@@ -323,6 +328,8 @@ export function parseInline(input: string): InlineNode[] {
   return out;
 }
 
+const GUILD_NAV_TYPES = new Set<string>(["customize", "browse", "guide", "linked-roles"]);
+
 function parseAngleToken(token: string): InlineNode | null {
   // User mention <@123> or <@!123>
   let m = /^@!?(\d+)$/.exec(token);
@@ -335,6 +342,12 @@ function parseAngleToken(token: string): InlineNode | null {
   // Channel mention <#123>
   m = /^#(\d+)$/.exec(token);
   if (m) return { kind: "mention", mention: "channel", id: m[1]! };
+
+  // Guild navigation <id:browse> / <id:guide> / <id:customize> / <id:linked-roles>
+  m = /^id:([a-z-]+)$/.exec(token);
+  if (m && GUILD_NAV_TYPES.has(m[1]!)) {
+    return { kind: "guildNav", nav: m[1] as GuildNavType };
+  }
 
   // Custom emoji <:name:id> / <a:name:id>
   m = /^(a)?:([a-zA-Z0-9_]+):(\d+)$/.exec(token);

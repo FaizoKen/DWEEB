@@ -7,6 +7,7 @@ import {
   ClockIcon,
   CodeBlockIcon,
   CodeIcon,
+  CompassIcon,
   EmojiIcon,
   HeadingIcon,
   ItalicIcon,
@@ -36,6 +37,8 @@ import {
   type EditResult,
   type EditState,
 } from "@/ui/markdownActions";
+import { TimestampPanel } from "@/ui/TimestampPicker";
+import { GUILD_NAV_ITEMS } from "@/ui/guildNav";
 import styles from "./MarkdownToolbar.module.css";
 
 type Transform = (state: EditState) => EditResult;
@@ -82,8 +85,6 @@ const ToolButton = forwardRef<HTMLButtonElement, ToolButtonProps>(function ToolB
   );
 });
 
-const NOW = () => Math.floor(Date.now() / 1000);
-
 /**
  * Formatting toolbar for a Discord-markdown textarea. Every button maps to a
  * pure transform in `markdownActions`; the component itself holds no state and
@@ -95,7 +96,12 @@ export function MarkdownToolbar({ state, onAction, disabled }: MarkdownToolbarPr
   const active = (marker: string) => isInlineActive(state, marker);
 
   return (
-    <div className={styles.toolbar} role="toolbar" aria-label="Text formatting" aria-disabled={disabled}>
+    <div
+      className={styles.toolbar}
+      role="toolbar"
+      aria-label="Text formatting"
+      aria-disabled={disabled}
+    >
       <div className={styles.group}>
         <ToolButton label="Bold (Ctrl+B)" active={active("**")} onClick={inline("**", "bold text")}>
           <BoldIcon />
@@ -283,25 +289,49 @@ export function MarkdownToolbar({ state, onAction, disabled }: MarkdownToolbarPr
               >
                 Custom emoji
               </MenuItem>
-              <MenuItem
-                icon={<ClockIcon size={15} />}
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, `<t:${NOW()}:F>`));
-                  close();
-                }}
-              >
-                Timestamp (now)
-              </MenuItem>
-              <MenuItem
-                icon={<ClockIcon size={15} />}
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, `<t:${NOW()}:R>`));
-                  close();
-                }}
-              >
-                Relative timestamp
-              </MenuItem>
             </>
+          )}
+        </Menu>
+        <Menu
+          align="start"
+          trigger={
+            <ToolButton label="Server link" className={styles.btnMenu}>
+              <CompassIcon />
+              <ChevronDownIcon size={12} className={styles.caret} />
+            </ToolButton>
+          }
+        >
+          {(close) =>
+            GUILD_NAV_ITEMS.map((item) => (
+              <MenuItem
+                key={item.type}
+                icon={<item.Icon size={15} />}
+                onSelect={() => {
+                  onAction((s) => insertSnippet(s, item.snippet));
+                  close();
+                }}
+              >
+                {item.label}
+              </MenuItem>
+            ))
+          }
+        </Menu>
+        <Menu
+          align="end"
+          trigger={
+            <ToolButton label="Timestamp" className={styles.btnMenu}>
+              <ClockIcon />
+              <ChevronDownIcon size={12} className={styles.caret} />
+            </ToolButton>
+          }
+        >
+          {(close) => (
+            <TimestampPanel
+              onInsert={(snippet) => {
+                onAction((s) => insertSnippet(s, snippet));
+                close();
+              }}
+            />
           )}
         </Menu>
       </div>

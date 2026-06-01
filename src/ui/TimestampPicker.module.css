@@ -1,0 +1,140 @@
+/*
+ * Lives inside the shared Menu panel (portalled, positioned, dismiss-on-outside
+ * — see Menu.tsx), so this only styles the picker's own innards. The Menu
+ * panel's padding becomes the picker's outer gutter; the style rows pick up the
+ * same inset hover pills the rest of the menu items use.
+ */
+
+.panel {
+  width: min(300px, calc(100vw - 40px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-2);
+  color: var(--app-text);
+}
+
+.fields {
+  display: flex;
+  gap: var(--app-space-2);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+/* Date carries a longer value than time, so it gets the extra room. */
+.field[data-grow] {
+  flex: 1.4;
+}
+
+.fieldLabel {
+  font-size: var(--app-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--app-text-subtle);
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  height: var(--app-control-h-sm);
+  padding: 0 10px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  font-size: var(--app-text-sm);
+  font-family: inherit;
+  /* Themes the native calendar/clock popup and picker indicator to dark. */
+  color-scheme: dark;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.input:focus {
+  outline: none;
+  border-color: var(--app-border-focus);
+  box-shadow: var(--app-focus-ring);
+}
+
+.now {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 8px;
+  background: transparent;
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
+  color: var(--app-text-muted);
+  font-size: var(--app-text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.now:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+  border-color: var(--app-border-strong);
+}
+.now:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+.styleList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: var(--app-space-2);
+  border-top: 1px solid var(--app-border);
+}
+
+.styleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-2);
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+.styleRow:hover,
+.styleRow:focus-visible {
+  background: var(--app-bg-hover);
+  outline: none;
+}
+
+.preview {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--app-text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The literal style code, kept visible so power users learn the syntax. */
+.code {
+  flex: 0 0 auto;
+  font-family: var(--app-font-mono);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--app-text-subtle);
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  padding: 3px 6px;
+}

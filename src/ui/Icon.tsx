@@ -288,7 +288,14 @@ export const StrikethroughIcon = ({ size = 16, ...rest }: IconProps) => (
 
 export const HeadingIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...glyph(size)} {...rest}>
-    <text x="12" y="17.5" textAnchor="middle" fontSize="17" fontWeight="800" fontFamily={GLYPH_FONT}>
+    <text
+      x="12"
+      y="17.5"
+      textAnchor="middle"
+      fontSize="17"
+      fontWeight="800"
+      fontFamily={GLYPH_FONT}
+    >
       H
     </text>
   </svg>
@@ -326,13 +333,37 @@ export const ListBulletIcon = ({ size = 16, ...rest }: IconProps) => (
 export const ListOrderedIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M10 7h10M10 12h10M10 17h10" />
-    <text x="2.5" y="9" fontSize="6.5" fontWeight="700" fontFamily={GLYPH_FONT} fill="currentColor" stroke="none">
+    <text
+      x="2.5"
+      y="9"
+      fontSize="6.5"
+      fontWeight="700"
+      fontFamily={GLYPH_FONT}
+      fill="currentColor"
+      stroke="none"
+    >
       1
     </text>
-    <text x="2.5" y="14" fontSize="6.5" fontWeight="700" fontFamily={GLYPH_FONT} fill="currentColor" stroke="none">
+    <text
+      x="2.5"
+      y="14"
+      fontSize="6.5"
+      fontWeight="700"
+      fontFamily={GLYPH_FONT}
+      fill="currentColor"
+      stroke="none"
+    >
       2
     </text>
-    <text x="2.5" y="19" fontSize="6.5" fontWeight="700" fontFamily={GLYPH_FONT} fill="currentColor" stroke="none">
+    <text
+      x="2.5"
+      y="19"
+      fontSize="6.5"
+      fontWeight="700"
+      fontFamily={GLYPH_FONT}
+      fill="currentColor"
+      stroke="none"
+    >
       3
     </text>
   </svg>
@@ -374,6 +405,21 @@ export const ClockIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <circle cx="12" cy="12" r="9" />
     <path d="M12 7v5l3.5 2" />
+  </svg>
+);
+
+/** Slanted hashtag — the "channel" glyph, for the Browse Channels nav mention. */
+export const HashIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M10 4 8 20M16 4l-2 16M5 9h14M4 15h14" />
+  </svg>
+);
+
+/** Compass — for the Server Guide nav mention. */
+export const CompassIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M15.8 8.2 13.4 13.4 8.2 15.8l2.4-5.2z" />
   </svg>
 );
 
