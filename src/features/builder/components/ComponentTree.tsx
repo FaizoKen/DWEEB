@@ -296,25 +296,7 @@ function computeAllowedPositions(source: DragSource, target: RowData): DropPosit
 export function ComponentTree() {
   const components = useMessageStore((s) => s.message.components);
   const addTopLevel = useMessageStore((s) => s.addTopLevel);
-  const selectedId = useMessageStore((s) => s.selectedId);
-  const select = useMessageStore((s) => s.select);
   const atLimit = components.length >= LIMITS.TOP_LEVEL_COMPONENTS;
-
-  // Clicking empty tree space — not a row (rows stop propagation), its inline
-  // editor, or a meta-header control — clears the selection. This collapses
-  // any open inspector, minimizing the tree back to its bare outline.
-  const clearSelectionOnBackdrop = useCallback(
-    (e: ReactMouseEvent<HTMLDivElement>) => {
-      if (
-        (e.target as HTMLElement).closest(
-          "[data-tree-row], input, textarea, select, button, label, a, summary",
-        )
-      )
-        return;
-      if (selectedId !== null) select(null);
-    },
-    [selectedId, select],
-  );
 
   const [drag, setDrag] = useState<DragInfo | null>(null);
   const [ghostStart, setGhostStart] = useState<{ x: number; y: number } | null>(null);
@@ -354,7 +336,7 @@ export function ComponentTree() {
     <ValidationContext.Provider value={validation}>
       <DragContext.Provider value={dragSession}>
         <div className={styles.tree}>
-          <div ref={scrollRef} className={styles.scroll} onClick={clearSelectionOnBackdrop}>
+          <div ref={scrollRef} className={styles.scroll}>
             <MetaHeader />
 
             {components.length === 0 ? (
