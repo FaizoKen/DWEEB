@@ -45,6 +45,8 @@ import {
   updateWebhookMessage,
   verifyWebhook,
   webhookAvatarHash,
+  webhookChannelId,
+  webhookGuildId,
   type WebhookHistoryEntry,
   type WebhookOwner,
   type WebhookOwnerKind,
@@ -100,8 +102,14 @@ export function SendPanel({
   // actual POST/PATCH runs from `handleConfirmedSend` when the user confirms.
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Result of the last "Save webhook" verify GET — used to show who owns the
-  // webhook (bot vs. person) before any message is sent.
-  const [verified, setVerified] = useState<{ name: string; owner: WebhookOwner } | null>(null);
+  // webhook (bot vs. person) and where it posts (guild/channel) before any
+  // message is sent.
+  const [verified, setVerified] = useState<{
+    name: string;
+    owner: WebhookOwner;
+    channelId?: string;
+    guildId?: string;
+  } | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const saveAbortRef = useRef<AbortController | null>(null);
@@ -171,6 +179,21 @@ export function SendPanel({
     return history.find((e) => e.id === parsedUrl.id)?.avatar ?? undefined;
   }, [parsedUrl, history]);
 
+  // Where the webhook posts — from a fresh verify or a saved entry. Shown in the
+  // confirm dialog so the destination is explicit; undefined until verified for
+  // a freshly-typed URL (resolved on confirm, same as ownership).
+  const knownChannelId = useMemo(() => {
+    if (verified?.channelId) return verified.channelId;
+    if (!parsedUrl) return undefined;
+    return history.find((e) => e.id === parsedUrl.id)?.channelId;
+  }, [verified, parsedUrl, history]);
+
+  const knownGuildId = useMemo(() => {
+    if (verified?.guildId) return verified.guildId;
+    if (!parsedUrl) return undefined;
+    return history.find((e) => e.id === parsedUrl.id)?.guildId;
+  }, [verified, parsedUrl, history]);
+
   // The capability inspector flags interactive components, but what that flag
   // means depends on who owns the webhook:
   //  - person/follower → hard block: Discord rejects the send outright.
@@ -235,10 +258,13 @@ export function SendPanel({
     // ownership block fires here instead of letting an interactive message slip
     // through to Discord and bounce back as a rejection.
     let ownerKind = knownOwnerKind;
-    // The webhook's own name + avatar, captured if we end up verifying here.
-    // Used to label and picture the recents entry without asking for input.
+    // The webhook's own name + avatar + location, captured if we end up
+    // verifying here. Used to label and picture the recents entry (and to show
+    // the destination in the confirm) without asking for input.
     let resolvedName: string | undefined;
     let resolvedAvatar: string | null | undefined;
+    let resolvedChannelId: string | undefined;
+    let resolvedGuildId: string | undefined;
     if (!ownerKind) {
       const check = await verifyWebhook(parsedUrl, { signal: ac.signal });
       if (!check.ok) {
@@ -253,7 +279,14 @@ export function SendPanel({
       ownerKind = owner.kind;
       resolvedName = typeof check.webhook.name === "string" ? check.webhook.name : undefined;
       resolvedAvatar = webhookAvatarHash(check.webhook);
-      setVerified({ name: resolvedName ?? "", owner });
+      resolvedChannelId = webhookChannelId(check.webhook) ?? undefined;
+      resolvedGuildId = webhookGuildId(check.webhook) ?? undefined;
+      setVerified({
+        name: resolvedName ?? "",
+        owner,
+        channelId: resolvedChannelId,
+        guildId: resolvedGuildId,
+      });
     }
 
     if (appWebhookNote != null && (ownerKind === "user" || ownerKind === "follower")) {
@@ -286,7 +319,13 @@ export function SendPanel({
       // recents without a separate "Save webhook" click. Records the name +
       // owner we resolved above; any inline label is preserved by the upsert,
       // which also refreshes lastUsedAt so recents stay ordered by most-recent.
-      rememberWebhook(parsedUrl.url, { name: resolvedName, ownerKind, avatar: resolvedAvatar });
+      rememberWebhook(parsedUrl.url, {
+        name: resolvedName,
+        ownerKind,
+        avatar: resolvedAvatar,
+        channelId: resolvedChannelId,
+        guildId: resolvedGuildId,
+      });
       setHistory(loadHistory());
     } else {
       setState({
@@ -323,11 +362,15 @@ export function SendPanel({
 
     const remoteName = typeof result.webhook.name === "string" ? result.webhook.name : "";
     const owner = classifyWebhookOwner(result.webhook);
-    setVerified({ name: remoteName, owner });
+    const channelId = webhookChannelId(result.webhook) ?? undefined;
+    const guildId = webhookGuildId(result.webhook) ?? undefined;
+    setVerified({ name: remoteName, owner, channelId, guildId });
     const entry = rememberWebhook(parsedUrl.url, {
       name: remoteName,
       ownerKind: owner.kind,
       avatar: webhookAvatarHash(result.webhook),
+      channelId,
+      guildId,
     });
     if (entry) {
       setHistory(loadHistory());
@@ -600,6 +643,8 @@ export function SendPanel({
         ownerKind={knownOwnerKind}
         webhookId={parsedUrl?.id}
         webhookAvatar={knownAvatar}
+        guildId={knownGuildId}
+        channelId={knownChannelId}
         threadId={threadId.trim() || undefined}
         messageId={mode === "update" ? (parsedMessageId ?? undefined) : undefined}
         pings={pings}

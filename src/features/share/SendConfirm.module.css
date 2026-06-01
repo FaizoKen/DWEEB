@@ -108,6 +108,17 @@
   align-self: center;
 }
 
+.openChannel {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--app-accent, rgb(120, 130, 255));
+  text-decoration: none;
+  white-space: nowrap;
+}
+.openChannel:hover {
+  text-decoration: underline;
+}
+
 /* No-ping state — calm, reassuring. */
 .pingCalm {
   background: var(--app-bg-elevated);

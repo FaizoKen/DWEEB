@@ -424,6 +424,26 @@ export function webhookAvatarHash(webhook: Record<string, unknown>): string | nu
 }
 
 /**
+ * Channel the webhook posts to, from a verified webhook object. Discord always
+ * returns `channel_id` on the token GET; null only if the shape is unexpected.
+ */
+export function webhookChannelId(webhook: Record<string, unknown>): string | null {
+  return typeof webhook.channel_id === "string" && webhook.channel_id.length > 0
+    ? webhook.channel_id
+    : null;
+}
+
+/**
+ * Guild the webhook belongs to. Present for the usual incoming/app webhooks;
+ * Discord may omit it for some webhook types, so this can legitimately be null.
+ */
+export function webhookGuildId(webhook: Record<string, unknown>): string | null {
+  return typeof webhook.guild_id === "string" && webhook.guild_id.length > 0
+    ? webhook.guild_id
+    : null;
+}
+
+/**
  * CDN URL for a webhook's avatar. Discord serves webhook avatars under the
  * webhook id; a null hash means the webhook has no custom picture, so we fall
  * back to Discord's default avatar. Animated hashes (`a_…`) are served as gifs.

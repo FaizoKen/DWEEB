@@ -34,6 +34,10 @@ export interface WebhookHistoryEntry {
   ownerKind?: WebhookOwnerKind;
   /** Avatar hash captured at save time; null when the webhook has no picture. */
   avatar?: string | null;
+  /** Channel the webhook posts to, captured at verify time. Absent on older entries. */
+  channelId?: string;
+  /** Guild the webhook belongs to, captured at verify time. Absent when Discord omits it. */
+  guildId?: string;
 }
 
 const OWNER_KINDS: readonly WebhookOwnerKind[] = ["bot", "user", "follower", "unknown"];
@@ -63,6 +67,10 @@ function safeParse(raw: string | null): WebhookHistoryEntry[] {
         ownerKind: OWNER_KINDS.includes(e.ownerKind as WebhookOwnerKind) ? e.ownerKind : undefined,
         // Keep only a string hash; anything else (incl. old entries) → no avatar.
         avatar: typeof (e as { avatar?: unknown }).avatar === "string" ? e.avatar : null,
+        // Snowflakes only; older entries (saved before these fields) → undefined.
+        channelId:
+          typeof (e as { channelId?: unknown }).channelId === "string" ? e.channelId : undefined,
+        guildId: typeof (e as { guildId?: unknown }).guildId === "string" ? e.guildId : undefined,
       }));
   } catch {
     return [];
@@ -93,6 +101,8 @@ export function rememberWebhook(
     label?: string;
     ownerKind?: WebhookOwnerKind;
     avatar?: string | null;
+    channelId?: string;
+    guildId?: string;
   } = {},
 ): WebhookHistoryEntry | null {
   const parsed = parseWebhookUrl(rawUrl);
@@ -109,6 +119,8 @@ export function rememberWebhook(
     ownerKind: fields.ownerKind ?? existing?.ownerKind,
     // `null` is a real value ("no picture"), so only fall back when omitted.
     avatar: fields.avatar !== undefined ? fields.avatar : (existing?.avatar ?? null),
+    channelId: fields.channelId ?? existing?.channelId,
+    guildId: fields.guildId ?? existing?.guildId,
   };
 
   const next = [entry, ...all.filter((e) => e.id !== parsed.id)].slice(0, MAX_ENTRIES);

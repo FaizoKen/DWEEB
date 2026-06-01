@@ -44,6 +44,10 @@ export interface SendConfirmProps {
   webhookId?: string;
   /** Avatar hash (from a saved entry); null/undefined falls back to the default. */
   webhookAvatar?: string | null;
+  /** Guild the webhook posts to, when known (verified or from a saved entry). */
+  guildId?: string;
+  /** Channel the webhook posts to, when known (verified or from a saved entry). */
+  channelId?: string;
   /** Target thread id, when posting into a thread. */
   threadId?: string;
   /** Message id being overwritten, in update mode. */
@@ -132,6 +136,8 @@ export function SendConfirm({
   ownerKind,
   webhookId,
   webhookAvatar,
+  guildId,
+  channelId,
   threadId,
   messageId,
   pings,
@@ -197,6 +203,32 @@ export function SendConfirm({
             ) : null}
           </dd>
         </div>
+        {guildId ? (
+          <div className={styles.fact}>
+            <dt>Server</dt>
+            <dd>
+              <code className={styles.chip}>{guildId}</code>
+            </dd>
+          </div>
+        ) : null}
+        {channelId ? (
+          <div className={styles.fact}>
+            <dt>Channel</dt>
+            <dd>
+              <code className={styles.chip}>{channelId}</code>
+              {guildId ? (
+                <a
+                  className={styles.openChannel}
+                  href={`https://discord.com/channels/${guildId}/${channelId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open ↗
+                </a>
+              ) : null}
+            </dd>
+          </div>
+        ) : null}
         {threadId ? (
           <div className={styles.fact}>
             <dt>Thread</dt>
