@@ -103,6 +103,9 @@ export interface MessageState {
   /** Drop the restore origin (e.g. user picks "Send as new" in the Send panel). */
   clearRestoreOrigin(): void;
   loadDefaultPreset(): void;
+  /** Wipe the editor to a fully blank message — components plus every
+   *  message-level option (username, avatar, mentions, etc.). Undoable. */
+  clearAll(): void;
   setUsername(value: string | undefined): void;
   setAvatarUrl(value: string | undefined): void;
   setTts(value: boolean): void;
@@ -333,6 +336,17 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set((s) => ({
       ...pushHistory(s),
       message: reassignIds(DEFAULT_PRESET.message),
+      selectedId: null,
+      restoredFrom: null,
+    }));
+  },
+
+  clearAll() {
+    set((s) => ({
+      ...pushHistory(s),
+      // A fresh, empty message — drops every message-level option (username,
+      // avatar, mentions, thread name…) along with the component tree.
+      message: { components: [] },
       selectedId: null,
       restoredFrom: null,
     }));

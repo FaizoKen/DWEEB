@@ -1,14 +1,15 @@
 /**
  * "Saved" dropdown — replaces the old Reset button.
  *
- * Three jobs:
+ * Four jobs:
  *  - Stash the current message under a user-supplied name (localStorage).
+ *  - Wipe the editor back to an empty message.
+ *  - Drop in one of the built-in templates as a starting point.
  *  - Load a previously saved message back into the editor.
- *  - Reset to the default preset (the action this control used to be).
  *
- * Saved messages are listed inline in the menu so loading is one click. Each
- * row carries a delete affordance. A short naming dialog appears when the
- * user picks "Save current message…".
+ * Templates and saved messages are listed inline in the menu so loading is one
+ * click. Saved rows carry a delete affordance. A short naming dialog appears
+ * when the user picks "Save current message…".
  */
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -18,17 +19,18 @@ import {
   useSavedMessagesStore,
   type SavedMessageRecord,
 } from "@/core/state/savedMessagesStore";
+import { TEMPLATES, type MessageTemplate } from "@/data/presets";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { Menu, MenuDivider, MenuItem } from "@/ui/Menu";
 import { Modal } from "@/ui/Modal";
 import { TextInput } from "@/ui/TextInput";
-import { BookmarkIcon, ChevronDownIcon, RefreshIcon, SaveIcon, TrashIcon } from "@/ui/Icon";
+import { BookmarkIcon, ChevronDownIcon, SaveIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import styles from "./SavedMessagesMenu.module.css";
 
 export function SavedMessagesMenu() {
-  const loadDefaultPreset = useMessageStore((s) => s.loadDefaultPreset);
+  const clearAll = useMessageStore((s) => s.clearAll);
   const replaceMessage = useMessageStore((s) => s.replaceMessage);
   const currentMessage = useMessageStore((s) => s.message);
 
@@ -56,6 +58,11 @@ export function SavedMessagesMenu() {
     pushToast(`Loaded "${entry.name}"`, "success");
   };
 
+  const handleLoadTemplate = (template: MessageTemplate) => {
+    replaceMessage(template.message);
+    pushToast(`Loaded the ${template.name} template`, "success");
+  };
+
   const confirmDelete = () => {
     if (!pendingDelete) return;
     removeEntry(pendingDelete.id);
@@ -74,7 +81,7 @@ export function SavedMessagesMenu() {
             leadingIcon={<BookmarkIcon />}
             trailingIcon={<ChevronDownIcon />}
             collapseLabel
-            title="Save the current message locally, load a saved one, or reset to the default template"
+            title="Save the current message locally, start from a template, load a saved one, or clear everything"
           >
             Saved
           </Button>
@@ -92,14 +99,28 @@ export function SavedMessagesMenu() {
               Save current message…
             </MenuItem>
             <MenuItem
-              icon={<RefreshIcon />}
+              icon={<TrashIcon />}
               onSelect={() => {
                 close();
-                loadDefaultPreset();
+                clearAll();
               }}
             >
-              Reset to default
+              Clear everything
             </MenuItem>
+            <MenuDivider />
+            <div className={styles.sectionLabel}>Templates</div>
+            <div className={styles.list}>
+              {TEMPLATES.map((template) => (
+                <TemplateRow
+                  key={template.id}
+                  template={template}
+                  onLoad={() => {
+                    close();
+                    handleLoadTemplate(template);
+                  }}
+                />
+              ))}
+            </div>
             <MenuDivider />
             <div className={styles.sectionLabel}>Saved messages</div>
             {entries.length === 0 ? (
@@ -167,6 +188,30 @@ function DeleteConfirmDialog({ entry, onCancel, onConfirm }: DeleteConfirmDialog
         </div>
       </div>
     </Modal>
+  );
+}
+
+interface TemplateRowProps {
+  template: MessageTemplate;
+  onLoad: () => void;
+}
+
+function TemplateRow({ template, onLoad }: TemplateRowProps) {
+  return (
+    <button
+      type="button"
+      className={styles.templateRow}
+      onClick={onLoad}
+      title={`Start from the ${template.name} template`}
+    >
+      <span className={styles.templateEmoji} aria-hidden>
+        {template.emoji}
+      </span>
+      <span className={styles.templateText}>
+        <span className={styles.rowName}>{template.name}</span>
+        <span className={styles.rowMeta}>{template.description}</span>
+      </span>
+    </button>
   );
 }
 
