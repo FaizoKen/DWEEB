@@ -181,7 +181,7 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
  * `items` of kind "file"; copied desktop files populate `files` directly.
  */
 function fileFromClipboard(data: DataTransfer): File | null {
-  if (data.files && data.files.length > 0) return data.files[0];
+  if (data.files && data.files.length > 0) return data.files[0] ?? null;
   for (const item of Array.from(data.items ?? [])) {
     if (item.kind === "file") {
       const file = item.getAsFile();
