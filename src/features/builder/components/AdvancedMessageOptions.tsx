@@ -27,6 +27,7 @@ import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { TextArea } from "@/ui/TextArea";
 import { cn } from "@/lib/cn";
+import { AdvancedModeConfirm } from "./AdvancedModeConfirm";
 import styles from "./ComponentTree.module.css";
 
 type MentionKind = "everyone" | "roles" | "users";
@@ -51,6 +52,23 @@ export function AdvancedMessageOptions() {
   // we drive open/closed ourselves and keep the Advanced switch as a sibling of
   // the disclosure button rather than a child of it.
   const [open, setOpen] = useState(false);
+
+  // Gate activation behind a confirmation explaining the raw fields it unlocks.
+  // Turning Advanced *off* skips the dialog — there's nothing to warn about.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const handleAdvancedToggle = (next: boolean) => {
+    if (next) {
+      setConfirmOpen(true);
+      return;
+    }
+    setAdvancedMode(false);
+  };
+
+  const confirmActivate = () => {
+    setAdvancedMode(true);
+    setConfirmOpen(false);
+  };
 
   const am = message.allowed_mentions;
 
@@ -94,11 +112,16 @@ export function AdvancedMessageOptions() {
         <Switch
           className={styles.advancedToggle}
           checked={advancedMode}
-          onChange={(e) => setAdvancedMode(e.currentTarget.checked)}
+          onChange={(e) => handleAdvancedToggle(e.currentTarget.checked)}
           label="Advanced"
           title="Show technical fields like custom_id, snowflake IDs, and component id"
         />
       </div>
+      <AdvancedModeConfirm
+        open={confirmOpen}
+        onConfirm={confirmActivate}
+        onCancel={() => setConfirmOpen(false)}
+      />
       {open ? (
         <div className={styles.advancedBody}>
           {/* Silent send */}
