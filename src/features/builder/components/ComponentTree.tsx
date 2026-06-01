@@ -33,7 +33,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
-import { scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
+import { addThenScroll, scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
 import {
   COMPONENT_META,
   CONTAINER_PICKER,
@@ -352,53 +352,53 @@ export function ComponentTree() {
 
   return (
     <ValidationContext.Provider value={validation}>
-    <DragContext.Provider value={dragSession}>
-      <div className={styles.tree}>
-        <div ref={scrollRef} className={styles.scroll} onClick={clearSelectionOnBackdrop}>
-          <MetaHeader />
+      <DragContext.Provider value={dragSession}>
+        <div className={styles.tree}>
+          <div ref={scrollRef} className={styles.scroll} onClick={clearSelectionOnBackdrop}>
+            <MetaHeader />
 
-          {components.length === 0 ? (
-            <div className={styles.empty}>
-              <p>Nothing here yet. Add your first component to get started.</p>
-            </div>
-          ) : (
-            <ul className={cn(styles.list, styles.topList)}>
-              {components.map((c, idx) => (
-                <TreeNode
-                  key={c._id}
-                  node={c}
-                  parentKind="top"
-                  parentId={null}
-                  parentSiblingIds={topLevelIds}
-                  siblingIndex={idx}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className={styles.footer}>
-          <AddComponentMenu
-            allowed={TOP_LEVEL_PICKER}
-            onPick={(t) => addTopLevel(t as TopLevelFactoryKey)}
-            disabled={atLimit}
-            align="top"
-            trigger={({ open }) => (
-              <Button
-                variant="primary"
-                size="sm"
-                leadingIcon={open ? <CloseIcon /> : <PlusIcon />}
-                fullWidth
-                disabled={atLimit}
-              >
-                {atLimit ? "Top-level limit reached" : open ? "Close" : "Add component"}
-              </Button>
+            {components.length === 0 ? (
+              <div className={styles.empty}>
+                <p>Nothing here yet. Add your first component to get started.</p>
+              </div>
+            ) : (
+              <ul className={cn(styles.list, styles.topList)}>
+                {components.map((c, idx) => (
+                  <TreeNode
+                    key={c._id}
+                    node={c}
+                    parentKind="top"
+                    parentId={null}
+                    parentSiblingIds={topLevelIds}
+                    siblingIndex={idx}
+                  />
+                ))}
+              </ul>
             )}
-          />
+          </div>
+
+          <div className={styles.footer}>
+            <AddComponentMenu
+              allowed={TOP_LEVEL_PICKER}
+              onPick={(t) => addThenScroll(() => addTopLevel(t as TopLevelFactoryKey))}
+              disabled={atLimit}
+              align="top"
+              trigger={({ open }) => (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leadingIcon={open ? <CloseIcon /> : <PlusIcon />}
+                  fullWidth
+                  disabled={atLimit}
+                >
+                  {atLimit ? "Top-level limit reached" : open ? "Close" : "Add component"}
+                </Button>
+              )}
+            />
+          </div>
         </div>
-      </div>
-      <DragGhost />
-    </DragContext.Provider>
+        <DragGhost />
+      </DragContext.Provider>
     </ValidationContext.Provider>
   );
 }
@@ -1352,7 +1352,9 @@ function collectAdders(node: AnyComponent, h: AdderHandlers): ReactNode[] {
         <AddComponentMenu
           allowed={CONTAINER_PICKER}
           disabled={node.components.length >= LIMITS.CONTAINER_CHILDREN}
-          onPick={(t) => h.addContainerChild(node._id, t as ContainerChildFactoryKey)}
+          onPick={(t) =>
+            addThenScroll(() => h.addContainerChild(node._id, t as ContainerChildFactoryKey))
+          }
           trigger={<AddChildButton label="Add to container" />}
         />
       </li>,
@@ -1362,7 +1364,10 @@ function collectAdders(node: AnyComponent, h: AdderHandlers): ReactNode[] {
   if (isSection(node) && (node as SectionComponent).components.length < LIMITS.SECTION_TEXTS_MAX) {
     out.push(
       <li key="__add_section_text" className={styles.adderItem}>
-        <AddChildButton label="Add text" onClick={() => h.addSectionText(node._id)} />
+        <AddChildButton
+          label="Add text"
+          onClick={() => addThenScroll(() => h.addSectionText(node._id))}
+        />
       </li>,
     );
   }
@@ -1373,7 +1378,10 @@ function collectAdders(node: AnyComponent, h: AdderHandlers): ReactNode[] {
       if (row.components.length < LIMITS.ACTION_ROW_BUTTONS && !row.components.some(isSelect)) {
         out.push(
           <li key="__add_row_button" className={styles.adderItem}>
-            <AddChildButton label="Add button" onClick={() => h.addRowButton(node._id)} />
+            <AddChildButton
+              label="Add button"
+              onClick={() => addThenScroll(() => h.addRowButton(node._id))}
+            />
           </li>,
         );
       }
@@ -1382,7 +1390,9 @@ function collectAdders(node: AnyComponent, h: AdderHandlers): ReactNode[] {
           <li key="__add_row_select" className={styles.adderItem}>
             <AddComponentMenu
               allowed={ROW_SELECT_PICKER}
-              onPick={(t) => h.addRowSelect(node._id, t as SelectComponent["type"])}
+              onPick={(t) =>
+                addThenScroll(() => h.addRowSelect(node._id, t as SelectComponent["type"]))
+              }
               trigger={<AddChildButton label="Add select…" />}
             />
           </li>,
@@ -1399,13 +1409,7 @@ function collectAdders(node: AnyComponent, h: AdderHandlers): ReactNode[] {
       <li key="__add_gallery_item" className={styles.adderItem}>
         <AddChildButton
           label="Add image"
-          onClick={() => {
-            // addGalleryItem appends the image and selects it; scroll its new
-            // row into view so it's ready to edit.
-            h.addGalleryItem(node._id);
-            const newId = useMessageStore.getState().selectedId;
-            if (newId) scrollTreeRowIntoView(newId);
-          }}
+          onClick={() => addThenScroll(() => h.addGalleryItem(node._id))}
         />
       </li>,
     );

@@ -1,3 +1,5 @@
+import { useMessageStore } from "@/core/state/messageStore";
+
 /**
  * Smooth-scroll a component tree row into view by its editor id.
  *
@@ -17,4 +19,15 @@ export function scrollTreeRowIntoView(id: string): void {
       .querySelector<HTMLElement>(`[data-tree-row="true"][data-row-id="${CSS.escape(id)}"]`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
+}
+
+/**
+ * Run an "add component" action, then smooth-scroll the freshly added row into
+ * view so it's ready to edit. Every `addX` store action selects the new node,
+ * so we read `selectedId` back once the action has committed and scroll to it.
+ */
+export function addThenScroll(addFn: () => void): void {
+  addFn();
+  const newId = useMessageStore.getState().selectedId;
+  if (newId) scrollTreeRowIntoView(newId);
 }
