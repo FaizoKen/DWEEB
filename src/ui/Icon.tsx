@@ -183,6 +183,14 @@ export const InfoIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+/** Padlock — pairs with the "treat the webhook URL like a password" note. */
+export const LockIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <rect x="4.5" y="11" width="15" height="9" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  </svg>
+);
+
 /** Error indicator — a circled exclamation. Pairs with danger color. */
 export const AlertCircleIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>

@@ -1,0 +1,129 @@
+.callout {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid var(--app-border);
+  border-left: 3px solid var(--app-border-strong);
+  background: var(--app-bg-elevated);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.icon {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--app-text-muted);
+}
+
+.content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.title {
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.body {
+  color: var(--app-text-muted);
+}
+.body strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+.body code {
+  font-family: var(--app-font-mono);
+  background: var(--app-bg-input);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.body a {
+  color: var(--app-accent-text);
+  text-decoration: none;
+}
+.body a:hover {
+  text-decoration: underline;
+}
+
+/* ── Tones — slim accent rail + a hair of tint, no loud fills. ─────────── */
+.info {
+  border-left-color: var(--app-accent);
+}
+.info .icon {
+  color: var(--app-accent-text);
+}
+
+.warning {
+  border-left-color: var(--app-warning);
+  background: var(--app-warning-soft);
+}
+.warning .icon {
+  color: var(--app-warning-text);
+}
+
+.danger {
+  border-left-color: var(--app-danger);
+  background: var(--app-danger-soft);
+}
+.danger .icon {
+  color: var(--app-danger-text);
+}
+
+/* ── Disclosure ───────────────────────────────────────────────────────── */
+.more {
+  margin-top: 1px;
+}
+
+.summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  cursor: pointer;
+  color: var(--app-accent-text);
+  font-weight: 500;
+  list-style: none;
+}
+.summary::-webkit-details-marker {
+  display: none;
+}
+.summary::before {
+  content: "›";
+  display: inline-block;
+  transition: transform 120ms ease;
+}
+.more[open] .summary::before {
+  transform: rotate(90deg);
+}
+.summary:hover {
+  text-decoration: underline;
+}
+
+.moreBody {
+  margin-top: 5px;
+  color: var(--app-text-muted);
+  line-height: 1.5;
+}
+.moreBody strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+.moreBody a {
+  color: var(--app-accent-text);
+  text-decoration: none;
+}
+.moreBody a:hover {
+  text-decoration: underline;
+}
+
+.actions {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

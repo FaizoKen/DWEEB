@@ -4,16 +4,6 @@
   color: var(--app-text-muted);
 }
 
-.warning {
-  background: rgba(240, 178, 50, 0.1);
-  border: 1px solid rgba(240, 178, 50, 0.35);
-  color: var(--app-text);
-  padding: 10px 12px;
-  border-radius: var(--app-radius-sm);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
 .urlRow {
   display: flex;
   gap: 6px;
@@ -41,73 +31,13 @@
   background: var(--app-bg-hover);
 }
 
-.blocking {
-  background: rgba(237, 66, 69, 0.08);
-  border: 1px solid rgba(237, 66, 69, 0.35);
-  color: var(--app-text);
-  padding: 10px 12px;
-  border-radius: var(--app-radius-sm);
-  font-size: 12px;
-}
-.blocking ul {
-  margin: 6px 0 0;
-  padding-left: 18px;
-}
-.blocking li {
-  margin-bottom: 2px;
-}
-.blockingDetail {
-  margin: 6px 0 0;
-  color: var(--app-text-muted);
-  line-height: 1.45;
-}
-.blockingActions {
-  margin-top: 10px;
+/* Validation errors that block a send — rendered inside a danger Callout. */
+.issueList {
+  margin: 0;
+  padding-left: 16px;
   display: flex;
-  justify-content: flex-end;
-}
-
-/* Calm, app-owned confirmation — shown instead of the interactive-component
-   warning once we know the webhook is owned by an app/bot. */
-.appOwned {
-  background: rgba(88, 101, 242, 0.08);
-  border: 1px solid rgba(88, 101, 242, 0.35);
-  color: var(--app-text);
-  padding: 10px 12px;
-  border-radius: var(--app-radius-sm);
-  font-size: 12px;
-}
-.appOwnedDetail {
-  margin: 6px 0 0;
-  color: var(--app-text-muted);
-  line-height: 1.45;
-}
-.appOwnedLink {
-  display: inline-block;
-  margin-top: 8px;
-  color: var(--app-accent, #5865f2);
-  font-size: 12px;
-  text-decoration: none;
-}
-.appOwnedLink:hover {
-  text-decoration: underline;
-}
-
-/* Heads-up shown when updating an existing message without restoring it first:
-   a webhook PATCH replaces the whole message, so the current editor content
-   overwrites the original wholesale. */
-.updateNote {
-  background: rgba(88, 101, 242, 0.08);
-  border: 1px solid rgba(88, 101, 242, 0.35);
-  color: var(--app-text);
-  padding: 10px 12px;
-  border-radius: var(--app-radius-sm);
-  font-size: 12px;
-}
-.updateNoteDetail {
-  margin: 6px 0 0;
-  color: var(--app-text-muted);
-  line-height: 1.45;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .error {

@@ -61,10 +61,12 @@ import {
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
+import { LockIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
 import { WebhookRecents } from "./WebhookRecents";
 import { SendConfirm } from "./SendConfirm";
+import { Callout } from "./Callout";
 import styles from "./SendPanel.module.css";
 
 type SendState =
@@ -399,8 +401,7 @@ export function SendPanel({
   return (
     <>
       <p className={styles.lead}>
-        Send the current message straight to a Discord webhook. The request goes from your browser
-        to Discord — nothing is uploaded to our servers (there are none).
+        Posts straight from your browser to Discord — nothing touches our servers.
       </p>
 
       <div className={styles.modeToggle} role="radiogroup" aria-label="Send mode">
@@ -412,7 +413,7 @@ export function SendPanel({
           onClick={() => setMode("new")}
         >
           <strong>Send as new</strong>
-          <span>Post a brand-new message to the channel (POST).</span>
+          <span>Post a new message (POST).</span>
         </button>
         <button
           type="button"
@@ -422,15 +423,14 @@ export function SendPanel({
           onClick={() => setMode("update")}
         >
           <strong>Update existing</strong>
-          <span>Edit a message this webhook already posted, in place (PATCH).</span>
+          <span>Edit a posted message (PATCH).</span>
         </button>
       </div>
 
-      <div className={styles.warning} role="note">
-        <strong>Treat the webhook URL like a password.</strong> Anyone with it can post to your
-        channel. We never send it anywhere; saving to history stores it in this browser's
-        localStorage only.
-      </div>
+      <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
+        <strong>Treat the webhook URL like a password.</strong> It's stored only in this browser and
+        never sent anywhere but Discord.
+      </Callout>
 
       <WebhookRecents
         history={history}
@@ -444,7 +444,6 @@ export function SendPanel({
 
       <Field
         label="Webhook URL"
-        hint="https://discord.com/api/webhooks/{id}/{token}"
         error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
       >
         {(id) => (
@@ -495,8 +494,8 @@ export function SendPanel({
           label="Message ID or link to update"
           hint={
             restoredFrom
-              ? "Pre-filled from the message you restored. Change it to update a different message instead."
-              : "Paste the ID or link of a message this webhook already posted. In Discord: right-click the message → Copy Message ID (needs Developer Mode)."
+              ? "Pre-filled from the restored message — change it to update a different one."
+              : "A message this webhook posted. In Discord: right-click → Copy Message ID (Developer Mode)."
           }
           error={messageIdInvalid ? "Not a valid message ID or link." : undefined}
         >
@@ -514,55 +513,71 @@ export function SendPanel({
       ) : null}
 
       {mode === "update" && !restoredFrom ? (
-        <div className={styles.updateNote} role="note">
-          <strong>Update overwrites the entire message.</strong>
-          <p className={styles.updateNoteDetail}>
-            What’s in the editor now replaces the original completely — anything you don’t rebuild
-            here is removed. Only this webhook can edit its own messages (Discord 404s otherwise). To
-            tweak the live message instead of replacing it, pull it in from the{" "}
-            <strong>Restore</strong> tab first.
-          </p>
-        </div>
+        <Callout
+          tone="info"
+          role="note"
+          title="Update overwrites the entire message."
+          more={
+            <>
+              What’s in the editor now replaces the original completely — anything you don’t rebuild
+              here is removed. Only this webhook can edit its own messages (Discord 404s otherwise).
+              To tweak the live message instead of replacing it, pull it in from the{" "}
+              <strong>Restore</strong> tab first.
+            </>
+          }
+          moreLabel="What this means"
+        />
       ) : null}
 
       {ownershipBlocked ? (
-        <div className={styles.blocking} role="alert">
-          <strong>
-            Can’t send: this webhook is owned by{" "}
-            {knownOwnerKind === "follower" ? "Channel Following" : "a person"}, not an app.
-          </strong>
-          <p className={styles.blockingDetail}>
-            Discord only accepts interactive components (buttons with custom_id, select menus) from
-            application-owned webhooks. Sending “{knownName || "this webhook"}” would be rejected.
-            Use a bot/app-owned webhook, or remove the interactive components.
-          </p>
-          {onRequestRemoveInteractive ? (
-            <div className={styles.blockingActions}>
+        <Callout
+          tone="danger"
+          role="alert"
+          title={
+            <>
+              Can’t send: “{knownName || "this webhook"}” is owned by{" "}
+              {knownOwnerKind === "follower" ? "Channel Following" : "a person"}, not an app.
+            </>
+          }
+          more={
+            <>
+              Discord only accepts interactive components (buttons with custom_id, select menus) from
+              application-owned webhooks. Use a bot/app-owned webhook, or remove the interactive
+              components.
+            </>
+          }
+          moreLabel="Why"
+          actions={
+            onRequestRemoveInteractive ? (
               <Button variant="danger" size="sm" onClick={onRequestRemoveInteractive}>
                 Remove interactive components
               </Button>
-            </div>
-          ) : null}
-        </div>
+            ) : null
+          }
+        />
       ) : null}
 
       {ownershipSatisfied ? (
-        <div className={styles.appOwned} role="note">
-          <strong>Interactive responses are handled by the bot’s server.</strong>
-          <p className={styles.appOwnedDetail}>
-            “{knownName || "This webhook"}” is app-owned, so Discord accepts and renders the buttons
-            and select menus. Clicks and selections are delivered to the application that owns it —
-            its backend has to be running to respond. This builder only posts the message.
-          </p>
-          <a
-            className={styles.appOwnedLink}
-            href="https://discord.com/developers/docs/interactions/receiving-and-responding"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            How Discord interactions work →
-          </a>
-        </div>
+        <Callout
+          tone="info"
+          role="note"
+          title="Interactive responses are handled by the bot’s server."
+          more={
+            <>
+              “{knownName || "This webhook"}” is app-owned, so Discord accepts and renders the
+              buttons and select menus. Clicks are delivered to the owning app — its backend has to
+              be running to respond. This builder only posts the message.{" "}
+              <a
+                href="https://discord.com/developers/docs/interactions/receiving-and-responding"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                How Discord interactions work →
+              </a>
+            </>
+          }
+          moreLabel="What this means"
+        />
       ) : null}
 
       {visibleCapabilities.length > 0 ? (
@@ -592,15 +607,14 @@ export function SendPanel({
       ) : null}
 
       {blockingIssues.length > 0 ? (
-        <div className={styles.blocking}>
-          <strong>Fix before sending:</strong>
-          <ul>
+        <Callout tone="danger" role="alert" title="Fix before sending:">
+          <ul className={styles.issueList}>
             {blockingIssues.slice(0, 5).map((issue, i) => (
               <li key={i}>{issue.message}</li>
             ))}
             {blockingIssues.length > 5 ? <li>…and {blockingIssues.length - 5} more</li> : null}
           </ul>
-        </div>
+        </Callout>
       ) : null}
 
       {state.kind === "error" ? (

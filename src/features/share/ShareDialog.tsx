@@ -42,11 +42,13 @@ import {
   verifyWebhook,
   webhookAvatarHash,
 } from "@/core/webhook";
+import { LockIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
 import { SendPanel } from "./SendPanel";
 import { WebhookRecents } from "./WebhookRecents";
+import { Callout } from "./Callout";
 import styles from "./ShareDialog.module.css";
 
 type Tab = "send" | "restore" | "share" | "json" | "import" | "about";
@@ -576,16 +578,14 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   return (
     <>
       <p className={styles.lead}>
-        Pull a previously-posted webhook message back into the editor. Discord only allows this for
-        messages <strong>this webhook</strong> originally sent — not for user or bot messages, even
-        in the same channel.
+        Pull a message <strong>this webhook</strong> posted back into the editor — Discord won’t
+        return user or bot messages, even in the same channel.
       </p>
 
-      <div className={styles.warning} role="note">
-        <strong>Treat the webhook URL like a password.</strong> Anyone with it can post to your
-        channel. We never send it anywhere; saving to history stores it in this browser's
-        localStorage only.
-      </div>
+      <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
+        <strong>Treat the webhook URL like a password.</strong> It's stored only in this browser and
+        never sent anywhere but Discord.
+      </Callout>
 
       <WebhookRecents
         history={history}
@@ -596,7 +596,6 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
 
       <Field
         label="Webhook URL"
-        hint="The same URL you used (or would use) to post."
         error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
       >
         {(id) => (
@@ -632,7 +631,7 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
 
       <Field
         label="Message ID or link"
-        hint="Right-click the message in Discord → Copy Message ID (Developer Mode), or paste the message URL."
+        hint="In Discord: right-click → Copy Message ID (Developer Mode), or paste the message link."
         error={idInvalid ? "Not a valid message ID or Discord message link." : undefined}
       >
         {(id) => (
