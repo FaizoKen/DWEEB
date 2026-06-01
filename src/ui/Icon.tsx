@@ -192,6 +192,14 @@ export const AlertCircleIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+/** Success indicator — a circled checkmark. Pairs with success color. */
+export const CheckCircleIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="m8.5 12.3 2.4 2.4 4.6-5.4" />
+  </svg>
+);
+
 /** Warning indicator — an exclamation triangle. Pairs with warning color. */
 export const AlertTriangleIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>

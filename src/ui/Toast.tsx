@@ -2,8 +2,15 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import styles from "./Toast.module.css";
 import { cn } from "@/lib/cn";
+import { AlertCircleIcon, CheckCircleIcon, InfoIcon } from "@/ui/Icon";
 
 type ToastTone = "info" | "success" | "error";
+
+const TONE_ICON: Record<ToastTone, typeof InfoIcon> = {
+  info: InfoIcon,
+  success: CheckCircleIcon,
+  error: AlertCircleIcon,
+};
 
 interface ToastEntry {
   id: number;
@@ -41,11 +48,17 @@ export function ToastViewport() {
   if (typeof document === "undefined") return null;
   return createPortal(
     <div className={styles.viewport} role="status" aria-live="polite">
-      {items.map((t) => (
-        <div key={t.id} className={cn(styles.toast, styles[t.tone])}>
-          {t.message}
-        </div>
-      ))}
+      {items.map((t) => {
+        const Icon = TONE_ICON[t.tone];
+        return (
+          <div key={t.id} className={cn(styles.toast, styles[t.tone])}>
+            <span className={styles.icon} aria-hidden="true">
+              <Icon size={18} />
+            </span>
+            <span className={styles.message}>{t.message}</span>
+          </div>
+        );
+      })}
     </div>,
     document.body,
   );
