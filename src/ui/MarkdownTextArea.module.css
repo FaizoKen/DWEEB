@@ -1,0 +1,13 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* The toolbar owns the top corners, so the textarea squares off to meet it.
+   Scoped via the element selector so it reliably wins over TextArea's own
+   single-class border-radius regardless of stylesheet order. */
+.wrap textarea {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}

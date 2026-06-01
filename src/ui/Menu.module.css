@@ -3,24 +3,21 @@
   display: inline-flex;
 }
 
+/* Positioned imperatively (fixed, portalled to <body>) — see Menu.tsx. */
 .panel {
-  position: absolute;
-  top: calc(100% + 6px);
   min-width: 190px;
+  max-width: min(320px, calc(100vw - 16px));
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
   box-shadow: var(--app-shadow-lg);
   padding: 5px;
-  z-index: var(--app-z-toolbar);
+  z-index: var(--app-z-tooltip);
   display: flex;
   flex-direction: column;
   gap: 2px;
   animation: menuRise 100ms ease-out;
 }
-
-.alignStart { left: 0; }
-.alignEnd { right: 0; }
 
 .item {
   display: inline-flex;

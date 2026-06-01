@@ -1,0 +1,69 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-bottom: none;
+  border-radius: var(--app-radius-sm) var(--app-radius-sm) 0 0;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 5px;
+  background: var(--app-border);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.btn:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+.btnActive {
+  background: var(--app-accent-soft);
+  color: var(--app-accent-text);
+}
+.btnActive:hover {
+  background: var(--app-accent-soft);
+  color: var(--app-accent-text);
+}
+
+/* Dropdown triggers carry a small caret, so they need a touch more room. */
+.btnMenu {
+  width: auto;
+  gap: 1px;
+  padding: 0 5px;
+}
+
+.caret {
+  opacity: 0.65;
+}
