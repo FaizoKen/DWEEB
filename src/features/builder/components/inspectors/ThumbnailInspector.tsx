@@ -1,4 +1,5 @@
 import { useMessageStore } from "@/core/state/messageStore";
+import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import type { ThumbnailComponent, UnfurledMediaItem } from "@/core/schema/types";
 import { Field } from "@/ui/Field";
@@ -12,6 +13,7 @@ interface Props {
 
 export function ThumbnailInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
+  const advancedMode = useUiPrefs((s) => s.advancedMode);
 
   const setMedia = (partial: Partial<UnfurledMediaItem>) => {
     patch<ThumbnailComponent>(node._id, {
@@ -32,7 +34,11 @@ export function ThumbnailInspector({ node }: Props) {
       />
       <Field
         label="Image URL"
-        hint="https:// or attachment://filename. Leave blank when using an attachment_id."
+        hint={
+          advancedMode
+            ? "https:// or attachment://filename. Leave blank when using an attachment_id."
+            : "Paste a direct image link (https://…)."
+        }
       >
         {(id) => (
           <TextInput
@@ -42,25 +48,27 @@ export function ThumbnailInspector({ node }: Props) {
           />
         )}
       </Field>
-      <Field
-        label="Attachment ID (optional)"
-        hint="Discord snowflake. Use instead of URL to reference an already-uploaded file."
-      >
-        {(id) => (
-          <TextInput
-            id={id}
-            value={node.media.attachment_id ?? ""}
-            inputMode="numeric"
-            maxLength={LIMITS.SNOWFLAKE_MAX}
-            onChange={(e) =>
-              setMedia({
-                attachment_id: e.currentTarget.value.replace(/[^\d]/g, "") || undefined,
-              })
-            }
-            placeholder="e.g. 1185234567890123456"
-          />
-        )}
-      </Field>
+      {advancedMode ? (
+        <Field
+          label="Attachment ID (optional)"
+          hint="Discord snowflake. Use instead of URL to reference an already-uploaded file."
+        >
+          {(id) => (
+            <TextInput
+              id={id}
+              value={node.media.attachment_id ?? ""}
+              inputMode="numeric"
+              maxLength={LIMITS.SNOWFLAKE_MAX}
+              onChange={(e) =>
+                setMedia({
+                  attachment_id: e.currentTarget.value.replace(/[^\d]/g, "") || undefined,
+                })
+              }
+              placeholder="e.g. 1185234567890123456"
+            />
+          )}
+        </Field>
+      ) : null}
       <Field label="Alt text">
         {(id) => (
           <TextInput

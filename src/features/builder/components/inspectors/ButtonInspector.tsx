@@ -8,6 +8,7 @@
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
+import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import {
   ButtonStyle,
@@ -41,6 +42,7 @@ const STYLE_OPTIONS: Array<{ value: ButtonStyleValue; label: string }> = [
 export function ButtonInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
   const replace = useMessageStore((s) => s.replaceNode);
+  const advancedMode = useUiPrefs((s) => s.advancedMode);
 
   const changeStyle = (next: ButtonStyleValue) => {
     if (next === node.style) return;
@@ -140,7 +142,7 @@ export function ButtonInspector({ node }: Props) {
       {node.style !== ButtonStyle.Link && node.style !== ButtonStyle.Premium ? (
         <Field
           label="custom_id"
-          hint="Your bot receives this when the button is clicked."
+          hint="Your bot receives this when the button is clicked — set it to wire up the action."
         >
           {(id) => (
             <TextInput
@@ -157,7 +159,9 @@ export function ButtonInspector({ node }: Props) {
         </Field>
       ) : null}
 
-      {node.style !== ButtonStyle.Premium ? <EmojiEditor node={node} /> : null}
+      {node.style !== ButtonStyle.Premium ? (
+        <EmojiEditor node={node} advancedMode={advancedMode} />
+      ) : null}
 
       <Switch
         checked={node.disabled ?? false}
@@ -219,7 +223,13 @@ function makeInteractive(
  */
 type EmojiEditableButton = LinkButtonComponent | InteractiveButtonComponent;
 
-function EmojiEditor({ node }: { node: EmojiEditableButton }) {
+function EmojiEditor({
+  node,
+  advancedMode,
+}: {
+  node: EmojiEditableButton;
+  advancedMode: boolean;
+}) {
   const patch = useMessageStore((s) => s.patchNode);
   const emoji = node.emoji ?? {};
 
@@ -264,20 +274,22 @@ function EmojiEditor({ node }: { node: EmojiEditableButton }) {
           />
         )}
       </Field>
-      <Field label="Custom emoji ID" hint="Required for guild emoji; leave blank for unicode.">
-        {(id) => (
-          <TextInput
-            id={id}
-            value={emoji.id ?? ""}
-            inputMode="numeric"
-            onChange={(e) =>
-              setEmoji({ ...emoji, id: e.currentTarget.value.replace(/[^\d]/g, "") || undefined })
-            }
-            placeholder="e.g. 1185234567890123456"
-          />
-        )}
-      </Field>
-      {emoji.id ? (
+      {advancedMode ? (
+        <Field label="Custom emoji ID" hint="Required for guild emoji; leave blank for unicode.">
+          {(id) => (
+            <TextInput
+              id={id}
+              value={emoji.id ?? ""}
+              inputMode="numeric"
+              onChange={(e) =>
+                setEmoji({ ...emoji, id: e.currentTarget.value.replace(/[^\d]/g, "") || undefined })
+              }
+              placeholder="e.g. 1185234567890123456"
+            />
+          )}
+        </Field>
+      ) : null}
+      {advancedMode && emoji.id ? (
         <Switch
           checked={emoji.animated ?? false}
           onChange={(e) => setEmoji({ ...emoji, animated: e.currentTarget.checked || undefined })}

@@ -7,26 +7,65 @@
 .scroll {
   overflow-y: auto;
   /* Bottom padding clears the floating Add-component pill (and Preview FAB on mobile). */
-  padding: 6px 8px 88px;
+  padding: 10px 10px 92px;
   -webkit-overflow-scrolling: touch;
 }
 
 .meta {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 4px 14px;
+  gap: var(--app-space-3);
+  padding: 8px 4px 16px;
   border-bottom: 1px solid var(--app-border);
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
+/* Footer of the meta header: budget pills on the left, the Advanced-mode
+   toggle on the right. Wraps on narrow widths so the toggle drops below. */
+.metaFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--app-space-2);
+}
+
+.advancedToggle {
+  margin-left: auto;
+}
+
+/* Budget meter: two small pills that read green/amber/red as the message
+   approaches Discord's hard limits — a meaningful at-a-glance health check. */
 .stats {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
+  gap: 6px;
+}
+
+.statPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: var(--app-text-xs);
+  font-weight: 500;
   color: var(--app-text-muted);
-  font-family: var(--app-font-mono);
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.statPillNear {
+  color: var(--app-warning-text);
+  background: var(--app-warning-soft);
+  border-color: transparent;
+}
+
+.statPillFull {
+  color: var(--app-danger-text);
+  background: var(--app-danger-soft);
+  border-color: transparent;
 }
 
 .list {
@@ -76,14 +115,14 @@
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: 18px 24px max-content 1fr auto;
+  grid-template-columns: 18px 28px max-content 1fr auto;
   align-items: center;
-  gap: 8px;
-  padding: 7px 8px;
+  gap: 9px;
+  padding: 9px 10px;
   border-radius: var(--app-radius-sm);
   cursor: pointer;
   user-select: none;
-  font-size: 13px;
+  font-size: var(--app-text-base);
   color: var(--app-text);
   transition: background 120ms ease, box-shadow 120ms ease;
 }
@@ -94,7 +133,7 @@
 
 .rowSelected {
   background: var(--app-accent-soft);
-  box-shadow: inset 2px 0 0 var(--app-accent);
+  box-shadow: inset 3px 0 0 var(--app-accent);
 }
 
 .rowSelected:hover {
@@ -226,15 +265,15 @@
 /* Small icon chip so each component type has a visual anchor instead of a
  * lone unicode character floating against the background. */
 .glyph {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   display: inline-grid;
   place-items: center;
   background: var(--app-bg-input);
   border: 1px solid var(--app-border);
-  border-radius: 5px;
+  border-radius: 7px;
   color: var(--app-text-muted);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
@@ -254,12 +293,12 @@
   font-weight: 600;
   color: var(--app-text);
   white-space: nowrap;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
 }
 
 .summary {
   color: var(--app-text-muted);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -302,21 +341,29 @@
 .addChild {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 11px 3px 4px;
-  font-size: 12px;
+  gap: 7px;
+  min-height: 30px;
+  padding: 4px 13px 4px 5px;
+  font-size: var(--app-text-sm);
+  font-weight: 500;
   color: var(--app-text-muted);
   background: transparent;
-  border: 1px dashed rgba(88, 101, 242, 0.4);
+  border: 1px dashed rgba(88, 101, 242, 0.45);
   border-radius: 999px;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .addChild:hover {
   background: var(--app-accent-soft);
   color: var(--app-text);
   border-color: var(--app-accent);
+}
+
+.addChild:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
 }
 
 .addChild:disabled,
@@ -374,21 +421,22 @@
 /* Inline inspector card. The accent left bar ties it visually to the
  * selected row above it. */
 .editorPanel {
-  margin: 6px 0 12px;
+  margin: 8px 0 14px;
   border: 1px solid var(--app-border);
-  border-left: 2px solid var(--app-accent);
+  border-left: 3px solid var(--app-accent);
   border-radius: var(--app-radius);
   overflow: hidden;
-  background: var(--app-bg-input);
+  background: var(--app-bg-elevated);
   box-shadow: var(--app-shadow-sm);
 }
 
 .empty {
   margin: 16px 4px;
-  padding: 28px 16px;
+  padding: 32px 18px;
   text-align: center;
   color: var(--app-text-muted);
-  font-size: 13px;
+  font-size: var(--app-text-base);
+  line-height: 1.5;
   border: 1px dashed var(--app-border);
   border-radius: var(--app-radius);
   background: var(--app-bg);
@@ -410,28 +458,28 @@
 
 .footer button {
   width: auto !important;
-  height: auto !important;
-  padding: 12px 18px !important;
+  height: var(--app-fab-h) !important;
+  padding: 0 18px !important;
   border-radius: 999px !important;
-  font-size: 13px !important;
+  font-size: var(--app-text-base) !important;
   box-shadow: var(--app-shadow-lg);
 }
 
 .advanced {
   border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
-  background: var(--app-bg-elevated);
+  border-radius: var(--app-radius);
+  background: var(--app-bg-subtle);
   overflow: hidden;
 }
 
 .advancedSummary {
   cursor: pointer;
-  padding: 8px 10px;
-  font-size: 11px;
+  padding: 11px 13px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--app-text-muted);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--app-text);
   user-select: none;
   list-style: none;
   display: flex;
@@ -439,20 +487,25 @@
   justify-content: space-between;
 }
 .advancedSummary::-webkit-details-marker { display: none; }
+.advancedSummary:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
 .advancedSummary::after {
   content: "▾";
-  font-size: 10px;
-  opacity: 0.6;
+  font-size: 11px;
+  color: var(--app-text-muted);
+  transition: transform 150ms ease;
 }
 .advanced[open] .advancedSummary::after {
-  content: "▴";
+  transform: rotate(180deg);
 }
 
 .advancedBody {
-  padding: 10px;
+  padding: 13px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--app-space-3);
   border-top: 1px solid var(--app-border);
 }
 
@@ -471,41 +524,54 @@
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 5px;
+  min-height: 30px;
+  padding: 5px 12px;
   background: var(--app-bg-input);
   border: 1px solid var(--app-border);
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--app-text-sm);
   color: var(--app-text);
   cursor: pointer;
   user-select: none;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
-.chip:hover { border-color: var(--app-accent); }
+.chip:hover { border-color: var(--app-border-strong); }
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
 .chipActive {
   background: var(--app-accent-soft);
   border-color: var(--app-accent);
   color: var(--app-text);
 }
+.chipActive:hover { border-color: var(--app-accent); }
 
 .sectionHint {
-  font-size: 11px;
-  color: var(--app-text-muted);
-  padding: 6px 8px;
-  background: var(--app-bg);
-  border-left: 2px solid var(--app-accent);
-  border-radius: 2px;
+  font-size: var(--app-text-xs);
+  line-height: 1.45;
+  color: var(--app-warning-text);
+  padding: 9px 11px;
+  background: var(--app-warning-soft);
+  border-radius: var(--app-radius-sm);
   margin-top: 4px;
 }
 
 @media (max-width: 640px) {
   .row {
-    gap: 6px;
-    padding: 9px 6px;
+    gap: 8px;
+    padding: 10px 8px;
   }
 
   .summary {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
+  }
+
+  /* Stack the username / avatar inputs so each stays comfortably wide on a
+     phone instead of squeezing two into one row. */
+  .row2 {
+    grid-template-columns: 1fr;
   }
 
   /* Tighter rail indent on phones so deep nests don't push content off-screen. */

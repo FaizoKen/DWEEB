@@ -5,20 +5,22 @@
 
 .select {
   width: 100%;
-  padding: 8px 28px 8px 10px;
+  min-height: var(--app-control-h);
+  padding: 8px 32px 8px 12px;
   background: var(--app-bg-input);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
   color: var(--app-text);
-  font-size: 13px;
+  font-size: var(--app-text-base);
   appearance: none;
   cursor: pointer;
-  transition: border-color 120ms ease;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .select:focus {
   outline: none;
   border-color: var(--app-border-focus);
+  box-shadow: var(--app-focus-ring);
 }
 
 .invalid {

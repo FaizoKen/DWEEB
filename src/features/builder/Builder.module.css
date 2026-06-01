@@ -9,8 +9,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
+  gap: var(--app-space-3);
+  padding: 10px 14px;
   background: var(--app-bg-elevated);
   border-bottom: 1px solid var(--app-border);
   z-index: var(--app-z-toolbar);
@@ -19,7 +19,7 @@
 .actionGroup {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 

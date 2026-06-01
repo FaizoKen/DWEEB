@@ -1,12 +1,13 @@
 .input {
   width: 100%;
-  padding: 8px 10px;
+  min-height: var(--app-control-h);
+  padding: 8px 12px;
   background: var(--app-bg-input);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
   color: var(--app-text);
-  font-size: 13px;
-  transition: border-color 120ms ease, background 120ms ease;
+  font-size: var(--app-text-base);
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 
 .input::placeholder {
@@ -17,6 +18,7 @@
   outline: none;
   border-color: var(--app-border-focus);
   background: var(--app-bg-active);
+  box-shadow: var(--app-focus-ring);
 }
 
 .invalid {

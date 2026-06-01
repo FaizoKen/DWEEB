@@ -15,20 +15,20 @@
 }
 
 .track {
-  width: 34px;
-  height: 20px;
+  width: 40px;
+  height: 24px;
   border-radius: 999px;
-  background: var(--app-border);
+  background: var(--app-border-strong);
   position: relative;
   transition: background 150ms ease;
 }
 
 .thumb {
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
   border-radius: 999px;
   background: #fff;
   transition: transform 150ms ease;
@@ -38,14 +38,14 @@
   background: var(--app-accent);
 }
 .input:checked + .track .thumb {
-  transform: translateX(14px);
+  transform: translateX(16px);
 }
 
 .input:focus-visible + .track {
-  box-shadow: 0 0 0 2px var(--app-border-focus);
+  box-shadow: var(--app-focus-ring);
 }
 
 .label {
-  font-size: 13px;
+  font-size: var(--app-text-base);
   color: var(--app-text);
 }

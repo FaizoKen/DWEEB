@@ -6,11 +6,11 @@
 }
 
 .label {
-  font-size: 11px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--app-text-muted);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--app-text);
 }
 
 .labelHidden {
@@ -29,11 +29,12 @@
 }
 
 .hint {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
+  line-height: 1.45;
   color: var(--app-text-subtle);
 }
 
 .error {
-  font-size: 11px;
-  color: var(--app-danger);
+  font-size: var(--app-text-xs);
+  color: var(--app-danger-text);
 }

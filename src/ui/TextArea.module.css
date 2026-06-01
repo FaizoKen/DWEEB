@@ -5,10 +5,10 @@
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
   color: var(--app-text);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--app-text-base);
+  line-height: 1.55;
   font-family: var(--app-font-sans);
-  transition: border-color 120ms ease;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
   min-height: 80px;
 }
 
@@ -19,6 +19,7 @@
 .textarea:focus {
   outline: none;
   border-color: var(--app-border-focus);
+  box-shadow: var(--app-focus-ring);
 }
 
 .invalid {

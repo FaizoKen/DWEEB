@@ -43,7 +43,7 @@ export function SelectBaseFields({ node }: Props) {
       </CapabilityNote>
       <Field
         label="custom_id"
-        hint="Sent to your bot when a user changes the selection."
+        hint="Sent to your bot when a user changes the selection — set it to wire up the action."
       >
         {(id) => (
           <TextInput

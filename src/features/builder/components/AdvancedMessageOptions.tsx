@@ -18,6 +18,7 @@
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
+import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import type { AllowedMentions } from "@/core/schema/types";
 import { Field } from "@/ui/Field";
@@ -41,6 +42,7 @@ export function AdvancedMessageOptions() {
   const setAllowed = useMessageStore((s) => s.setAllowedMentions);
   const setThreadName = useMessageStore((s) => s.setThreadName);
   const setAppliedTags = useMessageStore((s) => s.setAppliedTags);
+  const advancedMode = useUiPrefs((s) => s.advancedMode);
 
   const am = message.allowed_mentions;
 
@@ -69,20 +71,13 @@ export function AdvancedMessageOptions() {
 
   return (
     <details className={styles.advanced}>
-      <summary className={styles.advancedSummary}>Advanced</summary>
+      <summary className={styles.advancedSummary}>Message options</summary>
       <div className={styles.advancedBody}>
         {/* Silent send */}
         <Switch
           checked={message.suppress_notifications ?? false}
           onChange={(e) => setSuppress(e.currentTarget.checked)}
           label="Send silently (no notifications)"
-        />
-
-        {/* TTS — only meaningful for V1 (plain content) messages; no-op on V2 */}
-        <Switch
-          checked={message.tts ?? false}
-          onChange={(e) => setTts(e.currentTarget.checked)}
-          label="Text-to-speech (no audible effect on V2 messages)"
         />
 
         {/* Allowed mentions */}
@@ -110,67 +105,80 @@ export function AdvancedMessageOptions() {
           )}
         </Field>
 
-        <Field
-          label="Allowed role IDs"
-          hint="Comma/space separated snowflakes. Conflicts with @role chip — use one."
-        >
-          {(id) => (
-            <TextInput
-              id={id}
-              value={(am?.roles ?? []).join(" ")}
-              onChange={(e) => updateAllowed({ roles: onSnowflakeList(e.currentTarget.value) })}
-              placeholder="e.g. 1185234567890123456 1185234567890123457"
+        {/* The remaining controls are raw-snowflake / no-op / forum-only fields —
+            power-user territory, so they only appear in Advanced mode. */}
+        {advancedMode ? (
+          <>
+            {/* TTS — only meaningful for V1 (plain content) messages; no-op on V2 */}
+            <Switch
+              checked={message.tts ?? false}
+              onChange={(e) => setTts(e.currentTarget.checked)}
+              label="Text-to-speech (no audible effect on V2 messages)"
             />
-          )}
-        </Field>
 
-        <Field
-          label="Allowed user IDs"
-          hint="Comma/space separated snowflakes. Conflicts with @user chip — use one."
-        >
-          {(id) => (
-            <TextInput
-              id={id}
-              value={(am?.users ?? []).join(" ")}
-              onChange={(e) => updateAllowed({ users: onSnowflakeList(e.currentTarget.value) })}
-              placeholder="e.g. 1185234567890123456"
-            />
-          )}
-        </Field>
+            <Field
+              label="Allowed role IDs"
+              hint="Comma/space separated snowflakes. Conflicts with @role chip — use one."
+            >
+              {(id) => (
+                <TextInput
+                  id={id}
+                  value={(am?.roles ?? []).join(" ")}
+                  onChange={(e) => updateAllowed({ roles: onSnowflakeList(e.currentTarget.value) })}
+                  placeholder="e.g. 1185234567890123456 1185234567890123457"
+                />
+              )}
+            </Field>
 
-        {/* Forum-channel options — labelled clearly so non-forum users know to skip them */}
-        <div className={styles.sectionHint}>
-          Forum / media channel only — Discord ignores these on text channels.
-        </div>
-        <Field
-          label="Forum thread name"
-          hint="Starts a new forum post with this title. Skip when posting into an existing thread."
-        >
-          {(id) => (
-            <TextArea
-              id={id}
-              rows={1}
-              value={message.thread_name ?? ""}
-              maxLength={LIMITS.THREAD_NAME}
-              onChange={(e) => setThreadName(e.currentTarget.value || undefined)}
-              placeholder="e.g. Release notes — v2.4"
-            />
-          )}
-        </Field>
+            <Field
+              label="Allowed user IDs"
+              hint="Comma/space separated snowflakes. Conflicts with @user chip — use one."
+            >
+              {(id) => (
+                <TextInput
+                  id={id}
+                  value={(am?.users ?? []).join(" ")}
+                  onChange={(e) => updateAllowed({ users: onSnowflakeList(e.currentTarget.value) })}
+                  placeholder="e.g. 1185234567890123456"
+                />
+              )}
+            </Field>
 
-        <Field
-          label="Forum applied tags"
-          hint={`Up to ${LIMITS.APPLIED_TAGS} tag snowflakes, comma/space separated.`}
-        >
-          {(id) => (
-            <TextInput
-              id={id}
-              value={(message.applied_tags ?? []).join(" ")}
-              onChange={(e) => setAppliedTags(onSnowflakeList(e.currentTarget.value))}
-              placeholder="e.g. 1185234567890123456"
-            />
-          )}
-        </Field>
+            {/* Forum-channel options — labelled clearly so non-forum users know to skip them */}
+            <div className={styles.sectionHint}>
+              Forum / media channel only — Discord ignores these on text channels.
+            </div>
+            <Field
+              label="Forum thread name"
+              hint="Starts a new forum post with this title. Skip when posting into an existing thread."
+            >
+              {(id) => (
+                <TextArea
+                  id={id}
+                  rows={1}
+                  value={message.thread_name ?? ""}
+                  maxLength={LIMITS.THREAD_NAME}
+                  onChange={(e) => setThreadName(e.currentTarget.value || undefined)}
+                  placeholder="e.g. Release notes — v2.4"
+                />
+              )}
+            </Field>
+
+            <Field
+              label="Forum applied tags"
+              hint={`Up to ${LIMITS.APPLIED_TAGS} tag snowflakes, comma/space separated.`}
+            >
+              {(id) => (
+                <TextInput
+                  id={id}
+                  value={(message.applied_tags ?? []).join(" ")}
+                  onChange={(e) => setAppliedTags(onSnowflakeList(e.currentTarget.value))}
+                  placeholder="e.g. 1185234567890123456"
+                />
+              )}
+            </Field>
+          </>
+        ) : null}
       </div>
     </details>
   );

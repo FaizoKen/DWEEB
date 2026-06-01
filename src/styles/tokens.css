@@ -11,33 +11,73 @@
 
 :root {
   /* ── App shell (builder chrome) ───────────────────────────────────── */
-  --app-bg: #0f1013;
-  --app-bg-elevated: #16181d;
-  --app-bg-input: #1c1f25;
-  --app-bg-hover: #20232a;
-  --app-bg-active: #262a33;
+  /* Layered neutrals: canvas → elevated panels → inputs → hover → active.
+     A hair warmer and more separated than before so hierarchy reads at a
+     glance without heavy borders. */
+  --app-bg: #0e0f13;
+  --app-bg-elevated: #17191f;
+  --app-bg-subtle: #1a1d23;
+  --app-bg-input: #1e2128;
+  --app-bg-hover: #242833;
+  --app-bg-active: #2c313d;
 
-  --app-border: #262932;
-  --app-border-strong: #353945;
+  --app-border: #2a2e38;
+  --app-border-strong: #3b4150;
   --app-border-focus: #5865f2;
 
-  --app-text: #e6e8ef;
-  --app-text-muted: #9ba1ad;
-  --app-text-subtle: #6b7280;
-  --app-text-inverted: #0f1013;
+  /* Brighter body text and AA-contrast muted/subtle (the old #6b7280 subtle
+     failed contrast on the dark canvas). */
+  --app-text: #eceef3;
+  --app-text-muted: #aab1bf;
+  --app-text-subtle: #828a99;
+  --app-text-inverted: #0e0f13;
 
   --app-accent: #5865f2;
   --app-accent-hover: #4752c4;
   --app-accent-soft: rgba(88, 101, 242, 0.18);
+  --app-accent-text: #aeb6ff;
 
-  --app-danger: #ed4245;
+  /* Semantic state colors carry a base, a soft fill, and an accessible text
+     tint so status/validation messaging stays consistent across surfaces. */
+  --app-danger: #f04747;
   --app-danger-hover: #c43539;
-  --app-success: #23a559;
-  --app-warning: #f0b232;
+  --app-danger-soft: rgba(240, 71, 71, 0.14);
+  --app-danger-text: #ff8a8c;
 
-  --app-radius-sm: 4px;
-  --app-radius: 8px;
-  --app-radius-lg: 12px;
+  --app-success: #2dc06b;
+  --app-success-soft: rgba(45, 192, 107, 0.14);
+  --app-success-text: #6ddf9e;
+
+  --app-warning: #f0b232;
+  --app-warning-soft: rgba(240, 178, 50, 0.16);
+  --app-warning-text: #f7cb6b;
+
+  /* ── Type + sizing scale (the "comfortable" baseline) ──────────────── */
+  --app-text-xs: 12px;
+  --app-text-sm: 13px;
+  --app-text-base: 14px;
+  --app-text-lg: 15px;
+  --app-text-xl: 17px;
+
+  --app-control-h: 36px;
+  --app-control-h-sm: 32px;
+  /* Shared height for the floating pills (Add component / Preview / AI) so they
+     always line up at the same size regardless of which file styles them. */
+  --app-fab-h: 42px;
+
+  --app-space-1: 4px;
+  --app-space-2: 8px;
+  --app-space-3: 12px;
+  --app-space-4: 16px;
+  --app-space-5: 20px;
+  --app-space-6: 24px;
+
+  --app-radius-sm: 6px;
+  --app-radius: 10px;
+  --app-radius-lg: 14px;
+
+  /* Consistent, visible keyboard-focus ring used by every control. */
+  --app-focus-ring: 0 0 0 2px rgba(88, 101, 242, 0.55);
 
   --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --app-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);

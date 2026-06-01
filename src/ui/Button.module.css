@@ -2,16 +2,23 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   border-radius: var(--app-radius-sm);
-  font-weight: 500;
+  font-weight: 600;
+  cursor: pointer;
   transition:
     background 120ms ease,
     color 120ms ease,
-    border-color 120ms ease;
+    border-color 120ms ease,
+    box-shadow 120ms ease;
   white-space: nowrap;
   user-select: none;
   border: 1px solid transparent;
+}
+
+.button:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
 }
 
 .button:disabled {
@@ -20,15 +27,15 @@
 }
 
 .size-sm {
-  padding: 4px 10px;
-  font-size: 12px;
-  height: 28px;
+  padding: 6px 12px;
+  font-size: var(--app-text-sm);
+  height: var(--app-control-h-sm);
 }
 
 .size-md {
-  padding: 6px 12px;
-  font-size: 13px;
-  height: 32px;
+  padding: 8px 16px;
+  font-size: var(--app-text-base);
+  height: var(--app-control-h);
 }
 
 .fullWidth {

@@ -6,39 +6,41 @@
 }
 
 .body {
-  padding: 14px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 @media (max-width: 640px) {
   .body {
-    padding: 10px;
-    gap: 12px;
+    padding: 12px;
+    gap: 14px;
   }
 }
 
 .empty {
-  padding: 24px 16px;
+  padding: 28px 18px;
   text-align: center;
   color: var(--app-text-muted);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .emptyTitle {
   font-weight: 600;
+  font-size: var(--app-text-base);
   color: var(--app-text);
   margin: 0;
 }
 .emptySub {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
 }
 
 .notImplemented {
   color: var(--app-text-muted);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }

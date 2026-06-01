@@ -2,24 +2,30 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--app-text-muted);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--app-text);
 }
 
 .addItem {
-  font-size: 11px;
-  color: var(--app-accent);
-  padding: 2px 6px;
-  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-xs);
+  font-weight: 500;
+  color: var(--app-accent-text);
+  padding: 4px 10px;
+  border-radius: 999px;
   background: var(--app-accent-soft);
   text-transform: none;
   letter-spacing: 0;
+  cursor: pointer;
 }
 .addItem:hover {
   background: rgba(88, 101, 242, 0.28);
+}
+.addItem:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
 }
 .addItem:disabled {
   opacity: 0.5;
@@ -33,13 +39,13 @@
 }
 
 .card {
-  background: var(--app-bg-elevated);
+  background: var(--app-bg-subtle);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
-  padding: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 /* Body padding for an image's inline editor when it's expanded as a tree row.
@@ -66,14 +72,15 @@
 }
 
 .cardTitle {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   color: var(--app-text);
 }
 
 .note {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
+  line-height: 1.45;
   color: var(--app-text-subtle);
 }
 .note code {
@@ -104,18 +111,24 @@
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 5px;
+  min-height: 30px;
+  padding: 5px 12px;
   background: var(--app-bg-input);
   border: 1px solid var(--app-border);
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--app-text-sm);
   color: var(--app-text);
   cursor: pointer;
   user-select: none;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 .chip:hover {
-  border-color: var(--app-accent);
+  border-color: var(--app-border-strong);
+}
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
 }
 .chipActive {
   background: var(--app-accent-soft);

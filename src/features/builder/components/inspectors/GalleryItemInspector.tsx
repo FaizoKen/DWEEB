@@ -8,6 +8,7 @@
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
+import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import type { EditorId, MediaGalleryItem } from "@/core/schema/types";
 import { Field } from "@/ui/Field";
@@ -23,6 +24,7 @@ interface Props {
 
 export function GalleryItemInspector({ galleryId, item }: Props) {
   const patchItem = useMessageStore((s) => s.patchGalleryItem);
+  const advancedMode = useUiPrefs((s) => s.advancedMode);
 
   return (
     <div className={styles.itemBody}>
@@ -35,7 +37,14 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
           })
         }
       />
-      <Field label="URL" hint="https:// or attachment://filename">
+      <Field
+        label="URL"
+        hint={
+          advancedMode
+            ? "https:// or attachment://filename"
+            : "Paste a direct image or video link (https://…)."
+        }
+      >
         {(id) => (
           <TextInput
             id={id}
@@ -48,28 +57,30 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
           />
         )}
       </Field>
-      <Field
-        label="Attachment ID (optional)"
-        hint="Reference an already-uploaded attachment by snowflake."
-      >
-        {(id) => (
-          <TextInput
-            id={id}
-            value={item.media.attachment_id ?? ""}
-            inputMode="numeric"
-            maxLength={LIMITS.SNOWFLAKE_MAX}
-            onChange={(e) =>
-              patchItem(galleryId, item._id, {
-                media: {
-                  ...item.media,
-                  attachment_id: e.currentTarget.value.replace(/[^\d]/g, "") || undefined,
-                },
-              })
-            }
-            placeholder="e.g. 1185234567890123456"
-          />
-        )}
-      </Field>
+      {advancedMode ? (
+        <Field
+          label="Attachment ID (optional)"
+          hint="Reference an already-uploaded attachment by snowflake."
+        >
+          {(id) => (
+            <TextInput
+              id={id}
+              value={item.media.attachment_id ?? ""}
+              inputMode="numeric"
+              maxLength={LIMITS.SNOWFLAKE_MAX}
+              onChange={(e) =>
+                patchItem(galleryId, item._id, {
+                  media: {
+                    ...item.media,
+                    attachment_id: e.currentTarget.value.replace(/[^\d]/g, "") || undefined,
+                  },
+                })
+              }
+              placeholder="e.g. 1185234567890123456"
+            />
+          )}
+        </Field>
+      ) : null}
       <Field label="Alt text">
         {(id) => (
           <TextInput

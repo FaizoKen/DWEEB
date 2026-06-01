@@ -33,6 +33,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useUiPrefs } from "@/core/state/uiPrefs";
 import { scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
 import {
   COMPONENT_META,
@@ -57,6 +58,7 @@ import { ComponentType } from "@/core/schema/types";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { IconButton } from "@/ui/IconButton";
+import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { AddComponentMenu } from "./AddComponentMenu";
 import { AdvancedMessageOptions } from "./AdvancedMessageOptions";
@@ -408,6 +410,9 @@ function MetaHeader() {
   const setUsername = useMessageStore((s) => s.setUsername);
   const setAvatar = useMessageStore((s) => s.setAvatarUrl);
 
+  const advancedMode = useUiPrefs((s) => s.advancedMode);
+  const setAdvancedMode = useUiPrefs((s) => s.setAdvancedMode);
+
   const characters = countCharacters(message);
   const components = countComponents(message);
 
@@ -440,16 +445,47 @@ function MetaHeader() {
         </Field>
       </div>
       <AdvancedMessageOptions />
-      <div className={styles.stats}>
-        <span>
-          {components} / {LIMITS.TOTAL_COMPONENTS} components
-        </span>
-        <span aria-hidden="true">·</span>
-        <span>
-          {characters} / {LIMITS.TOTAL_CHARACTERS} chars
-        </span>
+      <div className={styles.metaFooter}>
+        <div className={styles.stats}>
+          <StatPill
+            value={components}
+            max={LIMITS.TOTAL_COMPONENTS}
+            label={components === 1 ? "component" : "components"}
+          />
+          <StatPill
+            value={characters}
+            max={LIMITS.TOTAL_CHARACTERS}
+            label={characters === 1 ? "char" : "chars"}
+          />
+        </div>
+        <Switch
+          className={styles.advancedToggle}
+          checked={advancedMode}
+          onChange={(e) => setAdvancedMode(e.currentTarget.checked)}
+          label="Advanced"
+          title="Show technical fields like custom_id, snowflake IDs, and component id"
+        />
       </div>
     </section>
+  );
+}
+
+/**
+ * A budget pill that shifts from neutral → amber → red as the count nears its
+ * Discord limit, so the user sees message health at a glance instead of parsing
+ * raw numbers. "Near" trips at 85% of the cap; "full" once the cap is hit.
+ */
+function StatPill({ value, max, label }: { value: number; max: number; label: string }) {
+  const ratio = max > 0 ? value / max : 0;
+  return (
+    <span
+      className={cn(
+        styles.statPill,
+        ratio >= 1 ? styles.statPillFull : ratio >= 0.85 ? styles.statPillNear : null,
+      )}
+    >
+      {value} / {max} {label}
+    </span>
   );
 }
 

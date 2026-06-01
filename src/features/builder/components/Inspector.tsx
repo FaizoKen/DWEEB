@@ -8,6 +8,7 @@
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
+import { useUiPrefs } from "@/core/state/uiPrefs";
 import { findById } from "@/core/schema/traversal";
 import { ComponentType, type AnyComponent } from "@/core/schema/types";
 import { TextDisplayInspector } from "./inspectors/TextDisplayInspector";
@@ -30,6 +31,7 @@ import styles from "./Inspector.module.css";
 export function Inspector() {
   const selectedId = useMessageStore((s) => s.selectedId);
   const message = useMessageStore((s) => s.message);
+  const advancedMode = useUiPrefs((s) => s.advancedMode);
 
   const location = selectedId ? findById(message, selectedId) : null;
   const node = location?.node;
@@ -51,7 +53,9 @@ export function Inspector() {
     <div className={styles.inspector}>
       <div className={styles.body}>
         {renderInspector(node)}
-        <ComponentIdField node={node} />
+        {/* The per-component Discord id is a power-user concern — only surface
+            it in Advanced mode. The value (if any) persists regardless. */}
+        {advancedMode ? <ComponentIdField node={node} /> : null}
       </div>
     </div>
   );

@@ -82,11 +82,12 @@
   display: none;
   align-items: center;
   gap: 8px;
-  padding: 12px 18px;
+  height: var(--app-fab-h);
+  padding: 0 18px;
   border-radius: 999px;
   background: var(--app-accent);
   color: #fff;
-  font-size: 13px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   box-shadow: var(--app-shadow-lg);
   border: none;
@@ -94,6 +95,10 @@
   transition:
     background 120ms ease,
     transform 120ms ease;
+}
+.preview-fab:focus-visible {
+  outline: none;
+  box-shadow: var(--app-shadow-lg), var(--app-focus-ring);
 }
 .preview-fab:hover {
   background: var(--app-accent-hover);
@@ -113,11 +118,12 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 18px;
+  height: var(--app-fab-h);
+  padding: 0 18px;
   border-radius: 999px;
   background: linear-gradient(120deg, #7c3aed 0%, #c026d3 50%, #ec4899 100%);
   color: #fff;
-  font-size: 13px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   box-shadow:
     var(--app-shadow-lg),
@@ -128,6 +134,10 @@
     filter 120ms ease,
     box-shadow 120ms ease,
     transform 120ms ease;
+}
+.ai-fab:focus-visible {
+  outline: none;
+  box-shadow: var(--app-shadow-lg), var(--app-focus-ring);
 }
 .ai-fab:hover {
   filter: brightness(1.08) saturate(1.05);
@@ -227,13 +237,27 @@
    * circle so the pair fits comfortably on narrow screens. */
   .ai-fab {
     gap: 0;
-    width: 48px;
-    height: 48px;
+    width: var(--app-fab-h);
+    height: var(--app-fab-h);
     padding: 0;
     justify-content: center;
   }
 
   .ai-fab span {
     display: none;
+  }
+}
+
+/* Respect users who ask the OS to minimize motion: collapse transitions,
+ * animations, and smooth scrolling to near-instant. The mobile preview sheet
+ * and FABs still move, just without the easing ramp. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
