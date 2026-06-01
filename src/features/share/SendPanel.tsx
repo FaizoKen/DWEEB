@@ -3,12 +3,19 @@
  * or PATCHes the original when the editor was populated from a restore.
  *
  * Mode logic:
- *  - With no restore origin set, the panel POSTs (creates a new message).
+ *  - The "Send as new" / "Update existing" toggle is always available, so a
+ *    message this webhook already posted can be edited in place (PATCH) without
+ *    restoring it first: pick "Update existing", paste the message ID/link, and
+ *    the current editor content replaces the original.
+ *  - "Send as new" (default) POSTs a brand-new message.
  *  - When the user just restored a message via the Restore tab, the store's
- *    `restoredFrom` field is set, and the panel defaults to "Update existing"
- *    (PATCH) with the webhook + message ID pre-filled. The user can switch
- *    back to "Send as new" — that simply ignores the restore origin for the
- *    next click; it doesn't clear it (so they can still hit Update later).
+ *    `restoredFrom` field is set, the panel defaults to "Update existing", and
+ *    the webhook + message ID are pre-filled from that restore. Switching to
+ *    "Send as new" just ignores the restore origin for the next click; it
+ *    doesn't clear it (so they can still hit Update later).
+ *
+ * A webhook PATCH replaces the whole message, so when updating without a
+ * restore we warn that anything not rebuilt in the editor is overwritten.
  *
  * Before posting, the panel confirms who owns the webhook (a GET) whenever the
  * owner isn't already known from a prior check or saved entry. That keeps the
@@ -396,30 +403,28 @@ export function SendPanel({
         to Discord — nothing is uploaded to our servers (there are none).
       </p>
 
-      {restoredFrom ? (
-        <div className={styles.modeToggle} role="radiogroup" aria-label="Send mode">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={mode === "update"}
-            className={cn(styles.modeOption, mode === "update" && styles.modeOptionActive)}
-            onClick={() => setMode("update")}
-          >
-            <strong>Update the original</strong>
-            <span>Edit the message you restored in place (PATCH).</span>
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={mode === "new"}
-            className={cn(styles.modeOption, mode === "new" && styles.modeOptionActive)}
-            onClick={() => setMode("new")}
-          >
-            <strong>Send as a copy</strong>
-            <span>Post a new message; leaves the original untouched.</span>
-          </button>
-        </div>
-      ) : null}
+      <div className={styles.modeToggle} role="radiogroup" aria-label="Send mode">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={mode === "new"}
+          className={cn(styles.modeOption, mode === "new" && styles.modeOptionActive)}
+          onClick={() => setMode("new")}
+        >
+          <strong>Send as new</strong>
+          <span>Post a brand-new message to the channel (POST).</span>
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={mode === "update"}
+          className={cn(styles.modeOption, mode === "update" && styles.modeOptionActive)}
+          onClick={() => setMode("update")}
+        >
+          <strong>Update existing</strong>
+          <span>Edit a message this webhook already posted, in place (PATCH).</span>
+        </button>
+      </div>
 
       <div className={styles.warning} role="note">
         <strong>Treat the webhook URL like a password.</strong> Anyone with it can post to your
@@ -488,7 +493,11 @@ export function SendPanel({
       {mode === "update" ? (
         <Field
           label="Message ID or link to update"
-          hint="Pre-filled from the message you restored. Change it to update a different message instead."
+          hint={
+            restoredFrom
+              ? "Pre-filled from the message you restored. Change it to update a different message instead."
+              : "Paste the ID or link of a message this webhook already posted. In Discord: right-click the message → Copy Message ID (needs Developer Mode)."
+          }
           error={messageIdInvalid ? "Not a valid message ID or link." : undefined}
         >
           {(id) => (
@@ -502,6 +511,18 @@ export function SendPanel({
             />
           )}
         </Field>
+      ) : null}
+
+      {mode === "update" && !restoredFrom ? (
+        <div className={styles.updateNote} role="note">
+          <strong>Update overwrites the entire message.</strong>
+          <p className={styles.updateNoteDetail}>
+            What’s in the editor now replaces the original completely — anything you don’t rebuild
+            here is removed. Only this webhook can edit its own messages (Discord 404s otherwise). To
+            tweak the live message instead of replacing it, pull it in from the{" "}
+            <strong>Restore</strong> tab first.
+          </p>
+        </div>
       ) : null}
 
       {ownershipBlocked ? (

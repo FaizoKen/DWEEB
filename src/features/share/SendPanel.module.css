@@ -93,6 +93,23 @@
   text-decoration: underline;
 }
 
+/* Heads-up shown when updating an existing message without restoring it first:
+   a webhook PATCH replaces the whole message, so the current editor content
+   overwrites the original wholesale. */
+.updateNote {
+  background: rgba(88, 101, 242, 0.08);
+  border: 1px solid rgba(88, 101, 242, 0.35);
+  color: var(--app-text);
+  padding: 10px 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: 12px;
+}
+.updateNoteDetail {
+  margin: 6px 0 0;
+  color: var(--app-text-muted);
+  line-height: 1.45;
+}
+
 .error {
   background: rgba(237, 66, 69, 0.1);
   border: 1px solid rgba(237, 66, 69, 0.35);
