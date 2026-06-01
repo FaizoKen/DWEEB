@@ -143,16 +143,12 @@ function renderInlineNode(node: InlineNode, key: number): ReactNode {
         </code>
       );
     case "link":
+      // Rendered as a non-navigable span: the preview should look like Discord
+      // (blue, underline-on-hover) but never open URLs on click.
       return (
-        <a
-          key={key}
-          href={node.href}
-          className={styles.link}
-          target="_blank"
-          rel="noreferrer noopener"
-        >
+        <span key={key} className={styles.link}>
           {renderInline(node.children)}
-        </a>
+        </span>
       );
     case "mention":
       return <Mention key={key} kind={node.mention} id={node.id} />;

@@ -27,6 +27,11 @@
   border-color: var(--app-accent);
   background: var(--app-accent-soft);
 }
+.dropzone:focus-visible {
+  outline: none;
+  border-color: var(--app-accent);
+  box-shadow: var(--app-focus-ring);
+}
 
 .dropOverlay {
   position: absolute;
@@ -92,6 +97,12 @@
 }
 
 .warningText {
+  font-size: 11px;
+  color: var(--app-danger, #ed4245);
+}
+
+.errorText {
+  margin: 0;
   font-size: 11px;
   color: var(--app-danger, #ed4245);
 }

@@ -11,7 +11,7 @@
  * preview source lives in the renderers.
  */
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/ui/Button";
 import { isSessionUrl, parseSessionUrl, registerAttachment } from "@/core/state/attachmentStore";
 import { useAttachmentRecord } from "./useAttachmentRecord";
@@ -30,9 +30,21 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
   const session = isSessionUrl(url) ? parseSessionUrl(url) : null;
   const record = useAttachmentRecord(session?.blobId ?? null);
   const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handlePick = (file: File | null) => {
     if (!file) return;
+    // The native `accept` only filters the OS dialog; drag-and-drop and the
+    // dialog's "All files" override both slip past it, so re-check here.
+    if (!matchesAccept(file, accept)) {
+      setError(
+        accept?.startsWith("image")
+          ? `“${file.name}” isn't an image file.`
+          : `“${file.name}” isn't a supported file type.`,
+      );
+      return;
+    }
+    setError(null);
     // The previous blob (if any) is left for the post-edit garbage collector
     // to reap — a duplicated component might still reference it.
     const sessionUrl = registerAttachment(file);
@@ -40,8 +52,40 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
   };
 
   const handleClear = () => {
+    setError(null);
     onChange("");
   };
+
+  // Enter/Space opens the dialog so the focusable dropzone stays keyboard-
+  // operable now that there's no separate "Choose file" button.
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      inputRef.current?.click();
+    }
+  };
+
+  // Paste-to-upload. A paste only reaches an element's own onPaste while that
+  // element is focused, but users expect Ctrl+V to work right after selecting
+  // the component in the tree (focus sits on the tree row, not the dropzone).
+  // So we listen at the document level while mounted: only one picker is ever
+  // mounted at a time (the inspector edits a single component), and pastes
+  // that carry no file are ignored so text pastes still reach their input.
+  const handlePickRef = useRef(handlePick);
+  useEffect(() => {
+    handlePickRef.current = handlePick;
+  });
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+      const file = fileFromClipboard(e.clipboardData);
+      if (!file) return;
+      e.preventDefault();
+      handlePickRef.current(file);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
 
   const isFileDrag = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
 
@@ -73,6 +117,8 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
       <label
         htmlFor={fileInputId}
         className={dragOver ? `${styles.dropzone} ${styles.dragging}` : styles.dropzone}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
         onDragEnter={handleDragOver}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -83,6 +129,7 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
           id={fileInputId}
           type="file"
           accept={accept}
+          tabIndex={-1}
           className={styles.fileInput}
           onChange={(e) => handlePick(e.currentTarget.files?.[0] ?? null)}
         />
@@ -100,7 +147,7 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
           )
         ) : (
           <div className={styles.placeholder}>
-            <strong>Upload file</strong>
+            <strong>Drag &amp; drop, paste, or click to upload</strong>
             <span>Held in this browser tab only; never uploaded to a third party.</span>
           </div>
         )}
@@ -110,18 +157,60 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
           </div>
         )}
       </label>
-      <div className={styles.actions}>
-        <Button variant="secondary" size="sm" onClick={() => inputRef.current?.click()}>
-          {session ? "Replace…" : "Choose file…"}
-        </Button>
-        {session ? (
+      {error ? (
+        <p className={styles.errorText} role="alert">
+          {error}
+        </p>
+      ) : null}
+      {session ? (
+        <div className={styles.actions}>
+          <Button variant="secondary" size="sm" onClick={() => inputRef.current?.click()}>
+            Replace…
+          </Button>
           <Button variant="ghost" size="sm" onClick={handleClear}>
             Remove
           </Button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * Pull the first file out of a paste. Pasted screenshots arrive as clipboard
+ * `items` of kind "file"; copied desktop files populate `files` directly.
+ */
+function fileFromClipboard(data: DataTransfer): File | null {
+  if (data.files && data.files.length > 0) return data.files[0];
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind === "file") {
+      const file = item.getAsFile();
+      if (file) return file;
+    }
+  }
+  return null;
+}
+
+/**
+ * Mirror the browser's `accept` matching so dropped / overridden files obey
+ * the same allow-list as the dialog. An empty `accept` permits anything.
+ * Tokens may be extensions (".png"), wildcard mimes ("image/*"), or exact
+ * mimes ("image/png").
+ */
+function matchesAccept(file: File, accept: string | undefined): boolean {
+  if (!accept) return true;
+  const tokens = accept
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  if (tokens.length === 0) return true;
+  const type = file.type.toLowerCase();
+  const name = file.name.toLowerCase();
+  return tokens.some((token) => {
+    if (token.startsWith(".")) return name.endsWith(token);
+    if (token.endsWith("/*")) return type.startsWith(token.slice(0, -1));
+    return type === token;
+  });
 }
 
 function formatBytes(bytes: number): string {

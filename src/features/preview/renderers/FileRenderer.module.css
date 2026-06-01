@@ -6,23 +6,6 @@
   position: relative; /* anchor the spoiler overlay */
 }
 
-.previewWrap {
-  position: relative;
-  align-self: flex-start; /* shrink to the image so the pill centers over it */
-  max-width: 100%;
-}
-
-.preview {
-  display: block;
-  max-width: 100%;
-  max-height: 300px;
-  width: auto;
-  height: auto;
-  border-radius: var(--discord-radius);
-  background: var(--discord-bg-tertiary);
-  object-fit: contain;
-}
-
 .card {
   display: flex;
   align-items: center;
@@ -57,14 +40,11 @@
   font-size: 12px;
 }
 
-/* Spoilered file: blur the preview + filename. The reveal is selection-driven —
+/* Spoilered file: blur the filename. The reveal is selection-driven —
    selecting the file drops the .spoiler class, clearing the blur. */
 .spoiler {
   cursor: pointer;
 } /* click to select/reveal */
-.spoiler .preview {
-  filter: blur(20px);
-}
 .spoiler .name {
   filter: blur(4px);
 }
@@ -79,7 +59,7 @@
   cursor: pointer;
 }
 
-/* Centered "SPOILER" pill over the blurred preview. */
+/* Centered "SPOILER" pill over the blurred card. */
 .spoilerPill {
   position: absolute;
   top: 50%;
