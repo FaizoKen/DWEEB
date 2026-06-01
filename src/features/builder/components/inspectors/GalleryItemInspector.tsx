@@ -14,6 +14,8 @@ import type { EditorId, MediaGalleryItem } from "@/core/schema/types";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
 import { Switch } from "@/ui/Switch";
+import { useNodeIssues } from "@/features/builder/useValidation";
+import { IssueList } from "../ValidationIssues";
 import { AttachmentPicker } from "./AttachmentPicker";
 import styles from "./inspectors.module.css";
 
@@ -25,9 +27,11 @@ interface Props {
 export function GalleryItemInspector({ galleryId, item }: Props) {
   const patchItem = useMessageStore((s) => s.patchGalleryItem);
   const advancedMode = useUiPrefs((s) => s.advancedMode);
+  const issues = useNodeIssues(item._id);
 
   return (
     <div className={styles.itemBody}>
+      <IssueList issues={issues} />
       <AttachmentPicker
         url={item.media.url ?? ""}
         accept="image/*,video/*"

@@ -11,6 +11,8 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { useUiPrefs } from "@/core/state/uiPrefs";
 import { findById } from "@/core/schema/traversal";
 import { ComponentType, type AnyComponent } from "@/core/schema/types";
+import { useNodeIssues } from "@/features/builder/useValidation";
+import { IssueList } from "./ValidationIssues";
 import { TextDisplayInspector } from "./inspectors/TextDisplayInspector";
 import { ContainerInspector } from "./inspectors/ContainerInspector";
 import { SectionInspector } from "./inspectors/SectionInspector";
@@ -35,6 +37,7 @@ export function Inspector() {
 
   const location = selectedId ? findById(message, selectedId) : null;
   const node = location?.node;
+  const issues = useNodeIssues(selectedId ?? "");
 
   if (!node) {
     return (
@@ -52,6 +55,7 @@ export function Inspector() {
   return (
     <div className={styles.inspector}>
       <div className={styles.body}>
+        <IssueList issues={issues} />
         {renderInspector(node)}
         {/* The per-component Discord id is a power-user concern — only surface
             it in Advanced mode. The value (if any) persists regardless. */}

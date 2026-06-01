@@ -2,6 +2,9 @@
   position: relative;
   border-radius: var(--discord-radius);
   transition: box-shadow 120ms ease;
+  /* Selecting a node scrolls its match here to the top (block: "start"); leave
+     a little headroom so it isn't pinned flush against the preview's edge. */
+  scroll-margin-top: 12px;
 }
 
 .selected {

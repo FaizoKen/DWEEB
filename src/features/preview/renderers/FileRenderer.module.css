@@ -3,6 +3,13 @@
   flex-direction: column;
   gap: 6px;
   max-width: 420px;
+  position: relative; /* anchor the spoiler overlay */
+}
+
+.previewWrap {
+  position: relative;
+  align-self: flex-start; /* shrink to the image so the pill centers over it */
+  max-width: 100%;
 }
 
 .preview {
@@ -50,7 +57,44 @@
   font-size: 12px;
 }
 
-.spoiler .preview { filter: blur(20px); }
-.spoiler:hover .preview { filter: none; }
-.spoiler .name { filter: blur(4px); }
-.spoiler:hover .name { filter: none; }
+/* Spoilered file: blur the preview + filename. The reveal is selection-driven —
+   selecting the file drops the .spoiler class, clearing the blur. */
+.spoiler {
+  cursor: pointer;
+} /* click to select/reveal */
+.spoiler .preview {
+  filter: blur(20px);
+}
+.spoiler .name {
+  filter: blur(4px);
+}
+
+/* Full-cover click target so a click selects (reveals) the file instead of
+   hitting the preview's video controls. No handler — the click bubbles to the
+   selecting wrapper in ComponentRenderer. */
+.spoilerOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: pointer;
+}
+
+/* Centered "SPOILER" pill over the blurred preview. */
+.spoilerPill {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none; /* clicks fall through to the overlay below */
+  z-index: 2;
+}

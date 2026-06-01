@@ -4,6 +4,7 @@
   border-radius: var(--discord-radius);
   overflow: hidden;
   max-width: 560px;
+  position: relative; /* anchor the spoiler pill overlay */
 }
 
 .body {
@@ -20,11 +21,43 @@
   }
 }
 
-.spoiler {
-  filter: blur(6px);
+/* Spoilered container: Discord obscures the whole content behind a heavy blur
+   and floats a centered "SPOILER" pill on top until it's revealed. The reveal
+   is selection-driven — selecting the container (or any child) drops these
+   classes, clearing the blur. */
+.spoilered {
+  cursor: pointer; /* click anywhere to select/reveal */
+}
+.spoilerBlur {
+  filter: blur(16px);
   transition: filter 200ms ease;
 }
-.spoiler:hover { filter: none; }
-/* Touch devices can't hover — let a tap reveal the container. */
-.spoiler:focus-within,
-.spoiler:active { filter: none; }
+
+/* Full-cover click target: while obscured, a click anywhere selects (reveals)
+   the container instead of activating a child hidden behind the blur. It has no
+   handler — the click bubbles to the selecting wrapper in ComponentRenderer. */
+.spoilerOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: pointer;
+}
+
+.spoilerPill {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none; /* clicks fall through to the overlay below */
+  z-index: 2;
+}

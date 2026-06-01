@@ -38,9 +38,7 @@ interface ComponentRendererProps {
 // reference), so memo lets every untouched node bail out. Selection state is
 // read as a per-node boolean below, so changing the selection only re-renders
 // the two nodes whose highlight actually flips — not the whole preview tree.
-export const ComponentRenderer = memo(function ComponentRenderer({
-  node,
-}: ComponentRendererProps) {
+export const ComponentRenderer = memo(function ComponentRenderer({ node }: ComponentRendererProps) {
   const isSelected = useMessageStore((s) => s.selectedId === node._id);
   const select = useMessageStore((s) => s.select);
   const closePreview = usePreviewClose();
@@ -51,6 +49,10 @@ export const ComponentRenderer = memo(function ComponentRenderer({
       className={cn(styles.wrapper, isSelected && styles.selected)}
       onClick={(e) => {
         e.stopPropagation();
+        // Revealing an obscured spoiler shouldn't also dismiss the mobile
+        // preview — the user needs to see the now-revealed content. A second
+        // tap (the node is already selected) dismisses as usual.
+        const revealingSpoiler = "spoiler" in node && node.spoiler === true && !isSelected;
         select(node._id);
         // On mobile this dismisses the preview slide-over so the editor
         // (and its now-revealed inspector) becomes visible. No-op on desktop.
@@ -58,7 +60,7 @@ export const ComponentRenderer = memo(function ComponentRenderer({
         // the chat too (see App.closePreview), so skip the dismiss and let
         // the user keep chatting while picking nodes. Read the AI state lazily
         // here so this node doesn't subscribe to (and re-render on) it.
-        if (!useAiStore.getState().open) closePreview?.();
+        if (!revealingSpoiler && !useAiStore.getState().open) closePreview?.();
         // Bring the matching tree row into the builder's viewport. Deferred
         // one frame so the freshly-selected row's inline inspector has
         // mounted before `scrollIntoView` measures positions.
@@ -67,7 +69,7 @@ export const ComponentRenderer = memo(function ComponentRenderer({
           const row = document.querySelector<HTMLElement>(
             `[data-tree-row="true"][data-row-id="${CSS.escape(targetId)}"]`,
           );
-          row?.scrollIntoView({ behavior: "smooth", block: "center" });
+          row?.scrollIntoView({ behavior: "smooth", block: "start" });
         });
       }}
     >

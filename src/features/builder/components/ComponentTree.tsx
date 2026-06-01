@@ -33,7 +33,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
-import { useUiPrefs } from "@/core/state/uiPrefs";
 import { scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
 import {
   COMPONENT_META,
@@ -58,11 +57,12 @@ import { ComponentType } from "@/core/schema/types";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { IconButton } from "@/ui/IconButton";
-import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { AddComponentMenu } from "./AddComponentMenu";
 import { AdvancedMessageOptions } from "./AdvancedMessageOptions";
 import {
+  AlertCircleIcon,
+  AlertTriangleIcon,
   ArrowDownIcon,
   ArrowUpIcon,
   ChevronDownIcon,
@@ -73,8 +73,16 @@ import {
   TrashIcon,
 } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
+import {
+  ValidationContext,
+  useNodeIssues,
+  useValidationSummary,
+  useValidationView,
+  worstSeverity,
+} from "@/features/builder/useValidation";
 import { Inspector } from "./Inspector";
 import { GalleryItemInspector } from "./inspectors/GalleryItemInspector";
+import { IssueDot, IssueList } from "./ValidationIssues";
 import styles from "./ComponentTree.module.css";
 import type { ContainerChildFactoryKey, TopLevelFactoryKey } from "@/core/factory/createComponent";
 
@@ -110,6 +118,12 @@ interface DragSession {
   ghostStart: { x: number; y: number } | null;
   dropTarget: { id: EditorId; position: DropPosition } | null;
   ghostRef: RefObject<HTMLDivElement>;
+  /**
+   * The tree's scrolling viewport. Drag rows use it to auto-scroll the list
+   * when the pointer nears an edge, so a node can be dragged past the visible
+   * window of a long tree without letting go.
+   */
+  scrollRef: RefObject<HTMLDivElement>;
   setDrag: (info: DragInfo | null) => void;
   setGhostStart: (pos: { x: number; y: number } | null) => void;
   setDropTarget: (target: { id: EditorId; position: DropPosition } | null) => void;
@@ -120,6 +134,7 @@ const DragContext = createContext<DragSession>({
   ghostStart: null,
   dropTarget: null,
   ghostRef: { current: null as unknown as HTMLDivElement },
+  scrollRef: { current: null as unknown as HTMLDivElement },
   setDrag: () => {},
   setGhostStart: () => {},
   setDropTarget: () => {},
@@ -134,6 +149,12 @@ const MOUSE_DRAG_THRESHOLD = 4;
 /** CSS class added to <body> while a drag is active. Suppresses scrolling
  *  and text selection across the page so the finger can't accidentally pan. */
 const BODY_DRAG_CLASS = "dnd-active";
+/** Distance from the scroll viewport's top/bottom edge, in px, where a drag
+ *  starts auto-scrolling the tree. */
+const AUTO_SCROLL_EDGE = 60;
+/** Peak auto-scroll speed (px per animation frame) reached at the very edge.
+ *  Speed ramps from 0 at the zone's inner boundary to this at the edge. */
+const AUTO_SCROLL_MAX_SPEED = 18;
 
 /** What kind of list this node exposes for its children. */
 function childParentKind(node: AnyComponent): ParentKind | null {
@@ -299,12 +320,14 @@ export function ComponentTree() {
   const [ghostStart, setGhostStart] = useState<{ x: number; y: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<DragSession["dropTarget"]>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const dragSession = useMemo<DragSession>(
     () => ({
       drag,
       ghostStart,
       dropTarget,
       ghostRef,
+      scrollRef,
       setDrag,
       setGhostStart,
       setDropTarget,
@@ -323,10 +346,15 @@ export function ComponentTree() {
 
   const topLevelIds = useMemo(() => components.map((c) => c._id), [components]);
 
+  // One validation pass for the whole tree, shared via context so each row is a
+  // cheap map lookup instead of its own re-validation.
+  const validation = useValidationView();
+
   return (
+    <ValidationContext.Provider value={validation}>
     <DragContext.Provider value={dragSession}>
       <div className={styles.tree}>
-        <div className={styles.scroll} onClick={clearSelectionOnBackdrop}>
+        <div ref={scrollRef} className={styles.scroll} onClick={clearSelectionOnBackdrop}>
           <MetaHeader />
 
           {components.length === 0 ? (
@@ -371,6 +399,7 @@ export function ComponentTree() {
       </div>
       <DragGhost />
     </DragContext.Provider>
+    </ValidationContext.Provider>
   );
 }
 
@@ -410,14 +439,30 @@ function MetaHeader() {
   const setUsername = useMessageStore((s) => s.setUsername);
   const setAvatar = useMessageStore((s) => s.setAvatarUrl);
 
-  const advancedMode = useUiPrefs((s) => s.advancedMode);
-  const setAdvancedMode = useUiPrefs((s) => s.setAdvancedMode);
+  const select = useMessageStore((s) => s.select);
 
   const characters = countCharacters(message);
   const components = countComponents(message);
 
+  const { errorCount, warningCount, firstErrorNodeId, firstWarningNodeId, messageIssues } =
+    useValidationSummary();
+
+  // Select the offending row and scroll it into view so a flagged component is
+  // one click away from the summary pill.
+  const jumpToIssue = (id: EditorId | null) => {
+    if (!id) return;
+    select(id);
+    scrollTreeRowIntoView(id);
+  };
+
+  // "A message must contain at least one component" is already covered by the
+  // empty-tree placeholder, so drop it from the banner to avoid saying it twice.
+  const bannerIssues = messageIssues.filter((i) => i.code !== "EMPTY_MESSAGE");
+
   return (
     <section className={styles.meta} aria-label="Webhook execution overrides">
+      {bannerIssues.length > 0 ? <IssueList issues={bannerIssues} /> : null}
+
       <div className={styles.row2}>
         <Field label="Username">
           {(id) => (
@@ -457,14 +502,34 @@ function MetaHeader() {
             max={LIMITS.TOTAL_CHARACTERS}
             label={characters === 1 ? "char" : "chars"}
           />
+          {/* On an empty message the only issue is "add a component", which the
+              empty-tree placeholder already says — so the pills wait for content.
+              A clean message shows no pill at all; absence is the "all good" cue. */}
+          {components > 0 && errorCount > 0 ? (
+            <button
+              type="button"
+              className={cn(styles.statPill, styles.issuePillError)}
+              onClick={() => jumpToIssue(firstErrorNodeId)}
+              disabled={!firstErrorNodeId}
+              title="Jump to the first component with an error"
+            >
+              <AlertCircleIcon size={12} />
+              {errorCount} {errorCount === 1 ? "error" : "errors"}
+            </button>
+          ) : null}
+          {components > 0 && warningCount > 0 ? (
+            <button
+              type="button"
+              className={cn(styles.statPill, styles.issuePillWarn)}
+              onClick={() => jumpToIssue(firstWarningNodeId)}
+              disabled={!firstWarningNodeId}
+              title="Jump to the first component with a warning"
+            >
+              <AlertTriangleIcon size={12} />
+              {warningCount} {warningCount === 1 ? "warning" : "warnings"}
+            </button>
+          ) : null}
         </div>
-        <Switch
-          className={styles.advancedToggle}
-          checked={advancedMode}
-          onChange={(e) => setAdvancedMode(e.currentTarget.checked)}
-          label="Advanced"
-          title="Show technical fields like custom_id, snowflake IDs, and component id"
-        />
       </div>
     </section>
   );
@@ -532,7 +597,7 @@ function usePointerDragRow({
   allowed: (target: RowData) => DropPosition[];
   commit: (target: RowData, position: DropPosition) => void;
 }) {
-  const { drag, dropTarget, ghostRef, setDrag, setGhostStart, setDropTarget } =
+  const { drag, dropTarget, ghostRef, scrollRef, setDrag, setGhostStart, setDropTarget } =
     useContext(DragContext);
 
   interface PointerState {
@@ -555,6 +620,14 @@ function usePointerDragRow({
   const stateRef = useRef<PointerState | null>(null);
   const lastDropRef = useRef<{ id: EditorId; position: DropPosition } | null>(null);
   const justDraggedRef = useRef(false);
+  // Last known pointer position (viewport coords), kept current while dragging
+  // so the auto-scroll loop can re-hit-test the row under a stationary pointer.
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  // Handle of the in-flight auto-scroll rAF, or null when idle.
+  const autoScrollRef = useRef<number | null>(null);
+  // Latest hit-test fn, so the rAF loop can invoke it without listing it as a
+  // dependency (which would rebuild the loop callback every render).
+  const updateDropTargetRef = useRef<(clientX: number, clientY: number) => void>(() => {});
 
   const releasePointerState = useCallback((state: PointerState) => {
     if (state.longPressTimer !== null) {
@@ -567,16 +640,64 @@ function usePointerDragRow({
     }
   }, []);
 
+  // One animation-frame tick of edge auto-scroll. When the pointer sits within
+  // AUTO_SCROLL_EDGE px of the scroll viewport's top or bottom, nudge the
+  // scrollTop — faster the closer to the edge — and re-run the hit-test so the
+  // drop indicator follows the rows now sliding under a stationary pointer.
+  // Reschedules itself; the handle lives in autoScrollRef so endDrag can cancel.
+  const runAutoScroll = useCallback(() => {
+    const container = scrollRef.current;
+    const pointer = lastPointerRef.current;
+    if (!container || !pointer) {
+      autoScrollRef.current = null;
+      return;
+    }
+    const rect = container.getBoundingClientRect();
+    const topGap = pointer.y - rect.top;
+    const bottomGap = rect.bottom - pointer.y;
+    let delta = 0;
+    if (topGap < AUTO_SCROLL_EDGE) {
+      const strength = Math.min(1, (AUTO_SCROLL_EDGE - topGap) / AUTO_SCROLL_EDGE);
+      delta = -Math.ceil(strength * AUTO_SCROLL_MAX_SPEED);
+    } else if (bottomGap < AUTO_SCROLL_EDGE) {
+      const strength = Math.min(1, (AUTO_SCROLL_EDGE - bottomGap) / AUTO_SCROLL_EDGE);
+      delta = Math.ceil(strength * AUTO_SCROLL_MAX_SPEED);
+    }
+    if (delta !== 0) {
+      const before = container.scrollTop;
+      container.scrollTop = before + delta;
+      if (container.scrollTop !== before) updateDropTargetRef.current(pointer.x, pointer.y);
+    }
+    autoScrollRef.current = requestAnimationFrame(runAutoScroll);
+  }, [scrollRef]);
+
+  const startAutoScroll = useCallback(() => {
+    if (autoScrollRef.current === null) {
+      autoScrollRef.current = requestAnimationFrame(runAutoScroll);
+    }
+  }, [runAutoScroll]);
+
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollRef.current !== null) {
+      cancelAnimationFrame(autoScrollRef.current);
+      autoScrollRef.current = null;
+    }
+  }, []);
+
   const beginDrag = useCallback(
     (startX: number, startY: number) => {
+      lastPointerRef.current = { x: startX, y: startY };
       setGhostStart({ x: startX, y: startY });
       setDrag(dragInfo);
+      startAutoScroll();
     },
-    [dragInfo, setDrag, setGhostStart],
+    [dragInfo, setDrag, setGhostStart, startAutoScroll],
   );
 
   const endDrag = useCallback(
     (doCommit: boolean) => {
+      stopAutoScroll();
+      lastPointerRef.current = null;
       const last = lastDropRef.current;
       if (doCommit && last) {
         const targetEl = document.querySelector(
@@ -590,7 +711,7 @@ function usePointerDragRow({
       setGhostStart(null);
       setDropTarget(null);
     },
-    [commit, setDrag, setDropTarget, setGhostStart],
+    [commit, setDrag, setDropTarget, setGhostStart, stopAutoScroll],
   );
 
   const onPointerDown = useCallback(
@@ -695,6 +816,8 @@ function usePointerDragRow({
     },
     [allowed, setDropTarget],
   );
+  // Keep the auto-scroll loop pointed at the freshest hit-test closure.
+  updateDropTargetRef.current = updateDropTargetFromPointer;
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -732,6 +855,10 @@ function usePointerDragRow({
 
       // We're dragging. Block native gestures associated with this pointer.
       e.preventDefault();
+
+      // Record the live pointer position for the edge auto-scroll loop, which
+      // re-hit-tests from here when the content scrolls under a still pointer.
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
 
       // Move the ghost imperatively — re-rendering the whole tree on every
       // pixel of motion would be wasteful.
@@ -777,14 +904,16 @@ function usePointerDragRow({
     [endDrag, releasePointerState],
   );
 
-  // Unmount cleanup: clear any pending long-press timer and detach the
-  // touchmove blocker so neither can fire against an unmounted component.
+  // Unmount cleanup: clear any pending long-press timer, detach the touchmove
+  // blocker, and cancel an in-flight auto-scroll frame so none can fire against
+  // an unmounted component.
   useEffect(() => {
     return () => {
       const state = stateRef.current;
       if (state) releasePointerState(state);
+      stopAutoScroll();
     };
-  }, [releasePointerState]);
+  }, [releasePointerState, stopAutoScroll]);
 
   const consumeJustDragged = useCallback(() => {
     if (justDraggedRef.current) {
@@ -820,6 +949,8 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
   const addRowSelect = useMessageStore((s) => s.addRowSelect);
   const addGalleryItem = useMessageStore((s) => s.addGalleryItem);
   const meta = COMPONENT_META[node.type];
+  const issues = useNodeIssues(node._id);
+  const severity = worstSeverity(issues);
 
   const { siblings, extras } = childGroups(node);
   const siblingIds = useMemo(() => siblings.map((c) => c._id), [siblings]);
@@ -906,7 +1037,7 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
           .querySelector<HTMLElement>(
             `[data-preview-scroll] [data-node-id="${CSS.escape(targetId)}"]`,
           )
-          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     },
     [consumeJustDragged, isSelected, node._id, select],
@@ -938,8 +1069,14 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
         <span className={styles.chevron} aria-hidden="true">
           {isSelected ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
         </span>
-        <span className={styles.glyph} aria-hidden="true">
-          {meta.glyph}
+        <span className={styles.glyphCell}>
+          <span
+            className={cn(styles.glyph, severity === "error" && styles.glyphError)}
+            aria-hidden="true"
+          >
+            {meta.glyph}
+          </span>
+          <IssueDot issues={issues} />
         </span>
         <span className={styles.label}>{meta.label}</span>
         <span className={styles.summary}>{summarize(node)}</span>
@@ -1032,6 +1169,8 @@ function GalleryItemNode({
   const moveGalleryItemToGallery = useMessageStore((s) => s.moveGalleryItemToGallery);
   const removeGalleryItem = useMessageStore((s) => s.removeGalleryItem);
   const duplicateGalleryItem = useMessageStore((s) => s.duplicateGalleryItem);
+  const issues = useNodeIssues(item._id);
+  const severity = worstSeverity(issues);
 
   const canMoveUp = index > 0;
   const canMoveDown = index < total - 1;
@@ -1123,8 +1262,14 @@ function GalleryItemNode({
         <span className={styles.chevron} aria-hidden="true">
           {isSelected ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
         </span>
-        <span className={styles.glyph} aria-hidden="true">
-          ▦
+        <span className={styles.glyphCell}>
+          <span
+            className={cn(styles.glyph, severity === "error" && styles.glyphError)}
+            aria-hidden="true"
+          >
+            ▦
+          </span>
+          <IssueDot issues={issues} />
         </span>
         <span className={styles.label}>Image</span>
         <span className={styles.summary}>{summarizeGalleryItem(item)}</span>

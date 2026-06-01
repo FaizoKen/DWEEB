@@ -1,0 +1,64 @@
+/* Status dot overlaid on a tree row's component glyph. The ring (a border in
+   the row's own background colour) keeps it legible on top of the icon chip. */
+.dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  border: 2px solid var(--app-bg-elevated);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.dotError {
+  background: var(--app-danger);
+}
+
+.dotWarn {
+  background: var(--app-warning);
+}
+
+/* Issue breakdown shown at the top of an inspector / meta header. */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-sm);
+  line-height: 1.45;
+}
+
+.itemError {
+  color: var(--app-danger-text);
+  background: var(--app-danger-soft);
+}
+
+.itemWarn {
+  color: var(--app-warning-text);
+  background: var(--app-warning-soft);
+}
+
+.itemIcon {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  margin-top: 1px;
+}
+
+.itemText {
+  min-width: 0;
+  word-break: break-word;
+}

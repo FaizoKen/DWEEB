@@ -183,6 +183,24 @@ export const InfoIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+/** Error indicator — a circled exclamation. Pairs with danger color. */
+export const AlertCircleIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8v4.5" />
+    <circle cx="12" cy="16.2" r="0.6" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+/** Warning indicator — an exclamation triangle. Pairs with warning color. */
+export const AlertTriangleIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.4 0z" />
+    <path d="M12 9v4" />
+    <circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 export const SettingsIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <circle cx="12" cy="12" r="3" />

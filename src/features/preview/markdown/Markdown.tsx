@@ -6,8 +6,9 @@
  * unchanged text doesn't re-run the parser on every keystroke.
  */
 
-import { memo, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { parseMarkdown, type BlockNode, type InlineNode, type MentionKind } from "./parse";
+import { cn } from "@/lib/cn";
 import styles from "./Markdown.module.css";
 
 interface MarkdownProps {
@@ -34,12 +35,25 @@ function renderBlock(block: BlockNode, key: number): ReactNode {
         </p>
       );
     case "heading": {
-      const cls =
-        block.level === 1 ? styles.h1 : block.level === 2 ? styles.h2 : styles.h3;
+      const cls = block.level === 1 ? styles.h1 : block.level === 2 ? styles.h2 : styles.h3;
       const inner = renderInline(block.children);
-      if (block.level === 1) return <h1 key={key} className={cls}>{inner}</h1>;
-      if (block.level === 2) return <h2 key={key} className={cls}>{inner}</h2>;
-      return <h3 key={key} className={cls}>{inner}</h3>;
+      if (block.level === 1)
+        return (
+          <h1 key={key} className={cls}>
+            {inner}
+          </h1>
+        );
+      if (block.level === 2)
+        return (
+          <h2 key={key} className={cls}>
+            {inner}
+          </h2>
+        );
+      return (
+        <h3 key={key} className={cls}>
+          {inner}
+        </h3>
+      );
     }
     case "subtext":
       return (
@@ -83,6 +97,21 @@ function renderInline(nodes: InlineNode[]): ReactNode {
   return nodes.map((n, i) => renderInlineNode(n, i));
 }
 
+/** Inline text spoiler. Click/tap to reveal, click/tap again to re-hide — the
+ * same on desktop and touch (no hover). Inline text isn't a selectable node, so
+ * unlike the media spoilers its reveal is a local toggle. */
+function TextSpoiler({ children }: { children: ReactNode }) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <span
+      className={cn(styles.spoiler, revealed && styles.spoilerRevealed)}
+      onClick={() => setRevealed((r) => !r)}
+    >
+      {children}
+    </span>
+  );
+}
+
 function renderInlineNode(node: InlineNode, key: number): ReactNode {
   switch (node.kind) {
     case "text":
@@ -98,11 +127,7 @@ function renderInlineNode(node: InlineNode, key: number): ReactNode {
     case "strike":
       return <s key={key}>{renderInline(node.children)}</s>;
     case "spoiler":
-      return (
-        <span key={key} className={styles.spoiler}>
-          {renderInline(node.children)}
-        </span>
-      );
+      return <TextSpoiler key={key}>{renderInline(node.children)}</TextSpoiler>;
     case "code":
       return (
         <code key={key} className={styles.codeInline}>
@@ -136,7 +161,11 @@ function renderInlineNode(node: InlineNode, key: number): ReactNode {
       );
     case "timestamp":
       return (
-        <time key={key} className={styles.timestamp} dateTime={new Date(node.unix * 1000).toISOString()}>
+        <time
+          key={key}
+          className={styles.timestamp}
+          dateTime={new Date(node.unix * 1000).toISOString()}
+        >
           {formatTimestamp(node.unix, node.style)}
         </time>
       );

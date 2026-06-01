@@ -30,6 +30,27 @@
   letter-spacing: 0.03em;
   line-height: 1.2;
   pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+/* Scaled-down "SPOILER" pill matching Discord's obscured thumbnail. */
+.spoilerPill {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: opacity 200ms ease;
 }
 .thumb img {
   width: 100%;
@@ -37,14 +58,18 @@
   object-fit: cover;
 }
 
+.spoiler {
+  cursor: pointer;
+} /* click to select/reveal */
 .spoiler img {
   filter: blur(40px);
   transition: filter 200ms ease;
 }
-.spoiler:hover img,
-.spoiler:focus-within img,
-.spoiler:active img {
-  filter: blur(20px);
+
+/* Hide the ALT badge while obscured. Selecting the thumbnail drops the
+   .spoiler class (see ThumbnailRenderer), clearing the blur and restoring it. */
+.spoiler .altBadge {
+  opacity: 0;
 }
 
 .placeholder {

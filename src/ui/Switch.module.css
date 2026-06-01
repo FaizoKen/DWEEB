@@ -34,8 +34,11 @@
   transition: transform 150ms ease;
 }
 
+/* A calm, muted green when on — reads as "enabled" without the loud brand
+   blurple, while staying clearly distinct from the slate off-track so on/off
+   isn't just the thumb's position. */
 .input:checked + .track {
-  background: var(--app-accent);
+  background: #3f9d6b;
 }
 .input:checked + .track .thumb {
   transform: translateX(16px);

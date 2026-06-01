@@ -2,12 +2,17 @@
  * Schema validation.
  *
  * Validation runs in two situations:
- *  1. Live in the editor, to surface inline warnings without blocking edits.
- *     Users may temporarily have e.g. an empty TextDisplay while typing.
+ *  1. Live in the editor, to flag problems inline without blocking *editing*
+ *     (you can keep typing through an error; only sending is gated).
  *  2. Before export, to refuse payloads Discord would reject.
  *
  * Both call sites use `validateMessage`. The `severity` field on each issue
- * controls UI treatment — `error` blocks export, `warning` is informational.
+ * controls UI treatment, and the line is drawn by Discord's own behaviour:
+ *   - `error`   — Discord would *reject* the message (empty required field,
+ *                 over a hard limit, duplicate id). Blocks export/send.
+ *   - `warning` — Discord *accepts* it but silently ignores or degrades the
+ *                 result (e.g. applied_tags with no thread_name, a malformed
+ *                 avatar_url that falls back to the default). Informational.
  */
 
 import {
@@ -56,6 +61,13 @@ export interface ValidationResult {
 
 const SNOWFLAKE_RE = /^\d{15,25}$/;
 
+/**
+ * Discord rejects a webhook username that contains "clyde" or "discord"
+ * (case-insensitive, anywhere in the string) to prevent impersonation — so
+ * "Discord Alerts" or "Clyde Bot" bounce, not just exact matches.
+ */
+const RESERVED_USERNAME_RE = /clyde|discord/i;
+
 export function validateMessage(message: WebhookMessage): ValidationResult {
   const issues: ValidationIssue[] = [];
 
@@ -98,6 +110,14 @@ export function validateMessage(message: WebhookMessage): ValidationResult {
       severity: "error",
       code: "USERNAME_TOO_LONG",
       message: `Webhook username must be ≤${LIMITS.WEBHOOK_USERNAME} characters.`,
+    });
+  }
+
+  if (message.username && RESERVED_USERNAME_RE.test(message.username)) {
+    issues.push({
+      severity: "error",
+      code: "USERNAME_RESERVED",
+      message: 'Webhook username can’t contain “clyde” or “discord” — Discord rejects those names.',
     });
   }
 
@@ -262,6 +282,21 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
     });
   }
 
+  // Buttons and selects are usually validated inside their action row, but a
+  // Button can also appear as a Section *accessory* — which only reaches this
+  // function via `validateNode(section.accessory)`. Without this dispatch an
+  // accessory button's missing URL / custom_id / label would go unchecked and
+  // Discord would reject the message on send. (Row children never recurse
+  // through here, so this never double-validates them.)
+  if (isButton(node)) {
+    validateButton(node, issues);
+    return;
+  }
+  if (isSelect(node)) {
+    validateSelect(node, issues);
+    return;
+  }
+
   if (isContainer(node)) {
     if (node.components.length === 0) {
       issues.push({
@@ -329,17 +364,19 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
         message: `Media gallery can hold at most ${LIMITS.GALLERY_ITEMS} items.`,
       });
     }
-    for (const item of node.items) {
-      validateMediaItem(item.media, node._id, issues, "Gallery item");
+    // Attach each item's issues to the *item's* editor id (not the gallery's)
+    // so the editor can flag the exact broken image row and its inspector.
+    node.items.forEach((item, i) => {
+      validateMediaItem(item.media, item._id, issues, `Gallery image ${i + 1}`);
       if (item.description && item.description.length > LIMITS.MEDIA_DESCRIPTION) {
         issues.push({
-          nodeId: node._id,
+          nodeId: item._id,
           severity: "error",
           code: "GALLERY_DESC_LONG",
-          message: `Gallery item description must be ≤${LIMITS.MEDIA_DESCRIPTION} characters.`,
+          message: `Gallery image ${i + 1} description must be ≤${LIMITS.MEDIA_DESCRIPTION} characters.`,
         });
       }
-    }
+    });
     return;
   }
 
@@ -407,11 +444,13 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
 
   if (isTextDisplay(node)) {
     if (node.content.trim().length === 0) {
+      // `content` is a required field (1–4000 chars) — Discord rejects a Text
+      // Display with empty/whitespace-only content, so this blocks send.
       issues.push({
         nodeId: node._id,
-        severity: "warning",
+        severity: "error",
         code: "TEXT_EMPTY",
-        message: "Text display is empty.",
+        message: "Text display can't be empty — Discord requires content here.",
       });
     }
     if (node.content.length > LIMITS.TEXT_DISPLAY_CONTENT) {
@@ -479,12 +518,15 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
 
   const hasLabel = "label" in btn && btn.label && btn.label.length > 0;
   const hasEmoji = "emoji" in btn && btn.emoji && (btn.emoji.id || btn.emoji.name);
+  // Discord rejects a non-premium button that carries neither a label nor an
+  // emoji, so this blocks send rather than merely warning. (Premium buttons
+  // draw their label from the SKU, so they're exempt.)
   if (btn.style !== ButtonStyle.Premium && !hasLabel && !hasEmoji) {
     issues.push({
       nodeId: btn._id,
-      severity: "warning",
+      severity: "error",
       code: "BUTTON_NO_LABEL",
-      message: "Button has neither a label nor an emoji.",
+      message: "Button needs a label or an emoji — Discord rejects a button with neither.",
     });
   }
   if ("label" in btn && btn.label && btn.label.length > LIMITS.BUTTON_LABEL) {
@@ -649,6 +691,16 @@ function validateSelect(sel: SelectComponent, issues: ValidationIssue[]): void {
         message: "More options marked default than max_values allows.",
       });
     }
+    // You can't allow choosing more items than exist — Discord rejects a
+    // string select whose max_values exceeds its option count.
+    if (sel.options.length > 0 && max > sel.options.length) {
+      issues.push({
+        nodeId: sel._id,
+        severity: "error",
+        code: "SELECT_MAX_OVER_OPTIONS",
+        message: `max_values (${max}) can't exceed the number of options (${sel.options.length}).`,
+      });
+    }
   } else if (
     isUserSelect(sel) ||
     isRoleSelect(sel) ||
@@ -714,9 +766,11 @@ function validateMediaItem(
   }
   if (hasUrl) {
     if (!isValidMediaUrl(media.url!)) {
+      // A malformed media URL is rejected by Discord (it can't unfurl it), so
+      // this blocks send rather than merely warning.
       issues.push({
         nodeId,
-        severity: "warning",
+        severity: "error",
         code: "MEDIA_URL_INVALID",
         message: `${context}: URL must be https://, attachment://filename, or an in-session upload.`,
       });

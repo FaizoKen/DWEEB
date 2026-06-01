@@ -31,15 +31,16 @@ export function MediaGalleryRenderer({ node }: { node: MediaGalleryComponent }) 
   // Clicking a specific image selects that image's tree row (each gallery item
   // is its own row now), then scrolls the builder to it. stopPropagation in the
   // figure keeps the wrapper from also selecting the whole gallery.
-  const handlePick = (itemId: EditorId) => {
+  const handlePick = (itemId: EditorId, revealingSpoiler: boolean) => {
     select(itemId);
     // Mirror ComponentRenderer: dismiss the mobile preview slide-over so the
-    // editor becomes visible, but keep it open while the AI chat is active.
-    if (!useAiStore.getState().open) closePreview?.();
+    // editor becomes visible, but keep it open while the AI chat is active —
+    // or while this tap is just revealing a spoiler the user wants to see.
+    if (!revealingSpoiler && !useAiStore.getState().open) closePreview?.();
     requestAnimationFrame(() => {
       document
         .querySelector<HTMLElement>(`[data-tree-row="true"][data-row-id="${CSS.escape(itemId)}"]`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
 
@@ -50,7 +51,7 @@ export function MediaGalleryRenderer({ node }: { node: MediaGalleryComponent }) 
           key={item._id}
           item={item}
           selected={selectedId === item._id}
-          onPick={() => handlePick(item._id)}
+          onPick={() => handlePick(item._id, item.spoiler === true && selectedId !== item._id)}
         />
       ))}
     </div>
@@ -66,6 +67,9 @@ function GalleryItem({
   selected: boolean;
   onPick: () => void;
 }) {
+  // Reveal follows the editor selection: clicking the item selects it (which
+  // reveals it), and selecting another item/node re-blurs this one.
+  const obscured = item.spoiler === true && !selected;
   const url = item.media.url ?? "";
   const src = useResolvedMediaUrl(url);
   const usesAttachmentId = !item.media.url && typeof item.media.attachment_id === "string";
@@ -82,7 +86,7 @@ function GalleryItem({
         styles.item,
         styles.clickable,
         selected && styles.selectedItem,
-        item.spoiler && styles.spoiler,
+        obscured && styles.spoiler,
       )}
       title={item.description}
       onClick={(e) => {
@@ -113,6 +117,14 @@ function GalleryItem({
         // Discord pins the ALT badge top-left on video items (the play button
         // occupies the center, the bottom edge reads as scrubber territory).
         <span className={cn(styles.altBadge, kind === "video" && styles.altBadgeTop)}>ALT</span>
+      )}
+      {obscured && src && (
+        // Discord obscures spoilered media behind a heavy blur and a centered
+        // "SPOILER" pill until it's revealed; hovering (desktop) or tapping
+        // (touch) clears the blur and the pill.
+        <span className={styles.spoilerPill} aria-hidden="true">
+          Spoiler
+        </span>
       )}
     </figure>
   );

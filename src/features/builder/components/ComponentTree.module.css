@@ -20,18 +20,13 @@
   margin-bottom: 12px;
 }
 
-/* Footer of the meta header: budget pills on the left, the Advanced-mode
-   toggle on the right. Wraps on narrow widths so the toggle drops below. */
+/* Footer of the meta header: budget pills, plus any error/warning summary
+   pills. A clean message shows no issue pill at all. */
 .metaFooter {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--app-space-2);
-}
-
-.advancedToggle {
-  margin-left: auto;
 }
 
 /* Budget meter: two small pills that read green/amber/red as the message
@@ -39,6 +34,7 @@
 .stats {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -66,6 +62,41 @@
   color: var(--app-danger-text);
   background: var(--app-danger-soft);
   border-color: transparent;
+}
+
+/* Clickable issue summary pills. Buttons need their font-family reset to match
+   the surrounding text; everything else is inherited from .statPill. */
+button.statPill {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.issuePillError {
+  color: var(--app-danger-text);
+  background: var(--app-danger-soft);
+  border-color: transparent;
+}
+
+.issuePillWarn {
+  color: var(--app-warning-text);
+  background: var(--app-warning-soft);
+  border-color: transparent;
+}
+
+.issuePillError:hover,
+.issuePillWarn:hover {
+  filter: brightness(1.1);
+}
+
+.issuePillError:focus-visible,
+.issuePillWarn:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+.statPill:disabled {
+  cursor: default;
+  filter: none;
 }
 
 .list {
@@ -122,22 +153,56 @@
   border-radius: var(--app-radius-sm);
   cursor: pointer;
   user-select: none;
+  /* On selection the row is scrolled to the top of the tree (block: "start");
+     this keeps a little breathing room above it rather than pinning it flush. */
+  scroll-margin-top: 10px;
   font-size: var(--app-text-base);
   color: var(--app-text);
+  /* Per-type colour coding. Each row inherits --row-hue / --row-sat from its
+     parent <li> (set per ComponentType below). The row paints a soft tinted
+     fill plus a saturated left stripe so adjacent components read as distinct
+     colour-coded blocks instead of one uniform list. Hover/selected/error
+     states layer on top and win where they apply. The fallback is near-neutral
+     so any unmapped row stays calm. */
+  background: hsla(var(--row-hue, 230), var(--row-sat, 12%), 55%, 0.1);
+  box-shadow: inset 3px 0 0 hsla(var(--row-hue, 230), var(--row-sat, 12%), 60%, 0.55);
   transition: background 120ms ease, box-shadow 120ms ease;
 }
 
+/* Hue/saturation per component type. Numbers match the ComponentType enum in
+   core/schema/types.ts (carried on each row as data-node-type); gallery images
+   carry no type, so they key off their parent kind instead. The vars are set on
+   the <li>, not the row, so the selected row's inline inspector panel — a
+   sibling of the row — inherits the same colour as the row's tint and stripe. */
+.list li:has(> .row[data-node-type="17"]) { --row-hue: 235; --row-sat: 68%; } /* Container */
+.list li:has(> .row[data-node-type="9"])  { --row-hue: 188; --row-sat: 60%; } /* Section */
+.list li:has(> .row[data-node-type="10"]) { --row-hue: 212; --row-sat: 66%; } /* Text */
+.list li:has(> .row[data-node-type="12"]) { --row-hue: 268; --row-sat: 60%; } /* Media Gallery */
+.list li:has(> .row[data-node-type="13"]) { --row-hue: 38;  --row-sat: 75%; } /* File */
+.list li:has(> .row[data-node-type="14"]) { --row-hue: 220; --row-sat: 10%; } /* Separator */
+.list li:has(> .row[data-node-type="1"])  { --row-hue: 145; --row-sat: 52%; } /* Buttons Row */
+.list li:has(> .row[data-node-type="2"])  { --row-hue: 150; --row-sat: 52%; } /* Button */
+.list li:has(> .row[data-node-type="11"]) { --row-hue: 330; --row-sat: 62%; } /* Thumbnail */
+.list li:has(> .row[data-node-type="3"]),
+.list li:has(> .row[data-node-type="5"]),
+.list li:has(> .row[data-node-type="6"]),
+.list li:has(> .row[data-node-type="7"]),
+.list li:has(> .row[data-node-type="8"]) { --row-hue: 22; --row-sat: 70%; } /* Selects */
+.list li:has(> .row[data-parent-kind="gallery"]) { --row-hue: 280; --row-sat: 52%; } /* Image */
+
 .row:hover {
-  background: var(--app-bg-hover);
+  background: hsla(var(--row-hue, 230), var(--row-sat, 12%), 55%, 0.18);
 }
 
+/* A selected row deepens its own type tint and stripe rather than switching to
+   the blue accent, so selection stays colour-coded to the component. */
 .rowSelected {
-  background: var(--app-accent-soft);
-  box-shadow: inset 3px 0 0 var(--app-accent);
+  background: hsla(var(--row-hue, 230), var(--row-sat, 12%), 55%, 0.28);
+  box-shadow: inset 3px 0 0 hsl(var(--row-hue, 230), var(--row-sat, 12%), 62%);
 }
 
 .rowSelected:hover {
-  background: var(--app-accent-soft);
+  background: hsla(var(--row-hue, 230), var(--row-sat, 12%), 55%, 0.32);
 }
 
 /* Drag-and-drop affordances. The row that's being dragged fades; the row the
@@ -262,6 +327,16 @@
   color: var(--app-text);
 }
 
+/* Wrapper around the glyph chip that anchors the absolutely-positioned issue
+ * dot to the chip's corner. Matches the glyph's 28px grid cell exactly. */
+.glyphCell {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+}
+
 /* Small icon chip so each component type has a visual anchor instead of a
  * lone unicode character floating against the background. */
 .glyph {
@@ -269,24 +344,38 @@
   height: 28px;
   display: inline-grid;
   place-items: center;
-  background: var(--app-bg-input);
-  border: 1px solid var(--app-border);
+  /* Inherits --row-hue / --row-sat from the .row, so the chip carries the same
+     type colour as its row tint. */
+  background: hsla(var(--row-hue, 230), var(--row-sat, 12%), 55%, 0.16);
+  border: 1px solid hsla(var(--row-hue, 230), var(--row-sat, 12%), 62%, 0.4);
   border-radius: 7px;
-  color: var(--app-text-muted);
+  color: hsl(var(--row-hue, 230), var(--row-sat, 12%), 80%);
   font-size: 14px;
   line-height: 1;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .row:hover .glyph {
-  color: var(--app-text);
-  border-color: var(--app-border-strong);
+  background: hsla(var(--row-hue, 230), var(--row-sat, 12%), 55%, 0.24);
+  border-color: hsla(var(--row-hue, 230), var(--row-sat, 12%), 62%, 0.62);
+  color: hsl(var(--row-hue, 230), var(--row-sat, 12%), 86%);
 }
 
 .rowSelected .glyph {
-  background: var(--app-bg);
-  border-color: var(--app-accent);
-  color: var(--app-text);
+  background: hsla(var(--row-hue, 230), var(--row-sat, 12%), 55%, 0.3);
+  border-color: hsl(var(--row-hue, 230), var(--row-sat, 12%), 62%);
+  color: hsl(var(--row-hue, 230), var(--row-sat, 12%), 88%);
+}
+
+/* Error tint on the component chip — compound selectors so it survives the
+ * hover and selected glyph overrides above. Warnings stay subtle (dot only)
+ * because they're often transient mid-edit states. */
+.glyph.glyphError,
+.row:hover .glyph.glyphError,
+.rowSelected .glyph.glyphError {
+  background: var(--app-danger-soft);
+  border-color: var(--app-danger);
+  color: var(--app-danger-text);
 }
 
 .label {
@@ -423,7 +512,9 @@
 .editorPanel {
   margin: 8px 0 14px;
   border: 1px solid var(--app-border);
-  border-left: 3px solid var(--app-accent);
+  /* Inherits --row-hue / --row-sat from the <li>, so the inspector's accent bar
+     matches the selected component's colour instead of the blue accent. */
+  border-left: 3px solid hsl(var(--row-hue, 230), var(--row-sat, 12%), 62%);
   border-radius: var(--app-radius);
   overflow: hidden;
   background: var(--app-bg-elevated);
@@ -472,7 +563,18 @@
   overflow: hidden;
 }
 
+/* Header lane: the "Message options" disclosure button on the left fills the
+   row; the Advanced toggle rides along on the right. The collapsible body sits
+   below at full width, so expanding never leaves a dead column beside it. */
+.advancedHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-2);
+}
+
 .advancedSummary {
+  flex: 1 1 auto;
+  min-width: 0;
   cursor: pointer;
   padding: 11px 13px;
   font-size: var(--app-text-sm);
@@ -481,24 +583,32 @@
   text-transform: none;
   color: var(--app-text);
   user-select: none;
-  list-style: none;
+  background: none;
+  border: 0;
+  text-align: left;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
 }
-.advancedSummary::-webkit-details-marker { display: none; }
 .advancedSummary:focus-visible {
   outline: none;
   box-shadow: var(--app-focus-ring);
 }
-.advancedSummary::after {
+/* Chevron sits on the left, hugging the label, so the right edge stays clear
+   for the Advanced toggle. Points right when collapsed, down when expanded. */
+.advancedSummary::before {
   content: "▾";
   font-size: 11px;
   color: var(--app-text-muted);
   transition: transform 150ms ease;
 }
-.advanced[open] .advancedSummary::after {
-  transform: rotate(180deg);
+.advancedSummary[aria-expanded="false"]::before {
+  transform: rotate(-90deg);
+}
+
+.advancedToggle {
+  flex: 0 0 auto;
+  margin-right: 13px;
 }
 
 .advancedBody {
@@ -566,12 +676,6 @@
 
   .summary {
     font-size: var(--app-text-xs);
-  }
-
-  /* Stack the username / avatar inputs so each stays comfortably wide on a
-     phone instead of squeezing two into one row. */
-  .row2 {
-    grid-template-columns: 1fr;
   }
 
   /* Tighter rail indent on phones so deep nests don't push content off-screen. */

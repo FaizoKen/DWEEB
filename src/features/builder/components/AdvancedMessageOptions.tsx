@@ -17,6 +17,7 @@
  * safety but the editor never lets the user set it.
  */
 
+import { useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
@@ -43,6 +44,13 @@ export function AdvancedMessageOptions() {
   const setThreadName = useMessageStore((s) => s.setThreadName);
   const setAppliedTags = useMessageStore((s) => s.setAppliedTags);
   const advancedMode = useUiPrefs((s) => s.advancedMode);
+  const setAdvancedMode = useUiPrefs((s) => s.setAdvancedMode);
+
+  // Controlled disclosure: a native <details> can't share its header lane with
+  // an interactive toggle (clicking the switch would also toggle the panel), so
+  // we drive open/closed ourselves and keep the Advanced switch as a sibling of
+  // the disclosure button rather than a child of it.
+  const [open, setOpen] = useState(false);
 
   const am = message.allowed_mentions;
 
@@ -70,116 +78,141 @@ export function AdvancedMessageOptions() {
   };
 
   return (
-    <details className={styles.advanced}>
-      <summary className={styles.advancedSummary}>Message options</summary>
-      <div className={styles.advancedBody}>
-        {/* Silent send */}
-        <Switch
-          checked={message.suppress_notifications ?? false}
-          onChange={(e) => setSuppress(e.currentTarget.checked)}
-          label="Send silently (no notifications)"
-        />
-
-        {/* Allowed mentions */}
-        <Field
-          label="Allowed mentions"
-          hint="Pick which classes of mention may resolve. Off = no pings."
+    <div className={styles.advanced}>
+      <div className={styles.advancedHeader}>
+        <button
+          type="button"
+          className={styles.advancedSummary}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
         >
-          {() => (
-            <div className={styles.chipRow}>
-              {(Object.keys(MENTION_LABELS) as MentionKind[]).map((k) => {
-                const active = am?.parse?.includes(k) ?? false;
-                return (
-                  <button
-                    key={k}
-                    type="button"
-                    className={cn(styles.chip, active && styles.chipActive)}
-                    aria-pressed={active}
-                    onClick={() => setParseKind(k, !active)}
-                  >
-                    {MENTION_LABELS[k]}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </Field>
-
-        {/* The remaining controls are raw-snowflake / no-op / forum-only fields —
-            power-user territory, so they only appear in Advanced mode. */}
-        {advancedMode ? (
-          <>
-            {/* TTS — only meaningful for V1 (plain content) messages; no-op on V2 */}
-            <Switch
-              checked={message.tts ?? false}
-              onChange={(e) => setTts(e.currentTarget.checked)}
-              label="Text-to-speech (no audible effect on V2 messages)"
-            />
-
-            <Field
-              label="Allowed role IDs"
-              hint="Comma/space separated snowflakes. Conflicts with @role chip — use one."
-            >
-              {(id) => (
-                <TextInput
-                  id={id}
-                  value={(am?.roles ?? []).join(" ")}
-                  onChange={(e) => updateAllowed({ roles: onSnowflakeList(e.currentTarget.value) })}
-                  placeholder="e.g. 1185234567890123456 1185234567890123457"
-                />
-              )}
-            </Field>
-
-            <Field
-              label="Allowed user IDs"
-              hint="Comma/space separated snowflakes. Conflicts with @user chip — use one."
-            >
-              {(id) => (
-                <TextInput
-                  id={id}
-                  value={(am?.users ?? []).join(" ")}
-                  onChange={(e) => updateAllowed({ users: onSnowflakeList(e.currentTarget.value) })}
-                  placeholder="e.g. 1185234567890123456"
-                />
-              )}
-            </Field>
-
-            {/* Forum-channel options — labelled clearly so non-forum users know to skip them */}
-            <div className={styles.sectionHint}>
-              Forum / media channel only — Discord ignores these on text channels.
-            </div>
-            <Field
-              label="Forum thread name"
-              hint="Starts a new forum post with this title. Skip when posting into an existing thread."
-            >
-              {(id) => (
-                <TextArea
-                  id={id}
-                  rows={1}
-                  value={message.thread_name ?? ""}
-                  maxLength={LIMITS.THREAD_NAME}
-                  onChange={(e) => setThreadName(e.currentTarget.value || undefined)}
-                  placeholder="e.g. Release notes — v2.4"
-                />
-              )}
-            </Field>
-
-            <Field
-              label="Forum applied tags"
-              hint={`Up to ${LIMITS.APPLIED_TAGS} tag snowflakes, comma/space separated.`}
-            >
-              {(id) => (
-                <TextInput
-                  id={id}
-                  value={(message.applied_tags ?? []).join(" ")}
-                  onChange={(e) => setAppliedTags(onSnowflakeList(e.currentTarget.value))}
-                  placeholder="e.g. 1185234567890123456"
-                />
-              )}
-            </Field>
-          </>
-        ) : null}
+          Message options
+        </button>
+        {/* Lives on the header lane, beside the disclosure — flips technical
+            fields here and in the inspectors. Kept outside the button so a
+            click toggles the switch, not the panel. */}
+        <Switch
+          className={styles.advancedToggle}
+          checked={advancedMode}
+          onChange={(e) => setAdvancedMode(e.currentTarget.checked)}
+          label="Advanced"
+          title="Show technical fields like custom_id, snowflake IDs, and component id"
+        />
       </div>
-    </details>
+      {open ? (
+        <div className={styles.advancedBody}>
+          {/* Silent send */}
+          <Switch
+            checked={message.suppress_notifications ?? false}
+            onChange={(e) => setSuppress(e.currentTarget.checked)}
+            label="Send silently (no notifications)"
+          />
+
+          {/* Allowed mentions */}
+          <Field
+            label="Allowed mentions"
+            hint="Pick which classes of mention may resolve. Off = no pings."
+          >
+            {() => (
+              <div className={styles.chipRow}>
+                {(Object.keys(MENTION_LABELS) as MentionKind[]).map((k) => {
+                  const active = am?.parse?.includes(k) ?? false;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      className={cn(styles.chip, active && styles.chipActive)}
+                      aria-pressed={active}
+                      onClick={() => setParseKind(k, !active)}
+                    >
+                      {MENTION_LABELS[k]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </Field>
+
+          {/* The remaining controls are raw-snowflake / no-op / forum-only fields —
+            power-user territory, so they only appear in Advanced mode. */}
+          {advancedMode ? (
+            <>
+              {/* TTS — only meaningful for V1 (plain content) messages; no-op on V2 */}
+              <Switch
+                checked={message.tts ?? false}
+                onChange={(e) => setTts(e.currentTarget.checked)}
+                label="Text-to-speech (no audible effect on V2 messages)"
+              />
+
+              <Field
+                label="Allowed role IDs"
+                hint="Comma/space separated snowflakes. Conflicts with @role chip — use one."
+              >
+                {(id) => (
+                  <TextInput
+                    id={id}
+                    value={(am?.roles ?? []).join(" ")}
+                    onChange={(e) =>
+                      updateAllowed({ roles: onSnowflakeList(e.currentTarget.value) })
+                    }
+                    placeholder="e.g. 1185234567890123456 1185234567890123457"
+                  />
+                )}
+              </Field>
+
+              <Field
+                label="Allowed user IDs"
+                hint="Comma/space separated snowflakes. Conflicts with @user chip — use one."
+              >
+                {(id) => (
+                  <TextInput
+                    id={id}
+                    value={(am?.users ?? []).join(" ")}
+                    onChange={(e) =>
+                      updateAllowed({ users: onSnowflakeList(e.currentTarget.value) })
+                    }
+                    placeholder="e.g. 1185234567890123456"
+                  />
+                )}
+              </Field>
+
+              {/* Forum-channel options — labelled clearly so non-forum users know to skip them */}
+              <div className={styles.sectionHint}>
+                Forum / media channel only — Discord ignores these on text channels.
+              </div>
+              <Field
+                label="Forum thread name"
+                hint="Starts a new forum post with this title. Skip when posting into an existing thread."
+              >
+                {(id) => (
+                  <TextArea
+                    id={id}
+                    rows={1}
+                    value={message.thread_name ?? ""}
+                    maxLength={LIMITS.THREAD_NAME}
+                    onChange={(e) => setThreadName(e.currentTarget.value || undefined)}
+                    placeholder="e.g. Release notes — v2.4"
+                  />
+                )}
+              </Field>
+
+              <Field
+                label="Forum applied tags"
+                hint={`Up to ${LIMITS.APPLIED_TAGS} tag snowflakes, comma/space separated.`}
+              >
+                {(id) => (
+                  <TextInput
+                    id={id}
+                    value={(message.applied_tags ?? []).join(" ")}
+                    onChange={(e) => setAppliedTags(onSnowflakeList(e.currentTarget.value))}
+                    placeholder="e.g. 1185234567890123456"
+                  />
+                )}
+              </Field>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }

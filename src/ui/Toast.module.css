@@ -1,6 +1,6 @@
 .viewport {
   position: fixed;
-  bottom: 16px;
+  top: 16px;
   right: 16px;
   z-index: var(--app-z-tooltip);
   display: flex;
@@ -38,6 +38,6 @@
 }
 
 @keyframes slide {
-  from { opacity: 0; transform: translateY(8px) }
+  from { opacity: 0; transform: translateY(-8px) }
   to { opacity: 1; transform: none }
 }

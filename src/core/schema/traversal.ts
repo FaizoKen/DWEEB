@@ -12,13 +12,7 @@
  *    immutably replace, remove, or splice the node without re-walking the tree.
  */
 
-import {
-  isActionRow,
-  isContainer,
-  isMediaGallery,
-  isSection,
-  isStringSelect,
-} from "./guards";
+import { isActionRow, isContainer, isMediaGallery, isSection, isStringSelect } from "./guards";
 import type {
   AnyComponent,
   ContainerChild,
@@ -44,6 +38,24 @@ function* walkNode(node: AnyComponent): Generator<AnyComponent> {
   } else if (isMediaGallery(node)) {
     // gallery items are not standalone components — skip
   }
+}
+
+/**
+ * True when `id` is this node or any descendant. Unlike `walk`, this also
+ * matches media-gallery item ids: items aren't standalone components, but the
+ * editor selects them individually, and callers (e.g. spoiler reveal) need a
+ * selected gallery item to count as "inside" its container.
+ */
+export function subtreeContainsId(node: AnyComponent, id: EditorId): boolean {
+  if (node._id === id) return true;
+  if (isContainer(node)) return node.components.some((c) => subtreeContainsId(c, id));
+  if (isSection(node))
+    return (
+      node.components.some((c) => subtreeContainsId(c, id)) || subtreeContainsId(node.accessory, id)
+    );
+  if (isActionRow(node)) return node.components.some((c) => subtreeContainsId(c, id));
+  if (isMediaGallery(node)) return node.items.some((item) => item._id === id);
+  return false;
 }
 
 /** O(n) total-component count. */
@@ -114,8 +126,7 @@ function findInside(node: AnyComponent, id: EditorId): NodeLocation | null {
       const text = node.components[i]!;
       if (text._id === id) return { node: text, parent: node, index: i };
     }
-    if (node.accessory._id === id)
-      return { node: node.accessory, parent: node, index: 0 };
+    if (node.accessory._id === id) return { node: node.accessory, parent: node, index: 0 };
   } else if (isActionRow(node)) {
     for (let i = 0; i < node.components.length; i++) {
       const child = node.components[i]!;
