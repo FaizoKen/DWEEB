@@ -26,6 +26,16 @@ export default defineConfig({
     target: "es2022",
     cssCodeSplit: true,
     sourcemap: false,
+    // Terser squeezes a few percent more out of the JS than esbuild's minifier
+    // (multiple compress passes + better property mangling on our shapes). The
+    // slower build is paid once at deploy time; the smaller chunk is paid by
+    // every visitor. No `drop_console` — the only `console.*` left is the
+    // ErrorBoundary diagnostic, which we keep.
+    minify: "terser",
+    terserOptions: {
+      compress: { passes: 2, ecma: 2020 },
+      format: { comments: false },
+    },
     rollupOptions: {
       output: {
         manualChunks(id) {

@@ -12,7 +12,7 @@
  * to native scrolling whenever the message isn't at its top.
  */
 
-import type { HTMLAttributes, MouseEvent as ReactMouseEvent } from "react";
+import { useMemo, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
 import { useMessageStore, selectMessage } from "@/core/state/messageStore";
 import { ComponentRenderer } from "./renderers/ComponentRenderer";
 import { PreviewCloseContext } from "./previewCloseContext";
@@ -30,6 +30,13 @@ export function Preview({ onClose, swipeProps }: PreviewProps = {}) {
   const select = useMessageStore((s) => s.select);
   const displayName = message.username || "Webhook";
   const avatar = message.avatar_url;
+  // The "sent at" time stands in for when the message would post; it shouldn't
+  // tick (and re-run an Intl formatter) on every keystroke, so freeze it at
+  // mount. Preview re-renders on every message edit, so this was pure waste.
+  const sentTime = useMemo(
+    () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    [],
+  );
 
   // Clicking empty preview space — anywhere that isn't a rendered component
   // (each carries `data-node-id`) or an interactive control like the
@@ -100,7 +107,7 @@ export function Preview({ onClose, swipeProps }: PreviewProps = {}) {
                 {displayName}
               </button>
               <span className={styles.badge}>APP</span>
-              <time className={styles.time}>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+              <time className={styles.time}>{sentTime}</time>
             </header>
             <div className={styles.content}>
               {message.components.length === 0 ? (

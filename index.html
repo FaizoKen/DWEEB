@@ -1,14 +1,13 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <!-- Early connection hints so analytics never blocks first paint. -->
-    <link rel="preconnect" href="https://www.googletagmanager.com" crossorigin />
+    <!-- Analytics is deferred to browser idle / first interaction (see
+         gtag-init.js), so it never competes with the app's critical resources.
+         A cheap DNS prefetch keeps the eventual lazy load fast without opening a
+         connection during first paint. -->
     <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
     <link rel="dns-prefetch" href="https://www.google-analytics.com" />
-
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS"></script>
-    <script src="/gtag-init.js"></script>
+    <script defer src="/gtag-init.js"></script>
 
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
