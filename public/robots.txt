@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://discordwebhookbuilder.faizo.net/sitemap.xml
+Sitemap: https://dweeb.faizo.net/sitemap.xml

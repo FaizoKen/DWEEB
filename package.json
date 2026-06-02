@@ -1,9 +1,9 @@
 {
-  "name": "discord-webhook-builder",
+  "name": "dweeb",
   "private": true,
   "version": "0.6.0",
   "type": "module",
-  "description": "Visual Discord webhook builder for Components V2 messages. Build, preview, and share Discord messages without writing JSON.",
+  "description": "DWEEB — a visual Discord webhook & embed builder for Components V2 messages. Build, preview, and share Discord messages without writing JSON.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

@@ -244,8 +244,8 @@ export function App() {
       data-ai-open={aiOpen ? "true" : "false"}
     >
       <h1 className="sr-only">
-        Discord Webhook Builder — visually build, preview, and share Discord webhook messages with
-        Components V2
+        DWEEB — the Discord Webhook Builder. Visually build, preview, and share Discord webhook
+        messages with Components V2.
       </h1>
       <section className="app-shell__pane app-shell__pane--builder" aria-label="Component builder">
         <Builder

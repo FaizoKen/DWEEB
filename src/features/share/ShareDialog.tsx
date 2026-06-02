@@ -230,8 +230,11 @@ function AboutPanel() {
   return (
     <>
       <p className={styles.lead}>
-        A visual editor for Discord webhook messages with <strong>Components V2</strong>. Build,
-        preview, and share — all in your browser.
+        <strong>DWEEB</strong> — a visual editor for Discord webhook messages with{" "}
+        <strong>Components V2</strong>. Build, preview, and share, all in your browser.
+      </p>
+      <p className={styles.lead}>
+        And yes, it stands for <em>Discord Webhook Embed Builder</em>. 🤓
       </p>
       <p className={styles.lead}>
         Made with 💖 by{" "}

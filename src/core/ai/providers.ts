@@ -280,7 +280,7 @@ async function callOpenAiCompatible(
   // don't apply.
   if (settings.provider === "openrouter") {
     if (typeof location !== "undefined") headers["HTTP-Referer"] = location.origin;
-    headers["X-Title"] = "Discord Webhook Builder";
+    headers["X-Title"] = "DWEEB";
   }
   const res = await proxiedFetch(url, {
     method: "POST",

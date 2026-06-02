@@ -8,7 +8,7 @@
 
 const [, , channelId, nameArg] = process.argv;
 const token = process.env.DISCORD_BOT_TOKEN;
-const name = nameArg ?? "Webhook Builder Test";
+const name = nameArg ?? "DWEEB Test";
 
 if (!token) {
   console.error("Missing DISCORD_BOT_TOKEN env var.");

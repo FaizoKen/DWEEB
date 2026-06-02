@@ -13,7 +13,7 @@ import { encodeJson } from "@/core/serialization/encode";
 import type { WebhookMessage } from "@/core/schema/types";
 
 const SCHEMA_GUIDE = `\
-You are an expert assistant embedded in a visual Discord Webhook Builder. You help
+You are an expert assistant embedded in DWEEB, a visual Discord webhook & embed builder. You help
 the user design a Discord message that uses the **Components V2** layout system
 (message flag IS_COMPONENTS_V2). With Components V2 the legacy \`content\` and
 \`embeds\` fields are FORBIDDEN — the entire message is expressed through

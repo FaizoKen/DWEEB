@@ -1,13 +1,15 @@
-# Discord Webhook Builder
+# DWEEB
+
+> **DWEEB** — the **D**iscord **W**ebhook **E**mbed Builder.
 
 A visual editor for Discord webhook messages using **Components V2**. Build rich
 messages with containers, sections, buttons, media, and files, watch a
 pixel-accurate live preview, and share the result through a single URL — no
 backend, no account, no database.
 
-![Discord Webhook Builder — editor on the left, pixel-accurate Discord preview on the right](docs/screenshot.png)
+![DWEEB — editor on the left, pixel-accurate Discord preview on the right](docs/screenshot.png)
 
-> Try it live at **[discordwebhookbuilder.faizo.net](https://discordwebhookbuilder.faizo.net)**
+> Try it live at **[dweeb.faizo.net](https://dweeb.faizo.net)**
 
 ## First-time users
 

@@ -1,6 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Discord Webhook Builder">
-  <rect width="32" height="32" rx="9" fill="#5865F2"/>
-  <rect x="6" y="6" width="15" height="15" rx="5" fill="#fff" opacity="0.4"/>
-  <rect x="11" y="11" width="15" height="15" rx="5" fill="#fff"/>
-  <rect x="14" y="17" width="9" height="3" rx="1.5" fill="#57F287"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DWEEB">
+  <rect width="512" height="512" rx="112" fill="#5865F2"/>
+  <rect x="40" y="210" width="52" height="30" rx="15" fill="#fff"/>
+  <rect x="420" y="210" width="52" height="30" rx="15" fill="#fff"/>
+  <rect x="214" y="200" width="84" height="30" rx="15" fill="#57F287"/>
+  <rect x="78" y="182" width="148" height="148" rx="46" fill="#fff"/>
+  <rect x="286" y="182" width="148" height="148" rx="46" fill="#fff"/>
 </svg>

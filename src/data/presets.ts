@@ -45,7 +45,7 @@ export interface MessageTemplate {
 // ────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_MESSAGE: WebhookMessage = {
-  username: "Webhook Builder",
+  username: "DWEEB",
   components: [
     {
       _id: id(),

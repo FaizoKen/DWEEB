@@ -1,7 +1,7 @@
 {
-  "name": "Discord Webhook Builder",
-  "short_name": "Webhook Builder",
-  "description": "Visually build, preview, and share Discord webhook messages using Components V2 — no JSON, no backend.",
+  "name": "DWEEB — Discord Webhook Embed Builder",
+  "short_name": "DWEEB",
+  "description": "DWEEB — visually build, preview, and share Discord webhook & embed messages using Components V2. No JSON, no backend.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
