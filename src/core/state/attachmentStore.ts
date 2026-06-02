@@ -18,13 +18,26 @@
  *     parts at send time.
  *
  * Persistence rules:
- *  - The registry lives in-memory only. A page reload loses every blob; any
- *    component pointing at a `session://` URL whose id no longer resolves is
- *    surfaced as "missing" in the inspector and validator.
- *  - Auto-save / share URLs strip `session://` references (see `draftStorage`
- *    and `encode`), since persisting a broken reference would just confuse a
- *    returning user.
+ *  - The registry is the live source of truth, but it now *writes through* to
+ *    IndexedDB (see `attachmentDb`): every register persists the bytes, every
+ *    forget / GC removes them. On startup `hydrateAttachments()` reads them
+ *    back so a `session://` URL the draft restored resolves again — uploads
+ *    survive a reload.
+ *  - The auto-save draft keeps the `session://` reference (it's just a URL);
+ *    re-connecting it to the rehydrated blob is what makes the upload reappear.
+ *  - Share URLs / JSON export *do* strip `session://` references (see `encode`),
+ *    since the recipient's browser has no access to this browser's blob store.
+ *  - A blob that can't be rehydrated (IndexedDB disabled, evicted, or shared
+ *    from another origin) still surfaces as "missing" in the inspector and
+ *    validator, exactly as before.
  */
+
+import {
+  deleteAttachmentBlob,
+  deleteAttachmentBlobs,
+  loadAllAttachmentBlobs,
+  putAttachmentBlob,
+} from "./attachmentDb";
 
 const SESSION_PREFIX = "session://";
 
@@ -67,6 +80,9 @@ export function getAttachmentSnapshot(): number {
 export function registerAttachment(file: File): string {
   const id = makeBlobId();
   blobs.set(id, { file });
+  // Write through to IndexedDB so the upload survives a reload. Fire-and-forget
+  // — the session URL is usable immediately; the persisted copy lands shortly.
+  void putAttachmentBlob(id, file);
   notify();
   return buildSessionUrl(id, file.name);
 }
@@ -77,6 +93,7 @@ export function forgetAttachment(blobId: string): void {
   if (!record) return;
   if (record.objectUrl) URL.revokeObjectURL(record.objectUrl);
   blobs.delete(blobId);
+  void deleteAttachmentBlob(blobId);
   notify();
 }
 
@@ -88,14 +105,44 @@ export function garbageCollect(referencedUrls: Iterable<string>): void {
     if (parsed) live.add(parsed.blobId);
   }
   let changed = false;
+  const removed: string[] = [];
   for (const id of Array.from(blobs.keys())) {
     if (live.has(id)) continue;
     const rec = blobs.get(id)!;
     if (rec.objectUrl) URL.revokeObjectURL(rec.objectUrl);
     blobs.delete(id);
+    removed.push(id);
     changed = true;
   }
+  // Evict the same ids from IndexedDB so orphaned uploads don't accumulate
+  // across sessions (e.g. a component deleted, or a draft replaced by import).
+  if (removed.length > 0) void deleteAttachmentBlobs(removed);
   if (changed) notify();
+}
+
+/**
+ * Restore persisted uploads into the in-memory registry. Idempotent and safe
+ * to call from `useEffect` (StrictMode double-invoke included): the first call
+ * latches, later calls resolve immediately. Existing in-memory ids win — we
+ * only fill gaps — so a blob registered before hydration finishes isn't
+ * clobbered by its persisted copy.
+ *
+ * Resolves once hydration is done, letting the caller reconcile the restored
+ * blobs against the live tree (drop anything no longer referenced).
+ */
+let hydration: Promise<void> | null = null;
+export function hydrateAttachments(): Promise<void> {
+  if (hydration) return hydration;
+  hydration = loadAllAttachmentBlobs().then((records) => {
+    let changed = false;
+    for (const { id, file } of records) {
+      if (blobs.has(id)) continue;
+      blobs.set(id, { file });
+      changed = true;
+    }
+    if (changed) notify();
+  });
+  return hydration;
 }
 
 export interface SessionUrlParts {

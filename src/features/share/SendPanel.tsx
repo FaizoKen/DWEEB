@@ -37,8 +37,9 @@
  * send is in flight aborts the first.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
 import { validateMessage } from "@/core/schema/validation";
 import { inspectCapabilities } from "@/core/schema/capability";
 import { summarizePings } from "@/core/schema/mentions";
@@ -152,7 +153,15 @@ export function SendPanel({
   const messageIdInvalid =
     mode === "update" && messageIdInput.trim().length > 0 && !parsedMessageId;
 
-  const validation = useMemo(() => validateMessage(message), [message]);
+  // Validation reads the attachment registry (a missing blob blocks send), so
+  // recompute when blobs hydrate from IndexedDB / are added / GC'd — not only
+  // when the message changes. Otherwise a restored upload would stay flagged.
+  const attachmentsVersion = useSyncExternalStore(
+    subscribeAttachments,
+    getAttachmentSnapshot,
+    getAttachmentSnapshot,
+  );
+  const validation = useMemo(() => validateMessage(message), [message, attachmentsVersion]);
   const blockingIssues = validation.issues.filter((i) => i.severity === "error");
 
   // Who the message will actually ping, after applying allowed_mentions. Shown
@@ -541,9 +550,9 @@ export function SendPanel({
           }
           more={
             <>
-              Discord only accepts interactive components (buttons with custom_id, select menus) from
-              application-owned webhooks. Use a bot/app-owned webhook, or remove the interactive
-              components.
+              Discord only accepts interactive components (buttons with custom_id, select menus)
+              from application-owned webhooks. Use a bot/app-owned webhook, or remove the
+              interactive components.
             </>
           }
           moreLabel="Why"

@@ -32,6 +32,59 @@
   cursor: not-allowed;
 }
 
+/* Drop / paste / click zone for adding gallery images, mirroring the
+   AttachmentPicker dropzone so uploads read consistently across inspectors. */
+.galleryDrop {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 2px;
+  min-height: 60px;
+  padding: 10px 12px;
+  border: 1px dashed var(--app-border);
+  border-radius: var(--app-radius);
+  background: var(--app-bg-elevated);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.galleryDrop:hover,
+.galleryDrop:focus-visible,
+.galleryDropActive {
+  outline: none;
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+}
+.galleryDrop strong {
+  font-size: 12px;
+  color: var(--app-text);
+}
+.galleryDrop span {
+  font-size: 11px;
+  color: var(--app-text-subtle);
+}
+.galleryDropInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.galleryDropFull,
+.galleryDropFull .galleryDropInput {
+  cursor: not-allowed;
+}
+.galleryDropFull {
+  opacity: 0.7;
+}
+.galleryDropFull:hover {
+  border-color: var(--app-border);
+  background: var(--app-bg-elevated);
+}
+
 .cards {
   display: flex;
   flex-direction: column;
@@ -121,7 +174,10 @@
   color: var(--app-text);
   cursor: pointer;
   user-select: none;
-  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 .chip:hover {
   border-color: var(--app-border-strong);

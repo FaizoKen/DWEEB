@@ -1,28 +1,42 @@
 /**
- * Garbage-collects in-memory file blobs once they're no longer referenced
- * by any component. We can't tie blob lifetime directly to component removal
- * because nodes can be duplicated, copied between containers, or moved
- * around — so a "delete this node" path can't safely free the blob without
- * checking the rest of the tree.
+ * Garbage-collects file blobs once they're no longer referenced by any
+ * component. We can't tie blob lifetime directly to component removal because
+ * nodes can be duplicated, copied between containers, or moved around — so a
+ * "delete this node" path can't safely free the blob without checking the rest
+ * of the tree.
  *
- * Cheap alternative: after every message mutation, walk the tree and tell
- * the registry which blob ids are still in use. Anything else gets freed.
+ * Cheap alternative: after every message mutation, walk the tree and tell the
+ * registry which blob ids are still in use. Anything else gets freed (from both
+ * the in-memory map and IndexedDB).
+ *
+ * On mount we first `hydrateAttachments()` — pulling persisted uploads back
+ * into the registry so the draft's `session://` URLs resolve again — then run
+ * the reconcile pass once. That ordering matters: GC removes any restored blob
+ * the current tree no longer references (e.g. the draft was replaced by an
+ * import), evicting it from IndexedDB too. Running GC before hydration would
+ * see an empty map and free nothing.
  */
 
 import { useEffect } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
-import { garbageCollect } from "@/core/state/attachmentStore";
+import { garbageCollect, hydrateAttachments } from "@/core/state/attachmentStore";
 import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 
 export function useAttachmentGc(): void {
   useEffect(() => {
-    // Run once at mount to clean up anything orphaned by a draft restore.
-    garbageCollect(collectMediaUrls(useMessageStore.getState().message));
+    let cancelled = false;
+    void hydrateAttachments().then(() => {
+      if (cancelled) return;
+      garbageCollect(collectMediaUrls(useMessageStore.getState().message));
+    });
     const unsubscribe = useMessageStore.subscribe((state, prev) => {
       if (state.message === prev.message) return;
       garbageCollect(collectMediaUrls(state.message));
     });
-    return unsubscribe;
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 }
 

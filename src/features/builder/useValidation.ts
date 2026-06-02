@@ -17,8 +17,9 @@
  * walks the tree top-to-bottom.
  */
 
-import { createContext, useContext, useMemo } from "react";
+import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
 import { validateMessage, type ValidationIssue } from "@/core/schema/validation";
 import type { EditorId, WebhookMessage } from "@/core/schema/types";
 
@@ -88,7 +89,17 @@ export function buildValidationView(message: WebhookMessage): ValidationView {
 /** Recompute the live validation view from the current message (memoized). */
 export function useValidationView(): ValidationView {
   const message = useMessageStore((s) => s.message);
-  return useMemo(() => buildValidationView(message), [message]);
+  // Validation reads the attachment registry (`checkAttachmentResolves`), so it
+  // must also recompute when blobs are registered, GC'd, or — crucially —
+  // restored from IndexedDB on startup. Without this, a reload would clear the
+  // preview's "missing" state but leave the stale ATTACHMENT_MISSING error
+  // standing until the next message edit. The version bumps on every mutation.
+  const attachmentsVersion = useSyncExternalStore(
+    subscribeAttachments,
+    getAttachmentSnapshot,
+    getAttachmentSnapshot,
+  );
+  return useMemo(() => buildValidationView(message), [message, attachmentsVersion]);
 }
 
 /**

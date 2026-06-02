@@ -166,7 +166,9 @@ button.statPill {
      so any unmapped row stays calm. */
   background: hsla(var(--row-hue, 230), var(--row-sat, 12%), 55%, 0.1);
   box-shadow: inset 3px 0 0 hsla(var(--row-hue, 230), var(--row-sat, 12%), 60%, 0.55);
-  transition: background 120ms ease, box-shadow 120ms ease;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
 }
 
 /* Hue/saturation per component type. Numbers match the ComponentType enum in
@@ -174,21 +176,54 @@ button.statPill {
    carry no type, so they key off their parent kind instead. The vars are set on
    the <li>, not the row, so the selected row's inline inspector panel — a
    sibling of the row — inherits the same colour as the row's tint and stripe. */
-.list li:has(> .row[data-node-type="17"]) { --row-hue: 235; --row-sat: 68%; } /* Container */
-.list li:has(> .row[data-node-type="9"])  { --row-hue: 188; --row-sat: 60%; } /* Section */
-.list li:has(> .row[data-node-type="10"]) { --row-hue: 212; --row-sat: 66%; } /* Text */
-.list li:has(> .row[data-node-type="12"]) { --row-hue: 268; --row-sat: 60%; } /* Media Gallery */
-.list li:has(> .row[data-node-type="13"]) { --row-hue: 38;  --row-sat: 75%; } /* File */
-.list li:has(> .row[data-node-type="14"]) { --row-hue: 220; --row-sat: 10%; } /* Separator */
-.list li:has(> .row[data-node-type="1"])  { --row-hue: 145; --row-sat: 52%; } /* Buttons Row */
-.list li:has(> .row[data-node-type="2"])  { --row-hue: 150; --row-sat: 52%; } /* Button */
-.list li:has(> .row[data-node-type="11"]) { --row-hue: 330; --row-sat: 62%; } /* Thumbnail */
+.list li:has(> .row[data-node-type="17"]) {
+  --row-hue: 235;
+  --row-sat: 68%;
+} /* Container */
+.list li:has(> .row[data-node-type="9"]) {
+  --row-hue: 188;
+  --row-sat: 60%;
+} /* Section */
+.list li:has(> .row[data-node-type="10"]) {
+  --row-hue: 212;
+  --row-sat: 66%;
+} /* Text */
+.list li:has(> .row[data-node-type="12"]) {
+  --row-hue: 268;
+  --row-sat: 60%;
+} /* Media Gallery */
+.list li:has(> .row[data-node-type="13"]) {
+  --row-hue: 38;
+  --row-sat: 75%;
+} /* File */
+.list li:has(> .row[data-node-type="14"]) {
+  --row-hue: 220;
+  --row-sat: 10%;
+} /* Separator */
+.list li:has(> .row[data-node-type="1"]) {
+  --row-hue: 145;
+  --row-sat: 52%;
+} /* Buttons Row */
+.list li:has(> .row[data-node-type="2"]) {
+  --row-hue: 150;
+  --row-sat: 52%;
+} /* Button */
+.list li:has(> .row[data-node-type="11"]) {
+  --row-hue: 330;
+  --row-sat: 62%;
+} /* Thumbnail */
 .list li:has(> .row[data-node-type="3"]),
 .list li:has(> .row[data-node-type="5"]),
 .list li:has(> .row[data-node-type="6"]),
 .list li:has(> .row[data-node-type="7"]),
-.list li:has(> .row[data-node-type="8"]) { --row-hue: 22; --row-sat: 70%; } /* Selects */
-.list li:has(> .row[data-parent-kind="gallery"]) { --row-hue: 280; --row-sat: 52%; } /* Image */
+.list li:has(> .row[data-node-type="8"]) {
+  --row-hue: 22;
+  --row-sat: 70%;
+} /* Selects */
+.list li:has(> .row[data-parent-kind="gallery"]) {
+  --row-hue: 280;
+  --row-sat: 52%;
+} /* Image */
 
 .row:hover {
   background: hsla(var(--row-hue, 230), var(--row-sat, 12%), 55%, 0.18);
@@ -236,6 +271,14 @@ button.statPill {
 /* "Into" indicator for dropping into a Container row. Outlines the whole row
  * so it reads as "this is the new parent" rather than "between rows". */
 .rowDropInto {
+  box-shadow: inset 0 0 0 2px var(--app-accent);
+  background: var(--app-accent-soft);
+}
+
+/* Native OS file drag hovering a Media Gallery / Thumbnail row. Same outline
+ * language as `.rowDropInto` so "drop a file here" reads consistently with the
+ * in-app drop affordances, but tinted to signal an upload rather than a move. */
+.rowFileDrop {
   box-shadow: inset 0 0 0 2px var(--app-accent);
   background: var(--app-accent-soft);
 }
@@ -352,7 +395,10 @@ button.statPill {
   color: hsl(var(--row-hue, 230), var(--row-sat, 12%), 80%);
   font-size: 14px;
   line-height: 1;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 .row:hover .glyph {
@@ -440,7 +486,10 @@ button.statPill {
   border: 1px dashed rgba(88, 101, 242, 0.45);
   border-radius: 999px;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease,
     box-shadow 120ms ease;
 }
 
@@ -471,7 +520,9 @@ button.statPill {
   border: 1px solid rgba(88, 101, 242, 0.45);
   font-size: 0;
   color: transparent;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 
 .addChildPlus::before,
@@ -644,9 +695,14 @@ button.statPill {
   color: var(--app-text);
   cursor: pointer;
   user-select: none;
-  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
-.chip:hover { border-color: var(--app-border-strong); }
+.chip:hover {
+  border-color: var(--app-border-strong);
+}
 .chip:focus-visible {
   outline: none;
   box-shadow: var(--app-focus-ring);
@@ -656,7 +712,9 @@ button.statPill {
   border-color: var(--app-accent);
   color: var(--app-text);
 }
-.chipActive:hover { border-color: var(--app-accent); }
+.chipActive:hover {
+  border-color: var(--app-accent);
+}
 
 .sectionHint {
   font-size: var(--app-text-xs);

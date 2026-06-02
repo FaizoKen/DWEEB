@@ -52,8 +52,10 @@ import type {
   MediaGalleryComponent,
   MediaGalleryItem,
   SectionComponent,
+  ThumbnailComponent,
 } from "@/core/schema/types";
 import { ComponentType } from "@/core/schema/types";
+import { registerAttachment } from "@/core/state/attachmentStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { IconButton } from "@/ui/IconButton";
@@ -73,6 +75,7 @@ import {
   TrashIcon,
 } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
+import { pushToast } from "@/ui/Toast";
 import {
   ValidationContext,
   useNodeIssues,
@@ -80,6 +83,8 @@ import {
   useValidationView,
   worstSeverity,
 } from "@/features/builder/useValidation";
+import { useFileDrop } from "./useFileDrop";
+import { addFilesToGallery, replaceGalleryItemFiles } from "./galleryUpload";
 import { Inspector } from "./Inspector";
 import { GalleryItemInspector } from "./inspectors/GalleryItemInspector";
 import { IssueDot, IssueList } from "./ValidationIssues";
@@ -993,6 +998,40 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
     pointerHandlers,
   } = usePointerDragRow({ isReorderable, dragInfo, allowed, commit });
 
+  // Native file drop: dropping image(s)/video(s) onto a MediaGallery row appends
+  // them as new images; dropping an image onto a Thumbnail row sets its media.
+  // This is a separate event channel from the pointer-based reorder above, so
+  // the two never collide. Other component rows opt out (`enabled: false`).
+  const patchNode = useMessageStore((s) => s.patchNode);
+  const isGallery = node.type === ComponentType.MediaGallery;
+  const isThumbnail = node.type === ComponentType.Thumbnail;
+  const handleDroppedFiles = useCallback(
+    (files: File[]) => {
+      if (node.type === ComponentType.MediaGallery) {
+        addFilesToGallery(node._id, node.items.length, files);
+      } else if (node.type === ComponentType.Thumbnail) {
+        const file = files[0];
+        if (!file) return;
+        patchNode<ThumbnailComponent>(node._id, {
+          media: { url: registerAttachment(file), attachment_id: undefined },
+        });
+        select(node._id);
+      }
+    },
+    [node, patchNode, select],
+  );
+  const { isDragOver: fileDragOver, handlers: fileDropHandlers } = useFileDrop({
+    accept: isGallery ? "image/*,video/*" : "image/*",
+    multiple: isGallery,
+    enabled: isGallery || isThumbnail,
+    onFiles: handleDroppedFiles,
+    onReject: () =>
+      pushToast(
+        isGallery ? "Only images and videos can be added here." : "Only images can be added here.",
+        "error",
+      ),
+  });
+
   const onRowClick = useCallback(
     (e: ReactMouseEvent<HTMLDivElement>) => {
       e.stopPropagation();
@@ -1035,6 +1074,7 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
           showDropBefore && styles.rowDropBefore,
           showDropAfter && styles.rowDropAfter,
           showDropInto && styles.rowDropInto,
+          fileDragOver && styles.rowFileDrop,
         )}
         // Data attributes drive drop-target resolution: the source's
         // pointermove uses `document.elementFromPoint` + `closest()` to find
@@ -1046,6 +1086,7 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
         data-sibling-index={siblingIndex}
         data-node-type={node.type}
         {...pointerHandlers}
+        {...fileDropHandlers}
         onClick={onRowClick}
       >
         <span className={styles.chevron} aria-hidden="true">
@@ -1199,6 +1240,19 @@ function GalleryItemNode({
     pointerHandlers,
   } = usePointerDragRow({ isReorderable: true, dragInfo, allowed, commit });
 
+  // Dropping a file onto an image row replaces that image in place; extra files
+  // in the same drop are inserted right after it (see `replaceGalleryItemFiles`).
+  const handleDroppedFiles = useCallback(
+    (files: File[]) => replaceGalleryItemFiles(galleryId, item._id, total, files),
+    [galleryId, item._id, total],
+  );
+  const { isDragOver: fileDragOver, handlers: fileDropHandlers } = useFileDrop({
+    accept: "image/*,video/*",
+    multiple: true,
+    onFiles: handleDroppedFiles,
+    onReject: () => pushToast("Only images and videos can be added here.", "error"),
+  });
+
   const onRowClick = (e: ReactMouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
     // Swallow the synthetic click a finished drag fires on the source row.
@@ -1232,6 +1286,7 @@ function GalleryItemNode({
           showDropBefore && styles.rowDropBefore,
           showDropAfter && styles.rowDropAfter,
           showDropInto && styles.rowDropInto,
+          fileDragOver && styles.rowFileDrop,
         )}
         data-tree-row="true"
         data-row-id={item._id}
@@ -1239,6 +1294,7 @@ function GalleryItemNode({
         data-parent-id={galleryId}
         data-sibling-index={index}
         {...pointerHandlers}
+        {...fileDropHandlers}
         onClick={onRowClick}
       >
         <span className={styles.chevron} aria-hidden="true">

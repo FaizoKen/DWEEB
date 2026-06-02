@@ -121,6 +121,20 @@ export interface MessageState {
   addRowButton(rowId: EditorId): void;
   addRowSelect(rowId: EditorId, type: SelectComponent["type"]): void;
   addGalleryItem(galleryId: EditorId): void;
+  /**
+   * Append one image per supplied media URL to a gallery, clamped to the
+   * gallery cap, selecting the first one added. Used by the drag-drop / paste
+   * upload paths, which register the files first and pass the resulting
+   * `session://` URLs. No-op on an empty list or a full gallery.
+   */
+  addGalleryItemsWithUrls(galleryId: EditorId, urls: string[]): void;
+  /**
+   * Replace one image's media with the first supplied URL in place (keeping its
+   * id, alt text, and spoiler flag), inserting any remaining URLs right after
+   * it, clamped to the gallery cap. Backs the "drop a file onto an existing
+   * image to replace it" path. No-op on an empty list or unknown ids.
+   */
+  replaceGalleryItemWithUrls(galleryId: EditorId, itemId: EditorId, urls: string[]): void;
   /** Reorder an image within its gallery by one slot. */
   moveGalleryItem(galleryId: EditorId, itemId: EditorId, direction: -1 | 1): void;
   /**
@@ -492,6 +506,53 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // Select the new image so its tree row expands ready to edit — the
       // "go to the last image" behavior, now expressed through selection.
       return { ...pushHistory(s), message, selectedId: item._id };
+    });
+  },
+
+  addGalleryItemsWithUrls(galleryId, urls) {
+    set((s) => {
+      if (urls.length === 0) return s;
+      let firstId: EditorId | null = null;
+      const message = updateById<MediaGalleryComponent>(s.message, galleryId, (g) => {
+        if (g.type !== ComponentType.MediaGallery) return g;
+        const room = LIMITS.GALLERY_ITEMS - g.items.length;
+        if (room <= 0) return g;
+        const additions = urls
+          .slice(0, room)
+          .map((url) => ({ ...createGalleryItem(), media: { url } }));
+        if (additions.length === 0) return g;
+        firstId = additions[0]!._id;
+        return { ...g, items: [...g.items, ...additions] };
+      });
+      if (!firstId) return s;
+      // Select the first newly added image so its row expands ready to edit.
+      return { ...pushHistory(s), message, selectedId: firstId };
+    });
+  },
+
+  replaceGalleryItemWithUrls(galleryId, itemId, urls) {
+    set((s) => {
+      if (urls.length === 0) return s;
+      let changed = false;
+      const message = updateById<MediaGalleryComponent>(s.message, galleryId, (g) => {
+        if (g.type !== ComponentType.MediaGallery) return g;
+        const idx = g.items.findIndex((it) => it._id === itemId);
+        if (idx === -1) return g;
+        const [first, ...rest] = urls;
+        // Replace media in place; keep the slot's id, alt text, and spoiler.
+        const replaced: MediaGalleryItem = { ...g.items[idx]!, media: { url: first } };
+        // Insert any extra dropped files immediately after, clamped to the cap.
+        const room = LIMITS.GALLERY_ITEMS - g.items.length;
+        const extras = rest
+          .slice(0, Math.max(0, room))
+          .map((url) => ({ ...createGalleryItem(), media: { url } }));
+        const items = [...g.items.slice(0, idx), replaced, ...extras, ...g.items.slice(idx + 1)];
+        changed = true;
+        return { ...g, items };
+      });
+      if (!changed) return s;
+      // Keep the replaced slot selected so its row stays in focus.
+      return { ...pushHistory(s), message, selectedId: itemId };
     });
   },
 
