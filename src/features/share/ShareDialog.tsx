@@ -234,8 +234,9 @@ function JsonExportPanel() {
 
 /**
  * About panel — surfaces a short description of the app, the author
- * credit, and the support-server invite. Lives in the Share dialog so
- * it's reachable from the same place as Import/Export.
+ * credit, the open-source/GitHub link, the support-server invite, and the
+ * legal pages. Lives in the Share dialog so it's reachable from the same
+ * place as Import/Export.
  */
 function AboutPanel() {
   return (
@@ -246,6 +247,13 @@ function AboutPanel() {
       </p>
       <p className={styles.lead}>
         And yes, it stands for <em>Discord Webhook Embed Builder</em>. 🤓
+      </p>
+      <p className={styles.lead}>
+        DWEEB is <strong>free and open source</strong> (MIT). The code lives on{" "}
+        <a href="https://github.com/FaizoKen/DWEEB" target="_blank" rel="noopener noreferrer">
+          GitHub
+        </a>{" "}
+        — stars, issues, and pull requests welcome.
       </p>
       <p className={styles.lead}>
         Made with 💖 by{" "}
@@ -261,6 +269,17 @@ function AboutPanel() {
         </a>
         .
       </p>
+      <nav className={styles.aboutLinks} aria-label="Legal and source links">
+        <a href="https://github.com/FaizoKen/DWEEB" target="_blank" rel="noopener noreferrer">
+          Source on GitHub
+        </a>
+        <a href="/privacy" target="_blank" rel="noopener noreferrer">
+          Privacy Policy
+        </a>
+        <a href="/terms" target="_blank" rel="noopener noreferrer">
+          Terms of Service
+        </a>
+      </nav>
     </>
   );
 }

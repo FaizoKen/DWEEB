@@ -7,6 +7,10 @@ messages with containers, sections, buttons, media, and files, watch a
 pixel-accurate live preview, and share the result through a single URL — no
 backend, no account, no database.
 
+DWEEB is **free and open source** (MIT). The code lives on GitHub at
+**[github.com/FaizoKen/DWEEB](https://github.com/FaizoKen/DWEEB)** — issues and
+pull requests welcome.
+
 ![DWEEB — editor on the left, pixel-accurate Discord preview on the right](docs/screenshot.png)
 
 > Try it live at **[dweeb.faizo.net](https://dweeb.faizo.net)**
@@ -301,6 +305,17 @@ chunk because decoding is only needed when landing on a share URL.
 
 Hosted on Cloudflare Pages with automatic builds on every push.
 
+## Contributing
+
+Contributions are welcome. Open an issue to discuss a change, or send a pull
+request. Run `bun run typecheck` and `bun run build` before submitting so CI
+stays green.
+
 ## License
 
-All rights reserved. This project is not open source.
+DWEEB is open source under the [MIT License](LICENSE) — use it, fork it, and
+ship it. See [`LICENSE`](LICENSE) for the full text.
+
+The hosted instance at [dweeb.faizo.net](https://dweeb.faizo.net) is also
+governed by its [Terms of Service](https://dweeb.faizo.net/terms) and
+[Privacy Policy](https://dweeb.faizo.net/privacy).

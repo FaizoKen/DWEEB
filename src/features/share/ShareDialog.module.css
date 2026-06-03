@@ -53,6 +53,22 @@
   color: var(--app-accent);
 }
 
+.aboutLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 4px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--app-border);
+  font-size: 12px;
+}
+.aboutLinks a {
+  color: var(--app-text-muted);
+}
+.aboutLinks a:hover {
+  color: var(--app-text);
+}
+
 .statsRow {
   display: flex;
   flex-wrap: wrap;

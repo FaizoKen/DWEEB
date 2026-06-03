@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e1f22" />
+    <meta name="color-scheme" content="dark" />
+    <title>Privacy Policy — DWEEB</title>
+    <meta
+      name="description"
+      content="How DWEEB (Discord Webhook Embed Builder) handles your data. Your drafts, webhook URLs, and API keys stay in your browser. Read the full privacy policy."
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://dweeb.faizo.net/privacy" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      :root {
+        --bg: #1e1f22;
+        --surface: #2b2d31;
+        --border: #3f4147;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #00a8fc;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          "gg sans", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        max-width: 46rem;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .back {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      .back:hover {
+        color: var(--text);
+      }
+      h1 {
+        font-size: 2rem;
+        line-height: 1.2;
+        margin: 0 0 0.35rem;
+      }
+      h2 {
+        font-size: 1.25rem;
+        margin: 2.25rem 0 0.75rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--border);
+      }
+      h3 {
+        font-size: 1.02rem;
+        margin: 1.5rem 0 0.5rem;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin: 0 0 1.5rem;
+      }
+      .tldr {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        margin: 1.5rem 0;
+      }
+      .tldr strong {
+        color: var(--text);
+      }
+      ul {
+        padding-left: 1.25rem;
+      }
+      li {
+        margin: 0.4rem 0;
+      }
+      code {
+        background: #1a1b1e;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 0.1rem 0.35rem;
+        font-size: 0.85em;
+        font-family: ui-monospace, "SFMono-Regular", "Consolas", monospace;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      footer {
+        margin-top: 3rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      footer a {
+        margin-right: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back" href="/">← Back to DWEEB</a>
+      <h1>Privacy Policy</h1>
+      <p class="meta">Last updated: 4 June 2026</p>
+
+      <div class="tldr">
+        <strong>The short version.</strong> DWEEB runs entirely in your browser. Your message
+        drafts, webhook URLs, saved messages, and any AI API keys live only in your browser's
+        local storage — they are never uploaded to us. You don't need an account to use the
+        editor. We use privacy-respecting analytics, and a few features (signing in with Discord,
+        the AI assistant) talk to third parties only when you choose to use them. We do not sell
+        your data.
+      </div>
+
+      <p>
+        This policy explains what DWEEB (the "Discord Webhook Embed Builder," "we," "us"), hosted at
+        <a href="https://dweeb.faizo.net">dweeb.faizo.net</a>, does with information when you use the
+        site. DWEEB is free and open source; the source code is available at
+        <a href="https://github.com/FaizoKen/DWEEB" target="_blank" rel="noopener noreferrer"
+          >github.com/FaizoKen/DWEEB</a
+        >.
+      </p>
+
+      <h2>1. Data stored only in your browser</h2>
+      <p>
+        DWEEB is a client-side application. The following are saved to your browser's
+        <code>localStorage</code> / IndexedDB and are <strong>never transmitted to our servers</strong>:
+      </p>
+      <ul>
+        <li>The message you're currently editing (auto-saved draft).</li>
+        <li>Webhook URLs you enter and your list of recently used webhooks.</li>
+        <li>Messages you choose to save for later.</li>
+        <li>Attachments/images you add while building a message.</li>
+        <li>API keys for the optional AI assistant (bring-your-own-key).</li>
+        <li>Interface preferences (e.g. the last server you connected to).</li>
+      </ul>
+      <p>
+        This data stays on your device until you remove it. You can clear it at any time by clearing
+        your browser's site data for <code>dweeb.faizo.net</code>, or by using the in-app controls
+        (Reset, remove a saved webhook, etc.).
+      </p>
+
+      <h2>2. Share links</h2>
+      <p>
+        When you create a share link, the entire message is compressed into the URL's
+        <code>#</code> hash fragment (for example <code>dweeb.faizo.net/#s=…</code>). By design,
+        browsers never send the fragment to a web server, so the contents of a share link are
+        <strong>not received or stored by us</strong>. However, anyone you give the link to can open
+        and read that message, so treat share links accordingly.
+      </p>
+
+      <h2>3. Sending messages to Discord</h2>
+      <p>
+        When you click <strong>Send</strong>, <strong>Restore</strong>, or update a message, your
+        browser talks <strong>directly to Discord's API</strong>. Your webhook URL and message
+        content go to Discord, not through us. This is governed by
+        <a href="https://discord.com/privacy" target="_blank" rel="noopener noreferrer"
+          >Discord's Privacy Policy</a
+        >. A webhook URL is a credential — treat it like a password and only share it with people you
+        trust.
+      </p>
+
+      <h2>4. Signing in with Discord (optional)</h2>
+      <p>
+        If you choose to sign in with Discord to load a server's roles, channels, and emojis, we use
+        Discord's OAuth flow. From it we receive your Discord user ID, your username/display name,
+        your avatar, an access token, and the list of servers you can manage. This information is
+        stored in an <strong>encrypted, HttpOnly session cookie</strong> kept in your browser — we do
+        not maintain a server-side account database. The access token is used only to confirm you
+        belong to a server before returning its data, and that data is briefly cached on our proxy to
+        reduce calls to Discord. Signing out clears the session. If you never sign in, none of this
+        applies.
+      </p>
+
+      <h2>5. The AI assistant (optional)</h2>
+      <p>
+        The optional AI assistant is bring-your-own-key. When you use it, your prompt and your API
+        key are sent through a same-origin proxy on our hosting to the AI provider <em>you</em>
+        selected (e.g. OpenAI, Anthropic, Google, Groq, OpenRouter, or your own Ollama endpoint).
+        The proxy forwards the request and streams the response back; it does
+        <strong>not store</strong> your prompts or keys. Your use of a provider is subject to that
+        provider's own privacy policy and terms.
+      </p>
+
+      <h2>6. Analytics</h2>
+      <p>
+        We use <strong>Google Analytics</strong> to understand how DWEEB is used (for example, how
+        many people visit and which features are popular). Google Analytics may collect information
+        such as the pages you view, your approximate location derived from your IP address, and your
+        device and browser type, and may set cookies. This is governed by
+        <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer"
+          >Google's Privacy Policy</a
+        >. You can opt out using the
+        <a
+          href="https://tools.google.com/dlpage/gaoptout"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Google Analytics opt-out browser add-on</a
+        >, a browser "Do Not Track" / privacy setting, or a content blocker.
+      </p>
+
+      <h2>7. Hosting and server logs</h2>
+      <p>
+        The site is hosted on Cloudflare. Like most web infrastructure, our hosting and the Discord
+        login proxy process technical data such as IP addresses to deliver the service, apply
+        per-IP rate limiting, and protect against abuse. We don't use this to build user profiles.
+      </p>
+
+      <h2>8. Cookies</h2>
+      <ul>
+        <li>
+          <strong>Session cookie</strong> — set only when you sign in with Discord (encrypted,
+          HttpOnly), plus a short-lived OAuth state cookie for security. Cleared on sign-out.
+        </li>
+        <li><strong>Analytics cookies</strong> — set by Google Analytics, as described above.</li>
+      </ul>
+      <p class="muted">We do not use advertising or cross-site tracking cookies.</p>
+
+      <h2>9. Third-party services</h2>
+      <p>DWEEB relies on these third parties, each with its own privacy policy:</p>
+      <ul>
+        <li><a href="https://discord.com/privacy" target="_blank" rel="noopener noreferrer">Discord</a> — webhooks, sign-in, and server data.</li>
+        <li><a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Analytics</a> — usage analytics.</li>
+        <li><a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener noreferrer">Cloudflare</a> — hosting and content delivery.</li>
+        <li>Whichever AI provider you select, if you use the AI assistant.</li>
+      </ul>
+
+      <h2>10. Data retention</h2>
+      <p>
+        Because most data lives in your browser, you control its retention — it persists until you
+        clear it. The Discord session cookie expires automatically and on sign-out. Server-side
+        caches of guild data are short-lived. We do not keep a database of users or message content.
+      </p>
+
+      <h2>11. Children</h2>
+      <p>
+        DWEEB is not directed to children. You must meet Discord's minimum age requirement (at least
+        13, or older where your local law requires) to use Discord-related features.
+      </p>
+
+      <h2>12. Your rights</h2>
+      <p>
+        Depending on where you live (e.g. under the GDPR or CCPA), you may have rights to access,
+        correct, or delete personal data. In practice, most of your data is local and already under
+        your control: clear your browser's site data to erase it, and sign out to clear the session
+        cookie. For anything held on our side, or to make a request, contact us using the details
+        below.
+      </p>
+
+      <h2>13. Changes to this policy</h2>
+      <p>
+        We may update this policy from time to time. Material changes will be reflected by updating
+        the "Last updated" date above. Continued use of DWEEB after a change means you accept the
+        revised policy.
+      </p>
+
+      <h2>14. Contact</h2>
+      <p>
+        Questions about privacy? Email
+        <a href="mailto:mail@faizo.net">mail@faizo.net</a> or join the
+        <a href="https://discord.gg/2wB7rHRDg2" target="_blank" rel="noopener noreferrer"
+          >DWEEB support server</a
+        >.
+      </p>
+
+      <footer>
+        <a href="/">DWEEB</a>
+        <a href="/terms">Terms of Service</a>
+        <a href="https://github.com/FaizoKen/DWEEB" target="_blank" rel="noopener noreferrer"
+          >Source on GitHub</a
+        >
+      </footer>
+    </main>
+  </body>
+</html>
