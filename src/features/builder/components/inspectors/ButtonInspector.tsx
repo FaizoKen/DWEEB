@@ -21,10 +21,14 @@ import {
   type PremiumButtonComponent,
 } from "@/core/schema/types";
 import { Field } from "@/ui/Field";
+import { Menu } from "@/ui/Menu";
 import { Select } from "@/ui/Select";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
+import { EmojiIcon } from "@/ui/Icon";
+import { GuildEmojiPanel } from "@/features/guild/MentionPicker";
 import { CapabilityNote } from "./CapabilityNote";
+import styles from "./ButtonInspector.module.css";
 
 interface Props {
   node: ButtonComponent;
@@ -55,23 +59,21 @@ export function ButtonInspector({ node }: Props) {
     }
   };
 
-  const isInteractive =
-    node.style !== ButtonStyle.Link && node.style !== ButtonStyle.Premium;
+  const isInteractive = node.style !== ButtonStyle.Link && node.style !== ButtonStyle.Premium;
 
   return (
     <>
       {isInteractive ? (
         <CapabilityNote>
-          <strong>Needs an application-owned webhook.</strong> Discord rejects
-          messages with interactive buttons when sent through a regular
-          user-created webhook. Use a Link button if you just want a hyperlink.
+          <strong>Needs an application-owned webhook.</strong> Discord rejects messages with
+          interactive buttons when sent through a regular user-created webhook. Use a Link button if
+          you just want a hyperlink.
         </CapabilityNote>
       ) : null}
       {node.style === ButtonStyle.Premium ? (
         <CapabilityNote>
-          <strong>Needs app monetization.</strong> Premium buttons require the
-          webhook's application to have a configured SKU; without that, the
-          button can't actually charge anyone.
+          <strong>Needs app monetization.</strong> Premium buttons require the webhook's application
+          to have a configured SKU; without that, the button can't actually charge anyone.
         </CapabilityNote>
       ) : null}
       <Field label="Style">
@@ -96,7 +98,7 @@ export function ButtonInspector({ node }: Props) {
             <TextInput
               id={id}
               maxLength={LIMITS.BUTTON_LABEL}
-              value={"label" in node ? node.label ?? "" : ""}
+              value={"label" in node ? (node.label ?? "") : ""}
               onChange={(e) =>
                 patch<LinkButtonComponent>(node._id, {
                   label: e.currentTarget.value || undefined,
@@ -115,9 +117,7 @@ export function ButtonInspector({ node }: Props) {
               type="url"
               maxLength={LIMITS.BUTTON_URL}
               value={node.url}
-              onChange={(e) =>
-                patch<LinkButtonComponent>(node._id, { url: e.currentTarget.value })
-              }
+              onChange={(e) => patch<LinkButtonComponent>(node._id, { url: e.currentTarget.value })}
             />
           )}
         </Field>
@@ -219,17 +219,13 @@ function makeInteractive(
  *
  * We expose three controls (unicode/name + id + animated) and accept a paste
  * of the raw Discord token (`<:name:id>` / `<a:name:id>`) as a shortcut — most
- * users grab those from the client by escaping a message.
+ * users grab those from the client by escaping a message. The trailing picker
+ * button opens the same cross-server `GuildEmojiPanel` the toolbar uses; its
+ * chosen token is parsed straight back into the `PartialEmoji` shape.
  */
 type EmojiEditableButton = LinkButtonComponent | InteractiveButtonComponent;
 
-function EmojiEditor({
-  node,
-  advancedMode,
-}: {
-  node: EmojiEditableButton;
-  advancedMode: boolean;
-}) {
+function EmojiEditor({ node, advancedMode }: { node: EmojiEditableButton; advancedMode: boolean }) {
   const patch = useMessageStore((s) => s.patchNode);
   const emoji = node.emoji ?? {};
 
@@ -260,18 +256,43 @@ function EmojiEditor({
         label="Emoji"
         hint={
           <>
-            Paste a unicode emoji (🔥) or a custom token like{" "}
-            <code>{"<:name:123…>"}</code>.
+            Paste a unicode emoji (🔥) or a custom token like <code>{"<:name:123…>"}</code>.
           </>
         }
       >
         {(id) => (
-          <TextInput
-            id={id}
-            value={emoji.name ?? ""}
-            onChange={(e) => onNameChange(e.currentTarget.value)}
-            placeholder="🔥  ·  thinking  ·  <a:wave:123…>"
-          />
+          <div className={styles.emojiRow}>
+            <TextInput
+              id={id}
+              className={styles.emojiInput}
+              value={emoji.name ?? ""}
+              onChange={(e) => onNameChange(e.currentTarget.value)}
+              placeholder="🔥  ·  thinking  ·  <a:wave:123…>"
+            />
+            <Menu
+              align="end"
+              trigger={
+                <button
+                  type="button"
+                  className={styles.pickBtn}
+                  aria-label="Pick a custom emoji"
+                  title="Pick a custom emoji"
+                >
+                  <EmojiIcon size={16} />
+                </button>
+              }
+            >
+              {(close) => (
+                <GuildEmojiPanel
+                  onPick={(snippet) => {
+                    const parsed = parseDiscordEmojiToken(snippet);
+                    if (parsed) setEmoji(parsed);
+                    close();
+                  }}
+                />
+              )}
+            </Menu>
+          </div>
         )}
       </Field>
       {advancedMode ? (

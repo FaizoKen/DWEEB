@@ -190,43 +190,54 @@ export async function sendToWebhook(
   // No-body responses (the default `wait=false` path).
   if (res.status === 204) return { ok: true, status: 204, body: null };
 
-  // Try to parse the body — Discord returns JSON for both success (wait=true)
-  // and structured error responses.
-  let body: unknown = null;
-  const text = await res.text().catch(() => "");
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = text;
-    }
-  }
-
+  // Discord returns JSON for both success (wait=true) and structured errors.
+  const body = await readBody(res);
   if (res.ok) return { ok: true, status: res.status, body };
-
   if (res.status === 429) {
-    const retryHeader = res.headers.get("retry-after");
-    const retryFromHeader = retryHeader ? Number.parseFloat(retryHeader) : NaN;
-    const retryFromBody =
-      body && typeof body === "object" && "retry_after" in body
-        ? Number((body as { retry_after: unknown }).retry_after)
-        : NaN;
-    const retryAfter = Number.isFinite(retryFromHeader)
-      ? retryFromHeader
-      : Number.isFinite(retryFromBody)
-        ? retryFromBody
-        : undefined;
     return {
       ok: false,
       status: 429,
       error: "Rate limited by Discord. Try again shortly.",
-      retryAfter,
+      retryAfter: retryAfterFrom(res, body),
       body,
     };
   }
+  return { ok: false, status: res.status, error: describeError(res.status, body), body };
+}
 
-  const errorMessage = describeError(res.status, body);
-  return { ok: false, status: res.status, error: errorMessage, body };
+/**
+ * Read and JSON-parse a response body, tolerating an empty body or a non-JSON
+ * payload (returned as the raw string). Discord answers with JSON for both
+ * success and structured errors, but an edge/proxy can occasionally hand back
+ * plain text.
+ */
+async function readBody(res: Response): Promise<unknown> {
+  const text = await res.text().catch(() => "");
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Seconds Discord wants us to wait after a 429, preferring the `Retry-After`
+ * header and falling back to the body's `retry_after`. Undefined when neither
+ * is a finite number.
+ */
+function retryAfterFrom(res: Response, body: unknown): number | undefined {
+  const header = res.headers.get("retry-after");
+  const fromHeader = header ? Number.parseFloat(header) : NaN;
+  const fromBody =
+    body && typeof body === "object" && "retry_after" in body
+      ? Number((body as { retry_after: unknown }).retry_after)
+      : NaN;
+  return Number.isFinite(fromHeader)
+    ? fromHeader
+    : Number.isFinite(fromBody)
+      ? fromBody
+      : undefined;
 }
 
 function describeError(status: number, body: unknown): string {
@@ -448,11 +459,7 @@ export function webhookGuildId(webhook: Record<string, unknown>): string | null 
  * webhook id; a null hash means the webhook has no custom picture, so we fall
  * back to Discord's default avatar. Animated hashes (`a_…`) are served as gifs.
  */
-export function webhookAvatarUrl(
-  id: string,
-  avatar: string | null | undefined,
-  size = 64,
-): string {
+export function webhookAvatarUrl(id: string, avatar: string | null | undefined, size = 64): string {
   if (!avatar) return "https://cdn.discordapp.com/embed/avatars/0.png";
   const ext = avatar.startsWith("a_") ? "gif" : "png";
   return `https://cdn.discordapp.com/avatars/${id}/${avatar}.${ext}?size=${size}`;
@@ -586,38 +593,132 @@ export async function updateWebhookMessage(
     };
   }
 
-  let body: unknown = null;
-  const text = await res.text().catch(() => "");
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = text;
-    }
-  }
-
+  const body = await readBody(res);
   if (res.ok) return { ok: true, status: res.status, body };
-
   if (res.status === 429) {
-    const retryHeader = res.headers.get("retry-after");
-    const retryFromHeader = retryHeader ? Number.parseFloat(retryHeader) : NaN;
-    const retryFromBody =
-      body && typeof body === "object" && "retry_after" in body
-        ? Number((body as { retry_after: unknown }).retry_after)
-        : NaN;
-    const retryAfter = Number.isFinite(retryFromHeader)
-      ? retryFromHeader
-      : Number.isFinite(retryFromBody)
-        ? retryFromBody
-        : undefined;
     return {
       ok: false,
       status: 429,
       error: "Rate limited by Discord. Try again shortly.",
-      retryAfter,
+      retryAfter: retryAfterFrom(res, body),
       body,
     };
   }
+  return { ok: false, status: res.status, error: describeError(res.status, body), body };
+}
 
+/* ─── Manage the webhook itself (token PATCH / DELETE) ───────────────── */
+
+export interface ManageOk {
+  ok: true;
+  status: number;
+  /** The webhook object Discord returns on a rename/avatar change; `{}` for a delete. */
+  webhook: Record<string, unknown>;
+}
+export interface ManageErr {
+  ok: false;
+  status: number;
+  error: string;
+  /** Seconds to wait, when rate-limited (429). */
+  retryAfter?: number;
+  body?: unknown;
+}
+export type ManageResult = ManageOk | ManageErr;
+
+/**
+ * Rename a webhook and/or change its avatar on Discord. The token in the URL is
+ * the credential, so this needs no Manage Webhooks permission and no bot in the
+ * server — the same trust model as `verifyWebhook`.
+ *
+ * `name` (1–80 chars) renames it; `avatar` is an image data URI
+ * (`data:image/png;base64,…`) to set a picture or `null` to clear it. Omit
+ * either to leave it untouched. The token PATCH cannot move the webhook to a
+ * different channel (`channel_id` is rejected) — that needs Manage Webhooks.
+ */
+export async function modifyWebhook(
+  parsed: ParsedWebhookUrl,
+  changes: { name?: string; avatar?: string | null },
+  options: { signal?: AbortSignal } = {},
+): Promise<ManageResult> {
+  const payload: Record<string, unknown> = {};
+  if (changes.name !== undefined) payload.name = changes.name;
+  if (changes.avatar !== undefined) payload.avatar = changes.avatar;
+
+  let res: Response;
+  try {
+    res = await fetch(parsed.url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: options.signal,
+    });
+  } catch (e) {
+    if ((e as DOMException)?.name === "AbortError") {
+      return { ok: false, status: 0, error: "Update was cancelled." };
+    }
+    return {
+      ok: false,
+      status: 0,
+      error:
+        "Network request failed. Check the URL, your connection, or any browser extensions blocking requests to discord.com.",
+    };
+  }
+
+  const body = await readBody(res);
+  if (res.ok) {
+    return {
+      ok: true,
+      status: res.status,
+      webhook: body && typeof body === "object" ? (body as Record<string, unknown>) : {},
+    };
+  }
+  if (res.status === 429) {
+    return {
+      ok: false,
+      status: 429,
+      error: "Rate limited by Discord. Try again shortly.",
+      retryAfter: retryAfterFrom(res, body),
+      body,
+    };
+  }
+  return { ok: false, status: res.status, error: describeError(res.status, body), body };
+}
+
+/**
+ * Permanently delete a webhook on Discord via its token (no permission needed).
+ * Discord answers 204; a 404/401 means it was already gone, which we still
+ * report so the caller can drop its saved copy.
+ */
+export async function deleteWebhook(
+  parsed: ParsedWebhookUrl,
+  options: { signal?: AbortSignal } = {},
+): Promise<ManageResult> {
+  let res: Response;
+  try {
+    res = await fetch(parsed.url, { method: "DELETE", signal: options.signal });
+  } catch (e) {
+    if ((e as DOMException)?.name === "AbortError") {
+      return { ok: false, status: 0, error: "Delete was cancelled." };
+    }
+    return {
+      ok: false,
+      status: 0,
+      error:
+        "Network request failed. Check the URL, your connection, or any browser extensions blocking requests to discord.com.",
+    };
+  }
+
+  if (res.status === 204) return { ok: true, status: 204, webhook: {} };
+
+  const body = await readBody(res);
+  if (res.status === 429) {
+    return {
+      ok: false,
+      status: 429,
+      error: "Rate limited by Discord. Try again shortly.",
+      retryAfter: retryAfterFrom(res, body),
+      body,
+    };
+  }
   return { ok: false, status: res.status, error: describeError(res.status, body), body };
 }

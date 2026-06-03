@@ -1,0 +1,41 @@
+[package]
+name = "dweeb-proxy"
+version = "0.1.0"
+edition = "2021"
+description = "Read-only Discord REST proxy for the DWEEB embed builder (roles / channels / emojis)."
+
+[dependencies]
+axum = "0.7"
+# Loads a local `.env` for `cargo run` / direct binary runs (no-op under Docker,
+# which injects env vars itself).
+dotenvy = "0.15"
+# `sync` brings in the Semaphore used to cap concurrent calls to Discord under
+# the shared bot token; `time` backs the rate limiter's periodic eviction.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+# Encrypted (AEAD) cookies for the OAuth session — keeps the user's Discord
+# access token off the wire to JS (httpOnly) and unreadable at rest in the cookie.
+axum-extra = { version = "0.9", features = ["cookie-private"] }
+# CSPRNG for unguessable OAuth `state` (CSRF) and session nonces.
+getrandom = "0.2"
+# `Duration` for cookie max-age. Pinned to the same 0.3 line the `cookie` crate
+# (via axum-extra) uses, so the types unify to one version.
+time = { version = "0.3", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Optional shared cache + rate-limit backend for multi-instance deployments.
+# Minimal feature set: an async (tokio) connection manager with auto-reconnect.
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Optimise the release binary for size — this is a low-throughput proxy, so a
+# small footprint matters more than squeezing out every microsecond. `panic`
+# is left at the default (unwind) so a panicking handler tears down only its
+# own request task, not the whole process.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

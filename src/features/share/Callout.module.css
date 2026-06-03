@@ -18,6 +18,11 @@
 }
 
 .content {
+  /* Fill the row beside the icon so column children (notably right-aligned
+     `.actions`) resolve against the callout's real width — not the shrink-wrap
+     of the widest line, which drifts the action button toward the middle when
+     the disclosure is collapsed. */
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;

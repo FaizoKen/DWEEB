@@ -128,6 +128,18 @@
   color: #fff;
 }
 
+/* Role mention tinted with the role's own color (Discord renders these in the
+   role color over a translucent fill of the same hue). `--role-rgb` is set
+   inline from the resolved role; placed after `.mention` so it wins. */
+.roleMention {
+  color: rgb(var(--role-rgb));
+  background: rgba(var(--role-rgb), 0.1);
+}
+.roleMention:hover {
+  color: rgb(var(--role-rgb));
+  background: rgba(var(--role-rgb), 0.3);
+}
+
 /* Leading glyph on a guild-navigation mention (Browse Channels, etc.). Sized in
    em so it tracks the surrounding text, nudged onto the baseline. */
 .navIcon {

@@ -26,6 +26,37 @@
   gap: 2px;
 }
 
+/* Toggle that reveals webhooks belonging to servers other than the connected
+   one (collapsed by default to keep the wrong-server click out of reach).
+   Styled as a pill so it clearly reads as a control, not a caption. */
+.othersToggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 2px 2px 0;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-accent, #5865f2);
+  cursor: pointer;
+}
+.othersToggle:hover {
+  background: var(--app-bg-hover);
+}
+
+.othersChevron {
+  flex: none;
+  transition: transform 120ms ease;
+}
+.othersChevronOpen {
+  transform: rotate(90deg);
+}
+
 .historyItem {
   display: flex;
   align-items: center;
@@ -41,16 +72,16 @@
   background: var(--app-accent-soft);
 }
 
-.historyEdit {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+/* A saved webhook a health check found deleted/revoked on Discord. Struck
+   through and dimmed so it's clearly unusable, but kept in the list with its
+   one-click remove (the trash button) rather than disappearing on its own. */
+.historyItemDeleted .historyText {
+  text-decoration: line-through;
+  color: var(--app-text-muted);
 }
-.historyEdit > :first-child {
-  flex: 1;
-  min-width: 0;
+.historyItemDeleted .historyAvatar {
+  opacity: 0.5;
+  filter: grayscale(1);
 }
 
 .historyButton {
@@ -102,6 +133,19 @@
   white-space: nowrap;
 }
 
+/* Resolved destination (server · #channel). Capped + ellipsised so a long
+   server name can't crowd out the webhook label on the left. */
+.historyDest {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
+  font-size: 11px;
+  color: var(--app-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ─── Owner chips ─────────────────────────────────────────────────────── */
 
 .ownerBadge {
@@ -139,4 +183,8 @@
 .ownerUnknown {
   background: var(--app-bg-hover);
   color: var(--app-text-muted);
+}
+.ownerGone {
+  background: rgba(237, 66, 69, 0.16);
+  color: rgb(240, 90, 90);
 }

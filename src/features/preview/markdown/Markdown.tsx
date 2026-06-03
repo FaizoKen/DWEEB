@@ -6,7 +6,7 @@
  * unchanged text doesn't re-run the parser on every keystroke.
  */
 
-import { memo, useState, type ReactNode } from "react";
+import { memo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   parseMarkdown,
   type BlockNode,
@@ -16,6 +16,8 @@ import {
 } from "./parse";
 import { formatTimestamp } from "./timestamp";
 import { GUILD_NAV_BY_TYPE } from "@/ui/guildNav";
+import { useChannelInfo, useRoleInfo } from "@/core/guild/guildStore";
+import { HashIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
 import styles from "./Markdown.module.css";
 
@@ -182,9 +184,51 @@ function Mention({ kind, id }: { kind: MentionKind; id: string }) {
   if (kind === "everyone" || kind === "here") {
     return <span className={styles.mention}>@{kind}</span>;
   }
+  // The proxy intentionally never reads guild members (that needs a privileged
+  // intent), so user mentions can't resolve to a name — keep the stable
+  // placeholder. Roles and channels resolve against the connected server.
   if (kind === "user") return <span className={styles.mention}>@user-{id.slice(-4)}</span>;
-  if (kind === "role") return <span className={styles.mention}>@role-{id.slice(-4)}</span>;
-  return <span className={styles.mention}>#channel-{id.slice(-4)}</span>;
+  if (kind === "role") return <RoleMention id={id} />;
+  return <ChannelMention id={id} />;
+}
+
+/**
+ * Role mention. Resolves to the real role name and tints with the role's color
+ * (like Discord) once the server's data is loaded; otherwise falls back to a
+ * neutral `@role-1234` placeholder so the preview still reads correctly offline.
+ */
+function RoleMention({ id }: { id: string }) {
+  const role = useRoleInfo(id);
+  const name = role ? role.name : `role-${id.slice(-4)}`;
+  const rgb = role && role.color ? packedColorToRgb(role.color) : null;
+  return (
+    <span
+      className={cn(styles.mention, rgb && styles.roleMention)}
+      style={rgb ? ({ "--role-rgb": rgb } as CSSProperties) : undefined}
+    >
+      @{name}
+    </span>
+  );
+}
+
+/** Channel mention. Resolves `<#id>` to `# channel-name` when data is loaded. */
+function ChannelMention({ id }: { id: string }) {
+  const channel = useChannelInfo(id);
+  const name = channel ? channel.name : `channel-${id.slice(-4)}`;
+  return (
+    <span className={styles.mention}>
+      <HashIcon className={styles.navIcon} />
+      {name}
+    </span>
+  );
+}
+
+/** Discord's packed RGB integer → a `"r, g, b"` string for a CSS custom prop. */
+function packedColorToRgb(color: number): string {
+  const r = (color >> 16) & 0xff;
+  const g = (color >> 8) & 0xff;
+  const b = color & 0xff;
+  return `${r}, ${g}, ${b}`;
 }
 
 /** Built-in server navigation mention (Browse Channels, Server Guide, …). */

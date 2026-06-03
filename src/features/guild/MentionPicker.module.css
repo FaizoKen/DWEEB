@@ -1,0 +1,133 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-2);
+  min-width: 240px;
+  max-width: 320px;
+}
+
+.search {
+  width: 100%;
+  height: var(--app-control-h-sm);
+  padding: 0 var(--app-space-3);
+  font-size: var(--app-text-sm);
+  color: var(--app-text);
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  outline: none;
+}
+.search::placeholder {
+  color: var(--app-text-subtle);
+}
+.search:focus-visible {
+  border-color: var(--app-border-focus);
+  box-shadow: var(--app-focus-ring);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.groupLabel {
+  padding: var(--app-space-2) var(--app-space-2) 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-text-subtle);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px var(--app-space-2);
+  font-size: var(--app-text-sm);
+  color: var(--app-text);
+  background: none;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.row:hover {
+  background: var(--app-bg-hover);
+}
+
+.rowIcon {
+  flex: none;
+  color: var(--app-text-muted);
+}
+
+.rowLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Role color swatch. */
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--app-text-subtle);
+}
+
+.hash {
+  flex: none;
+  color: var(--app-text-muted);
+}
+
+.note {
+  margin: 0;
+  padding: var(--app-space-2);
+  font-size: var(--app-text-xs);
+  color: var(--app-text-subtle);
+}
+
+/* ── Emoji grid ───────────────────────────────────────────────────────── */
+/* Scrolls the whole picker (all server groups); each group's grid flows freely
+ * inside so there are no nested scrollbars. */
+.emojiScroll {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.emojiGroup + .emojiGroup {
+  margin-top: var(--app-space-2);
+}
+
+.emojiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+  gap: 2px;
+}
+
+.emojiBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  cursor: pointer;
+}
+.emojiBtn:hover {
+  background: var(--app-bg-hover);
+}
+
+.emojiImg {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}

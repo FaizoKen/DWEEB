@@ -1,0 +1,63 @@
+name: Server
+
+# Backend (Rust/axum proxy) CI. Mirrors `web.yml` but for `server/`: runs only
+# when server files change, so frontend-only commits skip it entirely.
+# `workflow_dispatch` lets you re-run from the Actions tab without a new commit.
+on:
+  push:
+    branches: [main]
+    paths: &server-paths
+      - "server/**"
+      - ".github/workflows/server.yml"
+  pull_request:
+    branches: [main]
+    paths: *server-paths
+  workflow_dispatch:
+
+# Minimum-needed permissions. We only read the source.
+permissions:
+  contents: read
+
+# Cancel an in-flight run when a newer commit lands on the same ref.
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Format, lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Every Cargo command runs inside server/, where the manifest lives.
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pin to the stable toolchain and pull in the components the checks need.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Cache the registry, git deps, and target/ keyed on Cargo.lock so reruns
+      # skip recompiling unchanged dependencies. Scoped to the server/ workspace.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      # `-D warnings` turns every clippy lint into a hard failure, matching the
+      # zero-warning bar the frontend typecheck holds.
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --locked

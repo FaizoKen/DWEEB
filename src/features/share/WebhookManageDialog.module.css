@@ -1,0 +1,94 @@
+.note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.avatarRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  flex: none;
+  object-fit: cover;
+  background: var(--app-bg-hover);
+}
+
+.avatarActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The real <input type=file> is hidden; the styled Button proxies the click. */
+.fileInput {
+  display: none;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 18px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+
+.danger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(237, 66, 69, 0.35);
+  border-radius: var(--app-radius-sm);
+  background: rgba(237, 66, 69, 0.06);
+}
+
+.dangerText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dangerText strong {
+  font-size: 13px;
+  color: var(--app-text);
+}
+
+.dangerConfirm {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+/* In confirm mode two buttons ("Cancel" / "Delete for real") need more room than
+   the narrow modal can give them beside the text, so stack the zone vertically:
+   full-width text on top, the buttons right-aligned below. */
+.dangerConfirming {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.dangerConfirming .dangerConfirm {
+  justify-content: flex-end;
+}

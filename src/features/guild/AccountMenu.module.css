@@ -1,0 +1,240 @@
+/* ── Trigger (action-bar icon) ────────────────────────────────────────── */
+.trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.trigger:hover:not(:disabled) {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+.trigger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Connected badge — the server icon as a rounded square with the user's avatar
+ * tucked into the corner as a circle, so the trigger reads "you, in this server". */
+.composite {
+  position: relative;
+  display: block;
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+.compositeServer {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  object-fit: cover;
+}
+.compositeUser {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  border: 2px solid var(--app-bg-elevated);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+/* ── Avatar ───────────────────────────────────────────────────────────── */
+.avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+.avatarFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-accent-text);
+  background: var(--app-accent-soft);
+}
+
+/* ── Popover panel ────────────────────────────────────────────────────── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+}
+
+.userRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 10px;
+}
+.userName {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--app-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Inline text button (Sign out / Retry). */
+.linkBtn {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--app-text-xs);
+  color: var(--app-accent-text);
+  cursor: pointer;
+}
+.linkBtn:hover {
+  color: var(--app-text);
+  text-decoration: underline;
+}
+
+.sectionLabel {
+  padding: 2px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-text-subtle);
+}
+
+/* ── Server list ──────────────────────────────────────────────────────── */
+.serverList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 248px;
+  overflow-y: auto;
+}
+
+.serverRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  text-align: left;
+  cursor: pointer;
+}
+.serverRow:hover {
+  background: var(--app-bg-hover);
+}
+.serverRowActive,
+.serverRowActive:hover {
+  background: var(--app-accent-soft);
+}
+
+.guildIcon {
+  width: 24px;
+  height: 24px;
+  border-radius: 30%;
+  object-fit: cover;
+  flex: none;
+}
+.guildIconFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-text);
+  background: var(--app-bg-active);
+}
+
+.serverText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.serverName {
+  font-size: var(--app-text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.serverMeta {
+  font-size: 11px;
+  color: var(--app-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.check {
+  color: var(--app-accent-text);
+  flex: none;
+}
+
+/* ── Footer actions (invite / refresh) ────────────────────────────────── */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--app-border);
+}
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  font: inherit;
+  font-size: var(--app-text-sm);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.actionRow:hover {
+  background: var(--app-bg-hover);
+}
+.actionRow svg {
+  color: var(--app-text-muted);
+  flex: none;
+}
+
+/* ── Hints / errors ───────────────────────────────────────────────────── */
+.hint,
+.error {
+  margin: 0;
+  padding: 2px 10px 8px;
+  font-size: var(--app-text-xs);
+  line-height: 1.45;
+}
+.hint {
+  color: var(--app-text-subtle);
+}
+.error {
+  color: var(--app-danger-text);
+}

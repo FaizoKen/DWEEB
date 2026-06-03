@@ -7,8 +7,8 @@ import {
   ClockIcon,
   CodeBlockIcon,
   CodeIcon,
-  CompassIcon,
   EmojiIcon,
+  HashIcon,
   HeadingIcon,
   ItalicIcon,
   LinkIcon,
@@ -38,7 +38,11 @@ import {
   type EditState,
 } from "@/ui/markdownActions";
 import { TimestampPanel } from "@/ui/TimestampPicker";
-import { GUILD_NAV_ITEMS } from "@/ui/guildNav";
+import {
+  GuildChannelPanel,
+  GuildEmojiPanel,
+  GuildMentionPanel,
+} from "@/features/guild/MentionPicker";
 import styles from "./MarkdownToolbar.module.css";
 
 type Transform = (state: EditState) => EditResult;
@@ -229,92 +233,56 @@ export function MarkdownToolbar({ state, onAction, disabled }: MarkdownToolbarPr
         <Menu
           align="start"
           trigger={
-            <ToolButton label="Mention or token" className={styles.btnMenu}>
+            <ToolButton label="Mention" className={styles.btnMenu}>
               <MentionIcon />
               <ChevronDownIcon size={12} className={styles.caret} />
             </ToolButton>
           }
         >
           {(close) => (
-            <>
-              <MenuItem
-                icon={<MentionIcon size={15} />}
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, "@everyone"));
-                  close();
-                }}
-              >
-                @everyone
-              </MenuItem>
-              <MenuItem
-                icon={<MentionIcon size={15} />}
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, "@here"));
-                  close();
-                }}
-              >
-                @here
-              </MenuItem>
-              <MenuItem
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, "<@USER_ID>", "USER_ID"));
-                  close();
-                }}
-              >
-                User mention
-              </MenuItem>
-              <MenuItem
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, "<@&ROLE_ID>", "ROLE_ID"));
-                  close();
-                }}
-              >
-                Role mention
-              </MenuItem>
-              <MenuItem
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, "<#CHANNEL_ID>", "CHANNEL_ID"));
-                  close();
-                }}
-              >
-                Channel mention
-              </MenuItem>
-              <MenuDivider />
-              <MenuItem
-                icon={<EmojiIcon size={15} />}
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, "<:name:000000000000000000>", "name"));
-                  close();
-                }}
-              >
-                Custom emoji
-              </MenuItem>
-            </>
+            <GuildMentionPanel
+              onPick={(snippet, selectToken) => {
+                onAction((s) => insertSnippet(s, snippet, selectToken));
+                close();
+              }}
+            />
           )}
         </Menu>
         <Menu
           align="start"
           trigger={
-            <ToolButton label="Server link" className={styles.btnMenu}>
-              <CompassIcon />
+            <ToolButton label="Channel" className={styles.btnMenu}>
+              <HashIcon />
               <ChevronDownIcon size={12} className={styles.caret} />
             </ToolButton>
           }
         >
-          {(close) =>
-            GUILD_NAV_ITEMS.map((item) => (
-              <MenuItem
-                key={item.type}
-                icon={<item.Icon size={15} />}
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, item.snippet));
-                  close();
-                }}
-              >
-                {item.label}
-              </MenuItem>
-            ))
+          {(close) => (
+            <GuildChannelPanel
+              onPick={(snippet, selectToken) => {
+                onAction((s) => insertSnippet(s, snippet, selectToken));
+                close();
+              }}
+            />
+          )}
+        </Menu>
+        <Menu
+          align="start"
+          trigger={
+            <ToolButton label="Emoji" className={styles.btnMenu}>
+              <EmojiIcon />
+              <ChevronDownIcon size={12} className={styles.caret} />
+            </ToolButton>
           }
+        >
+          {(close) => (
+            <GuildEmojiPanel
+              onPick={(snippet, selectToken) => {
+                onAction((s) => insertSnippet(s, snippet, selectToken));
+                close();
+              }}
+            />
+          )}
         </Menu>
         <Menu
           align="end"
