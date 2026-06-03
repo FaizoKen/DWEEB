@@ -1,7 +1,7 @@
 {
   "name": "DWEEB — Discord Webhook Embed Builder",
   "short_name": "DWEEB",
-  "description": "DWEEB — visually build, preview, and share Discord webhook & embed messages using Components V2. No JSON, no backend.",
+  "description": "DWEEB — visually build, preview, and send Discord webhook & embed messages using Components V2. Private by design: runs entirely in your browser, nothing uploaded. Free, open source, and built for large communities and teams.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

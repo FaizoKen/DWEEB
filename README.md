@@ -7,6 +7,11 @@ messages with containers, sections, buttons, media, and files, watch a
 pixel-accurate live preview, and share the result through a single URL — no
 backend, no account, no database.
 
+**Private by design.** Everything runs in your browser, so your drafts and
+webhook URLs never leave your device and share links keep their data in the URL
+fragment — nothing is uploaded. That makes DWEEB a security-conscious choice for
+sensitive announcements and for large communities and teams.
+
 DWEEB is **free and open source** (MIT). The code lives on GitHub at
 **[github.com/FaizoKen/DWEEB](https://github.com/FaizoKen/DWEEB)** — issues and
 pull requests welcome.
