@@ -16,6 +16,7 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useEmojiStore } from "@/core/guild/emojiStore";
 import { EmojiIcon, HashIcon, MentionIcon } from "@/ui/Icon";
+import { GUILD_NAV_ITEMS } from "@/ui/guildNav";
 import styles from "./MentionPicker.module.css";
 
 type Pick = (snippet: string, selectToken?: string) => void;
@@ -43,6 +44,11 @@ function GroupLabel({ children }: { children: ReactNode }) {
   return <div className={styles.groupLabel}>{children}</div>;
 }
 
+/**
+ * Role / user mention picker. Lists `@everyone`, `@here`, and the server's real
+ * roles, plus a user-by-ID escape hatch (users can't be enumerated). Channels
+ * live in their own `GuildChannelPanel` so each dropdown stays focused.
+ */
 export function GuildMentionPanel({ onPick }: { onPick: Pick }) {
   const data = useGuildStore((s) => s.data);
   const [q, setQ] = useState("");
@@ -56,14 +62,6 @@ export function GuildMentionPanel({ onPick }: { onPick: Pick }) {
       .slice(0, MAX_ROWS);
   }, [data, query]);
 
-  const channels = useMemo(() => {
-    if (!data) return [];
-    return data.channels
-      .filter((c) => !query || c.name.toLowerCase().includes(query))
-      .sort((a, b) => a.position - b.position)
-      .slice(0, MAX_ROWS);
-  }, [data, query]);
-
   const showEveryone = !query || "everyone".includes(query);
   const showHere = !query || "here".includes(query);
 
@@ -72,10 +70,10 @@ export function GuildMentionPanel({ onPick }: { onPick: Pick }) {
       {data ? (
         <input
           className={styles.search}
-          placeholder="Search roles & channels…"
+          placeholder="Search roles…"
           value={q}
           onChange={(e) => setQ(e.currentTarget.value)}
-          aria-label="Search roles and channels"
+          aria-label="Search roles"
           autoFocus
         />
       ) : null}
@@ -100,6 +98,59 @@ export function GuildMentionPanel({ onPick }: { onPick: Pick }) {
           </Row>
         ))}
 
+        <GroupLabel>By ID</GroupLabel>
+        <Row onClick={() => onPick("<@USER_ID>", "USER_ID")}>
+          <MentionIcon size={14} className={styles.rowIcon} />
+          User mention…
+        </Row>
+        {!data ? (
+          <Row onClick={() => onPick("<@&ROLE_ID>", "ROLE_ID")}>
+            <MentionIcon size={14} className={styles.rowIcon} />
+            Role mention…
+          </Row>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Channel mention picker. Lists the server's real channels and Discord's
+ * built-in server-navigation links (`<id:…>`: Browse Channels, Channels &
+ * Roles, …), with a channel-by-ID escape hatch when no server is connected.
+ */
+export function GuildChannelPanel({ onPick }: { onPick: Pick }) {
+  const data = useGuildStore((s) => s.data);
+  const [q, setQ] = useState("");
+  const query = q.trim().toLowerCase();
+
+  const channels = useMemo(() => {
+    if (!data) return [];
+    return data.channels
+      .filter((c) => !query || c.name.toLowerCase().includes(query))
+      .sort((a, b) => a.position - b.position)
+      .slice(0, MAX_ROWS);
+  }, [data, query]);
+
+  const navItems = useMemo(
+    () => GUILD_NAV_ITEMS.filter((item) => !query || item.label.toLowerCase().includes(query)),
+    [query],
+  );
+
+  return (
+    <div className={styles.panel}>
+      {data ? (
+        <input
+          className={styles.search}
+          placeholder="Search channels…"
+          value={q}
+          onChange={(e) => setQ(e.currentTarget.value)}
+          aria-label="Search channels"
+          autoFocus
+        />
+      ) : null}
+
+      <div className={styles.list}>
         {channels.length > 0 ? <GroupLabel>Channels</GroupLabel> : null}
         {channels.map((c) => (
           <Row key={c.id} onClick={() => onPick(`<#${c.id}>`)}>
@@ -108,17 +159,17 @@ export function GuildMentionPanel({ onPick }: { onPick: Pick }) {
           </Row>
         ))}
 
-        <GroupLabel>By ID</GroupLabel>
-        <Row onClick={() => onPick("<@USER_ID>", "USER_ID")}>
-          <MentionIcon size={14} className={styles.rowIcon} />
-          User mention…
-        </Row>
+        {navItems.length > 0 ? <GroupLabel>Server</GroupLabel> : null}
+        {navItems.map((item) => (
+          <Row key={item.type} onClick={() => onPick(item.snippet)}>
+            <item.Icon size={14} className={styles.rowIcon} />
+            <span className={styles.rowLabel}>{item.label}</span>
+          </Row>
+        ))}
+
         {!data ? (
           <>
-            <Row onClick={() => onPick("<@&ROLE_ID>", "ROLE_ID")}>
-              <MentionIcon size={14} className={styles.rowIcon} />
-              Role mention…
-            </Row>
+            <GroupLabel>By ID</GroupLabel>
             <Row onClick={() => onPick("<#CHANNEL_ID>", "CHANNEL_ID")}>
               <HashIcon size={13} className={styles.rowIcon} />
               Channel mention…

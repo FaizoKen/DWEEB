@@ -7,8 +7,8 @@ import {
   ClockIcon,
   CodeBlockIcon,
   CodeIcon,
-  CompassIcon,
   EmojiIcon,
+  HashIcon,
   HeadingIcon,
   ItalicIcon,
   LinkIcon,
@@ -38,8 +38,11 @@ import {
   type EditState,
 } from "@/ui/markdownActions";
 import { TimestampPanel } from "@/ui/TimestampPicker";
-import { GUILD_NAV_ITEMS } from "@/ui/guildNav";
-import { GuildEmojiPanel, GuildMentionPanel } from "@/features/guild/MentionPicker";
+import {
+  GuildChannelPanel,
+  GuildEmojiPanel,
+  GuildMentionPanel,
+} from "@/features/guild/MentionPicker";
 import styles from "./MarkdownToolbar.module.css";
 
 type Transform = (state: EditState) => EditResult;
@@ -248,6 +251,24 @@ export function MarkdownToolbar({ state, onAction, disabled }: MarkdownToolbarPr
         <Menu
           align="start"
           trigger={
+            <ToolButton label="Channel" className={styles.btnMenu}>
+              <HashIcon />
+              <ChevronDownIcon size={12} className={styles.caret} />
+            </ToolButton>
+          }
+        >
+          {(close) => (
+            <GuildChannelPanel
+              onPick={(snippet, selectToken) => {
+                onAction((s) => insertSnippet(s, snippet, selectToken));
+                close();
+              }}
+            />
+          )}
+        </Menu>
+        <Menu
+          align="start"
+          trigger={
             <ToolButton label="Emoji" className={styles.btnMenu}>
               <EmojiIcon />
               <ChevronDownIcon size={12} className={styles.caret} />
@@ -262,30 +283,6 @@ export function MarkdownToolbar({ state, onAction, disabled }: MarkdownToolbarPr
               }}
             />
           )}
-        </Menu>
-        <Menu
-          align="start"
-          trigger={
-            <ToolButton label="Server link" className={styles.btnMenu}>
-              <CompassIcon />
-              <ChevronDownIcon size={12} className={styles.caret} />
-            </ToolButton>
-          }
-        >
-          {(close) =>
-            GUILD_NAV_ITEMS.map((item) => (
-              <MenuItem
-                key={item.type}
-                icon={<item.Icon size={15} />}
-                onSelect={() => {
-                  onAction((s) => insertSnippet(s, item.snippet));
-                  close();
-                }}
-              >
-                {item.label}
-              </MenuItem>
-            ))
-          }
         </Menu>
         <Menu
           align="end"

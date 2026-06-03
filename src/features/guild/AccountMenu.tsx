@@ -5,7 +5,7 @@
  *   - Signed out → a log-in icon; clicking starts the Discord login redirect.
  *   - Signed in  → the user's avatar; clicking opens a popover to pick a server
  *     (only servers the DWEEB bot is already in), add the bot to another server,
- *     refresh the list, or sign out.
+ *     refresh the server list and the connected guild's data, or sign out.
  *
  * Replaces the old full-width "Server data" panel — the picker and its loaded
  * data now live behind this single icon to keep the editor clean. Only rendered
@@ -106,7 +106,7 @@ export function AccountMenu() {
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   // One-shot guard so the post–sign-in auto-select runs once, not on every
-  // manual "Refresh servers". Re-armed on sign-out so a later sign-in repeats it.
+  // manual "Refresh". Re-armed on sign-out so a later sign-in repeats it.
   const autoRan = useRef(false);
   // Whether *this* page load arrived straight from a bot-add redirect. Drives
   // the "sign in to finish" auto-login below; reset by a full reload, so it only
@@ -252,6 +252,16 @@ function AccountPanel({ onClose }: { onClose: () => void }) {
 
   const connectedId = useGuildStore((s) => s.guildId);
   const connect = useGuildStore((s) => s.connect);
+  const refresh = useGuildStore((s) => s.refresh);
+
+  // Manual refresh: re-pull the picker list *and* the connected guild's data,
+  // both with `force` so the proxy bypasses its short-TTL cache and returns live
+  // Discord state (new roles/channels/emojis show up immediately). Passive loads
+  // keep using the cache; only this explicit action pays the round-trip.
+  const onRefresh = () => {
+    void loadGuilds(true);
+    if (connectedId) void refresh(true);
+  };
 
   // Only servers the bot is already in are pickable here; everything else is
   // funnelled through the single "Add to another server" invite below. The
@@ -314,19 +324,14 @@ function AccountPanel({ onClose }: { onClose: () => void }) {
 
       <div className={styles.actions}>
         {invite ? (
-          <a
-            className={styles.actionRow}
-            href={invite}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
+          <a className={styles.actionRow} href={invite} target="_blank" rel="noreferrer noopener">
             <PlusIcon size={16} />
             <span>Add to another server</span>
           </a>
         ) : null}
-        <button type="button" className={styles.actionRow} onClick={() => void loadGuilds()}>
+        <button type="button" className={styles.actionRow} onClick={onRefresh}>
           <RefreshIcon size={16} />
-          <span>Refresh servers</span>
+          <span>Refresh</span>
         </button>
       </div>
     </div>

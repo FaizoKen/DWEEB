@@ -76,6 +76,15 @@ export function isValidGuildId(id: string): boolean {
   return SNOWFLAKE_RE.test(id.trim());
 }
 
+/** Append `?fresh=true` when a caller wants to bypass the proxy's short-TTL
+ *  cache — used by the manual "Refresh" so it pulls live data straight from
+ *  Discord, while every passive load keeps hitting the cache to spare Discord's
+ *  rate limit. The proxy re-warms the cache on a fresh read, so one user's
+ *  refresh keeps the next person's load fast. */
+function withFresh(path: string, force: boolean): string {
+  return force ? `${path}?fresh=true` : path;
+}
+
 /** GET helper: credentialed fetch + normalised errors. `signal` is optional. */
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   let res: Response;
@@ -107,22 +116,25 @@ export async function fetchMe(): Promise<AuthUser | null> {
   }
 }
 
-/** `GET /api/guilds` — the signed-in user's usable servers. */
-export async function fetchUserGuilds(): Promise<PickerGuild[]> {
-  const body = await getJson<{ guilds: PickerGuild[] }>("/api/guilds");
+/** `GET /api/guilds` — the signed-in user's usable servers. Pass `force` on a
+ *  manual refresh to bypass the proxy's cache and pull a live list. */
+export async function fetchUserGuilds(force = false): Promise<PickerGuild[]> {
+  const body = await getJson<{ guilds: PickerGuild[] }>(withFresh("/api/guilds", force));
   return body.guilds ?? [];
 }
 
-/** `GET /api/guilds/:id/bootstrap` — a server's roles, channels, and emojis. */
+/** `GET /api/guilds/:id/bootstrap` — a server's roles, channels, and emojis.
+ *  Pass `force` on a manual refresh to bypass the proxy's cache. */
 export async function fetchBootstrap(
   guildId: string,
   signal?: AbortSignal,
+  force = false,
 ): Promise<BootstrapResponse> {
   const id = guildId.trim();
   if (!isValidGuildId(id)) {
     throw new GuildApiError("That doesn't look like a valid server ID.", 0);
   }
-  return getJson<BootstrapResponse>(`/api/guilds/${id}/bootstrap`, signal);
+  return getJson<BootstrapResponse>(withFresh(`/api/guilds/${id}/bootstrap`, force), signal);
 }
 
 /**

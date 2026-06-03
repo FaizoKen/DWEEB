@@ -37,9 +37,15 @@ export function loginUrl(): string {
  * the proxy redirects back with its URL in the fragment (see
  * `consumeIncomingWebhook`). The bot needs no permissions — the user authorizes
  * the webhook for a channel they manage.
+ *
+ * Pass `guildId` to pre-select that server in Discord's picker (the proxy
+ * forwards it as `guild_id`). The user can still switch servers and must hold
+ * Manage Server there; an id they can't use just falls back to the full picker.
  */
-export function webhookCreateUrl(): string {
-  return `${PROXY_BASE_URL}/auth/webhook`;
+export function webhookCreateUrl(guildId?: string): string {
+  const base = `${PROXY_BASE_URL}/auth/webhook`;
+  const gid = guildId?.trim();
+  return gid ? `${base}?guild_id=${encodeURIComponent(gid)}` : base;
 }
 
 /** Fragment key the proxy uses to hand a freshly-created webhook URL back. */

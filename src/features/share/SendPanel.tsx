@@ -505,6 +505,11 @@ export function SendPanel({
         Posts straight from your browser to Discord — nothing touches our servers.
       </p>
 
+      <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
+        <strong>Treat the webhook URL like a password.</strong> It's stored only in this browser and
+        never sent anywhere but Discord.
+      </Callout>
+
       <div className={styles.modeToggle} role="radiogroup" aria-label="Send mode">
         <button
           type="button"
@@ -528,11 +533,6 @@ export function SendPanel({
         </button>
       </div>
 
-      <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
-        <strong>Treat the webhook URL like a password.</strong> It's stored only in this browser and
-        never sent anywhere but Discord.
-      </Callout>
-
       <WebhookRecents
         history={history}
         activeId={parsedUrl?.id ?? null}
@@ -552,7 +552,9 @@ export function SendPanel({
               type="button"
               className={styles.createWebhookLink}
               onClick={() => {
-                window.location.href = webhookCreateUrl();
+                // Pre-select the server the builder is connected to, if any, so
+                // the webhook lands where the user is already working.
+                window.location.href = webhookCreateUrl(useGuildStore.getState().guildId);
               }}
             >
               <PlusIcon size={13} className={styles.createWebhookIcon} />

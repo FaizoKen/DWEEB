@@ -327,10 +327,9 @@ impl Discord {
 
         let status = resp.status();
         if status.is_success() {
-            return resp
-                .json::<T>()
-                .await
-                .map_err(|e| AppError::BadGateway(format!("unexpected response from Discord: {e}")));
+            return resp.json::<T>().await.map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
         }
 
         // On 429 Discord tells us how long to wait; surface it to the caller.
@@ -346,7 +345,11 @@ impl Discord {
         let text = resp.text().await.unwrap_or_default();
         let message = serde_json::from_str::<Value>(&text)
             .ok()
-            .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_string))
+            .and_then(|v| {
+                v.get("message")
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+            })
             .unwrap_or_else(|| "Discord returned an error".to_string());
 
         Err(map_discord_error(status, message, retry_after, bearer))
@@ -368,8 +371,12 @@ fn map_discord_error(
     bearer: bool,
 ) -> AppError {
     match status.as_u16() {
-        401 if bearer => AppError::Unauthorized("Your Discord session expired — sign in again.".into()),
-        401 => AppError::BadGateway("Discord rejected the bot token — check DISCORD_BOT_TOKEN".into()),
+        401 if bearer => {
+            AppError::Unauthorized("Your Discord session expired — sign in again.".into())
+        }
+        401 => {
+            AppError::BadGateway("Discord rejected the bot token — check DISCORD_BOT_TOKEN".into())
+        }
         403 => AppError::BadGateway(format!("the bot lacks access to this guild ({message})")),
         404 => AppError::Status {
             status: StatusCode::NOT_FOUND,

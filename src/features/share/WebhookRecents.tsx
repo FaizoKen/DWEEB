@@ -8,9 +8,9 @@
  * entry the panel is acting on.
  *
  * History is owned by the parent panel (which also reads it — e.g. the Send
- * panel's ownership/name lookups) and passed in; the inline rename / forget
- * here mutate localStorage and then call `onChange` so the parent reloads its
- * copy and the list re-renders.
+ * panel's ownership/name lookups) and passed in; the forget action here mutates
+ * localStorage and then calls `onChange` so the parent reloads its copy and the
+ * list re-renders.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -23,7 +23,6 @@ import {
   OWNER_COPY,
   parseWebhookUrl,
   refreshWebhook,
-  renameWebhook,
   verifyWebhook,
   webhookAvatarHash,
   webhookAvatarUrl,
@@ -32,12 +31,11 @@ import {
   type WebhookHistoryEntry,
   type WebhookOwnerKind,
 } from "@/core/webhook";
-import { Button } from "@/ui/Button";
-import { TextInput } from "@/ui/TextInput";
-import { ChevronRightIcon, CloseIcon, PencilIcon, TrashIcon } from "@/ui/Icon";
+import { ChevronRightIcon, SettingsIcon, TrashIcon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
+import { WebhookManageDialog } from "./WebhookManageDialog";
 import styles from "./WebhookRecents.module.css";
 
 /** CSS-module class for each owner chip, by kind. */
@@ -73,9 +71,8 @@ export function WebhookRecents({
   /** Called after a rename/forget so the parent can reload its history copy. */
   onChange: () => void;
 }) {
-  // Inline rename of a saved entry: which id is being edited + its draft.
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingLabel, setEditingLabel] = useState("");
+  // The entry whose "Manage on Discord" dialog is open, if any.
+  const [managing, setManaging] = useState<WebhookHistoryEntry | null>(null);
   // Whether the "other servers" group is expanded (collapsed by default while a
   // guild is connected, so the current guild's webhooks are what you click).
   const [showOthers, setShowOthers] = useState(false);
@@ -163,56 +160,7 @@ export function WebhookRecents({
     pushToast("Webhook removed from this browser.", "info");
   };
 
-  const startEditLabel = (entry: WebhookHistoryEntry) => {
-    setEditingId(entry.id);
-    setEditingLabel(entry.label);
-  };
-
-  const cancelEditLabel = () => {
-    setEditingId(null);
-    setEditingLabel("");
-  };
-
-  const commitEditLabel = (id: string) => {
-    renameWebhook(id, editingLabel);
-    onChange();
-    setEditingId(null);
-    setEditingLabel("");
-  };
-
   const renderRow = (entry: WebhookHistoryEntry) => {
-    if (editingId === entry.id) {
-      return (
-        <li key={entry.id} className={styles.historyItem}>
-          <form
-            className={styles.historyEdit}
-            onSubmit={(e) => {
-              e.preventDefault();
-              commitEditLabel(entry.id);
-            }}
-          >
-            <TextInput
-              autoFocus
-              value={editingLabel}
-              onChange={(e) => setEditingLabel(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") cancelEditLabel();
-              }}
-              placeholder={entry.name || "Add a label"}
-              maxLength={60}
-              aria-label="Webhook label"
-            />
-            <Button size="sm" variant="primary" type="submit">
-              Save
-            </Button>
-            <IconButton size="sm" label="Cancel rename" onClick={cancelEditLabel}>
-              <CloseIcon size={12} />
-            </IconButton>
-          </form>
-        </li>
-      );
-    }
-
     // Prefer the resolved destination (server · #channel) so same-named
     // webhooks are distinguishable; fall back to the webhook id.
     const destination = describeDestination(entry);
@@ -241,7 +189,7 @@ export function WebhookRecents({
                 if (img.src !== fallback) img.src = fallback;
               }}
             />
-            <span className={styles.historyText}>{entry.label || entry.name || "(unlabeled)"}</span>
+            <span className={styles.historyText}>{entry.name || "(unlabeled)"}</span>
             {deleted ? (
               <span
                 className={cn(styles.ownerBadge, styles.ownerBadgeSm, styles.ownerGone)}
@@ -270,13 +218,17 @@ export function WebhookRecents({
             <span className={styles.historyId}>id · {entry.id}</span>
           )}
         </button>
-        <IconButton size="sm" label="Edit label" onClick={() => startEditLabel(entry)}>
-          <PencilIcon size={12} />
-        </IconButton>
+        {/* Manage on Discord (rename / avatar / delete) — pointless once a health
+            check has found it gone, so it's hidden for those. */}
+        {!deleted ? (
+          <IconButton size="sm" label="Manage on Discord" onClick={() => setManaging(entry)}>
+            <SettingsIcon size={12} />
+          </IconButton>
+        ) : null}
         <IconButton
           size="sm"
           variant="danger"
-          label="Forget this webhook"
+          label="Remove from this browser"
           onClick={() => handleForget(entry)}
         >
           <TrashIcon size={12} />
@@ -313,6 +265,13 @@ export function WebhookRecents({
           </button>
           {showOthers ? <ul className={styles.historyList}>{others.map(renderRow)}</ul> : null}
         </>
+      ) : null}
+      {managing ? (
+        <WebhookManageDialog
+          entry={managing}
+          onClose={() => setManaging(null)}
+          onChange={onChange}
+        />
       ) : null}
     </div>
   );

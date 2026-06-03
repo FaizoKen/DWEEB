@@ -48,12 +48,28 @@ pub async fn login(State(st): State<AppState>, jar: PrivateCookieJar) -> impl In
 /// and returns it on the callback. The bot doesn't need to be in the server or
 /// hold any permission — the *user* authorizes the webhook for a channel they
 /// can manage.
-pub async fn webhook_start(State(st): State<AppState>, jar: PrivateCookieJar) -> impl IntoResponse {
+pub async fn webhook_start(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Query(q): Query<WebhookStartQuery>,
+) -> impl IntoResponse {
     let cfg = &st.config;
     let state = format!("{WEBHOOK_STATE_PREFIX}{}", random_token());
-    let url = webhook_authorize_url(&cfg.client_id, &cfg.oauth_redirect_url, &state);
+    let url = webhook_authorize_url(
+        &cfg.client_id,
+        &cfg.oauth_redirect_url,
+        &state,
+        q.guild_id.as_deref(),
+    );
     let jar = jar.add(build_state_cookie(cfg, &state));
     (jar, Redirect::to(&url))
+}
+
+/// Optional `?guild_id=` on `/auth/webhook` — the server the builder is already
+/// connected to, used to pre-select Discord's guild picker.
+#[derive(Deserialize)]
+pub struct WebhookStartQuery {
+    guild_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -94,7 +110,12 @@ pub async fn callback(
     if provided.starts_with(WEBHOOK_STATE_PREFIX) {
         let token = st
             .discord
-            .exchange_code(&cfg.client_id, &cfg.client_secret, &code, &cfg.oauth_redirect_url)
+            .exchange_code(
+                &cfg.client_id,
+                &cfg.client_secret,
+                &code,
+                &cfg.oauth_redirect_url,
+            )
             .await?;
         let jar = jar.add(clear_state_cookie(cfg));
         let target = build_webhook_redirect(&st, &cfg.frontend_url, &token).await;
@@ -103,7 +124,12 @@ pub async fn callback(
 
     let token = st
         .discord
-        .exchange_code(&cfg.client_id, &cfg.client_secret, &code, &cfg.oauth_redirect_url)
+        .exchange_code(
+            &cfg.client_id,
+            &cfg.client_secret,
+            &code,
+            &cfg.oauth_redirect_url,
+        )
         .await?;
     let user = st.discord.current_user(&token.access_token).await?;
 
@@ -133,7 +159,9 @@ pub async fn callback(
             })
             .collect();
         if let Ok(val) = serde_json::to_value(&list) {
-            st.cache.put(format!("uguilds:{}", user.id), Arc::new(val)).await;
+            st.cache
+                .put(format!("uguilds:{}", user.id), Arc::new(val))
+                .await;
         }
     }
 
@@ -157,7 +185,10 @@ pub async fn me(State(st): State<AppState>, jar: PrivateCookieJar) -> Result<Res
 
     let avatar_url = session.avatar.as_ref().map(|hash| {
         let ext = if hash.starts_with("a_") { "gif" } else { "png" };
-        format!("https://cdn.discordapp.com/avatars/{}/{hash}.{ext}", session.uid)
+        format!(
+            "https://cdn.discordapp.com/avatars/{}/{hash}.{ext}",
+            session.uid
+        )
     });
 
     Ok(Json(json!({
@@ -184,14 +215,28 @@ fn authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> String {
 /// server list so we can resolve the destination *server name* from their own
 /// account — no bot membership or DWEEB login required. No `prompt=none` — we
 /// *want* the channel picker shown every time.
-fn webhook_authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> String {
-    format!(
+///
+/// `guild_id`, when present, pre-selects that server in Discord's picker. We
+/// don't pass `disable_guild_select`, so it's only a default the user can change.
+/// Only snowflakes (digits) are forwarded — Discord rejects a malformed
+/// `guild_id`, so anything else is dropped to fall back to the full picker.
+fn webhook_authorize_url(
+    client_id: &str,
+    redirect_uri: &str,
+    state: &str,
+    guild_id: Option<&str>,
+) -> String {
+    let mut url = format!(
         "https://discord.com/oauth2/authorize?client_id={}&response_type=code&redirect_uri={}&scope={}&state={}",
         client_id,
         percent_encode(redirect_uri),
         percent_encode("webhook.incoming guilds"),
         state,
-    )
+    );
+    if let Some(gid) = guild_id.filter(|g| !g.is_empty() && g.bytes().all(|b| b.is_ascii_digit())) {
+        url.push_str(&format!("&guild_id={gid}"));
+    }
+    url
 }
 
 /// Where to send the browser after a `webhook.incoming` exchange: back to the

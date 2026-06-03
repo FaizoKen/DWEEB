@@ -40,7 +40,7 @@ be in.
 | GET    | `/health`                     | —    | `{ "status": "ok" }`                     |
 | GET    | `/auth/login`                 | —    | 302 → Discord consent (sets state cookie)|
 | GET    | `/auth/callback`              | —    | exchanges code; sets session **or** (webhook flow) → frontend with the new webhook |
-| GET    | `/auth/webhook`               | —    | 302 → Discord's `webhook.incoming` channel picker (sets state cookie) |
+| GET    | `/auth/webhook`               | —    | 302 → Discord's `webhook.incoming` channel picker (sets state cookie); optional `?guild_id=` pre-selects the server |
 | POST   | `/auth/logout`                | —    | clears the session                       |
 | GET    | `/auth/me`                    | ✓    | `{ id, name, avatar_url }`               |
 | GET    | `/api/guilds`                 | ✓    | `{ guilds: [{ id, name, icon, bot_present }] }` |
@@ -62,6 +62,11 @@ touches the bot token. It reuses the same `/auth/callback` redirect URI and stat
 cookie as login (distinguished by a state prefix), so no extra redirect URI is
 registered. The webhook URL is the user's own credential and lives only in their
 browser; the proxy never stores it.
+
+Passing `?guild_id=` (the builder forwards the connected server's id) pre-selects
+that server in Discord's picker. It's only a default — the user can still pick
+another server and must hold **Manage Server** there; a non-snowflake or
+unusable id is dropped and Discord shows the full picker.
 
 ## Hardening (built in)
 

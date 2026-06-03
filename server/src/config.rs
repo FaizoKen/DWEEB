@@ -170,7 +170,9 @@ fn opt_env(key: &str) -> Option<String> {
 
 /// Parse an env var into `T`, falling back to `default` when missing/invalid.
 fn parse_or<T: std::str::FromStr>(key: &str, default: T) -> T {
-    opt_env(key).and_then(|s| s.parse::<T>().ok()).unwrap_or(default)
+    opt_env(key)
+        .and_then(|s| s.parse::<T>().ok())
+        .unwrap_or(default)
 }
 
 /// Parse a boolean env var (`true`/`1`/`yes` ⇒ true), falling back to `default`.

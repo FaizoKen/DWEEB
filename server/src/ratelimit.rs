@@ -72,7 +72,9 @@ impl RateLimiter {
         };
 
         if now.duration_since(inner.last_sweep) >= SWEEP_INTERVAL {
-            inner.buckets.retain(|_, b| now.duration_since(b.last) < IDLE_EVICT);
+            inner
+                .buckets
+                .retain(|_, b| now.duration_since(b.last) < IDLE_EVICT);
             inner.last_sweep = now;
         }
 

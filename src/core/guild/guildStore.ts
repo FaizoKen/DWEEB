@@ -46,8 +46,9 @@ interface GuildState {
 
   /** Connect to (or switch to) a guild and load its mapping data. */
   connect(guildId: string): Promise<void>;
-  /** Re-fetch the currently connected guild. */
-  refresh(): Promise<void>;
+  /** Re-fetch the currently connected guild. Pass `force` on a manual refresh
+   *  to bypass the proxy's cache and pull live data. */
+  refresh(force?: boolean): Promise<void>;
   /** Forget the current guild and clear cached data. */
   disconnect(): void;
 }
@@ -103,6 +104,7 @@ async function load(
   guildId: string,
   set: (partial: Partial<GuildState>) => void,
   get: () => GuildState,
+  force = false,
 ): Promise<void> {
   // A load already running for this exact guild — let it settle, don't pile on.
   if (inflight && inflight.guildId === guildId) return;
@@ -111,7 +113,7 @@ async function load(
   inflight = { guildId, controller };
 
   try {
-    const raw = await fetchBootstrap(guildId, controller.signal);
+    const raw = await fetchBootstrap(guildId, controller.signal, force);
     // Superseded by a newer load (guild switched) — discard this result.
     if (inflight?.controller !== controller) return;
     const data = indexBootstrap(guildId, raw, Date.now());
@@ -120,7 +122,18 @@ async function load(
     saveLastGuildId(guildId);
     set({ guildId, status: "ready", data, error: null });
     const name = useAuthStore.getState().guilds.find((g) => g.id === guildId)?.name;
-    pushToast(name ? `Connected to ${name}` : "Server data loaded", "success");
+    // `force` is only set by the explicit "Refresh" action, so word the toast
+    // for it differently from a first connect/switch.
+    pushToast(
+      force
+        ? name
+          ? `Refreshed ${name}`
+          : "Server data refreshed"
+        : name
+          ? `Connected to ${name}`
+          : "Server data loaded",
+      "success",
+    );
   } catch (e) {
     if (controller.signal.aborted) return; // cancelled on purpose
     // A 401 means the login session lapsed: hand off to the auth store, which
@@ -166,11 +179,11 @@ export const useGuildStore = create<GuildState>((set, get) => ({
     await load(guildId, set, get);
   },
 
-  async refresh() {
+  async refresh(force = false) {
     const guildId = get().guildId;
     if (!guildId || !isProxyConfigured()) return;
     set({ status: "loading", error: null });
-    await load(guildId, set, get);
+    await load(guildId, set, get, force);
   },
 
   disconnect() {

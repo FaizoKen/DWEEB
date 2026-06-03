@@ -41,8 +41,9 @@ interface AuthState {
 
   /** Resolve the current session once on app load. */
   init(): Promise<void>;
-  /** (Re)load the user's server list for the picker. */
-  loadGuilds(): Promise<void>;
+  /** (Re)load the user's server list for the picker. Pass `force` on a manual
+   *  refresh to bypass the proxy's cache. */
+  loadGuilds(force?: boolean): Promise<void>;
   /** Begin Discord login (full-page redirect). */
   login(): void;
   /** Sign out: clear the proxy session and reset all server state. */
@@ -87,10 +88,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  async loadGuilds() {
+  async loadGuilds(force = false) {
     set({ guildsStatus: "loading", guildsError: null });
     try {
-      const guilds = await fetchUserGuilds();
+      const guilds = await fetchUserGuilds(force);
       set({ guilds, guildsStatus: "ready" });
     } catch (e) {
       if (isAuthError(e)) {

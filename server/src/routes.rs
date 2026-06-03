@@ -13,7 +13,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use axum::extract::{FromRef, Path, State};
+use axum::extract::{FromRef, Path, Query, State};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::{Key, PrivateCookieJar};
@@ -42,6 +42,16 @@ impl FromRef<AppState> for Key {
     }
 }
 
+/// Query options for the cached guild reads. `?fresh=true` bypasses the cache
+/// read (forcing a live Discord round-trip) while still re-warming the cache, so
+/// a user's manual "Refresh" gets current data without disabling caching for
+/// everyone else. Absent/empty query → `fresh` defaults to false.
+#[derive(Debug, Default, Deserialize)]
+pub struct ReadQuery {
+    #[serde(default)]
+    pub fresh: bool,
+}
+
 /// A guild the signed-in user may use, trimmed for the FE server picker.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct UsableGuild {
@@ -59,31 +69,34 @@ pub async fn health() -> impl IntoResponse {
 
 pub async fn roles(
     State(st): State<AppState>,
+    Query(q): Query<ReadQuery>,
     jar: PrivateCookieJar,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
     authorize_member(&st, &jar, &guild).await?;
-    let value = fetch_roles(&st, &guild).await?;
+    let value = fetch_roles(&st, &guild, q.fresh).await?;
     Ok(value_response(&value))
 }
 
 pub async fn channels(
     State(st): State<AppState>,
+    Query(q): Query<ReadQuery>,
     jar: PrivateCookieJar,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
     authorize_member(&st, &jar, &guild).await?;
-    let value = fetch_channels(&st, &guild).await?;
+    let value = fetch_channels(&st, &guild, q.fresh).await?;
     Ok(value_response(&value))
 }
 
 pub async fn emojis(
     State(st): State<AppState>,
+    Query(q): Query<ReadQuery>,
     jar: PrivateCookieJar,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
     authorize_member(&st, &jar, &guild).await?;
-    let value = fetch_emojis(&st, &guild).await?;
+    let value = fetch_emojis(&st, &guild, q.fresh).await?;
     Ok(value_response(&value))
 }
 
@@ -91,13 +104,14 @@ pub async fn emojis(
 /// picker with a single request.
 pub async fn bootstrap(
     State(st): State<AppState>,
+    Query(q): Query<ReadQuery>,
     jar: PrivateCookieJar,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
     authorize_member(&st, &jar, &guild).await?;
-    let roles = fetch_roles(&st, &guild).await?;
-    let channels = fetch_channels(&st, &guild).await?;
-    let emojis = fetch_emojis(&st, &guild).await?;
+    let roles = fetch_roles(&st, &guild, q.fresh).await?;
+    let channels = fetch_channels(&st, &guild, q.fresh).await?;
+    let emojis = fetch_emojis(&st, &guild, q.fresh).await?;
 
     let mut obj = Map::new();
     obj.insert("roles".to_string(), (*roles).clone());
@@ -110,11 +124,12 @@ pub async fn bootstrap(
 /// is already a member — drives the FE picker + "add the bot" prompts.
 pub async fn list_guilds(
     State(st): State<AppState>,
+    Query(q): Query<ReadQuery>,
     jar: PrivateCookieJar,
 ) -> Result<Response, AppError> {
     let session = require_session(&jar)?;
-    let guilds = usable_guilds(&st, &session).await?;
-    let bot = bot_guild_set(&st).await;
+    let guilds = usable_guilds(&st, &session, q.fresh).await?;
+    let bot = bot_guild_set(&st, q.fresh).await;
 
     let items: Vec<Value> = guilds
         .iter()
@@ -155,7 +170,10 @@ async fn authorize_member(
     guild: &str,
 ) -> Result<(), AppError> {
     let session = require_session(jar)?;
-    let guilds = usable_guilds(st, &session).await?;
+    // Membership is a gate, not user-facing data — always serve it from cache so
+    // a forced data refresh doesn't also force an extra `current_user_guilds`
+    // round-trip on every guild read.
+    let guilds = usable_guilds(st, &session, false).await?;
     if guilds.iter().any(|g| g.id == guild) {
         Ok(())
     } else {
@@ -167,11 +185,17 @@ async fn authorize_member(
 
 /// The user's usable guilds (owner or `MANAGE_GUILD`, unless that gate is off),
 /// cached per-user so repeat reads don't re-hit Discord.
-async fn usable_guilds(st: &AppState, session: &Session) -> Result<Vec<UsableGuild>, AppError> {
+async fn usable_guilds(
+    st: &AppState,
+    session: &Session,
+    fresh: bool,
+) -> Result<Vec<UsableGuild>, AppError> {
     let key = format!("uguilds:{}", session.uid);
-    if let Some(v) = st.cache.get(&key).await {
-        if let Ok(list) = serde_json::from_value::<Vec<UsableGuild>>((*v).clone()) {
-            return Ok(list);
+    if !fresh {
+        if let Some(v) = st.cache.get(&key).await {
+            if let Ok(list) = serde_json::from_value::<Vec<UsableGuild>>((*v).clone()) {
+                return Ok(list);
+            }
         }
     }
     let raw = st.discord.current_user_guilds(&session.token).await?;
@@ -193,11 +217,13 @@ async fn usable_guilds(st: &AppState, session: &Session) -> Result<Vec<UsableGui
 
 /// The set of guild ids the bot is in (cached). Best-effort: an error here only
 /// costs the picker its "bot already added" annotation, never a failed request.
-async fn bot_guild_set(st: &AppState) -> HashSet<String> {
+async fn bot_guild_set(st: &AppState, fresh: bool) -> HashSet<String> {
     const KEY: &str = "botguilds";
-    if let Some(v) = st.cache.get(KEY).await {
-        if let Ok(ids) = serde_json::from_value::<Vec<String>>((*v).clone()) {
-            return ids.into_iter().collect();
+    if !fresh {
+        if let Some(v) = st.cache.get(KEY).await {
+            if let Ok(ids) = serde_json::from_value::<Vec<String>>((*v).clone()) {
+                return ids.into_iter().collect();
+            }
         }
     }
     match st.discord.bot_guild_ids().await {
@@ -213,30 +239,36 @@ async fn bot_guild_set(st: &AppState) -> HashSet<String> {
 
 // ── Cached guild reads ─────────────────────────────────────────────────────
 
-async fn fetch_roles(st: &AppState, guild: &str) -> Result<Arc<Value>, AppError> {
+async fn fetch_roles(st: &AppState, guild: &str, fresh: bool) -> Result<Arc<Value>, AppError> {
     let key = format!("roles:{guild}");
-    if let Some(v) = st.cache.get(&key).await {
-        return Ok(v);
+    if !fresh {
+        if let Some(v) = st.cache.get(&key).await {
+            return Ok(v);
+        }
     }
     let value = Arc::new(to_value(st.discord.roles(guild).await?)?);
     st.cache.put(key, Arc::clone(&value)).await;
     Ok(value)
 }
 
-async fn fetch_channels(st: &AppState, guild: &str) -> Result<Arc<Value>, AppError> {
+async fn fetch_channels(st: &AppState, guild: &str, fresh: bool) -> Result<Arc<Value>, AppError> {
     let key = format!("channels:{guild}");
-    if let Some(v) = st.cache.get(&key).await {
-        return Ok(v);
+    if !fresh {
+        if let Some(v) = st.cache.get(&key).await {
+            return Ok(v);
+        }
     }
     let value = Arc::new(to_value(st.discord.channels(guild).await?)?);
     st.cache.put(key, Arc::clone(&value)).await;
     Ok(value)
 }
 
-async fn fetch_emojis(st: &AppState, guild: &str) -> Result<Arc<Value>, AppError> {
+async fn fetch_emojis(st: &AppState, guild: &str, fresh: bool) -> Result<Arc<Value>, AppError> {
     let key = format!("emojis:{guild}");
-    if let Some(v) = st.cache.get(&key).await {
-        return Ok(v);
+    if !fresh {
+        if let Some(v) = st.cache.get(&key).await {
+            return Ok(v);
+        }
     }
     let value = Arc::new(to_value(st.discord.emojis(guild).await?)?);
     st.cache.put(key, Arc::clone(&value)).await;

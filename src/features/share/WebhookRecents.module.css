@@ -84,18 +84,6 @@
   filter: grayscale(1);
 }
 
-.historyEdit {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.historyEdit > :first-child {
-  flex: 1;
-  min-width: 0;
-}
-
 .historyButton {
   flex: 1;
   display: flex;
