@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "127.0.0.1:8080:8080"
+      - "4444:8080"
     healthcheck:
       test: ["CMD", "/usr/local/bin/dweeb-proxy", "healthcheck"]
       interval: 30s
