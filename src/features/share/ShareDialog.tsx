@@ -248,8 +248,10 @@ function AboutPanel() {
         message back to edit it in place), and share any design as a single link.
       </p>
       <p className={styles.lead}>
-        It runs entirely in your browser — drafts, webhook URLs, and share links never touch a
-        server.
+        <strong>Private by design.</strong> Everything runs in your browser — message drafts,
+        webhook URLs, and share links never reach our servers (share state lives in the URL hash;
+        webhook tokens go only to Discord). No account, no database, nothing uploaded — so it's
+        safe for sensitive announcements and built to scale with large communities and teams.
       </p>
       <p className={styles.lead}>
         And yes, it stands for <em>Discord Webhook Embed Builder</em>. 🤓
