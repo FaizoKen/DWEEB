@@ -234,18 +234,34 @@ function JsonExportPanel() {
 
 /**
  * About panel — surfaces a short description of the app, the author
- * credit, and the support-server invite. Lives in the Share dialog so
- * it's reachable from the same place as Import/Export.
+ * credit, the open-source/GitHub link, the support-server invite, and the
+ * legal pages. Lives in the Share dialog so it's reachable from the same
+ * place as Import/Export.
  */
 function AboutPanel() {
   return (
     <>
       <p className={styles.lead}>
-        <strong>DWEEB</strong> — a visual editor for Discord webhook messages with{" "}
-        <strong>Components V2</strong>. Build, preview, and share, all in your browser.
+        <strong>DWEEB</strong> builds Discord's <strong>Components V2</strong> messages —
+        containers, sections, buttons, select menus, and media galleries, not just legacy embeds.
+        You design against a pixel-accurate live preview, send straight to a webhook (then pull a
+        message back to edit it in place), and share any design as a single link.
+      </p>
+      <p className={styles.lead}>
+        <strong>Private by design.</strong> Everything runs in your browser — message drafts,
+        webhook URLs, and share links never reach our servers (share state lives in the URL hash;
+        webhook tokens go only to Discord). No account, no database, nothing uploaded — so it's
+        safe for sensitive announcements and built to scale with large communities and teams.
       </p>
       <p className={styles.lead}>
         And yes, it stands for <em>Discord Webhook Embed Builder</em>. 🤓
+      </p>
+      <p className={styles.lead}>
+        DWEEB is <strong>free and open source</strong> (MIT). The code lives on{" "}
+        <a href="https://github.com/FaizoKen/DWEEB" target="_blank" rel="noopener noreferrer">
+          GitHub
+        </a>{" "}
+        — stars, issues, and pull requests welcome.
       </p>
       <p className={styles.lead}>
         Made with 💖 by{" "}
@@ -261,6 +277,17 @@ function AboutPanel() {
         </a>
         .
       </p>
+      <nav className={styles.aboutLinks} aria-label="Legal and source links">
+        <a href="https://github.com/FaizoKen/DWEEB" target="_blank" rel="noopener noreferrer">
+          Source on GitHub
+        </a>
+        <a href="/privacy" target="_blank" rel="noopener noreferrer">
+          Privacy Policy
+        </a>
+        <a href="/terms" target="_blank" rel="noopener noreferrer">
+          Terms of Service
+        </a>
+      </nav>
     </>
   );
 }
