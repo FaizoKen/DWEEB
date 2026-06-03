@@ -242,8 +242,14 @@ function AboutPanel() {
   return (
     <>
       <p className={styles.lead}>
-        <strong>DWEEB</strong> — a visual editor for Discord webhook messages with{" "}
-        <strong>Components V2</strong>. Build, preview, and share, all in your browser.
+        <strong>DWEEB</strong> builds Discord's <strong>Components V2</strong> messages —
+        containers, sections, buttons, select menus, and media galleries, not just legacy embeds.
+        You design against a pixel-accurate live preview, send straight to a webhook (then pull a
+        message back to edit it in place), and share any design as a single link.
+      </p>
+      <p className={styles.lead}>
+        It runs entirely in your browser — drafts, webhook URLs, and share links never touch a
+        server.
       </p>
       <p className={styles.lead}>
         And yes, it stands for <em>Discord Webhook Embed Builder</em>. 🤓
