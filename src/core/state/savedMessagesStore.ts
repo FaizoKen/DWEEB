@@ -18,7 +18,7 @@ import { newId } from "@/lib/id";
 import type { WebhookMessage } from "@/core/schema/types";
 import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
 
-const STORAGE_KEY = "dwb.saved.v1";
+const STORAGE_KEY = "dweeb.saved.v1";
 const MAX_NAME_LENGTH = 60;
 
 export interface SavedMessageRecord {

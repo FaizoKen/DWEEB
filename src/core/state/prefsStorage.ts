@@ -13,7 +13,7 @@ export interface UiPrefs {
   advancedMode: boolean;
 }
 
-const STORAGE_KEY = "dwb.ui.v1";
+const STORAGE_KEY = "dweeb.ui.v1";
 
 const DEFAULTS: UiPrefs = {
   advancedMode: false,

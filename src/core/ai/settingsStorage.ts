@@ -10,7 +10,7 @@
 import type { AiProvider, AiSettings } from "./types";
 import { DEFAULT_PROVIDER, defaultSettingsFor } from "./providerMeta";
 
-const STORAGE_KEY = "dwb.ai.v1";
+const STORAGE_KEY = "dweeb.ai.v1";
 
 const PROVIDERS: AiProvider[] = ["openai", "anthropic", "gemini", "groq", "openrouter", "ollama"];
 

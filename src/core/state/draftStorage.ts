@@ -21,7 +21,7 @@
 import type { WebhookMessage } from "@/core/schema/types";
 import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
 
-const STORAGE_KEY = "dwb.draft.v1";
+const STORAGE_KEY = "dweeb.draft.v1";
 
 export interface DraftRecord {
   /** Unix millis when the draft was last written. */

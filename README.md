@@ -177,7 +177,7 @@ from the wire format, and it is stripped on export.
 - **`useAutoSaveDraft`** — subscribes to the message store and writes the
   wire payload to `localStorage` (debounced 300ms). Combined with the
   bootstrap path in `messageStore`, this is what makes a refresh resume the
-  in-progress message. The draft is keyed `dwb.draft.v1` and is plain text
+  in-progress message. The draft is keyed `dweeb.draft.v1` and is plain text
   — no credentials live there.
 
 An `ErrorBoundary` wraps the whole app so a bad inspector edit can't blank

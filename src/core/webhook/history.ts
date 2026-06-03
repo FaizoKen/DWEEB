@@ -16,7 +16,7 @@
 
 import { parseWebhookUrl, type WebhookOwnerKind } from "./send";
 
-const STORAGE_KEY = "dwb.webhook_history.v1";
+const STORAGE_KEY = "dweeb.webhook_history.v1";
 const MAX_ENTRIES = 5;
 
 export interface WebhookHistoryEntry {

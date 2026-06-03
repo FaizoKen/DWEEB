@@ -24,7 +24,7 @@ const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/webho
   headers: {
     Authorization: `Bot ${token}`,
     "Content-Type": "application/json",
-    "User-Agent": "DiscordWebhookBuilder (local-script, 0.1)",
+    "User-Agent": "DWEEB (local-script, 0.1)",
   },
   body: JSON.stringify({ name }),
 });

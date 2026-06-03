@@ -17,7 +17,7 @@
  * failure degrades gracefully to the prior in-memory-only behaviour.
  */
 
-const DB_NAME = "dwb-attachments";
+const DB_NAME = "dweeb-attachments";
 const DB_VERSION = 1;
 const STORE = "blobs";
 
