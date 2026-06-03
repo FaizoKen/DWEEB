@@ -5,8 +5,18 @@
 #
 # Point your tunnel's ingress at  http://localhost:8080  (see README).
 #
-#   cp .env.example .env   # then fill it in
+#   cp .env.example .env       # then fill it in
+#
+# Run the published image (built & pushed to GHCR by the Docker workflow):
+#   docker compose pull        # grab the latest published image
+#   docker compose up -d
+#
+# Or build from local source instead of pulling:
 #   docker compose up -d --build
+#
+# Pin a released version instead of :latest by setting TAG in .env. The Docker
+# workflow strips the leading "v", so a vX.Y.Z git tag publishes X.Y.Z:
+#   TAG=0.7.0
 #
 # Multi-instance scaling (optional): start a shared Redis with the `redis`
 # profile and point the proxy at it via REDIS_URL in .env:
@@ -15,8 +25,12 @@
 
 services:
   proxy:
+    # Default: the image published to GHCR by .github/workflows/docker.yml.
+    # Override the tag with TAG=0.7.0 in .env to pin a specific release.
+    image: ghcr.io/faizoken/dweeb-proxy:${TAG:-latest}
+    # Local build path, used by `docker compose up -d --build`. The build is
+    # tagged with the image name above, so a later plain `up` reuses it.
     build: .
-    image: dweeb-proxy:latest
     restart: unless-stopped
     env_file: .env
     ports:
