@@ -41,8 +41,9 @@ const RemoveInteractiveConfirm = lazy(() =>
 const AiChatPanel = lazy(() =>
   import("@/features/ai/AiChatPanel").then((m) => ({ default: m.AiChatPanel })),
 );
-import { ToastViewport } from "@/ui/Toast";
+import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
+import { consumeIncomingWebhook, type IncomingWebhook } from "@/core/guild/config";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAutoSaveDraft } from "./useAutoSaveDraft";
@@ -183,6 +184,9 @@ export function App() {
   // Latches true on first open so the lazy chunk is fetched once and the dialog
   // stays mounted thereafter (preserving SendPanel's in-progress input).
   const [shareMounted, setShareMounted] = useState(false);
+  // A webhook just created via Discord's `webhook.incoming` redirect, picked up
+  // from the URL fragment on load and handed to the Send panel to prefill.
+  const [incomingWebhook, setIncomingWebhook] = useState<IncomingWebhook | undefined>(undefined);
 
   // Confirmation popup for clearing interactive components. It opens *after*
   // the Share dialog closes, so it floats over the editor rather than the menu.
@@ -222,6 +226,22 @@ export function App() {
     setShareOpen(true);
   };
 
+  // Returning from Discord's `webhook.incoming` flow: the new webhook's URL is in
+  // the fragment. Pull it out (clears it from the address bar), then open the
+  // Send panel prefilled with it. An `error` marker means the user backed out or
+  // Discord returned nothing — just say so. Runs once on load.
+  useEffect(() => {
+    const result = consumeIncomingWebhook();
+    if (!result) return;
+    if ("error" in result) {
+      pushToast("No webhook was created. You can try again or paste a URL.", "info");
+      return;
+    }
+    setIncomingWebhook(result);
+    openShareDialog("send");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Close the Share dialog and hand off to the confirmation popup over the editor.
   const requestRemoveInteractive = () => {
     setShareOpen(false);
@@ -244,8 +264,8 @@ export function App() {
       data-ai-open={aiOpen ? "true" : "false"}
     >
       <h1 className="sr-only">
-        DWEEB — the Discord Webhook Embed Builder. Visually build, preview, and share Discord webhook
-        messages with Components V2.
+        DWEEB — the Discord Webhook Embed Builder. Visually build, preview, and share Discord
+        webhook messages with Components V2.
       </h1>
       <section className="app-shell__pane app-shell__pane--builder" aria-label="Component builder">
         <Builder
@@ -308,6 +328,7 @@ export function App() {
             onClose={() => setShareOpen(false)}
             initialTab={shareInitialTab}
             onRequestRemoveInteractive={requestRemoveInteractive}
+            initialWebhook={incomingWebhook}
           />
         </Suspense>
       ) : null}

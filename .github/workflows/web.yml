@@ -1,12 +1,25 @@
-name: CI
+name: Web
 
-# Run on every push to main and on every PR opened against main.
+# Frontend (Vite/React SPA) CI. Runs on every push to main and every PR against
+# main, but only when frontend-relevant files change — server-only commits are
+# handled by `server.yml`, so they skip this build entirely.
 # `workflow_dispatch` lets you re-run from the Actions tab without a new commit.
 on:
   push:
     branches: [main]
+    paths: &web-paths
+      - "src/**"
+      - "public/**"
+      - "functions/**"
+      - "index.html"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig*.json"
+      - "vite.config.ts"
+      - ".github/workflows/web.yml"
   pull_request:
     branches: [main]
+    paths: *web-paths
   workflow_dispatch:
 
 # Minimum-needed permissions. We only read the source.
@@ -16,7 +29,7 @@ permissions:
 # Cancel an in-flight run when a newer commit lands on the same ref.
 # Saves runner minutes and produces faster feedback on the latest commit.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: web-${{ github.ref }}
   cancel-in-progress: true
 
 # Opt into Node 24 for JavaScript-based actions ahead of GitHub's June 2026

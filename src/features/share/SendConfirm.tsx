@@ -48,6 +48,10 @@ export interface SendConfirmProps {
   guildId?: string;
   /** Channel the webhook posts to, when known (verified or from a saved entry). */
   channelId?: string;
+  /** Resolved server name, when known — shown instead of the guild snowflake. */
+  guildName?: string;
+  /** Resolved channel name, when known — shown (as `#name`) instead of the id. */
+  channelName?: string;
   /** Target thread id, when posting into a thread. */
   threadId?: string;
   /** Message id being overwritten, in update mode. */
@@ -138,6 +142,8 @@ export function SendConfirm({
   webhookAvatar,
   guildId,
   channelId,
+  guildName,
+  channelName,
   threadId,
   messageId,
   pings,
@@ -203,20 +209,32 @@ export function SendConfirm({
             ) : null}
           </dd>
         </div>
-        {guildId ? (
+        {guildId || guildName ? (
           <div className={styles.fact}>
             <dt>Server</dt>
             <dd>
-              <code className={styles.chip}>{guildId}</code>
+              {guildName ? (
+                <span className={styles.destName} title={guildId}>
+                  {guildName}
+                </span>
+              ) : (
+                <code className={styles.chip}>{guildId}</code>
+              )}
             </dd>
           </div>
         ) : null}
-        {channelId ? (
+        {channelId || channelName ? (
           <div className={styles.fact}>
             <dt>Channel</dt>
             <dd>
-              <code className={styles.chip}>{channelId}</code>
-              {guildId ? (
+              {channelName ? (
+                <span className={styles.destName} title={channelId}>
+                  #{channelName}
+                </span>
+              ) : (
+                <code className={styles.chip}>{channelId}</code>
+              )}
+              {guildId && channelId ? (
                 <a
                   className={styles.openChannel}
                   href={`https://discord.com/channels/${guildId}/${channelId}`}

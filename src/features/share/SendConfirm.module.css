@@ -108,6 +108,11 @@
   align-self: center;
 }
 
+/* Resolved server / channel name shown in place of the raw snowflake. */
+.destName {
+  font-weight: 600;
+}
+
 .openChannel {
   margin-left: 8px;
   font-size: 11px;

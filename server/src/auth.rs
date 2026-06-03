@@ -20,6 +20,7 @@ use axum_extra::extract::cookie::PrivateCookieJar;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::discord::TokenResponse;
 use crate::error::AppError;
 use crate::routes::{current_session, AppState, UsableGuild};
 use crate::session::{
@@ -27,11 +28,30 @@ use crate::session::{
     Session, STATE_COOKIE,
 };
 
+/// Marks a `state` value (and so its callback) as belonging to the
+/// `webhook.incoming` flow rather than a login. Both flows share the `/auth/
+/// callback` redirect + the one state cookie; the prefix is how `callback` tells
+/// them apart, so no extra redirect URI needs registering in the Dev Portal.
+const WEBHOOK_STATE_PREFIX: &str = "whk_";
+
 /// `GET /auth/login` — set a CSRF `state` cookie and bounce to Discord.
 pub async fn login(State(st): State<AppState>, jar: PrivateCookieJar) -> impl IntoResponse {
     let cfg = &st.config;
     let state = random_token();
     let url = authorize_url(&cfg.client_id, &cfg.oauth_redirect_url, &state);
+    let jar = jar.add(build_state_cookie(cfg, &state));
+    (jar, Redirect::to(&url))
+}
+
+/// `GET /auth/webhook` — begin Discord's `webhook.incoming` flow. Discord shows
+/// its own channel picker, creates an app-owned webhook in the chosen channel,
+/// and returns it on the callback. The bot doesn't need to be in the server or
+/// hold any permission — the *user* authorizes the webhook for a channel they
+/// can manage.
+pub async fn webhook_start(State(st): State<AppState>, jar: PrivateCookieJar) -> impl IntoResponse {
+    let cfg = &st.config;
+    let state = format!("{WEBHOOK_STATE_PREFIX}{}", random_token());
+    let url = webhook_authorize_url(&cfg.client_id, &cfg.oauth_redirect_url, &state);
     let jar = jar.add(build_state_cookie(cfg, &state));
     (jar, Redirect::to(&url))
 }
@@ -67,6 +87,20 @@ pub async fn callback(
     }
 
     let code = q.code.unwrap_or_default();
+
+    // `webhook.incoming` flow: exchange the code, then redirect to the builder
+    // with the created webhook's URL in the fragment. No session is minted — this
+    // authorization is just for the one webhook, independent of being signed in.
+    if provided.starts_with(WEBHOOK_STATE_PREFIX) {
+        let token = st
+            .discord
+            .exchange_code(&cfg.client_id, &cfg.client_secret, &code, &cfg.oauth_redirect_url)
+            .await?;
+        let jar = jar.add(clear_state_cookie(cfg));
+        let target = build_webhook_redirect(&st, &cfg.frontend_url, &token).await;
+        return Ok((jar, Redirect::to(&target)).into_response());
+    }
+
     let token = st
         .discord
         .exchange_code(&cfg.client_id, &cfg.client_secret, &code, &cfg.oauth_redirect_url)
@@ -143,6 +177,78 @@ fn authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> String {
         percent_encode("identify guilds"),
         state,
     )
+}
+
+/// Authorize URL for the webhook-create flow. `webhook.incoming` creates the
+/// webhook (and shows Discord's channel picker); `guilds` lets us read the user's
+/// server list so we can resolve the destination *server name* from their own
+/// account — no bot membership or DWEEB login required. No `prompt=none` — we
+/// *want* the channel picker shown every time.
+fn webhook_authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> String {
+    format!(
+        "https://discord.com/oauth2/authorize?client_id={}&response_type=code&redirect_uri={}&scope={}&state={}",
+        client_id,
+        percent_encode(redirect_uri),
+        percent_encode("webhook.incoming guilds"),
+        state,
+    )
+}
+
+/// Where to send the browser after a `webhook.incoming` exchange: back to the
+/// builder with the new webhook's execute URL in the fragment (`#dweeb_webhook=`),
+/// which the FE reads, drops into the Send field, then clears. The URL is the
+/// user's own credential and lives only in their browser's address bar
+/// momentarily; a fragment is never sent to a server. On failure (user backed
+/// out, or Discord returned no webhook) we signal the FE with an `error` marker.
+///
+/// Best-effort, we resolve the destination's *names* (`&channel=`, `&guild=`) so
+/// the builder can label same-named webhooks without the user signing in:
+///   - **server name** from the user's own guild list (the `guilds` scope) —
+///     works even when the bot isn't in that server; bot lookup as a fallback.
+///   - **channel name** from the bot (no user-OAuth scope exposes it) — present
+///     only when the bot is in the server. Skipped silently otherwise.
+async fn build_webhook_redirect(st: &AppState, frontend: &str, token: &TokenResponse) -> String {
+    let Some(w) = token.webhook.as_ref() else {
+        return format!("{frontend}#dweeb_webhook=error");
+    };
+    let Some(url) = w.url.as_deref().filter(|u| !u.is_empty()) else {
+        return format!("{frontend}#dweeb_webhook=error");
+    };
+
+    let guild = resolve_guild_name(st, &token.access_token, w.guild_id.as_deref());
+    let channel = async {
+        match w.channel_id.as_deref() {
+            Some(id) => st.discord.channel_name(id).await,
+            None => None,
+        }
+    };
+    let (guild, channel) = tokio::join!(guild, channel);
+
+    let mut frag = format!("dweeb_webhook={}", percent_encode(url));
+    if let Some(c) = channel.as_deref().filter(|s| !s.is_empty()) {
+        frag.push_str(&format!("&channel={}", percent_encode(c)));
+    }
+    if let Some(g) = guild.as_deref().filter(|s| !s.is_empty()) {
+        frag.push_str(&format!("&guild={}", percent_encode(g)));
+    }
+    format!("{frontend}#{frag}")
+}
+
+/// The server name for `guild_id`, preferring the user's own guild list (their
+/// `guilds`-scoped token names every server they're in, bot or not) and falling
+/// back to a bot lookup. None when neither source has it.
+async fn resolve_guild_name(
+    st: &AppState,
+    access_token: &str,
+    guild_id: Option<&str>,
+) -> Option<String> {
+    let gid = guild_id?;
+    if let Ok(guilds) = st.discord.current_user_guilds(access_token).await {
+        if let Some(g) = guilds.into_iter().find(|g| g.id == gid) {
+            return Some(g.name);
+        }
+    }
+    st.discord.guild_name(gid).await
 }
 
 /// 16 random bytes as lowercase hex — an unguessable CSRF `state` token.

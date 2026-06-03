@@ -43,6 +43,7 @@ import {
   webhookAvatarHash,
 } from "@/core/webhook";
 import { LockIcon } from "@/ui/Icon";
+import { type IncomingWebhook } from "@/core/guild/config";
 import { pushToast } from "@/ui/Toast";
 import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
@@ -68,6 +69,12 @@ interface ShareDialogProps {
    * the dialog and shows a confirmation over the editor.
    */
   onRequestRemoveInteractive?: () => void;
+  /**
+   * Forwarded to the Send panel: a webhook just created via Discord's
+   * `webhook.incoming` flow (URL + resolved destination names), to prefill +
+   * verify on open.
+   */
+  initialWebhook?: IncomingWebhook;
 }
 
 export function ShareDialog({
@@ -75,6 +82,7 @@ export function ShareDialog({
   onClose,
   initialTab = "send",
   onRequestRemoveInteractive,
+  initialWebhook,
 }: ShareDialogProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
 
@@ -107,7 +115,10 @@ export function ShareDialog({
       </div>
       <div className={styles.body}>
         {tab === "send" ? (
-          <SendPanel onRequestRemoveInteractive={onRequestRemoveInteractive} />
+          <SendPanel
+            onRequestRemoveInteractive={onRequestRemoveInteractive}
+            initialWebhook={initialWebhook}
+          />
         ) : null}
         {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}
         {tab === "share" ? <ShareLinkPanel /> : null}
@@ -188,8 +199,8 @@ function JsonExportPanel() {
     <>
       <p className={styles.lead}>
         POST this body to your webhook URL with the <code>?with_components=true</code> query
-        parameter. The required <code>flags</code> (Components V2, plus silent-send if enabled)
-        are already included below — Discord rejects the payload without them.
+        parameter. The required <code>flags</code> (Components V2, plus silent-send if enabled) are
+        already included below — Discord rejects the payload without them.
       </p>
       <TextArea readOnly rows={14} value={json} className={styles.mono} />
       <div className={styles.actions}>

@@ -93,12 +93,21 @@
 }
 
 /* ── Emoji grid ───────────────────────────────────────────────────────── */
+/* Scrolls the whole picker (all server groups); each group's grid flows freely
+ * inside so there are no nested scrollbars. */
+.emojiScroll {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.emojiGroup + .emojiGroup {
+  margin-top: var(--app-space-2);
+}
+
 .emojiGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
   gap: 2px;
-  max-height: 240px;
-  overflow-y: auto;
 }
 
 .emojiBtn {

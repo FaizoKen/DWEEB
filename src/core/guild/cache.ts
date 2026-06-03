@@ -16,6 +16,9 @@
 import type { GuildData } from "./types";
 
 const STORAGE_KEY = "dweeb.guild.v1";
+/** Last connected guild id. Kept separate from the data cache so it survives a
+ *  sign-out (which clears the data) and lets the next sign-in reselect it. */
+const LAST_GUILD_KEY = "dweeb.guild.last.v1";
 
 /**
  * How long cached guild data is treated as fresh on the client (ms). The proxy
@@ -60,6 +63,26 @@ export function clearCachedGuild(): void {
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/** The most recently connected guild id, or null. Survives sign-out by design. */
+export function loadLastGuildId(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const id = localStorage.getItem(LAST_GUILD_KEY);
+    return id && id.trim() ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastGuildId(guildId: string): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(LAST_GUILD_KEY, guildId);
   } catch {
     // ignore
   }

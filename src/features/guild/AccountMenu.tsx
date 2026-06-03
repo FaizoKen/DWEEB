@@ -1,0 +1,424 @@
+/**
+ * Account control for the action bar (top-left).
+ *
+ * One compact icon that reflects the Discord auth state:
+ *   - Signed out → a log-in icon; clicking starts the Discord login redirect.
+ *   - Signed in  → the user's avatar; clicking opens a popover to pick a server
+ *     (only servers the DWEEB bot is already in), add the bot to another server,
+ *     refresh the list, or sign out.
+ *
+ * Replaces the old full-width "Server data" panel — the picker and its loaded
+ * data now live behind this single icon to keep the editor clean. Only rendered
+ * when a proxy base URL is configured; the caller guards on that.
+ */
+
+import { useEffect, useRef } from "react";
+import { useAuthStore } from "@/core/auth/authStore";
+import { useGuildStore } from "@/core/guild/guildStore";
+import { loadLastGuildId } from "@/core/guild/cache";
+import { botInviteUrl } from "@/core/guild/config";
+import { isValidGuildId, type AuthUser, type PickerGuild } from "@/core/guild/api";
+import { Menu } from "@/ui/Menu";
+import { CheckCircleIcon, LogInIcon, PlusIcon, RefreshIcon, UserIcon } from "@/ui/Icon";
+import { cn } from "@/lib/cn";
+import styles from "./AccountMenu.module.css";
+
+/** Query keys Discord appends to the redirect after a bot add. */
+const BOT_ADD_PARAMS = ["code", "guild_id", "permissions", "scope", "state"];
+
+/**
+ * The id of the guild the user just added the bot to, read from the invite's
+ * redirect (`?guild_id=…`). Null when this load isn't a post-add redirect.
+ */
+function readJustAddedGuildId(): string | null {
+  if (typeof window === "undefined") return null;
+  const id = new URLSearchParams(window.location.search).get("guild_id");
+  return id && isValidGuildId(id) ? id : null;
+}
+
+/** Strip the bot-add redirect params from the URL, preserving path and hash. */
+function clearBotAddQuery(): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  let changed = false;
+  for (const key of BOT_ADD_PARAMS) {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key);
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  const query = url.searchParams.toString();
+  window.history.replaceState(null, "", `${url.pathname}${query ? `?${query}` : ""}${url.hash}`);
+}
+
+/**
+ * The just-added guild id is parked in sessionStorage so it survives the page
+ * navigations the connect may have to wait on — most importantly a sign-in
+ * redirect when the user added the bot while signed out. sessionStorage (not
+ * local) keeps it tab-scoped and self-cleaning, and it persists across leaving
+ * for Discord and coming back in the same tab.
+ */
+const PENDING_GUILD_KEY = "dweeb.guild.pending";
+
+function loadPendingGuildId(): string | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const id = sessionStorage.getItem(PENDING_GUILD_KEY);
+    return id && isValidGuildId(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePendingGuildId(id: string): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(PENDING_GUILD_KEY, id);
+  } catch {
+    // ignore
+  }
+}
+
+function clearPendingGuildId(): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(PENDING_GUILD_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export function AccountMenu() {
+  const status = useAuthStore((s) => s.status);
+  const user = useAuthStore((s) => s.user);
+  const guilds = useAuthStore((s) => s.guilds);
+  const guildsStatus = useAuthStore((s) => s.guildsStatus);
+  const initAuth = useAuthStore((s) => s.init);
+  const login = useAuthStore((s) => s.login);
+  const loadGuilds = useAuthStore((s) => s.loadGuilds);
+
+  // A connected server lights up a presence dot on the avatar so you can tell
+  // at a glance one is active without opening the menu.
+  const connectedId = useGuildStore((s) => s.guildId);
+  const connect = useGuildStore((s) => s.connect);
+  const connectedGuild = guilds.find((g) => g.id === connectedId) ?? null;
+
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // One-shot guard so the post–sign-in auto-select runs once, not on every
+  // manual "Refresh servers". Re-armed on sign-out so a later sign-in repeats it.
+  const autoRan = useRef(false);
+  // Whether *this* page load arrived straight from a bot-add redirect. Drives
+  // the "sign in to finish" auto-login below; reset by a full reload, so it only
+  // fires on the genuine return from Discord, never on a random signed-out load.
+  const arrivedFromBotAdd = useRef(readJustAddedGuildId() !== null);
+  // One-shot guard for that auto-login redirect.
+  const loginKicked = useRef(false);
+
+  // Resolve the session once on mount.
+  useEffect(() => {
+    void initAuth();
+  }, [initAuth]);
+
+  // Park the just-added guild id (survives the sign-in redirect) and tidy the
+  // redirect params out of the address bar. Runs before the picker logic below.
+  useEffect(() => {
+    const justAdded = readJustAddedGuildId();
+    if (justAdded) savePendingGuildId(justAdded);
+    clearBotAddQuery();
+  }, []);
+
+  // Pick a server automatically once the session resolves.
+  //   1. A server the user just added the bot to (pending id) → connect to it.
+  //      If they're signed out, start sign-in first; the pending id survives the
+  //      redirect and connects on return.
+  //   2. Otherwise reconnect to the last server, or the first available one.
+  //   3. No server has the bot → open the menu so the add prompt is front
+  //      and centre.
+  useEffect(() => {
+    if (status === "unknown" || status === "loading") return;
+
+    const pending = loadPendingGuildId();
+
+    if (status === "anon") {
+      autoRan.current = false;
+      // Came back from adding the bot but signed out — sign-in is required to
+      // load it. Kick off login once; the pending id is parked for the return.
+      if (pending && arrivedFromBotAdd.current && !loginKicked.current) {
+        loginKicked.current = true;
+        login();
+      }
+      return;
+    }
+
+    // status === "authed"
+    if (autoRan.current) return;
+
+    // Just-added server: connect straight by id — it may not be flagged
+    // `bot_present` in the picker yet (proxy cache), and authorization only
+    // needs that it's a server the user manages, which it is.
+    if (pending) {
+      autoRan.current = true;
+      clearPendingGuildId();
+      void connect(pending);
+      void loadGuilds(); // refresh the picker so the new server fills in
+      return;
+    }
+
+    // Wait for the picker list before the last/first-server logic.
+    if (guildsStatus !== "ready") return;
+    autoRan.current = true;
+
+    // Already on a server (restored from cache) — that one *is* the last server.
+    if (connectedId) return;
+
+    const botGuilds = guilds.filter((g) => g.bot_present);
+    if (botGuilds.length === 0) {
+      triggerRef.current?.click();
+      return;
+    }
+    const lastId = loadLastGuildId();
+    const target = botGuilds.find((g) => g.id === lastId) ?? botGuilds[0];
+    if (target) void connect(target.id);
+  }, [status, guildsStatus, connectedId, guilds, connect, loadGuilds, login]);
+
+  // Resolving the session — a quiet placeholder so the bar doesn't jump.
+  if (status === "unknown" || status === "loading") {
+    return (
+      <button type="button" className={styles.trigger} disabled aria-label="Checking sign-in…">
+        <LogInIcon size={18} />
+      </button>
+    );
+  }
+
+  // Signed out — the icon *is* the login button.
+  if (status === "anon") {
+    return (
+      <button
+        type="button"
+        className={styles.trigger}
+        onClick={login}
+        title="Sign in with Discord to load server roles, channels, and emoji"
+        aria-label="Sign in with Discord"
+      >
+        <LogInIcon size={18} />
+      </button>
+    );
+  }
+
+  // Signed in — the avatar opens the account/server popover.
+  return (
+    <Menu
+      align="start"
+      trigger={
+        <button
+          ref={triggerRef}
+          type="button"
+          className={styles.trigger}
+          title={
+            connectedGuild
+              ? `${user?.name ?? "Account"} — ${connectedGuild.name}`
+              : (user?.name ?? "Account")
+          }
+          aria-label={
+            connectedGuild
+              ? `Account — connected to ${connectedGuild.name}`
+              : "Account and server settings"
+          }
+        >
+          {connectedGuild ? (
+            <span className={styles.composite}>
+              <GuildIcon guild={connectedGuild} className={styles.compositeServer} />
+              <Avatar user={user} size={18} className={styles.compositeUser} />
+            </span>
+          ) : (
+            <Avatar user={user} size={24} />
+          )}
+        </button>
+      }
+    >
+      {(close) => <AccountPanel onClose={close} />}
+    </Menu>
+  );
+}
+
+function AccountPanel({ onClose }: { onClose: () => void }) {
+  const user = useAuthStore((s) => s.user);
+  const guilds = useAuthStore((s) => s.guilds);
+  const guildsStatus = useAuthStore((s) => s.guildsStatus);
+  const guildsError = useAuthStore((s) => s.guildsError);
+  const loadGuilds = useAuthStore((s) => s.loadGuilds);
+  const logout = useAuthStore((s) => s.logout);
+
+  const connectedId = useGuildStore((s) => s.guildId);
+  const connect = useGuildStore((s) => s.connect);
+
+  // Only servers the bot is already in are pickable here; everything else is
+  // funnelled through the single "Add to another server" invite below. The
+  // active server is always included even if the proxy hasn't refreshed its
+  // `bot_present` flag yet (e.g. a server the bot was just added to).
+  const botGuilds = [...guilds]
+    .filter((g) => g.bot_present || g.id === connectedId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const invite = botInviteUrl();
+
+  const onPick = (id: string) => {
+    if (id !== connectedId) void connect(id);
+    onClose();
+  };
+
+  return (
+    <div className={styles.panel}>
+      <div className={styles.userRow}>
+        <Avatar user={user} size={32} />
+        <span className={styles.userName}>{user?.name ?? "Signed in"}</span>
+        <button
+          type="button"
+          className={styles.linkBtn}
+          onClick={() => {
+            onClose();
+            void logout();
+          }}
+        >
+          Sign out
+        </button>
+      </div>
+
+      <div className={styles.sectionLabel}>Servers</div>
+
+      {guildsStatus === "loading" ? (
+        <p className={styles.hint}>Loading your servers…</p>
+      ) : guildsStatus === "error" ? (
+        <p className={styles.error}>
+          {guildsError ?? "Couldn't load your servers."}{" "}
+          <button type="button" className={styles.linkBtn} onClick={() => void loadGuilds()}>
+            Retry
+          </button>
+        </p>
+      ) : botGuilds.length === 0 ? (
+        <p className={styles.hint}>
+          No servers with the DWEEB bot yet. Add it to a server you manage to load its data.
+        </p>
+      ) : (
+        <ul className={styles.serverList}>
+          {botGuilds.map((g) => (
+            <ServerRow
+              key={g.id}
+              guild={g}
+              active={g.id === connectedId}
+              onPick={() => onPick(g.id)}
+            />
+          ))}
+        </ul>
+      )}
+
+      <div className={styles.actions}>
+        {invite ? (
+          <a
+            className={styles.actionRow}
+            href={invite}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <PlusIcon size={16} />
+            <span>Add to another server</span>
+          </a>
+        ) : null}
+        <button type="button" className={styles.actionRow} onClick={() => void loadGuilds()}>
+          <RefreshIcon size={16} />
+          <span>Refresh servers</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ServerRow({
+  guild,
+  active,
+  onPick,
+}: {
+  guild: PickerGuild;
+  active: boolean;
+  onPick: () => void;
+}) {
+  const status = useGuildStore((s) => s.status);
+  const data = useGuildStore((s) => s.data);
+  const loading = active && status === "loading" && data?.guildId !== guild.id;
+  const loaded = active && data?.guildId === guild.id ? data : null;
+
+  return (
+    <li>
+      <button
+        type="button"
+        className={cn(styles.serverRow, active && styles.serverRowActive)}
+        onClick={onPick}
+      >
+        <GuildIcon guild={guild} />
+        <span className={styles.serverText}>
+          <span className={styles.serverName}>{guild.name}</span>
+          {loading ? (
+            <span className={styles.serverMeta}>Loading…</span>
+          ) : loaded ? (
+            <span className={styles.serverMeta}>
+              {loaded.roles.length} roles · {loaded.channels.length} channels ·{" "}
+              {loaded.emojis.length} emoji
+            </span>
+          ) : null}
+        </span>
+        {active ? <CheckCircleIcon size={16} className={styles.check} /> : null}
+      </button>
+    </li>
+  );
+}
+
+/** Discord CDN URL for a guild's icon, or null when it has none. */
+function guildIconUrl(guild: PickerGuild): string | null {
+  if (!guild.icon) return null;
+  return `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.webp?size=32`;
+}
+
+function GuildIcon({ guild, className }: { guild: PickerGuild; className?: string }) {
+  const cls = className ?? styles.guildIcon;
+  const url = guildIconUrl(guild);
+  if (url) {
+    return <img className={cls} src={url} alt="" loading="lazy" />;
+  }
+  return (
+    <span className={cn(cls, styles.guildIconFallback)} aria-hidden="true">
+      {guild.name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+function Avatar({
+  user,
+  size,
+  className,
+}: {
+  user: AuthUser | null;
+  size: number;
+  className?: string;
+}) {
+  if (user?.avatar_url) {
+    return (
+      <img
+        className={cn(styles.avatar, className)}
+        src={user.avatar_url}
+        alt=""
+        width={size}
+        height={size}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  return (
+    <span
+      className={cn(styles.avatar, styles.avatarFallback, className)}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      <UserIcon size={Math.round(size * 0.62)} />
+    </span>
+  );
+}

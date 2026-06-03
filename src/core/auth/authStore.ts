@@ -23,6 +23,11 @@ import {
 } from "@/core/guild/api";
 import { isProxyConfigured, loginUrl } from "@/core/guild/config";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { pushToast } from "@/ui/Toast";
+
+/** Set right before the login redirect so we can greet the user only on the
+ *  return from a real sign-in, not on every reload with a live session. */
+const JUST_LOGGED_IN_KEY = "dweeb.auth.justLoggedIn";
 
 type AuthStatus = "unknown" | "loading" | "authed" | "anon";
 type GuildsStatus = "idle" | "loading" | "ready" | "error";
@@ -63,6 +68,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const user = await fetchMe();
       if (user) {
         set({ status: "authed", user });
+        // Greet only right after an actual sign-in, not on every reload.
+        try {
+          if (sessionStorage.getItem(JUST_LOGGED_IN_KEY)) {
+            sessionStorage.removeItem(JUST_LOGGED_IN_KEY);
+            pushToast(`Signed in as ${user.name}`, "success");
+          }
+        } catch {
+          // sessionStorage unavailable — skip the greeting, not worth failing over.
+        }
         void get().loadGuilds();
       } else {
         set({ status: "anon", user: null });
@@ -90,6 +104,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   login() {
     if (!isProxyConfigured()) return;
+    try {
+      sessionStorage.setItem(JUST_LOGGED_IN_KEY, "1");
+    } catch {
+      // No sessionStorage — we just skip the post-login greeting.
+    }
     window.location.href = loginUrl();
   },
 
@@ -97,6 +116,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await postLogout();
     useGuildStore.getState().disconnect();
     set({ status: "anon", user: null, guilds: [], guildsStatus: "idle", guildsError: null });
+    pushToast("Signed out", "info");
   },
 
   markSignedOut() {
@@ -108,5 +128,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       guildsStatus: "idle",
       guildsError: null,
     });
+    pushToast("Your session expired — sign in again.", "info");
   },
 }));

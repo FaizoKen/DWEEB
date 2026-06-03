@@ -38,6 +38,16 @@ export interface WebhookHistoryEntry {
   channelId?: string;
   /** Guild the webhook belongs to, captured at verify time. Absent when Discord omits it. */
   guildId?: string;
+  /** Channel *name* (e.g. "general"), resolved when the webhook was created via
+   *  the `webhook.incoming` flow. Lets same-named webhooks be told apart by
+   *  destination without signing in. Absent when it couldn't be resolved. */
+  channelName?: string;
+  /** Server *name*, resolved alongside `channelName`. */
+  guildName?: string;
+  /** Unix millis when a health check (verify GET) last found this webhook gone
+   *  on Discord — deleted, or its token revoked (404/401). Absent while the
+   *  webhook is reachable; cleared automatically if a later check succeeds. */
+  deletedAt?: number;
 }
 
 const OWNER_KINDS: readonly WebhookOwnerKind[] = ["bot", "user", "follower", "unknown"];
@@ -71,6 +81,14 @@ function safeParse(raw: string | null): WebhookHistoryEntry[] {
         channelId:
           typeof (e as { channelId?: unknown }).channelId === "string" ? e.channelId : undefined,
         guildId: typeof (e as { guildId?: unknown }).guildId === "string" ? e.guildId : undefined,
+        channelName:
+          typeof (e as { channelName?: unknown }).channelName === "string"
+            ? e.channelName
+            : undefined,
+        guildName:
+          typeof (e as { guildName?: unknown }).guildName === "string" ? e.guildName : undefined,
+        deletedAt:
+          typeof (e as { deletedAt?: unknown }).deletedAt === "number" ? e.deletedAt : undefined,
       }));
   } catch {
     return [];
@@ -103,6 +121,8 @@ export function rememberWebhook(
     avatar?: string | null;
     channelId?: string;
     guildId?: string;
+    channelName?: string;
+    guildName?: string;
   } = {},
 ): WebhookHistoryEntry | null {
   const parsed = parseWebhookUrl(rawUrl);
@@ -121,6 +141,8 @@ export function rememberWebhook(
     avatar: fields.avatar !== undefined ? fields.avatar : (existing?.avatar ?? null),
     channelId: fields.channelId ?? existing?.channelId,
     guildId: fields.guildId ?? existing?.guildId,
+    channelName: fields.channelName ?? existing?.channelName,
+    guildName: fields.guildName ?? existing?.guildName,
   };
 
   const next = [entry, ...all.filter((e) => e.id !== parsed.id)].slice(0, MAX_ENTRIES);
@@ -152,6 +174,71 @@ export function touchWebhook(id: string): void {
 
 export function forgetWebhook(id: string): void {
   persist(loadHistory().filter((e) => e.id !== id));
+}
+
+/**
+ * Apply fresh metadata from a live verify (GET) to a saved entry, in place.
+ * Backs the recents health check, so a webhook renamed / re-pictured / moved on
+ * Discord stops showing stale details. Unlike `rememberWebhook` this never
+ * reorders the list or bumps `lastUsedAt` — merely opening the dialog mustn't
+ * reshuffle recents — and it leaves the user `label` and the creation-time
+ * `channelName`/`guildName` alone. A successful verify also proves the webhook
+ * is alive, so any `deletedAt` flag is cleared.
+ *
+ * Returns true only when a field actually changed, so the caller can skip a
+ * redundant persist + re-render.
+ */
+export function refreshWebhook(
+  id: string,
+  fields: {
+    name?: string;
+    avatar?: string | null;
+    ownerKind?: WebhookOwnerKind;
+    channelId?: string;
+    guildId?: string;
+  },
+): boolean {
+  const all = loadHistory();
+  const idx = all.findIndex((e) => e.id === id);
+  if (idx < 0) return false;
+  const cur = all[idx]!;
+  const next: WebhookHistoryEntry = {
+    ...cur,
+    name: fields.name?.trim() || cur.name,
+    avatar: fields.avatar !== undefined ? fields.avatar : cur.avatar,
+    ownerKind: fields.ownerKind ?? cur.ownerKind,
+    channelId: fields.channelId ?? cur.channelId,
+    guildId: fields.guildId ?? cur.guildId,
+    deletedAt: undefined,
+  };
+  if (
+    next.name === cur.name &&
+    next.avatar === cur.avatar &&
+    next.ownerKind === cur.ownerKind &&
+    next.channelId === cur.channelId &&
+    next.guildId === cur.guildId &&
+    next.deletedAt === cur.deletedAt
+  ) {
+    return false;
+  }
+  all[idx] = next;
+  persist(all);
+  return true;
+}
+
+/**
+ * Flag a saved entry whose verify GET came back 404 (deleted) or 401 (token
+ * revoked) — it can no longer receive messages. In place, like `refreshWebhook`.
+ * Returns true only when it newly sets the flag (already-flagged entries are a
+ * no-op) so the caller can avoid a redundant re-render.
+ */
+export function markWebhookGone(id: string): boolean {
+  const all = loadHistory();
+  const idx = all.findIndex((e) => e.id === id);
+  if (idx < 0 || all[idx]!.deletedAt) return false;
+  all[idx] = { ...all[idx]!, deletedAt: Date.now() };
+  persist(all);
+  return true;
 }
 
 export function clearHistory(): void {

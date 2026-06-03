@@ -23,7 +23,14 @@ import { create } from "zustand";
 import { useAuthStore } from "@/core/auth/authStore";
 import { fetchBootstrap, GuildApiError, type BootstrapResponse } from "./api";
 import { isProxyConfigured } from "./config";
-import { CLIENT_TTL_MS, clearCachedGuild, loadCachedGuild, saveCachedGuild } from "./cache";
+import {
+  CLIENT_TTL_MS,
+  clearCachedGuild,
+  loadCachedGuild,
+  saveCachedGuild,
+  saveLastGuildId,
+} from "./cache";
+import { pushToast } from "@/ui/Toast";
 import type { GuildChannel, GuildData, GuildEmoji, GuildRole } from "./types";
 
 export type GuildStatus = "idle" | "loading" | "ready" | "error";
@@ -109,7 +116,11 @@ async function load(
     if (inflight?.controller !== controller) return;
     const data = indexBootstrap(guildId, raw, Date.now());
     saveCachedGuild(data);
+    // Remember this as the last server so a future sign-in reselects it.
+    saveLastGuildId(guildId);
     set({ guildId, status: "ready", data, error: null });
+    const name = useAuthStore.getState().guilds.find((g) => g.id === guildId)?.name;
+    pushToast(name ? `Connected to ${name}` : "Server data loaded", "success");
   } catch (e) {
     if (controller.signal.aborted) return; // cancelled on purpose
     // A 401 means the login session lapsed: hand off to the auth store, which
@@ -125,6 +136,7 @@ async function load(
     const current = get();
     const keep = current.data?.guildId === guildId ? current.data : null;
     set({ status: keep ? "ready" : "error", error: message, data: keep });
+    pushToast(message, "error");
   } finally {
     if (inflight?.controller === controller) inflight = null;
   }

@@ -128,6 +128,8 @@ async fn main() {
         .route("/auth/callback", get(auth::callback))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
+        // Webhook creation via Discord's `webhook.incoming` OAuth (no bot perms).
+        .route("/auth/webhook", get(auth::webhook_start))
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))
         .route("/api/guilds/:guild_id/roles", get(roles))

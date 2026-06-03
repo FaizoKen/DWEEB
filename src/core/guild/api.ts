@@ -125,6 +125,19 @@ export async function fetchBootstrap(
   return getJson<BootstrapResponse>(`/api/guilds/${id}/bootstrap`, signal);
 }
 
+/**
+ * `GET /api/guilds/:id/emojis` — just a server's custom emoji. Lighter than
+ * `bootstrap`; used to gather emoji from the user's *other* bot servers without
+ * also pulling their roles and channels.
+ */
+export async function fetchGuildEmojis(guildId: string, signal?: AbortSignal): Promise<RawEmoji[]> {
+  const id = guildId.trim();
+  if (!isValidGuildId(id)) {
+    throw new GuildApiError("That doesn't look like a valid server ID.", 0);
+  }
+  return getJson<RawEmoji[]>(`/api/guilds/${id}/emojis`, signal);
+}
+
 /** `POST /auth/logout` — clear the session. Best-effort; never throws. */
 export async function postLogout(): Promise<void> {
   try {

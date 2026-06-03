@@ -92,11 +92,31 @@ pub struct Emoji {
 }
 
 /// Discord's OAuth2 token response (only the fields we use).
+///
+/// On a `webhook.incoming` authorization the response also carries the freshly
+/// created `webhook` (with its ready-to-use execute `url`); on a plain login it's
+/// absent. We only read the `url` — the browser re-verifies it to fill in the
+/// name/owner for recents.
 #[derive(Deserialize)]
 pub struct TokenResponse {
     pub access_token: String,
     #[serde(default)]
     pub expires_in: i64,
+    #[serde(default)]
+    pub webhook: Option<IncomingWebhook>,
+}
+
+/// The webhook returned by a `webhook.incoming` token exchange. `url` is the
+/// full execute URL (`…/webhooks/{id}/{token}`); `channel_id`/`guild_id` let us
+/// best-effort resolve human names so same-named webhooks stay distinguishable.
+#[derive(Deserialize)]
+pub struct IncomingWebhook {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub guild_id: Option<String>,
 }
 
 /// The signed-in user, from `GET /users/@me`.
@@ -164,6 +184,35 @@ impl Discord {
 
     pub async fn emojis(&self, guild: &str) -> Result<Vec<Emoji>, AppError> {
         self.get_bot(&format!("/guilds/{guild}/emojis")).await
+    }
+
+    /// Best-effort channel name for a `webhook.incoming` webhook's channel, so
+    /// the builder can label same-named webhooks by destination. Returns None if
+    /// the bot can't see the channel (not in that guild) — no login required when
+    /// it can. `None` on any error; never fails the caller.
+    pub async fn channel_name(&self, channel_id: &str) -> Option<String> {
+        #[derive(Deserialize)]
+        struct Named {
+            #[serde(default)]
+            name: Option<String>,
+        }
+        self.get_bot::<Named>(&format!("/channels/{channel_id}"))
+            .await
+            .ok()
+            .and_then(|c| c.name)
+    }
+
+    /// Best-effort guild name (same contract as `channel_name`).
+    pub async fn guild_name(&self, guild_id: &str) -> Option<String> {
+        #[derive(Deserialize)]
+        struct Named {
+            #[serde(default)]
+            name: Option<String>,
+        }
+        self.get_bot::<Named>(&format!("/guilds/{guild_id}"))
+            .await
+            .ok()
+            .and_then(|g| g.name)
     }
 
     /// Every guild id the bot is a member of (paginated, 200 per page). Used to

@@ -39,7 +39,8 @@ be in.
 | ------ | ----------------------------- | ---- | ---------------------------------------- |
 | GET    | `/health`                     | —    | `{ "status": "ok" }`                     |
 | GET    | `/auth/login`                 | —    | 302 → Discord consent (sets state cookie)|
-| GET    | `/auth/callback`              | —    | exchanges code, sets session, → frontend |
+| GET    | `/auth/callback`              | —    | exchanges code; sets session **or** (webhook flow) → frontend with the new webhook |
+| GET    | `/auth/webhook`               | —    | 302 → Discord's `webhook.incoming` channel picker (sets state cookie) |
 | POST   | `/auth/logout`                | —    | clears the session                       |
 | GET    | `/auth/me`                    | ✓    | `{ id, name, avatar_url }`               |
 | GET    | `/api/guilds`                 | ✓    | `{ guilds: [{ id, name, icon, bot_present }] }` |
@@ -49,6 +50,18 @@ be in.
 | GET    | `/api/guilds/:id/bootstrap`   | ✓    | `{ roles, channels, emojis }` (one call) |
 
 `✓` = requires the session cookie **and** membership of `:id`.
+
+### Creating a webhook (`webhook.incoming`)
+
+`/auth/webhook` starts Discord's **`webhook.incoming`** OAuth flow: Discord shows
+its own channel picker, the *user* authorizes a webhook for a channel they
+manage, and the callback exchanges the code and redirects back to the builder
+with the new webhook's URL in the fragment (`#dweeb_webhook=…`). **The bot needs
+no permissions and need not even be in the server** — webhook creation never
+touches the bot token. It reuses the same `/auth/callback` redirect URI and state
+cookie as login (distinguished by a state prefix), so no extra redirect URI is
+registered. The webhook URL is the user's own credential and lives only in their
+browser; the proxy never stores it.
 
 ## Hardening (built in)
 

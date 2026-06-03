@@ -39,12 +39,15 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useAuthStore } from "@/core/auth/authStore";
+import { useGuildStore } from "@/core/guild/guildStore";
 import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
 import { validateMessage } from "@/core/schema/validation";
 import { inspectCapabilities } from "@/core/schema/capability";
 import { summarizePings } from "@/core/schema/mentions";
 import {
   classifyWebhookOwner,
+  forgetWebhook,
   loadHistory,
   parseMessageIdInput,
   parseWebhookUrl,
@@ -62,9 +65,10 @@ import {
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
-import { LockIcon } from "@/ui/Icon";
+import { LockIcon, PlusIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
+import { isProxyConfigured, webhookCreateUrl, type IncomingWebhook } from "@/core/guild/config";
 import { WebhookRecents } from "./WebhookRecents";
 import { SendConfirm } from "./SendConfirm";
 import { Callout } from "./Callout";
@@ -87,19 +91,27 @@ function formatRawBody(body: unknown): string {
 
 export function SendPanel({
   onRequestRemoveInteractive,
+  initialWebhook,
 }: {
   /**
    * Asked when the user clicks "Remove them" on the app-owned-webhook block.
    * The App closes the dialog and pops a confirmation over the editor.
    */
   onRequestRemoveInteractive?: () => void;
+  /**
+   * A webhook just created via Discord's `webhook.incoming` flow and handed back
+   * through the redirect (URL + resolved destination names). When present it
+   * prefills the field and is verified + saved on mount, so the user lands ready
+   * to send.
+   */
+  initialWebhook?: IncomingWebhook;
 } = {}) {
   const message = useMessageStore((s) => s.message);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
 
-  // Prefill from the restore origin when the editor was just restored from a
-  // previously-posted message; otherwise start empty.
-  const [url, setUrl] = useState(() => restoredFrom?.webhookUrl ?? "");
+  // Prefill from a just-created webhook (the `webhook.incoming` return) first,
+  // else the restore origin; otherwise start empty.
+  const [url, setUrl] = useState(() => initialWebhook?.url ?? restoredFrom?.webhookUrl ?? "");
   const [threadId, setThreadId] = useState(() => restoredFrom?.threadId ?? "");
   const [messageIdInput, setMessageIdInput] = useState(() => restoredFrom?.messageId ?? "");
   const [mode, setMode] = useState<"new" | "update">(() => (restoredFrom ? "update" : "new"));
@@ -181,6 +193,15 @@ export function SendPanel({
     return history.find((e) => e.id === parsedUrl.id)?.ownerKind;
   }, [verified, parsedUrl, history]);
 
+  // Whether the URL in the field is a saved webhook a health check found gone
+  // on Discord (deleted / token revoked). Posting to it can only 404, so this
+  // hard-blocks the send. Recomputes live if the check flags it while the dialog
+  // is open (the recents list reloads our `history` on change).
+  const knownGone = useMemo(() => {
+    if (!parsedUrl) return false;
+    return history.find((e) => e.id === parsedUrl.id)?.deletedAt != null;
+  }, [parsedUrl, history]);
+
   // Best-known display name for the URL — from a fresh verify or a saved entry —
   // so the ownership banners can name the webhook instead of "this webhook".
   const knownName = useMemo(() => {
@@ -212,6 +233,25 @@ export function SendPanel({
     return history.find((e) => e.id === parsedUrl.id)?.guildId;
   }, [verified, parsedUrl, history]);
 
+  // Human names for the destination, so the confirm dialog reads "#general ·
+  // Faizo's server" instead of raw snowflakes. Prefer the names saved on the
+  // entry (resolved at creation); fall back to live data — the server from the
+  // signed-in guild list, the channel from the connected guild.
+  const authGuilds = useAuthStore((s) => s.guilds);
+  const connectedData = useGuildStore((s) => s.data);
+
+  const knownGuildName = useMemo(() => {
+    const stored = parsedUrl ? history.find((e) => e.id === parsedUrl.id)?.guildName : undefined;
+    if (stored) return stored;
+    return knownGuildId ? authGuilds.find((g) => g.id === knownGuildId)?.name : undefined;
+  }, [parsedUrl, history, authGuilds, knownGuildId]);
+
+  const knownChannelName = useMemo(() => {
+    const stored = parsedUrl ? history.find((e) => e.id === parsedUrl.id)?.channelName : undefined;
+    if (stored) return stored;
+    return knownChannelId ? connectedData?.channelById[knownChannelId]?.name : undefined;
+  }, [parsedUrl, history, connectedData, knownChannelId]);
+
   // The capability inspector flags interactive components, but what that flag
   // means depends on who owns the webhook:
   //  - person/follower → hard block: Discord rejects the send outright.
@@ -239,6 +279,13 @@ export function SendPanel({
   const handleSend = () => {
     if (!parsedUrl) {
       setState({ kind: "error", message: "Enter a valid Discord webhook URL." });
+      return;
+    }
+    if (knownGone) {
+      setState({
+        kind: "error",
+        message: "This webhook was deleted on Discord. Create a new one and use that URL.",
+      });
       return;
     }
     if (mode === "update" && !parsedMessageId) {
@@ -407,6 +454,51 @@ export function SendPanel({
     setState({ kind: "idle" });
   };
 
+  // A webhook just created via `webhook.incoming` was handed back through the
+  // redirect (prefilled into `url` above). Verify it once with Discord to capture
+  // its name/owner/destination, then remember it — the ownership banners, confirm
+  // dialog, and "already verified" send path all read those from history by id,
+  // so no extra GET happens at send time.
+  const initialVerifiedRef = useRef(false);
+  useEffect(() => {
+    if (!initialWebhook || initialVerifiedRef.current) return;
+    const parsed = parseWebhookUrl(initialWebhook.url);
+    if (!parsed) return;
+    initialVerifiedRef.current = true;
+    // Save the destination names right away (resolved server-side, present even
+    // when signed out) so the recents entry is labelled even if the verify GET
+    // below is slow or fails.
+    rememberWebhook(parsed.url, {
+      channelName: initialWebhook.channelName,
+      guildName: initialWebhook.guildName,
+    });
+    setHistory(loadHistory());
+    const ac = new AbortController();
+    void (async () => {
+      const result = await verifyWebhook(parsed, { signal: ac.signal });
+      if (!result.ok) return; // a bad/expired URL just stays in the field, unsaved
+      const remoteName = typeof result.webhook.name === "string" ? result.webhook.name : "";
+      const owner = classifyWebhookOwner(result.webhook);
+      rememberWebhook(parsed.url, {
+        name: remoteName,
+        ownerKind: owner.kind,
+        avatar: webhookAvatarHash(result.webhook),
+        channelId: webhookChannelId(result.webhook) ?? undefined,
+        guildId: webhookGuildId(result.webhook) ?? undefined,
+        channelName: initialWebhook.channelName,
+        guildName: initialWebhook.guildName,
+      });
+      setHistory(loadHistory());
+      pushToast(
+        remoteName
+          ? `Webhook “${remoteName}” ready — review and send.`
+          : "Webhook ready — review and send.",
+        "success",
+      );
+    })();
+    return () => ac.abort();
+  }, [initialWebhook]);
+
   return (
     <>
       <p className={styles.lead}>
@@ -454,6 +546,20 @@ export function SendPanel({
       <Field
         label="Webhook URL"
         error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
+        hint={
+          isProxyConfigured() ? (
+            <button
+              type="button"
+              className={styles.createWebhookLink}
+              onClick={() => {
+                window.location.href = webhookCreateUrl();
+              }}
+            >
+              <PlusIcon size={13} className={styles.createWebhookIcon} />
+              Don’t have one? Create a webhook on a Discord channel
+            </button>
+          ) : undefined
+        }
       >
         {(id) => (
           <div className={styles.urlRow}>
@@ -538,7 +644,37 @@ export function SendPanel({
         />
       ) : null}
 
-      {ownershipBlocked ? (
+      {knownGone ? (
+        <Callout
+          tone="danger"
+          role="alert"
+          title={<>Can’t send: “{knownName || "this webhook"}” was deleted on Discord.</>}
+          more={
+            <>
+              A health check couldn’t find this webhook anymore — it was deleted, or its token was
+              reset. Create a new webhook and send to that URL instead.
+            </>
+          }
+          moreLabel="What happened"
+          actions={
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                if (!parsedUrl) return;
+                forgetWebhook(parsedUrl.id);
+                setHistory(loadHistory());
+                setUrl("");
+                setState({ kind: "idle" });
+              }}
+            >
+              Remove from recents
+            </Button>
+          }
+        />
+      ) : null}
+
+      {ownershipBlocked && !knownGone ? (
         <Callout
           tone="danger"
           role="alert"
@@ -566,7 +702,7 @@ export function SendPanel({
         />
       ) : null}
 
-      {ownershipSatisfied ? (
+      {ownershipSatisfied && !knownGone ? (
         <Callout
           tone="info"
           role="note"
@@ -665,6 +801,7 @@ export function SendPanel({
             sending ||
             saving ||
             !parsedUrl ||
+            knownGone ||
             blockingIssues.length > 0 ||
             ownershipBlocked ||
             (mode === "update" && !parsedMessageId)
@@ -689,6 +826,8 @@ export function SendPanel({
         webhookAvatar={knownAvatar}
         guildId={knownGuildId}
         channelId={knownChannelId}
+        guildName={knownGuildName}
+        channelName={knownChannelName}
         threadId={threadId.trim() || undefined}
         messageId={mode === "update" ? (parsedMessageId ?? undefined) : undefined}
         pings={pings}

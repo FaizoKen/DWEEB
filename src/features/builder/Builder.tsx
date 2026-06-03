@@ -27,6 +27,8 @@ import {
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
 import { SavedMessagesMenu } from "./components/SavedMessagesMenu";
+import { AccountMenu } from "@/features/guild/AccountMenu";
+import { isProxyConfigured } from "@/core/guild/config";
 import styles from "./Builder.module.css";
 
 interface BuilderProps {
@@ -70,6 +72,7 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
   return (
     <div className={styles.actionBar}>
       <div className={styles.actionGroup}>
+        {isProxyConfigured() ? <AccountMenu /> : null}
         <SavedMessagesMenu />
         <IconButton label="Undo" onClick={undo} disabled={!canUndo}>
           <UndoIcon />

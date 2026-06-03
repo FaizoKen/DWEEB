@@ -11,8 +11,10 @@
  * which inserts it at the caret and closes the menu.
  */
 
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { useAuthStore } from "@/core/auth/authStore";
+import { useEmojiStore } from "@/core/guild/emojiStore";
 import { EmojiIcon, HashIcon, MentionIcon } from "@/ui/Icon";
 import styles from "./MentionPicker.module.css";
 
@@ -128,25 +130,63 @@ export function GuildMentionPanel({ onPick }: { onPick: Pick }) {
   );
 }
 
+/** Cap emoji rendered per server so a huge server can't flood the grid. */
+const MAX_EMOJI_PER_GUILD = 200;
+
 export function GuildEmojiPanel({ onPick }: { onPick: Pick }) {
-  const data = useGuildStore((s) => s.data);
+  const connectedId = useGuildStore((s) => s.guildId);
+  const connectedData = useGuildStore((s) => s.data);
+  const guilds = useAuthStore((s) => s.guilds);
+  const byGuild = useEmojiStore((s) => s.byGuild);
+  const loading = useEmojiStore((s) => s.status === "loading");
+  const seed = useEmojiStore((s) => s.seed);
+  const loadFor = useEmojiStore((s) => s.loadFor);
+
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
 
-  const emojis = useMemo(() => {
-    if (!data) return [];
-    return data.emojis
-      .filter((e) => e.available && (!query || e.name.toLowerCase().includes(query)))
-      .slice(0, 200);
-  }, [data, query]);
+  // Every server the bot is in is fair game: a webhook can render custom emoji
+  // from any server it shares. (The connected one is always included even if its
+  // `bot_present` flag hasn't refreshed yet.)
+  const botGuilds = useMemo(
+    () => guilds.filter((g) => g.bot_present || g.id === connectedId),
+    [guilds, connectedId],
+  );
 
-  if (!data || data.emojis.length === 0) {
+  // Seed the connected server's already-loaded emoji, then fetch the rest.
+  useEffect(() => {
+    if (connectedId && connectedData?.guildId === connectedId) {
+      seed(connectedId, connectedData.emojis);
+    }
+    if (botGuilds.length > 0) void loadFor(botGuilds.map((g) => g.id));
+  }, [connectedId, connectedData, botGuilds, seed, loadFor]);
+
+  // One group per server, connected first then alphabetical; empty groups drop.
+  const groups = useMemo(() => {
+    const ordered = [...botGuilds].sort((a, b) => {
+      if (a.id === connectedId) return -1;
+      if (b.id === connectedId) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    return ordered
+      .map((g) => ({
+        id: g.id,
+        name: g.name,
+        emojis: (byGuild[g.id] ?? [])
+          .filter((e) => e.available && (!query || e.name.toLowerCase().includes(query)))
+          .slice(0, MAX_EMOJI_PER_GUILD),
+      }))
+      .filter((g) => g.emojis.length > 0);
+  }, [botGuilds, byGuild, connectedId, query]);
+
+  const loadedAny = botGuilds.some((g) => (byGuild[g.id] ?? []).length > 0);
+
+  // Not signed in / no bot servers — keep the by-ID escape hatch.
+  if (botGuilds.length === 0) {
     return (
       <div className={styles.panel}>
         <div className={styles.list}>
-          <p className={styles.note}>
-            {data ? "This server has no custom emoji." : "Connect a server to pick its emoji."}
-          </p>
+          <p className={styles.note}>Connect a server to pick its emoji.</p>
           <Row onClick={() => onPick("<:name:000000000000000000>", "name")}>
             <EmojiIcon size={14} className={styles.rowIcon} />
             Custom emoji by ID…
@@ -160,31 +200,54 @@ export function GuildEmojiPanel({ onPick }: { onPick: Pick }) {
     <div className={styles.panel}>
       <input
         className={styles.search}
-        placeholder="Search emoji…"
+        placeholder="Search emoji across your servers…"
         value={q}
         onChange={(e) => setQ(e.currentTarget.value)}
         aria-label="Search emoji"
         autoFocus
       />
-      <div className={styles.emojiGrid}>
-        {emojis.map((e) => (
-          <button
-            key={e.id}
-            type="button"
-            className={styles.emojiBtn}
-            title={`:${e.name}:`}
-            onClick={() => onPick(`<${e.animated ? "a" : ""}:${e.name}:${e.id}>`)}
-          >
-            <img
-              className={styles.emojiImg}
-              src={`https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? "gif" : "webp"}?size=32&quality=lossless`}
-              alt={`:${e.name}:`}
-              loading="lazy"
-              decoding="async"
-            />
-          </button>
+      <div className={styles.emojiScroll}>
+        {groups.map((group) => (
+          <div key={group.id} className={styles.emojiGroup}>
+            <GroupLabel>{group.name}</GroupLabel>
+            <div className={styles.emojiGrid}>
+              {group.emojis.map((e) => (
+                <button
+                  key={`${group.id}:${e.id}`}
+                  type="button"
+                  className={styles.emojiBtn}
+                  title={`:${e.name}:`}
+                  onClick={() => onPick(`<${e.animated ? "a" : ""}:${e.name}:${e.id}>`)}
+                >
+                  <img
+                    className={styles.emojiImg}
+                    src={`https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? "gif" : "webp"}?size=32&quality=lossless`}
+                    alt={`:${e.name}:`}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
-        {emojis.length === 0 ? <p className={styles.note}>No matches.</p> : null}
+
+        {groups.length === 0 ? (
+          <p className={styles.note}>
+            {loading && !loadedAny
+              ? "Loading emoji…"
+              : query
+                ? "No matches."
+                : "No custom emoji found in your servers."}
+          </p>
+        ) : loading ? (
+          <p className={styles.note}>Loading more…</p>
+        ) : null}
+
+        <Row onClick={() => onPick("<:name:000000000000000000>", "name")}>
+          <EmojiIcon size={14} className={styles.rowIcon} />
+          Custom emoji by ID…
+        </Row>
       </div>
     </div>
   );

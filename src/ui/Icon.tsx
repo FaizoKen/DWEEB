@@ -183,6 +183,23 @@ export const InfoIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+/** Arrow entering a door — the signed-out "log in" affordance. */
+export const LogInIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+    <path d="M10 17l5-5-5-5" />
+    <path d="M15 12H3" />
+  </svg>
+);
+
+/** Generic person — avatar fallback when a user has no Discord avatar. */
+export const UserIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </svg>
+);
+
 /** Padlock — pairs with the "treat the webhook URL like a password" note. */
 export const LockIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
