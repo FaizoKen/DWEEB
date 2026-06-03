@@ -6,6 +6,7 @@
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
+import { useGuildStore } from "@/core/guild/guildStore";
 import { LIMITS } from "@/core/schema/limits";
 import type { SelectComponent } from "@/core/schema/types";
 import { Field } from "@/ui/Field";
@@ -25,6 +26,10 @@ interface Props {
 
 export function DefaultValuesEditor({ node, allowedTypes }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
+  // When a server is connected, offer a name picker for role/channel defaults
+  // (users can't be resolved — the proxy never reads members — so they stay
+  // manual). The raw snowflake field always remains as a fallback.
+  const guild = useGuildStore((s) => s.data);
   const values = node.default_values ?? [];
   const fixedType = allowedTypes.length === 1 ? allowedTypes[0]! : null;
 
@@ -86,6 +91,36 @@ export function DefaultValuesEditor({ node, allowedTypes }: Props) {
                   <TrashIcon size={12} />
                 </IconButton>
               </div>
+              {guild && (entry.type === "role" || entry.type === "channel") ? (
+                <Field label={entry.type === "role" ? "Pick a role" : "Pick a channel"}>
+                  {(id) => {
+                    const options =
+                      entry.type === "role"
+                        ? [...guild.roles]
+                            .filter((r) => r.id !== guild.guildId)
+                            .sort((a, b) => b.position - a.position)
+                        : [...guild.channels].sort((a, b) => a.position - b.position);
+                    const known = options.some((o) => o.id === entry.id);
+                    return (
+                      <Select
+                        id={id}
+                        value={known ? entry.id : ""}
+                        onChange={(e) => {
+                          const v = e.currentTarget.value;
+                          if (v) updateEntry(i, { ...entry, id: v });
+                        }}
+                      >
+                        <option value="">Choose from server…</option>
+                        {options.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {entry.type === "role" ? `@${o.name}` : `#${o.name}`}
+                          </option>
+                        ))}
+                      </Select>
+                    );
+                  }}
+                </Field>
+              ) : null}
               <div className={styles.row2}>
                 <Field label="Snowflake ID">
                   {(id) => (

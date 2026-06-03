@@ -1,0 +1,39 @@
+# Runs the proxy. Cloudflare Tunnel is installed on the host, so there is no
+# cloudflared container here. The proxy is published on the LOOPBACK address
+# only (127.0.0.1) — not reachable from the public internet, only by the host
+# (where cloudflared runs) and other local processes.
+#
+# Point your tunnel's ingress at  http://localhost:8080  (see README).
+#
+#   cp .env.example .env   # then fill it in
+#   docker compose up -d --build
+#
+# Multi-instance scaling (optional): start a shared Redis with the `redis`
+# profile and point the proxy at it via REDIS_URL in .env:
+#   REDIS_URL=redis://redis:6379
+#   docker compose --profile redis up -d --build
+
+services:
+  proxy:
+    build: .
+    image: dweeb-proxy:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/dweeb-proxy", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Only started when you opt in with `--profile redis`. Shared cache +
+  # rate-limit store for running several `proxy` replicas behind a balancer.
+  redis:
+    image: redis:7-alpine
+    profiles: ["redis"]
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # Not published to the host — only the proxy talks to it over the compose
+    # network. Add a `ports:` mapping only if you need to inspect it directly.

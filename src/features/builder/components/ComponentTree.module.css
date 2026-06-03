@@ -11,6 +11,11 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Server-data connection panel above the webhook meta header. */
+.guildConnect {
+  margin: 0 4px 12px;
+}
+
 .meta {
   display: flex;
   flex-direction: column;

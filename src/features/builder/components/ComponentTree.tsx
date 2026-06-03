@@ -85,6 +85,8 @@ import {
 } from "@/features/builder/useValidation";
 import { useFileDrop } from "./useFileDrop";
 import { addFilesToGallery, replaceGalleryItemFiles } from "./galleryUpload";
+import { isProxyConfigured } from "@/core/guild/config";
+import { GuildConnect } from "@/features/guild/GuildConnect";
 import { Inspector } from "./Inspector";
 import { GalleryItemInspector } from "./inspectors/GalleryItemInspector";
 import { IssueDot, IssueList } from "./ValidationIssues";
@@ -342,6 +344,12 @@ export function ComponentTree() {
       <DragContext.Provider value={dragSession}>
         <div className={styles.tree}>
           <div ref={scrollRef} className={styles.scroll}>
+            {isProxyConfigured() ? (
+              <div className={styles.guildConnect}>
+                <GuildConnect />
+              </div>
+            ) : null}
+
             <MetaHeader />
 
             {components.length === 0 ? (

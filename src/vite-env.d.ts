@@ -1,5 +1,19 @@
 /// <reference types="vite/client" />
 
+// Build-time configuration for the optional DWEEB proxy (see `server/` and
+// `.env.example`). Both are optional: with no base URL the guild features stay
+// dormant and the app behaves as a pure client-side builder.
+interface ImportMetaEnv {
+  /** Proxy origin, e.g. `https://api.dweeb.example.com`. */
+  readonly VITE_PROXY_BASE_URL?: string;
+  /** Discord application (client) id — public; used for the bot-invite link. */
+  readonly VITE_DISCORD_CLIENT_ID?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
 // Treat default-imported CSS Modules as a string->string lookup so e.g.
 // `import styles from "./Foo.module.css"; styles.bar` type-checks.
 declare module "*.module.css" {
