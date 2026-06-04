@@ -102,7 +102,34 @@ export function AccountMenu() {
   // at a glance one is active without opening the menu.
   const connectedId = useGuildStore((s) => s.guildId);
   const connect = useGuildStore((s) => s.connect);
+  const guildStatus = useGuildStore((s) => s.status);
   const connectedGuild = guilds.find((g) => g.id === connectedId) ?? null;
+
+  // True while the post–sign-in auto-select is about to connect to a server but
+  // hasn't yet, so the spinner spans that gap instead of briefly baring a
+  // server-less avatar before the connected-server data begins loading.
+  const pendingConnect =
+    status === "authed" &&
+    guildsStatus === "ready" &&
+    !connectedId &&
+    guilds.some((g) => g.bot_present);
+
+  // Everything that must land before the account icon is meaningful: the
+  // session, the server list, and the connected server's data. While any of it
+  // is in flight we hold one full spinner rather than an interim icon.
+  const busy =
+    status === "unknown" ||
+    status === "loading" ||
+    guildsStatus === "loading" ||
+    guildStatus === "loading" ||
+    pendingConnect;
+
+  // Latch the first full resolution. Afterwards a background refresh updates the
+  // data behind the existing icon instead of collapsing the trigger (and any
+  // open menu) back into a spinner — the full loader is a first-load affordance.
+  const settledRef = useRef(false);
+  if (!busy) settledRef.current = true;
+  const showLoader = busy && !settledRef.current;
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   // One-shot guard so the post–sign-in auto-select runs once, not on every
@@ -182,11 +209,19 @@ export function AccountMenu() {
     if (target) void connect(target.id);
   }, [status, guildsStatus, connectedId, guilds, connect, loadGuilds, login]);
 
-  // Resolving the session — a quiet placeholder so the bar doesn't jump.
-  if (status === "unknown" || status === "loading") {
+  // Still loading something — hold a single breathing skeleton (no icon) so the
+  // trigger resolves straight to its final icon in one smooth step, with no
+  // intermediate login/avatar icon flashing in between.
+  if (showLoader) {
     return (
-      <button type="button" className={styles.trigger} disabled aria-label="Checking sign-in…">
-        <LogInIcon size={18} />
+      <button
+        type="button"
+        className={cn(styles.trigger, styles.loading)}
+        disabled
+        aria-label="Loading…"
+        aria-busy="true"
+      >
+        <span className={styles.skeleton} aria-hidden="true" />
       </button>
     );
   }
@@ -201,7 +236,7 @@ export function AccountMenu() {
         title="Sign in with Discord to load server roles, channels, and emoji"
         aria-label="Sign in with Discord"
       >
-        <LogInIcon size={18} />
+        <LogInIcon size={22} className={styles.reveal} />
       </button>
     );
   }
@@ -227,12 +262,12 @@ export function AccountMenu() {
           }
         >
           {connectedGuild ? (
-            <span className={styles.composite}>
+            <span className={cn(styles.composite, styles.reveal)}>
               <GuildIcon guild={connectedGuild} className={styles.compositeServer} />
               <Avatar user={user} size={18} className={styles.compositeUser} />
             </span>
           ) : (
-            <Avatar user={user} size={24} />
+            <Avatar user={user} size={28} className={styles.reveal} />
           )}
         </button>
       }

@@ -26,21 +26,73 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* The first-load spinner isn't a dimmed icon, so it keeps full strength and a
+ * neutral cursor even though the button is held inert while loading. */
+.trigger.loading:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+/* Breathing skeleton shown in the trigger while the account data is still
+ * loading — a single neutral placeholder standing in for whichever icon (login
+ * or avatar) resolves once everything has landed. The slow opacity pulse reads
+ * as a soft "breathing" skeleton rather than a busy spinner. */
+.skeleton {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--app-bg-active);
+  animation: accountMenuBreathe 1.6s ease-in-out infinite;
+}
+
+/* The resolved icon fades + scales in once, so the skeleton → icon hand-off
+ * reads as a smooth reveal rather than a hard swap. */
+.reveal {
+  animation: accountMenuReveal 160ms ease both;
+}
+
+@keyframes accountMenuBreathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes accountMenuReveal {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .reveal {
+    animation: none;
+  }
+}
 
 /* Connected badge — the server icon as a rounded square with the user's avatar
  * tucked into the corner as a circle, so the trigger reads "you, in this server". */
 .composite {
   position: relative;
   display: block;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex: none;
 }
 .compositeServer {
   display: block;
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
   object-fit: cover;
 }
 .compositeUser {
