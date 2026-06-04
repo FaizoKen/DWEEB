@@ -7,10 +7,10 @@
  * inside the Builder's action bar.
  *
  * On narrow viewports the preview pane is hidden and slides up from the
- * bottom as a sheet when the user taps the floating "Preview" button. The
- * sheet can be dismissed by swiping it down via its top drag handle. This
- * keeps the editor full-width on mobile while preserving one-tap access to
- * the render.
+ * bottom as a sheet when the user taps the floating live mini preview — a
+ * scaled, real-time thumbnail of the message. The sheet can be dismissed by
+ * swiping it down via its top drag handle. This keeps the editor full-width
+ * on mobile while preserving one-tap access to the render.
  *
  * First-visit flow:
  *  1. `bootstrap()` in the store seeds either a saved draft or the showcase
@@ -24,6 +24,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { TouchEvent as ReactTouchEvent } from "react";
 import { Builder } from "@/features/builder/Builder";
 import { Preview } from "@/features/preview/Preview";
+import { MiniPreview } from "@/features/preview/MiniPreview";
 import { useAiStore } from "@/core/ai/aiStore";
 
 // Interaction-gated surfaces: none are needed for first paint, so they're code-
@@ -168,6 +169,24 @@ function usePreviewSwipeToClose(onClose: () => void) {
   };
 }
 
+/**
+ * Tracks whether the layout is in its mobile (bottom-sheet) form. Used to gate
+ * mounting the live mini preview: it renders a second full <Preview /> tree, so
+ * we only want it alive on the viewports where it's actually shown.
+ */
+function useIsMobileSheet() {
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(MOBILE_SHEET_QUERY).matches,
+  );
+  useEffect(() => {
+    const mql = window.matchMedia(MOBILE_SHEET_QUERY);
+    const onChange = () => setIsMobile(mql.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+  return isMobile;
+}
+
 export function App() {
   useShareUrlBootstrap();
   useKeyboardShortcuts();
@@ -196,6 +215,10 @@ export function App() {
   // `previewOpen` only matters on mobile, where the preview pane is a
   // bottom sheet. On desktop the CSS keeps both panes visible regardless.
   const [previewOpen, setPreviewOpen] = useState(false);
+
+  // Gates the live mini preview, which is a mobile-only affordance (and mounts
+  // its own <Preview />, so we keep it off the desktop tree entirely).
+  const isMobileSheet = useIsMobileSheet();
 
   // The AI assistant docks as a third column on desktop and a floating window
   // over the preview on mobile; `aiOpen` drives the app-shell grid switch.
@@ -300,25 +323,37 @@ export function App() {
       ) : null}
 
       <div className="fab-stack">
-        <button
-          type="button"
-          className="preview-fab"
-          onClick={() => setPreviewOpen(true)}
-          aria-label="Show preview"
-        >
-          <EyeIcon size={18} />
-          <span>Preview</span>
-        </button>
+        {/* Live mini preview: a tappable, real-time thumbnail of the message
+            that opens the full preview sheet. Mobile only — on desktop the
+            preview is already a permanent side column. Sits above the action
+            row, so the corner reads as a stacked widget. */}
+        {isMobileSheet && !previewOpen ? <MiniPreview onOpen={() => setPreviewOpen(true)} /> : null}
 
-        <button
-          type="button"
-          className="ai-fab"
-          onClick={openAiWithPreview}
-          aria-label="Open the AI assistant"
-        >
-          <SparkleIcon size={20} />
-          <span>AI Assistant</span>
-        </button>
+        <div className="fab-row">
+          {/* Explicit "open the full preview" toggle, beneath its thumbnail.
+              Mobile only — the desktop preview is always visible. */}
+          {isMobileSheet && !previewOpen ? (
+            <button
+              type="button"
+              className="preview-fab"
+              onClick={() => setPreviewOpen(true)}
+              aria-label="Show preview"
+            >
+              <EyeIcon size={18} />
+              <span>Preview</span>
+            </button>
+          ) : null}
+
+          <button
+            type="button"
+            className="ai-fab"
+            onClick={openAiWithPreview}
+            aria-label="Open the AI assistant"
+          >
+            <SparkleIcon size={20} />
+            <span>AI Assistant</span>
+          </button>
+        </div>
       </div>
 
       {shareMounted ? (

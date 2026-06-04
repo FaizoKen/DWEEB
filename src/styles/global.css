@@ -65,21 +65,33 @@
 }
 
 /* Floating action stack, anchored to the true bottom-right corner. The
- * safe-area inset keeps it clear of the iOS home indicator. Buttons inside
- * sit in a row so the support button lands beside the preview toggle. */
+ * safe-area inset keeps it clear of the iOS home indicator. Children stack
+ * vertically and hug the right edge: the live mini preview on top, then the
+ * action row (Preview toggle + AI launcher) beneath it. */
 .fab-stack {
   position: fixed;
   right: 16px;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   z-index: var(--app-z-toolbar);
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+/* The action row under the mini preview. On desktop only the AI launcher
+ * remains, so the row collapses to that single pill. */
+.fab-row {
+  display: flex;
   align-items: center;
   gap: 12px;
 }
 
-/* Preview-toggle: hidden on desktop, shown on mobile. */
+/* Preview-toggle: only ever rendered on mobile (App gates it). A compact
+ * accent pill — the original style — sitting in the action row beside the AI
+ * launcher, opening the full preview sheet. */
 .preview-fab {
-  display: none;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   height: var(--app-fab-h);
@@ -225,16 +237,8 @@
     z-index: var(--app-z-modal);
   }
 
-  .preview-fab {
-    display: inline-flex;
-  }
-
-  .app-shell[data-preview-open="true"] .preview-fab {
-    display: none;
-  }
-
-  /* Beside the preview toggle in the corner, collapsed to an icon-only
-   * circle so the pair fits comfortably on narrow screens. */
+  /* Collapsed to an icon-only circle so the Preview/AI pair keeps its original
+   * compact look and fits comfortably on narrow screens. */
   .ai-fab {
     gap: 0;
     width: var(--app-fab-h);

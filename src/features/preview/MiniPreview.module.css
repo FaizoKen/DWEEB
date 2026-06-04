@@ -1,0 +1,59 @@
+/* The card is only mounted on mobile (App gates it behind `useIsMobileSheet`),
+ * so it can be unconditionally visible here — there's no desktop case to hide. */
+.card {
+  position: relative;
+  /* Width matches the Preview/AI row below so their left edges line up; height
+   * keeps the row's ~1.58 aspect so the thumbnail reads as a tidy little card. */
+  width: 165px;
+  height: 104px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--discord-bg-primary);
+  box-shadow:
+    var(--app-shadow-lg),
+    0 0 0 1px rgba(255, 255, 255, 0.07) inset;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+.card:focus-visible {
+  outline: none;
+  box-shadow: var(--app-shadow-lg), var(--app-focus-ring);
+}
+.card:hover {
+  box-shadow:
+    var(--app-shadow-lg),
+    0 0 0 1px rgba(255, 255, 255, 0.16) inset;
+}
+.card:active {
+  transform: scale(0.97);
+}
+
+/* Clipping window for the scaled render. `pointer-events: none` cascades to the
+ * whole preview so every tap falls through to the card itself, regardless of
+ * how a given browser implements `inert`'s pointer handling. */
+.viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Holds the real <Preview /> at "full" size, then scales it down. Sizing the
+ * stage to 200% of the card and scaling by 0.5 makes the rendered box fill the
+ * card exactly at *any* card size — no width/height needs to track the card.
+ * Origin is the top-left so it shrinks toward the corner and reveals the *start*
+ * of the message; `display: flex` lets the preview's `flex: 1` surface fill it. */
+.stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 200%;
+  height: 200%;
+  display: flex;
+  transform: scale(0.5);
+  transform-origin: top left;
+}

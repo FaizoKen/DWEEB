@@ -6,7 +6,8 @@
 
 .scroll {
   overflow-y: auto;
-  /* Bottom padding clears the floating Add-component pill (and Preview FAB on mobile). */
+  /* Bottom padding clears the floating Add-component pill bottom-left; the mobile
+   * override below widens it to also clear the live mini preview corner widget. */
   padding: 10px 10px 92px;
   -webkit-overflow-scrolling: touch;
 }
@@ -724,6 +725,18 @@ button.statPill {
   background: var(--app-warning-soft);
   border-radius: var(--app-radius-sm);
   margin-top: 4px;
+}
+
+/* On mobile the live mini preview corner widget — a 104px thumbnail stacked
+ * above the Preview/AI button row — floats over the builder's bottom-right.
+ * Reserve room below the list (thumbnail + 10px gap + button row + the 16px
+ * corner offset, plus breathing space) so the last components can scroll clear
+ * of it. On desktop the widget sits over the preview column, so the base
+ * padding is enough. Matches the 900px sheet breakpoint that mounts the widget. */
+@media (max-width: 900px) {
+  .scroll {
+    padding-bottom: calc(104px + 10px + var(--app-fab-h) + 36px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 @media (max-width: 640px) {
