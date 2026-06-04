@@ -124,6 +124,24 @@
   text-decoration: underline;
 }
 
+/* Spinner shown in the confirm button while the send is in flight. Borrows the
+   button's text colour via `currentColor`, so it reads on the primary fill. */
+.spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: sendConfirmSpin 0.6s linear infinite;
+}
+
+@keyframes sendConfirmSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* No-ping state — calm, reassuring. */
 .pingCalm {
   background: var(--app-bg-elevated);

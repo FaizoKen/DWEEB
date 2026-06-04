@@ -19,6 +19,7 @@
  */
 
 import { OWNER_COPY, webhookAvatarUrl, type WebhookOwnerKind } from "@/core/webhook";
+import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import type { PingSummary } from "@/core/schema/mentions";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -58,6 +59,12 @@ export interface SendConfirmProps {
   messageId?: string;
   /** Who the message will ping, after `allowed_mentions`. */
   pings: PingSummary;
+  /**
+   * The confirmed send is in flight. The confirm button shows a spinner and is
+   * disabled (so it can't be double-fired); the dialog stays open until the
+   * panel resolves the outcome and closes it.
+   */
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -147,6 +154,7 @@ export function SendConfirm({
   threadId,
   messageId,
   pings,
+  busy = false,
   onConfirm,
   onCancel,
 }: SendConfirmProps) {
@@ -164,8 +172,19 @@ export function SendConfirm({
           <Button variant="secondary" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={onConfirm}>
-            {mode === "update" ? "Update message" : "Post message"}
+          <Button
+            variant="primary"
+            onClick={onConfirm}
+            disabled={busy}
+            leadingIcon={busy ? <span className={styles.spinner} aria-hidden="true" /> : undefined}
+          >
+            {busy
+              ? mode === "update"
+                ? "Updating…"
+                : "Posting…"
+              : mode === "update"
+                ? "Update message"
+                : "Post message"}
           </Button>
         </>
       }
@@ -240,6 +259,14 @@ export function SendConfirm({
                   href={`https://discord.com/channels/${guildId}/${channelId}`}
                   target="_blank"
                   rel="noopener noreferrer"
+                  // Plain click opens the desktop app (falls back to web);
+                  // modified clicks keep their native open-in-new-tab behaviour.
+                  onClick={(e) =>
+                    handleDiscordLinkClick(
+                      e,
+                      `https://discord.com/channels/${guildId}/${channelId}`,
+                    )
+                  }
                 >
                   Open ↗
                 </a>

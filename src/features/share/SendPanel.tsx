@@ -71,6 +71,7 @@ import { cn } from "@/lib/cn";
 import { isProxyConfigured, webhookCreateUrl, type IncomingWebhook } from "@/core/guild/config";
 import { WebhookRecents } from "./WebhookRecents";
 import { SendConfirm } from "./SendConfirm";
+import { SendSuccess } from "./SendSuccess";
 import { Callout } from "./Callout";
 import styles from "./SendPanel.module.css";
 
@@ -78,6 +79,38 @@ type SendState =
   | { kind: "idle" }
   | { kind: "sending" }
   | { kind: "error"; message: string; retryAfter?: number; status?: number; body?: unknown };
+
+/** Destination + deep link captured after a successful send, for `SendSuccess`. */
+interface SendSuccessInfo {
+  mode: "new" | "update";
+  webhookName?: string;
+  webhookId?: string;
+  webhookAvatar?: string | null;
+  guildId?: string;
+  channelId?: string;
+  guildName?: string;
+  channelName?: string;
+  /** Deep link to the message (or its channel); null when unresolved. */
+  discordUrl: string | null;
+}
+
+/** Pull the new message's snowflake from a Discord response (POST wait=true / PATCH). */
+function messageIdFromBody(body: unknown): string | undefined {
+  if (body && typeof body === "object") {
+    const id = (body as { id?: unknown }).id;
+    if (typeof id === "string" && id.length > 0) return id;
+  }
+  return undefined;
+}
+
+/** Channel id echoed back on a Discord message body — a fallback destination. */
+function channelIdFromBody(body: unknown): string | undefined {
+  if (body && typeof body === "object") {
+    const id = (body as { channel_id?: unknown }).channel_id;
+    if (typeof id === "string" && id.length > 0) return id;
+  }
+  return undefined;
+}
 
 /** Pretty-print a Discord error body for the raw-response view. */
 function formatRawBody(body: unknown): string {
@@ -123,6 +156,12 @@ export function SendPanel({
   // Pre-send confirmation. Opened by `handleSend` once inputs validate; the
   // actual POST/PATCH runs from `handleConfirmedSend` when the user confirms.
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Post-send result dialog — confirms delivery and offers a deep link straight
+  // to the message in Discord. Null when closed.
+  const [success, setSuccess] = useState<SendSuccessInfo | null>(null);
+  // True while a confirmed send is in flight. Keeps the confirm dialog open with
+  // a loading button instead of closing it the instant "Post" is clicked.
+  const [confirmBusy, setConfirmBusy] = useState(false);
   // Result of the last "Save webhook" verify GET — used to show who owns the
   // webhook (bot vs. person) and where it posts (guild/channel) before any
   // message is sent.
@@ -307,7 +346,6 @@ export function SendPanel({
   };
 
   const handleConfirmedSend = async () => {
-    setConfirmOpen(false);
     // Inputs were validated in handleSend; re-guard for type-narrowing.
     if (!parsedUrl) return;
     if (mode === "update" && !parsedMessageId) return;
@@ -315,92 +353,150 @@ export function SendPanel({
     const ac = new AbortController();
     abortRef.current = ac;
 
+    // Keep the confirm dialog open with a loading button while the POST/PATCH is
+    // in flight — closing it the instant "Post" is hit (then opening a separate
+    // result modal) made the transition flicker. It's closed in the `finally`
+    // below, once the outcome is known and the next view is ready.
+    setConfirmBusy(true);
     setState({ kind: "sending" });
     setShowRaw(false);
 
-    // Always confirm who owns the webhook before posting. When we don't yet
-    // know (no prior "Save webhook" or saved entry), GET it first so the
-    // ownership block fires here instead of letting an interactive message slip
-    // through to Discord and bounce back as a rejection.
-    let ownerKind = knownOwnerKind;
-    // The webhook's own name + avatar + location, captured if we end up
-    // verifying here. Used to label and picture the recents entry (and to show
-    // the destination in the confirm) without asking for input.
-    let resolvedName: string | undefined;
-    let resolvedAvatar: string | null | undefined;
-    let resolvedChannelId: string | undefined;
-    let resolvedGuildId: string | undefined;
-    if (!ownerKind) {
-      const check = await verifyWebhook(parsedUrl, { signal: ac.signal });
-      if (!check.ok) {
-        if (check.status === 0 && check.error === "Check was cancelled.") {
-          setState({ kind: "idle" });
+    try {
+      // Always confirm who owns the webhook before posting. When we don't yet
+      // know (no prior "Save webhook" or saved entry), GET it first so the
+      // ownership block fires here instead of letting an interactive message slip
+      // through to Discord and bounce back as a rejection.
+      let ownerKind = knownOwnerKind;
+      // The webhook's own name + avatar + location, captured if we end up
+      // verifying here. Used to label and picture the recents entry (and to show
+      // the destination in the confirm) without asking for input.
+      let resolvedName: string | undefined;
+      let resolvedAvatar: string | null | undefined;
+      let resolvedChannelId: string | undefined;
+      let resolvedGuildId: string | undefined;
+      if (!ownerKind) {
+        const check = await verifyWebhook(parsedUrl, { signal: ac.signal });
+        if (!check.ok) {
+          if (check.status === 0 && check.error === "Check was cancelled.") {
+            setState({ kind: "idle" });
+            return;
+          }
+          setState({ kind: "error", message: check.error, status: check.status, body: check.body });
           return;
         }
-        setState({ kind: "error", message: check.error, status: check.status, body: check.body });
+        const owner = classifyWebhookOwner(check.webhook);
+        ownerKind = owner.kind;
+        resolvedName = typeof check.webhook.name === "string" ? check.webhook.name : undefined;
+        resolvedAvatar = webhookAvatarHash(check.webhook);
+        resolvedChannelId = webhookChannelId(check.webhook) ?? undefined;
+        resolvedGuildId = webhookGuildId(check.webhook) ?? undefined;
+        setVerified({
+          name: resolvedName ?? "",
+          owner,
+          channelId: resolvedChannelId,
+          guildId: resolvedGuildId,
+        });
+      }
+
+      if (appWebhookNote != null && (ownerKind === "user" || ownerKind === "follower")) {
+        // Setting `verified` above flips `ownershipBlocked`, so the banner (with
+        // the "Remove interactive components" action) now renders on its own —
+        // don't duplicate it as an error line. Just leave the send un-started.
+        setState({ kind: "idle" });
         return;
       }
-      const owner = classifyWebhookOwner(check.webhook);
-      ownerKind = owner.kind;
-      resolvedName = typeof check.webhook.name === "string" ? check.webhook.name : undefined;
-      resolvedAvatar = webhookAvatarHash(check.webhook);
-      resolvedChannelId = webhookChannelId(check.webhook) ?? undefined;
-      resolvedGuildId = webhookGuildId(check.webhook) ?? undefined;
-      setVerified({
-        name: resolvedName ?? "",
-        owner,
-        channelId: resolvedChannelId,
-        guildId: resolvedGuildId,
-      });
-    }
 
-    if (appWebhookNote != null && (ownerKind === "user" || ownerKind === "follower")) {
-      // Setting `verified` above flips `ownershipBlocked`, so the banner (with
-      // the "Remove interactive components" action) now renders on its own —
-      // don't duplicate it as an error line. Just leave the send un-started.
-      setState({ kind: "idle" });
-      return;
-    }
+      const result =
+        mode === "update" && parsedMessageId
+          ? await updateWebhookMessage(parsedUrl, parsedMessageId, message, {
+              threadId: threadId.trim() || undefined,
+              signal: ac.signal,
+            })
+          : await sendToWebhook(parsedUrl, message, {
+              threadId: threadId.trim() || undefined,
+              // Ask Discord to echo the created message so we can deep-link to it
+              // from the success dialog (without `wait` a POST is a bodyless 204).
+              wait: true,
+              signal: ac.signal,
+            });
 
-    const result =
-      mode === "update" && parsedMessageId
-        ? await updateWebhookMessage(parsedUrl, parsedMessageId, message, {
-            threadId: threadId.trim() || undefined,
-            signal: ac.signal,
-          })
-        : await sendToWebhook(parsedUrl, message, {
-            threadId: threadId.trim() || undefined,
-            signal: ac.signal,
-          });
+      if (result.ok) {
+        // Success is surfaced by the result dialog below; no inline banner needed.
+        setState({ kind: "idle" });
+        // Always remember the webhook on a successful send so it shows up in
+        // recents without a separate "Save webhook" click. Records the name +
+        // owner we resolved above; any inline label is preserved by the upsert,
+        // which also refreshes lastUsedAt so recents stay ordered by most-recent.
+        rememberWebhook(parsedUrl.url, {
+          name: resolvedName,
+          ownerKind,
+          avatar: resolvedAvatar,
+          channelId: resolvedChannelId,
+          guildId: resolvedGuildId,
+        });
+        setHistory(loadHistory());
 
-    if (result.ok) {
-      // Success is surfaced by the toast below; no inline banner needed.
-      setState({ kind: "idle" });
-      pushToast(
-        mode === "update" ? "Original message updated." : "Message delivered to Discord.",
-        "success",
-      );
-      // Always remember the webhook on a successful send so it shows up in
-      // recents without a separate "Save webhook" click. Records the name +
-      // owner we resolved above; any inline label is preserved by the upsert,
-      // which also refreshes lastUsedAt so recents stay ordered by most-recent.
-      rememberWebhook(parsedUrl.url, {
-        name: resolvedName,
-        ownerKind,
-        avatar: resolvedAvatar,
-        channelId: resolvedChannelId,
-        guildId: resolvedGuildId,
-      });
-      setHistory(loadHistory());
-    } else {
-      setState({
-        kind: "error",
-        message: result.error,
-        retryAfter: result.retryAfter,
-        status: result.status,
-        body: result.body,
-      });
+        // Pop the success dialog with a deep link straight to the message. Prefer
+        // the ids resolved on this send (a freshly-verified URL) over the
+        // best-known ones, and pull the message id out of the response (POST uses
+        // wait=true; PATCH always echoes it) so "Open in Discord" lands on the
+        // exact message — falling back to the channel, or to no link when the
+        // guild/channel can't be resolved.
+        const effGuildId = resolvedGuildId ?? knownGuildId;
+        const effChannelId = resolvedChannelId ?? knownChannelId ?? channelIdFromBody(result.body);
+        const postedMessageId =
+          messageIdFromBody(result.body) ??
+          (mode === "update" ? (parsedMessageId ?? undefined) : undefined);
+        // A thread post lives under the thread id, which Discord uses as the
+        // channel segment of the message link.
+        const linkChannelSeg = threadId.trim() || effChannelId;
+        const discordUrl =
+          effGuildId && linkChannelSeg
+            ? `https://discord.com/channels/${effGuildId}/${linkChannelSeg}${
+                postedMessageId ? `/${postedMessageId}` : ""
+              }`
+            : null;
+        setSuccess({
+          mode,
+          webhookName: resolvedName ?? knownName,
+          webhookId: parsedUrl.id,
+          webhookAvatar: resolvedAvatar ?? knownAvatar,
+          guildId: effGuildId,
+          channelId: effChannelId,
+          guildName:
+            knownGuildName ??
+            (effGuildId ? authGuilds.find((g) => g.id === effGuildId)?.name : undefined),
+          channelName:
+            knownChannelName ??
+            (effChannelId ? connectedData?.channelById[effChannelId]?.name : undefined),
+          discordUrl,
+        });
+      } else if (result.status === 0 && /cancel/i.test(result.error)) {
+        // Aborted via the dialog's Cancel — not an error worth surfacing.
+        setState({ kind: "idle" });
+      } else {
+        setState({
+          kind: "error",
+          message: result.error,
+          retryAfter: result.retryAfter,
+          status: result.status,
+          body: result.body,
+        });
+      }
+    } finally {
+      // Whatever the outcome, drop the loading state and close the confirm —
+      // success swaps to the result modal; error/blocked reveals the panel.
+      setConfirmBusy(false);
+      setConfirmOpen(false);
     }
+  };
+
+  // Cancel from the confirm dialog. While a send is in flight this aborts it
+  // (so dismissing mid-post doesn't leave the request running); otherwise it
+  // just closes. Either way the `finally` above tidies up the busy/open state.
+  const handleConfirmCancel = () => {
+    if (confirmBusy) abortRef.current?.abort();
+    setConfirmOpen(false);
   };
 
   // Verify the webhook with Discord (GET), then store it — no message is posted.
@@ -833,8 +929,23 @@ export function SendPanel({
         threadId={threadId.trim() || undefined}
         messageId={mode === "update" ? (parsedMessageId ?? undefined) : undefined}
         pings={pings}
+        busy={confirmBusy}
         onConfirm={handleConfirmedSend}
-        onCancel={() => setConfirmOpen(false)}
+        onCancel={handleConfirmCancel}
+      />
+
+      <SendSuccess
+        open={success != null}
+        mode={success?.mode ?? "new"}
+        webhookName={success?.webhookName}
+        webhookId={success?.webhookId}
+        webhookAvatar={success?.webhookAvatar}
+        guildId={success?.guildId}
+        channelId={success?.channelId}
+        guildName={success?.guildName}
+        channelName={success?.channelName}
+        discordUrl={success?.discordUrl ?? null}
+        onClose={() => setSuccess(null)}
       />
     </>
   );
