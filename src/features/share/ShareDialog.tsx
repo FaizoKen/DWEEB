@@ -24,6 +24,7 @@ import {
   buildShareUrl,
   convertV1Payload,
   copyText,
+  createShortLink,
   decodeJson,
   decodeShare,
   detectV1Fields,
@@ -157,6 +158,25 @@ function ShareLinkPanel() {
   const token = useMemo(() => encodeShare(message), [message]);
   const url = useMemo(() => buildShareUrl(token), [token]);
 
+  // The short link is opt-in: it uploads this message so it can be served from a
+  // tiny `/s/…` URL. A short link pins one specific snapshot, so clear it
+  // whenever the message (token) changes.
+  const [shortUrl, setShortUrl] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  useEffect(() => setShortUrl(null), [token]);
+
+  const handleCreateShort = async () => {
+    setCreating(true);
+    const result = await createShortLink(token);
+    setCreating(false);
+    if (result.ok) {
+      setShortUrl(result.url);
+      pushToast("Short link created — expires in 7 days.", "success");
+    } else {
+      pushToast(`Couldn't create short link: ${result.error}`, "error");
+    }
+  };
+
   return (
     <>
       <p className={styles.lead}>
@@ -188,6 +208,41 @@ function ShareLinkPanel() {
           Update address bar
         </Button>
       </div>
+
+      <section className={styles.shortLink}>
+        <p className={styles.lead}>
+          <strong>Short link (optional).</strong> Need a tiny URL? This{" "}
+          <strong>uploads the message to our server</strong> and serves it back from{" "}
+          <code>/s/…</code>, auto-deleting after <strong>7 days</strong>. Unlike the hash link
+          above, the contents leave your browser — skip it for sensitive messages.
+        </p>
+        {shortUrl ? (
+          <>
+            <div className={styles.urlRow}>
+              <TextInput readOnly value={shortUrl} spellCheck={false} />
+              <button
+                type="button"
+                className={styles.revealBtn}
+                onClick={async () => {
+                  if (await copyText(shortUrl)) pushToast("Short link copied", "success");
+                  else pushToast("Copy failed", "error");
+                }}
+              >
+                Copy
+              </button>
+            </div>
+            <div className={styles.statsRow}>
+              <span className={styles.statChip}>Expires in 7 days</span>
+            </div>
+          </>
+        ) : (
+          <div className={styles.actions}>
+            <Button variant="secondary" onClick={handleCreateShort} disabled={creating}>
+              {creating ? "Creating…" : "Create short link"}
+            </Button>
+          </div>
+        )}
+      </section>
     </>
   );
 }
@@ -250,8 +305,10 @@ function AboutPanel() {
       <p className={styles.lead}>
         <strong>Private by design.</strong> Everything runs in your browser — message drafts,
         webhook URLs, and share links never reach our servers (share state lives in the URL hash;
-        webhook tokens go only to Discord). No account, no database, nothing uploaded — so it's
-        safe for sensitive announcements and built to scale with large communities and teams.
+        webhook tokens go only to Discord). No account, no database, nothing uploaded. The one
+        exception is opt-in: creating a <em>short link</em> uploads that message so it can be served
+        from a tiny URL, and it's auto-deleted after 7 days — for sensitive announcements, stick
+        with the default hash link.
       </p>
       <p className={styles.lead}>
         And yes, it stands for <em>Discord Webhook Embed Builder</em>. 🤓

@@ -1,22 +1,48 @@
 /**
- * Boots the editor from `#s=<token>` exactly once on first mount.
+ * Boots the editor from a shared link exactly once on first mount.
  *
- * If the URL carries a share token we decode it, replace the active message,
- * and strip the token so subsequent edits don't appear to be "off" relative
- * to the URL. Failures show a toast but never block the editor from opening.
+ * Two link shapes feed the editor:
+ *  - `#s=<token>` — the whole message lives in the URL hash. Decoded inline.
+ *  - `/s/<id>`    — an opt-in short link; the token is fetched from the server
+ *                   (Cloudflare KV), then decoded the same way.
  *
- * After the initial boot we don't watch the hash — share state is one-way:
+ * In both cases we decode, replace the active message, and strip the link from
+ * the address bar so subsequent edits don't look "off" relative to the URL.
+ * Failures show a toast but never block the editor from opening.
+ *
+ * After the initial boot we don't watch the URL — share state is one-way:
  * URL → editor on open, editor → URL only on user request.
  */
 
 import { useEffect, useRef } from "react";
-// Import the token readers directly from `url` (pure string ops, no lz-string)
-// so the compression/migration code stays out of the initial bundle. The
-// decoder — which pulls in lz-string — is loaded on demand below, only when a
-// share token is actually present.
+// Import the token readers directly (pure string ops, no lz-string) so the
+// compression/migration code stays out of the initial bundle. The decoder —
+// which pulls in lz-string — is loaded on demand below, only when a share link
+// is actually present.
 import { clearShareTokenFromHash, readShareTokenFromHash } from "@/core/serialization/url";
+import { readShortLinkId, resolveShortLink } from "@/core/serialization/shortlink";
 import { useMessageStore } from "@/core/state/messageStore";
 import { pushToast } from "@/ui/Toast";
+
+type ReplaceMessage = ReturnType<typeof useMessageStore.getState>["replaceMessage"];
+
+/** Decode a token and either load it into the editor or toast the failure. */
+async function applyToken(token: string, replaceMessage: ReplaceMessage): Promise<boolean> {
+  const { decodeShare } = await import("@/core/serialization/encode");
+  const result = decodeShare(token);
+  if (result.ok) {
+    replaceMessage(result.message);
+    pushToast("Loaded message from shared link.", "info");
+    return true;
+  }
+  pushToast(`Couldn't load shared link: ${result.error}`, "error");
+  return false;
+}
+
+/** Replace `/s/<id>` in the address bar with `/` once it's been consumed. */
+function stripShortLinkFromPath(): void {
+  window.history.replaceState(null, "", window.location.origin + "/");
+}
 
 export function useShareUrlBootstrap(): void {
   const replaceMessage = useMessageStore((s) => s.replaceMessage);
@@ -25,18 +51,28 @@ export function useShareUrlBootstrap(): void {
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
+
+    // Short link first: resolve the token from the server, then decode it.
+    const shortId = readShortLinkId(window.location.pathname);
+    if (shortId) {
+      void (async () => {
+        const resolved = await resolveShortLink(shortId);
+        if (resolved.ok) {
+          await applyToken(resolved.token, replaceMessage);
+        } else {
+          pushToast(`Couldn't load shared link: ${resolved.error}`, "error");
+        }
+        // Either way, clear the id from the URL so a reload starts clean.
+        stripShortLinkFromPath();
+      })();
+      return;
+    }
+
+    // Hash link: the token is right here in the URL.
     const token = readShareTokenFromHash(window.location.hash);
     if (!token) return;
-    // Defer the decoder (and lz-string) until we know there's a token to decode.
-    void import("@/core/serialization/encode").then(({ decodeShare }) => {
-      const result = decodeShare(token);
-      if (result.ok) {
-        replaceMessage(result.message);
-        clearShareTokenFromHash();
-        pushToast("Loaded message from shared link.", "info");
-      } else {
-        pushToast(`Couldn't load shared link: ${result.error}`, "error");
-      }
+    void applyToken(token, replaceMessage).then((ok) => {
+      if (ok) clearShareTokenFromHash();
     });
   }, [replaceMessage]);
 }

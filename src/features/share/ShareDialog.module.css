@@ -16,7 +16,9 @@
   font-weight: 500;
   color: var(--app-text-muted);
   border-radius: var(--app-radius-sm);
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 .tab:hover {
   color: var(--app-text);
@@ -94,7 +96,22 @@
   justify-content: flex-end;
 }
 
-.mono { font-family: var(--app-font-mono); font-size: 12px; }
+/* Opt-in short-link subsection in the Share link tab — divided off from the
+ * default (hash) link above it so the "this uploads" tradeoff reads as a
+ * distinct, deliberate choice. */
+.shortLink {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--app-border);
+}
+
+.mono {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+}
 
 .error {
   font-size: 12px;
@@ -109,7 +126,10 @@
   align-items: stretch;
   width: 100%;
 }
-.urlRow > :first-child { flex: 1; min-width: 0; }
+.urlRow > :first-child {
+  flex: 1;
+  min-width: 0;
+}
 
 .revealBtn {
   padding: 0 12px;
@@ -118,9 +138,14 @@
   border-radius: var(--app-radius-sm);
   color: var(--app-text-muted);
   font-size: 12px;
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
-.revealBtn:hover { color: var(--app-text); background: var(--app-bg-hover); }
+.revealBtn:hover {
+  color: var(--app-text);
+  background: var(--app-bg-hover);
+}
 
 .v1Preview {
   background: var(--app-bg-elevated);
@@ -180,7 +205,10 @@
   font-size: 11px;
   line-height: 1.5;
 }
-.v1PreviewItem:first-child { border-top: none; padding-top: 0; }
+.v1PreviewItem:first-child {
+  border-top: none;
+  padding-top: 0;
+}
 
 .v1PreviewBadge {
   padding: 1px 6px;

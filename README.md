@@ -94,8 +94,15 @@ way — Vite is the only thing the scripts actually invoke.
 4. The bundled `public/_headers` and `public/_redirects` ship with sensible
    defaults (CSP, immutable asset caching, SPA fallback). Override them only
    if you change the asset layout.
+5. **Optional — short links.** To enable the opt-in "Create short link" action,
+   bind a KV namespace named `SHORT_LINKS` to the Pages project (project →
+   **Settings → Functions → KV namespace bindings**). Without it, the
+   `/api/shorten` Function returns 503 and the UI just keeps offering the
+   default hash link. Stored entries auto-expire after 7 days.
 
-The site is a static SPA — there is no server runtime to configure.
+The site is a static SPA. The only server-side code is a couple of Cloudflare
+Pages Functions in [`functions/`](functions/) (an AI-provider proxy and the
+optional short-link store); they deploy automatically with the site.
 
 ## Architecture
 
