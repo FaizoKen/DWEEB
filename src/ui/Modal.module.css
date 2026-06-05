@@ -18,6 +18,10 @@
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 32px);
+  /* Keep the scrolling body clipped to the rounded corners now that it can
+     reach the dialog's edge (the Share dialog has no footer). Nested dialogs
+     portal to document.body, so they aren't trapped by this. */
+  overflow: hidden;
   outline: none;
   animation: rise 160ms ease-out;
 }
@@ -66,6 +70,12 @@
 .body {
   padding: 20px;
   overflow-y: auto;
+  /* Flex children default to min-height: auto, which refuses to shrink below
+     their content. Without this the body never gets smaller than its content,
+     so `overflow-y: auto` never engages and tall content overflows the dialog's
+     max-height — cutting off the bottom (last lines + action buttons) off-screen
+     with no way to scroll. min-height: 0 lets it shrink and scroll instead. */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
