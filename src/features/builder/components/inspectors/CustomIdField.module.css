@@ -1,0 +1,38 @@
+/*
+ * Read-only presentation for the interaction custom_id while a plugin owns it.
+ * Reads as a locked, inset chip rather than an editable input so it's obvious
+ * at a glance the value is managed elsewhere (the Plugin panel below).
+ */
+.locked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--app-control-h);
+  padding: 8px 12px;
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  cursor: default;
+}
+
+.lockedIcon {
+  flex: none;
+  color: var(--app-text-subtle);
+}
+
+.lockedValue {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--app-text-muted);
+  font-family: var(--app-font-mono);
+  font-size: var(--app-text-sm);
+  text-overflow: ellipsis;
+  cursor: text;
+}
+.lockedValue:focus {
+  outline: none;
+}

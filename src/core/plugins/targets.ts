@@ -1,0 +1,97 @@
+/**
+ * Plugin targets — the stable, plugin-facing names for the interactive
+ * component kinds a plugin can attach to.
+ *
+ * Plugin authors should never see Discord's numeric `ComponentType` wire
+ * values; those can shift and leak an implementation detail. This module is the
+ * single translation layer between the editor's component nodes and the stable
+ * string enum the manifest declares.
+ *
+ * "Interactive" mirrors the capability inspector's definition (`capability.ts`):
+ * every select menu, plus buttons that carry a `custom_id` (i.e. not Link and
+ * not Premium). Those are exactly the components that fire a Discord
+ * interaction a microservice can handle.
+ */
+
+import { isButton, isSelect } from "@/core/schema/guards";
+import { ButtonStyle, ComponentType, type AnyComponent } from "@/core/schema/types";
+import type { PluginManifest } from "./manifest";
+
+export type PluginTarget =
+  | "button"
+  | "string_select"
+  | "user_select"
+  | "role_select"
+  | "mentionable_select"
+  | "channel_select";
+
+/** Every legal target, used to validate a manifest's `targets` array. */
+export const ALL_PLUGIN_TARGETS: readonly PluginTarget[] = [
+  "button",
+  "string_select",
+  "user_select",
+  "role_select",
+  "mentionable_select",
+  "channel_select",
+];
+
+/**
+ * The plugin target a node represents, or `null` when the node isn't an
+ * interactive component a plugin can attach to (Link/Premium buttons, layout
+ * components, etc.).
+ */
+export function targetOf(node: AnyComponent): PluginTarget | null {
+  if (isButton(node)) {
+    // Link and Premium buttons carry no custom_id — nothing for a plugin to own.
+    if (node.style === ButtonStyle.Link || node.style === ButtonStyle.Premium) return null;
+    return "button";
+  }
+  if (isSelect(node)) {
+    switch (node.type) {
+      case ComponentType.StringSelect:
+        return "string_select";
+      case ComponentType.UserSelect:
+        return "user_select";
+      case ComponentType.RoleSelect:
+        return "role_select";
+      case ComponentType.MentionableSelect:
+        return "mentionable_select";
+      case ComponentType.ChannelSelect:
+        return "channel_select";
+    }
+  }
+  return null;
+}
+
+/** True when a plugin can be attached to this node. */
+export function isPluginTarget(node: AnyComponent): boolean {
+  return targetOf(node) !== null;
+}
+
+/** Plugins from a list that declare support for `target`. */
+export function pluginsForTarget(
+  plugins: PluginManifest[],
+  target: PluginTarget,
+): PluginManifest[] {
+  return plugins.filter((p) => p.targets.includes(target));
+}
+
+/**
+ * The plugin that owns a given `custom_id`, by prefix match, or `null`. This is
+ * how a draft or share link re-binds to a plugin on reload without DWEEB
+ * storing anything beyond the `custom_id` itself. The longest matching prefix
+ * wins so a more specific plugin isn't shadowed by a broader one.
+ */
+export function matchPlugin(
+  plugins: PluginManifest[],
+  customId: string | undefined,
+): PluginManifest | null {
+  if (!customId) return null;
+  let best: PluginManifest | null = null;
+  for (const p of plugins) {
+    if (customId.startsWith(p.customIdPrefix)) {
+      if (!best || p.customIdPrefix.length > best.customIdPrefix.length) best = p;
+    }
+  }
+  return best;
+}

@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Modal Form — configure</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1f22;
+        --panel: #2b2d31;
+        --panel-2: #232428;
+        --border: #3a3c41;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #5865f2;
+        --danger: #da373c;
+        --radius: 8px;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #f2f3f5;
+        --panel-2: #e3e5e8;
+        --border: #d7d9dc;
+        --text: #1e1f22;
+        --muted: #4e5058;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 { font-size: 14px; margin: 18px 0 8px; }
+      h2:first-of-type { margin-top: 0; }
+      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="text"], input[type="url"], input[type="number"], select, textarea {
+        width: 100%;
+        padding: 8px 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+      }
+      input:focus-visible, select:focus-visible, textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .field {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 10px;
+        margin-top: 8px;
+      }
+      .field-top { display: flex; gap: 8px; align-items: center; }
+      .field-top input { flex: 1; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+      .check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.icon { flex: none; width: 34px; padding: 0; color: var(--muted); }
+      button.icon:hover { color: var(--danger); border-color: var(--danger); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .row { display: flex; gap: 8px; margin-top: 20px; }
+      .row .grow { flex: 1; }
+      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+      code { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <h2>Modal title</h2>
+    <input id="title" type="text" maxlength="45" placeholder="e.g. Application form" />
+
+    <h2>Fields <span class="hint" id="fieldCount"></span></h2>
+    <div id="fields"></div>
+    <button id="addField" type="button" style="margin-top: 8px">+ Add field</button>
+
+    <h2>Forward submissions to</h2>
+    <input id="webhook" type="url" placeholder="https://discord.com/api/webhooks/…" />
+    <select id="savedWebhook" style="margin-top: 8px">
+      <option value="">— or pick a saved DWEEB webhook —</option>
+    </select>
+    <div class="hint">
+      Paste a Discord webhook URL, or pick one you saved in DWEEB. Each submission
+      is posted there as an embed.
+    </div>
+
+    <h2>Reply with a saved message</h2>
+    <select id="reply">
+      <option value="">— pick one of your DWEEB saved messages —</option>
+    </select>
+    <div class="hint" id="replyHint">The user gets this (ephemeral) after submitting.</div>
+
+    <div class="err" id="error"></div>
+
+    <div class="row">
+      <button id="cancel" type="button">Cancel</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script>
+      "use strict";
+      const PREFIX = "modalform:";
+
+      // ── Session state ───────────────────────────────────────────────────
+      let nonce = null;
+      let hostOrigin = "*";
+      let instanceId = null; // set when reconfiguring
+      let savedMessages = []; // [{ id, name, payload }]
+      let savedWebhooks = []; // [{ id, name, url, channelName?, guildName? }]
+      let existingReplyPayload = null; // reply payload already stored (reconfigure)
+      let webhookAlreadySet = false; // reconfigure: keep existing if input left blank
+
+      const $ = (id) => document.getElementById(id);
+
+      // ── Field list model ────────────────────────────────────────────────
+      let fields = [];
+      const newField = (f = {}) => ({
+        id: f.id || "f_" + Math.random().toString(36).slice(2, 9),
+        label: f.label || "",
+        style: f.style === "paragraph" ? "paragraph" : "short",
+        required: !!f.required,
+        placeholder: f.placeholder || "",
+        max_length: f.max_length || "",
+      });
+
+      function renderFields() {
+        const wrap = $("fields");
+        wrap.innerHTML = "";
+        fields.forEach((f, i) => {
+          const el = document.createElement("div");
+          el.className = "field";
+          el.innerHTML = `
+            <div class="field-top">
+              <input type="text" maxlength="45" placeholder="Field label" data-k="label" />
+              <button type="button" class="icon" title="Remove field" data-del>✕</button>
+            </div>
+            <div class="grid">
+              <div>
+                <label class="lbl">Style</label>
+                <select data-k="style">
+                  <option value="short">Short (single line)</option>
+                  <option value="paragraph">Paragraph</option>
+                </select>
+              </div>
+              <div>
+                <label class="lbl">Max length</label>
+                <input type="number" min="1" max="4000" placeholder="optional" data-k="max_length" />
+              </div>
+            </div>
+            <label class="lbl">Placeholder</label>
+            <input type="text" maxlength="100" placeholder="optional" data-k="placeholder" />
+            <label class="check"><input type="checkbox" data-k="required" /> Required</label>`;
+          el.querySelector('[data-k="label"]').value = f.label;
+          el.querySelector('[data-k="style"]').value = f.style;
+          el.querySelector('[data-k="max_length"]').value = f.max_length;
+          el.querySelector('[data-k="placeholder"]').value = f.placeholder;
+          el.querySelector('[data-k="required"]').checked = f.required;
+          el.querySelectorAll("[data-k]").forEach((input) => {
+            const k = input.getAttribute("data-k");
+            input.addEventListener("input", () => {
+              f[k] = input.type === "checkbox" ? input.checked : input.value;
+            });
+          });
+          el.querySelector("[data-del]").addEventListener("click", () => {
+            fields.splice(i, 1);
+            renderFields();
+          });
+          wrap.appendChild(el);
+        });
+        $("fieldCount").textContent = `(${fields.length}/5)`;
+        $("addField").disabled = fields.length >= 5;
+        sendResize();
+      }
+
+      $("addField").addEventListener("click", () => {
+        if (fields.length >= 5) return;
+        fields.push(newField());
+        renderFields();
+      });
+
+      // ── Reply picker ────────────────────────────────────────────────────
+      function renderReplyOptions() {
+        const sel = $("reply");
+        sel.innerHTML = "";
+        if (instanceId && existingReplyPayload) {
+          const keep = document.createElement("option");
+          keep.value = "__keep__";
+          keep.textContent = "Keep current reply";
+          sel.appendChild(keep);
+        } else {
+          const ph = document.createElement("option");
+          ph.value = "";
+          ph.textContent = "— pick a saved message —";
+          sel.appendChild(ph);
+        }
+        for (const m of savedMessages) {
+          const o = document.createElement("option");
+          o.value = m.id;
+          o.textContent = m.name;
+          sel.appendChild(o);
+        }
+        $("replyHint").textContent = savedMessages.length
+          ? "The user gets this (ephemeral) after submitting."
+          : "No saved messages found in DWEEB yet — save one first, then reopen.";
+      }
+
+      // ── Saved-webhook picker ────────────────────────────────────────────
+      // Picking one just fills the URL field above (the single source of truth
+      // on save), then resets the select so it reads as an action, not a state.
+      function renderWebhookOptions() {
+        const sel = $("savedWebhook");
+        sel.innerHTML = "";
+        const ph = document.createElement("option");
+        ph.value = "";
+        ph.textContent = savedWebhooks.length
+          ? "— or pick a saved DWEEB webhook —"
+          : "— no saved DWEEB webhooks —";
+        sel.appendChild(ph);
+        for (const w of savedWebhooks) {
+          const o = document.createElement("option");
+          o.value = w.id;
+          const dest =
+            w.channelName && w.guildName
+              ? ` (#${w.channelName} · ${w.guildName})`
+              : w.guildName
+                ? ` (${w.guildName})`
+                : "";
+          o.textContent = (w.name || "Webhook") + dest;
+          sel.appendChild(o);
+        }
+        sel.disabled = savedWebhooks.length === 0;
+      }
+
+      $("savedWebhook").addEventListener("change", () => {
+        const picked = savedWebhooks.find((w) => w.id === $("savedWebhook").value);
+        if (picked) $("webhook").value = picked.url;
+        $("savedWebhook").value = "";
+      });
+
+      // ── Protocol ────────────────────────────────────────────────────────
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+
+      window.addEventListener("message", async (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "dweeb:plugin:init") {
+          nonce = msg.nonce;
+          hostOrigin = event.origin;
+          if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+
+          if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
+            instanceId = msg.customId.slice(PREFIX.length);
+            await loadInstance(instanceId);
+          } else {
+            fields = [newField({ label: "Your answer", style: "paragraph", required: true })];
+          }
+          renderFields();
+          requestResource("savedMessages");
+          requestResource("savedWebhooks");
+          return;
+        }
+
+        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          pendingReqs.delete(msg.requestId);
+          if (msg.ok && Array.isArray(msg.data)) {
+            if (msg.resource === "savedMessages") {
+              savedMessages = msg.data.filter((m) => m && m.id && m.payload);
+              renderReplyOptions();
+            } else if (msg.resource === "savedWebhooks") {
+              savedWebhooks = msg.data.filter((w) => w && w.id && w.url);
+              renderWebhookOptions();
+            }
+          }
+          sendResize();
+          return;
+        }
+      });
+
+      const pendingReqs = new Set();
+      function requestResource(resource) {
+        const requestId = "req_" + Math.random().toString(36).slice(2);
+        pendingReqs.add(requestId);
+        parent.postMessage(
+          { type: "dweeb:plugin:request", nonce, requestId, resource },
+          hostOrigin,
+        );
+      }
+
+      function sendResize() {
+        if (nonce == null) return;
+        parent.postMessage(
+          { type: "dweeb:plugin:resize", nonce, height: document.body.scrollHeight + 24 },
+          hostOrigin,
+        );
+      }
+
+      // ── Load existing instance (reconfigure) ────────────────────────────
+      async function loadInstance(id) {
+        try {
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
+          if (!res.ok) {
+            fields = [newField({ label: "Your answer", style: "paragraph", required: true })];
+            return;
+          }
+          const data = await res.json();
+          $("title").value = data.modal?.title || "";
+          fields = (data.modal?.fields || []).map(newField);
+          if (!fields.length) fields = [newField()];
+          existingReplyPayload = data.reply?.payload || null;
+          webhookAlreadySet = !!data.forward_webhook_set;
+          if (webhookAlreadySet) $("webhook").placeholder = "•••••••• (unchanged — type to replace)";
+        } catch {
+          fields = [newField()];
+        }
+      }
+
+      // ── Save ────────────────────────────────────────────────────────────
+      $("cancel").addEventListener("click", () => {
+        parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
+      });
+
+      $("save").addEventListener("click", save);
+
+      async function save() {
+        $("error").textContent = "";
+        const title = $("title").value.trim();
+        if (!title) return fail("Give the modal a title.");
+        if (!fields.length) return fail("Add at least one field.");
+        for (const f of fields) {
+          if (!f.label.trim()) return fail("Every field needs a label.");
+        }
+
+        // Resolve the reply payload.
+        const replyChoice = $("reply").value;
+        let replyPayload = null;
+        if (replyChoice === "__keep__") {
+          replyPayload = existingReplyPayload;
+        } else if (replyChoice) {
+          const picked = savedMessages.find((m) => m.id === replyChoice);
+          replyPayload = picked ? picked.payload : null;
+        }
+        if (!replyPayload) return fail("Pick a saved message to reply with.");
+
+        // Resolve the forward webhook.
+        const webhookInput = $("webhook").value.trim();
+        if (!webhookInput && !(instanceId && webhookAlreadySet)) {
+          return fail("Enter a Discord webhook URL to forward submissions to.");
+        }
+
+        const body = {
+          modal: {
+            title,
+            fields: fields.map((f) => ({
+              id: f.id,
+              label: f.label.trim(),
+              style: f.style,
+              required: !!f.required,
+              placeholder: f.placeholder ? String(f.placeholder).slice(0, 100) : null,
+              max_length: f.max_length ? Number(f.max_length) || null : null,
+            })),
+          },
+          forward_webhook: webhookInput, // "" => keep existing on update
+          reply: { payload: replyPayload },
+        };
+
+        setBusy(true);
+        try {
+          const url = instanceId ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
+          const method = instanceId ? "PUT" : "POST";
+          const res = await fetch(url, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setBusy(false);
+            return fail(data.error || `Server returned ${res.status}.`);
+          }
+          const id = data.id || instanceId;
+          parent.postMessage(
+            {
+              type: "dweeb:plugin:save",
+              nonce,
+              customId: PREFIX + id,
+              summary: {
+                label: title,
+                description: `${fields.length} field${fields.length === 1 ? "" : "s"} → webhook + reply`,
+              },
+            },
+            hostOrigin,
+          );
+        } catch (e) {
+          setBusy(false);
+          fail("Couldn't reach the plugin service.");
+        }
+      }
+
+      function fail(message) {
+        $("error").textContent = message;
+        sendResize();
+      }
+      function setBusy(busy) {
+        $("save").disabled = busy;
+        $("save").textContent = busy ? "Saving…" : "Save";
+      }
+    </script>
+  </body>
+</html>

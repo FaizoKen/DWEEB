@@ -1,0 +1,36 @@
+.frameWrap {
+  width: 100%;
+  /* Size to the iframe's reported height (the hook clamps that, so a
+     misbehaving plugin can't grow unbounded). Do NOT cap height here — the
+     Modal's own body handles scrolling, so capping with overflow:hidden would
+     clip the bottom of the form (reply picker + Save button) on short
+     viewports with no way to scroll to it. `overflow: hidden` stays only to
+     clip the iframe to the rounded corners. */
+  overflow: hidden;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-input);
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  /* Cap the visible iframe to the viewport so a tall form scrolls *inside* the
+     iframe. A cross-origin iframe consumes wheel/touch events, so it must own
+     its own scroll — letting it grow to full height instead traps the bottom of
+     the form (reply picker + Save button) below the fold with no reachable
+     scrollbar, because the wheel never reaches the modal body. */
+  max-height: min(70vh, 600px);
+  border: 0;
+  /* Let the plugin paint edge to edge; it provides its own padding. */
+  background: transparent;
+  transition: height 120ms ease;
+}
+
+.note {
+  margin: 10px 2px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}

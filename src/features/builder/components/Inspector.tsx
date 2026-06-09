@@ -28,6 +28,8 @@ import { RoleSelectInspector } from "./inspectors/RoleSelectInspector";
 import { MentionableSelectInspector } from "./inspectors/MentionableSelectInspector";
 import { ChannelSelectInspector } from "./inspectors/ChannelSelectInspector";
 import { ComponentIdField } from "./inspectors/ComponentIdField";
+import { PluginPanel } from "./inspectors/PluginPanel";
+import { isPluginTarget } from "@/core/plugins/targets";
 import styles from "./Inspector.module.css";
 
 export function Inspector() {
@@ -57,6 +59,10 @@ export function Inspector() {
       <div className={styles.body}>
         <IssueList issues={issues} />
         {renderInspector(node)}
+        {/* Interactive components (buttons with a custom_id, selects) can hand
+            their action to an external plugin. The panel is inert unless a
+            plugin registry is configured. */}
+        {isPluginTarget(node) ? <PluginPanel node={node} /> : null}
         {/* The per-component Discord id is a power-user concern — only surface
             it in Advanced mode. The value (if any) persists regardless. */}
         {advancedMode ? <ComponentIdField node={node} /> : null}

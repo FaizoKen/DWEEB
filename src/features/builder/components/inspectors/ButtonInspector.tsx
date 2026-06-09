@@ -27,7 +27,9 @@ import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { EmojiIcon } from "@/ui/Icon";
 import { GuildEmojiPanel } from "@/features/guild/MentionPicker";
+import { useAttachedPlugin } from "@/features/plugins/useAttachedPlugin";
 import { CapabilityNote } from "./CapabilityNote";
+import { CustomIdField } from "./CustomIdField";
 import styles from "./ButtonInspector.module.css";
 
 interface Props {
@@ -47,6 +49,7 @@ export function ButtonInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
   const replace = useMessageStore((s) => s.replaceNode);
   const advancedMode = useUiPrefs((s) => s.advancedMode);
+  const attachedPlugin = useAttachedPlugin(node);
 
   const changeStyle = (next: ButtonStyleValue) => {
     if (next === node.style) return;
@@ -64,11 +67,18 @@ export function ButtonInspector({ node }: Props) {
   return (
     <>
       {isInteractive ? (
-        <CapabilityNote>
-          <strong>Needs an application-owned webhook.</strong> Discord rejects messages with
-          interactive buttons when sent through a regular user-created webhook. Use a Link button if
-          you just want a hyperlink.
-        </CapabilityNote>
+        attachedPlugin ? (
+          <CapabilityNote tone="info">
+            <strong>Handled by {attachedPlugin.name}.</strong> Clicks are processed by the plugin's
+            service — send this message through an application-owned webhook so they reach it.
+          </CapabilityNote>
+        ) : (
+          <CapabilityNote>
+            <strong>Needs an application-owned webhook.</strong> Discord rejects messages with
+            interactive buttons when sent through a regular user-created webhook. Use a Link button
+            if you just want a hyperlink.
+          </CapabilityNote>
+        )
       ) : null}
       {node.style === ButtonStyle.Premium ? (
         <CapabilityNote>
@@ -139,26 +149,6 @@ export function ButtonInspector({ node }: Props) {
         </Field>
       ) : null}
 
-      {node.style !== ButtonStyle.Link && node.style !== ButtonStyle.Premium ? (
-        <Field
-          label="custom_id"
-          hint="Your bot receives this when the button is clicked — set it to wire up the action."
-        >
-          {(id) => (
-            <TextInput
-              id={id}
-              maxLength={LIMITS.BUTTON_CUSTOM_ID}
-              value={node.custom_id}
-              onChange={(e) =>
-                patch<InteractiveButtonComponent>(node._id, {
-                  custom_id: e.currentTarget.value,
-                })
-              }
-            />
-          )}
-        </Field>
-      ) : null}
-
       {node.style !== ButtonStyle.Premium ? (
         <EmojiEditor node={node} advancedMode={advancedMode} />
       ) : null}
@@ -172,6 +162,18 @@ export function ButtonInspector({ node }: Props) {
         }
         label="Disabled"
       />
+
+      {/* custom_id sits last so it's adjacent to the Plugin panel that follows
+          in the Inspector — the plugin binding *is* this value, so keep the two
+          visually grouped. Locked read-only while a plugin owns the button. */}
+      {node.style !== ButtonStyle.Link && node.style !== ButtonStyle.Premium ? (
+        <CustomIdField
+          node={node}
+          maxLength={LIMITS.BUTTON_CUSTOM_ID}
+          hint="Your bot receives this when the button is clicked — set it to wire up the action."
+          attachedPlugin={attachedPlugin}
+        />
+      ) : null}
     </>
   );
 }

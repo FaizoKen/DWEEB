@@ -7,10 +7,12 @@ messages with containers, sections, buttons, media, and files, watch a
 pixel-accurate live preview, and share the result through a single URL — no
 backend, no account, no database.
 
-**Private by design.** Everything runs in your browser, so your drafts and
-webhook URLs never leave your device and share links keep their data in the URL
-fragment — nothing is uploaded. That makes DWEEB a security-conscious choice for
-sensitive announcements and for large communities and teams.
+**Private by design.** Everything runs in your browser, so your drafts stay on
+your device and share links keep their data in the URL fragment — nothing is
+uploaded to us. The only data that leaves your browser is what you opt into
+sending: signing in with Discord, the AI assistant, short links, or a plugin you
+attach. That makes DWEEB a security-conscious choice for sensitive announcements
+and for large communities and teams.
 
 DWEEB is **free and open source** (MIT). The code lives on GitHub at
 **[github.com/FaizoKen/DWEEB](https://github.com/FaizoKen/DWEEB)** — issues and
@@ -51,8 +53,9 @@ The action-bar buttons:
 - **Reset** — replace the current message with the default template
   (undoable).
 
-Privacy: webhook URLs and your draft never leave your browser. Share URLs put
-the message in the `#hash` fragment, which the server never sees.
+Privacy: your draft never leaves your browser, and Share URLs put the message in
+the `#hash` fragment, which the server never sees. A webhook URL goes to Discord
+when you Send (and to a plugin you attach, if you point one at it).
 
 ```
 ┌─────────────────────────────────┬────────────────────────────────────────┐
@@ -225,9 +228,9 @@ TypeScript will flag any place you forgot.
 
 The **Send** tab in *Share / Send / Export* posts the current message to a
 Discord webhook directly from the browser (Discord allows CORS on the
-webhook execute endpoint). The webhook URL never leaves your machine — there
-is no backend to forward it through, and history is opt-in per submission
-and stored in `localStorage` only.
+webhook execute endpoint). On this path the webhook URL goes straight to Discord
+and never passes through a DWEEB backend; history is opt-in per submission and
+stored in `localStorage` only.
 
 The **Restore** tab does the inverse: paste a webhook URL plus a message ID
 (or link) and the editor pulls the message back via

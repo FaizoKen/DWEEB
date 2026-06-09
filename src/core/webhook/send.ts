@@ -2,9 +2,9 @@
  * Webhook execution.
  *
  * Posts the current message directly to Discord from the browser. The webhook
- * execute endpoint accepts cross-origin requests, so no proxy is needed — and
- * by keeping the call client-side the webhook URL never leaves the user's
- * machine.
+ * execute endpoint accepts cross-origin requests, so no proxy is needed — the
+ * call stays client-side and the webhook URL goes straight to Discord, never
+ * through a DWEEB backend.
  *
  * The body Discord receives is the wire-format payload (from
  * `serialization/normalize.ts`) plus a `flags` integer combining

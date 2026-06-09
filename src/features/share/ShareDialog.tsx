@@ -681,8 +681,8 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
       </p>
 
       <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
-        <strong>Treat the webhook URL like a password.</strong> It's stored only in this browser and
-        never sent anywhere but Discord.
+        <strong>Treat the webhook URL like a password.</strong> It's a credential that lets anyone
+        post to your channel — keep it secret and only use webhooks you own.
       </Callout>
 
       <WebhookRecents

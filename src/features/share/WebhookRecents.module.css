@@ -49,6 +49,15 @@
   background: var(--app-bg-hover);
 }
 
+/* Stands in for the primary list when a guild is connected but none of the
+   saved webhooks belong to it — every entry is tucked behind the toggle below. */
+.othersEmpty {
+  margin: 0;
+  padding: 2px 4px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
 .othersChevron {
   flex: none;
   transition: transform 120ms ease;

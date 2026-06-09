@@ -237,20 +237,28 @@ export function WebhookRecents({
     );
   };
 
-  // Surface the connected guild's webhooks first; collapse the rest so a click
-  // while working in one server can't accidentally post to another. With nothing
-  // matching (or no guild connected) there's nothing to prioritise — show all.
-  const matching = connectedId ? history.filter((e) => e.guildId === connectedId) : [];
-  const grouped = connectedId !== "" && matching.length > 0;
-  const primary = grouped ? matching : history;
-  const others = grouped ? history.filter((e) => e.guildId !== connectedId) : [];
+  // Surface the connected guild's webhooks first; collapse everything else behind
+  // a toggle so a click while working in one server can't accidentally post to
+  // another. With no guild connected there's nothing to prioritise — show all
+  // directly. With a guild connected, the non-matching entries always go in the
+  // collapsed "other servers" group; if none match, the primary list is empty
+  // and every entry sits behind the toggle, so reaching one from elsewhere takes
+  // a deliberate expand.
+  const hasGuild = connectedId !== "";
+  const primary = hasGuild ? history.filter((e) => e.guildId === connectedId) : history;
+  const others = hasGuild ? history.filter((e) => e.guildId !== connectedId) : [];
 
   return (
     <div className={styles.history}>
       <div className={styles.historyTitle}>Recent webhooks (this browser)</div>
-      <ul className={styles.historyList}>{primary.map(renderRow)}</ul>
+      {primary.length > 0 ? (
+        <ul className={styles.historyList}>{primary.map(renderRow)}</ul>
+      ) : null}
       {others.length > 0 ? (
         <>
+          {primary.length === 0 ? (
+            <p className={styles.othersEmpty}>No saved webhooks for this server.</p>
+          ) : null}
           <button
             type="button"
             className={styles.othersToggle}
