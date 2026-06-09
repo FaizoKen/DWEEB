@@ -1,9 +1,13 @@
-# Runs the proxy. Cloudflare Tunnel is installed on the host, so there is no
-# cloudflared container here. The proxy is published on the LOOPBACK address
-# only (127.0.0.1) — not reachable from the public internet, only by the host
-# (where cloudflared runs) and other local processes.
+# Runs the proxy. cloudflared runs as its OWN container on this host, so the
+# tunnel reaches the proxy container-to-container over this compose network
+# (dweeb_default). No host port is published — the proxy is NOT reachable from
+# the public internet, only through the tunnel. Attach cloudflared once with:
 #
-# Point your tunnel's ingress at  http://localhost:8080  (see README).
+#   docker network connect dweeb_default cloudflared
+#
+# Then point your tunnel's ingress at  http://dweeb-proxy-1:8080  (the service
+# alias http://proxy:8080 works too). Note the INTERNAL port 8080, not a host
+# port. (Re-run the network connect if cloudflared is ever recreated.)
 #
 #   cp .env.example .env       # then fill it in
 #
@@ -33,8 +37,6 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "4444:8080"
     healthcheck:
       test: ["CMD", "/usr/local/bin/dweeb-proxy", "healthcheck"]
       interval: 30s
