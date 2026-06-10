@@ -1,0 +1,30 @@
+[package]
+name = "dweeb-interactions-dispatcher"
+version = "0.1.0"
+edition = "2021"
+description = "Routes Discord interactions to DWEEB plugin services by custom_id prefix — a Discord app has exactly ONE interactions endpoint, this is it."
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tower-http = { version = "0.5", features = ["trace"] }
+# Loads a local `.env` for `cargo run`; a no-op under Docker (which injects env).
+dotenvy = "0.15"
+serde_json = "1"
+# Forward interactions to plugin upstreams. rustls avoids an OpenSSL system
+# dependency, keeping the deploy image tiny (upstreams are plain http on the
+# compose network anyway).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Verify Discord's Ed25519 interaction signatures.
+ed25519-dalek = "2"
+hex = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Small, low-throughput service — optimise the release binary for size so it
+# fits the cheapest hosting tiers.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

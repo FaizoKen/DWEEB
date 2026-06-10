@@ -220,3 +220,31 @@ That half lives entirely in your service and is outside DWEEB's scope.
 > Interactive components only fire when the message is sent through an
 > **application-owned** webhook. DWEEB surfaces this requirement in the editor;
 > your plugin's documentation should explain how users wire your app up.
+
+## 5. Hosting a plugin on the DWEEB production stack
+
+A Discord application has exactly **one** Interactions Endpoint URL, so all
+plugins share it: the [interactions dispatcher](../plugins/dispatcher) sits at
+`https://api-dweeb.faizo.net/interactions` (stable forever) and routes each
+interaction to a plugin by its `customIdPrefix`. Every plugin is served at its
+own origin, `https://<id>.dweeb.faizo.net` — covered by ONE wildcard DNS record
+(`*.dweeb.faizo.net` → the server, DNS only) and ONE CSP wildcard
+(`frame-src https://*.dweeb.faizo.net` in `public/_headers`), so none of that
+recurs per plugin.
+
+Adding a plugin (say `ping-pong`, prefix `pingpong:`) is four edits:
+
+| # | File | Edit |
+|---|---|---|
+| 1 | `server/compose.yml` | Copy the `modal-form` service block: new image (CI workflow publishes `ghcr.io/<owner>/dweeb-<id>`), own volume if it has state. |
+| 2 | `server/Caddyfile` | Copy a plugin block: `pingpong.{$PLUGINS_DOMAIN} { import site_defaults; reverse_proxy ping-pong:8090 }`. |
+| 3 | `server/compose.yml` (dispatcher) | Add `"pingpong:": "http://ping-pong:8090"` to `ROUTES`. |
+| 4 | `src/core/plugins/registry.json` | Add the manifest with `configUrl: https://pingpong.dweeb.faizo.net/config.html`. |
+
+Then `docker compose pull && docker compose up -d` on the server (Caddy issues
+the new subdomain's certificate automatically) and push so the frontend
+rebuilds with the new registry. The plugin itself just implements this
+document's protocol plus `GET /health` and a signature-verified
+`POST /interactions` — the dispatcher forwards the raw body and signature
+headers untouched, so verification works exactly as if Discord called the
+plugin directly.

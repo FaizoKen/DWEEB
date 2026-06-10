@@ -1,22 +1,32 @@
-# Runs the proxy behind Caddy, which terminates TLS directly on this host.
-# Point the domain's DNS A record STRAIGHT at this server (Cloudflare proxy
-# OFF / "DNS only") — Caddy then obtains and renews the Let's Encrypt
-# certificate automatically. Caddy serves HTTP/1.1, HTTP/2 and HTTP/3 (QUIC,
-# port 443/udp) and forwards to the proxy over the compose network; the proxy
-# container itself publishes no host port.
+# Runs the proxy, the plugin services, and Caddy, which terminates TLS
+# directly on this host. Point each domain's DNS STRAIGHT at this server
+# (Cloudflare proxy OFF / "DNS only") — Caddy then obtains and renews the
+# Let's Encrypt certificates automatically and serves HTTP/1.1, HTTP/2 and
+# HTTP/3 (QUIC, port 443/udp). Only Caddy publishes host ports; everything
+# else is reached over the compose network.
 #
 #   cp .env.example .env       # then fill it in (incl. DOMAIN + ACME_EMAIL)
 #
-# Run the published image (built & pushed to GHCR by the Docker workflow):
-#   docker compose pull        # grab the latest published image
+# Run the published images (built & pushed to GHCR by the workflows):
+#   docker compose pull        # grab the latest published images
 #   docker compose up -d
 #
 # Or build from local source instead of pulling:
 #   docker compose up -d --build
 #
-# Pin a released version instead of :latest by setting TAG in .env. The Docker
-# workflow strips the leading "v", so a vX.Y.Z git tag publishes X.Y.Z:
+# Pin released versions instead of :latest by setting TAG / *_TAG in .env. The
+# workflows strip the leading "v", so a vX.Y.Z git tag publishes X.Y.Z:
 #   TAG=0.7.0
+#
+# ── Adding a plugin ──────────────────────────────────────────────────────────
+# Plugins follow one convention (see docs/plugins.md for the protocol):
+#   1. copy the modal-form service block below — new image + volume name;
+#   2. copy a plugin block in ./Caddyfile — subdomain <id>.$PLUGINS_DOMAIN;
+#   3. add its custom_id prefix to the dispatcher's ROUTES below;
+#   4. add its manifest to src/core/plugins/registry.json (frontend).
+# No DNS, CSP, or Discord-portal work: the *.$PLUGINS_DOMAIN wildcard record,
+# the builder's frame-src wildcard, and the dispatcher's stable interactions
+# URL already cover it.
 #
 # Multi-instance scaling (optional): start a shared Redis with the `redis`
 # profile and point the proxy at it via REDIS_URL in .env:
@@ -33,7 +43,7 @@ services:
       - "443:443/udp" # HTTP/3 (QUIC)
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
-      MODALFORM_DOMAIN: ${MODALFORM_DOMAIN:?set MODALFORM_DOMAIN in .env}
+      PLUGINS_DOMAIN: ${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
@@ -60,16 +70,39 @@ services:
       retries: 3
       start_period: 5s
 
-  # Modal Form plugin (../plugins/modal-form): its own registry, config UI and
-  # Discord interactions endpoint, backed by one SQLite file. Served by Caddy
-  # on MODALFORM_DOMAIN; publishes no host port itself.
+  # The Discord app's single interactions endpoint (../plugins/dispatcher):
+  # verifies signatures, answers PINGs, and routes interactions to plugins by
+  # custom_id prefix. Caddy maps https://$DOMAIN/interactions here, so the URL
+  # registered in the Discord portal never changes. One ROUTES entry per
+  # plugin, e.g. {"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8090"}
+  dispatcher:
+    image: ghcr.io/faizoken/dweeb-interactions-dispatcher:${DISPATCHER_TAG:-latest}
+    build: ../plugins/dispatcher
+    restart: unless-stopped
+    environment:
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      ROUTES: '{"modalform:": "http://modal-form:8090"}'
+      RUST_LOG: info
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8095 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # ── Plugins ────────────────────────────────────────────────────────────────
+
+  # Modal Form (../plugins/modal-form): its own registry, config UI and config
+  # API, backed by one SQLite file. Served by Caddy at modalform.$PLUGINS_DOMAIN;
+  # interactions arrive via the dispatcher; publishes no host port itself.
   modal-form:
     image: ghcr.io/faizoken/dweeb-modal-form:${MODALFORM_TAG:-latest}
     build: ../plugins/modal-form
     restart: unless-stopped
     environment:
-      DISCORD_PUBLIC_KEY: ${MODALFORM_DISCORD_PUBLIC_KEY:?set MODALFORM_DISCORD_PUBLIC_KEY in .env}
-      PUBLIC_BASE_URL: https://${MODALFORM_DOMAIN:?set MODALFORM_DOMAIN in .env}
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://modalform.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
       RUST_LOG: info
     volumes:
       # The plugin's only state: the SQLite file with instance configs.

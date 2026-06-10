@@ -10,7 +10,7 @@
       "publisher": "DWEEB",
       "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/modal-form",
       "targets": ["button"],
-      "configUrl": "https://modalform-dweeb.faizo.net/config.html",
+      "configUrl": "https://modalform.dweeb.faizo.net/config.html",
       "customIdPrefix": "modalform:"
     }
   ]

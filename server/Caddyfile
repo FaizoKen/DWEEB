@@ -1,36 +1,53 @@
-# TLS-terminating edge for the proxy, used by compose.yml. Caddy obtains and
-# renews the Let's Encrypt certificate automatically — the domain's DNS must
-# point STRAIGHT at this host (Cloudflare proxy OFF / "DNS only"), or the ACME
-# challenge can't reach us. Serves HTTP/1.1 + HTTP/2 + HTTP/3 (QUIC).
+# TLS-terminating edge for the proxy and the plugin services, used by
+# compose.yml. Caddy obtains and renews every Let's Encrypt certificate
+# automatically — each hostname's DNS must point STRAIGHT at this host
+# (Cloudflare proxy OFF / "DNS only"), or the ACME challenge can't reach us.
+# Serves HTTP/1.1 + HTTP/2 + HTTP/3 (QUIC).
 {
 	email {$ACME_EMAIL}
 }
 
-{$DOMAIN} {
-	# Compress JSON responses (zstd/gzip, negotiated). Small CPU cost, less
-	# time on the wire.
+# Shared site defaults: compress JSON/HTML (zstd/gzip, negotiated — small CPU
+# cost, less time on the wire) and pin HTTPS.
+(site_defaults) {
 	encode zstd gzip
-
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}
 
-	reverse_proxy proxy:8080 {
-		# The app trusts CF-Connecting-IP / X-Real-IP first when picking
-		# the client IP for per-IP rate limiting. Nothing in front of
-		# Caddy sets these anymore, so strip them — otherwise any client
-		# could spoof its rate-limit identity. Caddy itself overwrites
-		# X-Forwarded-For with the real client IP.
-		header_up -CF-Connecting-IP
-		header_up -X-Real-IP
+{$DOMAIN} {
+	import site_defaults
+
+	# The Discord app's single Interactions Endpoint URL lives on the API
+	# domain so it NEVER moves when plugins come and go. The dispatcher
+	# verifies the signature and fans out to plugins by custom_id prefix.
+	handle /interactions {
+		reverse_proxy dispatcher:8095
+	}
+
+	handle {
+		reverse_proxy proxy:8080 {
+			# The app trusts CF-Connecting-IP / X-Real-IP first when
+			# picking the client IP for per-IP rate limiting. Nothing
+			# in front of Caddy sets these anymore, so strip them —
+			# otherwise any client could spoof its rate-limit
+			# identity. Caddy itself overwrites X-Forwarded-For with
+			# the real client IP.
+			header_up -CF-Connecting-IP
+			header_up -X-Real-IP
+		}
 	}
 }
 
-# Modal Form plugin: DWEEB embeds {$MODALFORM_DOMAIN}/config.html in an iframe
-# and Discord POSTs interactions here — those must answer within 3 seconds, so
-# the plugin gets the same direct, single-hop path as the proxy.
-{$MODALFORM_DOMAIN} {
-	encode zstd gzip
+# ── Plugins ──────────────────────────────────────────────────────────────────
+# Convention: every plugin is served at <id>.{$PLUGINS_DOMAIN}. The wildcard
+# DNS record (*.{$PLUGINS_DOMAIN} → this host, DNS only) and the builder's CSP
+# (frame-src https://*.{$PLUGINS_DOMAIN}) already cover ANY subdomain, so a new
+# plugin needs no DNS or CSP work — copy a block, change subdomain + upstream,
+# and register its custom_id prefix in the dispatcher's ROUTES (compose.yml).
 
-	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
-
+# Modal Form. The second hostname is the legacy pre-wildcard one — drop it once
+# the old modalform-dweeb DNS record is deleted.
+modalform.{$PLUGINS_DOMAIN}, modalform-dweeb.faizo.net {
+	import site_defaults
 	reverse_proxy modal-form:8090
 }
