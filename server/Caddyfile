@@ -45,9 +45,8 @@
 # plugin needs no DNS or CSP work — copy a block, change subdomain + upstream,
 # and register its custom_id prefix in the dispatcher's ROUTES (compose.yml).
 
-# Modal Form. The second hostname is the legacy pre-wildcard one — drop it once
-# the old modalform-dweeb DNS record is deleted.
-modalform.{$PLUGINS_DOMAIN}, modalform-dweeb.faizo.net {
+# Modal Form.
+modalform.{$PLUGINS_DOMAIN} {
 	import site_defaults
 	reverse_proxy modal-form:8090
 }
