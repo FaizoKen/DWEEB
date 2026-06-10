@@ -26,8 +26,9 @@ interactions.{$PLUGINS_DOMAIN} {
 {$DOMAIN} {
 	import site_defaults
 
-	# Alias for the dispatcher (canonical URL above).
+	# Alias for the dispatcher (canonical URL above, which serves at "/").
 	handle /interactions {
+		rewrite * /
 		reverse_proxy dispatcher:8095
 	}
 

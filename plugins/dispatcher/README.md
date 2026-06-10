@@ -8,7 +8,7 @@ everything else to the right plugin by `custom_id` prefix — the same
 `customIdPrefix` every plugin manifest already declares.
 
 ```
-Discord ──POST /interactions──▶ dispatcher ── verifies Ed25519, answers PING
+Discord ──POST /──▶ dispatcher ── verifies Ed25519, answers PING
                                     │
                        custom_id "modalform:…" ──▶ http://modal-form:8090/interactions
                        custom_id "pingpong:…"  ──▶ http://ping-pong:8090/interactions
@@ -28,7 +28,7 @@ One entry in the `ROUTES` env var (see `server/compose.yml`):
 ```
 
 Longest prefix wins. Nothing else here changes; the public endpoint URL
-(`https://interactions.dweeb.faizo.net/interactions`) is stable forever.
+(`https://interactions.dweeb.faizo.net`) is stable forever.
 
 ## Env
 

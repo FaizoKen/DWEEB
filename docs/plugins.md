@@ -225,7 +225,7 @@ That half lives entirely in your service and is outside DWEEB's scope.
 
 A Discord application has exactly **one** Interactions Endpoint URL, so all
 plugins share it: the [interactions dispatcher](../plugins/dispatcher) sits at
-`https://interactions.dweeb.faizo.net/interactions` (stable forever) and routes
+`https://interactions.dweeb.faizo.net` (stable forever) and routes
 each interaction to a plugin by its `customIdPrefix`. Every plugin is served at its
 own origin, `https://<id>.dweeb.faizo.net` — covered by ONE wildcard DNS record
 (`*.dweeb.faizo.net` → the server, DNS only) and ONE CSP wildcard

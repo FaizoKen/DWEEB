@@ -101,7 +101,9 @@ async fn main() {
 
     let router = Router::new()
         .route("/health", get(health))
-        .route("/interactions", post(interactions))
+        // Public endpoint at the root: the hostname (interactions.<domain>) is
+        // the whole address, no path component.
+        .route("/", post(interactions))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(app);
 
