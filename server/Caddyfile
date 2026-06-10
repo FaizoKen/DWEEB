@@ -1,0 +1,25 @@
+# TLS-terminating edge for the proxy, used by compose.yml. Caddy obtains and
+# renews the Let's Encrypt certificate automatically — the domain's DNS must
+# point STRAIGHT at this host (Cloudflare proxy OFF / "DNS only"), or the ACME
+# challenge can't reach us. Serves HTTP/1.1 + HTTP/2 + HTTP/3 (QUIC).
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# Compress JSON responses (zstd/gzip, negotiated). Small CPU cost, less
+	# time on the wire.
+	encode zstd gzip
+
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	reverse_proxy proxy:8080 {
+		# The app trusts CF-Connecting-IP / X-Real-IP first when picking
+		# the client IP for per-IP rate limiting. Nothing in front of
+		# Caddy sets these anymore, so strip them — otherwise any client
+		# could spoof its rate-limit identity. Caddy itself overwrites
+		# X-Forwarded-For with the real client IP.
+		header_up -CF-Connecting-IP
+		header_up -X-Real-IP
+	}
+}

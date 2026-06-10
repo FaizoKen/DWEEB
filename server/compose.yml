@@ -1,15 +1,11 @@
-# Runs the proxy. cloudflared runs as its OWN container on this host, so the
-# tunnel reaches the proxy container-to-container over this compose network
-# (dweeb_default). No host port is published — the proxy is NOT reachable from
-# the public internet, only through the tunnel. Attach cloudflared once with:
+# Runs the proxy behind Caddy, which terminates TLS directly on this host.
+# Point the domain's DNS A record STRAIGHT at this server (Cloudflare proxy
+# OFF / "DNS only") — Caddy then obtains and renews the Let's Encrypt
+# certificate automatically. Caddy serves HTTP/1.1, HTTP/2 and HTTP/3 (QUIC,
+# port 443/udp) and forwards to the proxy over the compose network; the proxy
+# container itself publishes no host port.
 #
-#   docker network connect dweeb_default cloudflared
-#
-# Then point your tunnel's ingress at  http://dweeb-proxy-1:8080  (the service
-# alias http://proxy:8080 works too). Note the INTERNAL port 8080, not a host
-# port. (Re-run the network connect if cloudflared is ever recreated.)
-#
-#   cp .env.example .env       # then fill it in
+#   cp .env.example .env       # then fill it in (incl. DOMAIN + ACME_EMAIL)
 #
 # Run the published image (built & pushed to GHCR by the Docker workflow):
 #   docker compose pull        # grab the latest published image
@@ -28,6 +24,25 @@
 #   docker compose --profile redis up -d --build
 
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80" # ACME HTTP-01 challenge + redirect to https
+      - "443:443" # HTTPS (TCP: HTTP/1.1 + HTTP/2)
+      - "443:443/udp" # HTTP/3 (QUIC)
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates + ACME account live in /data — MUST persist, or every
+      # restart re-issues certs and burns Let's Encrypt rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - proxy
+
   proxy:
     # Default: the image published to GHCR by .github/workflows/docker.yml.
     # Override the tag with TAG=0.7.0 in .env to pin a specific release.
@@ -53,3 +68,7 @@ services:
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     # Not published to the host — only the proxy talks to it over the compose
     # network. Add a `ports:` mapping only if you need to inspect it directly.
+
+volumes:
+  caddy_data:
+  caddy_config:

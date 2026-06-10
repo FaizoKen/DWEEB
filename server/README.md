@@ -72,8 +72,10 @@ unusable id is dropped and Discord shows the full picker.
 
 - **Login + membership authorization** on every read (above).
 - **Per-IP rate limiting** (token bucket) on `/api` + `/auth`
-  (`RATE_LIMIT_PER_MIN` / `RATE_LIMIT_BURST`). Behind Cloudflare/Tunnel the real
-  client IP is read from `CF-Connecting-IP` / `X-Forwarded-For`.
+  (`RATE_LIMIT_PER_MIN` / `RATE_LIMIT_BURST`). The real client IP is read from
+  `CF-Connecting-IP` / `X-Forwarded-For` / `X-Real-IP` — whatever proxy sits in
+  front must strip the ones it doesn't set itself (the bundled `Caddyfile`
+  does).
 - **Global concurrency cap** on calls made under the shared bot token
   (`DISCORD_MAX_CONCURRENCY`) so a spike can't blow Discord's global rate budget.
 - **Short-TTL caching** of guild data and per-user guild lists (`CACHE_TTL_SECS`).
@@ -106,16 +108,33 @@ cargo run                     # listens on 0.0.0.0:8080
 For local dev set `COOKIE_SECURE=false` (plain HTTP) and
 `ALLOWED_ORIGINS=http://localhost:5173`.
 
-## Deploy (Docker behind Cloudflare Tunnel)
+## Deploy (Docker, direct TLS via Caddy)
 
 ```bash
 cp .env.example .env          # production values; COOKIE_SECURE=true
-docker compose up -d --build
+docker compose pull           # or: docker compose up -d --build
+docker compose up -d
 ```
 
-The compose file publishes the proxy on the loopback address `127.0.0.1:8080`
-only — not reachable from the public internet, only by the host (where your
-cloudflared runs). Point your tunnel ingress at `http://localhost:8080`.
+The compose file runs Caddy in front of the proxy. Point the domain's DNS A
+record **straight at the host** (Cloudflare proxy OFF / "DNS only") and set
+`DOMAIN` + `ACME_EMAIL` in `.env` — Caddy obtains and renews the Let's Encrypt
+certificate itself and serves HTTP/1.1, HTTP/2 and HTTP/3 (QUIC). Open
+**80/tcp, 443/tcp and 443/udp** in any firewall. The proxy container publishes
+no host port; only Caddy is reachable, and it strips `CF-Connecting-IP` /
+`X-Real-IP` so per-IP rate limiting can't be spoofed (see `Caddyfile`).
+
+For lowest latency on the host, enable BBR and give QUIC larger UDP buffers:
+
+```bash
+cat >/etc/sysctl.d/99-dweeb-net.conf <<'EOF'
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.core.rmem_max=7500000
+net.core.wmem_max=7500000
+EOF
+sysctl --system
+```
 
 **Cookie tip:** host the proxy on a subdomain of the builder's site (e.g.
 `api.dweeb.example.com` next to `dweeb.example.com`) and keep
