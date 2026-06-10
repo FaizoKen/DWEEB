@@ -72,9 +72,10 @@ services:
 
   # The Discord app's single interactions endpoint (../plugins/dispatcher):
   # verifies signatures, answers PINGs, and routes interactions to plugins by
-  # custom_id prefix. Caddy maps https://$DOMAIN/interactions here, so the URL
-  # registered in the Discord portal never changes. One ROUTES entry per
-  # plugin, e.g. {"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8090"}
+  # custom_id prefix. Caddy serves it at https://interactions.$PLUGINS_DOMAIN
+  # (plus the /interactions alias on $DOMAIN), so the URL registered in the
+  # Discord portal never changes. One ROUTES entry per plugin, e.g.
+  # {"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8090"}
   dispatcher:
     image: ghcr.io/faizoken/dweeb-interactions-dispatcher:${DISPATCHER_TAG:-latest}
     build: ../plugins/dispatcher

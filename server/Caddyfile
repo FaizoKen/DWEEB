@@ -14,12 +14,19 @@
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 }
 
+# The Discord app's single Interactions Endpoint URL — its own hostname under
+# the plugins wildcard, so it NEVER moves when plugins come and go. The
+# dispatcher verifies the signature and fans out to plugins by custom_id
+# prefix.
+interactions.{$PLUGINS_DOMAIN} {
+	import site_defaults
+	reverse_proxy dispatcher:8095
+}
+
 {$DOMAIN} {
 	import site_defaults
 
-	# The Discord app's single Interactions Endpoint URL lives on the API
-	# domain so it NEVER moves when plugins come and go. The dispatcher
-	# verifies the signature and fans out to plugins by custom_id prefix.
+	# Alias for the dispatcher (canonical URL above).
 	handle /interactions {
 		reverse_proxy dispatcher:8095
 	}

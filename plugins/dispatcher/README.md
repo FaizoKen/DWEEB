@@ -28,7 +28,7 @@ One entry in the `ROUTES` env var (see `server/compose.yml`):
 ```
 
 Longest prefix wins. Nothing else here changes; the public endpoint URL
-(`https://api-dweeb.faizo.net/interactions`) is stable forever.
+(`https://interactions.dweeb.faizo.net/interactions`) is stable forever.
 
 ## Env
 
