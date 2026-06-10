@@ -33,6 +33,7 @@ services:
       - "443:443/udp" # HTTP/3 (QUIC)
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      MODALFORM_DOMAIN: ${MODALFORM_DOMAIN:?set MODALFORM_DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
@@ -59,6 +60,28 @@ services:
       retries: 3
       start_period: 5s
 
+  # Modal Form plugin (../plugins/modal-form): its own registry, config UI and
+  # Discord interactions endpoint, backed by one SQLite file. Served by Caddy
+  # on MODALFORM_DOMAIN; publishes no host port itself.
+  modal-form:
+    image: ghcr.io/faizoken/dweeb-modal-form:${MODALFORM_TAG:-latest}
+    build: ../plugins/modal-form
+    restart: unless-stopped
+    environment:
+      DISCORD_PUBLIC_KEY: ${MODALFORM_DISCORD_PUBLIC_KEY:?set MODALFORM_DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://${MODALFORM_DOMAIN:?set MODALFORM_DOMAIN in .env}
+      RUST_LOG: info
+    volumes:
+      # The plugin's only state: the SQLite file with instance configs.
+      - modalform_data:/data
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8090 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   # Only started when you opt in with `--profile redis`. Shared cache +
   # rate-limit store for running several `proxy` replicas behind a balancer.
   redis:
@@ -72,3 +95,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  modalform_data:

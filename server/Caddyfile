@@ -23,3 +23,14 @@
 		header_up -X-Real-IP
 	}
 }
+
+# Modal Form plugin: DWEEB embeds {$MODALFORM_DOMAIN}/config.html in an iframe
+# and Discord POSTs interactions here — those must answer within 3 seconds, so
+# the plugin gets the same direct, single-hop path as the proxy.
+{$MODALFORM_DOMAIN} {
+	encode zstd gzip
+
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	reverse_proxy modal-form:8090
+}
