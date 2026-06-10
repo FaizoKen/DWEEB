@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ping Pong — configure</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1f22;
+        --panel: #2b2d31;
+        --panel-2: #232428;
+        --border: #3a3c41;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #5865f2;
+        --danger: #da373c;
+        --radius: 8px;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #f2f3f5;
+        --panel-2: #e3e5e8;
+        --border: #d7d9dc;
+        --text: #1e1f22;
+        --muted: #4e5058;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 { font-size: 14px; margin: 18px 0 8px; }
+      h2:first-of-type { margin-top: 0; }
+      textarea {
+        width: 100%;
+        min-height: 64px;
+        resize: vertical;
+        padding: 8px 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+      }
+      textarea:focus-visible { outline: none; border-color: var(--accent); }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .hint.over { color: var(--danger); }
+      .check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin-top: 12px; }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .row { display: flex; gap: 8px; margin-top: 20px; }
+      .row .grow { flex: 1; }
+      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+    </style>
+  </head>
+  <body>
+    <h2>Reply when clicked</h2>
+    <textarea id="reply" placeholder="Pong! 🏓"></textarea>
+    <div class="hint" id="budget"></div>
+
+    <label class="check">
+      <input id="ephemeral" type="checkbox" checked />
+      Only the person who clicked sees the reply (ephemeral)
+    </label>
+
+    <div class="err" id="error"></div>
+
+    <div class="row">
+      <button id="cancel" type="button">Cancel</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script>
+      "use strict";
+      // The whole config is carried INSIDE the custom_id (nothing is stored
+      // server-side):  pingpong:1:<e|p>:<percent-encoded reply>
+      // Discord caps a custom_id at 100 chars, which is the budget below.
+      const PREFIX = "pingpong:";
+      const VERSION = "1";
+      const CUSTOM_ID_MAX = 100;
+      const DEFAULT_REPLY = "Pong! 🏓";
+
+      let nonce = null;
+      let hostOrigin = "*";
+
+      const $ = (id) => document.getElementById(id);
+
+      const overhead = () => (PREFIX + VERSION + ":" + flagChar() + ":").length;
+      const flagChar = () => ($("ephemeral").checked ? "e" : "p");
+      const encodedReply = () => encodeURIComponent($("reply").value.trim());
+
+      function updateBudget() {
+        const budget = CUSTOM_ID_MAX - overhead();
+        const used = encodedReply().length;
+        const el = $("budget");
+        el.textContent = `${used}/${budget} of the encoded budget used` +
+          (used > budget ? " — too long, shorten the reply" : "");
+        el.classList.toggle("over", used > budget);
+        $("save").disabled = used > budget;
+        sendResize();
+      }
+      $("reply").addEventListener("input", updateBudget);
+      $("ephemeral").addEventListener("change", updateBudget);
+
+      // ── Protocol ────────────────────────────────────────────────────────
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+
+      window.addEventListener("message", (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type !== "dweeb:plugin:init") return;
+
+        nonce = msg.nonce;
+        hostOrigin = event.origin;
+        if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+
+        // Reconfigure: decode the existing custom_id back into the form.
+        if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
+          const m = msg.customId.slice(PREFIX.length).match(/^1:(e|p):(.*)$/);
+          if (m) {
+            $("ephemeral").checked = m[1] === "e";
+            try { $("reply").value = decodeURIComponent(m[2]); } catch { /* keep blank */ }
+          }
+        }
+        updateBudget();
+      });
+
+      function sendResize() {
+        if (nonce == null) return;
+        parent.postMessage(
+          { type: "dweeb:plugin:resize", nonce, height: document.body.scrollHeight + 24 },
+          hostOrigin,
+        );
+      }
+
+      // ── Save / cancel ───────────────────────────────────────────────────
+      $("cancel").addEventListener("click", () => {
+        parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
+      });
+
+      $("save").addEventListener("click", () => {
+        $("error").textContent = "";
+        const text = $("reply").value.trim() || DEFAULT_REPLY;
+        const customId = PREFIX + VERSION + ":" + flagChar() + ":" + encodeURIComponent(text);
+        if (customId.length > CUSTOM_ID_MAX) {
+          $("error").textContent = "Reply too long for Discord's custom_id — shorten it.";
+          sendResize();
+          return;
+        }
+        parent.postMessage(
+          {
+            type: "dweeb:plugin:save",
+            nonce,
+            customId,
+            summary: {
+              label: text.length > 40 ? text.slice(0, 39) + "…" : text,
+              description: $("ephemeral").checked ? "ephemeral reply" : "public reply",
+            },
+          },
+          hostOrigin,
+        );
+      });
+    </script>
+  </body>
+</html>

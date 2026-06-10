@@ -82,7 +82,7 @@ services:
     restart: unless-stopped
     environment:
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
-      ROUTES: '{"modalform:": "http://modal-form:8090"}'
+      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091"}'
       RUST_LOG: info
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
@@ -111,6 +111,25 @@ services:
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8090 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Ping Pong (../plugins/ping-pong): a button that instantly replies with a
+  # configurable message. Fully stateless — the config travels inside the
+  # custom_id, so there is no volume. Served at pingpong.$PLUGINS_DOMAIN.
+  ping-pong:
+    image: ghcr.io/faizoken/dweeb-ping-pong:${PINGPONG_TAG:-latest}
+    build: ../plugins/ping-pong
+    restart: unless-stopped
+    environment:
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://pingpong.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      RUST_LOG: info
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8091 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
       interval: 30s
       timeout: 3s
       retries: 3

@@ -57,3 +57,9 @@ modalform.{$PLUGINS_DOMAIN} {
 	import site_defaults
 	reverse_proxy modal-form:8090
 }
+
+# Ping Pong.
+pingpong.{$PLUGINS_DOMAIN} {
+	import site_defaults
+	reverse_proxy ping-pong:8091
+}
