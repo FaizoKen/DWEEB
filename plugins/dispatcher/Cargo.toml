@@ -1,6 +1,6 @@
 [package]
 name = "dweeb-interactions-dispatcher"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Routes Discord interactions to DWEEB plugin services by custom_id prefix — a Discord app has exactly ONE interactions endpoint, this is it."
 

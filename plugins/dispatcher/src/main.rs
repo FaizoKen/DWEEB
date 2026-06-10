@@ -162,13 +162,20 @@ async fn interactions(
     };
 
     // Forward raw body + signature headers so the plugin re-verifies the exact
-    // bytes Discord signed.
+    // bytes Discord signed. The receive timestamp (unix µs) lets latency-aware
+    // plugins (e.g. ping-pong) report the dispatcher hop; it is informational
+    // only — it isn't part of the signed material.
+    let received_us = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0);
     let forwarded = app
         .client
         .post(format!("{base}/interactions"))
         .header("content-type", "application/json")
         .header("x-signature-ed25519", signature)
         .header("x-signature-timestamp", timestamp)
+        .header("x-dweeb-dispatcher-received", received_us.to_string())
         .body(body.clone())
         .send()
         .await;

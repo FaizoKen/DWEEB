@@ -2,7 +2,20 @@
 
 Attach this to an **interactive button** in DWEEB. When a Discord user clicks
 it, they instantly get a reply with a message you choose — ephemeral (only the
-clicker sees it) or public.
+clicker sees it) or public — plus a **detailed latency report** as subtext:
+
+```
+Pong! 🏓
+⏱ click → server 142 ms · dispatcher hop 0.4 ms · handler 23 µs
+```
+
+- **click → server** — the interaction `id` is a snowflake embedding the
+  click's millisecond timestamp; compared against this host's (NTP-synced)
+  clock it gives the true Discord → server delivery time.
+- **dispatcher hop** — the [interactions dispatcher](../dispatcher) stamps its
+  receive time in `x-dweeb-dispatcher-received` when forwarding, exposing the
+  internal hop (omitted when the service is called directly).
+- **handler** — time spent inside the request handler itself.
 
 It's also the **minimal plugin template**: where [Modal Form](../modal-form)
 shows the *stateful* pattern (SQLite instance store, capability ids), Ping Pong

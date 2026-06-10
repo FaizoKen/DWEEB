@@ -1,10 +1,20 @@
 //! DWEEB "Ping Pong" plugin.
 //!
-//! The minimal DWEEB plugin: a button that instantly replies with a
-//! configurable message. Where Modal Form shows the *stateful* pattern
-//! (SQLite instance store, capability ids), this one shows the *stateless*
-//! pattern — the whole config travels inside the `custom_id` Discord hands
-//! back on every click, so there is nothing to store and nothing to look up:
+//! A button that replies with your message plus a **detailed latency report**:
+//!
+//!   Pong! 🏓
+//!   -# ⏱ click → server 142 ms · dispatcher hop 0.4 ms · handler 23 µs
+//!
+//! The measurements come for free from what every interaction already carries:
+//! the interaction `id` is a snowflake embedding the click's millisecond
+//! timestamp (click → server), the dispatcher stamps its receive time in
+//! `x-dweeb-dispatcher-received` (the internal hop), and the handler times
+//! itself.
+//!
+//! It's also the minimal DWEEB plugin: where Modal Form shows the *stateful*
+//! pattern (SQLite instance store, capability ids), this one shows the
+//! *stateless* pattern — the whole config travels inside the `custom_id`
+//! Discord hands back on every click, so there is nothing to store:
 //!
 //!   pingpong:1:<e|p>:<percent-encoded reply text>
 //!   └prefix──┘ │ │    └ what to say (≤ 100 chars total, Discord's limit)
@@ -34,6 +44,8 @@ use tracing_subscriber::EnvFilter;
 
 const PREFIX: &str = "pingpong:";
 const DEFAULT_REPLY: &str = "Pong! \u{1F3D3}";
+/// Discord's snowflake epoch (2015-01-01T00:00:00Z) in unix milliseconds.
+const DISCORD_EPOCH_MS: u64 = 1_420_070_400_000;
 
 // Interaction request types.
 const TYPE_PING: u64 = 1;
@@ -113,7 +125,7 @@ async fn registry(State(app): State<Arc<App>>) -> Json<Value> {
             "schemaVersion": 1,
             "id": "ping-pong",
             "name": "Ping Pong",
-            "description": "Reply instantly with a message of your choice when the button is clicked.",
+            "description": "Reply with your message plus a detailed latency report (click → server, dispatcher hop, handler time).",
             "version": env!("CARGO_PKG_VERSION"),
             "publisher": "DWEEB",
             "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/ping-pong",
@@ -130,8 +142,15 @@ async fn config_html() -> Html<&'static str> {
 }
 
 /// Discord interactions endpoint. Verifies the signature on the raw body, then
-/// dispatches: PING → pong, button click → the reply decoded from custom_id.
+/// dispatches: PING → pong, button click → the reply decoded from custom_id
+/// plus a latency report (see the module docs for where each number comes from).
 async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
+    let started = std::time::Instant::now();
+    let now_us = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or(0);
+
     let signature = headers
         .get("x-signature-ed25519")
         .and_then(|v| v.to_str().ok())
@@ -161,14 +180,56 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
             if ephemeral {
                 flags |= FLAG_EPHEMERAL;
             }
+            let detail = latency_report(&interaction, &headers, now_us, started);
             Json(json!({
                 "type": RESPONSE_CHANNEL_MESSAGE,
-                "data": { "content": reply, "flags": flags }
+                "data": { "content": format!("{reply}\n{detail}"), "flags": flags }
             }))
             .into_response()
         }
         _ => (StatusCode::BAD_REQUEST, "unsupported interaction type").into_response(),
     }
+}
+
+/// Build the latency subtext line. Every part is optional — whatever can't be
+/// measured (no snowflake, direct call without the dispatcher) is just omitted,
+/// so the reply never fails because a number was missing.
+///
+///   -# ⏱ click → server **142 ms** · dispatcher hop **0.4 ms** · handler **23 µs**
+///
+/// "click → server" compares the interaction snowflake's embedded timestamp
+/// against this host's clock, so it includes Discord's own processing and is
+/// only as honest as NTP keeps us; negative skew clamps to 0.
+fn latency_report(
+    interaction: &Value,
+    headers: &HeaderMap,
+    now_us: u64,
+    started: std::time::Instant,
+) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(3);
+
+    let clicked_ms = interaction
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|id| (id >> 22) + DISCORD_EPOCH_MS);
+    if let Some(clicked) = clicked_ms {
+        let delivery_ms = (now_us / 1000).saturating_sub(clicked);
+        parts.push(format!("click → server **{delivery_ms} ms**"));
+    }
+
+    let dispatcher_us = headers
+        .get("x-dweeb-dispatcher-received")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+    if let Some(received) = dispatcher_us {
+        let hop_us = now_us.saturating_sub(received);
+        parts.push(format!("dispatcher hop **{:.1} ms**", hop_us as f64 / 1000.0));
+    }
+
+    parts.push(format!("handler **{} µs**", started.elapsed().as_micros()));
+
+    format!("-# \u{23F1} {}", parts.join(" · "))
 }
 
 /// Decode `pingpong:1:<e|p>:<percent-encoded text>` → (reply, ephemeral).

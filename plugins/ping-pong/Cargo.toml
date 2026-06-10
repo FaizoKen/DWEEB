@@ -1,8 +1,8 @@
 [package]
 name = "dweeb-ping-pong"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "DWEEB plugin: a Discord button that instantly replies with a configurable message. Stateless — the config lives inside the custom_id."
+description = "DWEEB plugin: a Discord button that replies with a configurable message plus a detailed latency report. Stateless — the config lives inside the custom_id."
 
 [dependencies]
 axum = "0.7"
