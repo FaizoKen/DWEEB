@@ -69,6 +69,16 @@ pub struct Config {
     /// shared via Redis so multiple proxy instances can run behind a load
     /// balancer. Unset ⇒ process-local in-memory backends (single instance).
     pub redis_url: Option<String>,
+
+    // ── Permanent component slots ──────────────────────────────────────────
+    /// Base URL of the interactions dispatcher's internal API (compose-network
+    /// address, e.g. `http://dispatcher:8095`). Together with
+    /// `dispatcher_token`, enables the dashboard's permanent-slot management;
+    /// unset ⇒ those endpoints answer 501.
+    pub dispatcher_url: Option<String>,
+    /// Bearer token for the dispatcher's internal API (`INTERNAL_API_TOKEN`
+    /// on the dispatcher side).
+    pub dispatcher_token: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -129,6 +139,9 @@ impl Config {
 
         let redis_url = opt_env("REDIS_URL");
 
+        let dispatcher_url = opt_env("DISPATCHER_URL").map(|u| u.trim_end_matches('/').to_string());
+        let dispatcher_token = opt_env("DISPATCHER_API_TOKEN");
+
         Ok(Config {
             bot_token,
             bind_addr,
@@ -148,6 +161,8 @@ impl Config {
             rate_limit_burst,
             discord_max_concurrency,
             redis_url,
+            dispatcher_url,
+            dispatcher_token,
         })
     }
 }

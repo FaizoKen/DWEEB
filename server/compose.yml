@@ -63,6 +63,11 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Compose-network address of the dispatcher's permanent-slot API (the
+      # token for it, DISPATCHER_API_TOKEN, comes from .env). The dashboard's
+      # "keep components alive" feature flows browser → proxy → dispatcher.
+      DISPATCHER_URL: http://dispatcher:8095
     healthcheck:
       test: ["CMD", "/usr/local/bin/dweeb-proxy", "healthcheck"]
       interval: 30s
@@ -90,7 +95,15 @@ services:
       # Days a component stays clickable after its message was sent; an expired
       # click disables the component instead of reaching a plugin. 0 = forever.
       COMPONENT_TTL_DAYS: ${COMPONENT_TTL_DAYS:-7}
+      # TTL-exempt messages each guild may hold, managed from the dashboard's
+      # post-send dialog (via the proxy). 0 stops new grants.
+      PERMANENT_SLOTS_PER_GUILD: ${PERMANENT_SLOTS_PER_GUILD:-2}
+      # Gates the /permanent management API the proxy calls. Unset = disabled.
+      INTERNAL_API_TOKEN: ${DISPATCHER_API_TOKEN:-}
       RUST_LOG: info
+    volumes:
+      # The dispatcher's only state: the SQLite file with permanent slots.
+      - dispatcher_data:/data
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8095 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
@@ -155,4 +168,5 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  dispatcher_data:
   modalform_data:

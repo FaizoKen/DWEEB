@@ -14,8 +14,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::extract::{FromRef, Path, Query, State};
-use axum::http::header;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use axum_extra::extract::cookie::{Key, PrivateCookieJar};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -26,11 +27,22 @@ use crate::discord::Discord;
 use crate::error::AppError;
 use crate::session::{Session, SESSION_COOKIE};
 
+/// Client for the interactions dispatcher's internal /permanent API — the
+/// service that owns the per-guild permanent-component slots the dashboard
+/// manages. Present only when both DISPATCHER_URL and DISPATCHER_API_TOKEN
+/// are configured.
+pub struct DispatcherApi {
+    pub base: String,
+    pub token: String,
+    pub http: reqwest::Client,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
     pub discord: Arc<Discord>,
     pub cache: Arc<DataCache>,
+    pub dispatcher: Option<Arc<DispatcherApi>>,
     /// Master key for encrypting/decrypting cookies.
     pub key: Key,
 }
@@ -145,6 +157,129 @@ pub async fn list_guilds(
     Ok(value_response(&json!({ "guilds": items })))
 }
 
+// ── Permanent component slots (login + Manage Server gated) ────────────────
+//
+// The dashboard's "keep this message's buttons alive" feature. The slots
+// themselves live in the interactions dispatcher (which enforces the expiry);
+// these handlers add the user-facing authorization — a valid session and a
+// guild the user manages — then relay to the dispatcher's token-gated API.
+
+/// Discord snowflakes are 17–20 digits today; accept a small range with slack.
+fn is_snowflake(s: &str) -> bool {
+    (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+#[derive(Deserialize)]
+pub struct PermanentAddBody {
+    pub message_id: String,
+    pub channel_id: String,
+}
+
+/// `GET /api/guilds/:id/permanent` — slot usage + current permanent messages.
+pub async fn permanent_list(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Path(guild): Path<String>,
+) -> Result<Response, AppError> {
+    authorize_member(&st, &jar, &guild).await?;
+    let api = dispatcher_api(&st)?;
+    let req = api
+        .http
+        .get(format!("{}/permanent/{guild}", api.base))
+        .bearer_auth(&api.token);
+    relay_dispatcher(req).await
+}
+
+/// `POST /api/guilds/:id/permanent` `{ message_id, channel_id }` — spend a
+/// slot on a message. 409 with the current slots when the guild is full.
+pub async fn permanent_add(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Path(guild): Path<String>,
+    Json(body): Json<PermanentAddBody>,
+) -> Result<Response, AppError> {
+    let session = authorize_member(&st, &jar, &guild).await?;
+    if !is_snowflake(&body.message_id) || !is_snowflake(&body.channel_id) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "message_id and channel_id must be Discord ids".into(),
+            retry_after: None,
+        });
+    }
+    let api = dispatcher_api(&st)?;
+    let req = api
+        .http
+        .post(format!("{}/permanent/{guild}", api.base))
+        .bearer_auth(&api.token)
+        .json(&json!({
+            "message_id": body.message_id,
+            "channel_id": body.channel_id,
+            // Recorded for audit; the session is the source of truth for who.
+            "added_by": session.uid,
+        }));
+    relay_dispatcher(req).await
+}
+
+/// `DELETE /api/guilds/:id/permanent/:message_id` — give the slot back.
+pub async fn permanent_remove(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Path((guild, message_id)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    authorize_member(&st, &jar, &guild).await?;
+    if !is_snowflake(&message_id) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "message_id must be a Discord id".into(),
+            retry_after: None,
+        });
+    }
+    let api = dispatcher_api(&st)?;
+    let req = api
+        .http
+        .delete(format!("{}/permanent/{guild}/{message_id}", api.base))
+        .bearer_auth(&api.token);
+    relay_dispatcher(req).await
+}
+
+/// The dispatcher client, or a clear "not enabled here" for deployments that
+/// don't run the dispatcher (e.g. proxy-only setups).
+fn dispatcher_api(st: &AppState) -> Result<&Arc<DispatcherApi>, AppError> {
+    st.dispatcher.as_ref().ok_or_else(|| AppError::Status {
+        status: StatusCode::NOT_IMPLEMENTED,
+        message: "Permanent component slots aren't enabled on this deployment.".into(),
+        retry_after: None,
+    })
+}
+
+/// Send a prepared dispatcher request and pass its answer through. The slot
+/// statuses the FE acts on (200, 404 not-permanent, 409 slots-full) relay
+/// verbatim; anything else means *our* deployment is misconfigured or down,
+/// which is a gateway error, not the caller's.
+async fn relay_dispatcher(req: reqwest::RequestBuilder) -> Result<Response, AppError> {
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't reach the dispatcher: {e}")))?;
+    let status = resp.status();
+    let bytes = resp.bytes().await.unwrap_or_default();
+    match status.as_u16() {
+        200 | 400 | 404 | 409 => Ok((
+            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::OK),
+            [(header::CONTENT_TYPE, "application/json")],
+            bytes,
+        )
+            .into_response()),
+        other => {
+            tracing::error!(status = other, "dispatcher permanent API error");
+            Err(AppError::BadGateway(
+                "The permanent-slot service answered unexpectedly — check the dispatcher logs."
+                    .into(),
+            ))
+        }
+    }
+}
+
 // ── Authorization ──────────────────────────────────────────────────────────
 
 /// Decode a valid, unexpired session or reject with 401.
@@ -164,18 +299,19 @@ pub fn current_session(jar: &PrivateCookieJar) -> Option<Session> {
 }
 
 /// Ensure the caller is signed in and the requested guild is one they may use.
+/// Returns the session so writes can record who acted.
 async fn authorize_member(
     st: &AppState,
     jar: &PrivateCookieJar,
     guild: &str,
-) -> Result<(), AppError> {
+) -> Result<Session, AppError> {
     let session = require_session(jar)?;
     // Membership is a gate, not user-facing data — always serve it from cache so
     // a forced data refresh doesn't also force an extra `current_user_guilds`
     // round-trip on every guild read.
     let guilds = usable_guilds(st, &session, false).await?;
     if guilds.iter().any(|g| g.id == guild) {
-        Ok(())
+        Ok(session)
     } else {
         Err(AppError::Forbidden(
             "You can only load servers you manage. If you just added the bot, sign in again to refresh your server list.".into(),

@@ -20,7 +20,14 @@
 # prefix.
 interactions.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy dispatcher:8095
+	# The permanent-slot management API is internal (proxy → dispatcher over
+	# the compose network, bearer-token gated). Don't expose it at the edge.
+	handle /permanent* {
+		respond 404
+	}
+	handle {
+		reverse_proxy dispatcher:8095
+	}
 }
 
 {$DOMAIN} {

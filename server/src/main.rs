@@ -36,7 +36,10 @@ use crate::cache::{DataCache, TtlCache};
 use crate::config::Config;
 use crate::discord::Discord;
 use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
-use crate::routes::{bootstrap, channels, emojis, health, list_guilds, roles, AppState};
+use crate::routes::{
+    bootstrap, channels, emojis, health, list_guilds, permanent_add, permanent_list,
+    permanent_remove, roles, AppState, DispatcherApi,
+};
 
 #[tokio::main]
 async fn main() {
@@ -110,12 +113,31 @@ async fn main() {
     // (validated to be ≥64 bytes in `Config::from_env`).
     let key = Key::from(config.session_secret.as_bytes());
 
+    // The dashboard's permanent-slot management talks to the interactions
+    // dispatcher over the compose network — only when both halves of its
+    // config are present.
+    let dispatcher = match (&config.dispatcher_url, &config.dispatcher_token) {
+        (Some(base), Some(token)) => {
+            tracing::info!(upstream = %base, "permanent-slot API enabled");
+            Some(Arc::new(DispatcherApi {
+                base: base.clone(),
+                token: token.clone(),
+                http: reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(5))
+                    .build()
+                    .expect("reqwest client"),
+            }))
+        }
+        _ => None,
+    };
+
     let state = AppState {
         discord: Arc::new(Discord::new(
             config.bot_token.clone(),
             config.discord_max_concurrency,
         )),
         cache: Arc::new(cache),
+        dispatcher,
         key,
         config: Arc::new(config),
     };
@@ -135,6 +157,16 @@ async fn main() {
         .route("/api/guilds/:guild_id/channels", get(channels))
         .route("/api/guilds/:guild_id/emojis", get(emojis))
         .route("/api/guilds/:guild_id/bootstrap", get(bootstrap))
+        // Permanent component slots (login + Manage Server gated, relayed to
+        // the interactions dispatcher which owns them).
+        .route(
+            "/api/guilds/:guild_id/permanent",
+            get(permanent_list).post(permanent_add),
+        )
+        .route(
+            "/api/guilds/:guild_id/permanent/:message_id",
+            axum::routing::delete(permanent_remove),
+        )
         .layer(cors)
         // Rate limiting runs outermost so rejected requests never touch a handler.
         .layer(from_fn_with_state(limiter, rate_limit))
@@ -197,7 +229,7 @@ fn build_cors(config: &Config) -> CorsLayer {
         .collect();
 
     CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST])
+        .allow_methods([Method::GET, Method::POST, Method::DELETE])
         .allow_headers([header::CONTENT_TYPE])
         .allow_credentials(true)
         .allow_origin(origins)
