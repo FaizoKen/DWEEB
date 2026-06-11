@@ -4,6 +4,7 @@ dist
 *.log
 .env
 .env.local
+.env.production
 .vite
 .cache
 bun.lockb
