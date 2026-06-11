@@ -18,6 +18,10 @@ tower-http = { version = "0.5", features = ["cors", "trace"] }
 axum-extra = { version = "0.9", features = ["cookie-private"] }
 # CSPRNG for unguessable OAuth `state` (CSRF) and session nonces.
 getrandom = "0.2"
+# Persistent store for the opt-in share short links (7-day TTL). `bundled`
+# compiles SQLite from source, so the image needs no system libsqlite — same
+# choice as the dispatcher and modal-form plugins.
+rusqlite = { version = "0.31", features = ["bundled"] }
 # `Duration` for cookie max-age. Pinned to the same 0.3 line the `cookie` crate
 # (via axum-extra) uses, so the types unify to one version.
 time = { version = "0.3", default-features = false }

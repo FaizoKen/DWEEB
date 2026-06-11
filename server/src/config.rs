@@ -70,6 +70,18 @@ pub struct Config {
     /// balancer. Unset ⇒ process-local in-memory backends (single instance).
     pub redis_url: Option<String>,
 
+    // ── Short links ────────────────────────────────────────────────────────
+    /// Days a short link lives before it auto-expires and is deleted
+    /// (default 7). 0 disables the feature: the endpoints answer 501 and the
+    /// builder's UI only offers the default hash link.
+    pub shortlink_ttl_days: u64,
+    /// SQLite file the short links live in. Must sit on persistent storage —
+    /// a short link is a 7-day promise, so it has to survive a redeploy.
+    pub shortlink_db_path: String,
+    /// Creation answers 503 once this many links are stored (existing links
+    /// keep resolving); bounds worst-case disk usage under abuse.
+    pub shortlink_max_entries: u64,
+
     // ── Permanent component slots ──────────────────────────────────────────
     /// Base URL of the interactions dispatcher's internal API (compose-network
     /// address, e.g. `http://dispatcher:8095`). Together with
@@ -139,6 +151,11 @@ impl Config {
 
         let redis_url = opt_env("REDIS_URL");
 
+        let shortlink_ttl_days = parse_or("SHORTLINK_TTL_DAYS", 7);
+        let shortlink_db_path =
+            opt_env("SHORTLINK_DB_PATH").unwrap_or_else(|| "shortlinks.db".to_string());
+        let shortlink_max_entries = parse_or("SHORTLINK_MAX_ENTRIES", 50_000);
+
         let dispatcher_url = opt_env("DISPATCHER_URL").map(|u| u.trim_end_matches('/').to_string());
         let dispatcher_token = opt_env("DISPATCHER_API_TOKEN");
 
@@ -161,6 +178,9 @@ impl Config {
             rate_limit_burst,
             discord_max_concurrency,
             redis_url,
+            shortlink_ttl_days,
+            shortlink_db_path,
+            shortlink_max_entries,
             dispatcher_url,
             dispatcher_token,
         })

@@ -20,9 +20,11 @@ mod error;
 mod ratelimit;
 mod routes;
 mod session;
+mod shortlink;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::http::{header, HeaderValue, Method};
 use axum::middleware::from_fn_with_state;
@@ -40,6 +42,7 @@ use crate::routes::{
     bootstrap, channels, emojis, health, list_guilds, permanent_add, permanent_list,
     permanent_remove, roles, AppState, DispatcherApi,
 };
+use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
 
 #[tokio::main]
 async fn main() {
@@ -131,6 +134,51 @@ async fn main() {
         _ => None,
     };
 
+    // Short links: a small SQLite file (fails the boot loudly when unwritable —
+    // a deployment that promises 7-day links must be able to keep them). An
+    // hourly sweep deletes expired rows; reads already filter on expiry, so a
+    // link dies exactly on time either way.
+    let shortlinks = if config.shortlink_ttl_days > 0 {
+        match ShortLinkStore::open(
+            &config.shortlink_db_path,
+            config.shortlink_ttl_days,
+            config.shortlink_max_entries,
+        ) {
+            Ok(store) => {
+                tracing::info!(
+                    db = %config.shortlink_db_path,
+                    ttl_days = config.shortlink_ttl_days,
+                    "short links enabled"
+                );
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                eprintln!("short-link store error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(store) = &shortlinks {
+        let store = Arc::clone(store);
+        tokio::spawn(async move {
+            // First tick fires immediately, so leftovers from before a restart
+            // are reclaimed at boot.
+            let mut tick = tokio::time::interval(Duration::from_secs(3600));
+            loop {
+                tick.tick().await;
+                let s = Arc::clone(&store);
+                match tokio::task::spawn_blocking(move || s.sweep()).await {
+                    Ok(Ok(0)) => {}
+                    Ok(Ok(n)) => tracing::info!(deleted = n, "swept expired short links"),
+                    Ok(Err(e)) => tracing::warn!("short-link sweep failed: {e}"),
+                    Err(e) => tracing::warn!("short-link sweep panicked: {e}"),
+                }
+            }
+        });
+    }
+
     let state = AppState {
         discord: Arc::new(Discord::new(
             config.bot_token.clone(),
@@ -138,6 +186,7 @@ async fn main() {
         )),
         cache: Arc::new(cache),
         dispatcher,
+        shortlinks,
         key,
         config: Arc::new(config),
     };
@@ -151,6 +200,14 @@ async fn main() {
         .route("/auth/me", get(auth::me))
         // Webhook creation via Discord's `webhook.incoming` OAuth (no bot perms).
         .route("/auth/webhook", get(auth::webhook_start))
+        // Opt-in share short links (anonymous; rate-limited + validated). The
+        // tight body limit keeps the create endpoint from accepting anything
+        // beyond a share token, well before JSON parsing.
+        .route(
+            "/api/shortlink",
+            post(shortlink_create).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route("/api/shortlink/:id", get(shortlink_resolve))
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))
         .route("/api/guilds/:guild_id/roles", get(roles))

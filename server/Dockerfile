@@ -27,7 +27,13 @@ RUN apt-get update \
 
 COPY --from=builder /app/target/release/dweeb-proxy /usr/local/bin/dweeb-proxy
 
+# Writable home for the short-link SQLite file, owned by the unprivileged
+# runtime user. compose.yml mounts the `proxy_data` named volume here; the
+# volume inherits this ownership on first use.
+RUN mkdir -p /data && chown 1000:1000 /data
+
 ENV BIND_ADDR=0.0.0.0:8080
+ENV SHORTLINK_DB_PATH=/data/shortlinks.db
 EXPOSE 8080
 # Run unprivileged.
 USER 1000:1000

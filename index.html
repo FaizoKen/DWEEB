@@ -1,6 +1,22 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Short-link early resolve: when this page load is a `/s/<id>` short
+         link, start fetching the stored share token NOW — in parallel with the
+         JS bundle download — instead of after the app boots. The app consumes
+         the in-flight response via `window.__dweebShortLink` (shortlink.ts).
+         `%VITE_PROXY_BASE_URL%` is replaced by Vite at build time; when it's
+         unset the literal survives, fails the http check, and the app falls
+         back to fetching on its own. -->
+    <script>
+      (function () {
+        var m = /^\/s\/([0-9A-Za-z]{4,16})\/*$/.exec(location.pathname);
+        var api = "%VITE_PROXY_BASE_URL%";
+        if (m && /^https?:\/\//.test(api))
+          window.__dweebShortLink = fetch(api.replace(/\/+$/, "") + "/api/shortlink/" + m[1]);
+      })();
+    </script>
+
     <!-- Analytics is deferred to browser idle / first interaction (see
          gtag-init.js), so it never competes with the app's critical resources.
          A cheap DNS prefetch keeps the eventual lazy load fast without opening a

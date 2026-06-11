@@ -48,8 +48,27 @@ be in.
 | GET    | `/api/guilds/:id/channels`    | ✓    | `[{ id, name, type, position, … }]`      |
 | GET    | `/api/guilds/:id/emojis`      | ✓    | `[{ id, name, animated, available }]`    |
 | GET    | `/api/guilds/:id/bootstrap`   | ✓    | `{ roles, channels, emojis }` (one call) |
+| POST   | `/api/shortlink`              | —    | `201 { id, expires_at }` — stores a share token for 7 days |
+| GET    | `/api/shortlink/:id`          | —    | `{ token }`, or 404 once expired/unknown |
 
 `✓` = requires the session cookie **and** membership of `:id`.
+
+### Short links
+
+The builder's default share link keeps the whole message in the URL hash, so it
+never reaches a server. The opt-in **short link** is the exception: the browser
+POSTs the compressed share token here, it's stored in a small SQLite file
+(`SHORTLINK_DB_PATH`, on the `proxy_data` volume under Docker) under a random
+base62 id, and the builder shares `https://<frontend>/s/<id>`. Opening that URL
+resolves the token back via `GET /api/shortlink/:id`.
+
+Links **auto-expire after `SHORTLINK_TTL_DAYS` (default 7)**: reads filter on
+the expiry timestamp (an expired link 404s immediately) and an hourly sweep
+deletes expired rows. Creation is anonymous by design — sharing must not
+require a login — so it's guarded by the per-IP rate limiter, a strict
+share-token shape + size check (this can't be used as a general blob store),
+and a total-row cap (`SHORTLINK_MAX_ENTRIES`). Set `SHORTLINK_TTL_DAYS=0` to
+disable the feature (the endpoints answer 501).
 
 ### Creating a webhook (`webhook.incoming`)
 

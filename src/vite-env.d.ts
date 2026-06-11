@@ -14,6 +14,14 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
+interface Window {
+  /**
+   * In-flight short-link resolution started by the inline early-resolve
+   * script in `index.html`, consumed (once) by `shortlink.ts`.
+   */
+  __dweebShortLink?: Promise<Response>;
+}
+
 // Treat default-imported CSS Modules as a string->string lookup so e.g.
 // `import styles from "./Foo.module.css"; styles.bar` type-checks.
 declare module "*.module.css" {

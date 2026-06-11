@@ -55,7 +55,10 @@ The action-bar buttons:
 
 Privacy: your draft never leaves your browser, and Share URLs put the message in
 the `#hash` fragment, which the server never sees. A webhook URL goes to Discord
-when you Send (and to a plugin you attach, if you point one at it).
+when you Send (and to a plugin you attach, if you point one at it). The one
+opt-in exception: the Share dialog's **Create short link** uploads that message
+to the proxy so it can be served from a tiny `…/s/<id>` URL — stored entries
+auto-expire and are deleted after 7 days.
 
 ```
 ┌─────────────────────────────────┬────────────────────────────────────────┐
@@ -166,6 +169,10 @@ from the wire format, and it is stripped on export.
 - **`serialization/url.ts`** owns reading and writing the `#s=<token>`
   hash fragment. Share state lives in the URL hash because hashes never
   reach the server — the share payload stays private to whoever has the URL.
+- **`serialization/shortlink.ts`** is the opt-in exception: it POSTs the
+  token to the proxy's `/api/shortlink` store (7-day auto-delete) and
+  resolves `…/s/<id>` URLs back, consuming the early fetch that
+  `index.html` starts in parallel with the bundle download.
 
 ### Layer 3 — Features (`src/features`)
 
@@ -190,8 +197,9 @@ from the wire format, and it is stripped on export.
 `App.tsx` composes everything. Two hooks live here:
 
 - **`useShareUrlBootstrap`** — on first mount, decodes `#s=<token>` (if
-  any) and replaces the active message. Failures surface as a toast; the
-  editor still opens.
+  any) — or resolves a `/s/<id>` short link against the proxy — and
+  replaces the active message. Failures surface as a toast; the editor
+  still opens.
 - **`useKeyboardShortcuts`** — global `Cmd/Ctrl+Z` and `Cmd/Ctrl+Shift+Z`
   for undo/redo. Ignored while the user is typing in a field.
 - **`useAutoSaveDraft`** — subscribes to the message store and writes the

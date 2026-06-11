@@ -26,6 +26,7 @@ use crate::config::Config;
 use crate::discord::Discord;
 use crate::error::AppError;
 use crate::session::{Session, SESSION_COOKIE};
+use crate::shortlink::ShortLinkStore;
 
 /// Client for the interactions dispatcher's internal /permanent API — the
 /// service that owns the per-guild permanent-component slots the dashboard
@@ -43,6 +44,8 @@ pub struct AppState {
     pub discord: Arc<Discord>,
     pub cache: Arc<DataCache>,
     pub dispatcher: Option<Arc<DispatcherApi>>,
+    /// Short-link store (see `shortlink.rs`); None when the feature is off.
+    pub shortlinks: Option<Arc<ShortLinkStore>>,
     /// Master key for encrypting/decrypting cookies.
     pub key: Key,
 }

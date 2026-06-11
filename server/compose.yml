@@ -68,6 +68,13 @@ services:
       # token for it, DISPATCHER_API_TOKEN, comes from .env). The dashboard's
       # "keep components alive" feature flows browser → proxy → dispatcher.
       DISPATCHER_URL: http://dispatcher:8095
+      # The short-link SQLite file must live on the proxy_data volume — a
+      # short link promises 7 days, so it has to survive a redeploy.
+      SHORTLINK_DB_PATH: ${SHORTLINK_DB_PATH:-/data/shortlinks.db}
+    volumes:
+      # The proxy's only state: the SQLite file with the opt-in share short
+      # links (auto-expiring, default 7 days).
+      - proxy_data:/data
     healthcheck:
       test: ["CMD", "/usr/local/bin/dweeb-proxy", "healthcheck"]
       interval: 30s
@@ -168,5 +175,6 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  proxy_data:
   dispatcher_data:
   modalform_data:

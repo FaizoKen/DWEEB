@@ -1,3 +1,7 @@
 /target
 .env
 .env.production
+# Local short-link store from a bare `cargo run` (see SHORTLINK_DB_PATH).
+*.db
+*.db-shm
+*.db-wal

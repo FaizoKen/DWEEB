@@ -179,11 +179,13 @@
         and read that message, so treat share links accordingly.
       </p>
       <p>
-        <strong>Short links (discontinued).</strong> DWEEB previously offered an opt-in
-        <code>dweeb.faizo.net/s/…</code> short link that stored the compressed message on our
-        infrastructure for up to 7 days. That feature has been removed; no short-link storage
-        exists anymore, and every previously stored entry has expired or been deleted. Share
-        links today are hash links only and never reach a server.
+        <strong>Short links (optional).</strong> If you choose to create a <em>short link</em>, the
+        compressed message is uploaded to our server and stored under a random id so it can be
+        served from a short <code>dweeb.faizo.net/s/…</code> URL. Unlike the hash link above, this
+        means the message contents <strong>do reach us</strong>. Short links
+        <strong>automatically expire and are deleted after 7 days</strong> and we store nothing
+        else about them — no account, no IP address, no analytics tied to the link. Don't create
+        one for a message you wouldn't want on our server — use the default hash link instead.
       </p>
 
       <h2>3. Sending messages to Discord</h2>
@@ -268,7 +270,9 @@
       <p>
         Because most data lives in your browser, you control its retention — it persists until you
         clear it. The Discord session cookie expires automatically and on sign-out. Server-side
-        caches of guild data are short-lived. We do not keep a database of users or message content.
+        caches of guild data are short-lived. We do not keep a database of users, and the only
+        message content we ever hold is a short link you explicitly created — deleted automatically
+        after 7 days.
       </p>
 
       <h2>11. Children</h2>
