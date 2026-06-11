@@ -21,11 +21,14 @@
  * A webhook PATCH replaces the whole message, so when updating without a
  * restore we warn that anything not rebuilt in the editor is overwritten.
  *
- * Messages with interactive components can opt into a permanent slot from the
- * confirm dialog ("Make permanent"): slot availability is fetched when the
- * confirm opens, and the claim runs right after the send succeeds — permanence
- * is keyed to the message id, which only exists then. A claim failure never
- * fails the send; it surfaces in the success dialog's permanent-slots section.
+ * Messages with interactive components decide permanence in the confirm
+ * dialog: slot state is fetched when the confirm opens, and the "Make
+ * permanent" switch claims a slot — or, when the update target already holds
+ * one, starts on and releases it when turned off. When every slot is taken the
+ * confirm lists the occupying messages for inline freeing. The claim/release
+ * runs right after the send succeeds — permanence is keyed to the message id,
+ * which only exists then — and never fails the send; the success dialog shows
+ * a read-only receipt of the final state, with any failure attached.
  *
  * Before posting, the panel confirms who owns the webhook (a GET) whenever the
  * owner isn't already known from a prior check or saved entry. That keeps the
@@ -76,6 +79,7 @@ import {
   addPermanentMessage,
   fetchPermanentSlots,
   isAuthError,
+  removePermanentMessage,
   type PermanentSlots,
 } from "@/core/guild/api";
 import { Button } from "@/ui/Button";
@@ -88,6 +92,7 @@ import { isProxyConfigured, webhookCreateUrl, type IncomingWebhook } from "@/cor
 import { WebhookRecents } from "./WebhookRecents";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
+import type { PermanentStatusProps } from "./PermanentStatus";
 import { Callout } from "./Callout";
 import styles from "./SendPanel.module.css";
 
@@ -116,12 +121,9 @@ interface SendSuccessInfo {
   editOnResend: boolean;
   /** The posted/edited message's id, when the response carried it. */
   messageId?: string;
-  /** Message carries interactive plugin components → the success dialog shows
-   *  the permanent-slots (component expiry) section. */
-  hasInteractive: boolean;
-  /** Why the pre-send "Make permanent" opt-in failed, when it did. Surfaced in
-   *  the success dialog's permanent-slots section, which doubles as the retry. */
-  permanentError?: string;
+  /** Read-only component-expiry receipt for the success dialog — how the
+   *  confirm dialog's permanence decision ended up. Undefined hides it. */
+  permanentStatus?: Omit<PermanentStatusProps, "messageId">;
 }
 
 /** Pull the new message's snowflake from a Discord response (POST wait=true / PATCH). */
@@ -187,13 +189,21 @@ export function SendPanel({
   // Pre-send confirmation. Opened by `handleSend` once inputs validate; the
   // actual POST/PATCH runs from `handleConfirmedSend` when the user confirms.
   const [confirmOpen, setConfirmOpen] = useState(false);
-  // Permanent-slot availability fetched when the confirm opens (interactive
-  // message, signed in, guild known). Null until it resolves — the confirm's
-  // "Make permanent" opt-in only renders on a successful fetch, so a failure
-  // here just falls back to the post-send flow.
+  // Permanent-slot state fetched when the confirm opens (interactive message,
+  // signed in, guild known). Null until it resolves — the confirm's "Make
+  // permanent" control only renders on a successful fetch, and the success
+  // dialog's receipt degrades to a generic expiry note.
   const [confirmSlots, setConfirmSlots] = useState<PermanentSlots | null>(null);
-  // The opt-in itself: claim a permanent slot right after the send succeeds.
+  // The fetch answered 501: this deployment doesn't run the feature at all,
+  // so even the generic expiry note would be wrong.
+  const [slotsUnavailable, setSlotsUnavailable] = useState(false);
+  // The switch itself: where the message should end up. Initialised to the
+  // update target's current state, so on = claim a slot after the send,
+  // off on an already-permanent target = release it ("set back to temporary").
   const [makePermanent, setMakePermanent] = useState(false);
+  // Inline slot freeing from the confirm's slots-full list.
+  const [freeingSlot, setFreeingSlot] = useState(false);
+  const [freeSlotError, setFreeSlotError] = useState<string | null>(null);
   // Post-send result dialog — confirms delivery and offers a deep link straight
   // to the message in Discord. Null when closed.
   const [success, setSuccess] = useState<SendSuccessInfo | null>(null);
@@ -353,16 +363,19 @@ export function SendPanel({
 
   const sending = state.kind === "sending";
 
-  // Fetch slot availability for the confirm dialog's "Make permanent" opt-in.
-  // Only worth a request when the message actually carries interactive
-  // components and the claim could succeed (signed in, proxy, guild known).
-  // Errors (403 non-manager, 501 feature off, network) just leave the opt-in
-  // hidden — the post-send section remains the fallback for all of those.
+  // Fetch slot state for the confirm dialog's "Make permanent" control. Only
+  // worth a request when the message actually carries interactive components
+  // and the user could act on it (signed in, proxy, guild known). Errors
+  // (403 non-manager, network) just leave the control hidden — the success
+  // dialog then shows a generic expiry note instead of a concrete state.
   const hasInteractiveComponents = appWebhookNote != null;
+  const updateTargetId = mode === "update" ? (parsedMessageId ?? undefined) : undefined;
   useEffect(() => {
     if (!confirmOpen) return;
     setConfirmSlots(null);
     setMakePermanent(false);
+    setSlotsUnavailable(false);
+    setFreeSlotError(null);
     if (
       !hasInteractiveComponents ||
       !isProxyConfigured() ||
@@ -373,30 +386,72 @@ export function SendPanel({
     }
     const ac = new AbortController();
     fetchPermanentSlots(knownGuildId, ac.signal)
-      .then(setConfirmSlots)
-      .catch(() => {});
+      .then((slots) => {
+        setConfirmSlots(slots);
+        // An update target that already holds a slot starts the switch on —
+        // leaving it on keeps the slot, turning it off releases it after the
+        // PATCH. Everything else starts off (opt in to claim).
+        setMakePermanent(
+          updateTargetId != null && slots.items.some((i) => i.message_id === updateTargetId),
+        );
+      })
+      .catch((e) => {
+        if (e instanceof Error && "status" in e && (e as { status: number }).status === 501) {
+          setSlotsUnavailable(true);
+        }
+      });
     return () => ac.abort();
-  }, [confirmOpen, hasInteractiveComponents, authStatus, knownGuildId]);
+  }, [confirmOpen, hasInteractiveComponents, authStatus, knownGuildId, updateTargetId]);
 
-  // What the confirm dialog renders: the opt-in switch when a slot is free, or
-  // an "already permanent" note when updating a message that holds one. Hidden
-  // when expiry is off (nothing to opt out of) or every slot is taken — freeing
-  // a slot mid-confirm is too much dialog; the success dialog has that flow.
-  const updateTargetId = mode === "update" ? (parsedMessageId ?? undefined) : undefined;
+  // Free a slot from the confirm's slots-full list — the only way to reclaim
+  // a slot held by a deleted message. The DELETE echoes the fresh slot state,
+  // which un-locks the switch once a slot opens up.
+  const handleFreeSlot = async (slotMessageId: string) => {
+    if (!knownGuildId) return;
+    setFreeingSlot(true);
+    setFreeSlotError(null);
+    try {
+      setConfirmSlots(await removePermanentMessage(knownGuildId, slotMessageId));
+    } catch (e) {
+      if (isAuthError(e)) {
+        // Session died mid-confirm — the control row disappears with it (the
+        // fetch effect keys off auth status).
+        useAuthStore.getState().markSignedOut();
+      } else {
+        setFreeSlotError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setFreeingSlot(false);
+    }
+  };
+
+  // What the confirm dialog renders. Hidden when expiry is off on this
+  // deployment (nothing to decide) or the slot state never loaded; when every
+  // slot is taken by other messages the switch locks off and the occupying
+  // messages are listed for inline freeing.
   const targetAlreadyPermanent =
     updateTargetId != null &&
     confirmSlots != null &&
     confirmSlots.items.some((i) => i.message_id === updateTargetId);
+  const slotsFull =
+    confirmSlots != null && !targetAlreadyPermanent && confirmSlots.used >= confirmSlots.cap;
   const permanentOption =
-    confirmSlots != null &&
-    confirmSlots.ttl_days !== null &&
-    (targetAlreadyPermanent || confirmSlots.used < confirmSlots.cap)
+    confirmSlots != null && confirmSlots.ttl_days !== null && knownGuildId
       ? {
           used: confirmSlots.used,
           cap: confirmSlots.cap,
           alreadyPermanent: targetAlreadyPermanent,
           checked: makePermanent,
           onChange: setMakePermanent,
+          full: slotsFull
+            ? {
+                guildId: knownGuildId,
+                items: confirmSlots.items,
+                onFree: handleFreeSlot,
+                busy: freeingSlot,
+                error: freeSlotError ?? undefined,
+              }
+            : undefined,
         }
       : undefined;
 
@@ -567,26 +622,67 @@ export function SendPanel({
               }`
             : null;
 
-        // The "Make permanent" opt-in from the confirm dialog. Permanence is
-        // keyed to the message id, which only exists now — so this is where the
-        // slot is actually claimed. The message is already live either way: a
-        // claim failure never fails the send, it rides into the success
-        // dialog's permanent-slots section, which shows the state and retries.
+        // The confirm dialog's "Make permanent" switch resolves here, where the
+        // message id is real: claim a slot when it was turned on, release the
+        // update target's slot when it was turned off. The message is already
+        // live either way — a failure never fails the send, it rides into the
+        // success dialog's receipt as an error line (updating the message
+        // again re-opens the confirm, which is the retry).
         let permanentError: string | undefined;
-        if (makePermanent && postedMessageId && effGuildId && effChannelId) {
-          try {
-            // A `full` result (slots taken since the confirm was fetched) needs
-            // no message of its own: the section's slots-full view lists the
-            // occupying messages and offers to free one.
-            await addPermanentMessage(effGuildId, postedMessageId, effChannelId);
-          } catch (e) {
-            if (isAuthError(e)) {
-              // Session expired mid-send — the section flips to its sign-in
-              // prompt, which explains the state better than an error line.
-              useAuthStore.getState().markSignedOut();
-            } else {
-              permanentError = e instanceof Error ? e.message : String(e);
+        let isPermanent = targetAlreadyPermanent;
+        if (confirmSlots != null && postedMessageId && effGuildId) {
+          if (makePermanent && !targetAlreadyPermanent && effChannelId) {
+            try {
+              const claim = await addPermanentMessage(effGuildId, postedMessageId, effChannelId);
+              if (claim.full) {
+                // Slots filled up between the confirm fetch and now.
+                permanentError =
+                  "All permanent slots were taken in the meantime — update the message to try again.";
+              } else {
+                isPermanent = true;
+              }
+            } catch (e) {
+              if (isAuthError(e)) {
+                useAuthStore.getState().markSignedOut();
+                permanentError =
+                  "Your session expired before the slot was claimed — sign in and update the message to try again.";
+              } else {
+                permanentError = e instanceof Error ? e.message : String(e);
+              }
             }
+          } else if (!makePermanent && targetAlreadyPermanent) {
+            try {
+              await removePermanentMessage(effGuildId, postedMessageId);
+              isPermanent = false;
+            } catch (e) {
+              if (isAuthError(e)) {
+                useAuthStore.getState().markSignedOut();
+                permanentError =
+                  "Your session expired before the slot was released — sign in and update the message to try again.";
+              } else {
+                permanentError = e instanceof Error ? e.message : String(e);
+              }
+            }
+          }
+        }
+
+        // The receipt the success dialog shows. Concrete (permanent/expiring)
+        // when the slot state loaded; a generic expiry note when it didn't
+        // (signed out, fetch failed); nothing at all when the message has no
+        // interactive components, the deployment doesn't run the feature, or
+        // components never expire there.
+        let permanentStatus: SendSuccessInfo["permanentStatus"];
+        if (appWebhookNote != null && isProxyConfigured() && !slotsUnavailable) {
+          if (confirmSlots == null) {
+            permanentStatus = { status: "unknown", signInHint: authStatus !== "authed" };
+          } else if (confirmSlots.ttl_days !== null) {
+            permanentStatus = isPermanent
+              ? { status: "permanent", error: permanentError }
+              : {
+                  status: "expiring",
+                  ttlDays: confirmSlots.ttl_days,
+                  error: permanentError,
+                };
           }
         }
 
@@ -606,8 +702,7 @@ export function SendPanel({
           discordUrl,
           editOnResend: postedMessageId != null,
           messageId: postedMessageId,
-          hasInteractive: appWebhookNote != null,
-          permanentError,
+          permanentStatus,
         });
       } else if (result.status === 0 && /cancel/i.test(result.error)) {
         // Aborted via the dialog's Cancel — not an error worth surfacing.
@@ -1086,8 +1181,7 @@ export function SendPanel({
         discordUrl={success?.discordUrl ?? null}
         editOnResend={success?.editOnResend ?? false}
         messageId={success?.messageId}
-        hasInteractive={success?.hasInteractive ?? false}
-        permanentError={success?.permanentError}
+        permanentStatus={success?.permanentStatus}
         onClose={() => setSuccess(null)}
       />
     </>

@@ -19,7 +19,7 @@ import { openDiscordLink } from "@/lib/discordDeepLink";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { CheckCircleIcon } from "@/ui/Icon";
-import { PermanentSlotsSection } from "./PermanentSlots";
+import { PermanentStatusSection, type PermanentStatusProps } from "./PermanentStatus";
 import styles from "./SendSuccess.module.css";
 
 export interface SendSuccessProps {
@@ -54,14 +54,12 @@ export interface SendSuccessProps {
   /** The posted/edited message's id, when the response carried it. */
   messageId?: string;
   /**
-   * True when the message carries interactive plugin components — surfaces
-   * the permanent-slots section (components expire by default; a server can
-   * exempt a few messages).
+   * Read-only component-expiry receipt for messages with interactive plugin
+   * components — permanence was decided in the confirm dialog; this only
+   * reports how it ended up. Undefined hides the section (no interactive
+   * components, feature off, or components never expire on this deployment).
    */
-  hasInteractive?: boolean;
-  /** Why the pre-send "Make permanent" opt-in failed, when it did. Shown in
-   *  the permanent-slots section, whose button is the retry. */
-  permanentError?: string;
+  permanentStatus?: Omit<PermanentStatusProps, "messageId">;
   onClose: () => void;
 }
 
@@ -78,8 +76,7 @@ export function SendSuccess({
   discordUrl,
   editOnResend,
   messageId,
-  hasInteractive,
-  permanentError,
+  permanentStatus,
   onClose,
 }: SendSuccessProps) {
   const name = webhookName?.trim() || "this webhook";
@@ -193,13 +190,8 @@ export function SendSuccess({
         ) : null}
       </dl>
 
-      {hasInteractive && guildId && channelId && messageId ? (
-        <PermanentSlotsSection
-          guildId={guildId}
-          channelId={channelId}
-          messageId={messageId}
-          initialError={permanentError}
-        />
+      {permanentStatus ? (
+        <PermanentStatusSection messageId={messageId} {...permanentStatus} />
       ) : null}
 
       {mode === "new" && editOnResend ? (

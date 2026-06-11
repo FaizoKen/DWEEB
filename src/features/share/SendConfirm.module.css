@@ -142,17 +142,20 @@
   }
 }
 
-/* "Make permanent" opt-in for messages with interactive components — same
-   compact row language as the success dialog's permanent-slots section. */
-.permanentRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/* "Make permanent" control for messages with interactive components — the
+   switch row, plus the slot-freeing list when every slot is taken. */
+.permanentBox {
   margin: 0 0 14px;
   padding: 10px 12px;
   border-radius: var(--app-radius-sm);
   background: var(--app-bg-subtle);
   border: 1px solid var(--app-border);
+}
+
+.permanentRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .permanentCopy {
@@ -176,24 +179,39 @@
   color: var(--app-text-muted);
 }
 
-/* Update target already holds a slot — state note, nothing to toggle. */
-.permanentNote {
+/* Occupying messages when every slot is taken. */
+.slotList {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--app-border);
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 14px;
-  padding: 10px 12px;
-  border-radius: var(--app-radius-sm);
-  background: var(--app-success-soft);
-  border: 1px solid rgba(45, 192, 107, 0.32);
-  font-size: var(--app-text-xs);
-  line-height: 1.4;
-  color: var(--app-text);
+  flex-direction: column;
+  gap: 2px;
 }
 
-.permanentNote svg {
-  flex: none;
-  color: var(--app-success-text);
+.slotItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.slotLink {
+  font-size: var(--app-text-xs);
+  color: var(--app-accent-text);
+  text-decoration: none;
+}
+
+.slotLink:hover {
+  text-decoration: underline;
+}
+
+.slotError {
+  margin: 8px 0 0;
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--app-danger-text);
 }
 
 /* No-ping state — calm, reassuring. */

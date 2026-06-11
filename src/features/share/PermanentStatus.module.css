@@ -1,0 +1,65 @@
+/* Read-only "interactive components" receipt in the success dialog.
+   One glanceable row: tinted status badge · short copy. */
+.section {
+  margin: 14px 0 0;
+  padding: 12px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+/* Badge tones — the color is the state signal, so copy can stay short. */
+.warning {
+  background: var(--app-warning-soft);
+  color: var(--app-warning-text);
+}
+
+.success {
+  background: var(--app-success-soft);
+  color: var(--app-success-text);
+}
+
+.copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--app-text-sm);
+  line-height: 1.4;
+  color: var(--app-text);
+}
+
+.sub {
+  margin: 0;
+  font-size: var(--app-text-xs);
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+
+.textError {
+  margin: 8px 0 0;
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--app-danger-text);
+}
