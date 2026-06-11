@@ -170,8 +170,9 @@ async fn interactions(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             if name == "dashboard" {
+                // Bare URL (no <>) so Discord renders the OG preview card.
                 return ephemeral(&format!(
-                    "\u{1F6E0}\u{FE0F} Build and manage your messages at <{}>",
+                    "\u{1F6E0}\u{FE0F} Build and manage your messages at {}",
                     app.dashboard_url
                 ));
             }
