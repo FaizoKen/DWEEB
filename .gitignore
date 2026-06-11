@@ -16,3 +16,5 @@ package-lock.json
 *.tsbuildinfo
 # Local-only release-announcement artifacts (webhook payload + screenshots).
 release/
+# Local backup of the production stack from contabo:/opt/dweeb (contains secrets).
+prod-backup/
