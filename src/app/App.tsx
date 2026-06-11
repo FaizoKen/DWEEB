@@ -44,6 +44,7 @@ const AiChatPanel = lazy(() =>
 );
 import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
+import { TestModeNotice } from "./TestModeNotice";
 import { consumeIncomingWebhook, type IncomingWebhook } from "@/core/guild/config";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
@@ -281,101 +282,109 @@ export function App() {
   };
 
   return (
-    <div
-      className="app-shell"
-      data-preview-open={previewOpen ? "true" : "false"}
-      data-ai-open={aiOpen ? "true" : "false"}
-    >
-      <h1 className="sr-only">
-        DWEEB — the Discord Webhook Embed Builder. Visually build, preview, and share Discord
-        webhook messages with Components V2.
-      </h1>
-      <section className="app-shell__pane app-shell__pane--builder" aria-label="Component builder">
-        <Builder
-          onShare={() => openShareDialog("share")}
-          onExport={() => openShareDialog("json")}
-          onImport={() => openShareDialog("import")}
-          onSend={() => openShareDialog("send")}
-          onRestore={() => openShareDialog("restore")}
-          onAbout={() => openShareDialog("about")}
-        />
-      </section>
-      {/* Dismiss scrim for the mobile preview sheet. The sheet only rises to
+    <>
+      <TestModeNotice />
+      <div
+        className="app-shell"
+        data-preview-open={previewOpen ? "true" : "false"}
+        data-ai-open={aiOpen ? "true" : "false"}
+      >
+        <h1 className="sr-only">
+          DWEEB — the Discord Webhook Embed Builder. Visually build, preview, and share Discord
+          webhook messages with Components V2.
+        </h1>
+        <section
+          className="app-shell__pane app-shell__pane--builder"
+          aria-label="Component builder"
+        >
+          <Builder
+            onShare={() => openShareDialog("share")}
+            onExport={() => openShareDialog("json")}
+            onImport={() => openShareDialog("import")}
+            onSend={() => openShareDialog("send")}
+            onRestore={() => openShareDialog("restore")}
+            onAbout={() => openShareDialog("about")}
+          />
+        </section>
+        {/* Dismiss scrim for the mobile preview sheet. The sheet only rises to
           85dvh, leaving the top of the builder (action bar + username/avatar)
           peeking above it — without this, a tap there edits those fields
           instead of closing the preview. It sits just under the sheet, so it
           catches the stray tap and dismisses. Driven by `data-preview-open`
           in global.css; inert on desktop where the preview is a side column. */}
-      <div className="preview-scrim" aria-hidden="true" onClick={closePreview} />
-      <section
-        ref={sheetRef}
-        className="app-shell__pane app-shell__pane--preview"
-        aria-label="Message preview"
-        aria-hidden={previewOpen ? undefined : "true"}
-      >
-        <Preview onClose={closePreview} swipeProps={swipeProps} />
-      </section>
+        <div className="preview-scrim" aria-hidden="true" onClick={closePreview} />
+        <section
+          ref={sheetRef}
+          className="app-shell__pane app-shell__pane--preview"
+          aria-label="Message preview"
+          aria-hidden={previewOpen ? undefined : "true"}
+        >
+          <Preview onClose={closePreview} swipeProps={swipeProps} />
+        </section>
 
-      {aiMounted ? (
-        <Suspense fallback={null}>
-          <AiChatPanel />
-        </Suspense>
-      ) : null}
+        {aiMounted ? (
+          <Suspense fallback={null}>
+            <AiChatPanel />
+          </Suspense>
+        ) : null}
 
-      <div className="fab-stack">
-        {/* Live mini preview: a tappable, real-time thumbnail of the message
+        <div className="fab-stack">
+          {/* Live mini preview: a tappable, real-time thumbnail of the message
             that opens the full preview sheet. Mobile only — on desktop the
             preview is already a permanent side column. Sits above the action
             row, so the corner reads as a stacked widget. */}
-        {isMobileSheet && !previewOpen ? <MiniPreview onOpen={() => setPreviewOpen(true)} /> : null}
-
-        <div className="fab-row">
-          {/* Explicit "open the full preview" toggle, beneath its thumbnail.
-              Mobile only — the desktop preview is always visible. */}
           {isMobileSheet && !previewOpen ? (
-            <button
-              type="button"
-              className="preview-fab"
-              onClick={() => setPreviewOpen(true)}
-              aria-label="Show preview"
-            >
-              <EyeIcon size={18} />
-              <span>Preview</span>
-            </button>
+            <MiniPreview onOpen={() => setPreviewOpen(true)} />
           ) : null}
 
-          <button
-            type="button"
-            className="ai-fab"
-            onClick={openAiWithPreview}
-            aria-label="Open the AI assistant"
-          >
-            <SparkleIcon size={20} />
-            <span>AI Assistant</span>
-          </button>
-        </div>
-      </div>
+          <div className="fab-row">
+            {/* Explicit "open the full preview" toggle, beneath its thumbnail.
+              Mobile only — the desktop preview is always visible. */}
+            {isMobileSheet && !previewOpen ? (
+              <button
+                type="button"
+                className="preview-fab"
+                onClick={() => setPreviewOpen(true)}
+                aria-label="Show preview"
+              >
+                <EyeIcon size={18} />
+                <span>Preview</span>
+              </button>
+            ) : null}
 
-      {shareMounted ? (
-        <Suspense fallback={null}>
-          <ShareDialog
-            open={shareOpen}
-            onClose={() => setShareOpen(false)}
-            initialTab={shareInitialTab}
-            onRequestRemoveInteractive={requestRemoveInteractive}
-            initialWebhook={incomingWebhook}
-          />
-        </Suspense>
-      ) : null}
-      {confirmMounted ? (
-        <Suspense fallback={null}>
-          <RemoveInteractiveConfirm
-            open={confirmStripOpen}
-            onClose={() => setConfirmStripOpen(false)}
-          />
-        </Suspense>
-      ) : null}
-      <ToastViewport />
-    </div>
+            <button
+              type="button"
+              className="ai-fab"
+              onClick={openAiWithPreview}
+              aria-label="Open the AI assistant"
+            >
+              <SparkleIcon size={20} />
+              <span>AI Assistant</span>
+            </button>
+          </div>
+        </div>
+
+        {shareMounted ? (
+          <Suspense fallback={null}>
+            <ShareDialog
+              open={shareOpen}
+              onClose={() => setShareOpen(false)}
+              initialTab={shareInitialTab}
+              onRequestRemoveInteractive={requestRemoveInteractive}
+              initialWebhook={incomingWebhook}
+            />
+          </Suspense>
+        ) : null}
+        {confirmMounted ? (
+          <Suspense fallback={null}>
+            <RemoveInteractiveConfirm
+              open={confirmStripOpen}
+              onClose={() => setConfirmStripOpen(false)}
+            />
+          </Suspense>
+        ) : null}
+        <ToastViewport />
+      </div>
+    </>
   );
 }
