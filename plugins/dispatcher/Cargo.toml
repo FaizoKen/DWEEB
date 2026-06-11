@@ -18,6 +18,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Verify Discord's Ed25519 interaction signatures.
 ed25519-dalek = "2"
 hex = "0.4"
+# Per-guild permanent-message slots (TTL exemptions). `bundled` compiles
+# SQLite from source, so the image needs no system libsqlite.
+rusqlite = { version = "0.31", features = ["bundled"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

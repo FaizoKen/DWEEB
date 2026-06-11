@@ -47,6 +47,9 @@ Longest prefix wins. Nothing else here changes; the public endpoint URL
 | `DISCORD_PUBLIC_KEY` | App public key (64 hex chars), verifies signatures. Required. |
 | `ROUTES` | JSON map of `custom_id` prefix → upstream base URL. Required. |
 | `COMPONENT_TTL_DAYS` | Days a component stays clickable after its message was sent. Default `7`; `0` = never expires. |
+| `PERMANENT_SLOTS_PER_GUILD` | TTL-exempt messages each guild may hold. Default `2`; `0` stops new grants (existing ones stay honored). |
+| `INTERNAL_API_TOKEN` | Bearer token gating the `/permanent` management API the proxy calls. Unset = that API is disabled. |
+| `DATABASE_PATH` | SQLite file for the permanent slots. Default `./dispatcher.db` (`/data/dispatcher.db` in the image). |
 | `DASHBOARD_URL` | URL `/dashboard` replies with. Default `https://dweeb.faizo.net`. |
 | `PORT` | Bind port, default `8095`. |
 
@@ -62,6 +65,32 @@ accumulate into unbounded long-tail load.
 
 Modal submits are exempt: opening the modal already passed this gate, so a
 form a user is mid-way through filling in still lands.
+
+## Permanent slots
+
+Some messages are *meant* to live forever — a role menu pinned in #welcome.
+Each guild gets `PERMANENT_SLOTS_PER_GUILD` exemptions, managed entirely from
+the **dashboard**: after sending a message with plugin components, the
+success dialog offers *Keep alive forever* (and, when every slot is taken,
+lists the occupying messages so one can be freed). No Discord command is
+involved.
+
+The authorization chain: browser → **proxy** (Discord login; the user must
+manage the guild) → **this service's `/permanent` API** (bearer
+`INTERNAL_API_TOKEN`), which owns the slots in one SQLite file
+(`DATABASE_PATH`; mount `/data` so they survive restarts). The TTL gate above
+consults the same store, and only for already-expired clicks — fresh traffic
+never touches the database.
+
+```
+GET    /permanent/:guild_id              → { cap, used, ttl_days, items }
+POST   /permanent/:guild_id              { message_id, channel_id, added_by }
+                                          → 200 state | 409 slots_full + state
+DELETE /permanent/:guild_id/:message_id  → 200 state | 404 not_permanent
+```
+
+Caddy refuses `/permanent*` on the public hostname; the API is reachable only
+over the compose network, and the token is required even there.
 
 ## Latency
 

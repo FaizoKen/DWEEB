@@ -227,8 +227,13 @@ That half lives entirely in your service and is outside DWEEB's scope.
 > first expired click disables the component on the message itself and is
 > never forwarded to your plugin, and a disabled component fires no further
 > interactions. This caps the lifetime traffic any one message can generate.
-> Operators can change the window or set `0` for no expiry; a per-plugin
-> permanent-validity quota may come later.
+> Operators can change the window or set `0` for no expiry.
+>
+> **Each guild can exempt 2 messages** (`PERMANENT_SLOTS_PER_GUILD`),
+> managed from the dashboard: after sending, the success dialog offers
+> **Keep alive forever** to a signed-in user who manages the server (and
+> lists the occupying messages when the slots are full, so one can be
+> freed). See the [dispatcher README](../plugins/dispatcher/README.md).
 
 ## 5. Hosting a plugin on the DWEEB production stack
 

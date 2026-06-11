@@ -21,20 +21,33 @@
 //! and is never forwarded. A disabled component fires no further interactions,
 //! so one expired click is the last traffic that message ever generates.
 //!
+//! Each guild gets PERMANENT_SLOTS_PER_GUILD exemptions, managed from the
+//! DWEEB dashboard: the proxy authenticates the user (Discord login + Manage
+//! Server on the guild) and calls the token-gated /permanent API here, which
+//! owns the slots in SQLite. No Discord command is involved.
+//!
 //! Env:
 //!   DISCORD_PUBLIC_KEY  app public key (64 hex chars), required
 //!   ROUTES              JSON map of custom_id prefix -> upstream base URL,
 //!                       e.g. {"modalform:":"http://modal-form:8090"}, required
 //!   COMPONENT_TTL_DAYS  days a component stays clickable after its message
 //!                       was sent, default 7; 0 = never expires
+//!   PERMANENT_SLOTS_PER_GUILD
+//!                       messages per guild exempt from the TTL, default 2;
+//!                       0 stops new grants (existing ones stay honored)
+//!   INTERNAL_API_TOKEN  bearer token the proxy must send to the /permanent
+//!                       API; unset = that API is disabled
+//!   DATABASE_PATH       SQLite file for the permanent slots, default ./dispatcher.db
 //!   DASHBOARD_URL       URL /dashboard replies with, default https://dweeb.faizo.net
 //!   PORT                bind port, default 8095
+
+mod store;
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
     body::Bytes,
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -52,6 +65,10 @@ const RESPONSE_UPDATE_MESSAGE: u64 = 7;
 const FLAG_EPHEMERAL: u64 = 1 << 6; // 64
 /// First millisecond of 2015 — the epoch Discord snowflakes count from.
 const DISCORD_EPOCH_MS: u64 = 1_420_070_400_000;
+/// Discord snowflakes are 17–20 digits today; accept a small range with slack.
+fn is_snowflake(s: &str) -> bool {
+    (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
+}
 
 struct App {
     public_key_hex: String,
@@ -60,6 +77,13 @@ struct App {
     /// How long a component stays clickable after its message was sent.
     /// `None` = never expires (COMPONENT_TTL_DAYS=0).
     component_ttl_ms: Option<u64>,
+    /// TTL-exempt messages each guild may hold at once.
+    permanent_slots: u32,
+    /// Which messages are TTL-exempt.
+    store: store::Store,
+    /// Bearer token the proxy presents to the /permanent management API.
+    /// `None` disables that API entirely.
+    internal_token: Option<String>,
     /// What `/dashboard` replies with.
     dashboard_url: String,
     client: reqwest::Client,
@@ -114,6 +138,28 @@ async fn main() {
     let component_ttl_ms = (component_ttl_days > 0).then(|| component_ttl_days * 86_400_000);
     tracing::info!(days = component_ttl_days, "component TTL (0 = never expires)");
 
+    let permanent_slots: u32 = std::env::var("PERMANENT_SLOTS_PER_GUILD")
+        .ok()
+        .map(|v| {
+            v.trim()
+                .parse()
+                .expect("PERMANENT_SLOTS_PER_GUILD must be a whole number (0 stops new grants)")
+        })
+        .unwrap_or(2);
+    let database_path =
+        std::env::var("DATABASE_PATH").unwrap_or_else(|_| "./dispatcher.db".into());
+    let store = store::Store::open(&database_path).expect("open permanent-message store");
+    let internal_token = std::env::var("INTERNAL_API_TOKEN")
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
+    tracing::info!(
+        path = %database_path,
+        slots = permanent_slots,
+        api_enabled = internal_token.is_some(),
+        "permanent store ready"
+    );
+
     let dashboard_url = std::env::var("DASHBOARD_URL")
         .unwrap_or_else(|_| "https://dweeb.faizo.net".into())
         .trim_end_matches('/')
@@ -123,6 +169,9 @@ async fn main() {
         public_key_hex,
         routes,
         component_ttl_ms,
+        permanent_slots,
+        store,
+        internal_token,
         dashboard_url,
         client: reqwest::Client::builder()
             // Discord gives the whole chain 3s; leave headroom to still send
@@ -145,6 +194,17 @@ async fn main() {
         // Public endpoint at the root: the hostname (interactions.<domain>) is
         // the whole address, no path component.
         .route("/", post(interactions))
+        // Permanent-slot management, called by the proxy on behalf of the
+        // dashboard. Token-gated (INTERNAL_API_TOKEN) — Caddy also refuses
+        // /permanent on the public hostname, but the token is the real gate.
+        .route(
+            "/permanent/:guild_id",
+            get(permanent_list).post(permanent_add),
+        )
+        .route(
+            "/permanent/:guild_id/:message_id",
+            axum::routing::delete(permanent_remove),
+        )
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(app);
 
@@ -217,9 +277,12 @@ async fn interactions(
 
     // Components expire COMPONENT_TTL_DAYS after their message was sent (the
     // message id snowflake carries the send time — no registry of instances
-    // needed). An expired click is answered by disabling the component on the
-    // message itself, so it never reaches a plugin and never fires again.
+    // needed), unless an admin spent one of the guild's permanent slots on
+    // the message. An expired click is answered by disabling the component on
+    // the message itself, so it never reaches a plugin and never fires again.
     // Modal submits are exempt: opening the modal already passed this gate.
+    // Only already-expired clicks pay the store lookup; fresh traffic never
+    // touches the database.
     if interaction.get("type").and_then(Value::as_u64) == Some(TYPE_MESSAGE_COMPONENT) {
         if let (Some(ttl_ms), Some(sent_ms)) = (app.component_ttl_ms, message_sent_ms(&interaction))
         {
@@ -227,7 +290,11 @@ async fn interactions(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
-            if now_ms.saturating_sub(sent_ms) > ttl_ms {
+            let message_id = interaction
+                .pointer("/message/id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if now_ms.saturating_sub(sent_ms) > ttl_ms && !app.store.is_permanent(message_id) {
                 tracing::info!(custom_id, "component past TTL, disabling");
                 return disable_expired(&interaction, custom_id);
             }
@@ -335,6 +402,169 @@ fn disable_component(node: &mut Value, custom_id: &str) {
         }
         _ => {}
     }
+}
+
+// ── Permanent-slot management API (called by the proxy) ─────────────────────
+//
+// The dashboard is the only client: browser → proxy (Discord login + Manage
+// Server check on the guild) → here, with INTERNAL_API_TOKEN as a bearer.
+// This service stays the single owner of the slots the TTL gate consults.
+
+/// `GET /permanent/:guild_id` — slot usage + the current permanent messages.
+async fn permanent_list(
+    State(app): State<Arc<App>>,
+    Path(guild_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
+        return denied;
+    }
+    match app.store.list(&guild_id) {
+        Ok(rows) => slots_json(&app, &rows).into_response(),
+        Err(err) => internal_error(err),
+    }
+}
+
+/// `POST /permanent/:guild_id` `{ message_id, channel_id, added_by }` —
+/// spend a slot. Idempotent: adding an already-permanent message is a 200.
+async fn permanent_add(
+    State(app): State<Arc<App>>,
+    Path(guild_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
+        return denied;
+    }
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return bad_request("body must be JSON"),
+    };
+    let field = |k: &str| parsed.get(k).and_then(Value::as_str).unwrap_or_default();
+    let (message_id, channel_id, added_by) =
+        (field("message_id"), field("channel_id"), field("added_by"));
+    if !is_snowflake(message_id) || !is_snowflake(channel_id) {
+        return bad_request("message_id and channel_id must be snowflakes");
+    }
+
+    let added = app.store.add(
+        &guild_id,
+        channel_id,
+        message_id,
+        added_by,
+        app.permanent_slots,
+    );
+    let outcome = match added {
+        Ok(o) => o,
+        Err(err) => return internal_error(err),
+    };
+    match app.store.list(&guild_id) {
+        Ok(rows) => match outcome {
+            store::Add::Added | store::Add::Already => slots_json(&app, &rows).into_response(),
+            store::Add::Full => {
+                (StatusCode::CONFLICT, slots_error_json(&app, &rows, "slots_full"))
+                    .into_response()
+            }
+        },
+        Err(err) => internal_error(err),
+    }
+}
+
+/// `DELETE /permanent/:guild_id/:message_id` — give the slot back.
+async fn permanent_remove(
+    State(app): State<Arc<App>>,
+    Path((guild_id, message_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id, &message_id]) {
+        return denied;
+    }
+    let removed = match app.store.remove(&guild_id, &message_id) {
+        Ok(r) => r,
+        Err(err) => return internal_error(err),
+    };
+    if !removed {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_permanent" })),
+        )
+            .into_response();
+    }
+    match app.store.list(&guild_id) {
+        Ok(rows) => slots_json(&app, &rows).into_response(),
+        Err(err) => internal_error(err),
+    }
+}
+
+/// Shared admission check for the management API: bearer token (constant-time
+/// compare; a missing INTERNAL_API_TOKEN disables the API outright) and
+/// snowflake-shaped path ids. `None` means proceed.
+fn deny_internal(app: &App, headers: &HeaderMap, ids: &[&str]) -> Option<Response> {
+    let Some(expected) = app.internal_token.as_deref() else {
+        return Some(
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": "permanent API disabled (INTERNAL_API_TOKEN unset)" })),
+            )
+                .into_response(),
+        );
+    };
+    let supplied = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or_default();
+    if !constant_time_eq(supplied.as_bytes(), expected.as_bytes()) {
+        return Some((StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorized" }))).into_response());
+    }
+    if ids.iter().any(|id| !is_snowflake(id)) {
+        return Some(bad_request("ids must be snowflakes"));
+    }
+    None
+}
+
+/// The slot state every management response carries. `ttl_days` is null when
+/// components never expire on this deployment (COMPONENT_TTL_DAYS=0) — the
+/// dashboard hides the feature then.
+fn slots_json(app: &App, rows: &[store::PermanentRow]) -> Json<Value> {
+    Json(json!({
+        "cap": app.permanent_slots,
+        "used": rows.len(),
+        "ttl_days": app.component_ttl_ms.map(|ms| ms / 86_400_000),
+        "items": rows.iter().map(|r| json!({
+            "message_id": r.message_id,
+            "channel_id": r.channel_id,
+            "added_at": r.added_at,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// Same state plus an error code, for the 409 slots-full response.
+fn slots_error_json(app: &App, rows: &[store::PermanentRow], error: &str) -> Json<Value> {
+    let mut body = slots_json(app, rows).0;
+    body["error"] = json!(error);
+    Json(body)
+}
+
+fn bad_request(message: &str) -> Response {
+    (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
+}
+
+fn internal_error(err: rusqlite::Error) -> Response {
+    tracing::error!(%err, "permanent store error");
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({ "error": "storage error" })),
+    )
+        .into_response()
+}
+
+/// Byte-wise comparison that doesn't leak the match length through timing.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// Minimal user-facing reply for the cases where no plugin answered.
