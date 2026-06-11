@@ -13,6 +13,11 @@
  *    and can be freed inline, which matters because a deleted message can't
  *    be reached any other way — without this a slot could leak forever.
  *
+ * The send confirm dialog offers the same claim *before* posting (the panel
+ * runs it once the message id exists). When that pre-send claim fails, the
+ * error arrives here as `initialError` — this section already shows the live
+ * slot state and its button is the natural retry.
+ *
  * Renders nothing when the deployment doesn't run the feature (proxy answers
  * 501) or when components never expire there (`ttl_days` null). Signed-out
  * users get the expiry warning plus a sign-in prompt, since slot management
@@ -39,6 +44,9 @@ export interface PermanentSlotsSectionProps {
   channelId: string;
   /** The just-sent message the section offers to keep alive. */
   messageId: string;
+  /** Why the Send panel's pre-send "Make permanent" opt-in failed, when it
+   *  did. Seeds the section's error line — its button is the retry. */
+  initialError?: string;
 }
 
 type SlotsState =
@@ -85,12 +93,13 @@ export function PermanentSlotsSection({
   guildId,
   channelId,
   messageId,
+  initialError,
 }: PermanentSlotsSectionProps) {
   const authStatus = useAuthStore((s) => s.status);
   const login = useAuthStore((s) => s.login);
   const [state, setState] = useState<SlotsState>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(initialError ?? null);
 
   useEffect(() => {
     if (authStatus !== "authed") return;

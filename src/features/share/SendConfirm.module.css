@@ -142,6 +142,60 @@
   }
 }
 
+/* "Make permanent" opt-in for messages with interactive components — same
+   compact row language as the success dialog's permanent-slots section. */
+.permanentRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+}
+
+.permanentCopy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.permanentTitle {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--app-text);
+}
+
+.permanentSub {
+  font-size: var(--app-text-xs);
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+
+/* Update target already holds a slot — state note, nothing to toggle. */
+.permanentNote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-success-soft);
+  border: 1px solid rgba(45, 192, 107, 0.32);
+  font-size: var(--app-text-xs);
+  line-height: 1.4;
+  color: var(--app-text);
+}
+
+.permanentNote svg {
+  flex: none;
+  color: var(--app-success-text);
+}
+
 /* No-ping state — calm, reassuring. */
 .pingCalm {
   background: var(--app-bg-elevated);

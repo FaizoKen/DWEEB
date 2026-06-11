@@ -10,6 +10,13 @@
  *     with its `allowed_mentions` policy, so an `@everyone` that will actually
  *     ring the whole channel is impossible to miss.
  *
+ * For messages with interactive components it can also carry a "Make
+ * permanent" opt-in (state owned by the Send panel): components expire after a
+ * deployment-set TTL, and flipping the switch asks the panel to claim one of
+ * the server's permanent slots right after the send succeeds — permanence is
+ * keyed to the message id, which only exists once Discord accepts the message,
+ * so the claim itself can never happen here.
+ *
  * The dialog is presentational: it owns no send logic. Confirming closes it and
  * hands back to the Send panel, which runs the existing verify + send flow
  * (including the ownership block) and surfaces status inline.
@@ -23,6 +30,8 @@ import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import type { PingSummary } from "@/core/schema/mentions";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
+import { Switch } from "@/ui/Switch";
+import { CheckCircleIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
 import styles from "./SendConfirm.module.css";
 
@@ -59,6 +68,21 @@ export interface SendConfirmProps {
   messageId?: string;
   /** Who the message will ping, after `allowed_mentions`. */
   pings: PingSummary;
+  /**
+   * The "Make permanent" opt-in for messages with interactive components.
+   * Present only when the Send panel confirmed a claim could succeed (signed
+   * in, slots fetched, expiry on, slot free — or, for an update, the target
+   * already holds one, which renders as a note instead of the switch).
+   * Undefined hides the row entirely; the post-send dialog still offers it.
+   */
+  permanentOption?: {
+    used: number;
+    cap: number;
+    /** The update target is already permanent — nothing to opt into. */
+    alreadyPermanent: boolean;
+    checked: boolean;
+    onChange: (checked: boolean) => void;
+  };
   /**
    * The confirmed send is in flight. The confirm button shows a spinner and is
    * disabled (so it can't be double-fired); the dialog stays open until the
@@ -154,6 +178,7 @@ export function SendConfirm({
   threadId,
   messageId,
   pings,
+  permanentOption,
   busy = false,
   onConfirm,
   onCancel,
@@ -291,6 +316,31 @@ export function SendConfirm({
           </div>
         ) : null}
       </dl>
+
+      {permanentOption ? (
+        permanentOption.alreadyPermanent ? (
+          <p className={styles.permanentNote}>
+            <CheckCircleIcon size={14} aria-hidden="true" />
+            This message is permanent — its buttons &amp; selects never expire.
+          </p>
+        ) : (
+          <div className={styles.permanentRow}>
+            <span className={styles.permanentCopy} id="send-confirm-permanent">
+              <span className={styles.permanentTitle}>Make permanent</span>
+              <span className={styles.permanentSub}>
+                Buttons &amp; selects never expire · {permanentOption.used}/{permanentOption.cap}{" "}
+                slots used
+              </span>
+            </span>
+            <Switch
+              aria-labelledby="send-confirm-permanent"
+              checked={permanentOption.checked}
+              disabled={busy}
+              onChange={(e) => permanentOption.onChange(e.currentTarget.checked)}
+            />
+          </div>
+        )
+      ) : null}
 
       <PingSummaryView pings={pings} />
     </Modal>

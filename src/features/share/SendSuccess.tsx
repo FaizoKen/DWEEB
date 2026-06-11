@@ -59,6 +59,9 @@ export interface SendSuccessProps {
    * exempt a few messages).
    */
   hasInteractive?: boolean;
+  /** Why the pre-send "Make permanent" opt-in failed, when it did. Shown in
+   *  the permanent-slots section, whose button is the retry. */
+  permanentError?: string;
   onClose: () => void;
 }
 
@@ -76,6 +79,7 @@ export function SendSuccess({
   editOnResend,
   messageId,
   hasInteractive,
+  permanentError,
   onClose,
 }: SendSuccessProps) {
   const name = webhookName?.trim() || "this webhook";
@@ -190,7 +194,12 @@ export function SendSuccess({
       </dl>
 
       {hasInteractive && guildId && channelId && messageId ? (
-        <PermanentSlotsSection guildId={guildId} channelId={channelId} messageId={messageId} />
+        <PermanentSlotsSection
+          guildId={guildId}
+          channelId={channelId}
+          messageId={messageId}
+          initialError={permanentError}
+        />
       ) : null}
 
       {mode === "new" && editOnResend ? (
