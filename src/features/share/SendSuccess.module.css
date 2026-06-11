@@ -33,8 +33,9 @@
 }
 
 .fact {
+  /* 88px (vs SendConfirm's 80px) so the "Interaction" label fits on one line. */
   display: grid;
-  grid-template-columns: 80px 1fr;
+  grid-template-columns: 88px 1fr;
   gap: 10px;
   align-items: start;
 }

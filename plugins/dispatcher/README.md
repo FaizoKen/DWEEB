@@ -12,7 +12,7 @@ Discord ──POST /──▶ dispatcher ── verifies Ed25519, answers PING +
                                     │
                        custom_id "modalform:…" ──▶ http://modal-form:8090/interactions
                        custom_id "pingpong:…"  ──▶ http://ping-pong:8090/interactions
-                       no match                ──▶ ephemeral "not wired" reply
+                       no match                ──▶ disables the component ("not wired")
 ```
 
 The app's single slash command, `/dashboard`, is answered inline too — an
@@ -39,6 +39,11 @@ One entry in the `ROUTES` env var (see `server/compose.yml`):
 
 Longest prefix wins. Nothing else here changes; the public endpoint URL
 (`https://interactions.dweeb.faizo.net`) is stable forever.
+
+Removing a plugin needs no cleanup either: a click on a component whose
+prefix matches no route is answered with an `UPDATE_MESSAGE` that disables
+it (the same mechanism the TTL below uses), so messages left behind by an
+uninstalled plugin stop generating traffic after their first click.
 
 ## Env
 
@@ -70,10 +75,10 @@ form a user is mid-way through filling in still lands.
 
 Some messages are *meant* to live forever — a role menu pinned in #welcome.
 Each guild gets `PERMANENT_SLOTS_PER_GUILD` exemptions, managed entirely from
-the **dashboard**: after sending a message with plugin components, the
-success dialog offers *Make permanent* (and, when every slot is taken,
-lists the occupying messages so one can be freed). No Discord command is
-involved.
+the **dashboard**: the pre-send confirmation offers *Make permanent* on
+messages with plugin components, and the account menu's *Managed messages*
+dialog lists the occupying messages so slots can be freed. No Discord command
+is involved.
 
 The authorization chain: browser → **proxy** (Discord login; the user must
 manage the guild) → **this service's `/permanent` API** (bearer

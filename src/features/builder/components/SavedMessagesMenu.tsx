@@ -108,20 +108,6 @@ export function SavedMessagesMenu() {
               Clear everything
             </MenuItem>
             <MenuDivider />
-            <div className={styles.sectionLabel}>Templates</div>
-            <div className={styles.list}>
-              {TEMPLATES.map((template) => (
-                <TemplateRow
-                  key={template.id}
-                  template={template}
-                  onLoad={() => {
-                    close();
-                    handleLoadTemplate(template);
-                  }}
-                />
-              ))}
-            </div>
-            <MenuDivider />
             <div className={styles.sectionLabel}>Saved messages</div>
             {entries.length === 0 ? (
               <div className={styles.empty}>
@@ -145,6 +131,20 @@ export function SavedMessagesMenu() {
                 ))}
               </div>
             )}
+            <MenuDivider />
+            <div className={styles.sectionLabel}>Templates</div>
+            <div className={styles.list}>
+              {TEMPLATES.map((template) => (
+                <TemplateRow
+                  key={template.id}
+                  template={template}
+                  onLoad={() => {
+                    close();
+                    handleLoadTemplate(template);
+                  }}
+                />
+              ))}
+            </div>
           </div>
         )}
       </Menu>

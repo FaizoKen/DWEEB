@@ -230,10 +230,11 @@ That half lives entirely in your service and is outside DWEEB's scope.
 > Operators can change the window or set `0` for no expiry.
 >
 > **Each guild can exempt 2 messages** (`PERMANENT_SLOTS_PER_GUILD`),
-> managed from the dashboard: after sending, the success dialog offers
-> **Make permanent** to a signed-in user who manages the server (and
-> lists the occupying messages when the slots are full, so one can be
-> freed). See the [dispatcher README](../plugins/dispatcher/README.md).
+> managed from the dashboard: the pre-send confirmation offers
+> **Make permanent** to a signed-in user who manages the server, and the
+> account menu's **Managed messages** dialog lists the occupying
+> messages so slots can be freed (including ones held by deleted
+> messages). See the [dispatcher README](../plugins/dispatcher/README.md).
 
 ## 5. Hosting a plugin on the DWEEB production stack
 

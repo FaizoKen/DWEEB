@@ -20,6 +20,9 @@
 //! answered here with an UPDATE_MESSAGE that disables the clicked component,
 //! and is never forwarded. A disabled component fires no further interactions,
 //! so one expired click is the last traffic that message ever generates.
+//! A click whose custom_id matches no route is answered the same way: the
+//! component is disabled, so a message left behind by an uninstalled plugin
+//! stops generating traffic after its first click.
 //!
 //! Each guild gets PERMANENT_SLOTS_PER_GUILD exemptions, managed from the
 //! DWEEB dashboard: the proxy authenticates the user (Discord login + Manage
@@ -296,7 +299,7 @@ async fn interactions(
                 .unwrap_or_default();
             if now_ms.saturating_sub(sent_ms) > ttl_ms && !app.store.is_permanent(message_id) {
                 tracing::info!(custom_id, "component past TTL, disabling");
-                return disable_expired(&interaction, custom_id);
+                return disable_clicked(&interaction, custom_id, "This component has expired.");
             }
         }
     }
@@ -306,8 +309,16 @@ async fn interactions(
         .iter()
         .find(|(prefix, _)| custom_id.starts_with(prefix.as_str()))
     else {
-        tracing::warn!(custom_id, "no route for interaction");
-        return ephemeral("This component isn't wired to any installed plugin.");
+        tracing::warn!(custom_id, "no route for interaction, disabling component");
+        // An unrouted component can never succeed — its plugin isn't
+        // installed — so disable it like an expired one rather than leave it
+        // clickable. Modal submits carry the modal's custom_id, which isn't
+        // on the message, so there is nothing to disable for them.
+        const NOT_WIRED: &str = "This component isn't wired to any installed plugin.";
+        if interaction.get("type").and_then(Value::as_u64) == Some(TYPE_MESSAGE_COMPONENT) {
+            return disable_clicked(&interaction, custom_id, NOT_WIRED);
+        }
+        return ephemeral(NOT_WIRED);
     };
 
     // Forward raw body + signature headers so the plugin re-verifies the exact
@@ -361,15 +372,15 @@ fn message_sent_ms(interaction: &Value) -> Option<u64> {
     Some((id >> 22) + DISCORD_EPOCH_MS)
 }
 
-/// Answer an expired click by editing the message to disable the clicked
-/// component. Discord stops sending interactions for a disabled component, so
-/// this is also the last request the message ever generates.
-fn disable_expired(interaction: &Value, custom_id: &str) -> Response {
+/// Answer a dead click (expired or unrouted) by editing the message to disable
+/// the clicked component. Discord stops sending interactions for a disabled
+/// component, so this is also the last request the message ever generates.
+fn disable_clicked(interaction: &Value, custom_id: &str, fallback: &str) -> Response {
     // Echo the message's own component tree back with the one component
     // disabled. If the tree is somehow absent, fall back to an ephemeral note
     // rather than wiping the message's components with an empty list.
     let Some(mut components) = interaction.pointer("/message/components").cloned() else {
-        return ephemeral("This component has expired.");
+        return ephemeral(fallback);
     };
     disable_component(&mut components, custom_id);
     Json(json!({

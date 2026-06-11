@@ -118,6 +118,7 @@ export function ShareDialog({
           <SendPanel
             onRequestRemoveInteractive={onRequestRemoveInteractive}
             initialWebhook={initialWebhook}
+            onCloseDialog={onClose}
           />
         ) : null}
         {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}

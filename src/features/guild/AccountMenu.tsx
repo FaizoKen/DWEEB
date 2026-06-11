@@ -12,15 +12,17 @@
  * when a proxy base URL is configured; the caller guards on that.
  */
 
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { loadLastGuildId } from "@/core/guild/cache";
 import { botInviteUrl } from "@/core/guild/config";
 import { isValidGuildId, type AuthUser, type PickerGuild } from "@/core/guild/api";
 import { Menu } from "@/ui/Menu";
-import { CheckCircleIcon, LogInIcon, PlusIcon, RefreshIcon, UserIcon } from "@/ui/Icon";
+import { CheckCircleIcon, ClockIcon, LogInIcon, PlusIcon, RefreshIcon, UserIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
+import { ManagedMessagesDialog } from "./ManagedMessagesDialog";
 import styles from "./AccountMenu.module.css";
 
 /** Query keys Discord appends to the redirect after a bot add. */
@@ -130,6 +132,15 @@ export function AccountMenu() {
   const settledRef = useRef(false);
   if (!busy) settledRef.current = true;
   const showLoader = busy && !settledRef.current;
+
+  // The "Managed messages" dialog — opened from the panel's action row, and
+  // rendered as a sibling so it outlives the popover. Its open state lives in
+  // a global store so other surfaces (the Send confirm's "Free a slot"
+  // hand-off when every permanent slot is taken) can summon it too.
+  const managedGuildId = useManagedMessagesStore((s) => s.guildId);
+  const managedGuildName = useManagedMessagesStore((s) => s.guildName);
+  const openManaged = useManagedMessagesStore((s) => s.open);
+  const closeManaged = useManagedMessagesStore((s) => s.close);
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   // One-shot guard so the post–sign-in auto-select runs once, not on every
@@ -243,41 +254,65 @@ export function AccountMenu() {
 
   // Signed in — the avatar opens the account/server popover.
   return (
-    <Menu
-      align="start"
-      trigger={
-        <button
-          ref={triggerRef}
-          type="button"
-          className={styles.trigger}
-          title={
-            connectedGuild
-              ? `${user?.name ?? "Account"} — ${connectedGuild.name}`
-              : (user?.name ?? "Account")
-          }
-          aria-label={
-            connectedGuild
-              ? `Account — connected to ${connectedGuild.name}`
-              : "Account and server settings"
-          }
-        >
-          {connectedGuild ? (
-            <span className={cn(styles.composite, styles.reveal)}>
-              <GuildIcon guild={connectedGuild} className={styles.compositeServer} />
-              <Avatar user={user} size={18} className={styles.compositeUser} />
-            </span>
-          ) : (
-            <Avatar user={user} size={28} className={styles.reveal} />
-          )}
-        </button>
-      }
-    >
-      {(close) => <AccountPanel onClose={close} />}
-    </Menu>
+    <>
+      <Menu
+        align="start"
+        trigger={
+          <button
+            ref={triggerRef}
+            type="button"
+            className={styles.trigger}
+            title={
+              connectedGuild
+                ? `${user?.name ?? "Account"} — ${connectedGuild.name}`
+                : (user?.name ?? "Account")
+            }
+            aria-label={
+              connectedGuild
+                ? `Account — connected to ${connectedGuild.name}`
+                : "Account and server settings"
+            }
+          >
+            {connectedGuild ? (
+              <span className={cn(styles.composite, styles.reveal)}>
+                <GuildIcon guild={connectedGuild} className={styles.compositeServer} />
+                <Avatar user={user} size={18} className={styles.compositeUser} />
+              </span>
+            ) : (
+              <Avatar user={user} size={28} className={styles.reveal} />
+            )}
+          </button>
+        }
+      >
+        {(close) => (
+          <AccountPanel
+            onClose={close}
+            onManageMessages={() => {
+              close();
+              if (connectedId) openManaged(connectedId, connectedGuild?.name);
+            }}
+          />
+        )}
+      </Menu>
+      {managedGuildId ? (
+        <ManagedMessagesDialog
+          guildId={managedGuildId}
+          guildName={managedGuildName ?? guilds.find((g) => g.id === managedGuildId)?.name}
+          onClose={closeManaged}
+        />
+      ) : null}
+    </>
   );
 }
 
-function AccountPanel({ onClose }: { onClose: () => void }) {
+function AccountPanel({
+  onClose,
+  onManageMessages,
+}: {
+  onClose: () => void;
+  /** Opens the connected server's "Managed messages" dialog (closes the menu first). */
+  onManageMessages: () => void;
+}) {
   const user = useAuthStore((s) => s.user);
   const guilds = useAuthStore((s) => s.guilds);
   const guildsStatus = useAuthStore((s) => s.guildsStatus);
@@ -307,9 +342,16 @@ function AccountPanel({ onClose }: { onClose: () => void }) {
     .sort((a, b) => a.name.localeCompare(b.name));
   const invite = botInviteUrl();
 
+  // Switching servers keeps the menu open — the row's meta (roles · channels ·
+  // emoji) fills in as the data loads, and the "Managed messages" sub-row
+  // moves under the new selection, so the click has visible feedback in place.
+  // Clicking the already-connected server again reads as "done" and closes.
   const onPick = (id: string) => {
-    if (id !== connectedId) void connect(id);
-    onClose();
+    if (id !== connectedId) {
+      void connect(id);
+    } else {
+      onClose();
+    }
   };
 
   return (
@@ -347,12 +389,19 @@ function AccountPanel({ onClose }: { onClose: () => void }) {
       ) : (
         <ul className={styles.serverList}>
           {botGuilds.map((g) => (
-            <ServerRow
-              key={g.id}
-              guild={g}
-              active={g.id === connectedId}
-              onPick={() => onPick(g.id)}
-            />
+            <Fragment key={g.id}>
+              <ServerRow guild={g} active={g.id === connectedId} onPick={() => onPick(g.id)} />
+              {/* Nested under the connected server's row so it's obvious which
+                  server's messages the dialog manages — slots are per-guild. */}
+              {g.id === connectedId ? (
+                <li>
+                  <button type="button" className={styles.serverSubRow} onClick={onManageMessages}>
+                    <ClockIcon size={14} />
+                    <span>Managed messages</span>
+                  </button>
+                </li>
+              ) : null}
+            </Fragment>
           ))}
         </ul>
       )}

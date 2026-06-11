@@ -19,7 +19,7 @@ import { openDiscordLink } from "@/lib/discordDeepLink";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { CheckCircleIcon } from "@/ui/Icon";
-import { PermanentStatusSection, type PermanentStatusProps } from "./PermanentStatus";
+import { PermanentStatusValue, type PermanentStatusProps } from "./PermanentStatus";
 import styles from "./SendSuccess.module.css";
 
 export interface SendSuccessProps {
@@ -56,8 +56,9 @@ export interface SendSuccessProps {
   /**
    * Read-only component-expiry receipt for messages with interactive plugin
    * components — permanence was decided in the confirm dialog; this only
-   * reports how it ended up. Undefined hides the section (no interactive
-   * components, feature off, or components never expire on this deployment).
+   * reports how it ended up, as an "Interaction" row in the facts list.
+   * Undefined hides the row (no interactive components, feature off, or
+   * components never expire on this deployment).
    */
   permanentStatus?: Omit<PermanentStatusProps, "messageId">;
   onClose: () => void;
@@ -188,11 +189,15 @@ export function SendSuccess({
             </dd>
           </div>
         ) : null}
+        {permanentStatus ? (
+          <div className={styles.fact}>
+            <dt>Interaction</dt>
+            <dd>
+              <PermanentStatusValue messageId={messageId} {...permanentStatus} />
+            </dd>
+          </div>
+        ) : null}
       </dl>
-
-      {permanentStatus ? (
-        <PermanentStatusSection messageId={messageId} {...permanentStatus} />
-      ) : null}
 
       {mode === "new" && editOnResend ? (
         <p className={styles.note}>

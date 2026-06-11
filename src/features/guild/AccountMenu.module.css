@@ -12,7 +12,10 @@
   border-radius: var(--app-radius-sm);
   color: var(--app-text-muted);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
 }
 .trigger:hover:not(:disabled) {
   background: var(--app-bg-hover);
@@ -239,6 +242,34 @@
 }
 .check {
   color: var(--app-accent-text);
+  flex: none;
+}
+
+/* Per-server sub-action ("Managed messages"), nested under the connected
+ * server's row. The indent lines it up with the server name above (10px row
+ * padding + 24px guild icon + 10px gap), which is what reads as "belongs to
+ * that server". */
+.serverSubRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 10px 5px 44px;
+  border: none;
+  background: transparent;
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  font: inherit;
+  font-size: var(--app-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.serverSubRow:hover {
+  background: var(--app-bg-hover);
+}
+.serverSubRow svg {
+  color: var(--app-text-muted);
   flex: none;
 }
 

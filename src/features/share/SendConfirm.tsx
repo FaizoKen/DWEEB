@@ -17,10 +17,11 @@
  * one, starts on and releases it when turned off. The claim/release itself
  * runs right after the send succeeds — permanence is keyed to the message id,
  * which only exists once Discord accepts the message, so it can never happen
- * here. When every slot is taken by other messages the switch locks off and
- * the occupying messages are listed for inline freeing — a deleted message
- * can't release its slot any other way, so without this a slot could leak
- * forever. The post-send dialog only *reports* the final state.
+ * here. When every slot is taken by other messages the switch gives way to
+ * a "Free a slot" button that hands off to the "Managed messages" dialog,
+ * which owns slot freeing — closing this dialog and the Share dialog around
+ * it (the pending send is abandoned, but the panel keeps its inputs). The
+ * post-send dialog only *reports* the final state.
  *
  * The dialog is presentational: it owns no send logic. Confirming closes it and
  * hands back to the Send panel, which runs the existing verify + send flow
@@ -33,7 +34,6 @@
 import { OWNER_COPY, webhookAvatarUrl, type WebhookOwnerKind } from "@/core/webhook";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import type { PingSummary } from "@/core/schema/mentions";
-import type { PermanentSlotItem } from "@/core/guild/api";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { Switch } from "@/ui/Switch";
@@ -88,19 +88,18 @@ export interface SendConfirmProps {
     checked: boolean;
     onChange: (checked: boolean) => void;
     /**
-     * Every slot is taken by *other* messages: the switch locks off and the
-     * occupying messages are listed so one can be freed inline — a deleted
-     * message can't release its slot any other way.
+     * Every slot is taken by *other* messages: the switch gives way to a
+     * "Free a slot" button that hands off to the "Managed messages" dialog,
+     * where a slot can be freed.
      */
-    full?: {
-      guildId: string;
-      items: PermanentSlotItem[];
-      onFree: (messageId: string) => void;
-      /** A free-slot call is in flight — the list's buttons disable. */
-      busy: boolean;
-      /** Why the last free-slot call failed, when it did. */
-      error?: string;
-    };
+    slotsFull: boolean;
+    /**
+     * The slots-full hand-off: closes the whole send stack (this dialog and
+     * the Share dialog hosting it) and opens "Managed messages" for the
+     * webhook's server. Only meaningful — and only rendered — when
+     * `slotsFull`.
+     */
+    onManageSlots?: () => void;
   };
   /**
    * The confirmed send is in flight. The confirm button shows a spinner and is
@@ -183,8 +182,7 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
   );
 }
 
-/** The "Make permanent" row: title + state sub-line + the switch, plus the
- *  slot-freeing list when every slot is taken by other messages. */
+/** The "Make permanent" row: title + state sub-line + the switch. */
 function PermanentOptIn({
   option,
   busy,
@@ -192,10 +190,10 @@ function PermanentOptIn({
   option: NonNullable<SendConfirmProps["permanentOption"]>;
   busy: boolean;
 }) {
-  const { used, cap, alreadyPermanent, checked, onChange, full } = option;
+  const { used, cap, alreadyPermanent, checked, onChange, slotsFull, onManageSlots } = option;
 
-  const sub = full
-    ? `All ${cap} permanent slots are used — free one to enable`
+  const sub = slotsFull
+    ? `All ${cap} permanent slots are used by other messages — free one to use it here`
     : alreadyPermanent && !checked
       ? "Frees its slot — buttons & selects will expire"
       : `Buttons & selects never expire · ${used}/${cap} slots used`;
@@ -209,39 +207,27 @@ function PermanentOptIn({
           </span>
           <span className={styles.permanentSub}>{sub}</span>
         </span>
-        <Switch
-          aria-labelledby="send-confirm-permanent"
-          checked={checked}
-          disabled={busy || full != null}
-          onChange={(e) => onChange(e.currentTarget.checked)}
-        />
+        {!slotsFull ? (
+          <Switch
+            aria-labelledby="send-confirm-permanent"
+            checked={checked}
+            disabled={busy}
+            onChange={(e) => onChange(e.currentTarget.checked)}
+          />
+        ) : null}
       </div>
-      {full ? (
-        <>
-          <ul className={styles.slotList}>
-            {full.items.map((item, i) => (
-              <li key={item.message_id} className={styles.slotItem}>
-                <a
-                  className={styles.slotLink}
-                  href={`https://discord.com/channels/${full.guildId}/${item.channel_id}/${item.message_id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Permanent message {i + 1} ↗
-                </a>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy || full.busy}
-                  onClick={() => full.onFree(item.message_id)}
-                >
-                  Free slot
-                </Button>
-              </li>
-            ))}
-          </ul>
-          {full.error ? <p className={styles.slotError}>{full.error}</p> : null}
-        </>
+      {slotsFull && onManageSlots ? (
+        <div className={styles.permanentAction}>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            title="Closes this dialog and opens Managed messages — the send isn't lost, your message and webhook stay in the panel"
+            onClick={onManageSlots}
+          >
+            Free a slot…
+          </Button>
+        </div>
       ) : null}
     </div>
   );

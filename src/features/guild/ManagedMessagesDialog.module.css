@@ -1,0 +1,116 @@
+.lead {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-text-subtle);
+}
+
+.error {
+  margin: 10px 0 0;
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--app-danger-text);
+}
+
+/* Group heading: title on the left, optional usage chip on the right. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+/* Usage chip — "1/2 used". */
+.usage {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--app-bg-hover);
+  color: var(--app-text-muted);
+}
+
+/* Message rows (both groups) — one line: link · meta · action. */
+.slotList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.slotItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 3px 0;
+}
+
+.slotItem + .slotItem {
+  border-top: 1px solid var(--app-border);
+}
+
+.slotLink {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--app-text-sm);
+  color: var(--app-accent-text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slotLink:hover {
+  text-decoration: underline;
+}
+
+.slotMeta {
+  flex: none;
+  font-size: 11px;
+  color: var(--app-text-subtle);
+  white-space: nowrap;
+}
+
+/* "Where this data lives" — the storage-model explainer, collapsed by default. */
+.storage {
+  margin: 14px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.storage summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--app-text-subtle);
+  user-select: none;
+}
+
+.storage summary:hover {
+  color: var(--app-text);
+}
+
+.storage p {
+  margin: 6px 0 0;
+}

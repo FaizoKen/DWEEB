@@ -1,10 +1,12 @@
 /**
- * Read-only "interactive components" status in the post-send success dialog.
+ * Read-only "interactive components" status in the post-send success dialog,
+ * rendered as the value of the "Interaction" row in the destination facts
+ * list — same section as Webhook / Server / Channel.
  *
  * Plugin buttons/selects stop working a set number of days after the message
  * is sent unless the message holds one of the server's permanent slots. The
  * *decision* happens before the send — the confirm dialog owns the "Make
- * permanent" toggle and the inline slot freeing — so this section is purely a
+ * permanent" toggle and the inline slot freeing — so this row is purely a
  * receipt: it states the outcome the Send panel already knows, without
  * re-fetching or offering to change anything. Changing your mind = update the
  * message, which re-opens the confirm with the toggle.
@@ -21,6 +23,7 @@
 
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { messageSentAt } from "@/lib/snowflake";
 import { CheckCircleIcon, ClockIcon } from "@/ui/Icon";
 import styles from "./PermanentStatus.module.css";
 
@@ -39,7 +42,7 @@ export interface PermanentStatusProps {
 
 /** One glanceable line: tinted status icon + short copy. The tint alone
  *  signals state (amber = expiring, green = permanent). */
-function Row({
+function Line({
   tone,
   icon,
   children,
@@ -49,81 +52,73 @@ function Row({
   children: ReactNode;
 }) {
   return (
-    <div className={styles.row}>
-      <span className={cn(styles.badge, styles[tone])}>{icon}</span>
-      <div className={styles.copy}>{children}</div>
-    </div>
+    <p className={styles.line}>
+      <span className={cn(styles.icon, styles[tone])} aria-hidden="true">
+        {icon}
+      </span>
+      <span>{children}</span>
+    </p>
   );
 }
 
-/** First millisecond of 2015 — the epoch Discord snowflakes count from. */
-const DISCORD_EPOCH_MS = 1420070400000n;
-
-/** When a message was sent, decoded from its snowflake id. Editing a message
- *  doesn't change its id, so this (plus the TTL) is the true expiry anchor. */
-function messageSentAt(messageId: string): Date | null {
-  if (!/^\d{15,25}$/.test(messageId)) return null;
-  return new Date(Number((BigInt(messageId) >> 22n) + DISCORD_EPOCH_MS));
-}
-
-export function PermanentStatusSection({
+export function PermanentStatusValue({
   status,
   messageId,
   ttlDays,
   signInHint,
   error,
 }: PermanentStatusProps) {
-  let row: ReactNode;
+  let line: ReactNode;
+  let sub: ReactNode = null;
   if (status === "permanent") {
-    row = (
-      <Row tone="success" icon={<CheckCircleIcon size={15} />}>
-        <p className={styles.title}>This message is permanent</p>
-        <p className={styles.sub}>Buttons &amp; selects never expire</p>
-      </Row>
+    line = (
+      <Line tone="success" icon={<CheckCircleIcon size={14} />}>
+        Never expires
+      </Line>
     );
+    sub = <p className={styles.sub}>This message is permanent</p>;
   } else if (status === "expiring") {
     const sentAt = messageId ? messageSentAt(messageId) : null;
     const expiresAt =
       sentAt && ttlDays != null ? new Date(sentAt.getTime() + ttlDays * 86_400_000) : null;
     const alreadyExpired = expiresAt !== null && expiresAt.getTime() <= Date.now();
     const expiryLabel = expiresAt?.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-    row = (
-      <Row tone="warning" icon={<ClockIcon size={15} />}>
-        <p className={styles.title}>
-          {expiryLabel ? (
-            alreadyExpired ? (
-              <>
-                Buttons &amp; selects <strong>expired {expiryLabel}</strong>
-              </>
-            ) : (
-              <>
-                Buttons &amp; selects expire <strong>{expiryLabel}</strong>
-              </>
-            )
+    line = (
+      <Line tone="warning" icon={<ClockIcon size={14} />}>
+        {expiryLabel ? (
+          alreadyExpired ? (
+            <>
+              Expired on <strong>{expiryLabel}</strong>
+            </>
           ) : (
             <>
-              Buttons &amp; selects expire <strong>{ttlDays} days</strong> after sending
+              Expires on <strong>{expiryLabel}</strong>
             </>
-          )}
-        </p>
-        <p className={styles.sub}>Update this message to make it permanent</p>
-      </Row>
+          )
+        ) : (
+          <>
+            Expires <strong>{ttlDays} days</strong> after sending
+          </>
+        )}
+      </Line>
     );
+    sub = <p className={styles.sub}>Update this message to make it permanent</p>;
   } else {
-    row = (
-      <Row tone="warning" icon={<ClockIcon size={15} />}>
-        <p className={styles.title}>Buttons &amp; selects expire a few days after sending</p>
-        {signInHint ? (
-          <p className={styles.sub}>Sign in before sending to make a message permanent</p>
-        ) : null}
-      </Row>
+    line = (
+      <Line tone="warning" icon={<ClockIcon size={14} />}>
+        Expires a few days after sending
+      </Line>
     );
+    if (signInHint) {
+      sub = <p className={styles.sub}>Sign in before sending to make a message permanent</p>;
+    }
   }
 
   return (
-    <section className={styles.section} aria-label="Interactive components">
-      {row}
+    <div className={styles.value}>
+      {line}
+      {sub}
       {error ? <p className={styles.textError}>{error}</p> : null}
-    </section>
+    </div>
   );
 }

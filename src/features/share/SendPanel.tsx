@@ -24,11 +24,13 @@
  * Messages with interactive components decide permanence in the confirm
  * dialog: slot state is fetched when the confirm opens, and the "Make
  * permanent" switch claims a slot — or, when the update target already holds
- * one, starts on and releases it when turned off. When every slot is taken the
- * confirm lists the occupying messages for inline freeing. The claim/release
- * runs right after the send succeeds — permanence is keyed to the message id,
- * which only exists then — and never fails the send; the success dialog shows
- * a read-only receipt of the final state, with any failure attached.
+ * one, starts on and releases it when turned off. When every slot is taken
+ * the switch gives way to a "Free a slot" button that closes the whole send
+ * stack (confirm + Share dialog) and opens the "Managed messages" dialog,
+ * which owns slot freeing. The claim/release runs right after the
+ * send succeeds — permanence is keyed to the message id, which only exists
+ * then — and never fails the send; the success dialog shows a read-only
+ * receipt of the final state, with any failure attached.
  *
  * Before posting, the panel confirms who owns the webhook (a GET) whenever the
  * owner isn't already known from a prior check or saved entry. That keeps the
@@ -82,6 +84,7 @@ import {
   removePermanentMessage,
   type PermanentSlots,
 } from "@/core/guild/api";
+import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
@@ -157,6 +160,7 @@ function formatRawBody(body: unknown): string {
 export function SendPanel({
   onRequestRemoveInteractive,
   initialWebhook,
+  onCloseDialog,
 }: {
   /**
    * Asked when the user clicks "Remove them" on the app-owned-webhook block.
@@ -170,6 +174,12 @@ export function SendPanel({
    * to send.
    */
   initialWebhook?: IncomingWebhook;
+  /**
+   * Closes the Share dialog hosting this panel. Used by the confirm's
+   * "Free a slot" hand-off, which drops the whole send stack before opening
+   * the "Managed messages" dialog.
+   */
+  onCloseDialog?: () => void;
 } = {}) {
   const message = useMessageStore((s) => s.message);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
@@ -201,9 +211,6 @@ export function SendPanel({
   // update target's current state, so on = claim a slot after the send,
   // off on an already-permanent target = release it ("set back to temporary").
   const [makePermanent, setMakePermanent] = useState(false);
-  // Inline slot freeing from the confirm's slots-full list.
-  const [freeingSlot, setFreeingSlot] = useState(false);
-  const [freeSlotError, setFreeSlotError] = useState<string | null>(null);
   // Post-send result dialog — confirms delivery and offers a deep link straight
   // to the message in Discord. Null when closed.
   const [success, setSuccess] = useState<SendSuccessInfo | null>(null);
@@ -375,7 +382,6 @@ export function SendPanel({
     setConfirmSlots(null);
     setMakePermanent(false);
     setSlotsUnavailable(false);
-    setFreeSlotError(null);
     if (
       !hasInteractiveComponents ||
       !isProxyConfigured() ||
@@ -403,55 +409,40 @@ export function SendPanel({
     return () => ac.abort();
   }, [confirmOpen, hasInteractiveComponents, authStatus, knownGuildId, updateTargetId]);
 
-  // Free a slot from the confirm's slots-full list — the only way to reclaim
-  // a slot held by a deleted message. The DELETE echoes the fresh slot state,
-  // which un-locks the switch once a slot opens up.
-  const handleFreeSlot = async (slotMessageId: string) => {
-    if (!knownGuildId) return;
-    setFreeingSlot(true);
-    setFreeSlotError(null);
-    try {
-      setConfirmSlots(await removePermanentMessage(knownGuildId, slotMessageId));
-    } catch (e) {
-      if (isAuthError(e)) {
-        // Session died mid-confirm — the control row disappears with it (the
-        // fetch effect keys off auth status).
-        useAuthStore.getState().markSignedOut();
-      } else {
-        setFreeSlotError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      setFreeingSlot(false);
-    }
-  };
-
   // What the confirm dialog renders. Hidden when expiry is off on this
   // deployment (nothing to decide) or the slot state never loaded; when every
-  // slot is taken by other messages the switch locks off and the occupying
-  // messages are listed for inline freeing.
+  // slot is taken by other messages the switch gives way to a "Free a slot"
+  // button that hands off to the "Managed messages" dialog (below).
   const targetAlreadyPermanent =
     updateTargetId != null &&
     confirmSlots != null &&
     confirmSlots.items.some((i) => i.message_id === updateTargetId);
   const slotsFull =
     confirmSlots != null && !targetAlreadyPermanent && confirmSlots.used >= confirmSlots.cap;
+
+  // "Free a slot" on the confirm's locked switch: abandon the pending send,
+  // drop the whole dialog stack (confirm + Share dialog), and open the
+  // "Managed messages" dialog for the webhook's server — the only place
+  // slots are freed. Nothing is lost: the editor keeps the message and this
+  // panel stays mounted, so clicking Send again picks up where it left off.
+  const handleManageSlots = () => {
+    setConfirmOpen(false);
+    onCloseDialog?.();
+    if (knownGuildId) {
+      useManagedMessagesStore.getState().open(knownGuildId, knownGuildName);
+    }
+  };
+
   const permanentOption =
-    confirmSlots != null && confirmSlots.ttl_days !== null && knownGuildId
+    confirmSlots != null && confirmSlots.ttl_days !== null
       ? {
           used: confirmSlots.used,
           cap: confirmSlots.cap,
           alreadyPermanent: targetAlreadyPermanent,
           checked: makePermanent,
           onChange: setMakePermanent,
-          full: slotsFull
-            ? {
-                guildId: knownGuildId,
-                items: confirmSlots.items,
-                onFree: handleFreeSlot,
-                busy: freeingSlot,
-                error: freeSlotError ?? undefined,
-              }
-            : undefined,
+          slotsFull,
+          onManageSlots: slotsFull ? handleManageSlots : undefined,
         }
       : undefined;
 
@@ -637,7 +628,7 @@ export function SendPanel({
               if (claim.full) {
                 // Slots filled up between the confirm fetch and now.
                 permanentError =
-                  "All permanent slots were taken in the meantime — update the message to try again.";
+                  "All permanent slots were taken in the meantime — free one under Managed messages in the account menu, then update the message to try again.";
               } else {
                 isPermanent = true;
               }
