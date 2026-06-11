@@ -45,6 +45,17 @@ type SlotsState =
   | { kind: "unavailable" } // feature off on this deployment (501)
   | { kind: "error"; message: string };
 
+/** First millisecond of 2015 — the epoch Discord snowflakes count from. */
+const DISCORD_EPOCH_MS = 1420070400000n;
+
+/** When a message was sent, decoded from its snowflake id. Editing a message
+ *  doesn't change its id, so this (plus the TTL) is the true expiry anchor —
+ *  the same arithmetic the dispatcher applies server-side. */
+function messageSentAt(messageId: string): Date | null {
+  if (!/^\d{15,25}$/.test(messageId)) return null;
+  return new Date(Number((BigInt(messageId) >> 22n) + DISCORD_EPOCH_MS));
+}
+
 export function PermanentSlotsSection({
   guildId,
   channelId,
@@ -124,6 +135,33 @@ export function PermanentSlotsSection({
   const isPermanent = slots.items.some((i) => i.message_id === messageId);
   const slotsFull = !isPermanent && slots.used >= slots.cap;
 
+  // The exact moment this message's components stop working: its send time
+  // (from the snowflake) plus the deployment's TTL. Editing doesn't move it.
+  const sentAt = messageSentAt(messageId);
+  const expiresAt = sentAt ? new Date(sentAt.getTime() + slots.ttl_days * 86_400_000) : null;
+  const alreadyExpired = expiresAt !== null && expiresAt.getTime() <= Date.now();
+  const expiryLabel = expiresAt?.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+
+  // Lead sentence for the two non-permanent states: a concrete date when the
+  // id decodes (the normal case), the relative window as a fallback.
+  const expiryIntro = expiryLabel ? (
+    alreadyExpired ? (
+      <>
+        Buttons and selects on this message <strong>stopped working on {expiryLabel}</strong>{" "}
+        (already greyed-out components stay disabled)
+      </>
+    ) : (
+      <>
+        Buttons and selects on this message stop working on <strong>{expiryLabel}</strong> (
+        {slots.ttl_days} days after it was sent)
+      </>
+    )
+  ) : (
+    <>
+      Buttons and selects stop working <strong>{slots.ttl_days} days</strong> after sending
+    </>
+  );
+
   const run = async (action: () => Promise<PermanentSlots>) => {
     setBusy(true);
     setActionError(null);
@@ -168,9 +206,8 @@ export function PermanentSlotsSection({
       ) : slotsFull ? (
         <>
           <p className={styles.text}>
-            Buttons and selects stop working <strong>{slots.ttl_days} days</strong> after sending,
-            and all {slots.cap} of this server’s permanent slots are in use. Free one to keep this
-            message instead:
+            {expiryIntro}, and all {slots.cap} of this server’s permanent slots are in use. Free one
+            to keep this message instead:
           </p>
           <ul className={styles.slotList}>
             {slots.items.map((item, i) => (
@@ -193,9 +230,8 @@ export function PermanentSlotsSection({
       ) : (
         <>
           <p className={styles.text}>
-            Buttons and selects stop working <strong>{slots.ttl_days} days</strong> after sending.
-            Use one of this server’s permanent slots ({slots.used}/{slots.cap} used) to keep them
-            alive forever.
+            {expiryIntro}. Use one of this server’s permanent slots ({slots.used}/{slots.cap} used)
+            to keep them alive forever.
           </p>
           <div className={styles.actions}>
             <Button size="sm" variant="primary" disabled={busy} onClick={makePermanent}>
