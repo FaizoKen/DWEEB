@@ -1,0 +1,68 @@
+name: Deploy
+
+# Continuous deployment to the production host. Fires whenever one of the
+# image-publishing workflows finishes successfully on main, then SSHes into
+# the server and lets it pull the freshly published :latest images:
+#
+#   cd /opt/dweeb && docker compose pull --quiet && docker compose up -d
+#
+# That command is NOT in this file — it is a forced command pinned in the
+# server's authorized_keys (`command="...",restrict`), so the DEPLOY_SSH_KEY
+# secret can run exactly that one command and nothing else. Changing what a
+# deploy does means editing authorized_keys on the server, not this workflow.
+#
+# The four build workflows finish at different times, so this can fire up to
+# four times per push. The concurrency group serializes the runs and GitHub
+# collapses extra queued ones; a repeat run is a cheap no-op (pull finds
+# nothing new, `up -d` only recreates containers whose image changed).
+#
+# Rollback: set TAG / *_TAG in /opt/dweeb/.env to a published sha-<short> or
+# semver tag, then re-run this workflow (workflow_dispatch) or `up -d` by hand.
+on:
+  workflow_run:
+    workflows:
+      - Docker
+      - Interactions Dispatcher
+      - Plugin Modal Form
+      - Plugin Ping Pong
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# The job only talks to the deploy host; it needs nothing from the repo.
+permissions: {}
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Pull and restart on prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # workflow_run also fires for failed and cancelled builds — skip those.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+
+      # The remote command is a placeholder — the server's forced command for
+      # this key runs the actual compose pull/up regardless of what is sent.
+      - name: Deploy
+        run: >
+          ssh -i ~/.ssh/deploy_key
+          -o IdentitiesOnly=yes
+          -o UserKnownHostsFile=~/.ssh/known_hosts
+          "$DEPLOY_USER@$DEPLOY_HOST" deploy
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
