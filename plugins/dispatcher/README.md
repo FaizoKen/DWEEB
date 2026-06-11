@@ -46,8 +46,22 @@ Longest prefix wins. Nothing else here changes; the public endpoint URL
 |---|---|
 | `DISCORD_PUBLIC_KEY` | App public key (64 hex chars), verifies signatures. Required. |
 | `ROUTES` | JSON map of `custom_id` prefix → upstream base URL. Required. |
+| `COMPONENT_TTL_DAYS` | Days a component stays clickable after its message was sent. Default `7`; `0` = never expires. |
 | `DASHBOARD_URL` | URL `/dashboard` replies with. Default `https://dweeb.faizo.net`. |
 | `PORT` | Bind port, default `8095`. |
+
+## Component TTL
+
+Components expire by default: a click on a message older than
+`COMPONENT_TTL_DAYS` (the message id snowflake carries its send time, so no
+per-instance registry is needed) is answered here with an `UPDATE_MESSAGE`
+that **disables the clicked component**, and is never forwarded to a plugin.
+Discord sends no interactions for a disabled component, so that first expired
+click is the last traffic the component ever generates — old messages can't
+accumulate into unbounded long-tail load.
+
+Modal submits are exempt: opening the modal already passed this gate, so a
+form a user is mid-way through filling in still lands.
 
 ## Latency
 

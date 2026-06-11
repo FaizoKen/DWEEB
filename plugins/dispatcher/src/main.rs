@@ -15,10 +15,18 @@
 //!
 //! Adding a plugin is one entry in the ROUTES env var; nothing here changes.
 //!
+//! Components also expire by default: a click on a message older than
+//! COMPONENT_TTL_DAYS (the message id snowflake carries its send time) is
+//! answered here with an UPDATE_MESSAGE that disables the clicked component,
+//! and is never forwarded. A disabled component fires no further interactions,
+//! so one expired click is the last traffic that message ever generates.
+//!
 //! Env:
 //!   DISCORD_PUBLIC_KEY  app public key (64 hex chars), required
 //!   ROUTES              JSON map of custom_id prefix -> upstream base URL,
 //!                       e.g. {"modalform:":"http://modal-form:8090"}, required
+//!   COMPONENT_TTL_DAYS  days a component stays clickable after its message
+//!                       was sent, default 7; 0 = never expires
 //!   DASHBOARD_URL       URL /dashboard replies with, default https://dweeb.faizo.net
 //!   PORT                bind port, default 8095
 
@@ -37,14 +45,21 @@ use serde_json::{json, Value};
 
 const TYPE_PING: u64 = 1;
 const TYPE_APPLICATION_COMMAND: u64 = 2;
+const TYPE_MESSAGE_COMPONENT: u64 = 3;
 const RESPONSE_PONG: u64 = 1;
 const RESPONSE_CHANNEL_MESSAGE: u64 = 4;
+const RESPONSE_UPDATE_MESSAGE: u64 = 7;
 const FLAG_EPHEMERAL: u64 = 1 << 6; // 64
+/// First millisecond of 2015 — the epoch Discord snowflakes count from.
+const DISCORD_EPOCH_MS: u64 = 1_420_070_400_000;
 
 struct App {
     public_key_hex: String,
     /// (custom_id prefix, upstream base URL) — longest prefix wins.
     routes: Vec<(String, String)>,
+    /// How long a component stays clickable after its message was sent.
+    /// `None` = never expires (COMPONENT_TTL_DAYS=0).
+    component_ttl_ms: Option<u64>,
     /// What `/dashboard` replies with.
     dashboard_url: String,
     client: reqwest::Client,
@@ -88,6 +103,17 @@ async fn main() {
         tracing::info!(prefix, upstream = %base, "route registered");
     }
 
+    let component_ttl_days: u64 = std::env::var("COMPONENT_TTL_DAYS")
+        .ok()
+        .map(|v| {
+            v.trim()
+                .parse()
+                .expect("COMPONENT_TTL_DAYS must be a whole number of days (0 = never expires)")
+        })
+        .unwrap_or(7);
+    let component_ttl_ms = (component_ttl_days > 0).then(|| component_ttl_days * 86_400_000);
+    tracing::info!(days = component_ttl_days, "component TTL (0 = never expires)");
+
     let dashboard_url = std::env::var("DASHBOARD_URL")
         .unwrap_or_else(|_| "https://dweeb.faizo.net".into())
         .trim_end_matches('/')
@@ -96,6 +122,7 @@ async fn main() {
     let app = Arc::new(App {
         public_key_hex,
         routes,
+        component_ttl_ms,
         dashboard_url,
         client: reqwest::Client::builder()
             // Discord gives the whole chain 3s; leave headroom to still send
@@ -187,6 +214,26 @@ async fn interactions(
         .pointer("/data/custom_id")
         .and_then(Value::as_str)
         .unwrap_or_default();
+
+    // Components expire COMPONENT_TTL_DAYS after their message was sent (the
+    // message id snowflake carries the send time — no registry of instances
+    // needed). An expired click is answered by disabling the component on the
+    // message itself, so it never reaches a plugin and never fires again.
+    // Modal submits are exempt: opening the modal already passed this gate.
+    if interaction.get("type").and_then(Value::as_u64) == Some(TYPE_MESSAGE_COMPONENT) {
+        if let (Some(ttl_ms), Some(sent_ms)) = (app.component_ttl_ms, message_sent_ms(&interaction))
+        {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            if now_ms.saturating_sub(sent_ms) > ttl_ms {
+                tracing::info!(custom_id, "component past TTL, disabling");
+                return disable_expired(&interaction, custom_id);
+            }
+        }
+    }
+
     let Some((prefix, base)) = app
         .routes
         .iter()
@@ -234,6 +281,59 @@ async fn interactions(
             tracing::error!(prefix, upstream = %base, %err, "forward failed");
             ephemeral("The plugin behind this component didn't respond — try again shortly.")
         }
+    }
+}
+
+/// When the message a component sits on was sent, from its snowflake id.
+fn message_sent_ms(interaction: &Value) -> Option<u64> {
+    let id: u64 = interaction
+        .pointer("/message/id")?
+        .as_str()?
+        .parse()
+        .ok()?;
+    Some((id >> 22) + DISCORD_EPOCH_MS)
+}
+
+/// Answer an expired click by editing the message to disable the clicked
+/// component. Discord stops sending interactions for a disabled component, so
+/// this is also the last request the message ever generates.
+fn disable_expired(interaction: &Value, custom_id: &str) -> Response {
+    // Echo the message's own component tree back with the one component
+    // disabled. If the tree is somehow absent, fall back to an ephemeral note
+    // rather than wiping the message's components with an empty list.
+    let Some(mut components) = interaction.pointer("/message/components").cloned() else {
+        return ephemeral("This component has expired.");
+    };
+    disable_component(&mut components, custom_id);
+    Json(json!({
+        "type": RESPONSE_UPDATE_MESSAGE,
+        "data": { "components": components }
+    }))
+    .into_response()
+}
+
+/// Recursively set `disabled: true` on every component matching `custom_id`.
+/// Handles Components V2 nesting: containers/sections/action rows hold
+/// children under `components`, a section's button under `accessory`.
+fn disable_component(node: &mut Value, custom_id: &str) {
+    match node {
+        Value::Array(items) => {
+            for item in items {
+                disable_component(item, custom_id);
+            }
+        }
+        Value::Object(map) => {
+            if map.get("custom_id").and_then(Value::as_str) == Some(custom_id) {
+                map.insert("disabled".into(), Value::Bool(true));
+            }
+            if let Some(children) = map.get_mut("components") {
+                disable_component(children, custom_id);
+            }
+            if let Some(accessory) = map.get_mut("accessory") {
+                disable_component(accessory, custom_id);
+            }
+        }
+        _ => {}
     }
 }
 

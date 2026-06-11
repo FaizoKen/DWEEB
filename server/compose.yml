@@ -87,6 +87,9 @@ services:
       # this URL. Register the command once: node scripts/register-commands.mjs
       # NOT derived from DOMAIN — that is the API host, not the dashboard.
       DASHBOARD_URL: ${DASHBOARD_URL:-https://dweeb.faizo.net}
+      # Days a component stays clickable after its message was sent; an expired
+      # click disables the component instead of reaching a plugin. 0 = forever.
+      COMPONENT_TTL_DAYS: ${COMPONENT_TTL_DAYS:-7}
       RUST_LOG: info
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.

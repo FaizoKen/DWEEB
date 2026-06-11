@@ -221,6 +221,15 @@ That half lives entirely in your service and is outside DWEEB's scope.
 > **application-owned** webhook. DWEEB surfaces this requirement in the editor;
 > your plugin's documentation should explain how users wire your app up.
 
+> **Components expire after 7 days by default.** On the production stack the
+> dispatcher rejects clicks on messages older than `COMPONENT_TTL_DAYS`
+> (default 7, counted from the message's send time via its snowflake id): the
+> first expired click disables the component on the message itself and is
+> never forwarded to your plugin, and a disabled component fires no further
+> interactions. This caps the lifetime traffic any one message can generate.
+> Operators can change the window or set `0` for no expiry; a per-plugin
+> permanent-validity quota may come later.
+
 ## 5. Hosting a plugin on the DWEEB production stack
 
 A Discord application has exactly **one** Interactions Endpoint URL, so all
