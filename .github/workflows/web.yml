@@ -65,8 +65,16 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      # The Vite env values are public (they're inlined into the shipped
+      # bundle) but live in git-ignored .env files locally, so the runner
+      # gets them from repository variables: Settings → Secrets and
+      # variables → Actions → Variables. Without them the build still
+      # succeeds — the guild features just stay dormant.
       - name: Build
         run: bun run build
+        env:
+          VITE_PROXY_BASE_URL: ${{ vars.VITE_PROXY_BASE_URL }}
+          VITE_DISCORD_CLIENT_ID: ${{ vars.VITE_DISCORD_CLIENT_ID }}
 
       # GitHub Pages has no rewrite rules, so serve the SPA shell as the 404
       # page — deep links (e.g. a stale `/s/<id>` short link) still load the
