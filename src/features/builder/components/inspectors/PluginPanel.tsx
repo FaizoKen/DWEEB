@@ -2,7 +2,9 @@
  * Plugin panel — attach an external plugin to an interactive component.
  *
  * Rendered by the Inspector for any plugin-targetable node (interactive button
- * or select). The binding *is* the component's `custom_id`: picking a plugin
+ * or select). Kept compact: a single "Browse plugins" trigger opens the
+ * PluginLibraryModal, which scales with the registry instead of inlining every
+ * plugin here. The binding *is* the component's `custom_id`: picking a plugin
  * opens its config iframe, and on save we adopt the `custom_id` it returns.
  * On reload we recompute the attachment purely from that id via `matchPlugin`,
  * so nothing plugin-specific is ever persisted on the message.
@@ -25,6 +27,8 @@ import { matchPlugin, pluginsForTarget, targetOf, type PluginTarget } from "@/co
 import type { AnyComponent, InteractiveButtonComponent } from "@/core/schema/types";
 import { Button } from "@/ui/Button";
 import { PluginConfigModal } from "@/features/plugins/PluginConfigModal";
+import { PluginIcon } from "@/features/plugins/PluginIcon";
+import { PluginLibraryModal } from "@/features/plugins/PluginLibraryModal";
 import type { PluginSaveResult } from "@/features/plugins/usePluginConfig";
 import styles from "./PluginPanel.module.css";
 
@@ -58,6 +62,7 @@ export function PluginPanel({ node }: Props) {
     manifest: PluginManifest;
     customId?: string;
   } | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   // Lazy, idempotent: only the first targetable node to render triggers a fetch.
   useEffect(() => {
@@ -91,7 +96,7 @@ export function PluginPanel({ node }: Props) {
     <div className={styles.panel}>
       <div className={styles.heading}>
         <span className={styles.title}>Plugin</span>
-        <span className={styles.sub}>Hand this component's action to a microservice.</span>
+        <span className={styles.sub}>Choose what happens when this component is used.</span>
       </div>
 
       {attached ? (
@@ -113,24 +118,22 @@ export function PluginPanel({ node }: Props) {
       ) : available.length === 0 ? (
         <p className={styles.muted}>No plugins available for this component type.</p>
       ) : (
-        <ul className={styles.list}>
-          {available.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                className={styles.pluginRow}
-                onClick={() => setConfiguring({ manifest: p })}
-              >
-                <PluginIcon manifest={p} />
-                <span className={styles.rowText}>
-                  <span className={styles.rowName}>{p.name}</span>
-                  {p.description ? <span className={styles.rowDesc}>{p.description}</span> : null}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <button type="button" className={styles.browse} onClick={() => setLibraryOpen(true)}>
+          <span>Browse plugins…</span>
+          <span className={styles.browseCount}>{available.length}</span>
+        </button>
       )}
+
+      {libraryOpen ? (
+        <PluginLibraryModal
+          plugins={available}
+          onPick={(manifest) => {
+            setLibraryOpen(false);
+            setConfiguring({ manifest });
+          }}
+          onClose={() => setLibraryOpen(false)}
+        />
+      ) : null}
 
       {configuring ? (
         <PluginConfigModal
@@ -178,18 +181,5 @@ function AttachedChip({
         </Button>
       </div>
     </div>
-  );
-}
-
-function PluginIcon({ manifest, summaryIcon }: { manifest: PluginManifest; summaryIcon?: string }) {
-  const src = summaryIcon ?? manifest.icon;
-  if (src) {
-    return <img className={styles.icon} src={src} alt="" aria-hidden width={28} height={28} />;
-  }
-  // Fallback monogram from the plugin name.
-  return (
-    <span className={styles.iconFallback} aria-hidden>
-      {manifest.name.slice(0, 1).toUpperCase()}
-    </span>
   );
 }

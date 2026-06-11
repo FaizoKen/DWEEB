@@ -68,9 +68,8 @@ export function PluginConfigModal({ manifest, target, customId, onSave, onClose 
         />
       </div>
       <p className={styles.note}>
-        Configuration is handled by <strong>{manifest.name}</strong>
-        {manifest.publisher ? ` · ${manifest.publisher}` : ""}. DWEEB only stores the resulting
-        action id on this component.
+        Configuration is handled by <strong>{manifest.name}</strong>. DWEEB only stores the
+        resulting action id on this component.
       </p>
     </Modal>
   );

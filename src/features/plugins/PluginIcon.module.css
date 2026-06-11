@@ -1,0 +1,26 @@
+.icon,
+.iconBuiltin,
+.iconFallback {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--app-radius-sm);
+}
+.icon {
+  object-fit: cover;
+}
+.iconBuiltin,
+.iconFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--app-border);
+}
+.iconBuiltin svg {
+  width: 16px;
+  height: 16px;
+}
+.iconFallback {
+  font-size: 14px;
+  font-weight: 700;
+}

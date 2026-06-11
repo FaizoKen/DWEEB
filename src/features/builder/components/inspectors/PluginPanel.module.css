@@ -42,23 +42,16 @@
   text-decoration: underline;
 }
 
-/* ── Picker list ─────────────────────────────────────────────────────────── */
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.pluginRow {
+/* ── Library trigger ─────────────────────────────────────────────────────── */
+.browse {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   width: 100%;
   padding: 8px 10px;
   text-align: left;
+  font-size: 13px;
   background: var(--app-bg-input);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
@@ -68,32 +61,25 @@
     background 120ms ease,
     border-color 120ms ease;
 }
-.pluginRow:hover {
+.browse:hover {
   background: var(--app-bg-hover);
   border-color: var(--app-border-strong);
 }
-.pluginRow:focus-visible {
+.browse:focus-visible {
   outline: none;
   border-color: var(--app-border-focus);
   box-shadow: var(--app-focus-ring);
 }
 
-.rowText {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-.rowName {
-  font-size: 13px;
+.browseCount {
+  flex: none;
+  font-size: 11px;
   font-weight: 600;
-}
-.rowDesc {
-  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--app-bg-hover);
+  border: 1px solid var(--app-border);
   color: var(--app-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ── Attached chip ───────────────────────────────────────────────────────── */
@@ -138,24 +124,4 @@
   display: flex;
   gap: 6px;
   flex: none;
-}
-
-/* ── Icons ───────────────────────────────────────────────────────────────── */
-.icon,
-.iconFallback {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--app-radius-sm);
-  object-fit: cover;
-}
-.iconFallback {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--app-bg-hover);
-  border: 1px solid var(--app-border);
-  color: var(--app-text-muted);
-  font-size: 14px;
-  font-weight: 700;
 }

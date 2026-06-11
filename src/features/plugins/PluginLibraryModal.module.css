@@ -1,0 +1,62 @@
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.row:hover {
+  background: var(--app-bg-hover);
+  border-color: var(--app-border-strong);
+}
+.row:focus-visible {
+  outline: none;
+  border-color: var(--app-border-focus);
+  box-shadow: var(--app-focus-ring);
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.rowName {
+  font-size: 13px;
+  font-weight: 600;
+}
+.rowDesc {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
