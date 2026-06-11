@@ -289,6 +289,33 @@ pub async fn shortlink_create(
     }
 }
 
+/// `GET /api/shortlink/:id` → `200 { token }`, or 404 once expired/unknown.
+pub async fn shortlink_resolve(
+    State(st): State<AppState>,
+    UrlPath(id): UrlPath<String>,
+) -> Result<Response, AppError> {
+    let store = std::sync::Arc::clone(store(&st)?);
+    if !is_short_id(&id) {
+        return Err(bad_request("Invalid short link."));
+    }
+    let token = tokio::task::spawn_blocking(move || store.resolve(&id))
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .map_err(|e| AppError::Internal(format!("shortlink store: {e}")))?;
+    match token {
+        Some(token) => Ok((
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(json!({ "token": token })),
+        )
+            .into_response()),
+        None => Err(AppError::Status {
+            status: StatusCode::NOT_FOUND,
+            message: "This short link has expired or doesn't exist.".into(),
+            retry_after: None,
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,32 +385,5 @@ mod tests {
         assert!(!is_short_id("abc")); // too short
         assert!(!is_short_id("aaaaaaaaaaaaaaaaa")); // too long
         assert!(!is_short_id("ab/../cd"));
-    }
-}
-
-/// `GET /api/shortlink/:id` → `200 { token }`, or 404 once expired/unknown.
-pub async fn shortlink_resolve(
-    State(st): State<AppState>,
-    UrlPath(id): UrlPath<String>,
-) -> Result<Response, AppError> {
-    let store = std::sync::Arc::clone(store(&st)?);
-    if !is_short_id(&id) {
-        return Err(bad_request("Invalid short link."));
-    }
-    let token = tokio::task::spawn_blocking(move || store.resolve(&id))
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .map_err(|e| AppError::Internal(format!("shortlink store: {e}")))?;
-    match token {
-        Some(token) => Ok((
-            [(header::CACHE_CONTROL, "no-store")],
-            Json(json!({ "token": token })),
-        )
-            .into_response()),
-        None => Err(AppError::Status {
-            status: StatusCode::NOT_FOUND,
-            message: "This short link has expired or doesn't exist.".into(),
-            retry_after: None,
-        }),
     }
 }
