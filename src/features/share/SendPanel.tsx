@@ -13,6 +13,10 @@
  *    the webhook + message ID are pre-filled from that restore. Switching to
  *    "Send as new" just ignores the restore origin for the next click; it
  *    doesn't clear it (so they can still hit Update later).
+ *  - After a successful send, the posted message is recorded as the restore
+ *    origin too, so the panel flips to "Update existing" pre-filled with the
+ *    webhook + new message id (+ thread) — clicking send again edits the live
+ *    message in place instead of posting a duplicate.
  *
  * A webhook PATCH replaces the whole message, so when updating without a
  * restore we warn that anything not rebuilt in the editor is overwritten.
@@ -92,6 +96,12 @@ interface SendSuccessInfo {
   channelName?: string;
   /** Deep link to the message (or its channel); null when unresolved. */
   discordUrl: string | null;
+  /**
+   * True when the panel re-targeted itself at the posted message (the restore
+   * origin was recorded), so clicking send again edits it in place. The success
+   * dialog surfaces this as a note after a "new" post.
+   */
+  editOnResend: boolean;
 }
 
 /** Pull the new message's snowflake from a Discord response (POST wait=true / PATCH). */
@@ -141,6 +151,7 @@ export function SendPanel({
 } = {}) {
   const message = useMessageStore((s) => s.message);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
+  const setRestoreOrigin = useMessageStore((s) => s.setRestoreOrigin);
 
   // Prefill from a just-created webhook (the `webhook.incoming` return) first,
   // else the restore origin; otherwise start empty.
@@ -183,8 +194,10 @@ export function SendPanel({
     [],
   );
 
-  // If a restore happens while the panel is open (e.g. user switched to the
-  // Restore tab, fetched, and came back), pull the new origin into the form.
+  // Mirror the store's origin into the form whenever it changes: a restore
+  // made while the panel is open (user switched to the Restore tab, fetched,
+  // and came back), or this panel's own successful send re-targeting the form
+  // at the message that's now live.
   useEffect(() => {
     if (!restoredFrom) return;
     setUrl(restoredFrom.webhookUrl);
@@ -447,9 +460,31 @@ export function SendPanel({
         const postedMessageId =
           messageIdFromBody(result.body) ??
           (mode === "update" ? (parsedMessageId ?? undefined) : undefined);
+        // The thread the message lives in: the id the user supplied, or — when
+        // a POST carried `thread_name` and so created a brand-new forum
+        // thread — the echoed message's channel_id, which IS that thread's id.
+        // Needed for the deep link and for the follow-up PATCH origin below.
+        const effThreadId =
+          threadId.trim() ||
+          (mode === "new" && message.thread_name ? channelIdFromBody(result.body) : undefined);
+
+        // Point the form at the message that's now live: record it as the
+        // restore origin, which flips the panel to "Update existing" with this
+        // webhook + message id (+ thread) pre-filled — clicking send again
+        // edits the message in place instead of posting a duplicate. Lives on
+        // the message store (like a restore) so it survives closing and
+        // reopening the dialog.
+        if (postedMessageId) {
+          setRestoreOrigin({
+            webhookUrl: parsedUrl.url,
+            messageId: postedMessageId,
+            threadId: effThreadId || undefined,
+          });
+        }
+
         // A thread post lives under the thread id, which Discord uses as the
         // channel segment of the message link.
-        const linkChannelSeg = threadId.trim() || effChannelId;
+        const linkChannelSeg = effThreadId || effChannelId;
         const discordUrl =
           effGuildId && linkChannelSeg
             ? `https://discord.com/channels/${effGuildId}/${linkChannelSeg}${
@@ -470,6 +505,7 @@ export function SendPanel({
             knownChannelName ??
             (effChannelId ? connectedData?.channelById[effChannelId]?.name : undefined),
           discordUrl,
+          editOnResend: postedMessageId != null,
         });
       } else if (result.status === 0 && /cancel/i.test(result.error)) {
         // Aborted via the dialog's Cancel — not an error worth surfacing.
@@ -707,7 +743,7 @@ export function SendPanel({
           label="Message ID or link to update"
           hint={
             restoredFrom
-              ? "Pre-filled from the restored message — change it to update a different one."
+              ? "Pre-filled from the message you last posted or restored — change it to update a different one."
               : "A message this webhook posted. In Discord: right-click → Copy Message ID (Developer Mode)."
           }
           error={messageIdInvalid ? "Not a valid message ID or link." : undefined}
@@ -945,6 +981,7 @@ export function SendPanel({
         guildName={success?.guildName}
         channelName={success?.channelName}
         discordUrl={success?.discordUrl ?? null}
+        editOnResend={success?.editOnResend ?? false}
         onClose={() => setSuccess(null)}
       />
     </>

@@ -44,6 +44,12 @@ export interface SendSuccessProps {
    * in which case only the "Done" button shows.
    */
   discordUrl?: string | null;
+  /**
+   * True when the Send panel re-targeted itself at the posted message, so
+   * sending again edits it in place. Shown as a note after a "new" post —
+   * after an update the panel was already pointing at the message.
+   */
+  editOnResend?: boolean;
   onClose: () => void;
 }
 
@@ -58,6 +64,7 @@ export function SendSuccess({
   guildName,
   channelName,
   discordUrl,
+  editOnResend,
   onClose,
 }: SendSuccessProps) {
   const name = webhookName?.trim() || "this webhook";
@@ -170,6 +177,13 @@ export function SendSuccess({
           </div>
         ) : null}
       </dl>
+
+      {mode === "new" && editOnResend ? (
+        <p className={styles.note}>
+          The Send tab now points at this message — send again to edit it in place, or switch back
+          to <strong>Send as new</strong> to post another.
+        </p>
+      ) : null}
     </Modal>
   );
 }

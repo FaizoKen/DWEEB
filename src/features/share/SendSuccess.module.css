@@ -93,3 +93,11 @@
   background: var(--app-bg-hover);
   color: var(--app-text);
 }
+
+/* "Send again to edit in place" hint under the facts, after a new post. */
+.note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}

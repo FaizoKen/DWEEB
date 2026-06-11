@@ -68,13 +68,15 @@ interface HistoryFrame {
 }
 
 /**
- * Origin of the active message when it was loaded by fetching a previously
- * posted webhook message. Held in memory only (never persisted to draft,
- * URL, or JSON export) so that "Update existing" in the Send panel can
- * default to PATCH-ing the same message instead of POST-ing a new one.
+ * Origin of the active message on Discord — set when it was loaded by
+ * fetching a previously posted webhook message (Restore tab), or right after
+ * the Send panel successfully posted/updated it. Held in memory only (never
+ * persisted to draft, URL, or JSON export) so that "Update existing" in the
+ * Send panel can default to PATCH-ing the same message instead of POST-ing a
+ * new one.
  *
  * Reset to `null` whenever a different message replaces the editor state
- * (preset, import, blank, share URL) — only an active restore opts in.
+ * (preset, import, blank, share URL) — only a restore or a send opts in.
  */
 export interface RestoredOrigin {
   /** Canonical webhook execute URL (no query/fragment). */
@@ -102,6 +104,12 @@ export interface MessageState {
   replaceMessageFromRestore(next: WebhookMessage, origin: RestoredOrigin): void;
   /** Drop the restore origin (e.g. user picks "Send as new" in the Send panel). */
   clearRestoreOrigin(): void;
+  /**
+   * Record the origin without touching the message or history — the Send panel
+   * calls this after a successful POST/PATCH so the next send defaults to
+   * updating the message that's now live instead of posting a duplicate.
+   */
+  setRestoreOrigin(origin: RestoredOrigin | null): void;
   loadDefaultPreset(): void;
   /** Wipe the editor to a fully blank message — components plus every
    *  message-level option (username, avatar, mentions, etc.). Undoable. */
@@ -344,6 +352,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   clearRestoreOrigin() {
     set({ restoredFrom: null });
+  },
+
+  setRestoreOrigin(origin) {
+    set({ restoredFrom: origin });
   },
 
   loadDefaultPreset() {
