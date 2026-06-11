@@ -71,7 +71,7 @@ form a user is mid-way through filling in still lands.
 Some messages are *meant* to live forever — a role menu pinned in #welcome.
 Each guild gets `PERMANENT_SLOTS_PER_GUILD` exemptions, managed entirely from
 the **dashboard**: after sending a message with plugin components, the
-success dialog offers *Keep alive forever* (and, when every slot is taken,
+success dialog offers *Make permanent* (and, when every slot is taken,
 lists the occupying messages so one can be freed). No Discord command is
 involved.
 

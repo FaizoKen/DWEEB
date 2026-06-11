@@ -231,7 +231,7 @@ That half lives entirely in your service and is outside DWEEB's scope.
 >
 > **Each guild can exempt 2 messages** (`PERMANENT_SLOTS_PER_GUILD`),
 > managed from the dashboard: after sending, the success dialog offers
-> **Keep alive forever** to a signed-in user who manages the server (and
+> **Make permanent** to a signed-in user who manages the server (and
 > lists the occupying messages when the slots are full, so one can be
 > freed). See the [dispatcher README](../plugins/dispatcher/README.md).
 

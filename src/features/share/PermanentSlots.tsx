@@ -19,7 +19,7 @@
  * needs the Discord login the rest of the dashboard already uses.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuthStore } from "@/core/auth/authStore";
 import {
   addPermanentMessage,
@@ -29,7 +29,9 @@ import {
   type PermanentSlots,
 } from "@/core/guild/api";
 import { isProxyConfigured } from "@/core/guild/config";
+import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
+import { AlertCircleIcon, CheckCircleIcon, ClockIcon } from "@/ui/Icon";
 import styles from "./PermanentSlots.module.css";
 
 export interface PermanentSlotsSectionProps {
@@ -44,6 +46,29 @@ type SlotsState =
   | { kind: "ready"; slots: PermanentSlots }
   | { kind: "unavailable" } // feature off on this deployment (501)
   | { kind: "error"; message: string };
+
+/** One glanceable line: tinted status icon, short copy, action on the right.
+ *  The tint alone signals state (amber = expiring, green = permanent) so the
+ *  copy can stay to a title plus an optional muted sub-line. */
+function Row({
+  tone,
+  icon,
+  action,
+  children,
+}: {
+  tone: "warning" | "success" | "danger" | "muted";
+  icon: ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className={styles.row}>
+      <span className={cn(styles.badge, styles[tone])}>{icon}</span>
+      <div className={styles.copy}>{children}</div>
+      {action ? <div className={styles.action}>{action}</div> : null}
+    </div>
+  );
+}
 
 /** First millisecond of 2015 — the epoch Discord snowflakes count from. */
 const DISCORD_EPOCH_MS = 1420070400000n;
@@ -95,17 +120,19 @@ export function PermanentSlotsSection({
 
   if (authStatus !== "authed") {
     return (
-      <section className={styles.section}>
-        <h3 className={styles.heading}>Interactive components</h3>
-        <p className={styles.text}>
-          Buttons and selects on this message stop working a few days after sending. Sign in with
-          Discord to keep this message alive permanently.
-        </p>
-        <div className={styles.actions}>
-          <Button size="sm" onClick={login}>
-            Sign in with Discord
-          </Button>
-        </div>
+      <section className={styles.section} aria-label="Interactive components">
+        <Row
+          tone="warning"
+          icon={<ClockIcon size={15} />}
+          action={
+            <Button size="sm" onClick={login}>
+              Sign in
+            </Button>
+          }
+        >
+          <p className={styles.title}>Buttons & selects expire a few days after sending</p>
+          <p className={styles.sub}>Sign in with Discord to keep this message alive</p>
+        </Row>
       </section>
     );
   }
@@ -113,17 +140,19 @@ export function PermanentSlotsSection({
   if (state.kind === "unavailable") return null;
   if (state.kind === "loading") {
     return (
-      <section className={styles.section}>
-        <h3 className={styles.heading}>Interactive components</h3>
-        <p className={styles.text}>Checking this server’s permanent slots…</p>
+      <section className={styles.section} aria-label="Interactive components">
+        <Row tone="muted" icon={<ClockIcon size={15} />}>
+          <p className={styles.sub}>Checking permanent slots…</p>
+        </Row>
       </section>
     );
   }
   if (state.kind === "error") {
     return (
-      <section className={styles.section}>
-        <h3 className={styles.heading}>Interactive components</h3>
-        <p className={styles.textError}>{state.message}</p>
+      <section className={styles.section} aria-label="Interactive components">
+        <Row tone="danger" icon={<AlertCircleIcon size={15} />}>
+          <p className={styles.titleError}>{state.message}</p>
+        </Row>
       </section>
     );
   }
@@ -142,23 +171,21 @@ export function PermanentSlotsSection({
   const alreadyExpired = expiresAt !== null && expiresAt.getTime() <= Date.now();
   const expiryLabel = expiresAt?.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
-  // Lead sentence for the two non-permanent states: a concrete date when the
-  // id decodes (the normal case), the relative window as a fallback.
-  const expiryIntro = expiryLabel ? (
+  // Title for the two non-permanent states: a concrete date when the id
+  // decodes (the normal case), the relative window as a fallback.
+  const expiryTitle = expiryLabel ? (
     alreadyExpired ? (
       <>
-        Buttons and selects on this message <strong>stopped working on {expiryLabel}</strong>{" "}
-        (already greyed-out components stay disabled)
+        Buttons & selects <strong>expired {expiryLabel}</strong>
       </>
     ) : (
       <>
-        Buttons and selects on this message stop working on <strong>{expiryLabel}</strong> (
-        {slots.ttl_days} days after it was sent)
+        Buttons & selects expire <strong>{expiryLabel}</strong>
       </>
     )
   ) : (
     <>
-      Buttons and selects stop working <strong>{slots.ttl_days} days</strong> after sending
+      Buttons & selects expire <strong>{slots.ttl_days} days</strong> after sending
     </>
   );
 
@@ -189,26 +216,30 @@ export function PermanentSlotsSection({
   const free = (id: string) => run(() => removePermanentMessage(guildId, id));
 
   return (
-    <section className={styles.section}>
-      <h3 className={styles.heading}>Interactive components</h3>
+    <section className={styles.section} aria-label="Interactive components">
       {isPermanent ? (
-        <>
-          <p className={styles.text}>
-            ♾️ This message is <strong>permanent</strong> — its buttons and selects never expire.{" "}
-            {slots.used}/{slots.cap} slots used.
-          </p>
-          <div className={styles.actions}>
+        <Row
+          tone="success"
+          icon={<CheckCircleIcon size={15} />}
+          action={
             <Button size="sm" disabled={busy} onClick={() => free(messageId)}>
-              Make temporary again
+              Make temporary
             </Button>
-          </div>
-        </>
+          }
+        >
+          <p className={styles.title}>This message is permanent</p>
+          <p className={styles.sub}>
+            Buttons never expire · {slots.used}/{slots.cap} slots used
+          </p>
+        </Row>
       ) : slotsFull ? (
         <>
-          <p className={styles.text}>
-            {expiryIntro}, and all {slots.cap} of this server’s permanent slots are in use. Free one
-            to keep this message instead:
-          </p>
+          <Row tone="warning" icon={<ClockIcon size={15} />}>
+            <p className={styles.title}>{expiryTitle}</p>
+            <p className={styles.sub}>
+              All {slots.cap} permanent slots are used — free one to keep this message
+            </p>
+          </Row>
           <ul className={styles.slotList}>
             {slots.items.map((item, i) => (
               <li key={item.message_id} className={styles.slotItem}>
@@ -220,7 +251,12 @@ export function PermanentSlotsSection({
                 >
                   Permanent message {i + 1} ↗
                 </a>
-                <Button size="sm" disabled={busy} onClick={() => free(item.message_id)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => free(item.message_id)}
+                >
                   Free slot
                 </Button>
               </li>
@@ -228,17 +264,21 @@ export function PermanentSlotsSection({
           </ul>
         </>
       ) : (
-        <>
-          <p className={styles.text}>
-            {expiryIntro}. Use one of this server’s permanent slots ({slots.used}/{slots.cap} used)
-            to keep them alive forever.
-          </p>
-          <div className={styles.actions}>
+        <Row
+          tone="warning"
+          icon={<ClockIcon size={15} />}
+          action={
             <Button size="sm" variant="primary" disabled={busy} onClick={makePermanent}>
-              Keep alive forever
+              Make permanent
             </Button>
-          </div>
-        </>
+          }
+        >
+          <p className={styles.title}>{expiryTitle}</p>
+          <p className={styles.sub}>
+            {alreadyExpired ? "Greyed-out components stay disabled · " : ""}
+            {slots.used}/{slots.cap} permanent slots used
+          </p>
+        </Row>
       )}
       {actionError ? <p className={styles.textError}>{actionError}</p> : null}
     </section>
