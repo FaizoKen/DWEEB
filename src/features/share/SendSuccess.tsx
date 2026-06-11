@@ -19,6 +19,7 @@ import { openDiscordLink } from "@/lib/discordDeepLink";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { CheckCircleIcon } from "@/ui/Icon";
+import { PermanentSlotsSection } from "./PermanentSlots";
 import styles from "./SendSuccess.module.css";
 
 export interface SendSuccessProps {
@@ -50,6 +51,14 @@ export interface SendSuccessProps {
    * after an update the panel was already pointing at the message.
    */
   editOnResend?: boolean;
+  /** The posted/edited message's id, when the response carried it. */
+  messageId?: string;
+  /**
+   * True when the message carries interactive plugin components — surfaces
+   * the permanent-slots section (components expire by default; a server can
+   * exempt a few messages).
+   */
+  hasInteractive?: boolean;
   onClose: () => void;
 }
 
@@ -65,6 +74,8 @@ export function SendSuccess({
   channelName,
   discordUrl,
   editOnResend,
+  messageId,
+  hasInteractive,
   onClose,
 }: SendSuccessProps) {
   const name = webhookName?.trim() || "this webhook";
@@ -177,6 +188,10 @@ export function SendSuccess({
           </div>
         ) : null}
       </dl>
+
+      {hasInteractive && guildId && channelId && messageId ? (
+        <PermanentSlotsSection guildId={guildId} channelId={channelId} messageId={messageId} />
+      ) : null}
 
       {mode === "new" && editOnResend ? (
         <p className={styles.note}>

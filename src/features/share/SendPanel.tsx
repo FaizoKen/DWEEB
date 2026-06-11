@@ -102,6 +102,11 @@ interface SendSuccessInfo {
    * dialog surfaces this as a note after a "new" post.
    */
   editOnResend: boolean;
+  /** The posted/edited message's id, when the response carried it. */
+  messageId?: string;
+  /** Message carries interactive plugin components → the success dialog shows
+   *  the permanent-slots (component expiry) section. */
+  hasInteractive: boolean;
 }
 
 /** Pull the new message's snowflake from a Discord response (POST wait=true / PATCH). */
@@ -506,6 +511,8 @@ export function SendPanel({
             (effChannelId ? connectedData?.channelById[effChannelId]?.name : undefined),
           discordUrl,
           editOnResend: postedMessageId != null,
+          messageId: postedMessageId,
+          hasInteractive: appWebhookNote != null,
         });
       } else if (result.status === 0 && /cancel/i.test(result.error)) {
         // Aborted via the dialog's Cancel — not an error worth surfacing.
@@ -982,6 +989,8 @@ export function SendPanel({
         channelName={success?.channelName}
         discordUrl={success?.discordUrl ?? null}
         editOnResend={success?.editOnResend ?? false}
+        messageId={success?.messageId}
+        hasInteractive={success?.hasInteractive ?? false}
         onClose={() => setSuccess(null)}
       />
     </>

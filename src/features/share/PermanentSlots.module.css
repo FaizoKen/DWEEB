@@ -1,0 +1,64 @@
+/* "Interactive components" (permanent slots) section of the success dialog. */
+.section {
+  margin: 14px 0 0;
+  padding: 11px 12px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-hover);
+  border: 1px solid var(--app-border);
+}
+
+.heading {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+
+.textError {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-danger, #e5484d);
+}
+
+.actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+/* Occupying messages when every slot is taken. */
+.slotList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.slotItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.slotLink {
+  font-size: 12px;
+  color: var(--app-accent, #5865f2);
+  text-decoration: none;
+}
+
+.slotLink:hover {
+  text-decoration: underline;
+}

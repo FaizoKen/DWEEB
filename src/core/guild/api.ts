@@ -150,6 +150,111 @@ export async function fetchGuildEmojis(guildId: string, signal?: AbortSignal): P
   return getJson<RawEmoji[]>(`/api/guilds/${id}/emojis`, signal);
 }
 
+// ── Permanent component slots ───────────────────────────────────────────────
+// Messages exempted from the component expiry (the interactions dispatcher
+// disables plugin buttons/selects COMPONENT_TTL_DAYS after a message is sent).
+// Each server gets a fixed number of exemption slots, managed here through the
+// proxy, which checks the signed-in user manages the server.
+
+/** One message currently occupying a permanent slot. */
+export interface PermanentSlotItem {
+  message_id: string;
+  channel_id: string;
+  /** Unix millis when the slot was granted. */
+  added_at: number;
+}
+
+/** A server's permanent-slot state, as every slot endpoint returns it. */
+export interface PermanentSlots {
+  /** Slots the server may hold. */
+  cap: number;
+  used: number;
+  /** Days components stay clickable on ordinary messages; null = no expiry
+   *  configured on this deployment (so permanence is moot). */
+  ttl_days: number | null;
+  items: PermanentSlotItem[];
+}
+
+/** Outcome of an add: `full` carries the occupying slots so the UI can offer
+ *  freeing one instead of surfacing a dead-end error. */
+export type PermanentAddResult =
+  | { full: false; slots: PermanentSlots }
+  | { full: true; slots: PermanentSlots };
+
+/** `GET /api/guilds/:id/permanent` — slot usage + current permanent messages.
+ *  A 501 means the deployment doesn't run the feature; callers typically hide
+ *  the UI on it (`e.status === 501`). */
+export async function fetchPermanentSlots(
+  guildId: string,
+  signal?: AbortSignal,
+): Promise<PermanentSlots> {
+  const id = guildId.trim();
+  if (!isValidGuildId(id)) {
+    throw new GuildApiError("That doesn't look like a valid server ID.", 0);
+  }
+  return getJson<PermanentSlots>(`/api/guilds/${id}/permanent`, signal);
+}
+
+/** `POST /api/guilds/:id/permanent` — spend a slot on a message. Idempotent:
+ *  re-adding an already-permanent message succeeds. */
+export async function addPermanentMessage(
+  guildId: string,
+  messageId: string,
+  channelId: string,
+): Promise<PermanentAddResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${PROXY_BASE_URL}/api/guilds/${guildId.trim()}/permanent`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: messageId, channel_id: channelId }),
+    });
+  } catch {
+    throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
+  }
+  // 409 = every slot is taken. Not an exception — the body carries the
+  // occupying messages so the UI can offer to free one.
+  if (res.status === 409) {
+    try {
+      return { full: true, slots: (await res.json()) as PermanentSlots };
+    } catch {
+      throw new GuildApiError("The server returned an unexpected response.", res.status);
+    }
+  }
+  if (!res.ok) throw await toApiError(res);
+  try {
+    return { full: false, slots: (await res.json()) as PermanentSlots };
+  } catch {
+    throw new GuildApiError("The server returned an unexpected response.", res.status);
+  }
+}
+
+/** `DELETE /api/guilds/:id/permanent/:messageId` — give a slot back. A 404
+ *  (already freed) is treated as success: the goal state is reached either
+ *  way, so the fresh list is fetched and returned. */
+export async function removePermanentMessage(
+  guildId: string,
+  messageId: string,
+): Promise<PermanentSlots> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${PROXY_BASE_URL}/api/guilds/${guildId.trim()}/permanent/${messageId.trim()}`,
+      { method: "DELETE", credentials: "include" },
+    );
+  } catch {
+    throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
+  }
+  if (res.status === 404) return fetchPermanentSlots(guildId);
+  if (!res.ok) throw await toApiError(res);
+  try {
+    return (await res.json()) as PermanentSlots;
+  } catch {
+    throw new GuildApiError("The server returned an unexpected response.", res.status);
+  }
+}
+
 /** `POST /auth/logout` — clear the session. Best-effort; never throws. */
 export async function postLogout(): Promise<void> {
   try {
