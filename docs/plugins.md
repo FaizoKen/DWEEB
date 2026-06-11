@@ -243,7 +243,7 @@ plugins share it: the [interactions dispatcher](../plugins/dispatcher) sits at
 each interaction to a plugin by its `customIdPrefix`. Every plugin is served at its
 own origin, `https://<id>.dweeb.faizo.net` — covered by ONE wildcard DNS record
 (`*.dweeb.faizo.net` → the server, DNS only) and ONE CSP wildcard
-(`frame-src https://*.dweeb.faizo.net` in `public/_headers`), so none of that
+(`frame-src https://*.dweeb.faizo.net` in the CSP built from `vite.config.ts`), so none of that
 recurs per plugin.
 
 Adding a plugin (say `ping-pong`, prefix `pingpong:`) is four edits:

@@ -96,18 +96,6 @@
   justify-content: flex-end;
 }
 
-/* Opt-in short-link subsection in the Share link tab — divided off from the
- * default (hash) link above it so the "this uploads" tradeoff reads as a
- * distinct, deliberate choice. */
-.shortLink {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 4px;
-  padding-top: 14px;
-  border-top: 1px solid var(--app-border);
-}
-
 .mono {
   font-family: var(--app-font-mono);
   font-size: 12px;

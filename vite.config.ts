@@ -1,12 +1,63 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "node:path";
 
-// Static SPA build targeting Cloudflare Pages.
+// Security policy for the deployed site. GitHub Pages cannot attach response
+// headers, so the policy ships as a <meta> tag injected into the built
+// index.html (dev stays unrestricted so HMR's WebSocket and the local
+// `http://localhost:8080` proxy keep working). Relative to the old Cloudflare
+// `_headers` deployment, `frame-ancestors` / `X-Frame-Options` and
+// `X-Content-Type-Options` are lost — they can't be expressed in a meta tag.
+//
+// `connect-src 'self' https:` is deliberate: the AI panel talks to
+// user-configured gateways (any https host) and there is no same-origin proxy
+// anymore, so provider hosts can't be enumerated. The tight `script-src`
+// remains the real injection defense.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' https://www.googletagmanager.com",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' https: data: blob:",
+  "media-src 'self' https: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' https:",
+  // Plugins render their config UI in iframes under *.dweeb.faizo.net.
+  "frame-src 'self' https://*.dweeb.faizo.net",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
+function injectSecurityMeta(): Plugin {
+  return {
+    name: "inject-security-meta",
+    apply: "build",
+    transformIndexHtml(html) {
+      return {
+        html,
+        tags: [
+          {
+            tag: "meta",
+            attrs: { "http-equiv": "Content-Security-Policy", content: CSP },
+            injectTo: "head-prepend",
+          },
+          {
+            tag: "meta",
+            attrs: { name: "referrer", content: "strict-origin-when-cross-origin" },
+            injectTo: "head-prepend",
+          },
+        ],
+      };
+    },
+  };
+}
+
+// Static SPA build targeting GitHub Pages.
 // Share-state is encoded in the URL hash, so no SPA fallback is needed
-// for share links — the server only ever sees `/`.
+// for share links — the server only ever sees `/`. (The deploy workflow
+// still publishes a 404.html copy of the shell so stray deep links load
+// the app.)
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), injectSecurityMeta()],
   resolve: {
     // React is aliased to Preact's compat layer to shrink the runtime: the
     // vendor chunk drops from ~47 kB gzip to ~12 kB. The app keeps writing

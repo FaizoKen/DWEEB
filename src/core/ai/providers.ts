@@ -227,40 +227,6 @@ async function readSse(res: Response, onData: (data: string) => void): Promise<v
   flush(buffer);
 }
 
-/** Same-origin Pages Function that forwards the provider request server-side. */
-const PROXY_ENDPOINT = "/api/llm";
-
-/**
- * Issue the provider request through our same-origin proxy first.
- *
- * The static site's CSP (`connect-src 'self'`) blocks direct calls to provider
- * hosts, and providers vary in whether they allow cross-origin browser calls.
- * Routing through `/api/llm` keeps the browser on its own origin and lets the
- * call happen server-side. If the proxy isn't deployed (e.g. local `vite dev`,
- * where the SPA catch-all serves index.html), we detect that and fall back to a
- * direct call so development still works.
- */
-async function proxiedFetch(targetUrl: string, init: RequestInit): Promise<Response> {
-  try {
-    const res = await fetch(PROXY_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        targetUrl,
-        method: init.method ?? "POST",
-        headers: init.headers ?? {},
-        body: typeof init.body === "string" ? init.body : null,
-      }),
-      signal: init.signal ?? null,
-    });
-    const contentType = res.headers.get("content-type") ?? "";
-    if (res.status !== 404 && !contentType.includes("text/html")) return res;
-  } catch {
-    // Couldn't reach our own origin — fall through to a direct request.
-  }
-  return fetch(targetUrl, init);
-}
-
 async function callOpenAiCompatible(
   settings: AiSettings,
   system: string,
@@ -275,14 +241,14 @@ async function callOpenAiCompatible(
   // Keyless local servers (Ollama) need no auth; skip the empty bearer, which
   // some OpenAI-compatible servers reject.
   if (settings.apiKey.trim()) headers.Authorization = `Bearer ${settings.apiKey}`;
-  // OpenRouter recommends identifying the calling app. These are set on the
-  // server-side proxy request, so the browser's forbidden-header rules (Referer)
-  // don't apply.
+  // OpenRouter recommends identifying the calling app. `HTTP-Referer` is a
+  // literal custom header name (not the browser-managed `Referer`), so a
+  // browser fetch is allowed to set it.
   if (settings.provider === "openrouter") {
     if (typeof location !== "undefined") headers["HTTP-Referer"] = location.origin;
     headers["X-Title"] = "DWEEB";
   }
-  const res = await proxiedFetch(url, {
+  const res = await fetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -341,7 +307,7 @@ async function callAnthropic(
   onToken?: (delta: string) => void,
 ): Promise<AiCallResult> {
   const url = `${resolvedBaseUrl(settings)}/v1/messages`;
-  const res = await proxiedFetch(url, {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -426,7 +392,7 @@ async function callGemini(
   const url =
     `${base}/v1beta/models/${encodeURIComponent(settings.model)}:${endpoint}` +
     `?key=${encodeURIComponent(settings.apiKey)}${sse}`;
-  const res = await proxiedFetch(url, {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

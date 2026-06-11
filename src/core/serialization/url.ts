@@ -4,7 +4,7 @@
  * Share state lives in the URL hash (`#s=<token>`) so:
  *  - The server never sees it (privacy, plus avoids CDN cache poisoning).
  *  - Page reloads keep the message intact.
- *  - Cloudflare's `_redirects` SPA fallback never gets in the way.
+ *  - The static host's SPA fallback never gets in the way.
  *
  * The reader returns the token only if the prefix matches — anything else
  * (e.g. `#dialog=share`) is ignored, leaving room for other hash-based UI.

@@ -123,14 +123,14 @@
     <main>
       <a class="back" href="/">← Back to DWEEB</a>
       <h1>Privacy Policy</h1>
-      <p class="meta">Last updated: 9 June 2026</p>
+      <p class="meta">Last updated: 11 June 2026</p>
 
       <div class="tldr">
         <strong>The short version.</strong> DWEEB runs in your browser. Your message
         drafts, webhook URLs, saved messages, and any AI API keys live in your browser's
         local storage and are never uploaded to us. You don't need an account to use the
         editor. A few opt-in features talk to third parties only when you use them — signing in
-        with Discord, the AI assistant, short links, and any plugin you attach (which can receive
+        with Discord, the AI assistant, and any plugin you attach (which can receive
         data such as a webhook URL you select for it). We use privacy-respecting analytics and do
         not sell your data.
       </div>
@@ -179,13 +179,11 @@
         and read that message, so treat share links accordingly.
       </p>
       <p>
-        <strong>Short links (optional).</strong> If you choose to create a <em>short link</em>, the
-        compressed message is uploaded to us and stored in temporary key-value storage under a
-        random id so it can be served from a short <code>dweeb.faizo.net/s/…</code> URL. Unlike the
-        hash link above, this means the message contents <strong>do reach us</strong>. Short links
-        are <strong>automatically deleted after 7 days</strong> and we store nothing else about
-        them. Don't create one for a message you wouldn't want on our server — use the default hash
-        link instead.
+        <strong>Short links (discontinued).</strong> DWEEB previously offered an opt-in
+        <code>dweeb.faizo.net/s/…</code> short link that stored the compressed message on our
+        infrastructure for up to 7 days. That feature has been removed; no short-link storage
+        exists anymore, and every previously stored entry has expired or been deleted. Share
+        links today are hash links only and never reach a server.
       </p>
 
       <h2>3. Sending messages to Discord</h2>
@@ -240,9 +238,10 @@
 
       <h2>7. Hosting and server logs</h2>
       <p>
-        The site is hosted on Cloudflare. Like most web infrastructure, our hosting and the Discord
-        login proxy process technical data such as IP addresses to deliver the service, apply
-        per-IP rate limiting, and protect against abuse. We don't use this to build user profiles.
+        The site is hosted on GitHub Pages. Like most web infrastructure, our hosting and the
+        Discord login proxy process technical data such as IP addresses to deliver the service,
+        apply per-IP rate limiting, and protect against abuse. We don't use this to build user
+        profiles.
       </p>
 
       <h2>8. Cookies</h2>
@@ -260,7 +259,7 @@
       <ul>
         <li><a href="https://discord.com/privacy" target="_blank" rel="noopener noreferrer">Discord</a> — webhooks, sign-in, and server data.</li>
         <li><a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Analytics</a> — usage analytics.</li>
-        <li><a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener noreferrer">Cloudflare</a> — hosting and content delivery.</li>
+        <li><a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener noreferrer">GitHub Pages</a> — hosting and content delivery.</li>
         <li>Whichever AI provider you select, if you use the AI assistant.</li>
         <li>Any plugin you choose to attach to a component — each runs as an independent service with its own privacy policy.</li>
       </ul>

@@ -1,16 +1,20 @@
 name: Web
 
-# Frontend (Vite/React SPA) CI. Runs on every push to main and every PR against
-# main, but only when frontend-relevant files change — server-only commits are
-# handled by `server.yml`, so they skip this build entirely.
-# `workflow_dispatch` lets you re-run from the Actions tab without a new commit.
+# Frontend (Vite/React SPA) CI + GitHub Pages deploy. Every push to main that
+# touches frontend-relevant files typechecks, builds, and publishes dist/ to
+# GitHub Pages; PRs run the same verification without deploying. Server-only
+# commits are handled by `server.yml`, so they skip this build entirely.
+# `workflow_dispatch` lets you redeploy from the Actions tab without a commit.
+#
+# One-time repo setup: Settings → Pages → Source: "GitHub Actions", and set the
+# custom domain (dweeb.faizo.net) there. The domain persists across deploys —
+# no CNAME file is needed for Actions-based deployments.
 on:
   push:
     branches: [main]
     paths: &web-paths
       - "src/**"
       - "public/**"
-      - "functions/**"
       - "index.html"
       - "package.json"
       - "bun.lock"
@@ -22,12 +26,12 @@ on:
     paths: *web-paths
   workflow_dispatch:
 
-# Minimum-needed permissions. We only read the source.
+# Minimum-needed permissions; the deploy job widens its own.
 permissions:
   contents: read
 
 # Cancel an in-flight run when a newer commit lands on the same ref.
-# Saves runner minutes and produces faster feedback on the latest commit.
+# Saves runner minutes and gets the latest commit live faster.
 concurrency:
   group: web-${{ github.ref }}
   cancel-in-progress: true
@@ -38,7 +42,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  verify:
+  build:
     name: Typecheck and build
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -54,7 +58,7 @@ jobs:
 
       # `--frozen-lockfile` makes the install fail if `bun.lock` is out of
       # sync with `package.json`. That catches forgotten lockfile updates
-      # before they reach Cloudflare's build runner.
+      # before they reach the deploy.
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -64,7 +68,32 @@ jobs:
       - name: Build
         run: bun run build
 
-      # Quick smoke that the build produced the entry point Cloudflare expects.
-      # If this ever fails, our Vite config or output directory drifted.
-      - name: Verify dist output
-        run: test -f dist/index.html && test -d dist/assets
+      # GitHub Pages has no rewrite rules, so serve the SPA shell as the 404
+      # page — deep links (e.g. a stale `/s/<id>` short link) still load the
+      # app. Doubles as a smoke test that the build produced the entry point.
+      - name: Add SPA 404 fallback
+        run: test -d dist/assets && cp dist/index.html dist/404.html
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

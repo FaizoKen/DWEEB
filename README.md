@@ -10,8 +10,8 @@ backend, no account, no database.
 **Private by design.** Everything runs in your browser, so your drafts stay on
 your device and share links keep their data in the URL fragment — nothing is
 uploaded to us. The only data that leaves your browser is what you opt into
-sending: signing in with Discord, the AI assistant, short links, or a plugin you
-attach. That makes DWEEB a security-conscious choice for sensitive announcements
+sending: signing in with Discord, the AI assistant, or a plugin you attach.
+That makes DWEEB a security-conscious choice for sensitive announcements
 and for large communities and teams.
 
 DWEEB is **free and open source** (MIT). The code lives on GitHub at
@@ -81,7 +81,7 @@ when you Send (and to a plugin you attach, if you point one at it).
 ```bash
 bun install
 bun run dev          # http://localhost:5173
-bun run build        # produces dist/ (Cloudflare Pages-ready)
+bun run build        # produces dist/ (static, ready for any host)
 bun run preview      # serve the built bundle locally
 bun run typecheck    # tsc -b --noEmit
 ```
@@ -89,23 +89,24 @@ bun run typecheck    # tsc -b --noEmit
 Bun is the supported runtime, but `npm install && npm run dev` works the same
 way — Vite is the only thing the scripts actually invoke.
 
-## Deploying to Cloudflare Pages
+## Deploying to GitHub Pages
 
-1. Push the repo to GitHub.
-2. In Cloudflare Pages → **Create a project** → connect the repo.
-3. Build command: `bun run build`. Output directory: `dist`.
-4. The bundled `public/_headers` and `public/_redirects` ship with sensible
-   defaults (CSP, immutable asset caching, SPA fallback). Override them only
-   if you change the asset layout.
-5. **Optional — short links.** To enable the opt-in "Create short link" action,
-   bind a KV namespace named `SHORT_LINKS` to the Pages project (project →
-   **Settings → Functions → KV namespace bindings**). Without it, the
-   `/api/shorten` Function returns 503 and the UI just keeps offering the
-   default hash link. Stored entries auto-expire after 7 days.
+The site is a fully static SPA — there is no server-side code in the web build.
+Deploys are automated by [`.github/workflows/web.yml`](.github/workflows/web.yml):
+every push to `main` that touches the frontend typechecks, builds, and publishes
+`dist/` to GitHub Pages (PRs run the same build without deploying).
 
-The site is a static SPA. The only server-side code is a couple of Cloudflare
-Pages Functions in [`functions/`](functions/) (an AI-provider proxy and the
-optional short-link store); they deploy automatically with the site.
+One-time setup:
+
+1. Repo **Settings → Pages** → Source: **GitHub Actions**.
+2. Set the custom domain there and point its DNS `CNAME` at
+   `<owner>.github.io` (proxying off, so GitHub can provision the TLS
+   certificate). Enable **Enforce HTTPS** once the certificate is issued.
+
+GitHub Pages can't attach response headers, so the Content-Security-Policy is
+injected into `index.html` as a `<meta>` tag at build time (see
+`vite.config.ts`), and the workflow publishes a `404.html` copy of the shell as
+the SPA fallback for deep links.
 
 ## Architecture
 
@@ -248,10 +249,10 @@ panel because the raw error is misleading.
 `src/core/webhook/send.ts` owns all three HTTP calls (`sendToWebhook`,
 `fetchWebhookMessage`, `updateWebhookMessage`) — status mapping,
 rate-limit parsing, and abort support are shared. `src/core/webhook/history.ts`
-owns the localStorage list of remembered webhooks. The CSP in
-`public/_headers` allow-lists `discord.com`, `canary.discord.com`,
-`ptb.discord.com`, and `discordapp.com` under `connect-src`. If you fork
-the app to talk to a different host, edit that header.
+owns the localStorage list of remembered webhooks. The CSP (injected at build
+time from `vite.config.ts`) allows any `https:` host under `connect-src`, so
+Discord's domains — and a different host, if you fork the app — need no
+allow-list changes.
 
 ## AI assistant
 
@@ -267,11 +268,9 @@ to a single `{ ok, text, error }` result. Supported providers: **Groq**,
 adapter).
 
 **Self-hosted models via Ollama.** Ollama has to be reachable at a public
-`https://` URL. Every provider call on the deployed site routes through the
-same-origin `functions/api/llm.ts` proxy (the CSP's `connect-src 'self'` blocks
-direct provider calls), and that proxy runs on Cloudflare's edge — it can't see
-your `localhost`, and its SSRF guard refuses non-https / private hosts anyway.
-So put Ollama behind a tunnel and use that URL:
+`https://` URL: provider calls go straight from your browser, and a page served
+over `https://` can't fetch plain-`http://` `localhost` (mixed content). So put
+Ollama behind a tunnel and use that URL:
 
 ```bash
 ollama pull llama3.2
@@ -281,9 +280,9 @@ cloudflared tunnel --url http://localhost:11434   # prints an https URL
 Then pick *Ollama (self-hosted)* in the provider dropdown, set the Base URL to
 the tunnel origin plus `/v1` (e.g. `https://xxxx.trycloudflare.com/v1`), and
 leave the key blank. There is no default Base URL on purpose: `localhost` can't
-work from the deployed site, so you supply your own public endpoint. (The proxy
-calls Ollama server-to-server, so you don't need to set `OLLAMA_ORIGINS` — that
-only matters for direct browser calls.)
+work from the deployed site, so you supply your own public endpoint. The browser
+calls Ollama directly, so allow the site's origin with
+`OLLAMA_ORIGINS=https://dweeb.faizo.net` (or `*`) when starting Ollama.
 
 ## Wire-format compatibility
 
@@ -318,7 +317,8 @@ chunk because decoding is only needed when landing on a share URL.
 
 ## Deployment
 
-Hosted on Cloudflare Pages with automatic builds on every push.
+Hosted on GitHub Pages with automatic builds and deploys on every push
+(see [`.github/workflows/web.yml`](.github/workflows/web.yml)).
 
 ## Contributing
 
