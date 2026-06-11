@@ -9,12 +9,17 @@
 //! forwards everything else — raw body and signature headers untouched, so the
 //! plugin can (and does) re-verify — to the matching upstream.
 //!
+//! It also answers the one slash command the app has, `/dashboard`, inline —
+//! a static ephemeral reply with the dashboard URL needs no plugin and no
+//! forward hop. Register it once with `node scripts/register-commands.mjs`.
+//!
 //! Adding a plugin is one entry in the ROUTES env var; nothing here changes.
 //!
 //! Env:
 //!   DISCORD_PUBLIC_KEY  app public key (64 hex chars), required
 //!   ROUTES              JSON map of custom_id prefix -> upstream base URL,
 //!                       e.g. {"modalform:":"http://modal-form:8090"}, required
+//!   DASHBOARD_URL       URL /dashboard replies with, default https://dweeb.faizo.net
 //!   PORT                bind port, default 8095
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -31,6 +36,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::{json, Value};
 
 const TYPE_PING: u64 = 1;
+const TYPE_APPLICATION_COMMAND: u64 = 2;
 const RESPONSE_PONG: u64 = 1;
 const RESPONSE_CHANNEL_MESSAGE: u64 = 4;
 const FLAG_EPHEMERAL: u64 = 1 << 6; // 64
@@ -39,6 +45,8 @@ struct App {
     public_key_hex: String,
     /// (custom_id prefix, upstream base URL) — longest prefix wins.
     routes: Vec<(String, String)>,
+    /// What `/dashboard` replies with.
+    dashboard_url: String,
     client: reqwest::Client,
 }
 
@@ -80,9 +88,15 @@ async fn main() {
         tracing::info!(prefix, upstream = %base, "route registered");
     }
 
+    let dashboard_url = std::env::var("DASHBOARD_URL")
+        .unwrap_or_else(|_| "https://dweeb.faizo.net".into())
+        .trim_end_matches('/')
+        .to_string();
+
     let app = Arc::new(App {
         public_key_hex,
         routes,
+        dashboard_url,
         client: reqwest::Client::builder()
             // Discord gives the whole chain 3s; leave headroom to still send
             // the fallback reply if an upstream stalls.
@@ -145,8 +159,26 @@ async fn interactions(
         Err(_) => return (StatusCode::BAD_REQUEST, "malformed interaction").into_response(),
     };
 
-    if interaction.get("type").and_then(Value::as_u64) == Some(TYPE_PING) {
-        return Json(json!({ "type": RESPONSE_PONG })).into_response();
+    match interaction.get("type").and_then(Value::as_u64) {
+        Some(TYPE_PING) => return Json(json!({ "type": RESPONSE_PONG })).into_response(),
+        // Slash commands route by name, not custom_id. The app has exactly
+        // one — /dashboard — and its reply is a static URL, so answering it
+        // here costs nothing and skips the forward hop entirely.
+        Some(TYPE_APPLICATION_COMMAND) => {
+            let name = interaction
+                .pointer("/data/name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if name == "dashboard" {
+                return ephemeral(&format!(
+                    "\u{1F6E0}\u{FE0F} Build and manage your messages at <{}>",
+                    app.dashboard_url
+                ));
+            }
+            tracing::warn!(name, "unknown slash command");
+            return ephemeral("Unknown command.");
+        }
+        _ => {}
     }
 
     // Components and modal submits both carry the routing key here.

@@ -8,11 +8,21 @@ everything else to the right plugin by `custom_id` prefix — the same
 `customIdPrefix` every plugin manifest already declares.
 
 ```
-Discord ──POST /──▶ dispatcher ── verifies Ed25519, answers PING
+Discord ──POST /──▶ dispatcher ── verifies Ed25519, answers PING + /dashboard
                                     │
                        custom_id "modalform:…" ──▶ http://modal-form:8090/interactions
                        custom_id "pingpong:…"  ──▶ http://ping-pong:8090/interactions
                        no match                ──▶ ephemeral "not wired" reply
+```
+
+The app's single slash command, `/dashboard`, is answered inline too — an
+ephemeral reply with `DASHBOARD_URL`. It's static, so it needs no plugin and
+no forward hop. Register it once (global commands take up to an hour to
+propagate):
+
+```powershell
+$env:DISCORD_BOT_TOKEN = "your-bot-token"
+node scripts/register-commands.mjs <applicationId>
 ```
 
 The raw body and signature headers are forwarded untouched, so each plugin
@@ -36,6 +46,7 @@ Longest prefix wins. Nothing else here changes; the public endpoint URL
 |---|---|
 | `DISCORD_PUBLIC_KEY` | App public key (64 hex chars), verifies signatures. Required. |
 | `ROUTES` | JSON map of `custom_id` prefix → upstream base URL. Required. |
+| `DASHBOARD_URL` | URL `/dashboard` replies with. Default `https://dweeb.faizo.net`. |
 | `PORT` | Bind port, default `8095`. |
 
 ## Latency

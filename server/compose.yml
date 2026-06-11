@@ -83,6 +83,9 @@ services:
     environment:
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091"}'
+      # The /dashboard slash command (answered inline, no plugin) replies with
+      # this URL. Register the command once: node scripts/register-commands.mjs
+      DASHBOARD_URL: https://${DOMAIN:?set DOMAIN in .env}
       RUST_LOG: info
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
