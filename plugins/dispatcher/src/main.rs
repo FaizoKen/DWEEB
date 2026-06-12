@@ -138,8 +138,7 @@ async fn main() {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -181,7 +180,10 @@ async fn main() {
         })
         .unwrap_or(7);
     let component_ttl_ms = (component_ttl_days > 0).then(|| component_ttl_days * 86_400_000);
-    tracing::info!(days = component_ttl_days, "component TTL (0 = never expires)");
+    tracing::info!(
+        days = component_ttl_days,
+        "component TTL (0 = never expires)"
+    );
 
     let permanent_slots: u32 = std::env::var("PERMANENT_SLOTS_PER_GUILD")
         .ok()
@@ -204,8 +206,7 @@ async fn main() {
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty());
 
-    let database_path =
-        std::env::var("DATABASE_PATH").unwrap_or_else(|_| "./dispatcher.db".into());
+    let database_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "./dispatcher.db".into());
     let store = store::Store::open(&database_path).expect("open permanent-message store");
     let internal_token = std::env::var("INTERNAL_API_TOKEN")
         .ok()
@@ -227,7 +228,9 @@ async fn main() {
             Some(key) => {
                 custom_keys.insert(app_id, (key, key_hex));
             }
-            None => tracing::warn!(application_id = %app_id, "stored custom-app key invalid, skipping"),
+            None => {
+                tracing::warn!(application_id = %app_id, "stored custom-app key invalid, skipping")
+            }
         }
     }
     tracing::info!(
@@ -319,11 +322,7 @@ async fn health() -> impl IntoResponse {
     Json(json!({ "status": "ok" }))
 }
 
-async fn interactions(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
+async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
     // Verify before acting; Discord probes with invalid signatures and a 401
     // here is what makes the endpoint pass their validation.
     let signature = headers
@@ -473,8 +472,8 @@ async fn interactions(
 
     match forwarded {
         Ok(resp) => {
-            let status = StatusCode::from_u16(resp.status().as_u16())
-                .unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let content_type = resp
                 .headers()
                 .get("content-type")
@@ -482,7 +481,12 @@ async fn interactions(
                 .unwrap_or("application/json")
                 .to_string();
             let bytes = resp.bytes().await.unwrap_or_default();
-            (status, [(axum::http::header::CONTENT_TYPE, content_type)], bytes).into_response()
+            (
+                status,
+                [(axum::http::header::CONTENT_TYPE, content_type)],
+                bytes,
+            )
+                .into_response()
         }
         Err(err) => {
             // Still answer Discord within its 3s window so the user sees a
@@ -495,11 +499,7 @@ async fn interactions(
 
 /// When the message a component sits on was sent, from its snowflake id.
 fn message_sent_ms(interaction: &Value) -> Option<u64> {
-    let id: u64 = interaction
-        .pointer("/message/id")?
-        .as_str()?
-        .parse()
-        .ok()?;
+    let id: u64 = interaction.pointer("/message/id")?.as_str()?.parse().ok()?;
     Some((id >> 22) + DISCORD_EPOCH_MS)
 }
 
@@ -603,10 +603,11 @@ async fn permanent_add(
     match app.store.list(&guild_id) {
         Ok(rows) => match outcome {
             store::Add::Added | store::Add::Already => slots_json(&app, &rows).into_response(),
-            store::Add::Full => {
-                (StatusCode::CONFLICT, slots_error_json(&app, &rows, "slots_full"))
-                    .into_response()
-            }
+            store::Add::Full => (
+                StatusCode::CONFLICT,
+                slots_error_json(&app, &rows, "slots_full"),
+            )
+                .into_response(),
         },
         Err(err) => internal_error(err),
     }
@@ -838,7 +839,13 @@ fn deny_internal(app: &App, headers: &HeaderMap, ids: &[&str]) -> Option<Respons
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
     if !constant_time_eq(supplied.as_bytes(), expected.as_bytes()) {
-        return Some((StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorized" }))).into_response());
+        return Some(
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "unauthorized" })),
+            )
+                .into_response(),
+        );
     }
     if ids.iter().any(|id| !is_snowflake(id)) {
         return Some(bad_request("ids must be snowflakes"));
@@ -911,7 +918,10 @@ fn parse_verifying_key(public_key_hex: &str) -> Option<VerifyingKey> {
 /// bytes. (Same logic as the modal-form plugin, minus the per-request key
 /// decode — keys here are parsed once, at boot or registration.)
 fn verify_signature(key: &VerifyingKey, signature_hex: &str, timestamp: &str, body: &[u8]) -> bool {
-    let sig: [u8; 64] = match hex::decode(signature_hex).ok().and_then(|b| b.try_into().ok()) {
+    let sig: [u8; 64] = match hex::decode(signature_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
