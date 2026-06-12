@@ -48,6 +48,29 @@ export function webhookCreateUrl(guildId?: string): string {
   return gid ? `${base}?guild_id=${encodeURIComponent(gid)}` : base;
 }
 
+/**
+ * The Interactions Endpoint URL a server owner pastes into THEIR OWN app's
+ * settings when registering it as a custom bot — the DWEEB dispatcher.
+ * `VITE_INTERACTIONS_URL` names it explicitly (e.g. the dedicated
+ * `https://interactions.<plugins-domain>` hostname); without it we fall back
+ * to the proxy's `/interactions` alias, which the bundled Caddyfile rewrites
+ * to the dispatcher. Empty when no proxy is configured (callers hide the UI).
+ */
+export function interactionsEndpointUrl(): string {
+  const explicit = (import.meta.env.VITE_INTERACTIONS_URL ?? "").trim().replace(/\/+$/, "");
+  if (explicit) return explicit;
+  return PROXY_BASE_URL ? `${PROXY_BASE_URL}/interactions` : "";
+}
+
+/**
+ * The OAuth2 redirect URI a server owner must add under their own app's
+ * Redirects before "Create webhook with your bot" can work — the proxy's
+ * callback, shared with every other OAuth flow here.
+ */
+export function oauthCallbackUrl(): string {
+  return PROXY_BASE_URL ? `${PROXY_BASE_URL}/auth/callback` : "";
+}
+
 /** Fragment key the proxy uses to hand a freshly-created webhook URL back. */
 const WEBHOOK_HASH_KEY = "dweeb_webhook";
 

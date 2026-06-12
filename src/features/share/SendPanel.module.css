@@ -31,6 +31,29 @@
   background: var(--app-bg-hover);
 }
 
+/* The create-webhook options under the Webhook URL field: the standard
+   DWEEB flow, plus one row per registered custom bot with a stored secret. */
+.createWebhookLinks {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+/* "your bot" chip on a custom-bot row, so it reads differently from the
+   standard DWEEB-owned flow at a glance. */
+.createWebhookBadge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--app-bg-hover);
+  color: var(--app-text-muted);
+}
+
 /* Slim inline link under the Webhook URL field that starts Discord's
    webhook.incoming flow — the easy path to a URL, without a bulky CTA. */
 .createWebhookLink {

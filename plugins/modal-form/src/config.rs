@@ -13,6 +13,12 @@ pub struct Config {
     /// Discord application **public key** (hex), from the Developer Portal.
     /// Used to verify interaction signatures.
     pub discord_public_key: String,
+    /// Shared secret with the interactions dispatcher. When a forwarded
+    /// request carries it, the dispatcher's `x-dweeb-public-key` header names
+    /// the verifying key — how interactions from guild-registered custom apps
+    /// still get cryptographically verified here. None = only the primary
+    /// key ever verifies.
+    pub dispatcher_forward_secret: Option<String>,
     /// SQLite database file path. Defaults to `./modal-form.db`.
     pub database_path: String,
 }
@@ -38,6 +44,11 @@ impl Config {
             return Err("DISCORD_PUBLIC_KEY must be 32 bytes of hex (64 chars)".to_string());
         }
 
+        let dispatcher_forward_secret = env::var("DISPATCHER_FORWARD_SECRET")
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
+
         let database_path =
             env::var("DATABASE_PATH").unwrap_or_else(|_| "./modal-form.db".to_string());
 
@@ -45,6 +56,7 @@ impl Config {
             port,
             public_base_url,
             discord_public_key,
+            dispatcher_forward_secret,
             database_path,
         })
     }

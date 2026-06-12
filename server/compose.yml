@@ -105,7 +105,16 @@ services:
       # TTL-exempt messages each guild may hold, managed from the dashboard's
       # post-send dialog (via the proxy). 0 stops new grants.
       PERMANENT_SLOTS_PER_GUILD: ${PERMANENT_SLOTS_PER_GUILD:-2}
-      # Gates the /permanent management API the proxy calls. Unset = disabled.
+      # Custom Discord apps each guild may register (dashboard → Custom bot),
+      # so the dispatcher serves THEIR app's interactions too. 0 stops new
+      # registrations (existing ones keep working).
+      CUSTOM_APPS_PER_GUILD: ${CUSTOM_APPS_PER_GUILD:-1}
+      # Shared with every plugin: vouches for the forwarded verifying-key
+      # header so plugins can verify custom-app signatures themselves.
+      # Unset = custom-app clicks fail at the plugin hop.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
+      # Gates the /permanent + /custom-apps management APIs the proxy calls.
+      # Unset = disabled.
       INTERNAL_API_TOKEN: ${DISPATCHER_API_TOKEN:-}
       RUST_LOG: info
     volumes:
@@ -131,6 +140,9 @@ services:
     environment:
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       PUBLIC_BASE_URL: https://modalform.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      # Lets the dispatcher vouch for a custom app's verifying key (see the
+      # dispatcher service above). Must match the dispatcher's value.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
       RUST_LOG: info
     volumes:
       # The plugin's only state: the SQLite file with instance configs.
@@ -153,6 +165,9 @@ services:
     environment:
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       PUBLIC_BASE_URL: https://pingpong.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      # Lets the dispatcher vouch for a custom app's verifying key (see the
+      # dispatcher service above). Must match the dispatcher's value.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
       RUST_LOG: info
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.

@@ -12,7 +12,7 @@
  * when a proxy base URL is configured; the caller guards on that.
  */
 
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
@@ -20,9 +20,18 @@ import { loadLastGuildId } from "@/core/guild/cache";
 import { botInviteUrl } from "@/core/guild/config";
 import { isValidGuildId, type AuthUser, type PickerGuild } from "@/core/guild/api";
 import { Menu } from "@/ui/Menu";
-import { CheckCircleIcon, ClockIcon, LogInIcon, PlusIcon, RefreshIcon, UserIcon } from "@/ui/Icon";
+import {
+  CheckCircleIcon,
+  ClockIcon,
+  LogInIcon,
+  PlusIcon,
+  RefreshIcon,
+  SettingsIcon,
+  UserIcon,
+} from "@/ui/Icon";
 import { cn } from "@/lib/cn";
 import { ManagedMessagesDialog } from "./ManagedMessagesDialog";
+import { CustomBotDialog } from "./CustomBotDialog";
 import styles from "./AccountMenu.module.css";
 
 /** Query keys Discord appends to the redirect after a bot add. */
@@ -141,6 +150,11 @@ export function AccountMenu() {
   const managedGuildName = useManagedMessagesStore((s) => s.guildName);
   const openManaged = useManagedMessagesStore((s) => s.open);
   const closeManaged = useManagedMessagesStore((s) => s.close);
+
+  // The "Custom bot" dialog — register the server's own Discord app so the
+  // DWEEB dispatcher serves its interactions. Only opened from this menu, so
+  // plain local state is enough (no cross-feature opener needed).
+  const [customBotGuildId, setCustomBotGuildId] = useState<string | null>(null);
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   // One-shot guard so the post–sign-in auto-select runs once, not on every
@@ -291,6 +305,10 @@ export function AccountMenu() {
               close();
               if (connectedId) openManaged(connectedId, connectedGuild?.name);
             }}
+            onManageCustomBot={() => {
+              close();
+              if (connectedId) setCustomBotGuildId(connectedId);
+            }}
           />
         )}
       </Menu>
@@ -301,6 +319,13 @@ export function AccountMenu() {
           onClose={closeManaged}
         />
       ) : null}
+      {customBotGuildId ? (
+        <CustomBotDialog
+          guildId={customBotGuildId}
+          guildName={guilds.find((g) => g.id === customBotGuildId)?.name}
+          onClose={() => setCustomBotGuildId(null)}
+        />
+      ) : null}
     </>
   );
 }
@@ -308,10 +333,13 @@ export function AccountMenu() {
 function AccountPanel({
   onClose,
   onManageMessages,
+  onManageCustomBot,
 }: {
   onClose: () => void;
   /** Opens the connected server's "Managed messages" dialog (closes the menu first). */
   onManageMessages: () => void;
+  /** Opens the connected server's "Custom bot" dialog (closes the menu first). */
+  onManageCustomBot: () => void;
 }) {
   const user = useAuthStore((s) => s.user);
   const guilds = useAuthStore((s) => s.guilds);
@@ -394,12 +422,28 @@ function AccountPanel({
               {/* Nested under the connected server's row so it's obvious which
                   server's messages the dialog manages — slots are per-guild. */}
               {g.id === connectedId ? (
-                <li>
-                  <button type="button" className={styles.serverSubRow} onClick={onManageMessages}>
-                    <ClockIcon size={14} />
-                    <span>Managed messages</span>
-                  </button>
-                </li>
+                <>
+                  <li>
+                    <button
+                      type="button"
+                      className={styles.serverSubRow}
+                      onClick={onManageMessages}
+                    >
+                      <ClockIcon size={14} />
+                      <span>Managed messages</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      className={styles.serverSubRow}
+                      onClick={onManageCustomBot}
+                    >
+                      <SettingsIcon size={14} />
+                      <span>Custom bot</span>
+                    </button>
+                  </li>
+                </>
               ) : null}
             </Fragment>
           ))}

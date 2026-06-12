@@ -58,6 +58,12 @@ const FLAG_EPHEMERAL: u64 = 1 << 6; // 64
 struct App {
     public_key_hex: String,
     public_base_url: String,
+    /// Shared secret with the dispatcher. When a forwarded request carries it
+    /// (x-dweeb-forward-auth), the dispatcher's x-dweeb-public-key header
+    /// names the key to verify with — that's how interactions from
+    /// guild-registered custom apps still get cryptographically verified
+    /// here. None = only the primary key ever verifies.
+    forward_secret: Option<String>,
 }
 
 #[tokio::main]
@@ -76,6 +82,10 @@ async fn main() {
         .unwrap_or_else(|_| "http://localhost:8091".into())
         .trim_end_matches('/')
         .to_string();
+    let forward_secret = std::env::var("DISPATCHER_FORWARD_SECRET")
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
@@ -84,6 +94,7 @@ async fn main() {
     let state = Arc::new(App {
         public_key_hex,
         public_base_url,
+        forward_secret,
     });
 
     let app = Router::new()
@@ -159,7 +170,9 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
         .get("x-signature-timestamp")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    if !verify_signature(&app.public_key_hex, signature, timestamp, &body) {
+    let key_hex = attested_key(&headers, app.forward_secret.as_deref())
+        .unwrap_or(app.public_key_hex.as_str());
+    if !verify_signature(key_hex, signature, timestamp, &body) {
         return (StatusCode::UNAUTHORIZED, "bad signature").into_response();
     }
 
@@ -280,4 +293,31 @@ fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &str, 
     message.extend_from_slice(timestamp.as_bytes());
     message.extend_from_slice(body);
     verifying_key.verify(&message, &signature).is_ok()
+}
+
+/// The dispatcher-attested verifying key, if this request carries one.
+///
+/// The dispatcher also serves guild-registered *custom* Discord apps, whose
+/// interactions are signed with their own keys — it forwards the verifying
+/// key in `x-dweeb-public-key`, vouched for by the shared
+/// DISPATCHER_FORWARD_SECRET in `x-dweeb-forward-auth`. The signature is
+/// still verified HERE, on the raw bytes Discord signed; the secret only
+/// authenticates *which key to use*. Without a valid secret the header is
+/// ignored (None), so a caller reaching this service directly can never
+/// substitute its own key.
+fn attested_key<'h>(headers: &'h HeaderMap, secret: Option<&str>) -> Option<&'h str> {
+    let secret = secret?;
+    let supplied = headers.get("x-dweeb-forward-auth")?.to_str().ok()?;
+    if !constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
+        return None;
+    }
+    headers.get("x-dweeb-public-key")?.to_str().ok()
+}
+
+/// Byte-wise comparison that doesn't leak the match length through timing.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }

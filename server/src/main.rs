@@ -19,6 +19,7 @@ mod discord;
 mod error;
 mod ratelimit;
 mod routes;
+mod seal;
 mod session;
 mod shortlink;
 
@@ -39,8 +40,8 @@ use crate::config::Config;
 use crate::discord::Discord;
 use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
 use crate::routes::{
-    bootstrap, channels, emojis, health, list_guilds, permanent_add, permanent_list,
-    permanent_remove, roles, AppState, DispatcherApi,
+    bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, emojis, health,
+    list_guilds, permanent_add, permanent_list, permanent_remove, roles, AppState, DispatcherApi,
 };
 use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
 
@@ -223,6 +224,22 @@ async fn main() {
         .route(
             "/api/guilds/:guild_id/permanent/:message_id",
             axum::routing::delete(permanent_remove),
+        )
+        // Custom bots: a guild's own Discord apps served by the dispatcher
+        // (login + Manage Server gated, relayed to the dispatcher's registry).
+        .route(
+            "/api/guilds/:guild_id/custom-apps",
+            get(custom_apps_list).post(custom_apps_add),
+        )
+        .route(
+            "/api/guilds/:guild_id/custom-apps/:application_id",
+            axum::routing::delete(custom_apps_remove),
+        )
+        // Start the `webhook.incoming` OAuth flow under one of the guild's
+        // registered custom bots, using its stored (sealed) client secret.
+        .route(
+            "/api/guilds/:guild_id/custom-apps/:application_id/webhook",
+            post(auth::custom_bot_webhook_start),
         )
         .layer(cors)
         // Rate limiting runs outermost so rejected requests never touch a handler.

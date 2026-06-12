@@ -263,3 +263,14 @@ document's protocol plus `GET /health` and a signature-verified
 `POST /interactions` — the dispatcher forwards the raw body and signature
 headers untouched, so verification works exactly as if Discord called the
 plugin directly.
+
+One wrinkle since **custom bots**: a guild may register its own Discord app
+(dashboard → *Custom bot*), and those interactions are signed with *that*
+app's key, not the deployment's `DISCORD_PUBLIC_KEY`. The dispatcher
+therefore forwards which key verified the request in `x-dweeb-public-key`,
+vouched for by the shared `DISPATCHER_FORWARD_SECRET` in
+`x-dweeb-forward-auth`. A plugin should verify with the forwarded key **only
+when the secret matches** (constant-time compare) and fall back to its
+configured key otherwise — see `attested_key` in either bundled plugin. A
+plugin that skips this still works for the main app; custom-app clicks just
+fail its verification.

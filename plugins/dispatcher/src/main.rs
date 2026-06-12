@@ -29,6 +29,16 @@
 //! Server on the guild) and calls the token-gated /permanent API here, which
 //! owns the slots in SQLite. No Discord command is involved.
 //!
+//! Custom apps: a guild may also register its OWN Discord application(s) —
+//! CUSTOM_APPS_PER_GUILD each, default 1 (per-guild plan caps can replace the
+//! env later without changing the API). The owner points their app's
+//! Interactions Endpoint URL at this same dispatcher; requests are then
+//! verified with the registered app's public key and served identically
+//! (PING, TTL gate, plugin routing). The registry lives in SQLite next to the
+//! permanent slots, managed through the token-gated /custom-apps API, and is
+//! mirrored into an in-memory map at boot — this process is the registry's
+//! only writer, so the interaction hot path never touches the database.
+//!
 //! Env:
 //!   DISCORD_PUBLIC_KEY  app public key (64 hex chars), required
 //!   ROUTES              JSON map of custom_id prefix -> upstream base URL,
@@ -38,15 +48,28 @@
 //!   PERMANENT_SLOTS_PER_GUILD
 //!                       messages per guild exempt from the TTL, default 2;
 //!                       0 stops new grants (existing ones stay honored)
+//!   CUSTOM_APPS_PER_GUILD
+//!                       custom Discord apps each guild may register, default
+//!                       1; 0 stops new registrations (existing ones stay)
+//!   DISPATCHER_FORWARD_SECRET
+//!                       shared secret attesting the forwarded verifying key
+//!                       to plugins (they verify custom-app signatures with
+//!                       it); unset = plugins fall back to the primary key,
+//!                       so custom-app clicks fail at the plugin hop
 //!   INTERNAL_API_TOKEN  bearer token the proxy must send to the /permanent
-//!                       API; unset = that API is disabled
-//!   DATABASE_PATH       SQLite file for the permanent slots, default ./dispatcher.db
+//!                       and /custom-apps APIs; unset = those APIs are disabled
+//!   DATABASE_PATH       SQLite file for the registries, default ./dispatcher.db
 //!   DASHBOARD_URL       URL /dashboard replies with, default https://dweeb.faizo.net
 //!   PORT                bind port, default 8095
 
 mod store;
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use axum::{
     body::Bytes,
@@ -74,7 +97,25 @@ fn is_snowflake(s: &str) -> bool {
 }
 
 struct App {
-    public_key_hex: String,
+    /// The main app's verifying key, decoded once at boot — the hot path
+    /// never re-parses hex.
+    primary_key: VerifyingKey,
+    /// Hex form of the same key, forwarded to plugins so they re-verify
+    /// against the key that actually signed the request.
+    primary_key_hex: String,
+    /// Guild-registered custom apps: application_id → (verifying key, hex).
+    /// Seeded from SQLite at boot and kept in sync by the /custom-apps API —
+    /// this process is the registry's only writer, so the map is
+    /// authoritative and interactions never touch the database for keys.
+    custom_keys: RwLock<HashMap<String, (VerifyingKey, String)>>,
+    /// Custom-app registrations each guild may hold. Today a deployment-wide
+    /// env; per-guild plan caps can replace this without changing the API
+    /// (every response already carries `cap`).
+    custom_apps_cap: u32,
+    /// Shared secret that vouches for the forwarded verifying-key header to
+    /// plugins. `None` = header not sent (custom-app clicks then fail the
+    /// plugins' own re-verification).
+    forward_secret: Option<String>,
     /// (custom_id prefix, upstream base URL) — longest prefix wins.
     routes: Vec<(String, String)>,
     /// How long a component stays clickable after its message was sent.
@@ -82,10 +123,10 @@ struct App {
     component_ttl_ms: Option<u64>,
     /// TTL-exempt messages each guild may hold at once.
     permanent_slots: u32,
-    /// Which messages are TTL-exempt.
+    /// Which messages are TTL-exempt + the custom-app registry.
     store: store::Store,
-    /// Bearer token the proxy presents to the /permanent management API.
-    /// `None` disables that API entirely.
+    /// Bearer token the proxy presents to the /permanent and /custom-apps
+    /// management APIs. `None` disables those APIs entirely.
     internal_token: Option<String>,
     /// What `/dashboard` replies with.
     dashboard_url: String,
@@ -102,11 +143,12 @@ async fn main() {
         )
         .init();
 
-    let public_key_hex = std::env::var("DISCORD_PUBLIC_KEY")
-        .expect("DISCORD_PUBLIC_KEY is required (app public key, 64 hex chars)");
-    if hex::decode(&public_key_hex).map(|b| b.len()) != Ok(32) {
-        panic!("DISCORD_PUBLIC_KEY must be 64 hex chars");
-    }
+    let primary_key_hex = std::env::var("DISCORD_PUBLIC_KEY")
+        .expect("DISCORD_PUBLIC_KEY is required (app public key, 64 hex chars)")
+        .trim()
+        .to_lowercase();
+    let primary_key = parse_verifying_key(&primary_key_hex)
+        .expect("DISCORD_PUBLIC_KEY must be a valid Ed25519 public key (64 hex chars)");
 
     let routes_json = std::env::var("ROUTES")
         .expect(r#"ROUTES is required, e.g. {"modalform:":"http://modal-form:8090"}"#);
@@ -149,6 +191,19 @@ async fn main() {
                 .expect("PERMANENT_SLOTS_PER_GUILD must be a whole number (0 stops new grants)")
         })
         .unwrap_or(2);
+    let custom_apps_cap: u32 = std::env::var("CUSTOM_APPS_PER_GUILD")
+        .ok()
+        .map(|v| {
+            v.trim()
+                .parse()
+                .expect("CUSTOM_APPS_PER_GUILD must be a whole number (0 stops new registrations)")
+        })
+        .unwrap_or(1);
+    let forward_secret = std::env::var("DISPATCHER_FORWARD_SECRET")
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
+
     let database_path =
         std::env::var("DATABASE_PATH").unwrap_or_else(|_| "./dispatcher.db".into());
     let store = store::Store::open(&database_path).expect("open permanent-message store");
@@ -163,13 +218,36 @@ async fn main() {
         "permanent store ready"
     );
 
+    // Seed the custom-app key map. A row whose stored key no longer parses is
+    // skipped with a warning — its app simply fails verification (401), the
+    // same as if it were never registered; re-registering repairs it.
+    let mut custom_keys = HashMap::new();
+    for (app_id, key_hex) in store.custom_apps_all().expect("load custom apps") {
+        match parse_verifying_key(&key_hex) {
+            Some(key) => {
+                custom_keys.insert(app_id, (key, key_hex));
+            }
+            None => tracing::warn!(application_id = %app_id, "stored custom-app key invalid, skipping"),
+        }
+    }
+    tracing::info!(
+        apps = custom_keys.len(),
+        cap = custom_apps_cap,
+        attest = forward_secret.is_some(),
+        "custom apps loaded (cap 0 stops new registrations)"
+    );
+
     let dashboard_url = std::env::var("DASHBOARD_URL")
         .unwrap_or_else(|_| "https://dweeb.faizo.net".into())
         .trim_end_matches('/')
         .to_string();
 
     let app = Arc::new(App {
-        public_key_hex,
+        primary_key,
+        primary_key_hex,
+        custom_keys: RwLock::new(custom_keys),
+        custom_apps_cap,
+        forward_secret,
         routes,
         component_ttl_ms,
         permanent_slots,
@@ -208,6 +286,22 @@ async fn main() {
             "/permanent/:guild_id/:message_id",
             axum::routing::delete(permanent_remove),
         )
+        // Custom-app registry, same trust chain as /permanent: proxy-only,
+        // token-gated, and refused at the edge by Caddy.
+        .route(
+            "/custom-apps/:guild_id",
+            get(custom_apps_list).post(custom_apps_add),
+        )
+        .route(
+            "/custom-apps/:guild_id/:application_id",
+            axum::routing::delete(custom_apps_remove),
+        )
+        // The sealed client secret for the proxy's "create webhook under
+        // this app" flow. Opaque ciphertext here — only the proxy can open it.
+        .route(
+            "/custom-apps/:guild_id/:application_id/secret",
+            get(custom_app_secret),
+        )
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(app);
 
@@ -230,7 +324,7 @@ async fn interactions(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    // Verify before parsing; Discord probes with invalid signatures and a 401
+    // Verify before acting; Discord probes with invalid signatures and a 401
     // here is what makes the endpoint pass their validation.
     let signature = headers
         .get("x-signature-ed25519")
@@ -240,14 +334,44 @@ async fn interactions(
         .get("x-signature-timestamp")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    if !verify_signature(&app.public_key_hex, signature, timestamp, &body) {
-        return (StatusCode::UNAUTHORIZED, "bad signature").into_response();
-    }
 
-    let interaction: Value = match serde_json::from_slice(&body) {
-        Ok(v) => v,
-        Err(_) => return (StatusCode::BAD_REQUEST, "malformed interaction").into_response(),
-    };
+    // The primary app first: virtually all traffic, and the precomputed key
+    // makes a failed try nearly free. Only then the custom-app path, which
+    // must parse the (still untrusted, but inert) JSON to learn which
+    // application signed — `application_id` selects the key, and nothing
+    // else is acted on until a signature checks out.
+    let (interaction, verified_key_hex): (Value, std::borrow::Cow<'_, str>) =
+        if verify_signature(&app.primary_key, signature, timestamp, &body) {
+            match serde_json::from_slice(&body) {
+                Ok(v) => (v, std::borrow::Cow::Borrowed(app.primary_key_hex.as_str())),
+                Err(_) => {
+                    return (StatusCode::BAD_REQUEST, "malformed interaction").into_response()
+                }
+            }
+        } else {
+            let Ok(parsed) = serde_json::from_slice::<Value>(&body) else {
+                // Unattributable garbage — for Discord's endpoint validation
+                // this must read as a signature failure, not a parse error.
+                return (StatusCode::UNAUTHORIZED, "bad signature").into_response();
+            };
+            let app_id = parsed
+                .get("application_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let custom = app
+                .custom_keys
+                .read()
+                .unwrap()
+                .get(app_id)
+                .map(|(key, hex)| (key.clone(), hex.clone()));
+            let Some((key, hex)) = custom else {
+                return (StatusCode::UNAUTHORIZED, "bad signature").into_response();
+            };
+            if !verify_signature(&key, signature, timestamp, &body) {
+                return (StatusCode::UNAUTHORIZED, "bad signature").into_response();
+            }
+            (parsed, std::borrow::Cow::Owned(hex))
+        };
 
     match interaction.get("type").and_then(Value::as_u64) {
         Some(TYPE_PING) => return Json(json!({ "type": RESPONSE_PONG })).into_response(),
@@ -329,16 +453,23 @@ async fn interactions(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_micros())
         .unwrap_or(0);
-    let forwarded = app
+    let mut request = app
         .client
         .post(format!("{base}/interactions"))
         .header("content-type", "application/json")
         .header("x-signature-ed25519", signature)
         .header("x-signature-timestamp", timestamp)
-        .header("x-dweeb-dispatcher-received", received_us.to_string())
-        .body(body.clone())
-        .send()
-        .await;
+        .header("x-dweeb-dispatcher-received", received_us.to_string());
+    // Tell the plugin which key verified this request, vouched for by the
+    // shared secret — that's what lets it re-verify a custom app's signature
+    // itself. Plugins ignore the key header without a valid secret, so a
+    // caller reaching a plugin directly can never substitute its own key.
+    if let Some(secret) = &app.forward_secret {
+        request = request
+            .header("x-dweeb-public-key", verified_key_hex.as_ref())
+            .header("x-dweeb-forward-auth", secret);
+    }
+    let forwarded = request.body(body.clone()).send().await;
 
     match forwarded {
         Ok(resp) => {
@@ -507,6 +638,187 @@ async fn permanent_remove(
     }
 }
 
+// ── Custom-app registry API (called by the proxy) ───────────────────────────
+//
+// Same trust chain as /permanent: browser → proxy (Discord login + Manage
+// Server check on the guild) → here, with INTERNAL_API_TOKEN as a bearer.
+// This service owns the registry; every mutation also updates the in-memory
+// key map the interaction hot path verifies with.
+
+/// `GET /custom-apps/:guild_id` — quota usage + the guild's registered apps.
+async fn custom_apps_list(
+    State(app): State<Arc<App>>,
+    Path(guild_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
+        return denied;
+    }
+    match app.store.custom_apps_list(&guild_id) {
+        Ok(rows) => custom_apps_json(&app, &rows).into_response(),
+        Err(err) => internal_error(err),
+    }
+}
+
+/// `POST /custom-apps/:guild_id`
+/// `{ application_id, public_key, name?, added_by }` — register an app under
+/// one of the guild's quota slots. Re-registering the guild's own app updates
+/// its key/name in place (the fix path for a mistyped key) without spending a
+/// new slot.
+async fn custom_apps_add(
+    State(app): State<Arc<App>>,
+    Path(guild_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
+        return denied;
+    }
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return bad_request("body must be JSON"),
+    };
+    let field = |k: &str| parsed.get(k).and_then(Value::as_str).unwrap_or_default();
+    let application_id = field("application_id");
+    let public_key = field("public_key").trim().to_lowercase();
+    let added_by = field("added_by");
+    // The app's client secret, already sealed by the proxy (opaque here).
+    // Empty = none stored; the dashboard then can't offer one-click webhook
+    // creation for this app.
+    let client_secret_enc = field("client_secret_enc");
+    if !is_snowflake(application_id) {
+        return bad_request("application_id must be a snowflake");
+    }
+    if client_secret_enc.len() > 2048 {
+        return bad_request("client_secret_enc too large");
+    }
+    let Some(key) = parse_verifying_key(&public_key) else {
+        return bad_request("public_key must be a valid Ed25519 public key (64 hex chars)");
+    };
+    if public_key == app.primary_key_hex {
+        // Registering the main app's own key would be pure confusion — the
+        // primary key already verifies first, unconditionally.
+        return bad_request("that is this deployment's own public key");
+    }
+    // Display name is cosmetic: control characters out, length bounded.
+    let name: String = field("name")
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(100)
+        .collect();
+
+    let added = app.store.custom_app_add(
+        &guild_id,
+        application_id,
+        &public_key,
+        &name,
+        client_secret_enc,
+        added_by,
+        app.custom_apps_cap,
+    );
+    let outcome = match added {
+        Ok(o) => o,
+        Err(err) => return internal_error(err),
+    };
+    if let store::AddApp::Added = outcome {
+        // Keep the hot-path map in lockstep with the registry.
+        app.custom_keys
+            .write()
+            .unwrap()
+            .insert(application_id.to_string(), (key, public_key));
+    }
+    match app.store.custom_apps_list(&guild_id) {
+        Ok(rows) => match outcome {
+            store::AddApp::Added => custom_apps_json(&app, &rows).into_response(),
+            store::AddApp::Full => (
+                StatusCode::CONFLICT,
+                custom_apps_error_json(&app, &rows, "quota_full"),
+            )
+                .into_response(),
+            store::AddApp::Taken => (
+                StatusCode::CONFLICT,
+                custom_apps_error_json(&app, &rows, "app_taken"),
+            )
+                .into_response(),
+        },
+        Err(err) => internal_error(err),
+    }
+}
+
+/// `DELETE /custom-apps/:guild_id/:application_id` — unregister; the app's
+/// interactions start failing verification (401) immediately.
+async fn custom_apps_remove(
+    State(app): State<Arc<App>>,
+    Path((guild_id, application_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id, &application_id]) {
+        return denied;
+    }
+    let removed = match app.store.custom_app_remove(&guild_id, &application_id) {
+        Ok(r) => r,
+        Err(err) => return internal_error(err),
+    };
+    if !removed {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_registered" })),
+        )
+            .into_response();
+    }
+    app.custom_keys.write().unwrap().remove(&application_id);
+    match app.store.custom_apps_list(&guild_id) {
+        Ok(rows) => custom_apps_json(&app, &rows).into_response(),
+        Err(err) => internal_error(err),
+    }
+}
+
+/// `GET /custom-apps/:guild_id/:application_id/secret` — the sealed client
+/// secret the proxy stored at registration (empty string when none). The
+/// ciphertext is opaque to this service; only the proxy holds the key.
+async fn custom_app_secret(
+    State(app): State<Arc<App>>,
+    Path((guild_id, application_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id, &application_id]) {
+        return denied;
+    }
+    match app.store.custom_app_secret(&guild_id, &application_id) {
+        Ok(Some(sealed)) => Json(json!({ "client_secret_enc": sealed })).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_registered" })),
+        )
+            .into_response(),
+        Err(err) => internal_error(err),
+    }
+}
+
+/// The registry state every custom-app response carries. `cap` comes from the
+/// deployment env today; a per-guild plan lookup can replace it later without
+/// touching this shape.
+fn custom_apps_json(app: &App, rows: &[store::CustomAppRow]) -> Json<Value> {
+    Json(json!({
+        "cap": app.custom_apps_cap,
+        "used": rows.len(),
+        "items": rows.iter().map(|r| json!({
+            "application_id": r.application_id,
+            "name": r.name,
+            "added_at": r.added_at,
+            "has_secret": r.has_secret,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// Same state plus an error code, for the 409 quota-full / app-taken responses.
+fn custom_apps_error_json(app: &App, rows: &[store::CustomAppRow], error: &str) -> Json<Value> {
+    let mut body = custom_apps_json(app, rows).0;
+    body["error"] = json!(error);
+    Json(body)
+}
+
 /// Shared admission check for the management API: bearer token (constant-time
 /// compare; a missing INTERNAL_API_TOKEN disables the API outright) and
 /// snowflake-shaped path ids. `None` means proceed.
@@ -515,7 +827,7 @@ fn deny_internal(app: &App, headers: &HeaderMap, ids: &[&str]) -> Option<Respons
         return Some(
             (
                 StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "error": "permanent API disabled (INTERNAL_API_TOKEN unset)" })),
+                Json(json!({ "error": "management API disabled (INTERNAL_API_TOKEN unset)" })),
             )
                 .into_response(),
         );
@@ -587,18 +899,18 @@ fn ephemeral(message: &str) -> Response {
     .into_response()
 }
 
+/// Decode a 64-hex-char Ed25519 public key. None on any malformed input —
+/// including a key that isn't a valid curve point.
+fn parse_verifying_key(public_key_hex: &str) -> Option<VerifyingKey> {
+    let pk: [u8; 32] = hex::decode(public_key_hex).ok()?.try_into().ok()?;
+    VerifyingKey::from_bytes(&pk).ok()
+}
+
 /// Verify Discord's `X-Signature-Ed25519` over `timestamp || body`. Any
 /// malformed input fails closed (returns false). This MUST run on the raw body
-/// bytes, before JSON parsing. (Same logic as the modal-form plugin.)
-fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &str, body: &[u8]) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex).ok().and_then(|b| b.try_into().ok()) {
-        Some(arr) => arr,
-        None => return false,
-    };
-    let verifying_key = match VerifyingKey::from_bytes(&pk) {
-        Ok(k) => k,
-        Err(_) => return false,
-    };
+/// bytes. (Same logic as the modal-form plugin, minus the per-request key
+/// decode — keys here are parsed once, at boot or registration.)
+fn verify_signature(key: &VerifyingKey, signature_hex: &str, timestamp: &str, body: &[u8]) -> bool {
     let sig: [u8; 64] = match hex::decode(signature_hex).ok().and_then(|b| b.try_into().ok()) {
         Some(arr) => arr,
         None => return false,
@@ -608,5 +920,5 @@ fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &str, 
     let mut message = Vec::with_capacity(timestamp.len() + body.len());
     message.extend_from_slice(timestamp.as_bytes());
     message.extend_from_slice(body);
-    verifying_key.verify(&message, &signature).is_ok()
+    key.verify(&message, &signature).is_ok()
 }

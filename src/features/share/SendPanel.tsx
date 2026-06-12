@@ -79,9 +79,12 @@ import {
 } from "@/core/webhook";
 import {
   addPermanentMessage,
+  createCustomBotWebhook,
+  fetchCustomBots,
   fetchPermanentSlots,
   isAuthError,
   removePermanentMessage,
+  type CustomBotItem,
   type PermanentSlots,
 } from "@/core/guild/api";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
@@ -866,22 +869,7 @@ export function SendPanel({
       <Field
         label="Webhook URL"
         error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
-        hint={
-          isProxyConfigured() ? (
-            <button
-              type="button"
-              className={styles.createWebhookLink}
-              onClick={() => {
-                // Pre-select the server the builder is connected to, if any, so
-                // the webhook lands where the user is already working.
-                window.location.href = webhookCreateUrl(useGuildStore.getState().guildId);
-              }}
-            >
-              <PlusIcon size={13} className={styles.createWebhookIcon} />
-              Don’t have one? Create a webhook on a Discord channel
-            </button>
-          ) : undefined
-        }
+        hint={isProxyConfigured() ? <CreateWebhookLinks /> : undefined}
       >
         {(id) => (
           <div className={styles.urlRow}>
@@ -1176,5 +1164,81 @@ export function SendPanel({
         onClose={() => setSuccess(null)}
       />
     </>
+  );
+}
+
+/**
+ * The "create a webhook" affordances under the URL field.
+ *
+ * Always offers Discord's standard `webhook.incoming` flow (a webhook owned
+ * by the DWEEB app). When the connected server has custom bots registered
+ * (account menu → Custom bot) with a stored client secret, each one appears
+ * as its own option — the webhook then belongs to THEIR app, so the message
+ * posts under their bot's identity and its components route through DWEEB.
+ * One click, no secret prompt: the proxy uses the secret stored (encrypted)
+ * at registration.
+ *
+ * The custom-bot list is fetched quietly when the section mounts; any
+ * failure (signed out, feature off, network) just leaves the default link.
+ */
+function CreateWebhookLinks() {
+  const authed = useAuthStore((s) => s.status === "authed");
+  const guildId = useGuildStore((s) => s.guildId);
+  const [bots, setBots] = useState<CustomBotItem[]>([]);
+  const [starting, setStarting] = useState(false);
+
+  useEffect(() => {
+    if (!authed || !guildId) {
+      setBots([]);
+      return;
+    }
+    const ac = new AbortController();
+    fetchCustomBots(guildId, ac.signal)
+      .then((b) => setBots(b.items.filter((i) => i.has_secret)))
+      .catch(() => setBots([]));
+    return () => ac.abort();
+  }, [authed, guildId]);
+
+  return (
+    <span className={styles.createWebhookLinks}>
+      <button
+        type="button"
+        className={styles.createWebhookLink}
+        onClick={() => {
+          // Pre-select the server the builder is connected to, if any, so
+          // the webhook lands where the user is already working.
+          window.location.href = webhookCreateUrl(useGuildStore.getState().guildId);
+        }}
+      >
+        <PlusIcon size={13} className={styles.createWebhookIcon} />
+        Don’t have one? Create a webhook on a Discord channel
+      </button>
+      {guildId
+        ? bots.map((bot) => (
+            <button
+              key={bot.application_id}
+              type="button"
+              className={styles.createWebhookLink}
+              disabled={starting}
+              onClick={() => {
+                setStarting(true);
+                createCustomBotWebhook(guildId, bot.application_id)
+                  .then((url) => {
+                    // Leaving the page; Discord's channel picker takes over.
+                    window.location.assign(url);
+                  })
+                  .catch((e) => {
+                    setStarting(false);
+                    pushToast(e instanceof Error ? e.message : String(e), "error");
+                  });
+              }}
+            >
+              <PlusIcon size={13} className={styles.createWebhookIcon} />
+              Create a webhook from {bot.name || "your custom bot"}
+              <span className={styles.createWebhookBadge}>your bot</span>
+            </button>
+          ))
+        : null}
+    </span>
   );
 }

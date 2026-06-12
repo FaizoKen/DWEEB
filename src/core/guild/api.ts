@@ -255,6 +255,152 @@ export async function removePermanentMessage(
   }
 }
 
+// ── Custom bots (bring your own Discord app) ───────────────────────────────
+// A server may register its own Discord application so the DWEEB interactions
+// dispatcher serves it too: components on messages sent by *their* bot then
+// work through DWEEB's plugins. Each server gets a quota of registrations
+// (default 1; plan-based extensions later — the `cap` in every response is
+// the source of truth, never hardcode it).
+
+/** One registered custom app. */
+export interface CustomBotItem {
+  application_id: string;
+  /** Display name the registrant gave it; may be empty. */
+  name: string;
+  /** Unix millis when it was registered. */
+  added_at: number;
+  /** Whether a client secret is stored (encrypted) — what enables the
+   *  one-click "create webhook from this bot" option in the Send dialog. */
+  has_secret: boolean;
+}
+
+/** A server's custom-bot state, as every custom-bot endpoint returns it. */
+export interface CustomBots {
+  /** Registrations the server may hold (per-guild plans may raise this later). */
+  cap: number;
+  used: number;
+  items: CustomBotItem[];
+}
+
+/** Outcome of a register: both refusals carry the current state so the UI can
+ *  explain (`quota_full` — free a registration first; `app_taken` — that app
+ *  already belongs to another server). */
+export type CustomBotAddResult =
+  | { ok: true; bots: CustomBots }
+  | { ok: false; reason: "quota_full" | "app_taken"; bots: CustomBots };
+
+/** `GET /api/guilds/:id/custom-apps` — quota usage + registered apps. A 501
+ *  means the deployment doesn't run the feature; callers hide the UI on it. */
+export async function fetchCustomBots(guildId: string, signal?: AbortSignal): Promise<CustomBots> {
+  const id = guildId.trim();
+  if (!isValidGuildId(id)) {
+    throw new GuildApiError("That doesn't look like a valid server ID.", 0);
+  }
+  return getJson<CustomBots>(`/api/guilds/${id}/custom-apps`, signal);
+}
+
+/** `POST /api/guilds/:id/custom-apps` — register the server's own app.
+ *  The client secret is sealed server-side at rest and never returned; it's
+ *  what makes webhook creation from this bot a single click later.
+ *  Re-registering the same app updates key/name/secret in place (the fix
+ *  path for a mistyped value) without spending a new quota slot. */
+export async function addCustomBot(
+  guildId: string,
+  applicationId: string,
+  publicKey: string,
+  clientSecret: string,
+  name?: string,
+): Promise<CustomBotAddResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${PROXY_BASE_URL}/api/guilds/${guildId.trim()}/custom-apps`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        application_id: applicationId.trim(),
+        public_key: publicKey.trim(),
+        client_secret: clientSecret.trim(),
+        name: name?.trim() ?? "",
+      }),
+    });
+  } catch {
+    throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
+  }
+  // 409 = refused but explainable — the body carries why and the current state.
+  if (res.status === 409) {
+    try {
+      const body = (await res.json()) as CustomBots & { error?: string };
+      const reason = body.error === "app_taken" ? "app_taken" : "quota_full";
+      return { ok: false, reason, bots: body };
+    } catch {
+      throw new GuildApiError("The server returned an unexpected response.", res.status);
+    }
+  }
+  if (!res.ok) throw await toApiError(res);
+  try {
+    return { ok: true, bots: (await res.json()) as CustomBots };
+  } catch {
+    throw new GuildApiError("The server returned an unexpected response.", res.status);
+  }
+}
+
+/** `DELETE /api/guilds/:id/custom-apps/:applicationId` — unregister. A 404
+ *  (already gone) is treated as success: the goal state is reached either
+ *  way, so the fresh list is fetched and returned. */
+export async function removeCustomBot(guildId: string, applicationId: string): Promise<CustomBots> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${PROXY_BASE_URL}/api/guilds/${guildId.trim()}/custom-apps/${applicationId.trim()}`,
+      { method: "DELETE", credentials: "include" },
+    );
+  } catch {
+    throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
+  }
+  if (res.status === 404) return fetchCustomBots(guildId);
+  if (!res.ok) throw await toApiError(res);
+  try {
+    return (await res.json()) as CustomBots;
+  } catch {
+    throw new GuildApiError("The server returned an unexpected response.", res.status);
+  }
+}
+
+/**
+ * `POST /api/guilds/:id/custom-apps/:applicationId/webhook` — start Discord's
+ * `webhook.incoming` flow under one of the server's registered custom bots,
+ * so the created webhook belongs to *their* app. One click: the secret was
+ * stored (encrypted) at registration, so nothing is prompted here. Returns
+ * the Discord authorize URL to navigate to; the webhook comes back through
+ * the same `#dweeb_webhook=` fragment as the standard flow.
+ *
+ * Prerequisite (shown at registration): the proxy's `/auth/callback` URL must
+ * be listed under the app's OAuth2 → Redirects in the Developer Portal.
+ */
+export async function createCustomBotWebhook(
+  guildId: string,
+  applicationId: string,
+): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${PROXY_BASE_URL}/api/guilds/${guildId.trim()}/custom-apps/${applicationId.trim()}/webhook`,
+      { method: "POST", credentials: "include" },
+    );
+  } catch {
+    throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
+  }
+  if (!res.ok) throw await toApiError(res);
+  try {
+    const body = (await res.json()) as { url?: string };
+    if (!body.url) throw new Error();
+    return body.url;
+  } catch {
+    throw new GuildApiError("The server returned an unexpected response.", res.status);
+  }
+}
+
 /** `POST /auth/logout` — clear the session. Best-effort; never throws. */
 export async function postLogout(): Promise<void> {
   try {

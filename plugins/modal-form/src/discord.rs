@@ -54,6 +54,36 @@ pub fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &s
     verifying_key.verify(&message, &signature).is_ok()
 }
 
+/// The dispatcher-attested verifying key, if this request carries one.
+///
+/// The dispatcher also serves guild-registered *custom* Discord apps, whose
+/// interactions are signed with their own keys — it forwards the verifying
+/// key in `x-dweeb-public-key`, vouched for by the shared
+/// DISPATCHER_FORWARD_SECRET in `x-dweeb-forward-auth`. The signature is
+/// still verified HERE, on the raw bytes Discord signed; the secret only
+/// authenticates *which key to use*. Without a valid secret the header is
+/// ignored (None), so a caller reaching this service directly can never
+/// substitute its own key.
+pub fn attested_key<'h>(
+    headers: &'h axum::http::HeaderMap,
+    secret: Option<&str>,
+) -> Option<&'h str> {
+    let secret = secret?;
+    let supplied = headers.get("x-dweeb-forward-auth")?.to_str().ok()?;
+    if !constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
+        return None;
+    }
+    headers.get("x-dweeb-public-key")?.to_str().ok()
+}
+
+/// Byte-wise comparison that doesn't leak the match length through timing.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 // ── Incoming interaction (only the fields we use) ────────────────────────────
 
 #[derive(Debug, Deserialize)]

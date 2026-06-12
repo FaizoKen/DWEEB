@@ -135,7 +135,10 @@ pub async fn interactions(
     let (Some(signature), Some(timestamp)) = (signature, timestamp) else {
         return (StatusCode::UNAUTHORIZED, "missing signature").into_response();
     };
-    if !discord::verify_signature(&state.config.discord_public_key, signature, timestamp, &body) {
+    let key_hex =
+        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
+            .unwrap_or(&state.config.discord_public_key);
+    if !discord::verify_signature(key_hex, signature, timestamp, &body) {
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
 

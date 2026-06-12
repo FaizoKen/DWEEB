@@ -24,8 +24,8 @@ use crate::discord::TokenResponse;
 use crate::error::AppError;
 use crate::routes::{current_session, AppState, UsableGuild};
 use crate::session::{
-    build_session_cookie, build_state_cookie, clear_session_cookie, clear_state_cookie, now,
-    Session, STATE_COOKIE,
+    build_custom_app_cookie, build_session_cookie, build_state_cookie, clear_custom_app_cookie,
+    clear_session_cookie, clear_state_cookie, now, Session, CUSTOM_APP_COOKIE, STATE_COOKIE,
 };
 
 /// Marks a `state` value (and so its callback) as belonging to the
@@ -33,6 +33,11 @@ use crate::session::{
 /// callback` redirect + the one state cookie; the prefix is how `callback` tells
 /// them apart, so no extra redirect URI needs registering in the Dev Portal.
 const WEBHOOK_STATE_PREFIX: &str = "whk_";
+
+/// Same idea for the bring-your-own-app variant: `webhook.incoming` run under
+/// a guild's own custom application instead of DWEEB's. The credentials ride
+/// in a second encrypted cookie (see `webhook_custom_start`).
+const CUSTOM_WEBHOOK_STATE_PREFIX: &str = "cwh_";
 
 /// `GET /auth/login` — set a CSRF `state` cookie and bounce to Discord.
 pub async fn login(State(st): State<AppState>, jar: PrivateCookieJar) -> impl IntoResponse {
@@ -72,6 +77,114 @@ pub struct WebhookStartQuery {
     guild_id: Option<String>,
 }
 
+/// The custom app's OAuth credentials, parked in an encrypted HttpOnly cookie
+/// between the flow's start and its callback. Never logged.
+#[derive(serde::Serialize, Deserialize)]
+struct CustomAppCreds {
+    client_id: String,
+    client_secret: String,
+}
+
+/// `POST /api/guilds/:guild_id/custom-apps/:application_id/webhook` — begin
+/// Discord's `webhook.incoming` flow under one of the guild's registered
+/// custom bots, so the created webhook belongs to *their* app and its
+/// components dispatch to their app's Interactions Endpoint URL (the DWEEB
+/// dispatcher).
+///
+/// One click, no secret prompt: the client secret was collected at
+/// registration, sealed under this proxy's key, and stored in the
+/// dispatcher's registry. Here it's fetched back (token-gated, guild-scoped),
+/// opened, and parked — encrypted, HttpOnly, 10-minute lifetime — in the
+/// cookie the shared callback consumes for the code exchange. Authorization
+/// is the same as every other guild write: a session + the user manages the
+/// guild. The response carries the authorize URL for the FE to navigate to.
+///
+/// Prerequisite the FE surfaces to the user: this proxy's `/auth/callback`
+/// URL must be added under THEIR app's OAuth2 → Redirects, or Discord
+/// refuses the authorize step.
+pub async fn custom_bot_webhook_start(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    axum::extract::Path((guild, application_id)): axum::extract::Path<(String, String)>,
+) -> Result<Response, AppError> {
+    let cfg = &st.config;
+    crate::routes::authorize_member(&st, &jar, &guild).await?;
+    if !crate::routes::is_snowflake(&application_id) {
+        return Err(AppError::Status {
+            status: axum::http::StatusCode::BAD_REQUEST,
+            message: "application_id must be a Discord application id.".into(),
+            retry_after: None,
+        });
+    }
+
+    // Fetch the sealed secret from the registry (guild-scoped, so the
+    // authorization above maps one-to-one) and open it with our key.
+    let api = crate::routes::dispatcher_api(&st)?;
+    let resp = api
+        .http
+        .get(format!(
+            "{}/custom-apps/{guild}/{application_id}/secret",
+            api.base
+        ))
+        .bearer_auth(&api.token)
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't reach the dispatcher: {e}")))?;
+    if resp.status().as_u16() == 404 {
+        return Err(AppError::Status {
+            status: axum::http::StatusCode::NOT_FOUND,
+            message: "That app isn't registered as a custom bot for this server.".into(),
+            retry_after: None,
+        });
+    }
+    if !resp.status().is_success() {
+        return Err(AppError::BadGateway(
+            "The custom-bot registry answered unexpectedly.".into(),
+        ));
+    }
+    let sealed = resp
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|v| v.get("client_secret_enc").and_then(|s| s.as_str()).map(String::from))
+        .unwrap_or_default();
+    if sealed.is_empty() {
+        return Err(AppError::Status {
+            status: axum::http::StatusCode::CONFLICT,
+            message: "No client secret is stored for this app — register it again with the client secret to enable webhook creation.".into(),
+            retry_after: None,
+        });
+    }
+    let Some(client_secret) = crate::seal::open(&st.key, &sealed) else {
+        // Almost always a rotated SESSION_SECRET — the stored secret is
+        // unopenable now. Fails safe; re-registering repairs it.
+        return Err(AppError::Status {
+            status: axum::http::StatusCode::CONFLICT,
+            message: "The stored client secret can't be read anymore — register the app again with the client secret.".into(),
+            retry_after: None,
+        });
+    };
+
+    let state = format!("{CUSTOM_WEBHOOK_STATE_PREFIX}{}", random_token());
+    // A Discord app's OAuth client id IS its application id.
+    let url = webhook_authorize_url(
+        &application_id,
+        &cfg.oauth_redirect_url,
+        &state,
+        Some(guild.as_str()),
+    );
+    let creds = CustomAppCreds {
+        client_id: application_id,
+        client_secret,
+    };
+    let creds_json = serde_json::to_string(&creds)
+        .map_err(|e| AppError::Internal(format!("serialize creds: {e}")))?;
+    let jar = jar
+        .add(build_state_cookie(cfg, &state))
+        .add(build_custom_app_cookie(cfg, &creds_json));
+    Ok((jar, Json(json!({ "url": url }))).into_response())
+}
+
 #[derive(Deserialize)]
 pub struct CallbackQuery {
     code: Option<String>,
@@ -88,8 +201,12 @@ pub async fn callback(
     let cfg = &st.config;
 
     // User cancelled, or Discord reported an error — just return to the builder.
+    // The custom-app credentials cookie (if this was that flow) is cleared too;
+    // an abandoned flow must not leave a secret parked in the browser.
     if q.error.is_some() || q.code.is_none() {
-        let jar = jar.add(clear_state_cookie(cfg));
+        let jar = jar
+            .add(clear_state_cookie(cfg))
+            .add(clear_custom_app_cookie(cfg));
         return Ok((jar, Redirect::to(&cfg.frontend_url)).into_response());
     }
 
@@ -103,6 +220,44 @@ pub async fn callback(
     }
 
     let code = q.code.unwrap_or_default();
+
+    // Bring-your-own-app `webhook.incoming` flow: exchange the code against
+    // the CUSTOM app's credentials (parked in the encrypted cookie at start),
+    // then hand the webhook back exactly like the standard flow below. A
+    // failed exchange is most likely a mistyped client secret — a user error,
+    // so it soft-fails back to the builder rather than erroring the callback.
+    if provided.starts_with(CUSTOM_WEBHOOK_STATE_PREFIX) {
+        let creds = jar
+            .get(CUSTOM_APP_COOKIE)
+            .and_then(|c| serde_json::from_str::<CustomAppCreds>(c.value()).ok());
+        let jar = jar
+            .add(clear_state_cookie(cfg))
+            .add(clear_custom_app_cookie(cfg));
+        let Some(creds) = creds else {
+            // Cookie expired (>10 min on Discord's screen) or was dropped.
+            let target = format!("{}#dweeb_webhook=error", cfg.frontend_url);
+            return Ok((jar, Redirect::to(&target)).into_response());
+        };
+        let exchanged = st
+            .discord
+            .exchange_code(
+                &creds.client_id,
+                &creds.client_secret,
+                &code,
+                &cfg.oauth_redirect_url,
+            )
+            .await;
+        let target = match exchanged {
+            Ok(token) => build_webhook_redirect(&st, &cfg.frontend_url, &token).await,
+            Err(_) => {
+                // Almost always a mistyped client secret or an unregistered
+                // redirect URI on the user's app — their fix, not ours.
+                tracing::warn!("custom-app webhook exchange failed");
+                format!("{}#dweeb_webhook=error", cfg.frontend_url)
+            }
+        };
+        return Ok((jar, Redirect::to(&target)).into_response());
+    }
 
     // `webhook.incoming` flow: exchange the code, then redirect to the builder
     // with the created webhook's URL in the fragment. No session is minted — this

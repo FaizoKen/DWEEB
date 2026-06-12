@@ -18,6 +18,11 @@ tower-http = { version = "0.5", features = ["cors", "trace"] }
 axum-extra = { version = "0.9", features = ["cookie-private"] }
 # CSPRNG for unguessable OAuth `state` (CSRF) and session nonces.
 getrandom = "0.2"
+# Seals custom-bot client secrets at rest (AES-256-GCM under a key derived
+# from SESSION_SECRET) before they're handed to the dispatcher's registry —
+# a registry/database leak alone never exposes a usable secret.
+aes-gcm = "0.10"
+hex = "0.4"
 # Persistent store for the opt-in share short links (7-day TTL). `bundled`
 # compiles SQLite from source, so the image needs no system libsqlite — same
 # choice as the dispatcher and modal-form plugins.

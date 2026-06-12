@@ -48,6 +48,11 @@ be in.
 | GET    | `/api/guilds/:id/channels`    | ✓    | `[{ id, name, type, position, … }]`      |
 | GET    | `/api/guilds/:id/emojis`      | ✓    | `[{ id, name, animated, available }]`    |
 | GET    | `/api/guilds/:id/bootstrap`   | ✓    | `{ roles, channels, emojis }` (one call) |
+| GET/POST | `/api/guilds/:id/permanent` | ✓    | permanent-component slots (relayed to the dispatcher) |
+| DELETE | `/api/guilds/:id/permanent/:message_id` | ✓ | free a permanent slot |
+| GET/POST | `/api/guilds/:id/custom-apps` | ✓  | the guild's registered custom bots (relayed to the dispatcher); register takes `{ application_id, public_key, client_secret?, name? }` |
+| DELETE | `/api/guilds/:id/custom-apps/:application_id` | ✓ | unregister a custom bot |
+| POST   | `/api/guilds/:id/custom-apps/:application_id/webhook` | ✓ | `{ url }` — one-click `webhook.incoming` under that bot, using its stored secret |
 | POST   | `/api/shortlink`              | —    | `201 { id, expires_at }` — stores a share token for 7 days |
 | GET    | `/api/shortlink/:id`          | —    | `{ token }`, or 404 once expired/unknown |
 
@@ -86,6 +91,32 @@ Passing `?guild_id=` (the builder forwards the connected server's id) pre-select
 that server in Discord's picker. It's only a default — the user can still pick
 another server and must hold **Manage Server** there; a non-snowflake or
 unusable id is dropped and Discord shows the full picker.
+
+### Custom bots (bring your own app)
+
+A server can register its **own Discord application** from the dashboard
+(account menu → *Custom bot*) so the interactions dispatcher serves *its*
+interactions too — plugin components then work on messages sent under their
+bot, with its name and avatar. Each server gets one registration by default
+(`CUSTOM_APPS_PER_GUILD`; per-server plan extensions can come later — the API
+already reports the cap). The proxy only adds the authorization (login +
+Manage Server) and relays to the dispatcher's token-gated `/custom-apps`
+registry; see `plugins/dispatcher/README.md` for the verification model.
+
+Registration also collects the app's **client secret**, which is what makes
+posting as their bot one click later: the secret is **sealed here
+(AES-256-GCM under a key derived from `SESSION_SECRET`)** before it's handed
+to the dispatcher's registry, so the registry only ever stores opaque
+ciphertext and it is never returned to any browser. The Send dialog's
+webhook section then offers *Create a webhook from \<their bot\>*: the proxy
+fetches the ciphertext back, opens it, runs the same `webhook.incoming` flow
+under their app (the secret rides to the callback in an encrypted, HttpOnly,
+10-minute cookie), and the callback exchanges the code with their
+credentials before handing the webhook back through the usual fragment. The
+user must add this proxy's `/auth/callback` URL to their app's OAuth2
+redirects — the dashboard shows the exact URL to copy. Rotating
+`SESSION_SECRET` makes stored secrets unopenable; the flow then asks for the
+app to be re-registered.
 
 ## Hardening (built in)
 

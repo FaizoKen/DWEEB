@@ -20,9 +20,12 @@
 # prefix.
 interactions.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	# The permanent-slot management API is internal (proxy → dispatcher over
-	# the compose network, bearer-token gated). Don't expose it at the edge.
+	# The management APIs are internal (proxy → dispatcher over the compose
+	# network, bearer-token gated). Don't expose them at the edge.
 	handle /permanent* {
+		respond 404
+	}
+	handle /custom-apps* {
 		respond 404
 	}
 	handle {

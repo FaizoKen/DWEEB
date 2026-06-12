@@ -22,6 +22,11 @@ use crate::config::{Config, SameSitePolicy};
 pub const SESSION_COOKIE: &str = "dweeb_session";
 /// Name of the short-lived OAuth CSRF-state cookie.
 pub const STATE_COOKIE: &str = "dweeb_oauth_state";
+/// Name of the short-lived cookie carrying a custom app's OAuth credentials
+/// across the bring-your-own-app webhook redirect (see `auth.rs`). Encrypted
+/// by the private jar like the session, HttpOnly, and cleared on callback —
+/// the secret is never persisted server-side.
+pub const CUSTOM_APP_COOKIE: &str = "dweeb_custom_app";
 
 /// The decoded session. Kept tiny so the cookie stays well under the 4 KB cap.
 #[derive(Serialize, Deserialize, Clone)]
@@ -100,6 +105,23 @@ pub fn build_state_cookie(cfg: &Config, state: &str) -> Cookie<'static> {
 /// A removal cookie for the state cookie (cleared once the callback consumes it).
 pub fn clear_state_cookie(cfg: &Config) -> Cookie<'static> {
     let mut cookie = Cookie::new(STATE_COOKIE, "");
+    cookie.set_max_age(Duration::seconds(0));
+    harden(cookie, cfg)
+}
+
+/// Build the short-lived cookie that parks a custom app's OAuth credentials
+/// (serialized JSON) during the bring-your-own-app webhook flow. Same 10-minute
+/// budget as the state cookie it always travels with.
+pub fn build_custom_app_cookie(cfg: &Config, creds_json: &str) -> Cookie<'static> {
+    let mut cookie = Cookie::new(CUSTOM_APP_COOKIE, creds_json.to_string());
+    cookie.set_max_age(Duration::minutes(10));
+    harden(cookie, cfg)
+}
+
+/// A removal cookie for the custom-app credentials (cleared once the callback
+/// consumes them — or abandons the flow).
+pub fn clear_custom_app_cookie(cfg: &Config) -> Cookie<'static> {
+    let mut cookie = Cookie::new(CUSTOM_APP_COOKIE, "");
     cookie.set_max_age(Duration::seconds(0));
     harden(cookie, cfg)
 }

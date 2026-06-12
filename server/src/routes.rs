@@ -168,7 +168,7 @@ pub async fn list_guilds(
 // guild the user manages — then relay to the dispatcher's token-gated API.
 
 /// Discord snowflakes are 17–20 digits today; accept a small range with slack.
-fn is_snowflake(s: &str) -> bool {
+pub(crate) fn is_snowflake(s: &str) -> bool {
     (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
 }
 
@@ -245,18 +245,149 @@ pub async fn permanent_remove(
     relay_dispatcher(req).await
 }
 
+// ── Custom bots (login + Manage Server gated) ──────────────────────────────
+//
+// A guild may register its OWN Discord application(s) so the interactions
+// dispatcher serves them too — components on messages sent by *their* bot
+// then work through DWEEB's plugins. The registry (and the per-guild quota,
+// default 1, plan-extensible later) lives in the dispatcher; these handlers
+// add the user-facing authorization and relay, exactly like the permanent
+// slots above.
+
+#[derive(Deserialize)]
+pub struct CustomAppAddBody {
+    pub application_id: String,
+    pub public_key: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The app's OAuth client secret, asked for at registration so "create a
+    /// webhook from this bot" is one click later. Sealed (AES-GCM under the
+    /// proxy's key) before it leaves this process; the dispatcher stores only
+    /// ciphertext and the browser never sees it again.
+    #[serde(default)]
+    pub client_secret: Option<String>,
+}
+
+/// `GET /api/guilds/:id/custom-apps` — quota usage + registered apps.
+pub async fn custom_apps_list(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Path(guild): Path<String>,
+) -> Result<Response, AppError> {
+    authorize_member(&st, &jar, &guild).await?;
+    let api = dispatcher_api(&st)?;
+    let req = api
+        .http
+        .get(format!("{}/custom-apps/{guild}", api.base))
+        .bearer_auth(&api.token);
+    relay_dispatcher(req).await
+}
+
+/// `POST /api/guilds/:id/custom-apps` `{ application_id, public_key, name? }`
+/// — register the guild's own app. 409 with `error: quota_full | app_taken`
+/// when it can't be granted.
+pub async fn custom_apps_add(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Path(guild): Path<String>,
+    Json(body): Json<CustomAppAddBody>,
+) -> Result<Response, AppError> {
+    let session = authorize_member(&st, &jar, &guild).await?;
+    let application_id = body.application_id.trim().to_string();
+    let public_key = body.public_key.trim().to_lowercase();
+    if !is_snowflake(&application_id) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "application_id must be a Discord application id.".into(),
+            retry_after: None,
+        });
+    }
+    if application_id == st.config.client_id {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "That's the DWEEB app itself — it's already wired up.".into(),
+            retry_after: None,
+        });
+    }
+    // Shape check here; the dispatcher additionally validates it's a real
+    // Ed25519 point and not this deployment's own key.
+    if public_key.len() != 64 || !public_key.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "public_key must be the app's 64-character hex Public Key.".into(),
+            retry_after: None,
+        });
+    }
+    // Seal the client secret before it leaves this process. Optional at the
+    // API level — without it the app still gets its interactions served, but
+    // the dashboard can't offer one-click webhook creation for it.
+    let client_secret_enc = match body.client_secret.as_deref().map(str::trim) {
+        None | Some("") => String::new(),
+        Some(secret) => {
+            if secret.len() < 16 || secret.len() > 128 || !secret.bytes().all(|b| b.is_ascii_graphic())
+            {
+                return Err(AppError::Status {
+                    status: StatusCode::BAD_REQUEST,
+                    message: "client_secret doesn't look like a Discord client secret.".into(),
+                    retry_after: None,
+                });
+            }
+            crate::seal::seal(&st.key, secret).ok_or_else(|| {
+                AppError::Internal("couldn't seal the client secret".into())
+            })?
+        }
+    };
+    let name = body.name.unwrap_or_default();
+    let api = dispatcher_api(&st)?;
+    let req = api
+        .http
+        .post(format!("{}/custom-apps/{guild}", api.base))
+        .bearer_auth(&api.token)
+        .json(&json!({
+            "application_id": application_id,
+            "public_key": public_key,
+            "name": name,
+            "client_secret_enc": client_secret_enc,
+            // Recorded for audit; the session is the source of truth for who.
+            "added_by": session.uid,
+        }));
+    relay_dispatcher(req).await
+}
+
+/// `DELETE /api/guilds/:id/custom-apps/:application_id` — unregister.
+pub async fn custom_apps_remove(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Path((guild, application_id)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    authorize_member(&st, &jar, &guild).await?;
+    if !is_snowflake(&application_id) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "application_id must be a Discord application id.".into(),
+            retry_after: None,
+        });
+    }
+    let api = dispatcher_api(&st)?;
+    let req = api
+        .http
+        .delete(format!("{}/custom-apps/{guild}/{application_id}", api.base))
+        .bearer_auth(&api.token);
+    relay_dispatcher(req).await
+}
+
 /// The dispatcher client, or a clear "not enabled here" for deployments that
 /// don't run the dispatcher (e.g. proxy-only setups).
-fn dispatcher_api(st: &AppState) -> Result<&Arc<DispatcherApi>, AppError> {
+pub(crate) fn dispatcher_api(st: &AppState) -> Result<&Arc<DispatcherApi>, AppError> {
     st.dispatcher.as_ref().ok_or_else(|| AppError::Status {
         status: StatusCode::NOT_IMPLEMENTED,
-        message: "Permanent component slots aren't enabled on this deployment.".into(),
+        message: "This feature isn't enabled on this deployment.".into(),
         retry_after: None,
     })
 }
 
-/// Send a prepared dispatcher request and pass its answer through. The slot
-/// statuses the FE acts on (200, 404 not-permanent, 409 slots-full) relay
+/// Send a prepared dispatcher request and pass its answer through. The
+/// statuses the FE acts on (200, 400, 404 not-found, 409 full/taken) relay
 /// verbatim; anything else means *our* deployment is misconfigured or down,
 /// which is a gateway error, not the caller's.
 async fn relay_dispatcher(req: reqwest::RequestBuilder) -> Result<Response, AppError> {
@@ -303,7 +434,7 @@ pub fn current_session(jar: &PrivateCookieJar) -> Option<Session> {
 
 /// Ensure the caller is signed in and the requested guild is one they may use.
 /// Returns the session so writes can record who acted.
-async fn authorize_member(
+pub(crate) async fn authorize_member(
     st: &AppState,
     jar: &PrivateCookieJar,
     guild: &str,
