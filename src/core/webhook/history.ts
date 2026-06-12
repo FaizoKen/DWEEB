@@ -29,6 +29,10 @@ export interface WebhookHistoryEntry {
   lastUsedAt: number;
   /** Bot vs. person, captured at verify time. Absent on pre-v1 entries. */
   ownerKind?: WebhookOwnerKind;
+  /** Owning application's id when `ownerKind` is "bot" — lets the Send panel
+   *  tell a DWEEB/custom-bot webhook from an unrelated app's without a
+   *  re-verify. Absent on person/follower webhooks and on older entries. */
+  applicationId?: string;
   /** Avatar hash captured at save time; null when the webhook has no picture. */
   avatar?: string | null;
   /** Channel the webhook posts to, captured at verify time. Absent on older entries. */
@@ -71,6 +75,10 @@ function safeParse(raw: string | null): WebhookHistoryEntry[] {
         // Drop anything that isn't a known owner kind so stale/garbage values
         // don't leak into the UI.
         ownerKind: OWNER_KINDS.includes(e.ownerKind as WebhookOwnerKind) ? e.ownerKind : undefined,
+        applicationId:
+          typeof (e as { applicationId?: unknown }).applicationId === "string"
+            ? e.applicationId
+            : undefined,
         // Keep only a string hash; anything else (incl. old entries) → no avatar.
         avatar: typeof (e as { avatar?: unknown }).avatar === "string" ? e.avatar : null,
         // Snowflakes only; older entries (saved before these fields) → undefined.
@@ -112,6 +120,7 @@ export function rememberWebhook(
   fields: {
     name?: string;
     ownerKind?: WebhookOwnerKind;
+    applicationId?: string;
     avatar?: string | null;
     channelId?: string;
     guildId?: string;
@@ -130,6 +139,7 @@ export function rememberWebhook(
     name: fields.name?.trim() || existing?.name || "",
     lastUsedAt: Date.now(),
     ownerKind: fields.ownerKind ?? existing?.ownerKind,
+    applicationId: fields.applicationId ?? existing?.applicationId,
     // `null` is a real value ("no picture"), so only fall back when omitted.
     avatar: fields.avatar !== undefined ? fields.avatar : (existing?.avatar ?? null),
     channelId: fields.channelId ?? existing?.channelId,
@@ -174,6 +184,7 @@ export function refreshWebhook(
     name?: string;
     avatar?: string | null;
     ownerKind?: WebhookOwnerKind;
+    applicationId?: string;
     channelId?: string;
     guildId?: string;
   },
@@ -187,6 +198,7 @@ export function refreshWebhook(
     name: fields.name?.trim() || cur.name,
     avatar: fields.avatar !== undefined ? fields.avatar : cur.avatar,
     ownerKind: fields.ownerKind ?? cur.ownerKind,
+    applicationId: fields.applicationId ?? cur.applicationId,
     channelId: fields.channelId ?? cur.channelId,
     guildId: fields.guildId ?? cur.guildId,
     deletedAt: undefined,
@@ -195,6 +207,7 @@ export function refreshWebhook(
     next.name === cur.name &&
     next.avatar === cur.avatar &&
     next.ownerKind === cur.ownerKind &&
+    next.applicationId === cur.applicationId &&
     next.channelId === cur.channelId &&
     next.guildId === cur.guildId &&
     next.deletedAt === cur.deletedAt

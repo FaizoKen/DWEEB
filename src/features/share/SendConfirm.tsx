@@ -31,7 +31,12 @@
  * dialog's own modal is fine.
  */
 
-import { OWNER_COPY, webhookAvatarUrl, type WebhookOwnerKind } from "@/core/webhook";
+import {
+  OWNER_COPY,
+  webhookAvatarUrl,
+  type ComponentRouting,
+  type WebhookOwnerKind,
+} from "@/core/webhook";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import type { PingSummary } from "@/core/schema/mentions";
 import { Modal } from "@/ui/Modal";
@@ -73,6 +78,16 @@ export interface SendConfirmProps {
   messageId?: string;
   /** Who the message will ping, after `allowed_mentions`. */
   pings: PingSummary;
+  /**
+   * Where this message's plugin-bound components will deliver their clicks,
+   * when the message has any and the webhook's owner is known. "foreign"
+   * renders a can't-miss warning (the components will post but never
+   * respond); "unverified" a softer caution. Undefined — and the dweeb /
+   * custom-bot verdicts, which need no flag here — render nothing.
+   */
+  componentRouting?: ComponentRouting;
+  /** Names of the plugins whose components are affected, for the warning copy. */
+  pluginNames?: string[];
   /**
    * The "Make permanent" control for messages with interactive components.
    * Present only when the Send panel could read the slot state (signed in,
@@ -233,6 +248,52 @@ function PermanentOptIn({
   );
 }
 
+/**
+ * The plugin-routing verdict, when it's bad news. "foreign" = the webhook's
+ * owning app — not DWEEB, not a registered custom bot — receives every click,
+ * so the plugin components will post but never respond. "unverified" = that
+ * couldn't be ruled out.
+ */
+function RoutingNotice({
+  routing,
+  webhookName,
+  pluginNames,
+}: {
+  routing: ComponentRouting;
+  webhookName: string;
+  pluginNames: string[];
+}) {
+  const what =
+    pluginNames.length > 0 ? `${pluginNames.join(" / ")} components` : "plugin components";
+
+  if (routing === "foreign") {
+    return (
+      <div className={styles.routingAlert} role="alert">
+        <strong>The {what} here won’t respond.</strong>
+        <p className={styles.pingDetail}>
+          Discord delivers component clicks to the app that owns the webhook, and “{webhookName}”
+          belongs to a different app — not DWEEB and not one of this server’s registered custom
+          bots. The message will post, but every click on those components will fail. Post through a
+          webhook created in DWEEB to make them work.
+        </p>
+      </div>
+    );
+  }
+  if (routing === "unverified") {
+    return (
+      <div className={styles.routingNote} role="note">
+        <strong>Couldn’t confirm the {what} will route through DWEEB.</strong>
+        <p className={styles.pingDetail}>
+          “{webhookName}” is owned by an app, but whether that app delivers clicks to DWEEB couldn’t
+          be checked. If it isn’t DWEEB’s own webhook or one of this server’s registered custom
+          bots, those components will post but never respond.
+        </p>
+      </div>
+    );
+  }
+  return null;
+}
+
 export function SendConfirm({
   open,
   mode,
@@ -247,6 +308,8 @@ export function SendConfirm({
   threadId,
   messageId,
   pings,
+  componentRouting,
+  pluginNames = [],
   permanentOption,
   busy = false,
   onConfirm,
@@ -385,6 +448,14 @@ export function SendConfirm({
           </div>
         ) : null}
       </dl>
+
+      {componentRouting ? (
+        <RoutingNotice
+          routing={componentRouting}
+          webhookName={targetName}
+          pluginNames={pluginNames}
+        />
+      ) : null}
 
       {permanentOption ? <PermanentOptIn option={permanentOption} busy={busy} /> : null}
 

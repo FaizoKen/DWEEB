@@ -38,6 +38,19 @@
  * URL — Discord rejects interactive components sent through a person/follower
  * webhook, so we catch it here instead of after the send bounces.
  *
+ * Bot-owned isn't always enough either. Discord delivers component clicks to
+ * the app that OWNS the webhook, so components bound to DWEEB plugins
+ * (custom_ids the dispatcher routes) only respond when that app is DWEEB
+ * itself or a custom bot registered for the server. When the owner turns out
+ * to be an unrelated app, the panel warns — a banner here plus a notice in
+ * the confirm dialog — instead of letting the components post and die
+ * silently. It's a warning, not a block: hand-written custom_ids aimed at
+ * someone else's bot are a legitimate use, and only plugin-bound components
+ * are provably dead. The one hard stop is a single halt when the foreign
+ * owner is discovered mid-confirm (fresh URL, verified after the dialog was
+ * already answered): the send is left un-started so the warning is actually
+ * seen, and a deliberate second Send goes through.
+ *
  * The webhook URL is treated as a credential:
  *  - The input uses `<TextInput masked>` (CSS dot masking, not
  *    `type="password"`) plus a show/hide toggle, so it doesn't appear in screen
@@ -61,6 +74,7 @@ import { validateMessage } from "@/core/schema/validation";
 import { inspectCapabilities } from "@/core/schema/capability";
 import { summarizePings } from "@/core/schema/mentions";
 import {
+  classifyComponentRouting,
   classifyWebhookOwner,
   forgetWebhook,
   loadHistory,
@@ -73,10 +87,13 @@ import {
   webhookAvatarHash,
   webhookChannelId,
   webhookGuildId,
+  type ComponentRouting,
   type WebhookHistoryEntry,
   type WebhookOwner,
   type WebhookOwnerKind,
 } from "@/core/webhook";
+import { getPlugins } from "@/core/plugins/registry";
+import { pluginBoundComponents } from "@/core/plugins/targets";
 import {
   addPermanentMessage,
   createCustomBotWebhook,
@@ -94,7 +111,12 @@ import { TextInput } from "@/ui/TextInput";
 import { LockIcon, PlusIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
-import { isProxyConfigured, webhookCreateUrl, type IncomingWebhook } from "@/core/guild/config";
+import {
+  DISCORD_CLIENT_ID,
+  isProxyConfigured,
+  webhookCreateUrl,
+  type IncomingWebhook,
+} from "@/core/guild/config";
 import { WebhookRecents } from "./WebhookRecents";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
@@ -229,6 +251,14 @@ export function SendPanel({
     channelId?: string;
     guildId?: string;
   } | null>(null);
+  // Custom-bot registrations for the webhook's guild — fetched only while the
+  // plugin-routing question is open (see `routingCheckable` below). `failed`
+  // parks the verdict at "unverified" instead of retry-looping the fetch.
+  const [registeredApps, setRegisteredApps] = useState<{
+    guildId: string;
+    ids: string[];
+  } | null>(null);
+  const [registeredAppsFailed, setRegisteredAppsFailed] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const saveAbortRef = useRef<AbortController | null>(null);
@@ -290,6 +320,15 @@ export function SendPanel({
     if (verified) return verified.owner.kind;
     if (!parsedUrl) return undefined;
     return history.find((e) => e.id === parsedUrl.id)?.ownerKind;
+  }, [verified, parsedUrl, history]);
+
+  // The owning app's id, same sources as `knownOwnerKind`. Only meaningful
+  // when that kind is "bot"; undefined until verified (or on older saved
+  // entries from before the field existed).
+  const knownApplicationId = useMemo(() => {
+    if (verified) return verified.owner.applicationId ?? undefined;
+    if (!parsedUrl) return undefined;
+    return history.find((e) => e.id === parsedUrl.id)?.applicationId;
   }, [verified, parsedUrl, history]);
 
   // Whether the URL in the field is a saved webhook a health check found gone
@@ -370,6 +409,75 @@ export function SendPanel({
     ownershipBlocked || ownershipSatisfied
       ? capabilities.filter((c) => c.kind !== "app_webhook")
       : capabilities;
+
+  // Interactive components whose custom_id belongs to a bundled plugin. These
+  // only respond when the webhook's owning app routes clicks to the DWEEB
+  // dispatcher, so a generic "app-owned" pass isn't enough — they get their
+  // own routing verdict below.
+  const pluginBound = useMemo(() => pluginBoundComponents(getPlugins(), message), [message]);
+  const pluginNames = useMemo(
+    () => [...new Set(pluginBound.map((b) => b.plugin.name))],
+    [pluginBound],
+  );
+
+  // The routing question is open when plugin-bound components head to a
+  // bot-owned webhook that isn't DWEEB's own app — and answerable only with a
+  // guild to ask about and a signed-in session to ask with.
+  const routingInQuestion =
+    pluginBound.length > 0 &&
+    knownOwnerKind === "bot" &&
+    knownApplicationId != null &&
+    knownApplicationId !== DISCORD_CLIENT_ID;
+  const routingCheckable =
+    routingInQuestion && knownGuildId != null && isProxyConfigured() && authStatus === "authed";
+
+  useEffect(() => {
+    if (!routingCheckable || !knownGuildId) return;
+    if (registeredApps?.guildId === knownGuildId) return; // already resolved for this guild
+    setRegisteredAppsFailed(false);
+    const ac = new AbortController();
+    fetchCustomBots(knownGuildId, ac.signal)
+      .then((bots) =>
+        setRegisteredApps({ guildId: knownGuildId, ids: bots.items.map((i) => i.application_id) }),
+      )
+      .catch(() => {
+        if (!ac.signal.aborted) setRegisteredAppsFailed(true);
+      });
+    return () => ac.abort();
+  }, [routingCheckable, knownGuildId, registeredApps]);
+
+  // Where this message's plugin-bound components will deliver their clicks.
+  // Undefined while there's nothing to judge (no plugin components, ownership
+  // unknown until confirm) or while the registration fetch is still in
+  // flight — the callouts and the confirm dialog only render on a verdict.
+  const componentRouting: ComponentRouting | undefined = useMemo(() => {
+    if (pluginBound.length === 0 || knownOwnerKind !== "bot" || !knownApplicationId) {
+      return undefined;
+    }
+    const resolvedIds =
+      registeredApps != null && registeredApps.guildId === knownGuildId ? registeredApps.ids : null;
+    if (
+      knownApplicationId !== DISCORD_CLIENT_ID &&
+      resolvedIds === null &&
+      routingCheckable &&
+      !registeredAppsFailed
+    ) {
+      return undefined; // check in flight — hold the verdict
+    }
+    return classifyComponentRouting({
+      applicationId: knownApplicationId,
+      dweebApplicationId: DISCORD_CLIENT_ID,
+      customBotIds: resolvedIds,
+    });
+  }, [
+    pluginBound,
+    knownOwnerKind,
+    knownApplicationId,
+    knownGuildId,
+    registeredApps,
+    registeredAppsFailed,
+    routingCheckable,
+  ]);
 
   const sending = state.kind === "sending";
 
@@ -502,7 +610,9 @@ export function SendPanel({
       // Always confirm who owns the webhook before posting. When we don't yet
       // know (no prior "Save webhook" or saved entry), GET it first so the
       // ownership block fires here instead of letting an interactive message slip
-      // through to Discord and bounce back as a rejection.
+      // through to Discord and bounce back as a rejection. Also re-GET when the
+      // plugin-routing question is open but the saved entry predates the
+      // `applicationId` field — `ownerKind` alone can't answer it.
       let ownerKind = knownOwnerKind;
       // The webhook's own name + avatar + location, captured if we end up
       // verifying here. Used to label and picture the recents entry (and to show
@@ -511,7 +621,12 @@ export function SendPanel({
       let resolvedAvatar: string | null | undefined;
       let resolvedChannelId: string | undefined;
       let resolvedGuildId: string | undefined;
-      if (!ownerKind) {
+      // Owning app id, for the plugin-routing check and the recents entry.
+      let appId = knownApplicationId ?? null;
+      // True when ownership was resolved by THIS call — i.e. the user answered
+      // the confirm before any routing verdict could have been shown.
+      let freshlyVerified = false;
+      if (!ownerKind || (pluginBound.length > 0 && ownerKind === "bot" && !appId)) {
         const check = await verifyWebhook(parsedUrl, { signal: ac.signal });
         if (!check.ok) {
           if (check.status === 0 && check.error === "Check was cancelled.") {
@@ -523,6 +638,8 @@ export function SendPanel({
         }
         const owner = classifyWebhookOwner(check.webhook);
         ownerKind = owner.kind;
+        appId = owner.applicationId;
+        freshlyVerified = true;
         resolvedName = typeof check.webhook.name === "string" ? check.webhook.name : undefined;
         resolvedAvatar = webhookAvatarHash(check.webhook);
         resolvedChannelId = webhookChannelId(check.webhook) ?? undefined;
@@ -541,6 +658,44 @@ export function SendPanel({
         // don't duplicate it as an error line. Just leave the send un-started.
         setState({ kind: "idle" });
         return;
+      }
+
+      // The ownership pass above guarantees Discord will ACCEPT the message; it
+      // doesn't guarantee the components will work. When the webhook was
+      // verified just now — meaning the user answered the confirm before any
+      // routing verdict existed — and the message carries plugin-bound
+      // components owned by an app other than DWEEB, resolve the custom-bot
+      // registration before posting. A definitive "foreign" leaves the send
+      // un-started, exactly like the ownership block: the warning banner (and,
+      // on the next confirm, the dialog's notice) now renders, and Send stays
+      // enabled for a deliberate second attempt. "Unverified" is let through —
+      // it's a warning, not a block, and waiting can't learn more.
+      if (freshlyVerified && pluginBound.length > 0 && appId && appId !== DISCORD_CLIENT_ID) {
+        const gid = resolvedGuildId ?? knownGuildId;
+        let ids =
+          registeredApps != null && registeredApps.guildId === gid ? registeredApps.ids : null;
+        if (ids === null && gid && isProxyConfigured() && authStatus === "authed") {
+          try {
+            const bots = await fetchCustomBots(gid, ac.signal);
+            ids = bots.items.map((i) => i.application_id);
+            setRegisteredApps({ guildId: gid, ids });
+          } catch {
+            if (ac.signal.aborted) {
+              setState({ kind: "idle" });
+              return;
+            }
+            setRegisteredAppsFailed(true);
+          }
+        }
+        const routing = classifyComponentRouting({
+          applicationId: appId,
+          dweebApplicationId: DISCORD_CLIENT_ID,
+          customBotIds: ids,
+        });
+        if (routing === "foreign") {
+          setState({ kind: "idle" });
+          return;
+        }
       }
 
       const result =
@@ -567,6 +722,7 @@ export function SendPanel({
         rememberWebhook(parsedUrl.url, {
           name: resolvedName,
           ownerKind,
+          applicationId: appId ?? undefined,
           avatar: resolvedAvatar,
           channelId: resolvedChannelId,
           guildId: resolvedGuildId,
@@ -756,6 +912,7 @@ export function SendPanel({
     const entry = rememberWebhook(parsedUrl.url, {
       name: remoteName,
       ownerKind: owner.kind,
+      applicationId: owner.applicationId ?? undefined,
       avatar: webhookAvatarHash(result.webhook),
       channelId,
       guildId,
@@ -805,6 +962,7 @@ export function SendPanel({
       rememberWebhook(parsed.url, {
         name: remoteName,
         ownerKind: owner.kind,
+        applicationId: owner.applicationId ?? undefined,
         avatar: webhookAvatarHash(result.webhook),
         channelId: webhookChannelId(result.webhook) ?? undefined,
         guildId: webhookGuildId(result.webhook) ?? undefined,
@@ -1013,26 +1171,94 @@ export function SendPanel({
       ) : null}
 
       {ownershipSatisfied && !knownGone ? (
-        <Callout
-          tone="info"
-          role="note"
-          title="Interactive responses are handled by the bot’s server."
-          more={
-            <>
-              “{knownName || "This webhook"}” is app-owned, so Discord accepts and renders the
-              buttons and select menus. Clicks are delivered to the owning app — its backend has to
-              be running to respond. This builder only posts the message.{" "}
-              <a
-                href="https://discord.com/developers/docs/interactions/receiving-and-responding"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                How Discord interactions work →
-              </a>
-            </>
-          }
-          moreLabel="What this means"
-        />
+        componentRouting === "foreign" ? (
+          <Callout
+            tone="danger"
+            role="alert"
+            title={
+              <>
+                “{knownName || "This webhook"}” won’t deliver clicks to DWEEB — the{" "}
+                {pluginNames.join(" / ")} component{pluginBound.length === 1 ? "" : "s"} here will
+                never respond.
+              </>
+            }
+            more={
+              <>
+                Discord delivers component clicks to the app that owns the webhook. This one belongs
+                to a different app — not DWEEB and not one of this server’s registered custom bots —
+                so DWEEB’s backend never sees them. You can still send: the message posts normally,
+                but every click on those components will fail. To make them work, post through a
+                webhook created in DWEEB (see the links under the URL field), or register the owning
+                app as a custom bot first.
+              </>
+            }
+            moreLabel="Why"
+            actions={
+              onRequestRemoveInteractive ? (
+                <Button variant="danger" size="sm" onClick={onRequestRemoveInteractive}>
+                  Remove interactive components
+                </Button>
+              ) : null
+            }
+          />
+        ) : componentRouting === "unverified" ? (
+          <Callout
+            tone="warning"
+            role="note"
+            title={<>Couldn’t confirm “{knownName || "this webhook"}” delivers clicks to DWEEB.</>}
+            more={
+              <>
+                The {pluginNames.join(" / ")} component
+                {pluginBound.length === 1 ? "" : "s"} here only respond when the webhook’s owning
+                app routes interactions through DWEEB — DWEEB’s own webhooks do, and so do the
+                server’s registered custom bots.{" "}
+                {authStatus !== "authed"
+                  ? "Sign in so this can be checked automatically. "
+                  : "The registration check didn’t go through, so this couldn’t be confirmed. "}
+                If the app is unrelated, the message still posts but those components never respond.
+              </>
+            }
+            moreLabel="What this means"
+          />
+        ) : componentRouting === "dweeb" || componentRouting === "custom-bot" ? (
+          <Callout
+            tone="info"
+            role="note"
+            title="Plugin components are handled by DWEEB."
+            more={
+              <>
+                “{knownName || "This webhook"}”{" "}
+                {componentRouting === "dweeb"
+                  ? "belongs to DWEEB"
+                  : "belongs to a custom bot registered for this server"}
+                , so Discord delivers button and select clicks to DWEEB’s backend, where the
+                attached plugins respond.
+              </>
+            }
+            moreLabel="What this means"
+          />
+        ) : (
+          <Callout
+            tone="info"
+            role="note"
+            title="Interactive responses are handled by the bot’s server."
+            more={
+              <>
+                “{knownName || "This webhook"}” is app-owned, so Discord accepts and renders the
+                buttons and select menus. Clicks are delivered to the owning app — its backend has
+                to be running to respond. This builder only posts the message.{" "}
+                <a
+                  href="https://discord.com/developers/docs/interactions/receiving-and-responding"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  How Discord interactions work →
+                </a>
+              </>
+            }
+            moreLabel="What this means"
+          />
+        )
       ) : null}
 
       {visibleCapabilities.length > 0 ? (
@@ -1141,6 +1367,8 @@ export function SendPanel({
         threadId={threadId.trim() || undefined}
         messageId={mode === "update" ? (parsedMessageId ?? undefined) : undefined}
         pings={pings}
+        componentRouting={componentRouting}
+        pluginNames={pluginNames}
         permanentOption={permanentOption}
         busy={confirmBusy}
         onConfirm={handleConfirmedSend}

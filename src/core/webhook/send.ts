@@ -429,6 +429,50 @@ export function classifyWebhookOwner(webhook: Record<string, unknown>): WebhookO
   return { kind, applicationId, type, ...OWNER_COPY[kind] };
 }
 
+/* ─── Component routing (which app receives the clicks) ──────────────── */
+
+/**
+ * Who receives the interactions fired by components on a message this webhook
+ * posts. Discord delivers component clicks to the application that OWNS the
+ * webhook, so components bound to DWEEB plugins (custom_ids the dispatcher
+ * routes) only ever respond when that app is DWEEB itself, or a custom bot
+ * whose interactions endpoint was pointed at the dispatcher when it was
+ * registered. Only meaningful for bot-owned webhooks — person/follower
+ * webhooks can't send interactive components at all (the ownership block).
+ */
+export type ComponentRouting =
+  /** Owned by the DWEEB app itself — clicks reach the dispatcher. */
+  | "dweeb"
+  /** Owned by one of the guild's registered custom bots — clicks reach the
+   *  dispatcher through the registrant's interactions endpoint. */
+  | "custom-bot"
+  /** Owned by an unrelated app — Discord delivers every click THERE, so
+   *  plugin-bound components post fine but never respond. */
+  | "foreign"
+  /** Bot-owned, but the custom-bot registration couldn't be checked (signed
+   *  out, no proxy, guild unknown, or the fetch failed). */
+  | "unverified";
+
+/**
+ * Classify where a bot-owned webhook's component clicks end up. Pure — the
+ * caller supplies the deployment's own app id and the guild's registered
+ * custom-bot app ids (pass `null` when that list couldn't be fetched, which
+ * degrades the verdict to "unverified" rather than guessing).
+ */
+export function classifyComponentRouting(opts: {
+  /** The webhook's owning app (`classifyWebhookOwner(...).applicationId`). */
+  applicationId: string;
+  /** This deployment's own application id (`DISCORD_CLIENT_ID`). */
+  dweebApplicationId: string;
+  /** App ids registered as custom bots for the webhook's guild; null = unknown. */
+  customBotIds: readonly string[] | null;
+}): ComponentRouting {
+  const { applicationId, dweebApplicationId, customBotIds } = opts;
+  if (dweebApplicationId.length > 0 && applicationId === dweebApplicationId) return "dweeb";
+  if (customBotIds === null) return "unverified";
+  return customBotIds.includes(applicationId) ? "custom-bot" : "foreign";
+}
+
 /** Pull the avatar hash out of a webhook object; null when it has none. */
 export function webhookAvatarHash(webhook: Record<string, unknown>): string | null {
   return typeof webhook.avatar === "string" && webhook.avatar.length > 0 ? webhook.avatar : null;

@@ -112,10 +112,12 @@ export function WebhookRecents({
         const res = await verifyWebhook(parsed, { signal: ac.signal });
         if (res.ok) {
           healthCheckedAt.set(entry.id, Date.now());
+          const owner = classifyWebhookOwner(res.webhook);
           return refreshWebhook(entry.id, {
             name: typeof res.webhook.name === "string" ? res.webhook.name : undefined,
             avatar: webhookAvatarHash(res.webhook),
-            ownerKind: classifyWebhookOwner(res.webhook).kind,
+            ownerKind: owner.kind,
+            applicationId: owner.applicationId ?? undefined,
             channelId: webhookChannelId(res.webhook) ?? undefined,
             guildId: webhookGuildId(res.webhook) ?? undefined,
           });
@@ -251,9 +253,7 @@ export function WebhookRecents({
   return (
     <div className={styles.history}>
       <div className={styles.historyTitle}>Recent webhooks (this browser)</div>
-      {primary.length > 0 ? (
-        <ul className={styles.historyList}>{primary.map(renderRow)}</ul>
-      ) : null}
+      {primary.length > 0 ? <ul className={styles.historyList}>{primary.map(renderRow)}</ul> : null}
       {others.length > 0 ? (
         <>
           {primary.length === 0 ? (

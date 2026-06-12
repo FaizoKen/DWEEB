@@ -183,6 +183,29 @@
   margin-top: 8px;
 }
 
+/* Plugin-routing verdicts. "Foreign" (the owning app will eat every click —
+   the components are guaranteed dead) is red; "unverified" (couldn't rule
+   that out) borrows the amber will-ping treatment. */
+.routingAlert {
+  margin: 0 0 14px;
+  background: rgba(237, 66, 69, 0.08);
+  border: 1px solid rgba(237, 66, 69, 0.35);
+  border-radius: var(--app-radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--app-text);
+}
+
+.routingNote {
+  margin: 0 0 14px;
+  background: rgba(240, 178, 50, 0.1);
+  border: 1px solid rgba(240, 178, 50, 0.35);
+  border-radius: var(--app-radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--app-text);
+}
+
 /* No-ping state — calm, reassuring. */
 .pingCalm {
   background: var(--app-bg-elevated);

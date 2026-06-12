@@ -13,8 +13,13 @@
  * interaction a microservice can handle.
  */
 
-import { isButton, isSelect } from "@/core/schema/guards";
-import { ButtonStyle, ComponentType, type AnyComponent } from "@/core/schema/types";
+import { isActionRow, isButton, isContainer, isSection, isSelect } from "@/core/schema/guards";
+import {
+  ButtonStyle,
+  ComponentType,
+  type AnyComponent,
+  type WebhookMessage,
+} from "@/core/schema/types";
 import type { PluginManifest } from "./manifest";
 
 export type PluginTarget =
@@ -94,4 +99,50 @@ export function matchPlugin(
     }
   }
   return best;
+}
+
+/** One interactive component bound (by `custom_id` prefix) to a plugin. */
+export interface PluginBoundComponent {
+  customId: string;
+  plugin: PluginManifest;
+}
+
+/**
+ * Every interactive component in a message whose `custom_id` belongs to a
+ * registered plugin. These are exactly the components that only respond when
+ * the message's interactions reach the DWEEB dispatcher — Discord delivers
+ * component clicks to the app that owns the webhook, so posting them through
+ * a webhook owned by an unrelated app leaves them permanently dead. Callers
+ * use this to decide whether that mismatch is worth warning about.
+ */
+export function pluginBoundComponents(
+  plugins: PluginManifest[],
+  message: WebhookMessage,
+): PluginBoundComponent[] {
+  const out: PluginBoundComponent[] = [];
+  for (const node of walkAll(message)) {
+    if (targetOf(node) === null) continue;
+    const customId = (node as { custom_id?: unknown }).custom_id;
+    if (typeof customId !== "string") continue;
+    const plugin = matchPlugin(plugins, customId);
+    if (plugin) out.push({ customId, plugin });
+  }
+  return out;
+}
+
+/** Yields every node (top-level + nested), mirroring the capability walker. */
+function* walkAll(message: WebhookMessage): Generator<AnyComponent> {
+  for (const top of message.components) yield* deep(top);
+}
+
+function* deep(node: AnyComponent): Generator<AnyComponent> {
+  yield node;
+  if (isContainer(node)) {
+    for (const child of node.components) yield* deep(child);
+  } else if (isSection(node)) {
+    for (const t of node.components) yield t;
+    yield node.accessory;
+  } else if (isActionRow(node)) {
+    for (const child of node.components) yield child;
+  }
 }
