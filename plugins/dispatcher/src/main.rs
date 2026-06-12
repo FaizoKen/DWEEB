@@ -9,9 +9,12 @@
 //! forwards everything else — raw body and signature headers untouched, so the
 //! plugin can (and does) re-verify — to the matching upstream.
 //!
-//! It also answers the one slash command the app has, `/dashboard`, inline —
-//! a static ephemeral reply with the dashboard URL needs no plugin and no
-//! forward hop. Register it once with `node scripts/register-commands.mjs`.
+//! It also answers every application command inline (commands.rs): the
+//! `/dashboard` slash command plus the right-click context-menu commands
+//! ("Edit in DWEEB", "Export JSON", "Make Permanent", "Use as Webhook
+//! Identity"). Each is a pure function of the interaction payload — no
+//! Discord API call, no plugin, no forward hop. Register them once with
+//! `node scripts/register-commands.mjs`.
 //!
 //! Adding a plugin is one entry in the ROUTES env var; nothing here changes.
 //!
@@ -62,6 +65,7 @@
 //!   DASHBOARD_URL       URL /dashboard replies with, default https://dweeb.faizo.net
 //!   PORT                bind port, default 8095
 
+mod commands;
 mod store;
 
 use std::{
@@ -362,7 +366,7 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
                 .read()
                 .unwrap()
                 .get(app_id)
-                .map(|(key, hex)| (key.clone(), hex.clone()));
+                .map(|(key, hex)| (*key, hex.clone()));
             let Some((key, hex)) = custom else {
                 return (StatusCode::UNAUTHORIZED, "bad signature").into_response();
             };
@@ -374,24 +378,11 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
 
     match interaction.get("type").and_then(Value::as_u64) {
         Some(TYPE_PING) => return Json(json!({ "type": RESPONSE_PONG })).into_response(),
-        // Slash commands route by name, not custom_id. The app has exactly
-        // one — /dashboard — and its reply is a static URL, so answering it
-        // here costs nothing and skips the forward hop entirely.
-        Some(TYPE_APPLICATION_COMMAND) => {
-            let name = interaction
-                .pointer("/data/name")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            if name == "dashboard" {
-                // Bare URL (no <>) so Discord renders the OG preview card.
-                return ephemeral(&format!(
-                    "\u{1F6E0}\u{FE0F} Build and manage your messages at {}",
-                    app.dashboard_url
-                ));
-            }
-            tracing::warn!(name, "unknown slash command");
-            return ephemeral("Unknown command.");
-        }
+        // Application commands (slash + context menus) route by name, not
+        // custom_id, and every one of them is a pure function of the payload
+        // Discord just sent — so they are all answered inline (commands.rs),
+        // skipping the forward hop entirely.
+        Some(TYPE_APPLICATION_COMMAND) => return commands::respond(&app, &interaction),
         _ => {}
     }
 

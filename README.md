@@ -254,6 +254,15 @@ can fetch or edit it. A user-, bot-, or different-webhook-authored message
 in the same channel will 404. We surface that explicitly in the Restore
 panel because the raw error is misleading.
 
+Servers with the DWEEB bot get a faster path into the editor: right-click
+any message → **Apps → Edit in DWEEB** replies (privately) with a link that
+opens the editor pre-loaded with that message — no Developer Mode, no
+message IDs. The same menu offers **Export JSON** (the message's wire
+payload) and, for admins, **Make Permanent**; right-clicking a *user* offers
+**Use as Webhook Identity**, which prefills the webhook name and avatar from
+that member. The message data rides inside the link's `#fragment`, so it
+never touches a server — same privacy story as Share links.
+
 `src/core/webhook/send.ts` owns all three HTTP calls (`sendToWebhook`,
 `fetchWebhookMessage`, `updateWebhookMessage`) — status mapping,
 rate-limit parsing, and abort support are shared. `src/core/webhook/history.ts`

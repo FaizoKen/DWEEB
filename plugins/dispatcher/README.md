@@ -15,10 +15,20 @@ Discord ──POST /──▶ dispatcher ── verifies Ed25519, answers PING +
                        no match                ──▶ disables the component ("not wired")
 ```
 
-The app's single slash command, `/dashboard`, is answered inline too — an
-ephemeral reply with `DASHBOARD_URL`. It's static, so it needs no plugin and
-no forward hop. Register it once (global commands take up to an hour to
-propagate):
+Application commands are answered inline too (`src/commands.rs`) — they
+route by name, not `custom_id`, so the prefix routing never sees them, and
+every one is a pure function of the interaction payload Discord already
+sent: no Discord API call, no plugin, no forward hop.
+
+| Command | Where | Reply (always ephemeral) |
+|---|---|---|
+| `/dashboard` | slash | Link to `DASHBOARD_URL`. |
+| **Edit in DWEEB** | message menu | Share link opening the editor pre-loaded with the message. The resolved payload from the interaction is re-encoded into the same `#s=<version>.<lz-string>` token `encodeShare` emits (`src/core/serialization`), so the deployed frontend needs no changes — and the message rides the URL fragment, which never reaches a server. A legacy `content` is lifted into a leading Text Display so plain-text messages open editable too. |
+| **Export JSON** | message menu | The postable wire JSON in a code block; falls back to an editor link when it outgrows the 2000/4000-char reply budget. |
+| **Make Permanent** | message menu | Toggles one of the guild's permanent slots on the message (see below). Gated to **Manage Server** — both at registration (`default_member_permissions`) and re-checked here against `member.permissions`. |
+| **Use as Webhook Identity** | user menu | Editor link with the webhook username/avatar prefilled from the member (nickname + guild avatar first). |
+
+Register the set once (global commands take up to an hour to propagate):
 
 ```powershell
 $env:DISCORD_BOT_TOKEN = "your-bot-token"
@@ -76,11 +86,15 @@ form a user is mid-way through filling in still lands.
 ## Permanent slots
 
 Some messages are *meant* to live forever — a role menu pinned in #welcome.
-Each guild gets `PERMANENT_SLOTS_PER_GUILD` exemptions, managed entirely from
-the **dashboard**: the pre-send confirmation offers *Make permanent* on
+Each guild gets `PERMANENT_SLOTS_PER_GUILD` exemptions, managed two ways:
+from the **dashboard** (the pre-send confirmation offers *Make permanent* on
 messages with plugin components, and the account menu's *Managed messages*
-dialog lists the occupying messages so slots can be freed. No Discord command
-is involved.
+dialog lists the occupying messages so slots can be freed), or by a **Manage
+Server** holder right-clicking the message in Discord → Apps → **Make
+Permanent** — the same command run on an already-permanent message releases
+its slot. The command path is served inline here (the interaction carries
+the guild, message, channel, and the invoker's computed permissions — all
+the `/permanent` API needs) against the same SQLite store.
 
 The authorization chain: browser → **proxy** (Discord login; the user must
 manage the guild) → **this service's `/permanent` API** (bearer
@@ -143,6 +157,14 @@ proxy** (AES-GCM under the proxy's key) — opaque ciphertext here, so neither
 this API nor a leak of the SQLite file yields a usable secret. The proxy
 stores it at registration and fetches it back to run the one-click
 "create a webhook from this bot" flow.
+
+When a secret is provided, the proxy also installs the same application
+commands on the custom app (a client-credentials grant with the
+`applications.commands.update` scope — the secret alone suffices, no bot
+token), so its bot carries the same right-click menus as the main app;
+unregistering clears them again. Both are best-effort and off the request
+path — a failure only means that bot lacks the menus, and re-registering
+retries.
 
 Same trust chain and edge rules as `/permanent`: proxy-only, bearer
 `INTERNAL_API_TOKEN`, and Caddy refuses `/custom-apps*` publicly.

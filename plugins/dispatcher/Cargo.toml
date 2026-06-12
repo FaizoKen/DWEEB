@@ -23,6 +23,7 @@ hex = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+lz-str = "0.2.1"
 
 # Small, low-throughput service — optimise the release binary for size so it
 # fits the cheapest hosting tiers.
