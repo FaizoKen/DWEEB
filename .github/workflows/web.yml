@@ -75,6 +75,7 @@ jobs:
         env:
           VITE_PROXY_BASE_URL: ${{ vars.VITE_PROXY_BASE_URL }}
           VITE_DISCORD_CLIENT_ID: ${{ vars.VITE_DISCORD_CLIENT_ID }}
+          VITE_INTERACTIONS_URL: ${{ vars.VITE_INTERACTIONS_URL }}
 
       # GitHub Pages has no rewrite rules, so serve the SPA shell as the 404
       # page — deep links (e.g. a stale `/s/<id>` short link) still load the
