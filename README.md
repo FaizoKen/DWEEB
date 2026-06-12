@@ -258,9 +258,10 @@ Servers with the DWEEB bot get a faster path into the editor: right-click
 any message → **Apps → Edit in DWEEB** replies (privately) with a link that
 opens the editor pre-loaded with that message — no Developer Mode, no
 message IDs. The same menu offers **Export JSON** (the message's wire
-payload) and, for admins, **Make Permanent**; right-clicking a *user* offers
-**Use as Webhook Identity**, which prefills the webhook name and avatar from
-that member. The message data rides inside the link's `#fragment`, so it
+payload) and **Message Info** (author, timestamps, ids, and the message's
+component-expiry status — with a permanent-slot toggle button for admins);
+right-clicking a *user* offers **Use as Webhook Identity**, which prefills
+the webhook name and avatar from that member. The message data rides inside the link's `#fragment`, so it
 never touches a server — same privacy story as Share links.
 
 `src/core/webhook/send.ts` owns all three HTTP calls (`sendToWebhook`,

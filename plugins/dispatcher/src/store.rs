@@ -23,6 +23,14 @@ pub struct PermanentRow {
     pub added_at: i64,
 }
 
+/// The grant behind one permanent message — which guild spent the slot, who
+/// clicked, and when. What "Message Info" reports.
+pub struct PermanentDetails {
+    pub guild_id: String,
+    pub added_by: String,
+    pub added_at: i64,
+}
+
 pub enum Add {
     Added,
     /// Already permanent — adding again is a no-op, not an error.
@@ -110,6 +118,29 @@ impl Store {
             None
         })
         .is_some()
+    }
+
+    /// The grant behind a permanent message, if any. `None` on a read error
+    /// too — same fail-toward-expiry bias as [`Self::is_permanent`], and the
+    /// caller (Message Info) then reports the message as a regular one.
+    pub fn permanent_details(&self, message_id: &str) -> Option<PermanentDetails> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT guild_id, added_by, added_at FROM permanent_messages WHERE message_id = ?1",
+            [message_id],
+            |r| {
+                Ok(PermanentDetails {
+                    guild_id: r.get(0)?,
+                    added_by: r.get(1)?,
+                    added_at: r.get(2)?,
+                })
+            },
+        )
+        .optional()
+        .unwrap_or_else(|err| {
+            tracing::error!(%err, "permanent lookup failed");
+            None
+        })
     }
 
     /// A guild's permanent messages, oldest grant first.

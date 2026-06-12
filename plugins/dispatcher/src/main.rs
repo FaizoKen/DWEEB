@@ -11,10 +11,13 @@
 //!
 //! It also answers every application command inline (commands.rs): the
 //! `/dashboard` slash command plus the right-click context-menu commands
-//! ("Edit in DWEEB", "Export JSON", "Make Permanent", "Use as Webhook
+//! ("Edit in DWEEB", "Export JSON", "Message Info", "Use as Webhook
 //! Identity"). Each is a pure function of the interaction payload — no
 //! Discord API call, no plugin, no forward hop. Register them once with
-//! `node scripts/register-commands.mjs`.
+//! `node scripts/register-commands.mjs`. One custom_id namespace is the
+//! dispatcher's own: clicks on `dweeb:`-prefixed components (the
+//! permanent-slot toggle button on a "Message Info" reply) are answered
+//! inline too, ahead of the plugin routing.
 //!
 //! Adding a plugin is one entry in the ROUTES env var; nothing here changes.
 //!
@@ -27,10 +30,12 @@
 //! component is disabled, so a message left behind by an uninstalled plugin
 //! stops generating traffic after its first click.
 //!
-//! Each guild gets PERMANENT_SLOTS_PER_GUILD exemptions, managed from the
-//! DWEEB dashboard: the proxy authenticates the user (Discord login + Manage
-//! Server on the guild) and calls the token-gated /permanent API here, which
-//! owns the slots in SQLite. No Discord command is involved.
+//! Each guild gets PERMANENT_SLOTS_PER_GUILD exemptions, managed two ways:
+//! from the DWEEB dashboard — the proxy authenticates the user (Discord
+//! login plus Manage Server on the guild) and calls the token-gated
+//! /permanent API here, which owns the slots in SQLite — or from Discord,
+//! via the toggle button on the "Message Info" context-menu reply
+//! (commands.rs re-checks Manage Server against member.permissions).
 //!
 //! Custom apps: a guild may also register its OWN Discord application(s) —
 //! CUSTOM_APPS_PER_GUILD each, default 1 (per-guild plan caps can replace the
@@ -391,6 +396,15 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
         .pointer("/data/custom_id")
         .and_then(Value::as_str)
         .unwrap_or_default();
+
+    // The dispatcher's own components — the permanent-slot toggle button on
+    // a "Message Info" reply — are answered inline: they have no upstream,
+    // and they sit on ephemeral replies that are gone long before any TTL.
+    if interaction.get("type").and_then(Value::as_u64) == Some(TYPE_MESSAGE_COMPONENT)
+        && custom_id.starts_with(commands::CUSTOM_ID_PREFIX)
+    {
+        return commands::component(&app, &interaction);
+    }
 
     // Components expire COMPONENT_TTL_DAYS after their message was sent (the
     // message id snowflake carries the send time — no registry of instances

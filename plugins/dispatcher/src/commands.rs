@@ -6,9 +6,16 @@
 //! dispatcher's own HTTP response, the same way `/dashboard` always was.
 //! That is also what makes them fast: every handler below is a pure function
 //! of the interaction payload Discord already sent — no Discord API call, no
-//! forward hop, and (except the permanent-slot toggle, which owns that data
-//! anyway) no database. The expensive-looking part, compressing a message
-//! into a share link, is LZ-String over a few KB of JSON — microseconds.
+//! forward hop, and (except the permanent-slot data behind "Message Info",
+//! which this service owns anyway) no database. The expensive-looking part,
+//! compressing a message into a share link, is LZ-String over a few KB of
+//! JSON — microseconds.
+//!
+//! One command grew a component: "Message Info" puts a permanent-slot toggle
+//! button on its reply. Its custom_id lives under [`CUSTOM_ID_PREFIX`], which
+//! main.rs intercepts ahead of the plugin routing and answers via
+//! [`component`] — the only custom_id namespace the dispatcher keeps for
+//! itself.
 //!
 //! The share-link contract: a MESSAGE command's payload includes the full
 //! target message under `data.resolved.messages`, and the web editor already
@@ -42,6 +49,11 @@ const TYPE_TEXT_DISPLAY: u64 = 10;
 const TYPE_THUMBNAIL: u64 = 11;
 const TYPE_MEDIA_GALLERY: u64 = 12;
 const TYPE_CONTAINER: u64 = 17;
+// Classic component types, for the toggle button on the Message Info reply.
+const TYPE_ACTION_ROW: u64 = 1;
+const TYPE_BUTTON: u64 = 2;
+const BUTTON_PRIMARY: u64 = 1;
+const BUTTON_DANGER: u64 = 4;
 /// A media gallery holds at most this many items.
 const MAX_GALLERY_ITEMS: usize = 10;
 
@@ -58,8 +70,20 @@ const MAX_V2_TEXT: usize = 4000;
 const CMD_DASHBOARD: &str = "dashboard";
 const CMD_EDIT: &str = "Edit in DWEEB";
 const CMD_EXPORT_JSON: &str = "Export JSON";
-const CMD_PERMANENT: &str = "Make Permanent";
+const CMD_INFO: &str = "Message Info";
+/// Pre-rename name of [`CMD_INFO`]. Still answered: global re-registration
+/// takes up to an hour to propagate, and custom apps keep the command set
+/// they were installed with until their guild re-registers them.
+const CMD_INFO_LEGACY: &str = "Make Permanent";
 const CMD_IDENTITY: &str = "Use as Webhook Identity";
+
+/// custom_id namespace of components the dispatcher itself puts on its
+/// replies. main.rs answers these inline ([`component`]), ahead of the
+/// plugin prefix routing — no plugin manifest may claim this prefix.
+pub const CUSTOM_ID_PREFIX: &str = "dweeb:";
+/// The permanent-slot toggle button on a "Message Info" reply:
+/// `dweeb:perm:<channel_id>:<message_id>`.
+const PERM_TOGGLE_PREFIX: &str = "dweeb:perm:";
 
 /// Answer any application-command interaction. Unknown names get a polite
 /// ephemeral shrug (a stale registration, or a custom app that registered
@@ -79,7 +103,7 @@ pub fn respond(app: &App, interaction: &Value) -> Response {
         }
         CMD_EDIT => edit_in_dweeb(app, interaction),
         CMD_EXPORT_JSON => export_json(app, interaction),
-        CMD_PERMANENT => toggle_permanent(app, interaction),
+        CMD_INFO | CMD_INFO_LEGACY => message_info(app, interaction),
         CMD_IDENTITY => webhook_identity(app, interaction),
         _ => {
             tracing::warn!(name, "unknown application command");
@@ -141,12 +165,238 @@ fn export_json(app: &App, interaction: &Value) -> Response {
     reply_sized(text).unwrap_or_else(|| too_large(interaction))
 }
 
-/// "Make Permanent": spend one of the guild's TTL-exemption slots on the
-/// message — or give it back when the message already holds one. The toggle
-/// runs against the same SQLite store the TTL gate consults, in-process.
-fn toggle_permanent(app: &App, interaction: &Value) -> Response {
+/// "Message Info": everything the interaction payload tells us about the
+/// message — author, timestamps, ids, payload shape — and where it stands
+/// with the component TTL: expires when, already expired, or permanent
+/// (including who spent the slot, from the same store the TTL gate reads).
+/// Manage Server holders also get the permanent-slot toggle as a button on
+/// the reply; [`component`] answers the click.
+fn message_info(app: &App, interaction: &Value) -> Response {
+    let Some(msg) = target_message(interaction) else {
+        return ephemeral("Couldn't read the message from this interaction.");
+    };
+    let message_id = msg.get("id").and_then(Value::as_str).unwrap_or_default();
+    let channel_id = msg
+        .get("channel_id")
+        .and_then(Value::as_str)
+        .or_else(|| interaction.get("channel_id").and_then(Value::as_str))
+        .unwrap_or_default();
+    let guild_id = interaction.get("guild_id").and_then(Value::as_str);
+
+    let mut lines = vec!["### Message Info".to_string()];
+
+    // Author. A webhook message's author IS the webhook — its id and its
+    // configured name; a <@mention> of it would render as an invalid user.
+    let author_name = msg
+        .pointer("/author/username")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let author_id = msg.pointer("/author/id").and_then(Value::as_str);
+    let is_bot = msg
+        .pointer("/author/bot")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let is_webhook = msg.get("webhook_id").and_then(Value::as_str).is_some();
+    lines.push(match (is_webhook, author_id) {
+        (true, Some(id)) => format!("**Author:** {author_name} (webhook `{id}`)"),
+        (false, Some(id)) if is_bot => format!("**Author:** <@{id}> ({author_name}, bot)"),
+        (false, Some(id)) => format!("**Author:** <@{id}> ({author_name})"),
+        _ => format!("**Author:** {author_name}"),
+    });
+
+    // The send time rides in the id snowflake; the edit time only exists as
+    // an ISO timestamp field.
+    match snowflake_ms(message_id) {
+        Some(sent_ms) => {
+            let sent = sent_ms / 1000;
+            lines.push(format!("**Sent:** <t:{sent}:f> (<t:{sent}:R>)"));
+        }
+        None => lines.push("**Sent:** unknown".into()),
+    }
+    if let Some(edited) = msg
+        .get("edited_timestamp")
+        .and_then(Value::as_str)
+        .and_then(iso8601_unix_secs)
+    {
+        lines.push(format!("**Edited:** <t:{edited}:f> (<t:{edited}:R>)"));
+    }
+    lines.push(format!(
+        "**Channel:** <#{channel_id}> · **Message ID:** `{message_id}`"
+    ));
+
+    let count = |key: &str| msg.get(key).and_then(Value::as_array).map_or(0, Vec::len);
+    let interactive = count_interactive(msg.get("components").unwrap_or(&Value::Null));
+    let content_chars = msg
+        .get("content")
+        .and_then(Value::as_str)
+        .map_or(0, |c| c.chars().count());
+    let mut parts = Vec::new();
+    if content_chars > 0 {
+        parts.push(format!("{content_chars} chars of content"));
+    }
+    if count("components") > 0 {
+        parts.push(format!(
+            "{} ({interactive} interactive)",
+            n_of(count("components"), "top-level component")
+        ));
+    }
+    if count("embeds") > 0 {
+        parts.push(n_of(count("embeds"), "embed"));
+    }
+    if count("attachments") > 0 {
+        parts.push(n_of(count("attachments"), "attachment"));
+    }
+    lines.push(format!(
+        "**Payload:** {}",
+        if parts.is_empty() {
+            "empty".into()
+        } else {
+            parts.join(" · ")
+        }
+    ));
+
+    let flags = msg.get("flags").and_then(Value::as_u64).unwrap_or(0);
+    let mut marks = Vec::new();
+    if flags & FLAG_IS_COMPONENTS_V2 != 0 {
+        marks.push("Components V2");
+    }
+    if flags & FLAG_SUPPRESS_NOTIFICATIONS != 0 {
+        marks.push("silent");
+    }
+    if msg.get("pinned").and_then(Value::as_bool).unwrap_or(false) {
+        marks.push("pinned");
+    }
+    if !marks.is_empty() {
+        lines.push(format!("**Flags:** {}", marks.join(" · ")));
+    }
+
+    // Expiry status, in the order the TTL gate would decide it: a permanent
+    // grant trumps everything (it occupies a slot even on a deployment that
+    // later disabled the TTL), then the deployment setting, then the clock.
+    let permanent = app.store.permanent_details(message_id);
+    lines.push(match (&permanent, app.component_ttl_ms) {
+        (Some(details), _) => format!(
+            "**Expiry:** \u{1F512} permanent — components never expire. \
+             Slot granted by <@{}> <t:{}:R>.",
+            details.added_by,
+            details.added_at / 1000
+        ),
+        (None, None) => "**Expiry:** components never expire on this deployment.".into(),
+        (None, Some(_)) if interactive == 0 => {
+            "**Expiry:** no interactive components — nothing here expires.".into()
+        }
+        (None, Some(ttl_ms)) => match snowflake_ms(message_id) {
+            Some(sent_ms) => {
+                let expires = (sent_ms + ttl_ms) / 1000;
+                if now_ms() > sent_ms + ttl_ms {
+                    format!(
+                        "**Expiry:** \u{231B} interactive components **expired** <t:{expires}:R> \
+                         — each click now just disables its component."
+                    )
+                } else {
+                    format!(
+                        "**Expiry:** \u{23F3} interactive components expire \
+                         <t:{expires}:f> (<t:{expires}:R>)."
+                    )
+                }
+            }
+            None => "**Expiry:** unknown.".into(),
+        },
+    });
+
+    // Slot usage + the toggle button, for guilds on a TTL'd deployment. The
+    // button renders only for Manage Server holders ([`toggle_permanent`]
+    // re-checks — a custom_id is client-forgeable), and only when there is
+    // something to toggle: interactive components to keep alive, or this
+    // guild's own slot to release.
+    let mut button = None;
+    if let (Some(guild_id), Some(_)) = (guild_id, app.component_ttl_ms) {
+        if let Ok(rows) = app.store.list(guild_id) {
+            lines.push(format!(
+                "-# {}/{} permanent slots used in this server.",
+                rows.len(),
+                app.permanent_slots
+            ));
+        }
+        let permissions: u128 = interaction
+            .pointer("/member/permissions")
+            .and_then(Value::as_str)
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(0);
+        if permissions & MANAGE_GUILD != 0 && !message_id.is_empty() && !channel_id.is_empty() {
+            let custom_id = format!("{PERM_TOGGLE_PREFIX}{channel_id}:{message_id}");
+            button = match &permanent {
+                Some(details) if details.guild_id == guild_id => Some(json!({
+                    "type": TYPE_BUTTON,
+                    "style": BUTTON_DANGER,
+                    "label": "Release Permanent Slot",
+                    "custom_id": custom_id,
+                })),
+                // Another guild's slot — not ours to release.
+                Some(_) => None,
+                None if interactive > 0 => Some(json!({
+                    "type": TYPE_BUTTON,
+                    "style": BUTTON_PRIMARY,
+                    "label": "Make Permanent",
+                    "custom_id": custom_id,
+                })),
+                None => None,
+            };
+        }
+    }
+
+    let text = lines.join("\n");
+    match button {
+        // The info text is a handful of bounded lines, always inside the
+        // 2000-char content budget — the buttoned shape never needs the
+        // oversize fallbacks.
+        Some(b) => Json(json!({
+            "type": RESPONSE_CHANNEL_MESSAGE,
+            "data": {
+                "content": text,
+                "flags": FLAG_EPHEMERAL,
+                "components": [{ "type": TYPE_ACTION_ROW, "components": [b] }],
+            }
+        }))
+        .into_response(),
+        None => reply_sized(text).unwrap_or_else(|| too_large(interaction)),
+    }
+}
+
+// ── Dispatcher-owned components ──────────────────────────────────────────────
+
+/// Answer a click on one of the dispatcher's OWN components — custom_ids
+/// under [`CUSTOM_ID_PREFIX`], intercepted by main.rs ahead of the plugin
+/// routing. Today that is exactly one button: the permanent-slot toggle on a
+/// "Message Info" reply. The answer is a fresh ephemeral confirmation; the
+/// info reply keeps its button, and every click re-reads the store, so the
+/// button keeps toggling truthfully even when its label has gone stale.
+pub fn component(app: &App, interaction: &Value) -> Response {
+    let custom_id = interaction
+        .pointer("/data/custom_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let target = custom_id
+        .strip_prefix(PERM_TOGGLE_PREFIX)
+        .and_then(|rest| rest.split_once(':'));
+    let Some((channel_id, message_id)) = target else {
+        tracing::warn!(custom_id, "unknown dispatcher-owned component");
+        return ephemeral("This button isn't wired to anything.");
+    };
+    toggle_permanent(app, interaction, channel_id, message_id)
+}
+
+/// Spend one of the guild's TTL-exemption slots on the message — or give it
+/// back when the message already holds one. The toggle runs against the same
+/// SQLite store the TTL gate consults, in-process.
+fn toggle_permanent(
+    app: &App,
+    interaction: &Value,
+    channel_id: &str,
+    message_id: &str,
+) -> Response {
     let Some(guild_id) = interaction.get("guild_id").and_then(Value::as_str) else {
-        return ephemeral("This command only works inside a server.");
+        return ephemeral("This only works inside a server.");
     };
     // member.permissions is Discord's already-computed set for the invoker in
     // this channel (Administrator arrives with every bit set).
@@ -160,24 +410,17 @@ fn toggle_permanent(app: &App, interaction: &Value) -> Response {
             "You need the **Manage Server** permission to manage permanent messages.",
         );
     }
-    if app.component_ttl_ms.is_none() {
+    let Some(ttl_ms) = app.component_ttl_ms else {
         return ephemeral(
             "Components never expire on this deployment — every message is already permanent.",
         );
-    }
-    let Some(msg) = target_message(interaction) else {
-        return ephemeral("Couldn't read the message from this interaction.");
     };
-    let message_id = msg.get("id").and_then(Value::as_str).unwrap_or_default();
-    let channel_id = msg
-        .get("channel_id")
-        .and_then(Value::as_str)
-        .or_else(|| interaction.get("channel_id").and_then(Value::as_str))
-        .unwrap_or_default();
-    if message_id.is_empty() || channel_id.is_empty() {
-        return ephemeral("Couldn't read the message from this interaction.");
+    // The ids come from the custom_id, not the (signed) payload — shape-check
+    // them like the /permanent API does before they touch the store.
+    if !crate::is_snowflake(message_id) || !crate::is_snowflake(channel_id) {
+        return ephemeral("This button isn't wired to anything.");
     }
-    let ttl_days = app.component_ttl_ms.map(|ms| ms / 86_400_000).unwrap_or(0);
+    let ttl_days = ttl_ms / 86_400_000;
 
     if app.store.is_permanent(message_id) {
         // Guild-scoped remove: a permanent message of another guild is
@@ -193,17 +436,6 @@ fn toggle_permanent(app: &App, interaction: &Value) -> Response {
         };
     }
 
-    // Permanence only matters for something that can expire.
-    if msg
-        .get("components")
-        .and_then(Value::as_array)
-        .is_none_or(Vec::is_empty)
-    {
-        return ephemeral(
-            "This message has no interactive components — permanent slots only keep \
-             components clickable past their expiry.",
-        );
-    }
     let added_by = interaction
         .pointer("/member/user/id")
         .and_then(Value::as_str)
@@ -218,12 +450,13 @@ fn toggle_permanent(app: &App, interaction: &Value) -> Response {
         // `Already` only happens on a toggle race; report it as the success it is.
         Ok(crate::store::Add::Added) | Ok(crate::store::Add::Already) => ephemeral(&format!(
             "\u{1F512} Permanent — this message's components never expire \
-             (others expire after {ttl_days} days). Run the command again to release the slot.{}",
+             (others expire after {ttl_days} days). Click the button again to release \
+             the slot.{}",
             usage_suffix(app, guild_id)
         )),
         Ok(crate::store::Add::Full) => ephemeral(&format!(
-            "Every permanent slot is taken.{} Release one by running this command on a \
-             permanent message, or from the dashboard's *Managed messages*.",
+            "Every permanent slot is taken.{} Release one from a permanent message's \
+             **Message Info** button, or from the dashboard's *Managed messages*.",
             usage_suffix(app, guild_id)
         )),
         Err(err) => storage_error(err),
@@ -301,6 +534,76 @@ fn webhook_identity(app: &App, interaction: &Value) -> Response {
          It replaces your current editor draft (undoable)."
     );
     reply_sized(text).unwrap_or_else(|| ephemeral("That name is too long to fit in a link."))
+}
+
+// ── Message Info plumbing ────────────────────────────────────────────────────
+
+/// When a message was sent, in unix milliseconds, from its snowflake id.
+fn snowflake_ms(id: &str) -> Option<u64> {
+    id.parse::<u64>()
+        .ok()
+        .map(|n| (n >> 22) + crate::DISCORD_EPOCH_MS)
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// `1 embed` / `2 embeds`.
+fn n_of(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+}
+
+/// How many components on the message can still fire an interaction — every
+/// node carrying a `custom_id`, found with the same walk main.rs disables
+/// them with (children under `components`, a section's button under
+/// `accessory`). Link buttons carry `url` instead, so they don't count —
+/// correctly, since they never expire either.
+fn count_interactive(node: &Value) -> usize {
+    match node {
+        Value::Array(items) => items.iter().map(count_interactive).sum(),
+        Value::Object(map) => {
+            usize::from(map.contains_key("custom_id"))
+                + map.get("components").map_or(0, count_interactive)
+                + map.get("accessory").map_or(0, count_interactive)
+        }
+        _ => 0,
+    }
+}
+
+/// Unix seconds of an ISO 8601 timestamp the way Discord writes them
+/// (`2026-06-12T03:14:15.926000+00:00`). Seconds precision, trailing offset
+/// honored; `None` on anything malformed — the caller then omits the line.
+/// (Hand-rolled days-from-civil-date so one display field doesn't pull a
+/// date crate into the image.)
+fn iso8601_unix_secs(ts: &str) -> Option<i64> {
+    let num = |range: std::ops::Range<usize>| -> Option<i64> { ts.get(range)?.parse().ok() };
+    let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (hour, minute, second) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let shifted_year = year - i64::from(month <= 2);
+    let era = shifted_year.div_euclid(400);
+    let year_of_era = shifted_year - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days_since_epoch = era * 146_097 + day_of_era - 719_468;
+    let mut secs = days_since_epoch * 86_400 + hour * 3600 + minute * 60 + second;
+    // Past the seconds sit optional fractions, then 'Z' or ±HH:MM.
+    if let Some(tail) = ts.get(19..) {
+        if let Some(idx) = tail.find(['+', '-']) {
+            let offset = &tail[idx..];
+            let sign = if offset.starts_with('+') { 1 } else { -1 };
+            let hours: i64 = offset.get(1..3)?.parse().ok()?;
+            let minutes: i64 = offset.get(4..6)?.parse().ok()?;
+            secs -= sign * (hours * 3600 + minutes * 60);
+        }
+    }
+    Some(secs)
 }
 
 // ── Share-token plumbing ─────────────────────────────────────────────────────
@@ -709,6 +1012,40 @@ mod tests {
         // duplicate it.
         assert!(!converted);
         assert_eq!(payload["components"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn interactive_components_are_counted_through_nesting() {
+        let components = json!([
+            { "type": 17, "components": [
+                { "type": 9,
+                  "components": [{ "type": 10, "content": "hi" }],
+                  "accessory": { "type": 2, "style": 1, "custom_id": "a:b" } },
+                { "type": 1, "components": [
+                    { "type": 2, "style": 5, "url": "https://example.com", "label": "Link" },
+                    { "type": 2, "style": 1, "custom_id": "x:y" },
+                ]},
+            ]},
+        ]);
+        // The two custom_id holders count; the link button and text don't.
+        assert_eq!(count_interactive(&components), 2);
+        assert_eq!(count_interactive(&Value::Null), 0);
+    }
+
+    #[test]
+    fn iso8601_parses_discord_timestamps() {
+        assert_eq!(iso8601_unix_secs("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(
+            iso8601_unix_secs("2024-01-01T00:00:00.123000+00:00"),
+            Some(1_704_067_200)
+        );
+        // A positive offset shifts the instant back toward UTC.
+        assert_eq!(
+            iso8601_unix_secs("2024-01-01T02:30:00+02:30"),
+            Some(1_704_067_200)
+        );
+        assert_eq!(iso8601_unix_secs("not a timestamp"), None);
+        assert_eq!(iso8601_unix_secs(""), None);
     }
 
     #[test]

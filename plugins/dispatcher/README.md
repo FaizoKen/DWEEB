@@ -25,7 +25,7 @@ sent: no Discord API call, no plugin, no forward hop.
 | `/dashboard` | slash | Link to `DASHBOARD_URL`. |
 | **Edit in DWEEB** | message menu | Share link opening the editor pre-loaded with the message. The resolved payload from the interaction is re-encoded into the same `#s=<version>.<lz-string>` token `encodeShare` emits (`src/core/serialization`), so the deployed frontend needs no changes — and the message rides the URL fragment, which never reaches a server. Legacy messages are converted to Components V2 so *any* message opens editable: `content` becomes a leading Text Display, rich embeds become Containers (color → accent, title/description/fields → text, thumbnail → section accessory, image → gallery; lossy, and noted in the reply), and image/video attachments become a Media Gallery. Auto-generated link previews are skipped — they regenerate from the text. |
 | **Export JSON** | message menu | The postable wire JSON in a code block; falls back to an editor link when it outgrows the 2000/4000-char reply budget. |
-| **Make Permanent** | message menu | Toggles one of the guild's permanent slots on the message (see below). Gated to **Manage Server** — both at registration (`default_member_permissions`) and re-checked here against `member.permissions`. |
+| **Message Info** | message menu | Everything the interaction payload says about the message: author (user / bot / webhook), sent + edited timestamps, channel and message ids, payload shape (content size, component / embed / attachment counts), flags (V2, silent, pinned), and its component-expiry status — expires when, already expired, or permanent including *who* granted the slot and when. **Manage Server** holders also get the permanent-slot toggle as a button on the reply (custom_id `dweeb:perm:…`, answered inline here too; the permission is re-checked on click). The pre-rename name **Make Permanent** is still answered as an alias. |
 | **Use as Webhook Identity** | user menu | Editor link with the webhook username/avatar prefilled from the member (nickname + guild avatar first). |
 
 Register the set once (global commands take up to an hour to propagate):
@@ -48,7 +48,10 @@ One entry in the `ROUTES` env var (see `server/compose.yml`):
 ```
 
 Longest prefix wins. Nothing else here changes; the public endpoint URL
-(`https://interactions.dweeb.faizo.net`) is stable forever.
+(`https://interactions.dweeb.faizo.net`) is stable forever. One prefix is
+reserved: `dweeb:` belongs to the dispatcher's own components (the Message
+Info toggle button), answered inline ahead of the routing — no plugin
+manifest may claim it.
 
 Removing a plugin needs no cleanup either: a click on a component whose
 prefix matches no route is answered with an `UPDATE_MESSAGE` that disables
@@ -90,11 +93,12 @@ Each guild gets `PERMANENT_SLOTS_PER_GUILD` exemptions, managed two ways:
 from the **dashboard** (the pre-send confirmation offers *Make permanent* on
 messages with plugin components, and the account menu's *Managed messages*
 dialog lists the occupying messages so slots can be freed), or by a **Manage
-Server** holder right-clicking the message in Discord → Apps → **Make
-Permanent** — the same command run on an already-permanent message releases
-its slot. The command path is served inline here (the interaction carries
-the guild, message, channel, and the invoker's computed permissions — all
-the `/permanent` API needs) against the same SQLite store.
+Server** holder right-clicking the message in Discord → Apps → **Message
+Info** and clicking the toggle button on the reply — the same button on an
+already-permanent message releases its slot. That path is served inline here
+(the interaction carries the guild, channel + message ids, and the invoker's
+computed permissions — all the `/permanent` API needs) against the same
+SQLite store.
 
 The authorization chain: browser → **proxy** (Discord login; the user must
 manage the guild) → **this service's `/permanent` API** (bearer

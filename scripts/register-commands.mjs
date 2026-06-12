@@ -31,7 +31,6 @@ const USER = 2; // right-click a user → Apps
 const MESSAGE = 3; // right-click a message → Apps
 const GUILD_INSTALL = 0; // integration_types
 const GUILD_CONTEXT = 0; // contexts: usable in servers only
-const MANAGE_GUILD = "32"; // default_member_permissions
 
 const commands = [
   {
@@ -58,12 +57,11 @@ const commands = [
     contexts: [GUILD_CONTEXT],
   },
   {
-    // Toggles one of the guild's TTL-exemption slots on the message.
-    // Visible to Manage Server holders by default; the dispatcher
-    // re-checks the permission server-side either way.
-    name: "Make Permanent",
+    // Ephemeral rundown of the message — author, timestamps, ids, and its
+    // component-expiry status — plus a permanent-slot toggle button for
+    // Manage Server holders (the permission is re-checked on click).
+    name: "Message Info",
     type: MESSAGE,
-    default_member_permissions: MANAGE_GUILD,
     integration_types: [GUILD_INSTALL],
     contexts: [GUILD_CONTEXT],
   },

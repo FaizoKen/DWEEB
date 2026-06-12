@@ -505,7 +505,6 @@ fn command_set() -> Value {
     const MESSAGE: u8 = 3;
     const GUILD_INSTALL: u8 = 0;
     const GUILD_CONTEXT: u8 = 0;
-    const MANAGE_GUILD_BITS: &str = "32";
     serde_json::json!([
         {
             "name": "dashboard",
@@ -527,9 +526,8 @@ fn command_set() -> Value {
             "contexts": [GUILD_CONTEXT],
         },
         {
-            "name": "Make Permanent",
+            "name": "Message Info",
             "type": MESSAGE,
-            "default_member_permissions": MANAGE_GUILD_BITS,
             "integration_types": [GUILD_INSTALL],
             "contexts": [GUILD_CONTEXT],
         },
