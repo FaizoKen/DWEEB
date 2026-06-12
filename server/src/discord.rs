@@ -289,6 +289,70 @@ impl Discord {
         resp.json::<OauthMe>().await.ok()?.application.name
     }
 
+    /// Best-effort: install the DWEEB application-command set on an app using
+    /// its own credentials. Run for custom apps at registration so their bot
+    /// gets the same right-click menus as the main app (the dispatcher
+    /// answers them regardless of which app the interaction arrives under).
+    /// `false` on any failure; callers never block on this.
+    pub async fn install_commands_via_secret(&self, client_id: &str, client_secret: &str) -> bool {
+        self.put_commands_via_secret(client_id, client_secret, &command_set())
+            .await
+    }
+
+    /// Best-effort: clear an app's command set when it is unregistered, so
+    /// its context menus don't dangle once the dispatcher stops serving it.
+    pub async fn clear_commands_via_secret(&self, client_id: &str, client_secret: &str) -> bool {
+        self.put_commands_via_secret(client_id, client_secret, &serde_json::json!([]))
+            .await
+    }
+
+    /// PUT an app's full global command list using its own credentials: a
+    /// client-credentials grant with the `applications.commands.update`
+    /// scope, then `PUT /applications/{id}/commands` with the Bearer token —
+    /// no bot token involved, exactly what the stored client secret allows.
+    async fn put_commands_via_secret(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        commands: &Value,
+    ) -> bool {
+        #[derive(Deserialize)]
+        struct Grant {
+            access_token: String,
+        }
+        let Ok(resp) = self
+            .http
+            .post(format!("{API_BASE}/oauth2/token"))
+            .form(&[
+                ("client_id", client_id),
+                ("client_secret", client_secret),
+                ("grant_type", "client_credentials"),
+                ("scope", "applications.commands.update"),
+            ])
+            .send()
+            .await
+        else {
+            return false;
+        };
+        if !resp.status().is_success() {
+            return false;
+        }
+        let Ok(grant) = resp.json::<Grant>().await else {
+            return false;
+        };
+        let Ok(resp) = self
+            .http
+            .put(format!("{API_BASE}/applications/{client_id}/commands"))
+            .header(AUTHORIZATION, format!("Bearer {}", grant.access_token))
+            .json(commands)
+            .send()
+            .await
+        else {
+            return false;
+        };
+        resp.status().is_success()
+    }
+
     /// Every guild id the bot is a member of (paginated, 200 per page). Used to
     /// tell the user which of their servers are "ready" vs need the bot added.
     pub async fn bot_guild_ids(&self) -> Result<Vec<String>, AppError> {
@@ -428,6 +492,54 @@ impl Discord {
 
         Err(map_discord_error(status, message, retry_after, bearer))
     }
+}
+
+/// The application-command set every DWEEB-served app carries: the
+/// `/dashboard` slash command plus the right-click context-menu commands the
+/// dispatcher answers inline (plugins/dispatcher/src/commands.rs). Mirrors
+/// `scripts/register-commands.mjs` — the canonical copy, used for the main
+/// app — change both together.
+fn command_set() -> Value {
+    const CHAT_INPUT: u8 = 1;
+    const USER: u8 = 2;
+    const MESSAGE: u8 = 3;
+    const GUILD_INSTALL: u8 = 0;
+    const GUILD_CONTEXT: u8 = 0;
+    const MANAGE_GUILD_BITS: &str = "32";
+    serde_json::json!([
+        {
+            "name": "dashboard",
+            "description": "Get the link to the DWEEB dashboard.",
+            "type": CHAT_INPUT,
+            "integration_types": [GUILD_INSTALL],
+            "contexts": [GUILD_CONTEXT],
+        },
+        {
+            "name": "Edit in DWEEB",
+            "type": MESSAGE,
+            "integration_types": [GUILD_INSTALL],
+            "contexts": [GUILD_CONTEXT],
+        },
+        {
+            "name": "Export JSON",
+            "type": MESSAGE,
+            "integration_types": [GUILD_INSTALL],
+            "contexts": [GUILD_CONTEXT],
+        },
+        {
+            "name": "Make Permanent",
+            "type": MESSAGE,
+            "default_member_permissions": MANAGE_GUILD_BITS,
+            "integration_types": [GUILD_INSTALL],
+            "contexts": [GUILD_CONTEXT],
+        },
+        {
+            "name": "Use as Webhook Identity",
+            "type": USER,
+            "integration_types": [GUILD_INSTALL],
+            "contexts": [GUILD_CONTEXT],
+        },
+    ])
 }
 
 /// Translate Discord's status into something useful for the proxy's caller.

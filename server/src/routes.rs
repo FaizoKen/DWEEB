@@ -375,7 +375,29 @@ pub async fn custom_apps_add(
             // Recorded for audit; the session is the source of truth for who.
             "added_by": session.uid,
         }));
-    relay_dispatcher(req).await
+    let resp = relay_dispatcher(req).await?;
+    // Registered — give the app's bot the same command set the main app
+    // carries (the right-click menus the dispatcher answers inline). Done
+    // with the just-provided secret via a client-credentials grant, off the
+    // request path and best-effort: a failure only means that server lacks
+    // the menus, and re-registering retries it.
+    if resp.status() == StatusCode::OK {
+        if let Some(secret) = client_secret.map(str::to_string) {
+            let discord = st.discord.clone();
+            let app_id = application_id.clone();
+            tokio::spawn(async move {
+                if discord.install_commands_via_secret(&app_id, &secret).await {
+                    tracing::info!(application_id = %app_id, "installed command set on custom app");
+                } else {
+                    tracing::warn!(
+                        application_id = %app_id,
+                        "couldn't install commands on custom app (best-effort, skipped)"
+                    );
+                }
+            });
+        }
+    }
+    Ok(resp)
 }
 
 /// `DELETE /api/guilds/:id/custom-apps/:application_id` — unregister.
@@ -393,11 +415,55 @@ pub async fn custom_apps_remove(
         });
     }
     let api = dispatcher_api(&st)?;
+    // Read the sealed secret before the row disappears — it's what lets us
+    // clear the app's commands after unregistering. Best-effort throughout:
+    // no secret (or an unopenable one after a SESSION_SECRET rotation) just
+    // means the owner's old context menus dangle until they clear them.
+    let secret = match api
+        .http
+        .get(format!(
+            "{}/custom-apps/{guild}/{application_id}/secret",
+            api.base
+        ))
+        .bearer_auth(&api.token)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => resp
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| {
+                v.get("client_secret_enc")
+                    .and_then(|s| s.as_str())
+                    .map(String::from)
+            })
+            .filter(|sealed| !sealed.is_empty())
+            .and_then(|sealed| crate::seal::open(&st.key, &sealed)),
+        _ => None,
+    };
     let req = api
         .http
         .delete(format!("{}/custom-apps/{guild}/{application_id}", api.base))
         .bearer_auth(&api.token);
-    relay_dispatcher(req).await
+    let resp = relay_dispatcher(req).await?;
+    if resp.status() == StatusCode::OK {
+        if let Some(secret) = secret {
+            let discord = st.discord.clone();
+            let app_id = application_id.clone();
+            tokio::spawn(async move {
+                if discord.clear_commands_via_secret(&app_id, &secret).await {
+                    tracing::info!(application_id = %app_id, "cleared command set on unregistered app");
+                } else {
+                    tracing::warn!(
+                        application_id = %app_id,
+                        "couldn't clear commands on unregistered app (best-effort, skipped)"
+                    );
+                }
+            });
+        }
+    }
+    Ok(resp)
 }
 
 /// The dispatcher client, or a clear "not enabled here" for deployments that
