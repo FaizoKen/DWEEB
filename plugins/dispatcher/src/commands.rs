@@ -29,13 +29,21 @@ use crate::{ephemeral, App, FLAG_EPHEMERAL, RESPONSE_CHANNEL_MESSAGE};
 /// `IS_COMPONENTS_V2` — lets a reply carry a Text Display component, whose
 /// budget (4000 chars across the message) doubles plain `content`'s 2000.
 const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15;
+/// `SUPPRESS_NOTIFICATIONS` — the one wire flag the editor reads back (its
+/// silent-send toggle), so it's the only original bit worth carrying over.
+const FLAG_SUPPRESS_NOTIFICATIONS: u64 = 1 << 12;
 /// Discord's `MANAGE_GUILD` permission bit, for the permanent-slot toggle.
 /// (Registration also sets `default_member_permissions`, but that's a
 /// default server owners can override — this check is the real gate.)
 const MANAGE_GUILD: u128 = 1 << 5;
-/// Components V2 Text Display, used to lift a legacy message's `content`
-/// into the component tree the editor works on.
+// Components V2 types used when rebuilding a legacy message as a V2 tree.
+const TYPE_SECTION: u64 = 9;
 const TYPE_TEXT_DISPLAY: u64 = 10;
+const TYPE_THUMBNAIL: u64 = 11;
+const TYPE_MEDIA_GALLERY: u64 = 12;
+const TYPE_CONTAINER: u64 = 17;
+/// A media gallery holds at most this many items.
+const MAX_GALLERY_ITEMS: usize = 10;
 
 /// Version prefix of the share tokens we emit. Must track `CURRENT_VERSION`
 /// in src/core/serialization/version.ts — bump them together.
@@ -89,19 +97,21 @@ fn edit_in_dweeb(app: &App, interaction: &Value) -> Response {
     let Some(msg) = target_message(interaction) else {
         return ephemeral("Couldn't read the message from this interaction.");
     };
-    let payload = message_to_share_payload(msg);
-    if payload["components"].as_array().is_some_and(Vec::is_empty) {
-        return ephemeral(
-            "This message has no content or components the editor can work on \
-             (embeds aren't supported yet).",
-        );
-    }
+    let (payload, converted) = message_to_share_payload(msg);
     let url = editor_url(app, &payload);
-    let text = format!(
+    let mut text = format!(
         "\u{1F4DD} **[Open this message in the DWEEB editor](<{url}>)**\n\
          -# The message travels inside the link's #fragment — it never touches a server. \
          Opening it replaces your current editor draft (undoable)."
     );
+    if converted {
+        text.push_str(
+            "\n-# Embeds/attachments were converted to Components V2 — \
+             the layout is approximate, check the preview.",
+        );
+    } else if payload["components"].as_array().is_some_and(Vec::is_empty) {
+        text.push_str("\n-# Nothing in this message maps to the editor yet, so it opens empty.");
+    }
     reply_sized(text).unwrap_or_else(|| too_large(interaction))
 }
 
@@ -112,11 +122,14 @@ fn export_json(app: &App, interaction: &Value) -> Response {
     let Some(msg) = target_message(interaction) else {
         return ephemeral("Couldn't read the message from this interaction.");
     };
-    let payload = message_to_share_payload(msg);
+    let (payload, converted) = message_to_share_payload(msg);
     let pretty = serde_json::to_string_pretty(&payload).unwrap_or_default();
     // A ``` inside a JSON string would close our fence early; a zero-width
     // space breaks the run while staying invisible in the snippet.
-    let fenced = format!("```json\n{}\n```", pretty.replace("```", "`\u{200B}``"));
+    let mut fenced = format!("```json\n{}\n```", pretty.replace("```", "`\u{200B}``"));
+    if converted {
+        fenced.push_str("-# Embeds/attachments were converted to Components V2.");
+    }
     if let Some(response) = reply_sized(fenced) {
         return response;
     }
@@ -304,21 +317,66 @@ fn target_message(interaction: &Value) -> Option<&Value> {
 }
 
 /// Rebuild a resolved Discord message as the wire payload the editor imports
-/// (the same shape its own Restore flow feeds `attachEditorFields`):
-/// components pass through untouched; a legacy `content` becomes a leading
-/// Text Display so plain-text messages open editable too; the author maps to
-/// the webhook username/avatar fields; `flags` rides along so the silent-send
-/// toggle round-trips. Everything else (embeds, reactions, …) is dropped.
-fn message_to_share_payload(msg: &Value) -> Value {
-    let mut components = msg
-        .get("components")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+/// (the same shape its own Restore flow feeds `attachEditorFields`). V2
+/// components pass through untouched; everything legacy is *converted* so
+/// any message opens editable: `content` becomes a leading Text Display,
+/// rich embeds become Containers ([`embed_to_container`]), and image/video
+/// attachments become a Media Gallery. The author maps to the webhook
+/// username/avatar fields, and the emitted `flags` are recomputed the way
+/// the editor's own exporter does — `IS_COMPONENTS_V2` plus the original
+/// `SUPPRESS_NOTIFICATIONS` bit — so the Export JSON output is postable
+/// as-is. The bool is true when an embed or attachment was converted
+/// (lossy), so callers can say so.
+fn message_to_share_payload(msg: &Value) -> (Value, bool) {
+    let mut components = Vec::new();
+    let mut converted = false;
+
+    // Discord renders content above embeds/attachments, with the (legacy
+    // action-row) components last — keep that order in the rebuilt tree.
     if let Some(content) = msg.get("content").and_then(Value::as_str) {
         if !content.is_empty() {
-            components.insert(0, json!({ "type": TYPE_TEXT_DISPLAY, "content": content }));
+            components.push(json!({ "type": TYPE_TEXT_DISPLAY, "content": content }));
         }
+    }
+    for embed in msg
+        .get("embeds")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        // Only author-built "rich" embeds convert. The other types (link,
+        // video, image, …) are URL previews Discord generated from the
+        // content — converting them would duplicate what the content
+        // already produces, and they re-render from the text anyway.
+        let kind = embed.get("type").and_then(Value::as_str).unwrap_or("rich");
+        if kind != "rich" {
+            continue;
+        }
+        if let Some(container) = embed_to_container(embed) {
+            components.push(container);
+            converted = true;
+        }
+    }
+    let media_items: Vec<Value> = msg
+        .get("attachments")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|a| {
+            a.get("content_type")
+                .and_then(Value::as_str)
+                .is_some_and(|ct| ct.starts_with("image/") || ct.starts_with("video/"))
+        })
+        .filter_map(|a| a.get("url").and_then(Value::as_str))
+        .take(MAX_GALLERY_ITEMS)
+        .map(|url| json!({ "media": { "url": url } }))
+        .collect();
+    if !media_items.is_empty() {
+        components.push(json!({ "type": TYPE_MEDIA_GALLERY, "items": media_items }));
+        converted = true;
+    }
+    if let Some(existing) = msg.get("components").and_then(Value::as_array) {
+        components.extend(existing.iter().cloned());
     }
 
     let mut payload = Map::new();
@@ -338,11 +396,103 @@ fn message_to_share_payload(msg: &Value) -> Value {
             )),
         );
     }
-    if let Some(flags) = msg.get("flags").and_then(Value::as_u64) {
-        payload.insert("flags".into(), json!(flags));
-    }
+    let original_flags = msg.get("flags").and_then(Value::as_u64).unwrap_or(0);
+    payload.insert(
+        "flags".into(),
+        json!(FLAG_IS_COMPONENTS_V2 | (original_flags & FLAG_SUPPRESS_NOTIFICATIONS)),
+    );
     payload.insert("components".into(), Value::Array(components));
-    Value::Object(payload)
+    (Value::Object(payload), converted)
+}
+
+/// A rich embed, rebuilt as the closest Components V2 Container. Lossy by
+/// nature: inline field columns flatten to stacked text, the author's icon
+/// and the timestamp have no V2 counterpart. The mapping —
+///
+///   color        → container accent_color
+///   author.name  → `-# name` subtext (linked when author.url is set)
+///   title        → `### title` heading (linked when embed.url is set)
+///   description  → text as-is
+///   fields       → one text block of `**name**` / value pairs
+///   thumbnail    → Section accessory on the leading text
+///   image        → Media Gallery
+///   footer.text  → `-# text` subtext
+///
+/// `None` when nothing in the embed maps (then it isn't "converted" either).
+fn embed_to_container(embed: &Value) -> Option<Value> {
+    let text_at = |ptr: &str| {
+        embed
+            .pointer(ptr)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+
+    let mut texts = Vec::new();
+    if let Some(author) = text_at("/author/name") {
+        texts.push(match text_at("/author/url") {
+            Some(url) => format!("-# [{author}]({url})"),
+            None => format!("-# {author}"),
+        });
+    }
+    if let Some(title) = text_at("/title") {
+        texts.push(match text_at("/url") {
+            Some(url) => format!("### [{title}]({url})"),
+            None => format!("### {title}"),
+        });
+    }
+    if let Some(description) = text_at("/description") {
+        texts.push(description.to_string());
+    }
+    let fields: Vec<String> = embed
+        .get("fields")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|f| {
+            let name = f.get("name").and_then(Value::as_str).unwrap_or_default();
+            let value = f.get("value").and_then(Value::as_str).unwrap_or_default();
+            (!name.is_empty() || !value.is_empty()).then(|| format!("**{name}**\n{value}"))
+        })
+        .collect();
+    if !fields.is_empty() {
+        texts.push(fields.join("\n\n"));
+    }
+    if let Some(footer) = text_at("/footer/text") {
+        texts.push(format!("-# {footer}"));
+    }
+
+    let mut children = Vec::new();
+    let mut texts = texts.into_iter();
+    // The thumbnail sits beside the embed's leading text, which is exactly
+    // what a Section with a Thumbnail accessory is. (A thumbnail on an
+    // embed with no text at all has nothing to anchor to and is dropped.)
+    if let Some(thumb) = text_at("/thumbnail/url") {
+        if let Some(first) = texts.next() {
+            children.push(json!({
+                "type": TYPE_SECTION,
+                "components": [{ "type": TYPE_TEXT_DISPLAY, "content": first }],
+                "accessory": { "type": TYPE_THUMBNAIL, "media": { "url": thumb } },
+            }));
+        }
+    }
+    children.extend(texts.map(|t| json!({ "type": TYPE_TEXT_DISPLAY, "content": t })));
+    if let Some(image) = text_at("/image/url") {
+        children.push(json!({
+            "type": TYPE_MEDIA_GALLERY,
+            "items": [{ "media": { "url": image } }],
+        }));
+    }
+    if children.is_empty() {
+        return None;
+    }
+
+    let mut container = Map::new();
+    container.insert("type".into(), json!(TYPE_CONTAINER));
+    if let Some(color) = embed.get("color").and_then(Value::as_u64) {
+        container.insert("accent_color".into(), json!(color));
+    }
+    container.insert("components".into(), Value::Array(children));
+    Some(Value::Object(container))
 }
 
 /// `<dashboard>/#s=<token>` — the editor's share-URL entrypoint.
@@ -473,18 +623,114 @@ mod tests {
                 { "type": 2, "style": 1, "label": "Go", "custom_id": "pingpong:go" }
             ]}],
         });
-        let payload = message_to_share_payload(&msg);
+        let (payload, converted) = message_to_share_payload(&msg);
         assert_eq!(payload["username"], "My Hook");
         assert_eq!(
             payload["avatar_url"],
             "https://cdn.discordapp.com/avatars/42/abc123.png"
         );
-        assert_eq!(payload["flags"], 4096);
+        // Flags are recomputed like the editor's exporter: IS_COMPONENTS_V2
+        // plus the original suppress-notifications bit.
+        assert_eq!(payload["flags"], 4096 | 32768);
+        // Lifting content isn't a lossy conversion — no notice for it.
+        assert!(!converted);
         let components = payload["components"].as_array().unwrap();
         // content lifted into a leading Text Display, original row preserved.
         assert_eq!(components.len(), 2);
         assert_eq!(components[0]["type"], 10);
         assert_eq!(components[0]["content"], "legacy text");
         assert_eq!(components[1]["type"], 1);
+    }
+
+    #[test]
+    fn rich_embed_becomes_container() {
+        let msg = json!({
+            "id": "1",
+            "flags": 0,
+            "embeds": [{
+                "type": "rich",
+                "color": 5793266,
+                "url": "https://example.com",
+                "title": "Patch Notes",
+                "description": "All the changes.",
+                "author": { "name": "Release Bot" },
+                "footer": { "text": "v1.2.3" },
+                "thumbnail": { "url": "https://cdn.example.com/thumb.png" },
+                "image": { "url": "https://cdn.example.com/banner.png" },
+                "fields": [
+                    { "name": "Fixed", "value": "the bug", "inline": true },
+                    { "name": "Added", "value": "a thing", "inline": false },
+                ],
+            }],
+        });
+        let (payload, converted) = message_to_share_payload(&msg);
+        assert!(converted);
+        assert_eq!(payload["flags"], 32768);
+        let components = payload["components"].as_array().unwrap();
+        assert_eq!(components.len(), 1);
+        let container = &components[0];
+        assert_eq!(container["type"], 17);
+        assert_eq!(container["accent_color"], 5793266);
+        let children = container["components"].as_array().unwrap();
+        // Section (author line + thumbnail), title, description, fields,
+        // footer, image gallery.
+        assert_eq!(children[0]["type"], 9);
+        assert_eq!(
+            children[0]["accessory"]["media"]["url"],
+            "https://cdn.example.com/thumb.png"
+        );
+        assert_eq!(children[0]["components"][0]["content"], "-# Release Bot");
+        assert_eq!(
+            children[1]["content"],
+            "### [Patch Notes](https://example.com)"
+        );
+        assert_eq!(children[2]["content"], "All the changes.");
+        assert_eq!(
+            children[3]["content"],
+            "**Fixed**\nthe bug\n\n**Added**\na thing"
+        );
+        assert_eq!(children[4]["content"], "-# v1.2.3");
+        assert_eq!(children[5]["type"], 12);
+        assert_eq!(
+            children[5]["items"][0]["media"]["url"],
+            "https://cdn.example.com/banner.png"
+        );
+    }
+
+    #[test]
+    fn link_preview_embeds_are_skipped() {
+        let msg = json!({
+            "id": "1",
+            "content": "https://youtu.be/x",
+            "embeds": [{ "type": "video", "title": "Some Video", "url": "https://youtu.be/x" }],
+        });
+        let (payload, converted) = message_to_share_payload(&msg);
+        // The preview regenerates from the content; converting it would
+        // duplicate it.
+        assert!(!converted);
+        assert_eq!(payload["components"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn media_attachments_become_gallery_and_empty_is_allowed() {
+        let msg = json!({
+            "id": "1",
+            "attachments": [
+                { "url": "https://cdn.example.com/a.png", "content_type": "image/png" },
+                { "url": "https://cdn.example.com/b.pdf", "content_type": "application/pdf" },
+            ],
+        });
+        let (payload, converted) = message_to_share_payload(&msg);
+        assert!(converted);
+        let components = payload["components"].as_array().unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0]["type"], 12);
+        assert_eq!(components[0]["items"].as_array().unwrap().len(), 1);
+
+        // A message with nothing mappable still produces a valid (empty)
+        // payload — the editor opens empty instead of the command failing.
+        let (payload, converted) = message_to_share_payload(&json!({ "id": "1" }));
+        assert!(!converted);
+        assert!(payload["components"].as_array().unwrap().is_empty());
     }
 }
