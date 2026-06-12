@@ -31,7 +31,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Map, Value};
 
-use crate::{ephemeral, App, FLAG_EPHEMERAL, RESPONSE_CHANNEL_MESSAGE};
+use crate::store::PermanentDetails;
+use crate::{ephemeral, App, FLAG_EPHEMERAL, RESPONSE_CHANNEL_MESSAGE, RESPONSE_UPDATE_MESSAGE};
 
 /// `IS_COMPONENTS_V2` — lets a reply carry a Text Display component, whose
 /// budget (4000 chars across the message) doubles plain `content`'s 2000.
@@ -270,39 +271,13 @@ fn message_info(app: &App, interaction: &Value) -> Response {
         lines.push(format!("**Flags:** {}", marks.join(" · ")));
     }
 
-    // Expiry status, in the order the TTL gate would decide it: a permanent
-    // grant trumps everything (it occupies a slot even on a deployment that
-    // later disabled the TTL), then the deployment setting, then the clock.
     let permanent = app.store.permanent_details(message_id);
-    lines.push(match (&permanent, app.component_ttl_ms) {
-        (Some(details), _) => format!(
-            "**Expiry:** \u{1F512} permanent — components never expire. \
-             Slot granted by <@{}> <t:{}:R>.",
-            details.added_by,
-            details.added_at / 1000
-        ),
-        (None, None) => "**Expiry:** components never expire on this deployment.".into(),
-        (None, Some(_)) if interactive == 0 => {
-            "**Expiry:** no interactive components — nothing here expires.".into()
-        }
-        (None, Some(ttl_ms)) => match snowflake_ms(message_id) {
-            Some(sent_ms) => {
-                let expires = (sent_ms + ttl_ms) / 1000;
-                if now_ms() > sent_ms + ttl_ms {
-                    format!(
-                        "**Expiry:** \u{231B} interactive components **expired** <t:{expires}:R> \
-                         — each click now just disables its component."
-                    )
-                } else {
-                    format!(
-                        "**Expiry:** \u{23F3} interactive components expire \
-                         <t:{expires}:f> (<t:{expires}:R>)."
-                    )
-                }
-            }
-            None => "**Expiry:** unknown.".into(),
-        },
-    });
+    lines.push(expiry_line(
+        app,
+        message_id,
+        interactive,
+        permanent.as_ref(),
+    ));
 
     // Slot usage + the toggle button, for guilds on a TTL'd deployment. The
     // button renders only for Manage Server holders ([`toggle_permanent`]
@@ -312,11 +287,7 @@ fn message_info(app: &App, interaction: &Value) -> Response {
     let mut button = None;
     if let (Some(guild_id), Some(_)) = (guild_id, app.component_ttl_ms) {
         if let Ok(rows) = app.store.list(guild_id) {
-            lines.push(format!(
-                "-# {}/{} permanent slots used in this server.",
-                rows.len(),
-                app.permanent_slots
-            ));
+            lines.push(slots_line(rows.len(), app.permanent_slots));
         }
         let permissions: u128 = interaction
             .pointer("/member/permissions")
@@ -325,23 +296,7 @@ fn message_info(app: &App, interaction: &Value) -> Response {
             .unwrap_or(0);
         if permissions & MANAGE_GUILD != 0 && !message_id.is_empty() && !channel_id.is_empty() {
             let custom_id = format!("{PERM_TOGGLE_PREFIX}{channel_id}:{message_id}");
-            button = match &permanent {
-                Some(details) if details.guild_id == guild_id => Some(json!({
-                    "type": TYPE_BUTTON,
-                    "style": BUTTON_DANGER,
-                    "label": "Release Permanent Slot",
-                    "custom_id": custom_id,
-                })),
-                // Another guild's slot — not ours to release.
-                Some(_) => None,
-                None if interactive > 0 => Some(json!({
-                    "type": TYPE_BUTTON,
-                    "style": BUTTON_PRIMARY,
-                    "label": "Make Permanent",
-                    "custom_id": custom_id,
-                })),
-                None => None,
-            };
+            button = toggle_button(guild_id, permanent.as_ref(), interactive, &custom_id);
         }
     }
 
@@ -368,9 +323,11 @@ fn message_info(app: &App, interaction: &Value) -> Response {
 /// Answer a click on one of the dispatcher's OWN components — custom_ids
 /// under [`CUSTOM_ID_PREFIX`], intercepted by main.rs ahead of the plugin
 /// routing. Today that is exactly one button: the permanent-slot toggle on a
-/// "Message Info" reply. The answer is a fresh ephemeral confirmation; the
-/// info reply keeps its button, and every click re-reads the store, so the
-/// button keeps toggling truthfully even when its label has gone stale.
+/// "Message Info" reply. A successful toggle answers with UPDATE_MESSAGE,
+/// rewriting the info reply in place ([`refresh_info_reply`]) instead of
+/// stacking a confirmation under it; the new expiry line, slot count, and
+/// button label all come from a fresh store read, so the reply stays
+/// truthful even when the click raced another toggle.
 pub fn component(app: &App, interaction: &Value) -> Response {
     let custom_id = interaction
         .pointer("/data/custom_id")
@@ -388,7 +345,9 @@ pub fn component(app: &App, interaction: &Value) -> Response {
 
 /// Spend one of the guild's TTL-exemption slots on the message — or give it
 /// back when the message already holds one. The toggle runs against the same
-/// SQLite store the TTL gate consults, in-process.
+/// SQLite store the TTL gate consults, in-process. Success refreshes the
+/// info reply itself; only the can't-toggle cases (no permission, full,
+/// another guild's slot, storage trouble) get a separate ephemeral note.
 fn toggle_permanent(
     app: &App,
     interaction: &Value,
@@ -410,27 +369,22 @@ fn toggle_permanent(
             "You need the **Manage Server** permission to manage permanent messages.",
         );
     }
-    let Some(ttl_ms) = app.component_ttl_ms else {
+    if app.component_ttl_ms.is_none() {
         return ephemeral(
             "Components never expire on this deployment — every message is already permanent.",
         );
-    };
+    }
     // The ids come from the custom_id, not the (signed) payload — shape-check
     // them like the /permanent API does before they touch the store.
     if !crate::is_snowflake(message_id) || !crate::is_snowflake(channel_id) {
         return ephemeral("This button isn't wired to anything.");
     }
-    let ttl_days = ttl_ms / 86_400_000;
 
     if app.store.is_permanent(message_id) {
         // Guild-scoped remove: a permanent message of another guild is
         // unreachable from here, exactly like the dashboard path.
         return match app.store.remove(guild_id, message_id) {
-            Ok(true) => ephemeral(&format!(
-                "\u{1F513} Released — this message's components now expire {ttl_days} days \
-                 after it was sent, like any other.{}",
-                usage_suffix(app, guild_id)
-            )),
+            Ok(true) => refresh_info_reply(app, interaction, guild_id, message_id),
             Ok(false) => ephemeral("That message's permanent slot belongs to another server."),
             Err(err) => storage_error(err),
         };
@@ -448,12 +402,9 @@ fn toggle_permanent(
         app.permanent_slots,
     ) {
         // `Already` only happens on a toggle race; report it as the success it is.
-        Ok(crate::store::Add::Added) | Ok(crate::store::Add::Already) => ephemeral(&format!(
-            "\u{1F512} Permanent — this message's components never expire \
-             (others expire after {ttl_days} days). Click the button again to release \
-             the slot.{}",
-            usage_suffix(app, guild_id)
-        )),
+        Ok(crate::store::Add::Added) | Ok(crate::store::Add::Already) => {
+            refresh_info_reply(app, interaction, guild_id, message_id)
+        }
         Ok(crate::store::Add::Full) => ephemeral(&format!(
             "Every permanent slot is taken.{} Release one from a permanent message's \
              **Message Info** button, or from the dashboard's *Managed messages*.",
@@ -461,6 +412,84 @@ fn toggle_permanent(
         )),
         Err(err) => storage_error(err),
     }
+}
+
+/// Rewrite the "Message Info" reply the clicked toggle sits on, as the
+/// UPDATE_MESSAGE answer to the click. Only what the toggle changed is
+/// patched — the **Expiry:** line, the slots-used line, and the button —
+/// each rebuilt from a fresh store read; the rest of the text (author,
+/// timestamps, payload shape) survives verbatim, since a component
+/// interaction doesn't carry the resolved target message it was built from.
+fn refresh_info_reply(
+    app: &App,
+    interaction: &Value,
+    guild_id: &str,
+    message_id: &str,
+) -> Response {
+    let permanent = app.store.permanent_details(message_id);
+    // A component interaction carries the message it sits on; if its content
+    // is somehow missing, confirm plainly rather than failing the click.
+    let Some(content) = interaction
+        .pointer("/message/content")
+        .and_then(Value::as_str)
+    else {
+        return ephemeral(&format!(
+            "{}{}",
+            if permanent.is_some() {
+                "\u{1F512} This message is now permanent."
+            } else {
+                "\u{1F513} Permanent slot released."
+            },
+            usage_suffix(app, guild_id)
+        ));
+    };
+    let interactive = interactive_from_content(content);
+    let expiry = expiry_line(app, message_id, interactive, permanent.as_ref());
+    let slots = app
+        .store
+        .list(guild_id)
+        .map(|rows| slots_line(rows.len(), app.permanent_slots))
+        .ok();
+    let content: Vec<&str> = content
+        .lines()
+        .map(|line| {
+            if line.starts_with("**Expiry:**") {
+                expiry.as_str()
+            } else if line.ends_with("permanent slots used in this server.") {
+                slots.as_deref().unwrap_or(line)
+            } else {
+                line
+            }
+        })
+        .collect();
+    let custom_id = interaction
+        .pointer("/data/custom_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let components = match toggle_button(guild_id, permanent.as_ref(), interactive, custom_id) {
+        Some(b) => json!([{ "type": TYPE_ACTION_ROW, "components": [b] }]),
+        None => json!([]),
+    };
+    Json(json!({
+        "type": RESPONSE_UPDATE_MESSAGE,
+        "data": { "content": content.join("\n"), "components": components }
+    }))
+    .into_response()
+}
+
+/// The interactive-component count, recovered from the info reply's own
+/// `**Payload:** … (N interactive) …` line — it only decides which button
+/// (if any) the refreshed reply gets. No match means [`message_info`]
+/// counted zero when it built the reply.
+fn interactive_from_content(content: &str) -> usize {
+    content
+        .lines()
+        .find_map(|line| line.strip_prefix("**Payload:**"))
+        .and_then(|line| {
+            let head = &line[..line.find(" interactive)")?];
+            head[head.rfind('(')? + 1..].parse().ok()
+        })
+        .unwrap_or(0)
 }
 
 // ── User command ─────────────────────────────────────────────────────────────
@@ -537,6 +566,82 @@ fn webhook_identity(app: &App, interaction: &Value) -> Response {
 }
 
 // ── Message Info plumbing ────────────────────────────────────────────────────
+
+/// The `**Expiry:**` line, in the order the TTL gate would decide it: a
+/// permanent grant trumps everything (it occupies a slot even on a
+/// deployment that later disabled the TTL), then the deployment setting,
+/// then the clock. Shared by the initial reply and the post-toggle refresh.
+fn expiry_line(
+    app: &App,
+    message_id: &str,
+    interactive: usize,
+    permanent: Option<&PermanentDetails>,
+) -> String {
+    match (permanent, app.component_ttl_ms) {
+        (Some(details), _) => format!(
+            "**Expiry:** \u{1F512} permanent — components never expire. \
+             Slot granted by <@{}> <t:{}:R>.",
+            details.added_by,
+            details.added_at / 1000
+        ),
+        (None, None) => "**Expiry:** components never expire on this deployment.".into(),
+        (None, Some(_)) if interactive == 0 => {
+            "**Expiry:** no interactive components — nothing here expires.".into()
+        }
+        (None, Some(ttl_ms)) => match snowflake_ms(message_id) {
+            Some(sent_ms) => {
+                let expires = (sent_ms + ttl_ms) / 1000;
+                if now_ms() > sent_ms + ttl_ms {
+                    format!(
+                        "**Expiry:** \u{231B} interactive components **expired** <t:{expires}:R> \
+                         — each click now just disables its component."
+                    )
+                } else {
+                    format!(
+                        "**Expiry:** \u{23F3} interactive components expire \
+                         <t:{expires}:f> (<t:{expires}:R>)."
+                    )
+                }
+            }
+            None => "**Expiry:** unknown.".into(),
+        },
+    }
+}
+
+/// The slots-used subtext. [`refresh_info_reply`] finds this line again by
+/// its tail — keep the wording in sync with the match there.
+fn slots_line(used: usize, total: u32) -> String {
+    format!("-# {used}/{total} permanent slots used in this server.")
+}
+
+/// The permanent-slot toggle button matching the store's current state, or
+/// `None` when there is nothing for this guild to toggle: another guild owns
+/// the slot, or no slot is held and nothing interactive would outlive the
+/// TTL. The caller has already checked Manage Server and the deployment TTL.
+fn toggle_button(
+    guild_id: &str,
+    permanent: Option<&PermanentDetails>,
+    interactive: usize,
+    custom_id: &str,
+) -> Option<Value> {
+    match permanent {
+        Some(details) if details.guild_id == guild_id => Some(json!({
+            "type": TYPE_BUTTON,
+            "style": BUTTON_DANGER,
+            "label": "Release Permanent Slot",
+            "custom_id": custom_id,
+        })),
+        // Another guild's slot — not ours to release.
+        Some(_) => None,
+        None if interactive > 0 => Some(json!({
+            "type": TYPE_BUTTON,
+            "style": BUTTON_PRIMARY,
+            "label": "Make Permanent",
+            "custom_id": custom_id,
+        })),
+        None => None,
+    }
+}
 
 /// When a message was sent, in unix milliseconds, from its snowflake id.
 fn snowflake_ms(id: &str) -> Option<u64> {
@@ -1030,6 +1135,19 @@ mod tests {
         // The two custom_id holders count; the link button and text don't.
         assert_eq!(count_interactive(&components), 2);
         assert_eq!(count_interactive(&Value::Null), 0);
+    }
+
+    #[test]
+    fn interactive_count_recovers_from_payload_line() {
+        let content = "### Message Info\n\
+                       **Author:** someone\n\
+                       **Payload:** 12 chars of content · \
+                       2 top-level components (3 interactive) · 1 embed\n\
+                       **Expiry:** \u{23F3} interactive components expire soon.";
+        assert_eq!(interactive_from_content(content), 3);
+        // No components on the message → no "(N interactive)" in the line.
+        assert_eq!(interactive_from_content("**Payload:** empty"), 0);
+        assert_eq!(interactive_from_content("no payload line at all"), 0);
     }
 
     #[test]
