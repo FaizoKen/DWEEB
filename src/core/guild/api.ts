@@ -265,7 +265,8 @@ export async function removePermanentMessage(
 /** One registered custom app. */
 export interface CustomBotItem {
   application_id: string;
-  /** Display name the registrant gave it; may be empty. */
+  /** The app's name, resolved from Discord at registration; empty when the
+   *  lookup didn't pan out (an update retries it). */
   name: string;
   /** Unix millis when it was registered. */
   added_at: number;
@@ -300,16 +301,16 @@ export async function fetchCustomBots(guildId: string, signal?: AbortSignal): Pr
 }
 
 /** `POST /api/guilds/:id/custom-apps` — register the server's own app.
- *  The client secret is sealed server-side at rest and never returned; it's
- *  what makes webhook creation from this bot a single click later.
- *  Re-registering the same app updates key/name/secret in place (the fix
+ *  The display name isn't sent: the server fetches the app's real name from
+ *  Discord. The client secret is sealed server-side at rest and never
+ *  returned; it's what makes webhook creation from this bot a single click
+ *  later. Re-registering the same app updates key/secret in place (the fix
  *  path for a mistyped value) without spending a new quota slot. */
 export async function addCustomBot(
   guildId: string,
   applicationId: string,
   publicKey: string,
   clientSecret: string,
-  name?: string,
 ): Promise<CustomBotAddResult> {
   let res: Response;
   try {
@@ -321,7 +322,6 @@ export async function addCustomBot(
         application_id: applicationId.trim(),
         public_key: publicKey.trim(),
         client_secret: clientSecret.trim(),
-        name: name?.trim() ?? "",
       }),
     });
   } catch {

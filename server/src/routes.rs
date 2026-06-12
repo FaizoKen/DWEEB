@@ -258,8 +258,6 @@ pub async fn permanent_remove(
 pub struct CustomAppAddBody {
     pub application_id: String,
     pub public_key: String,
-    #[serde(default)]
-    pub name: Option<String>,
     /// The app's OAuth client secret, asked for at registration so "create a
     /// webhook from this bot" is one click later. Sealed (AES-GCM under the
     /// proxy's key) before it leaves this process; the dispatcher stores only
@@ -283,9 +281,11 @@ pub async fn custom_apps_list(
     relay_dispatcher(req).await
 }
 
-/// `POST /api/guilds/:id/custom-apps` `{ application_id, public_key, name? }`
-/// — register the guild's own app. 409 with `error: quota_full | app_taken`
-/// when it can't be granted.
+/// `POST /api/guilds/:id/custom-apps` `{ application_id, public_key,
+/// client_secret? }` — register the guild's own app. The display name is not
+/// part of the request: it's resolved from Discord here, so it's the app's
+/// real name. 409 with `error: quota_full | app_taken` when it can't be
+/// granted.
 pub async fn custom_apps_add(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
@@ -321,8 +321,13 @@ pub async fn custom_apps_add(
     // Seal the client secret before it leaves this process. Optional at the
     // API level — without it the app still gets its interactions served, but
     // the dashboard can't offer one-click webhook creation for it.
-    let client_secret_enc = match body.client_secret.as_deref().map(str::trim) {
-        None | Some("") => String::new(),
+    let client_secret = body
+        .client_secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let client_secret_enc = match client_secret {
+        None => String::new(),
         Some(secret) => {
             if secret.len() < 16
                 || secret.len() > 128
@@ -338,8 +343,26 @@ pub async fn custom_apps_add(
                 .ok_or_else(|| AppError::Internal("couldn't seal the client secret".into()))?
         }
     };
-    let name = body.name.unwrap_or_default();
     let api = dispatcher_api(&st)?;
+    // Nobody types the name — it's resolved from Discord, best-effort. The
+    // public lookup covers nearly every app; the few that 404 there get a
+    // second chance through the just-provided client secret. Failing both
+    // never blocks registration: an empty name makes the UI show the
+    // application id, and an Update retries the lookup.
+    let mut name = st
+        .discord
+        .application_name(&application_id)
+        .await
+        .unwrap_or_default();
+    if name.is_empty() {
+        if let Some(secret) = client_secret {
+            name = st
+                .discord
+                .application_name_via_secret(&application_id, secret)
+                .await
+                .unwrap_or_default();
+        }
+    }
     let req = api
         .http
         .post(format!("{}/custom-apps/{guild}", api.base))

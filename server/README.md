@@ -50,7 +50,7 @@ be in.
 | GET    | `/api/guilds/:id/bootstrap`   | ✓    | `{ roles, channels, emojis }` (one call) |
 | GET/POST | `/api/guilds/:id/permanent` | ✓    | permanent-component slots (relayed to the dispatcher) |
 | DELETE | `/api/guilds/:id/permanent/:message_id` | ✓ | free a permanent slot |
-| GET/POST | `/api/guilds/:id/custom-apps` | ✓  | the guild's registered custom bots (relayed to the dispatcher); register takes `{ application_id, public_key, client_secret?, name? }` |
+| GET/POST | `/api/guilds/:id/custom-apps` | ✓  | the guild's registered custom bots (relayed to the dispatcher); register takes `{ application_id, public_key, client_secret? }` (the display name is fetched from Discord) |
 | DELETE | `/api/guilds/:id/custom-apps/:application_id` | ✓ | unregister a custom bot |
 | POST   | `/api/guilds/:id/custom-apps/:application_id/webhook` | ✓ | `{ url }` — one-click `webhook.incoming` under that bot, using its stored secret |
 | POST   | `/api/shortlink`              | —    | `201 { id, expires_at }` — stores a share token for 7 days |

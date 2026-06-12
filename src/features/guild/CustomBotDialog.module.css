@@ -146,28 +146,15 @@
   cursor: help;
 }
 
-/* The register / update form: two columns on desktop, stacked on mobile. */
+/* The register / update form: one field per row. */
 .formGrid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px 12px;
-}
-
-.colHalf {
-  grid-column: span 1;
 }
 
 .colFull {
   grid-column: 1 / -1;
-}
-
-@media (max-width: 560px) {
-  .formGrid {
-    grid-template-columns: 1fr;
-  }
-  .colHalf {
-    grid-column: 1 / -1;
-  }
 }
 
 .formActions {

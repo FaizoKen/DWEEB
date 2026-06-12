@@ -215,6 +215,80 @@ impl Discord {
             .and_then(|g| g.name)
     }
 
+    /// Best-effort public application name, from `GET /applications/{id}/rpc`
+    /// — an endpoint Discord serves without credentials, so it works for apps
+    /// the DWEEB bot has no relationship with. A few (mostly ancient) apps
+    /// 404 there despite existing, so `None` means "couldn't resolve", not
+    /// "no such app"; never fails the caller.
+    pub async fn application_name(&self, application_id: &str) -> Option<String> {
+        #[derive(Deserialize)]
+        struct Named {
+            #[serde(default)]
+            name: Option<String>,
+        }
+        let resp = self
+            .http
+            .get(format!("{API_BASE}/applications/{application_id}/rpc"))
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.json::<Named>().await.ok()?.name
+    }
+
+    /// Best-effort application name using the app's own credentials: a
+    /// client-credentials grant, then `GET /oauth2/@me`, whose response
+    /// always carries the application object. Covers the apps the public
+    /// lookup misses, for callers holding a client secret anyway.
+    pub async fn application_name_via_secret(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Option<String> {
+        #[derive(Deserialize)]
+        struct Grant {
+            access_token: String,
+        }
+        #[derive(Deserialize)]
+        struct AppInfo {
+            #[serde(default)]
+            name: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct OauthMe {
+            application: AppInfo,
+        }
+        let resp = self
+            .http
+            .post(format!("{API_BASE}/oauth2/token"))
+            .form(&[
+                ("client_id", client_id),
+                ("client_secret", client_secret),
+                ("grant_type", "client_credentials"),
+                ("scope", "identify"),
+            ])
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let grant = resp.json::<Grant>().await.ok()?;
+        let resp = self
+            .http
+            .get(format!("{API_BASE}/oauth2/@me"))
+            .header(AUTHORIZATION, format!("Bearer {}", grant.access_token))
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.json::<OauthMe>().await.ok()?.application.name
+    }
+
     /// Every guild id the bot is a member of (paginated, 200 per page). Used to
     /// tell the user which of their servers are "ready" vs need the bot added.
     pub async fn bot_guild_ids(&self) -> Result<Vec<String>, AppError> {

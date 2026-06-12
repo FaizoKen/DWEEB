@@ -66,7 +66,6 @@ export function CustomBotDialog({
   const [appId, setAppId] = useState("");
   const [publicKey, setPublicKey] = useState("");
   const [clientSecret, setClientSecret] = useState("");
-  const [botName, setBotName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const resetForm = () => {
@@ -74,7 +73,6 @@ export function CustomBotDialog({
     setAppId("");
     setPublicKey("");
     setClientSecret("");
-    setBotName("");
   };
 
   useEffect(() => {
@@ -128,7 +126,7 @@ export function CustomBotDialog({
     }
     setBusy(true);
     try {
-      const result = await addCustomBot(guildId, appId, publicKey, clientSecret, botName);
+      const result = await addCustomBot(guildId, appId, publicKey, clientSecret);
       setState({ kind: "ready", bots: result.bots });
       if (result.ok) {
         resetForm();
@@ -158,15 +156,14 @@ export function CustomBotDialog({
   };
 
   // Open the form as an update for one registered app: the Application ID is
-  // fixed, the name carries over, and a fresh key + secret are required
-  // (they're write-only, so there's nothing to prefill).
-  const startEdit = (applicationId: string, name: string) => {
+  // fixed, and a fresh key + secret are required (they're write-only, so
+  // there's nothing to prefill). The name re-fetches from Discord on save.
+  const startEdit = (applicationId: string) => {
     setActionError(null);
     setEditingId(applicationId);
     setAppId(applicationId);
     setPublicKey("");
     setClientSecret("");
-    setBotName(name);
   };
 
   const endpointUrl = interactionsEndpointUrl();
@@ -189,6 +186,9 @@ export function CustomBotDialog({
   } else {
     const { bots } = state;
     const showForm = bots.used < bots.cap || editingId != null;
+    const editingName = editingId
+      ? bots.items.find((i) => i.application_id === editingId)?.name
+      : undefined;
     body = (
       <>
         <p className={styles.lead}>
@@ -236,7 +236,7 @@ export function CustomBotDialog({
                     variant="ghost"
                     disabled={busy}
                     title="Replace the stored Public Key and Client Secret"
-                    onClick={() => startEdit(item.application_id, item.name)}
+                    onClick={() => startEdit(item.application_id)}
                   >
                     Update
                   </Button>
@@ -265,7 +265,7 @@ export function CustomBotDialog({
           <section>
             <div className={styles.sectionHead}>
               <h3 className={styles.sectionTitle}>
-                {editingId ? `Update ${botName || "app"}` : "Register your app"}
+                {editingId ? `Update ${editingName || "app"}` : "Register your app"}
               </h3>
               {editingId ? (
                 <button type="button" className={styles.linkBtn} onClick={resetForm}>
@@ -274,7 +274,11 @@ export function CustomBotDialog({
               ) : null}
             </div>
             <div className={styles.formGrid}>
-              <Field label="Application ID" className={styles.colHalf}>
+              <Field
+                label="Application ID"
+                hint="The bot's name is fetched from Discord automatically"
+                className={styles.colFull}
+              >
                 {(id) => (
                   <TextInput
                     id={id}
@@ -283,17 +287,6 @@ export function CustomBotDialog({
                     placeholder="1234567890123456789"
                     inputMode="numeric"
                     disabled={editingId != null}
-                  />
-                )}
-              </Field>
-              <Field label="Name" className={styles.colHalf}>
-                {(id) => (
-                  <TextInput
-                    id={id}
-                    value={botName}
-                    onChange={(e) => setBotName(e.target.value)}
-                    placeholder="Optional label"
-                    maxLength={100}
                   />
                 )}
               </Field>
