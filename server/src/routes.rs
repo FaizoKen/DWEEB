@@ -324,7 +324,9 @@ pub async fn custom_apps_add(
     let client_secret_enc = match body.client_secret.as_deref().map(str::trim) {
         None | Some("") => String::new(),
         Some(secret) => {
-            if secret.len() < 16 || secret.len() > 128 || !secret.bytes().all(|b| b.is_ascii_graphic())
+            if secret.len() < 16
+                || secret.len() > 128
+                || !secret.bytes().all(|b| b.is_ascii_graphic())
             {
                 return Err(AppError::Status {
                     status: StatusCode::BAD_REQUEST,
@@ -332,9 +334,8 @@ pub async fn custom_apps_add(
                     retry_after: None,
                 });
             }
-            crate::seal::seal(&st.key, secret).ok_or_else(|| {
-                AppError::Internal("couldn't seal the client secret".into())
-            })?
+            crate::seal::seal(&st.key, secret)
+                .ok_or_else(|| AppError::Internal("couldn't seal the client secret".into()))?
         }
     };
     let name = body.name.unwrap_or_default();

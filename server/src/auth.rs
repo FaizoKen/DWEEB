@@ -146,7 +146,11 @@ pub async fn custom_bot_webhook_start(
         .json::<serde_json::Value>()
         .await
         .ok()
-        .and_then(|v| v.get("client_secret_enc").and_then(|s| s.as_str()).map(String::from))
+        .and_then(|v| {
+            v.get("client_secret_enc")
+                .and_then(|s| s.as_str())
+                .map(String::from)
+        })
         .unwrap_or_default();
     if sealed.is_empty() {
         return Err(AppError::Status {
