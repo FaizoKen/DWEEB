@@ -13,7 +13,8 @@
  *    equality on untouched subtrees still holds.
  *  - History (undo/redo) is captured by snapshotting the message before each
  *    structural action. Field edits coalesce into a single history entry per
- *    burst (see `pushHistory`).
+ *    burst (see `pushHistory`). The most recent steps persist across refreshes
+ *    via `historyStorage.ts` (saved by `useAutoSaveDraft`, hydrated below).
  */
 
 import { create } from "zustand";
@@ -27,6 +28,7 @@ import {
 import { DEFAULT_PRESET } from "@/data/presets";
 import { LIMITS } from "@/core/schema/limits";
 import { loadDraftMessage } from "./draftStorage";
+import { loadHistory, type HistoryFrame } from "./historyStorage";
 import {
   ButtonStyle,
   ComponentType,
@@ -62,10 +64,6 @@ import {
 } from "@/core/factory/createComponent";
 
 const HISTORY_LIMIT = 50;
-
-interface HistoryFrame {
-  message: WebhookMessage;
-}
 
 /**
  * Origin of the active message on Discord — set when it was loaded by
@@ -321,12 +319,18 @@ function bootstrap(): WebhookMessage {
   return reassignIds(DEFAULT_PRESET.message);
 }
 
+/**
+ * Undo/redo stacks from the previous session. Persisted alongside the draft,
+ * so the hydrated `past` ends exactly where the draft message picks up.
+ */
+const initialHistory = loadHistory();
+
 export const useMessageStore = create<MessageState>((set, get) => ({
   message: bootstrap(),
   selectedId: null,
   restoredFrom: null,
-  past: [],
-  future: [],
+  past: initialHistory?.past ?? [],
+  future: initialHistory?.future ?? [],
 
   select(id) {
     set({ selectedId: id });

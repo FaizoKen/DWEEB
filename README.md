@@ -203,10 +203,12 @@ from the wire format, and it is stripped on export.
 - **`useKeyboardShortcuts`** — global `Cmd/Ctrl+Z` and `Cmd/Ctrl+Shift+Z`
   for undo/redo. Ignored while the user is typing in a field.
 - **`useAutoSaveDraft`** — subscribes to the message store and writes the
-  wire payload to `localStorage` (debounced 300ms). Combined with the
-  bootstrap path in `messageStore`, this is what makes a refresh resume the
-  in-progress message. The draft is keyed `dweeb.draft.v1` and is plain text
-  — no credentials live there.
+  wire payload to `localStorage` (debounced 300ms, flushed on pagehide).
+  Combined with the bootstrap path in `messageStore`, this is what makes a
+  refresh resume the in-progress message. The draft is keyed `dweeb.draft.v1`
+  and is plain text — no credentials live there. The most recent undo/redo
+  steps persist the same way (`dweeb.history.v1`, capped per stack and by
+  total size; see `historyStorage.ts`), so undo still works after a refresh.
 
 An `ErrorBoundary` wraps the whole app so a bad inspector edit can't blank
 the page.

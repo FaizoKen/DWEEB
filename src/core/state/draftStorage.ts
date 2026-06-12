@@ -12,7 +12,8 @@
  * What does NOT get saved:
  *  - Webhook URLs (those are credentials and live in `webhook/history.ts`,
  *    opt-in per entry).
- *  - Selection or undo history (transient editor state, not user content).
+ *  - Selection (transient editor state, not user content). Undo/redo history
+ *    persists separately — see `historyStorage.ts`.
  *
  * The storage key carries a version suffix; a future schema bump can ignore
  * old drafts rather than trying to migrate them.
