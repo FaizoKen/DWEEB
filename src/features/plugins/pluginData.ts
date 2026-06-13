@@ -22,6 +22,8 @@
 
 import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useGuildStore } from "@/core/guild/guildStore";
+import { useAuthStore } from "@/core/auth/authStore";
 import { stripEditorFields } from "@/core/serialization/normalize";
 import { loadHistory } from "@/core/webhook";
 
@@ -31,6 +33,7 @@ export const PLUGIN_RESOURCES = [
   "savedWebhooks",
   "message",
   "component",
+  "guild",
 ] as const;
 export type PluginResource = (typeof PLUGIN_RESOURCES)[number];
 
@@ -87,6 +90,18 @@ export function resolvePluginResource(resource: string, ctx: ResourceContext): R
     case "component": {
       // Minimal context about the component the plugin is attached to.
       return { ok: true, data: { target: ctx.target, customId: ctx.customId ?? null } };
+    }
+    case "guild": {
+      // The server the editor is currently connected to (id + display name), so
+      // a plugin can target "this server" without the user pasting an id. A
+      // guild id isn't a secret — it's visible to every member — and no token or
+      // session data rides along. `null` means no server is connected yet, which
+      // the plugin should treat as "fall back to asking". The name is best-effort
+      // from the user's guild picker; absent for a server not in that list.
+      const { guildId } = useGuildStore.getState();
+      if (!guildId) return { ok: true, data: null };
+      const name = useAuthStore.getState().guilds.find((g) => g.id === guildId)?.name ?? null;
+      return { ok: true, data: { id: guildId, name } };
     }
     default:
       return { ok: false, error: `Unknown or restricted resource: ${resource}` };

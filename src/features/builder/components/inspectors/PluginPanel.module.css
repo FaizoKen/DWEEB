@@ -1,10 +1,13 @@
+/* The action leads the inspector, directly under the capability notice that
+   frames it — so no top divider (that would double up with the notice block and
+   the body gap above). The hairline goes on the *bottom*, separating the action
+   from the field editor the Inspector renders below it. */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--app-border);
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--app-border);
 }
 
 .heading {
@@ -175,6 +178,26 @@
   font-size: 11px;
   color: var(--app-text-muted);
   opacity: 0.8;
+}
+
+/* The binding's target server. A neutral fact by default; tinted as a caution
+   (with the alert glyph) when it differs from the connected guild. The hard
+   block still lives at the Send page — this is just an early, in-editor nudge. */
+.chipTarget {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+.chipTargetWarn {
+  color: var(--app-warning-text);
+  font-weight: 500;
+}
+.chipTargetIcon {
+  flex: none;
+  margin-top: 1px;
 }
 
 .chipActions {

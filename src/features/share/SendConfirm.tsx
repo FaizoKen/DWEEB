@@ -89,6 +89,18 @@ export interface SendConfirmProps {
   /** Names of the plugins whose components are affected, for the warning copy. */
   pluginNames?: string[];
   /**
+   * A guild-scoped plugin binding (e.g. Self Role) configured for a *different*
+   * server than this webhook posts to — the component is dead on arrival there.
+   * Undefined when there's no such mismatch.
+   */
+  pluginGuildMismatch?: {
+    pluginName: string;
+    /** Display name (or id) of the server the binding was set up for. */
+    configuredGuildName: string;
+    /** Display name of the server this webhook posts to, when known. */
+    webhookGuildName?: string;
+  };
+  /**
    * The "Make permanent" control for messages with interactive components.
    * Present only when the Send panel could read the slot state (signed in,
    * slots fetched, expiry on). Undefined hides the row entirely — the
@@ -273,7 +285,7 @@ function RoutingNotice({
         <p className={styles.pingDetail}>
           Discord delivers component clicks to the app that owns the webhook, and “{webhookName}”
           belongs to a different app — not DWEEB and not one of this server’s registered custom
-          bots. The message will post, but every click on those components will fail. Post through a
+          bots. Every click on those components would fail, so the send is blocked. Post through a
           webhook created in DWEEB to make them work.
         </p>
       </div>
@@ -310,6 +322,7 @@ export function SendConfirm({
   pings,
   componentRouting,
   pluginNames = [],
+  pluginGuildMismatch,
   permanentOption,
   busy = false,
   onConfirm,
@@ -455,6 +468,18 @@ export function SendConfirm({
           webhookName={targetName}
           pluginNames={pluginNames}
         />
+      ) : null}
+
+      {pluginGuildMismatch ? (
+        <div className={styles.routingAlert} role="alert">
+          <strong>Wrong server for this {pluginGuildMismatch.pluginName} menu.</strong>
+          <p className={styles.pingDetail}>
+            It was set up for {pluginGuildMismatch.configuredGuildName}, but “{targetName}” posts to{" "}
+            {pluginGuildMismatch.webhookGuildName ?? "another server"}. Clicks will just return
+            “this menu was set up for a different server.” Post through a webhook in{" "}
+            {pluginGuildMismatch.configuredGuildName}, or reconfigure the menu for this server.
+          </p>
+        </div>
       ) : null}
 
       {permanentOption ? <PermanentOptIn option={permanentOption} busy={busy} /> : null}

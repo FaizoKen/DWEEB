@@ -29,6 +29,7 @@ import { MentionableSelectInspector } from "./inspectors/MentionableSelectInspec
 import { ChannelSelectInspector } from "./inspectors/ChannelSelectInspector";
 import { ComponentIdField } from "./inspectors/ComponentIdField";
 import { PluginPanel } from "./inspectors/PluginPanel";
+import { InteractionNotice } from "./inspectors/InteractionNotice";
 import { isPluginTarget } from "@/core/plugins/targets";
 import styles from "./Inspector.module.css";
 
@@ -58,11 +59,18 @@ export function Inspector() {
     <div className={styles.inspector}>
       <div className={styles.body}>
         <IssueList issues={issues} />
-        {renderInspector(node)}
         {/* Interactive components (buttons with a custom_id, selects) can hand
-            their action to an external plugin. The panel is inert unless a
-            plugin registry is configured. */}
-        {isPluginTarget(node) ? <PluginPanel node={node} /> : null}
+            their action to an external plugin. The action *is* the point of the
+            component, so it leads — above the field editor, under the capability
+            notice that frames it. Both are inert unless a plugin registry is
+            configured. */}
+        {isPluginTarget(node) ? (
+          <>
+            <InteractionNotice node={node} />
+            <PluginPanel node={node} />
+          </>
+        ) : null}
+        {renderInspector(node)}
         {/* The per-component Discord id is a power-user concern — only surface
             it in Advanced mode. The value (if any) persists regardless. */}
         {advancedMode ? <ComponentIdField node={node} /> : null}

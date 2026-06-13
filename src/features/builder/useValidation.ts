@@ -19,7 +19,10 @@
 
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useGuildStore } from "@/core/guild/guildStore";
 import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
+import { getPluginSummary } from "@/core/state/pluginSummaryCache";
+import { interactiveComponents } from "@/core/plugins/targets";
 import { validateMessage, type ValidationIssue } from "@/core/schema/validation";
 import type { EditorId, WebhookMessage } from "@/core/schema/types";
 
@@ -84,6 +87,80 @@ export function buildValidationView(message: WebhookMessage): ValidationView {
     firstErrorNodeId,
     firstWarningNodeId,
   };
+}
+
+/**
+ * Fold extra node-scoped issues (e.g. the plugin guild checks below) into a
+ * view, returning a new one with the per-node lists, counts, and first-issue
+ * ids updated. Issues without a `nodeId` are ignored — this is for component
+ * problems only. Base's first-error / first-warning ids win when set, so a real
+ * message error still anchors the header's jump affordance.
+ */
+export function mergeNodeIssues(base: ValidationView, extra: ValidationIssue[]): ValidationView {
+  if (extra.length === 0) return base;
+  const byNode = new Map(base.byNode);
+  let { errorCount, warningCount, firstErrorNodeId, firstWarningNodeId } = base;
+  for (const issue of extra) {
+    if (issue.nodeId === undefined) continue;
+    const existing = byNode.get(issue.nodeId);
+    byNode.set(issue.nodeId, existing ? [...existing, issue] : [issue]);
+    if (issue.severity === "error") {
+      errorCount++;
+      if (firstErrorNodeId === null) firstErrorNodeId = issue.nodeId;
+    } else {
+      warningCount++;
+      if (firstWarningNodeId === null) firstWarningNodeId = issue.nodeId;
+    }
+  }
+  return { ...base, byNode, errorCount, warningCount, firstErrorNodeId, firstWarningNodeId };
+}
+
+/**
+ * Editor-only validation issues for guild-scoped plugin bindings (Self Role et
+ * al.), which only work in the server they were set up for. These can't live in
+ * `validateMessage` — it's a pure, destination-agnostic function shared with the
+ * Send panel, while this depends on the connected guild and the per-binding
+ * guild cache (both outside the message). Returned as standard `ValidationIssue`s
+ * so {@link mergeNodeIssues} can give them the same tree-dot + inspector-banner
+ * treatment as any real problem.
+ *
+ *  - A connected guild that the binding's target *differs* from is a provable
+ *    wrong-server: an **error**.
+ *  - No connected guild (signed out / not connected) means we can't compare, but
+ *    the binding is still server-locked: a softer **warning** so it isn't
+ *    silently dropped (the cache survives logout, so we still see the binding).
+ *
+ * The real, blocking check still runs at send time against the webhook's guild.
+ */
+export function usePluginGuildIssues(): ValidationIssue[] {
+  const message = useMessageStore((s) => s.message);
+  const connectedGuildId = useGuildStore((s) => s.guildId);
+  return useMemo(() => {
+    const connected = connectedGuildId !== "";
+    const issues: ValidationIssue[] = [];
+    for (const { nodeId, customId } of interactiveComponents(message)) {
+      const entry = getPluginSummary(customId);
+      const targetGuildId = entry?.guildId;
+      if (!targetGuildId) continue; // not a guild-scoped binding
+      if (connected && targetGuildId === connectedGuildId) continue; // correctly placed
+      issues.push(
+        connected
+          ? {
+              nodeId,
+              severity: "error",
+              code: "PLUGIN_GUILD_MISMATCH",
+              message: `“${entry.summary.label}” is set up for a different server than the one you're connected to — it won't respond when posted there.`,
+            }
+          : {
+              nodeId,
+              severity: "warning",
+              code: "PLUGIN_GUILD_UNVERIFIED",
+              message: `“${entry.summary.label}” only works in the server it was set up for — connect that server (or sign in) so DWEEB can confirm you're posting there.`,
+            },
+      );
+    }
+    return issues;
+  }, [message, connectedGuildId]);
 }
 
 /** Recompute the live validation view from the current message (memoized). */

@@ -41,15 +41,29 @@
  * Bot-owned isn't always enough either. Discord delivers component clicks to
  * the app that OWNS the webhook, so components bound to DWEEB plugins
  * (custom_ids the dispatcher routes) only respond when that app is DWEEB
- * itself or a custom bot registered for the server. When the owner turns out
- * to be an unrelated app, the panel warns — a banner here plus a notice in
- * the confirm dialog — instead of letting the components post and die
- * silently. It's a warning, not a block: hand-written custom_ids aimed at
- * someone else's bot are a legitimate use, and only plugin-bound components
- * are provably dead. The one hard stop is a single halt when the foreign
- * owner is discovered mid-confirm (fresh URL, verified after the dialog was
- * already answered): the send is left un-started so the warning is actually
- * seen, and a deliberate second Send goes through.
+ * itself or a custom bot registered for the server. The routing verdict only
+ * fires for plugin-bound components — a hand-written custom_id aimed at someone
+ * else's bot is a legitimate use and gets only the generic "the bot's backend
+ * handles this" info note. So when a plugin-bound component's webhook is owned
+ * by an unrelated app ("foreign"), it is provably dead — pure false traffic —
+ * and the Send button is blocked (a banner here with a Remove action, plus a
+ * notice in the confirm). A fresh URL, whose owner is only verified
+ * mid-confirm, gets a one-time halt that then leaves the button disabled. The
+ * signed-out "unverified" case is handled separately by requiring sign-in (see
+ * `mustSignInToRouteCheck`); an authed-but-uncheckable "unverified" stays a
+ * soft caution, since it can't be proven dead.
+ *
+ * A guild-scoped plugin binding (Self Role et al.) is a harder case: it only
+ * works in the server it was set up for, so posting it to a webhook in another
+ * server leaves every click dead ("this menu was set up for a different
+ * server") — pure false traffic, never a legitimate use. So unlike the routing
+ * warning this is a *block*: plugins surface their target guild on save (cached
+ * per binding), and when it differs from the destination webhook's guild the
+ * Send button is disabled (banner here + notice in the confirm). A fresh URL,
+ * whose guild we only learn mid-confirm, gets a one-time halt that then leaves
+ * the button disabled. Bindings whose guild isn't cached are skipped, so it
+ * never false-positives; the fix is to reconfigure the menu (which recaches the
+ * real guild) or post through a webhook in the right server.
  *
  * The webhook URL is treated as a credential:
  *  - The input uses `<TextInput masked>` (CSS dot masking, not
@@ -94,6 +108,7 @@ import {
 } from "@/core/webhook";
 import { getPlugins } from "@/core/plugins/registry";
 import { pluginBoundComponents } from "@/core/plugins/targets";
+import { getPluginBindingGuild } from "@/core/state/pluginSummaryCache";
 import {
   addPermanentMessage,
   createCustomBotWebhook,
@@ -377,6 +392,7 @@ export function SendPanel({
   // signed-in guild list, the channel from the connected guild.
   const authGuilds = useAuthStore((s) => s.guilds);
   const authStatus = useAuthStore((s) => s.status);
+  const login = useAuthStore((s) => s.login);
   const connectedData = useGuildStore((s) => s.data);
 
   const knownGuildName = useMemo(() => {
@@ -478,6 +494,41 @@ export function SendPanel({
     registeredAppsFailed,
     routingCheckable,
   ]);
+
+  // A signed-out user can never have the custom-bot registration checked, so a
+  // plugin-bound message to a bot-owned webhook lands at "unverified" purely for
+  // lack of a session. Rather than ship that as a soft "couldn't confirm"
+  // caution and let the clicks die, require sign-in: once authed the check runs
+  // and the verdict resolves (custom-bot / foreign / dweeb). Gated on a proxy
+  // (so sign-in is actually possible) and a definitively signed-out session
+  // (not the brief "loading"/"unknown" window, which would flash the block).
+  const mustSignInToRouteCheck =
+    componentRouting === "unverified" && authStatus === "anon" && isProxyConfigured();
+
+  // A guild-scoped plugin binding (Self Role and the like) only works in the
+  // server it was set up for — posting it elsewhere leaves the component dead
+  // ("this menu was set up for a different server"). Plugins surface their
+  // target guild on save and we cache it per binding, so when the destination
+  // webhook's guild is known and a binding's cached guild differs, we can warn
+  // before the send. Bindings whose guild we don't have cached (configured on
+  // another device, cache cleared) are simply skipped — never a false positive.
+  const pluginGuildMismatch = useMemo(() => {
+    if (!knownGuildId) return null;
+    for (const b of pluginBound) {
+      const configuredGuildId = getPluginBindingGuild(b.customId);
+      if (configuredGuildId && configuredGuildId !== knownGuildId) {
+        return { plugin: b.plugin, configuredGuildId };
+      }
+    }
+    return null;
+  }, [pluginBound, knownGuildId]);
+
+  // Human name for the mismatched binding's server, when it's one of the user's
+  // own servers; otherwise the raw id (still better than nothing in the warning).
+  const mismatchGuildName = pluginGuildMismatch
+    ? (authGuilds.find((g) => g.id === pluginGuildMismatch.configuredGuildId)?.name ??
+      pluginGuildMismatch.configuredGuildId)
+    : undefined;
 
   const sending = state.kind === "sending";
 
@@ -586,6 +637,30 @@ export function SendPanel({
       });
       return;
     }
+    if (mustSignInToRouteCheck) {
+      setState({
+        kind: "error",
+        message: "Sign in so DWEEB can confirm these plugin components route to it before sending.",
+      });
+      return;
+    }
+    if (componentRouting === "foreign") {
+      // Owned by an unrelated app — clicks never reach DWEEB, so the plugin
+      // components are provably dead. Block rather than post false traffic.
+      setState({
+        kind: "error",
+        message: `“${knownName || "This webhook"}” delivers clicks to a different app, so the ${pluginNames.join(" / ") || "plugin"} component${pluginBound.length === 1 ? "" : "s"} here would never respond. Post through a DWEEB webhook (or a registered custom bot), or remove the interactive components.`,
+      });
+      return;
+    }
+    if (pluginGuildMismatch) {
+      // Provably dead in this server — block rather than post false traffic.
+      setState({
+        kind: "error",
+        message: `This ${pluginGuildMismatch.plugin.name} menu was set up for ${mismatchGuildName}, not the server this webhook posts to — post through a webhook in ${mismatchGuildName}, or reconfigure the menu for this server.`,
+      });
+      return;
+    }
     setState({ kind: "idle" });
     setConfirmOpen(true);
   };
@@ -666,10 +741,12 @@ export function SendPanel({
       // routing verdict existed — and the message carries plugin-bound
       // components owned by an app other than DWEEB, resolve the custom-bot
       // registration before posting. A definitive "foreign" leaves the send
-      // un-started, exactly like the ownership block: the warning banner (and,
-      // on the next confirm, the dialog's notice) now renders, and Send stays
-      // enabled for a deliberate second attempt. "Unverified" is let through —
-      // it's a warning, not a block, and waiting can't learn more.
+      // un-started, exactly like the ownership block: `setVerified` above flips
+      // the verdict, so on the next render the banner shows and the Send button
+      // is disabled (a second attempt can't slip through). "Unverified" is let
+      // through here — it's not provably dead (signed-out is handled earlier by
+      // the sign-in gate; an authed-but-failed check can't learn more by
+      // waiting).
       if (freshlyVerified && pluginBound.length > 0 && appId && appId !== DISCORD_CLIENT_ID) {
         const gid = resolvedGuildId ?? knownGuildId;
         let ids =
@@ -693,6 +770,38 @@ export function SendPanel({
           customBotIds: ids,
         });
         if (routing === "foreign") {
+          setState({ kind: "idle" });
+          return;
+        }
+        // Signed out → the registration fetch above was skipped, so the verdict
+        // is only "unverified" for lack of a session. Mirror the main Send gate
+        // (`mustSignInToRouteCheck`): leave the send un-started so the sign-in
+        // banner renders — `setVerified` above already flipped the owner state
+        // that drives it. (An authed-but-failed check still falls through;
+        // waiting can't learn more there.)
+        if (routing === "unverified" && authStatus === "anon" && isProxyConfigured()) {
+          setState({ kind: "idle" });
+          return;
+        }
+      }
+
+      // Block a guild-scoped binding (Self Role et al.) that targets a different
+      // server than this freshly-verified webhook posts to. The mismatch can
+      // only be checked once we know the webhook's guild, which for a fresh URL
+      // is just now — so the disabled-button block couldn't have caught it yet.
+      // Leave the send un-started: `setVerified` above resolved the guild, so on
+      // the next render the "wrong server" banner shows and the Send button is
+      // disabled (a second attempt can't slip through). Skipped for bindings
+      // whose guild isn't cached — never a false positive.
+      if (freshlyVerified && pluginBound.length > 0) {
+        const gid = resolvedGuildId ?? knownGuildId;
+        const mismatched =
+          gid != null &&
+          pluginBound.some((b) => {
+            const cfg = getPluginBindingGuild(b.customId);
+            return cfg != null && cfg !== gid;
+          });
+        if (mismatched) {
           setState({ kind: "idle" });
           return;
         }
@@ -1177,8 +1286,8 @@ export function SendPanel({
             role="alert"
             title={
               <>
-                “{knownName || "This webhook"}” won’t deliver clicks to DWEEB — the{" "}
-                {pluginNames.join(" / ")} component{pluginBound.length === 1 ? "" : "s"} here will
+                Can’t send: “{knownName || "This webhook"}” won’t deliver clicks to DWEEB — the{" "}
+                {pluginNames.join(" / ")} component{pluginBound.length === 1 ? "" : "s"} here would
                 never respond.
               </>
             }
@@ -1186,10 +1295,10 @@ export function SendPanel({
               <>
                 Discord delivers component clicks to the app that owns the webhook. This one belongs
                 to a different app — not DWEEB and not one of this server’s registered custom bots —
-                so DWEEB’s backend never sees them. You can still send: the message posts normally,
-                but every click on those components will fail. To make them work, post through a
-                webhook created in DWEEB (see the links under the URL field), or register the owning
-                app as a custom bot first.
+                so DWEEB’s backend never sees them. Sent here every click would fail, so the send is
+                blocked. To make them work, post through a webhook created in DWEEB (see the links
+                under the URL field), or register the owning app as a custom bot first — or remove
+                the interactive components.
               </>
             }
             moreLabel="Why"
@@ -1202,24 +1311,51 @@ export function SendPanel({
             }
           />
         ) : componentRouting === "unverified" ? (
-          <Callout
-            tone="warning"
-            role="note"
-            title={<>Couldn’t confirm “{knownName || "this webhook"}” delivers clicks to DWEEB.</>}
-            more={
-              <>
-                The {pluginNames.join(" / ")} component
-                {pluginBound.length === 1 ? "" : "s"} here only respond when the webhook’s owning
-                app routes interactions through DWEEB — DWEEB’s own webhooks do, and so do the
-                server’s registered custom bots.{" "}
-                {authStatus !== "authed"
-                  ? "Sign in so this can be checked automatically. "
-                  : "The registration check didn’t go through, so this couldn’t be confirmed. "}
-                If the app is unrelated, the message still posts but those components never respond.
-              </>
-            }
-            moreLabel="What this means"
-          />
+          mustSignInToRouteCheck ? (
+            <Callout
+              tone="danger"
+              role="alert"
+              title={
+                <>
+                  Sign in to send {pluginNames.join(" / ")} component
+                  {pluginBound.length === 1 ? "" : "s"} through “{knownName || "this webhook"}”.
+                </>
+              }
+              more={
+                <>
+                  These components only respond when the webhook’s owning app routes interactions
+                  through DWEEB — DWEEB’s own webhooks do, and so do this server’s registered custom
+                  bots. Signing in lets DWEEB verify that automatically, so the clicks aren’t
+                  silently dropped. Until then it can’t be confirmed, so the send is held.
+                </>
+              }
+              moreLabel="Why"
+              actions={
+                <Button size="sm" variant="primary" onClick={() => login()}>
+                  Sign in with Discord
+                </Button>
+              }
+            />
+          ) : (
+            <Callout
+              tone="warning"
+              role="note"
+              title={
+                <>Couldn’t confirm “{knownName || "this webhook"}” delivers clicks to DWEEB.</>
+              }
+              more={
+                <>
+                  The {pluginNames.join(" / ")} component
+                  {pluginBound.length === 1 ? "" : "s"} here only respond when the webhook’s owning
+                  app routes interactions through DWEEB — DWEEB’s own webhooks do, and so do the
+                  server’s registered custom bots. The registration check didn’t go through, so this
+                  couldn’t be confirmed. If the app is unrelated, the message still posts but those
+                  components never respond.
+                </>
+              }
+              moreLabel="What this means"
+            />
+          )
         ) : componentRouting === "dweeb" || componentRouting === "custom-bot" ? (
           <Callout
             tone="info"
@@ -1259,6 +1395,29 @@ export function SendPanel({
             moreLabel="What this means"
           />
         )
+      ) : null}
+
+      {pluginGuildMismatch && !knownGone ? (
+        <Callout
+          tone="danger"
+          role="alert"
+          title={
+            <>
+              Can’t send: this {pluginGuildMismatch.plugin.name} menu was set up for a different
+              server than “{knownName || "this webhook"}” posts to.
+            </>
+          }
+          more={
+            <>
+              It only changes roles in <strong>{mismatchGuildName}</strong>, but this webhook posts
+              to {knownGuildName ? <strong>{knownGuildName}</strong> : "another server"}. Sent here
+              every click would just return “this menu was set up for a different server” and change
+              nothing, so the send is blocked. Post through a webhook in{" "}
+              <strong>{mismatchGuildName}</strong>, or reconfigure the menu for this server.
+            </>
+          }
+          moreLabel="Why"
+        />
       ) : null}
 
       {visibleCapabilities.length > 0 ? (
@@ -1340,6 +1499,9 @@ export function SendPanel({
             knownGone ||
             blockingIssues.length > 0 ||
             ownershipBlocked ||
+            mustSignInToRouteCheck ||
+            componentRouting === "foreign" ||
+            pluginGuildMismatch != null ||
             (mode === "update" && !parsedMessageId)
           }
         >
@@ -1369,6 +1531,15 @@ export function SendPanel({
         pings={pings}
         componentRouting={componentRouting}
         pluginNames={pluginNames}
+        pluginGuildMismatch={
+          pluginGuildMismatch
+            ? {
+                pluginName: pluginGuildMismatch.plugin.name,
+                configuredGuildName: mismatchGuildName ?? pluginGuildMismatch.configuredGuildId,
+                webhookGuildName: knownGuildName,
+              }
+            : undefined
+        }
         permanentOption={permanentOption}
         busy={confirmBusy}
         onConfirm={handleConfirmedSend}

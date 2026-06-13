@@ -25,6 +25,7 @@ on:
       - Interactions Dispatcher
       - Plugin Modal Form
       - Plugin Ping Pong
+      - Plugin Self Role
     types: [completed]
     branches: [main]
   workflow_dispatch:

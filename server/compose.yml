@@ -94,7 +94,7 @@ services:
     restart: unless-stopped
     environment:
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
-      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091"}'
+      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092"}'
       # The /dashboard slash command (answered inline, no plugin) replies with
       # this URL. Register the command once: node scripts/register-commands.mjs
       # NOT derived from DOMAIN — that is the API host, not the dashboard.
@@ -177,6 +177,37 @@ services:
       retries: 3
       start_period: 5s
 
+  # Self Role (../plugins/self-role): members self-assign roles from a button or
+  # select. Unlike the other plugins it calls the Discord REST API, so it needs a
+  # bot token with Manage Roles — supplied per instance in the config UI, or a
+  # deployment-wide shared bot via BOT_TOKEN below. Its own registry, config UI
+  # and config API, backed by one SQLite file. Served at selfrole.$PLUGINS_DOMAIN.
+  self-role:
+    image: ghcr.io/faizoken/dweeb-self-role:${SELFROLE_TAG:-latest}
+    build: ../plugins/self-role
+    restart: unless-stopped
+    environment:
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://selfrole.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      # Lets the dispatcher vouch for a custom app's verifying key (see the
+      # dispatcher service above). Must match the dispatcher's value.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
+      # Optional shared "Self Role" bot so admins can use it by inviting it
+      # instead of pasting a token. Leave blank to require per-instance tokens.
+      BOT_TOKEN: ${SELFROLE_BOT_TOKEN:-}
+      BOT_INVITE_URL: ${SELFROLE_BOT_INVITE_URL:-}
+      RUST_LOG: info
+    volumes:
+      # The plugin's only state: the SQLite file with instance configs.
+      - selfrole_data:/data
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8092 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   # Only started when you opt in with `--profile redis`. Shared cache +
   # rate-limit store for running several `proxy` replicas behind a balancer.
   redis:
@@ -193,3 +224,4 @@ volumes:
   proxy_data:
   dispatcher_data:
   modalform_data:
+  selfrole_data:

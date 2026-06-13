@@ -130,6 +130,44 @@
   color: var(--app-text);
 }
 
+/* A single plugin-managed select option, read-only. Reads as a locked inset
+   row (label + the value the plugin wired) rather than an editable card, so
+   it's obvious the option list is owned elsewhere — mirrors the locked
+   custom_id field. */
+.lockedOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  cursor: default;
+}
+.lockedOptionIcon {
+  flex: none;
+  color: var(--app-text-subtle);
+}
+.lockedOptionLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--app-text-sm);
+  color: var(--app-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lockedOptionValue {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--app-font-mono);
+  font-size: var(--app-text-xs);
+  color: var(--app-text-muted);
+}
+
 .note {
   margin: 0;
   font-size: var(--app-text-xs);

@@ -7,11 +7,9 @@
 import { useMessageStore } from "@/core/state/messageStore";
 import { LIMITS } from "@/core/schema/limits";
 import type { SelectComponent } from "@/core/schema/types";
-import { useAttachedPlugin } from "@/features/plugins/useAttachedPlugin";
 import { Field } from "@/ui/Field";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
-import { CapabilityNote } from "./CapabilityNote";
 import styles from "./inspectors.module.css";
 
 interface Props {
@@ -20,7 +18,6 @@ interface Props {
 
 export function SelectBaseFields({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
-  const attachedPlugin = useAttachedPlugin(node);
 
   const setMin = (v: string) => {
     const parsed = v === "" ? undefined : Number.parseInt(v, 10);
@@ -37,19 +34,8 @@ export function SelectBaseFields({ node }: Props) {
 
   return (
     <>
-      {attachedPlugin ? (
-        <CapabilityNote tone="info">
-          <strong>Handled by {attachedPlugin.name}.</strong> Selections are processed by the
-          plugin's service — send this message through an application-owned webhook so they reach
-          it.
-        </CapabilityNote>
-      ) : (
-        <CapabilityNote>
-          <strong>Needs an application-owned webhook.</strong> Discord rejects messages containing
-          select menus when sent through a regular user-created webhook — only application/bot-owned
-          webhooks can post them.
-        </CapabilityNote>
-      )}
+      {/* The select's capability notice now renders above the Action panel, just
+          ahead of these shared fields — see the Inspector. */}
       <Field label="Placeholder">
         {(id) => (
           <TextInput
@@ -105,8 +91,8 @@ export function SelectBaseFields({ node }: Props) {
         label="Disabled"
       />
       {/* The interaction's custom_id lives in the Action panel the Inspector
-          renders next — it's bound to (or freed from) a plugin there, so the
-          two halves of that one decision stay together. */}
+          renders above these fields — it's bound to (or freed from) a plugin
+          there, so the two halves of that one decision stay together. */}
     </>
   );
 }

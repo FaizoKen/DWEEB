@@ -59,6 +59,15 @@ export interface PluginManifest {
    * defaults to 1. DWEEB sends its own {@link PLUGIN_API_VERSION} in `init`.
    */
   apiVersion?: number;
+  /**
+   * For a `string_select` plugin: declares that the plugin owns the menu's
+   * option list. When set, the plugin's `save` may hand back the `options` to
+   * wire onto the select, and DWEEB **locks** the options editor — each value
+   * is part of the plugin's contract (e.g. a role id), so hand-editing would
+   * silently break it, exactly as the plugin-owned `custom_id` is locked.
+   * Defaults to false: a select plugin that leaves options to the user.
+   */
+  managesSelectOptions?: boolean;
 }
 
 /** Shape the registry endpoint returns. */
@@ -118,6 +127,7 @@ export function parseManifest(raw: unknown): PluginManifest | null {
     ...(isAllowedUrl(o.homepage) ? { homepage: o.homepage } : {}),
     ...(isNonEmptyString(o.publisher) ? { publisher: o.publisher } : {}),
     ...(typeof o.apiVersion === "number" ? { apiVersion: o.apiVersion } : {}),
+    ...(o.managesSelectOptions === true ? { managesSelectOptions: true } : {}),
   };
   return manifest;
 }

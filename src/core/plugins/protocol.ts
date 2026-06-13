@@ -5,7 +5,7 @@
  *
  *   iframe → host : ready   { apiVersion }            (iframe booted, send context)
  *   host → iframe : init    { ...context, nonce }     (component kind, current id, theme)
- *   iframe → host : save    { customId, summary? }    (user saved — adopt this custom_id)
+ *   iframe → host : save    { customId, summary?, options?, guildId? }  (adopt id; wire options)
  *   iframe → host : cancel                            (user backed out)
  *   iframe → host : resize  { height }                (optional auto-height)
  *
@@ -46,6 +46,22 @@ export interface PluginSummary {
   icon?: string;
 }
 
+/**
+ * A select-menu option a plugin can hand back on save to be wired — and locked —
+ * onto the `string_select` it's attached to. Lets a plugin own the whole
+ * option list (label + the `value` Discord delivers on use) instead of making
+ * the user hand-map each one. Only meaningful for the `string_select` target;
+ * the host ignores it for buttons and other selects. Always sanitized by the
+ * host before it touches the component — see {@link sanitizeOptions}.
+ */
+export interface PluginSelectOption {
+  label: string;
+  /** The value Discord delivers when this option is picked (e.g. a role id). */
+  value: string;
+  description?: string;
+  emoji?: { id?: string | null; name?: string | null; animated?: boolean };
+}
+
 // ── iframe → host ────────────────────────────────────────────────────────────
 
 export interface PluginReadyMessage {
@@ -61,6 +77,21 @@ export interface PluginSaveMessage {
   customId: string;
   /** Optional richer label for the attached-plugin chip. */
   summary?: PluginSummary;
+  /**
+   * Optional select-menu options to wire (and lock) onto a `string_select`, so
+   * the user never hand-maps each option's value. Sanitized + clamped by the
+   * host; ignored entirely for non-`string_select` targets.
+   */
+  options?: PluginSelectOption[];
+  /**
+   * The Discord guild this binding targets, when the plugin is guild-scoped
+   * (e.g. Self Role only changes roles in the server it was configured for).
+   * The host caches it per binding so the Send panel can warn — before the
+   * message is posted — when the destination webhook lives in a *different*
+   * server, where the component is dead on arrival. Sanitized by the host;
+   * ignored when absent or not a snowflake.
+   */
+  guildId?: string;
 }
 
 export interface PluginCancelMessage {
@@ -182,6 +213,63 @@ export function sanitizeSummary(raw: unknown): PluginSummary | undefined {
   };
 }
 
+/** Validate a plugin-supplied guild id — a Discord snowflake — else undefined.
+ *  Used for the guild-scoped binding hint (`PluginSaveMessage.guildId`); a
+ *  malformed value is simply dropped so the host just skips the cross-guild
+ *  check rather than trusting a bogus id. */
+export function sanitizeGuildId(raw: unknown): string | undefined {
+  return typeof raw === "string" && /^\d{15,25}$/.test(raw) ? raw : undefined;
+}
+
+/** Discord's per-field cap for a select option (label/value/description). */
+const OPTION_FIELD_MAX = 100;
+
+/**
+ * Validate + clamp plugin-supplied select options before they're written onto a
+ * component. Drops malformed entries, trims and length-clamps each field to
+ * Discord's caps, dedupes by `value` (a select can't carry two options with the
+ * same value), and limits the count to `max`. Returns `undefined` when nothing
+ * usable survives, so callers can treat "no options" uniformly. As with every
+ * inbound plugin field, this never trusts the shape the iframe sent.
+ */
+export function sanitizeOptions(raw: unknown, max: number): PluginSelectOption[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: PluginSelectOption[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (out.length >= max) break;
+    if (!isObject(item)) continue;
+    const label = typeof item.label === "string" ? item.label.trim() : "";
+    const value = typeof item.value === "string" ? item.value.trim() : "";
+    if (!label || !value || seen.has(value)) continue;
+    seen.add(value);
+    const opt: PluginSelectOption = {
+      label: label.slice(0, OPTION_FIELD_MAX),
+      value: value.slice(0, OPTION_FIELD_MAX),
+    };
+    if (typeof item.description === "string" && item.description.trim())
+      opt.description = item.description.trim().slice(0, OPTION_FIELD_MAX);
+    const emoji = sanitizeEmoji(item.emoji);
+    if (emoji) opt.emoji = emoji;
+    out.push(opt);
+  }
+  return out.length ? out : undefined;
+}
+
+/** A partial emoji is `{ id }` (custom) or `{ name }` (unicode); anything else
+ *  is dropped so a malformed emoji never blocks an otherwise-valid option. */
+function sanitizeEmoji(raw: unknown): PluginSelectOption["emoji"] | undefined {
+  if (!isObject(raw)) return undefined;
+  const id = typeof raw.id === "string" && raw.id ? raw.id : undefined;
+  const name = typeof raw.name === "string" && raw.name ? raw.name : undefined;
+  if (!id && !name) return undefined;
+  return {
+    ...(id ? { id } : {}),
+    ...(name ? { name } : {}),
+    ...(raw.animated === true ? { animated: true } : {}),
+  };
+}
+
 /** Mint a fresh per-open session nonce. */
 export function newNonce(): string {
   return newId();
@@ -189,5 +277,11 @@ export function newNonce(): string {
 
 /** Sandbox flags for the plugin iframe. Same-origin is required so the plugin
  *  can use its own storage/cookies against its backend; scripts/forms enable a
- *  normal config UI. No top-navigation, popups, or downloads are granted. */
-export const PLUGIN_IFRAME_SANDBOX = "allow-scripts allow-forms allow-same-origin";
+ *  normal config UI. Popups are granted so a plugin can open an external link
+ *  (e.g. Self Role's "Add the DWEEB bot" OAuth invite) in a new tab — without
+ *  this, the browser silently swallows `target="_blank"` clicks. The popup
+ *  escapes the sandbox so the destination (Discord's OAuth flow) loads as a
+ *  normal, unsandboxed window. No top-navigation of the host frame or downloads
+ *  are granted. */
+export const PLUGIN_IFRAME_SANDBOX =
+  "allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox";

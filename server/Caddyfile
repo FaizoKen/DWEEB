@@ -74,3 +74,9 @@ pingpong.{$PLUGINS_DOMAIN} {
 	import site_defaults
 	reverse_proxy ping-pong:8091
 }
+
+# Self Role.
+selfrole.{$PLUGINS_DOMAIN} {
+	import site_defaults
+	reverse_proxy self-role:8092
+}

@@ -27,7 +27,6 @@ import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { EmojiIcon } from "@/ui/Icon";
 import { GuildEmojiPanel } from "@/features/guild/MentionPicker";
-import { useAttachedPlugin } from "@/features/plugins/useAttachedPlugin";
 import { CapabilityNote } from "./CapabilityNote";
 import styles from "./ButtonInspector.module.css";
 
@@ -48,7 +47,6 @@ export function ButtonInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
   const replace = useMessageStore((s) => s.replaceNode);
   const advancedMode = useUiPrefs((s) => s.advancedMode);
-  const attachedPlugin = useAttachedPlugin(node);
 
   const changeStyle = (next: ButtonStyleValue) => {
     if (next === node.style) return;
@@ -61,24 +59,12 @@ export function ButtonInspector({ node }: Props) {
     }
   };
 
-  const isInteractive = node.style !== ButtonStyle.Link && node.style !== ButtonStyle.Premium;
-
   return (
     <>
-      {isInteractive ? (
-        attachedPlugin ? (
-          <CapabilityNote tone="info">
-            <strong>Handled by {attachedPlugin.name}.</strong> Clicks are processed by the plugin's
-            service — send this message through an application-owned webhook so they reach it.
-          </CapabilityNote>
-        ) : (
-          <CapabilityNote>
-            <strong>Needs an application-owned webhook.</strong> Discord rejects messages with
-            interactive buttons when sent through a regular user-created webhook. Use a Link button
-            if you just want a hyperlink.
-          </CapabilityNote>
-        )
-      ) : null}
+      {/* The interactive-button capability notice now lives above the Action
+          panel the Inspector renders ahead of these fields. The Premium note
+          stays here — a Premium button isn't a plugin target, so it has no
+          Action panel to hang under. */}
       {node.style === ButtonStyle.Premium ? (
         <CapabilityNote>
           <strong>Needs app monetization.</strong> Premium buttons require the webhook's application
@@ -162,8 +148,8 @@ export function ButtonInspector({ node }: Props) {
         label="Disabled"
       />
       {/* The interaction's custom_id lives in the Action panel the Inspector
-          renders next — it's bound to (or freed from) a plugin there, so the
-          two halves of that one decision stay together. */}
+          renders above these fields — it's bound to (or freed from) a plugin
+          there, so the two halves of that one decision stay together. */}
     </>
   );
 }

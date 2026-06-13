@@ -16,6 +16,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useAuthStore } from "@/core/auth/authStore";
+import { useGuildStore } from "@/core/guild/guildStore";
 import { usePluginRegistry } from "@/core/state/pluginRegistryStore";
 import {
   clearPluginSummary,
@@ -26,9 +28,14 @@ import { isPluginRegistryConfigured } from "@/core/plugins/registry";
 import { LIMITS } from "@/core/schema/limits";
 import type { PluginManifest } from "@/core/plugins/manifest";
 import { matchPlugin, pluginsForTarget, targetOf, type PluginTarget } from "@/core/plugins/targets";
-import type { AnyComponent, InteractiveButtonComponent } from "@/core/schema/types";
+import type {
+  AnyComponent,
+  InteractiveButtonComponent,
+  StringSelectComponent,
+} from "@/core/schema/types";
+import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
-import { ChevronRightIcon, PuzzleIcon } from "@/ui/Icon";
+import { AlertTriangleIcon, ChevronRightIcon, PuzzleIcon } from "@/ui/Icon";
 import { PluginConfigModal } from "@/features/plugins/PluginConfigModal";
 import { PluginIcon } from "@/features/plugins/PluginIcon";
 import { PluginLibraryModal } from "@/features/plugins/PluginLibraryModal";
@@ -116,8 +123,17 @@ export function PluginPanel({ node }: Props) {
   const handleSave = (manifest: PluginManifest) => (result: PluginSaveResult) => {
     // Adopting a new id supersedes the old binding's cached summary.
     if (customId && customId !== result.customId) clearPluginSummary(customId);
-    writeCustomId(result.customId);
-    if (result.summary) setPluginSummary(result.customId, manifest.id, result.summary);
+    // The plugin owns the custom_id, and — for a string select — may also hand
+    // back the exact option list to wire, so the user never maps each option's
+    // value (e.g. a role id) by hand. Both get locked in their inspectors while
+    // the plugin stays attached.
+    const fields: Partial<StringSelectComponent> = { custom_id: result.customId };
+    if (target === "string_select" && result.options?.length) fields.options = result.options;
+    patch<StringSelectComponent>(node._id, fields);
+    // Cache the summary plus, for a guild-scoped plugin, the guild it targets —
+    // the Send panel uses the latter to warn before posting to another server.
+    if (result.summary)
+      setPluginSummary(result.customId, manifest.id, result.summary, result.guildId);
     setConfiguring(null);
   };
 
@@ -233,12 +249,54 @@ function AttachedChip({
   const label = cached?.summary.label ?? manifest.name;
   const detail = cached?.summary.description ?? manifest.description;
 
+  // A guild-scoped binding (Self Role et al.) carries the server it was set up
+  // for. Surface that here so a wrong-server binding is caught while editing —
+  // not only at the Send page, where the destination is finally chosen and the
+  // hard block lives. The guild is only cached for guild-scoped plugins, so for
+  // every other binding this line simply doesn't render.
+  const targetGuildId = cached?.guildId;
+  const authGuilds = useAuthStore((s) => s.guilds);
+  // Signed out: with no session we can't resolve the id to a server name (the
+  // line falls back to the raw id) and there's no connected guild to compare
+  // against, so the mismatch caution below can never fire. Flag it as its own
+  // caution that prompts sign-in, so a wrong-server binding still gets a second
+  // look here rather than slipping through to the Send page unchecked.
+  const signedOut = useAuthStore((s) => s.status) === "anon";
+  // The connected guild is the closest thing the editor has to a "current
+  // server": when one is connected and it differs from the binding's target,
+  // the line escalates from a neutral fact to a caution. With nothing connected
+  // there's no destination to judge against, so we never cry wolf — the real
+  // block still happens at send time against the chosen webhook's guild.
+  const connectedGuildId = useGuildStore((s) => s.guildId);
+
+  const targetName =
+    (targetGuildId && authGuilds.find((g) => g.id === targetGuildId)?.name) || targetGuildId;
+  const mismatch = !!targetGuildId && connectedGuildId !== "" && connectedGuildId !== targetGuildId;
+  const connectedName =
+    authGuilds.find((g) => g.id === connectedGuildId)?.name ?? "a different server";
+  const warn = mismatch || signedOut;
+
   return (
     <div className={styles.chip}>
       <PluginIcon manifest={manifest} summaryIcon={cached?.summary.icon} />
       <div className={styles.chipText}>
         <span className={styles.chipName}>{label}</span>
         {detail ? <span className={styles.chipDesc}>{detail}</span> : null}
+        {targetGuildId ? (
+          <span
+            className={cn(styles.chipTarget, warn && styles.chipTargetWarn)}
+            title={targetGuildId}
+          >
+            {warn ? (
+              <AlertTriangleIcon size={12} className={styles.chipTargetIcon} aria-hidden />
+            ) : null}
+            {mismatch
+              ? `Targets ${targetName} — you're connected to ${connectedName}`
+              : signedOut
+                ? `Targets ${targetName} — sign in to verify the server`
+                : `Targets ${targetName}`}
+          </span>
+        ) : null}
         <span className={styles.chipMeta}>via {manifest.name}</span>
       </div>
       <div className={styles.chipActions}>

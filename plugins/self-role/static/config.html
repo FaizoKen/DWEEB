@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Self Role — configure</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1f22;
+        --panel: #2b2d31;
+        --panel-2: #232428;
+        --border: #3a3c41;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #5865f2;
+        --green: #3ba55d;
+        --yellow: #f0b232;
+        --danger: #da373c;
+        --radius: 8px;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #f2f3f5;
+        --panel-2: #e3e5e8;
+        --border: #d7d9dc;
+        --text: #1e1f22;
+        --muted: #4e5058;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 20px 0 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h2:first-of-type { margin-top: 0; }
+      .step-num {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="text"], input[type="password"], select, textarea {
+        width: 100%;
+        padding: 8px 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+      }
+      input:focus-visible, select:focus-visible, textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+      .hint code, .callout code { color: var(--accent); }
+      .row2 { display: flex; gap: 8px; }
+      .row2 > * { flex: 1; }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
+      .bar .grow { flex: 1; }
+      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+      /* Disabled (locked) sections before the bot is connected. */
+      .locked { opacity: 0.45; pointer-events: none; filter: grayscale(0.3); }
+
+      /* Callouts. */
+      .callout {
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+      .callout.good { border-left-color: var(--green); }
+      .callout.warn { border-left-color: var(--yellow); }
+      .callout.bad { border-left-color: var(--danger); }
+      .callout b { color: var(--text); }
+
+      details { margin-top: 8px; }
+      summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+      details ol { margin: 8px 0 0; padding-left: 20px; }
+      details li { margin: 4px 0; color: var(--muted); }
+
+      /* Role list. */
+      .roles { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 320px; overflow: auto; }
+      .role {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 9px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-2);
+        cursor: pointer;
+      }
+      .role:hover { border-color: var(--accent); }
+      .role input { flex: none; margin: 0; accent-color: var(--accent); }
+      .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
+      .role .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .role .warn-tag { flex: none; font-size: 11px; color: var(--yellow); }
+      .role.blocked { opacity: 0.7; }
+      .role-search { margin-top: 8px; }
+      .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+      /* Mode cards. */
+      .modes { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+      .mode {
+        display: flex;
+        gap: 10px;
+        padding: 9px 11px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        background: var(--panel-2);
+      }
+      .mode:hover { border-color: var(--accent); }
+      .mode.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); }
+      .mode input { margin: 2px 0 0; accent-color: var(--accent); flex: none; }
+      .mode .m-title { font-weight: 600; }
+      .mode .m-desc { font-size: 12px; color: var(--muted); }
+
+      /* Value-mapping table (string select). */
+      .map { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+      .map-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-2);
+      }
+      .map-row .m-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .map-row code { color: var(--accent); }
+      .map-row button { padding: 4px 8px; font-size: 12px; }
+
+      .seg { display: flex; gap: 6px; margin-top: 8px; }
+      .seg button { flex: 1; }
+      .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+    </style>
+  </head>
+  <body>
+    <!-- Step 1 — the bot (always DWEEB's shared bot) ------------------------->
+    <h2><span class="step-num">1</span> <span id="step1Title">Bot &amp; server</span></h2>
+    <div id="botIntro"></div>
+
+    <!-- Legacy manual-connect block. The builder now signs the user in and hands
+         us the connected server, so we never ask for a raw Server ID anymore.
+         Kept (always hidden) only as the value-holder for #guildId and the
+         internal #connect trigger the auto-connect path drives. -->
+    <div id="manualConnect" style="display: none">
+      <div id="guildIdBlock">
+        <label class="lbl" for="guildId">Server ID</label>
+        <input id="guildId" type="text" inputmode="numeric" autocomplete="off"
+          placeholder="e.g. 123456789012345678" />
+        <div class="hint">
+          Turn on <b>Developer Mode</b> (Discord → Settings → Advanced), then
+          right-click your server icon → <b>Copy Server ID</b>.
+        </div>
+      </div>
+
+      <div class="bar" style="margin-top: 12px">
+        <button id="connect" type="button" class="primary">Connect</button>
+        <span class="grow"></span>
+        <span id="connStatus" class="hint" style="margin: 0"></span>
+      </div>
+    </div>
+    <div class="err" id="connErr"></div>
+
+    <!-- Step 2 — choose roles ------------------------------------------------->
+    <h2><span class="step-num">2</span> <span id="rolesTitle">Choose roles</span>
+      <span class="count" id="roleCount"></span></h2>
+    <div id="roleSection" class="locked">
+      <input id="roleSearch" class="role-search" type="text" placeholder="Search roles…" />
+      <div id="roles" class="roles"></div>
+      <div class="hint" id="rolesHint"></div>
+    </div>
+
+    <!-- Step 3 — behaviour ---------------------------------------------------->
+    <h2><span class="step-num">3</span> When clicked…</h2>
+    <div id="modeSection" class="locked">
+      <div id="modes" class="modes"></div>
+    </div>
+
+    <!-- Step 4 — wire up the menu (string select only) ------------------------>
+    <div id="mapWrap" style="display: none">
+      <h2><span class="step-num">4</span> Your menu options</h2>
+      <div class="callout good">
+        ✓ DWEEB wires these onto your Select Menu for you — one option per role,
+        each one's <code>Value</code> locked to the role's ID. No copy-pasting,
+        and they can't be broken by accident. Just <b>Save</b>.
+      </div>
+      <div id="map" class="map"></div>
+    </div>
+
+    <!-- Step 5 — reply -------------------------------------------------------->
+    <h2><span class="step-num" id="replyStepNum">4</span> Reply to the member</h2>
+    <div id="replySection" class="locked">
+      <div class="seg" id="replySeg">
+        <button type="button" data-rmode="summary" class="sel">Automatic summary</button>
+        <button type="button" data-rmode="custom">Custom message</button>
+      </div>
+      <div class="hint" id="summaryHint">
+        I'll reply privately with what changed, e.g.
+        “✅ Added <b>Red</b>”. Nobody else sees it.
+      </div>
+      <textarea id="replyText" rows="2" maxlength="500" style="display: none; margin-top: 8px"
+        placeholder="e.g. Roles updated! Check the top of the member list."></textarea>
+    </div>
+
+    <div class="err" id="error"></div>
+
+    <div class="bar">
+      <button id="cancel" type="button">Cancel</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script>
+      "use strict";
+      const PREFIX = "selfrole:";
+
+      // ── Session / protocol state ────────────────────────────────────────
+      let nonce = null;
+      let hostOrigin = "*";
+      let instanceId = null; // set when reconfiguring
+
+      // ── Capabilities (from /api/meta) ───────────────────────────────────
+      let defaultBot = false; // deployment runs a shared bot
+      let inviteUrl = null;
+
+      // ── Host context (the server DWEEB is connected to) ─────────────────
+      let autoGuild = false; // DWEEB told us the current server id
+      let hostGuildId = ""; // the builder's currently-connected server id
+      let hostGuildName = ""; // its display name, for a friendly status line
+      let autoState = "idle"; // "idle" | "connecting" | "ok" | "error"
+      let autoError = ""; // last failure reason, shown in the auto status
+      // True when reconfiguring a menu whose saved server isn't the one the
+      // builder is connected to right now. The menu keeps targeting its saved
+      // server, so we warn rather than silently retarget.
+      let guildMismatch = false;
+
+      // ── Editor model ────────────────────────────────────────────────────
+      let target = "button"; // "button" | "string_select"
+      let connected = false;
+      let rolesLive = false; // true once `roles` holds the live guild list, not just cached saves
+      let guildName = "";
+      let roles = []; // [{ id, name, color, position, managed, assignable }]
+      let selected = new Set(); // selected role ids
+      let mode = "toggle";
+      let replyMode = "summary";
+
+      const $ = (id) => document.getElementById(id);
+      const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
+      const isSelect = () => target === "string_select";
+      const hexColor = (n) =>
+        n && n > 0 ? "#" + n.toString(16).padStart(6, "0") : "#99aab5";
+      const escapeHtml = (s) =>
+        String(s).replace(
+          /[&<>"']/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        );
+
+      // The fully-automatic path: the shared DWEEB bot is configured and DWEEB
+      // told us the current server. Then the user never touches step 1 — we
+      // connect with the DWEEB bot for them. Self Role always uses the DWEEB
+      // bot to assign roles; there is no bring-your-own-bot option.
+      const autoMode = () => defaultBot && autoGuild;
+
+      // The bot-invite link, pre-targeted at this menu's server when we know it.
+      // Discord's OAuth screen reads `guild_id` to pre-select that server in the
+      // picker — so the admin lands on the exact server this menu assigns roles
+      // in (the bug case: re-authorize *that* server to grant Manage Roles)
+      // without losing the freedom to pick a different one. Falls back to the
+      // bare invite URL when no server is known.
+      function botInviteUrl() {
+        if (!inviteUrl) return null;
+        const gid = ($("guildId").value || "").trim();
+        if (!isSnowflake(gid)) return inviteUrl;
+        try {
+          const u = new URL(inviteUrl);
+          u.searchParams.set("guild_id", gid);
+          return u.toString();
+        } catch {
+          return inviteUrl;
+        }
+      }
+
+      // ── Step-1 status (always the shared DWEEB bot) ──────────────────────
+      function renderBotIntro() {
+        const intro = $("botIntro");
+
+        // No shared bot configured on this deployment — an operator must set
+        // BOT_TOKEN. Self Role can't assign roles without it.
+        if (!defaultBot) {
+          $("manualConnect").style.display = "none";
+          $("step1Title").textContent = "Bot";
+          intro.innerHTML = `<div class="callout bad">This deployment has no Self Role bot configured. The operator needs to set <code>BOT_TOKEN</code> (a bot with <b>Manage Roles</b>) for Self Role to work.</div>`;
+          sendResize();
+          return;
+        }
+
+        // Fully-automatic: DWEEB told us the server — just a live status line.
+        if (autoMode()) {
+          $("manualConnect").style.display = "none";
+          $("step1Title").textContent = "Bot & server";
+          // The server this menu targets (where roles get assigned). When
+          // reconfiguring that's the saved server; otherwise it's the host's.
+          const targetName = guildName || hostGuildName;
+          const where = targetName ? `<b>${escapeHtml(targetName)}</b>` : "this server";
+          if (autoState === "ok" && guildMismatch) {
+            // Saved server ≠ the builder's current server. Its roles don't exist
+            // here, so editing is locked: offer a one-click retarget, or point
+            // the admin back to DWEEB to reopen this with the original selected.
+            const built = guildName ? `<b>${escapeHtml(guildName)}</b>` : "a different server";
+            const here = hostGuildName
+              ? `<b>${escapeHtml(hostGuildName)}</b>`
+              : "the server you're building for";
+            intro.innerHTML = `<div class="callout warn">⚠ This menu was set up for ${built}, but you're now building in ${here}. You can't edit ${built}'s roles from here — <a href="#" id="switchLink">switch it to ${here}</a> to rebuild it for this server, or reopen it with ${built} selected in DWEEB.</div>`;
+            const sw = $("switchLink");
+            if (sw) sw.onclick = (e) => { e.preventDefault(); switchToHostGuild(); };
+          } else if (autoState === "ok") {
+            intro.innerHTML = `<div class="callout good">✓ Using the <b>DWEEB bot</b> in ${where} — nothing to set up here.</div>`;
+          } else if (autoState === "error") {
+            const lead = autoError
+              ? escapeHtml(autoError)
+              : `The <b>DWEEB bot</b> isn't in ${where} yet, or is missing <b>Manage Roles</b>.`;
+            const invite = botInviteUrl();
+            const add = invite
+              ? ` <a href="${invite}" target="_blank" rel="noopener">Add the DWEEB bot</a> ·`
+              : "";
+            intro.innerHTML = `<div class="callout bad">${lead}${add} <a href="#" id="retryLink">Try again</a></div>`;
+            const retry = $("retryLink");
+            if (retry) retry.onclick = (e) => { e.preventDefault(); connect(); };
+          } else {
+            intro.innerHTML = `<div class="callout">Connecting to ${where} with the <b>DWEEB bot</b>…</div>`;
+          }
+          sendResize();
+          return;
+        }
+
+        // Shared bot exists, but DWEEB didn't hand us a server. Sign-in is now
+        // required in the builder, so this only happens when no server is
+        // connected yet — and a raw Server ID typed here is exactly what causes
+        // "this menu was set up for a different server" later. So we don't ask
+        // for one: point the admin back to the builder to connect their server,
+        // and this menu will target it automatically.
+        $("manualConnect").style.display = "none";
+        $("step1Title").textContent = "Bot & server";
+        const invite = botInviteUrl();
+        const addBot = invite
+          ? ` Haven't added the bot? <a href="${invite}" target="_blank" rel="noopener">Add the DWEEB bot</a>.`
+          : "";
+        if (instanceId) {
+          // Reconfiguring, but DWEEB handed us no current server (logged out,
+          // or none picked). Same locked treatment as a different-server menu:
+          // we can't confirm this menu still targets the right place, so prompt
+          // to connect rather than silently editing it. The saved roles show
+          // read-only below.
+          const built = guildName ? `<b>${escapeHtml(guildName)}</b>` : "another server";
+          intro.innerHTML = `<div class="callout warn">⚠ This menu assigns roles in ${built}. Connect your server in DWEEB first — sign in and pick the server you're building for, then reopen this menu to edit it.${addBot}</div>`;
+        } else {
+          intro.innerHTML = `<div class="callout warn">Connect your server in DWEEB first — pick the server you're building this message for, then reopen this menu. It'll use that exact server automatically, with the <b>DWEEB bot</b> assigning roles.${addBot}</div>`;
+        }
+        sendResize();
+      }
+
+      // ── Connect ─────────────────────────────────────────────────────────
+      $("connect").addEventListener("click", connect);
+      async function connect() {
+        $("connErr").textContent = "";
+        const auto = autoMode();
+        const guildId = $("guildId").value.trim();
+        if (!isSnowflake(guildId)) {
+          if (auto) return autoFail("No server detected — open this from a connected server.");
+          return connFail("Enter your Server ID (17–20 digits — see the hint above).");
+        }
+
+        // Skip the "Connecting…" flash when we already show a good status and
+        // are just refreshing the live role list (the reconfigure path).
+        if (auto && autoState !== "ok") {
+          autoState = "connecting";
+          autoError = "";
+          renderBotIntro();
+        }
+        setConnecting(true);
+        try {
+          // The service always probes with the shared DWEEB bot.
+          const res = await fetch("/api/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ guild_id: guildId }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setConnecting(false);
+            if (auto) return autoFail(data.error || `Couldn't connect (${res.status}).`);
+            return connFail(data.error || `Couldn't connect (${res.status}).`);
+          }
+          guildName = data.guild_name || hostGuildName || "your server";
+          roles = Array.isArray(data.roles) ? data.roles : [];
+          // Keep only still-existing selections.
+          const ids = new Set(roles.map((r) => r.id));
+          selected = new Set([...selected].filter((id) => ids.has(id)));
+          connected = true;
+          rolesLive = true; // we now hold the live guild role list
+          $("connStatus").textContent = `✓ ${guildName} · ${data.bot_name || "DWEEB bot"}`;
+          if (!data.bot_can_manage_roles) {
+            // Connected, but the bot lacks the one permission it needs.
+            if (auto) {
+              autoFail(
+                "The DWEEB bot is in your server but is missing the Manage Roles permission. Give its role Manage Roles in Server Settings → Roles, then try again.",
+              );
+            } else {
+              $("connErr").innerHTML =
+                '<span style="color:var(--yellow)">⚠️ This bot is missing the <b>Manage Roles</b> permission, so it can\'t assign anything yet. Give its role Manage Roles in Server Settings → Roles.</span>';
+            }
+          } else if (auto) {
+            autoState = "ok";
+            autoError = "";
+            renderBotIntro();
+          }
+          unlock();
+          renderRoles();
+          renderMap();
+          setConnecting(false);
+        } catch (e) {
+          setConnecting(false);
+          if (auto) return autoFail("Couldn't reach the Self Role service.");
+          connFail("Couldn't reach the plugin service.");
+        }
+      }
+
+      // Surface a failure on the automatic path through the step-1 status line.
+      function autoFail(m) {
+        autoState = "error";
+        autoError = m || "";
+        renderBotIntro();
+      }
+
+      function setConnecting(b) {
+        $("connect").disabled = b;
+        $("connect").textContent = b ? "Connecting…" : connected ? "Reconnect" : "Connect";
+      }
+      function connFail(m) {
+        $("connErr").textContent = m;
+        sendResize();
+      }
+
+      function unlock() {
+        for (const id of ["roleSection", "modeSection", "replySection"])
+          $(id).classList.remove("locked");
+        $("mapWrap").style.display = isSelect() ? "" : "none";
+        $("replyStepNum").textContent = isSelect() ? "5" : "4";
+      }
+
+      // ── Roles ───────────────────────────────────────────────────────────
+      $("roleSearch").addEventListener("input", renderRoles);
+      function renderRoles() {
+        const wrap = $("roles");
+        const q = $("roleSearch").value.trim().toLowerCase();
+        wrap.innerHTML = "";
+        const shown = roles.filter((r) => !q || r.name.toLowerCase().includes(q));
+        if (!shown.length) {
+          wrap.innerHTML = `<div class="hint">No roles match.</div>`;
+        }
+        for (const r of shown) {
+          const row = document.createElement("label");
+          row.className = "role" + (r.assignable === false ? " blocked" : "");
+          const input = document.createElement("input");
+          input.type = isSelect() ? "checkbox" : "radio";
+          input.name = "role";
+          input.checked = selected.has(r.id);
+          input.addEventListener("change", () => {
+            if (!isSelect()) selected = new Set();
+            if (input.checked) selected.add(r.id);
+            else selected.delete(r.id);
+            updateRoleCount();
+            renderMap();
+            updateModes();
+          });
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = r.name;
+          row.append(input, dot, name);
+          if (r.assignable === false) {
+            const tag = document.createElement("span");
+            tag.className = "warn-tag";
+            tag.textContent = r.managed ? "⚠ managed" : "⚠ above bot";
+            tag.title = r.managed
+              ? "Discord manages this role (bot/booster) — it can't be self-assigned."
+              : "The bot's role sits below this one, so it can't assign it. Move the bot's role up.";
+            row.appendChild(tag);
+          }
+          wrap.appendChild(row);
+        }
+        updateRoleCount();
+        sendResize();
+      }
+
+      function updateRoleCount() {
+        $("roleCount").textContent = isSelect()
+          ? `(${selected.size} selected)`
+          : selected.size
+            ? "(1 selected)"
+            : "";
+        $("rolesTitle").textContent = isSelect() ? "Choose roles" : "Choose the role";
+        $("rolesHint").innerHTML = isSelect()
+          ? "Members can pick any of these from the dropdown."
+          : "This button gives one role.";
+      }
+
+      // ── Wired-options preview (string select only) ──────────────────────
+      // A read-only confirmation of the option list DWEEB will lock onto the
+      // menu on Save — label = role name, value = role ID. Nothing to copy.
+      function renderMap() {
+        if (!isSelect()) return;
+        const map = $("map");
+        map.innerHTML = "";
+        const chosen = roles.filter((r) => selected.has(r.id));
+        if (!chosen.length) {
+          map.innerHTML = `<div class="hint">Pick some roles above to preview the options.</div>`;
+          sendResize();
+          return;
+        }
+        for (const r of chosen) {
+          const row = document.createElement("div");
+          row.className = "map-row";
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.className = "m-name";
+          name.textContent = r.name;
+          const code = document.createElement("code");
+          code.textContent = r.id;
+          row.append(dot, name, code);
+          map.appendChild(row);
+        }
+        sendResize();
+      }
+
+      // The option list DWEEB locks onto the Select Menu on save: label = role
+      // name, value = the role ID (the contract the plugin matches clicks on).
+      function buildOptions() {
+        return roles
+          .filter((r) => selected.has(r.id))
+          .map((r) => ({ label: (r.name || r.id).slice(0, 100), value: r.id }));
+      }
+
+      // ── Modes ───────────────────────────────────────────────────────────
+      const MODE_DEFS = {
+        toggle: {
+          title: "Toggle",
+          desc: "Click to get the role; click again to remove it. The classic.",
+          selectOnly: false,
+        },
+        unique: {
+          title: "Pick one (swap)",
+          desc: "Picking a role removes the others from this menu. Great for colours, regions, pronouns.",
+          selectOnly: true,
+        },
+        add: {
+          title: "Give only",
+          desc: "Only ever adds the role — never removes it. Good for “verify” or “opt in”.",
+          selectOnly: false,
+        },
+        remove: {
+          title: "Take only",
+          desc: "Only ever removes the role.",
+          selectOnly: false,
+        },
+      };
+      function renderModes() {
+        const wrap = $("modes");
+        wrap.innerHTML = "";
+        for (const [key, def] of Object.entries(MODE_DEFS)) {
+          if (def.selectOnly && !isSelect()) continue;
+          const row = document.createElement("label");
+          row.className = "mode" + (mode === key ? " sel" : "");
+          row.dataset.mode = key;
+          const input = document.createElement("input");
+          input.type = "radio";
+          input.name = "mode";
+          input.checked = mode === key;
+          input.addEventListener("change", () => {
+            mode = key;
+            updateModes();
+          });
+          const txt = document.createElement("div");
+          txt.innerHTML = `<div class="m-title">${def.title}</div><div class="m-desc">${def.desc}</div>`;
+          row.append(input, txt);
+          wrap.appendChild(row);
+        }
+        sendResize();
+      }
+      function updateModes() {
+        // If a select-only mode is active on a button, fall back to toggle.
+        if (MODE_DEFS[mode]?.selectOnly && !isSelect()) mode = "toggle";
+        for (const row of $("modes").children)
+          row.classList.toggle("sel", row.dataset.mode === mode);
+      }
+
+      // ── Reply ───────────────────────────────────────────────────────────
+      for (const btn of $("replySeg").children) {
+        btn.addEventListener("click", () => {
+          replyMode = btn.dataset.rmode;
+          for (const b of $("replySeg").children) b.classList.toggle("sel", b === btn);
+          $("replyText").style.display = replyMode === "custom" ? "" : "none";
+          $("summaryHint").style.display = replyMode === "custom" ? "none" : "";
+          sendResize();
+        });
+      }
+
+      // ── DWEEB protocol ──────────────────────────────────────────────────
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+
+      window.addEventListener("message", async (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+
+        // Answer to a data request we made (e.g. the current server).
+        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          const resolve = pendingReqs.get(msg.requestId);
+          pendingReqs.delete(msg.requestId);
+          resolve(msg.ok ? msg.data : null);
+          return;
+        }
+
+        if (msg.type !== "dweeb:plugin:init") return;
+
+        nonce = msg.nonce;
+        hostOrigin = event.origin;
+        if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+        target = msg.target === "string_select" ? "string_select" : "button";
+
+        await loadMeta();
+
+        // Ask DWEEB which server the editor is connected to. If it knows, we can
+        // pre-fill the Server ID and (with the hosted bot) auto-connect — so the
+        // admin never has to think about "Connect a bot".
+        const guild = await requestResource("guild");
+        if (guild && typeof guild.id === "string" && isSnowflake(guild.id)) {
+          autoGuild = true;
+          hostGuildId = guild.id;
+          hostGuildName = typeof guild.name === "string" ? guild.name : "";
+          if (!$("guildId").value) $("guildId").value = guild.id;
+        }
+
+        if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
+          instanceId = msg.customId.slice(PREFIX.length);
+          await loadInstance(instanceId);
+        }
+        renderBotIntro();
+        renderModes();
+        updateRoleCount();
+        sendResize();
+        maybeAutoConnect();
+      });
+
+      // ── Request editor data from DWEEB (one promise per request) ────────
+      const pendingReqs = new Map(); // requestId -> resolve
+      function requestResource(resource) {
+        return new Promise((resolve) => {
+          if (nonce == null) return resolve(null);
+          const requestId = "req_" + Math.random().toString(36).slice(2);
+          pendingReqs.set(requestId, resolve);
+          parent.postMessage(
+            { type: "dweeb:plugin:request", nonce, requestId, resource },
+            hostOrigin,
+          );
+          // Never hang if the host is older or refuses the resource.
+          setTimeout(() => {
+            if (pendingReqs.has(requestId)) {
+              pendingReqs.delete(requestId);
+              resolve(null);
+            }
+          }, 4000);
+        });
+      }
+
+      // Connect with the hosted DWEEB bot as soon as we know the server, so the
+      // user never touches step 1. No-op unless we're on the automatic path.
+      function maybeAutoConnect() {
+        if (!autoMode()) return;
+        // Belongs to a different server — never reach out for that server's
+        // roles. The admin must switch to the current server first.
+        if (guildMismatch) return;
+        // Already have the live list (a fresh connect) — nothing to do. When
+        // reconfiguring we land here with cached roles and connected=true but
+        // rolesLive=false: fetch the full guild list so the picker shows every
+        // role, not just the handful already saved.
+        if (connected && rolesLive) return;
+        if (!isSnowflake($("guildId").value.trim())) return;
+        connect();
+      }
+
+      // Retarget a mismatched menu at the server the builder is connected to
+      // right now. The old selection belongs to a different server, so start
+      // clean and pull this server's live roles.
+      function switchToHostGuild() {
+        if (!isSnowflake(hostGuildId)) return;
+        $("guildId").value = hostGuildId;
+        guildName = hostGuildName;
+        guildMismatch = false;
+        rolesLive = false;
+        connected = false;
+        selected = new Set();
+        roles = [];
+        autoState = "connecting";
+        renderRoles();
+        renderMap();
+        connect();
+      }
+
+      function sendResize() {
+        if (nonce == null) return;
+        parent.postMessage(
+          { type: "dweeb:plugin:resize", nonce, height: document.body.scrollHeight + 24 },
+          hostOrigin,
+        );
+      }
+
+      async function loadMeta() {
+        try {
+          const res = await fetch("/api/meta");
+          if (res.ok) {
+            const m = await res.json();
+            defaultBot = !!m.defaultBot;
+            inviteUrl = m.inviteUrl || null;
+          }
+        } catch {
+          /* leave defaults */
+        }
+      }
+
+      // ── Reconfigure ─────────────────────────────────────────────────────
+      async function loadInstance(id) {
+        try {
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          target = d.target === "string_select" ? "string_select" : "button";
+          // The saved server wins; fall back to whatever the host pre-filled.
+          const savedGuild = d.guild_id || $("guildId").value;
+          // The menu's target-server display name. Don't fold this into
+          // hostGuildName — that tracks the *current* server, which we compare
+          // against below to spot a mismatch.
+          guildName = d.guild_name || (savedGuild === hostGuildId ? hostGuildName : "") || "";
+          $("guildId").value = savedGuild;
+          if (isSnowflake(savedGuild)) {
+            // Did the admin build this for a different server than the one
+            // they're connected to now? If so, warn instead of silently
+            // retargeting (the menu still assigns roles in its saved server).
+            // We deliberately do NOT flip `autoGuild` on from the saved id:
+            // that flag means "DWEEB handed us a *current* server". Without one
+            // (logged out, or no server picked) we can't confirm this menu
+            // still targets the right place, so we lock it and ask the admin to
+            // connect — exactly the treatment a different-server menu gets.
+            guildMismatch = !!hostGuildId && hostGuildId !== savedGuild;
+          }
+          mode = d.mode || "toggle";
+          // Show the saved roles immediately (cached name/color). "Reconnect"
+          // refreshes the live list + assignable flags.
+          roles = (d.roles || []).map((r) => ({
+            id: r.id,
+            name: r.name || r.id,
+            color: r.color || 0,
+            assignable: undefined,
+          }));
+          selected = new Set(roles.map((r) => r.id));
+          if (d.response?.mode === "custom") {
+            replyMode = "custom";
+            $("replyText").value = d.response.text || "";
+            $("replyText").style.display = "";
+            $("summaryHint").style.display = "none";
+            for (const b of $("replySeg").children)
+              b.classList.toggle("sel", b.dataset.rmode === "custom");
+          }
+          if (autoMode()) autoState = "ok"; // reconfiguring a hosted-bot menu
+          if (guildMismatch || !autoGuild) {
+            // We can't safely edit here. Either this menu belongs to a
+            // different server than the one being built for (`guildMismatch`),
+            // or DWEEB handed us no current server at all (`!autoGuild` —
+            // logged out, or no server picked). In both cases the saved roles
+            // either don't exist here or can't be verified against the right
+            // server, so don't fetch live roles or unlock editing. Show the
+            // saved roles read-only (the sections stay `.locked`) so the admin
+            // can see what the menu does; step 1 tells them how to proceed —
+            // switch to this server, or connect one in DWEEB.
+            connected = false;
+            $("connStatus").textContent = "";
+            renderRoles();
+            renderMap();
+            return;
+          }
+          connected = true;
+          $("connStatus").textContent = guildName ? `✓ ${guildName}` : "✓ saved";
+          unlock();
+          renderRoles();
+          renderMap();
+        } catch {
+          /* fresh form */
+        }
+      }
+
+      // ── Save ────────────────────────────────────────────────────────────
+      $("cancel").addEventListener("click", () => {
+        parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
+      });
+      $("save").addEventListener("click", save);
+
+      async function save() {
+        $("error").textContent = "";
+        const guildId = $("guildId").value.trim();
+        if (guildMismatch)
+          return fail(
+            `This menu belongs to ${guildName || "another server"}. Switch it to your current server first, or reopen it with ${guildName || "that server"} selected in DWEEB.`,
+          );
+        if (defaultBot && !autoGuild)
+          return fail("Connect your server in DWEEB first — sign in and pick it, then reopen this menu.");
+        if (!connected) return fail("Finish step 1 first (the DWEEB bot needs to reach your server).");
+        if (!isSnowflake(guildId)) return fail("That Server ID doesn't look right.");
+        if (selected.size === 0)
+          return fail(isSelect() ? "Choose at least one role." : "Choose a role for the button.");
+        if (!isSelect() && selected.size !== 1) return fail("A button gives exactly one role.");
+
+        const replyText = $("replyText").value.trim();
+        if (replyMode === "custom" && !replyText)
+          return fail("Type your custom reply, or switch to the automatic summary.");
+
+        const chosen = roles.filter((r) => selected.has(r.id));
+        const body = {
+          target,
+          guild_id: guildId,
+          guild_name: guildName || "",
+          roles: chosen.map((r) => ({ id: r.id, name: r.name, color: r.color || 0 })),
+          mode,
+          response:
+            replyMode === "custom"
+              ? { mode: "custom", text: replyText }
+              : { mode: "summary" },
+        };
+
+        setBusy(true);
+        try {
+          const url = instanceId
+            ? `/api/instances/${encodeURIComponent(instanceId)}`
+            : "/api/instances";
+          const res = await fetch(url, {
+            method: instanceId ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setBusy(false);
+            return fail(data.error || `Server returned ${res.status}.`);
+          }
+          const id = data.id || instanceId;
+          const modeLabel = MODE_DEFS[mode]?.title || mode;
+          parent.postMessage(
+            {
+              type: "dweeb:plugin:save",
+              nonce,
+              customId: PREFIX + id,
+              // The server this menu is bound to. DWEEB caches it so it can warn
+              // before the message is posted to a different server (where this
+              // menu would just answer "set up for a different server").
+              guildId,
+              summary: {
+                label: "Self Role",
+                description: isSelect()
+                  ? `${chosen.length} role${chosen.length === 1 ? "" : "s"} · ${modeLabel}`
+                  : `${chosen[0]?.name || "1 role"} · ${modeLabel}`,
+              },
+              // For a string select, hand DWEEB the option list to wire + lock
+              // onto the menu (one per role, value = role ID). DWEEB ignores
+              // this for buttons. No more hand-mapping each option's value.
+              ...(isSelect() ? { options: buildOptions() } : {}),
+            },
+            hostOrigin,
+          );
+        } catch (e) {
+          setBusy(false);
+          fail("Couldn't reach the plugin service.");
+        }
+      }
+
+      function fail(m) {
+        $("error").textContent = m;
+        sendResize();
+      }
+      function setBusy(b) {
+        $("save").disabled = b;
+        $("save").textContent = b ? "Saving…" : "Save";
+      }
+    </script>
+  </body>
+</html>

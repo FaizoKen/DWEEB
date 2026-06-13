@@ -24,6 +24,19 @@
       "targets": ["button"],
       "configUrl": "https://pingpong.dweeb.faizo.net/config.html",
       "customIdPrefix": "pingpong:"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "self-role",
+      "name": "Self Role",
+      "description": "Let members give themselves roles from a button or select menu — toggle, give, take, or pick-one.",
+      "version": "0.1.0",
+      "publisher": "DWEEB",
+      "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/self-role",
+      "targets": ["button", "string_select"],
+      "configUrl": "https://selfrole.dweeb.faizo.net/config.html",
+      "customIdPrefix": "selfrole:",
+      "managesSelectOptions": true
     }
   ]
 }

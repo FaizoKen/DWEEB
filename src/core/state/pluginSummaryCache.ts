@@ -22,6 +22,13 @@ import type { PluginSummary } from "@/core/plugins/protocol";
 interface CacheEntry {
   pluginId: string;
   summary: PluginSummary;
+  /**
+   * The guild this binding targets, for a guild-scoped plugin. Like the summary
+   * it's an expendable, same-device convenience: when present the Send panel can
+   * warn before posting the message to a *different* server (where the component
+   * would be dead); a miss just skips that check.
+   */
+  guildId?: string;
 }
 
 type CacheMap = Record<string, CacheEntry>;
@@ -58,10 +65,22 @@ export function getPluginSummary(customId: string | undefined): CacheEntry | nul
   return entry && typeof entry === "object" && typeof entry.pluginId === "string" ? entry : null;
 }
 
-/** Remember the summary a plugin returned for a `custom_id`. */
-export function setPluginSummary(customId: string, pluginId: string, summary: PluginSummary): void {
+/** The guild a guild-scoped binding targets, if one was cached for this id. */
+export function getPluginBindingGuild(customId: string | undefined): string | null {
+  const entry = getPluginSummary(customId);
+  return entry && typeof entry.guildId === "string" ? entry.guildId : null;
+}
+
+/** Remember the summary (and, for a guild-scoped binding, the guild) a plugin
+ *  returned for a `custom_id`. */
+export function setPluginSummary(
+  customId: string,
+  pluginId: string,
+  summary: PluginSummary,
+  guildId?: string,
+): void {
   const map = readAll();
-  map[customId] = { pluginId, summary };
+  map[customId] = { pluginId, summary, ...(guildId ? { guildId } : {}) };
   const keys = Object.keys(map);
   if (keys.length > MAX_ENTRIES) {
     // Cheap eviction: drop the oldest-inserted keys (JSON preserves order).

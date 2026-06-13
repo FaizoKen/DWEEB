@@ -33,7 +33,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
-import { addThenScroll, scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
+import {
+  addThenScroll,
+  scrollPreviewNodeIntoView,
+  scrollTreeRowIntoView,
+} from "@/features/builder/scrollTreeRow";
 import {
   COMPONENT_META,
   CONTAINER_PICKER,
@@ -78,7 +82,9 @@ import { cn } from "@/lib/cn";
 import { pushToast } from "@/ui/Toast";
 import {
   ValidationContext,
+  mergeNodeIssues,
   useNodeIssues,
+  usePluginGuildIssues,
   useValidationSummary,
   useValidationView,
   worstSeverity,
@@ -334,8 +340,12 @@ export function ComponentTree() {
   const topLevelIds = useMemo(() => components.map((c) => c._id), [components]);
 
   // One validation pass for the whole tree, shared via context so each row is a
-  // cheap map lookup instead of its own re-validation.
-  const validation = useValidationView();
+  // cheap map lookup instead of its own re-validation. The plugin guild checks
+  // are folded in here (not in `validateMessage`, which is pure) so a
+  // wrong-server binding gets the same tree-dot + inspector-banner as any issue.
+  const base = useValidationView();
+  const pluginIssues = usePluginGuildIssues();
+  const validation = useMemo(() => mergeNodeIssues(base, pluginIssues), [base, pluginIssues]);
 
   return (
     <ValidationContext.Provider value={validation}>
@@ -435,11 +445,14 @@ function MetaHeader() {
     useValidationSummary();
 
   // Select the offending row and scroll it into view so a flagged component is
-  // one click away from the summary pill.
+  // one click away from the summary pill. Also scroll the preview to the same
+  // node — mirroring a normal row click — so the flagged component is visible
+  // on both sides, not just in the tree.
   const jumpToIssue = (id: EditorId | null) => {
     if (!id) return;
     select(id);
     scrollTreeRowIntoView(id);
+    scrollPreviewNodeIntoView(id);
   };
 
   // "A message must contain at least one component" is already covered by the
@@ -1046,20 +1059,9 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
       }
       // Click an unselected row to select it, then (desktop only) scroll the
       // preview to the matching rendered component — the mirror of the
-      // preview→tree scroll in ComponentRenderer. On mobile the preview is a
-      // hidden bottom sheet, so there's nothing to bring into view. Deferred a
-      // frame so the freshly-revealed inline inspector has settled the layout
-      // before `scrollIntoView` measures positions.
+      // preview→tree scroll in ComponentRenderer.
       select(node._id);
-      if (window.matchMedia("(max-width: 900px)").matches) return;
-      const targetId = node._id;
-      requestAnimationFrame(() => {
-        document
-          .querySelector<HTMLElement>(
-            `[data-preview-scroll] [data-node-id="${CSS.escape(targetId)}"]`,
-          )
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      scrollPreviewNodeIntoView(node._id);
     },
     [consumeJustDragged, isSelected, node._id, select],
   );
@@ -1265,15 +1267,7 @@ function GalleryItemNode({
     select(item._id);
     // Desktop: mirror the row→preview scroll TreeNode does, landing on this
     // image's rendered figure. On mobile the preview is a hidden sheet.
-    if (window.matchMedia("(max-width: 900px)").matches) return;
-    const targetId = item._id;
-    requestAnimationFrame(() => {
-      document
-        .querySelector<HTMLElement>(
-          `[data-preview-scroll] [data-node-id="${CSS.escape(targetId)}"]`,
-        )
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
+    scrollPreviewNodeIntoView(item._id, "center");
   };
 
   return (

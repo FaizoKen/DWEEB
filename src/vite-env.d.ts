@@ -12,6 +12,8 @@ interface ImportMetaEnv {
   readonly VITE_DEV_MODAL_FORM_ORIGIN?: string;
   /** Dev only: local origin for the ping-pong plugin's config UI (default `http://localhost:8091`). */
   readonly VITE_DEV_PING_PONG_ORIGIN?: string;
+  /** Dev only: local origin for the self-role plugin's config UI (default `http://localhost:8092`). */
+  readonly VITE_DEV_SELF_ROLE_ORIGIN?: string;
 }
 
 interface ImportMeta {

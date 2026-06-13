@@ -18,6 +18,7 @@ import {
   ButtonStyle,
   ComponentType,
   type AnyComponent,
+  type EditorId,
   type WebhookMessage,
 } from "@/core/schema/types";
 import type { PluginManifest } from "./manifest";
@@ -126,6 +127,29 @@ export function pluginBoundComponents(
     if (typeof customId !== "string") continue;
     const plugin = matchPlugin(plugins, customId);
     if (plugin) out.push({ customId, plugin });
+  }
+  return out;
+}
+
+/** An interactive component carrying a `custom_id`, paired with its editor id. */
+export interface InteractiveNode {
+  nodeId: EditorId;
+  customId: string;
+}
+
+/**
+ * Every interactive component in the message that carries a `custom_id`, with
+ * the editor id of the owning node so a caller can jump to it. Unlike
+ * {@link pluginBoundComponents} this needs no plugin registry — it's the raw
+ * list of attachable components, which callers cross-reference against their
+ * own state (e.g. the per-binding guild cache) to spot a misconfiguration.
+ */
+export function interactiveComponents(message: WebhookMessage): InteractiveNode[] {
+  const out: InteractiveNode[] = [];
+  for (const node of walkAll(message)) {
+    if (targetOf(node) === null) continue;
+    const customId = (node as { custom_id?: unknown }).custom_id;
+    if (typeof customId === "string") out.push({ nodeId: node._id, customId });
   }
   return out;
 }

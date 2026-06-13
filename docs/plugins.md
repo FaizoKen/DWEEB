@@ -75,6 +75,7 @@ renders nothing). `configUrl` (and any `icon`/`homepage`) must be `https://`, or
 | `configUrl`      | yes      | `https` (or `http://localhost`) iframe URL for configuration. |
 | `customIdPrefix` | yes      | Every `custom_id` you mint must start with this. How DWEEB re-binds on reload and how it validates your saves. Keep it short and unique, e.g. `"rolemenu:"`. |
 | `apiVersion`     | no       | Highest protocol version you speak. Defaults to `1`. |
+| `managesSelectOptions` | no | `string_select` plugins only. Set `true` to own the menu's option list: your `save` may return `options`, and DWEEB **wires them onto the select and locks the options editor** (see §3). Omit for a select plugin that leaves options to the user. |
 
 A manifest that fails validation is silently dropped — it just won't appear in
 the picker.
@@ -104,21 +105,25 @@ prefix-matching the `custom_id`, and "Reconfigure" reopens your iframe with that
 same `custom_id` so you can reload the instance's saved config.
 
 > Your service owns config storage. DWEEB does not persist or proxy it. The only
-> cosmetic thing DWEEB caches locally is the optional `summary` you return on
-> save, to label the chip nicely — it's expendable.
+> things DWEEB caches locally (per `custom_id`, and expendable) are the optional
+> `summary` you return on save, to label the chip nicely, and the optional
+> `guildId` if your plugin is guild-scoped — used only to warn before the message
+> is posted to a different server.
 
 ## 3. Build the config iframe (`configUrl`)
 
-Your page runs sandboxed (`allow-scripts allow-forms allow-same-origin`) and
-talks to DWEEB only through `postMessage`. All messages are namespaced
-`dweeb:plugin:*`.
+Your page runs sandboxed (`allow-scripts allow-forms allow-same-origin
+allow-popups allow-popups-to-escape-sandbox`) and talks to DWEEB only through
+`postMessage`. All messages are namespaced `dweeb:plugin:*`. Popups are allowed
+so an external link (e.g. an OAuth invite) can open in a new tab via
+`target="_blank"`; the host frame itself can't be navigated.
 
 ### Handshake
 
 ```
 your iframe → DWEEB : "dweeb:plugin:ready"    { apiVersion? }
 DWEEB → your iframe : "dweeb:plugin:init"     { nonce, apiVersion, target, customId?, theme, locale }
-your iframe → DWEEB : "dweeb:plugin:save"     { nonce, customId, summary? }   // adopt this id
+your iframe → DWEEB : "dweeb:plugin:save"     { nonce, customId, summary?, options?, guildId? }  // adopt id (+ wire options)
 your iframe → DWEEB : "dweeb:plugin:cancel"   { nonce }                       // user backed out
 your iframe → DWEEB : "dweeb:plugin:resize"   { nonce, height }              // optional auto-height
 your iframe → DWEEB : "dweeb:plugin:request"  { nonce, requestId, resource }  // read editor data
@@ -135,6 +140,18 @@ Rules:
 - On `save`, DWEEB validates `customId` (prefix + length) before adopting it. A
   mismatch is rejected and the modal stays open.
 - `summary` is optional: `{ label, description?, icon? }` for a nicer chip.
+- `guildId` is optional: the Discord guild this binding targets, if your plugin
+  is guild-scoped (it only works in the server it was configured for). DWEEB
+  caches it per binding and warns before the message is posted to a webhook in a
+  different server, where the component would be dead on arrival. A snowflake;
+  anything else is dropped.
+- `options` is optional and only honored when `target === "string_select"` **and**
+  your manifest sets `managesSelectOptions`. Each entry is
+  `{ label, value, description?, emoji? }`; DWEEB sanitizes them (trims, clamps to
+  Discord's caps, dedupes by `value`, max 25), wires them onto the select, and
+  **locks** the options editor so the user can't break the `value` contract your
+  service matches on. It's the select analogue of owning the `custom_id`: stop
+  making users hand-map each option's value (e.g. a role id) by copy-paste.
 - Always target DWEEB's origin in `postMessage` (use `event.origin` from the
   `init` message), never `"*"`.
 
@@ -190,6 +207,7 @@ OAuth session and AI provider keys are **never** exposed.
 | `savedWebhooks` | `[{ id, name, url, channelName?, guildName? }]` — webhooks saved in this browser, including the execute `url`. For forwarding plugins (e.g. Modal Form) so the user can pick a destination instead of re-pasting a URL. |
 | `message`       | The message currently being built, as a clean Discord wire payload. |
 | `component`     | `{ target, customId }` for the component you're attached to. |
+| `guild`         | `{ id, name }` of the server the editor is connected to, or `null` if none. Lets a plugin target "this server" without the user pasting an id (e.g. Self Role auto-fills it). A guild id is public, not a credential. |
 
 > **`savedWebhooks` hands over a credential.** A webhook URL embeds a token;
 > this gate auto-answers any plugin iframe with no per-request user gesture, so a
@@ -271,6 +289,6 @@ therefore forwards which key verified the request in `x-dweeb-public-key`,
 vouched for by the shared `DISPATCHER_FORWARD_SECRET` in
 `x-dweeb-forward-auth`. A plugin should verify with the forwarded key **only
 when the secret matches** (constant-time compare) and fall back to its
-configured key otherwise — see `attested_key` in either bundled plugin. A
+configured key otherwise — see `attested_key` in any bundled plugin. A
 plugin that skips this still works for the main app; custom-app clicks just
 fail its verification.

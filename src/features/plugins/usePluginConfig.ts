@@ -22,9 +22,12 @@ import {
   isResizeMessage,
   isSaveMessage,
   newNonce,
+  sanitizeGuildId,
+  sanitizeOptions,
   sanitizeSummary,
   type PluginInitMessage,
   type PluginResponseMessage,
+  type PluginSelectOption,
   type PluginSummary,
   type PluginTheme,
 } from "@/core/plugins/protocol";
@@ -34,6 +37,16 @@ import { resolvePluginResource } from "./pluginData";
 export interface PluginSaveResult {
   customId: string;
   summary?: PluginSummary;
+  /**
+   * Sanitized select-menu options the plugin asked the host to wire onto a
+   * `string_select`. Only populated for that target; `undefined` otherwise.
+   */
+  options?: PluginSelectOption[];
+  /**
+   * The guild this binding targets, when the plugin is guild-scoped. Cached per
+   * binding so the Send panel can warn before posting to a different server.
+   */
+  guildId?: string;
 }
 
 interface Args {
@@ -129,6 +142,13 @@ export function usePluginConfig({
         onSaveRef.current({
           customId: data.customId,
           summary: sanitizeSummary(data.summary),
+          // Options are only ever wired onto a string select; ignore them for
+          // buttons and the snowflake-resolving selects (which have no options).
+          options:
+            target === "string_select"
+              ? sanitizeOptions(data.options, LIMITS.SELECT_OPTIONS)
+              : undefined,
+          guildId: sanitizeGuildId(data.guildId),
         });
         return;
       }
