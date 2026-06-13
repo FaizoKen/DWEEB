@@ -4,7 +4,7 @@ Attach this to an **interactive button** in DWEEB. When a Discord user clicks it
 
 1. a **modal** (a form you design) pops up,
 2. their answers are **forwarded to a webhook** (e.g. a staff channel),
-3. they get an **ephemeral reply** built from one of your DWEEB **saved messages**.
+3. they get an **ephemeral reply** — either a **plain message** you type, or one of your DWEEB **saved messages**.
 
 Classic uses: applications, suggestions, ticket intake, report forms.
 
@@ -18,7 +18,7 @@ DWEEB  ──embeds─▶  GET /config.html  ◀──saves config──▶  /ap
 Discord ─clicks─▶  POST /interactions  ──modal──▶  user
                           │ submit
                           ├─ forwards answers ──▶  your Discord webhook
-                          └─ replies with your saved message (ephemeral)
+                          └─ replies with your plain or saved message (ephemeral)
 ```
 
 ## Architecture & safety

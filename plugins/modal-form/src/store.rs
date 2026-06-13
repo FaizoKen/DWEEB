@@ -35,10 +35,17 @@ pub struct ModalDef {
     pub fields: Vec<ModalField>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// How to reply to the submitter (ephemeral). Either a plain-text "flat"
+/// message typed in the config UI, or a DWEEB saved message (Components V2).
+/// A saved-message `payload`, when present, takes priority over `text`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReplyDef {
     /// A DWEEB Components V2 wire payload (the saved message) used to reply.
-    pub payload: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+    /// A plain-text reply typed directly in the config UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 /// The full, stored configuration for one instance.

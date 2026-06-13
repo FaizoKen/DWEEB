@@ -25,8 +25,12 @@ const RESPONSE_MODAL: u8 = 9;
 // Component / flag constants.
 const COMPONENT_ACTION_ROW: u8 = 1;
 const COMPONENT_TEXT_INPUT: u8 = 4;
+const COMPONENT_TEXT_DISPLAY: u8 = 10;
+const COMPONENT_CONTAINER: u8 = 17;
 const TEXT_INPUT_SHORT: u8 = 1;
 const TEXT_INPUT_PARAGRAPH: u8 = 2;
+/// Components V2 caps the total text across a message at this many characters.
+const MAX_V2_TEXT: usize = 4000;
 const FLAG_EPHEMERAL: u64 = 1 << 6; // 64
 const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15; // 32768
 
@@ -157,10 +161,15 @@ pub fn pong() -> Value {
     json!({ "type": RESPONSE_PONG })
 }
 
+/// An ephemeral reply, always Components V2: the text rides in a Text Display
+/// rather than the plain `content` field (which V2 forbids).
 pub fn ephemeral_text(content: &str) -> Value {
     json!({
         "type": RESPONSE_CHANNEL_MESSAGE,
-        "data": { "flags": FLAG_EPHEMERAL, "content": content }
+        "data": {
+            "flags": FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL,
+            "components": [{ "type": COMPONENT_TEXT_DISPLAY, "content": content }],
+        }
     })
 }
 
@@ -206,52 +215,66 @@ pub fn modal_response(submit_custom_id: &str, modal: &ModalDef) -> Value {
     })
 }
 
-/// Reply to the user with the saved Components V2 message, ephemeral. Falls back
-/// to a plain acknowledgement if the saved payload has no usable components.
-pub fn reply_with_payload(reply: &ReplyDef) -> Value {
-    match reply.payload.get("components") {
-        Some(components) if components.as_array().is_some_and(|a| !a.is_empty()) => json!({
-            "type": RESPONSE_CHANNEL_MESSAGE,
-            "data": {
-                "flags": FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL,
-                "components": components,
-            }
-        }),
-        _ => ephemeral_text("Thanks — your response was recorded."),
+/// Reply to the user (ephemeral) with whichever the instance is configured for:
+/// a saved Components V2 message if one is set, otherwise a plain-text message.
+/// Falls back to a plain acknowledgement if neither is usable.
+pub fn build_reply(reply: &ReplyDef) -> Value {
+    // A saved Components V2 message takes priority over flat text.
+    if let Some(components) = reply.payload.as_ref().and_then(|p| p.get("components")) {
+        if components.as_array().is_some_and(|a| !a.is_empty()) {
+            return json!({
+                "type": RESPONSE_CHANNEL_MESSAGE,
+                "data": {
+                    "flags": FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL,
+                    "components": components,
+                }
+            });
+        }
     }
+    if let Some(text) = reply.text.as_deref() {
+        if !text.trim().is_empty() {
+            return ephemeral_text(&clamp(text, 2000));
+        }
+    }
+    ephemeral_text("Thanks — your response was recorded.")
 }
 
-/// Build the Discord webhook payload that forwards a submission.
+/// Build the Discord webhook payload that forwards a submission, as a
+/// Components V2 message: a Container holding the title, one block per answer,
+/// and a footer — the V2 stand-in for the old embed's title/fields/footer. The
+/// execute call must carry `with_components=true` and this sets the
+/// IS_COMPONENTS_V2 flag, since V2 forbids the `content`/`embeds` fields.
 pub fn build_forward_message(
     modal: &ModalDef,
     values: &[(String, String)],
     submitter: Option<&User>,
 ) -> Value {
-    let fields: Vec<Value> = values
-        .iter()
-        .map(|(id, value)| {
-            let label = modal
-                .fields
-                .iter()
-                .find(|f| &f.id == id)
-                .map(|f| f.label.clone())
-                .unwrap_or_else(|| id.clone());
-            json!({
-                "name": clamp(&label, 256),
-                "value": value_or_dash(value),
-                "inline": false,
-            })
-        })
-        .collect();
-
     let who = submitter.map(display_name).unwrap_or_else(|| "someone".to_string());
+
+    // Assemble title + answers + footer as one Markdown block. Each answer keeps
+    // the old embed's per-field clamp; the whole block is then clamped to V2's
+    // message-wide text budget so a long submission can't get rejected.
+    let mut body = format!("### {}", clamp(&format!("New submission · {}", modal.title), 256));
+    for (id, value) in values {
+        let label = modal
+            .fields
+            .iter()
+            .find(|f| &f.id == id)
+            .map(|f| f.label.clone())
+            .unwrap_or_else(|| id.clone());
+        body.push_str(&format!("\n\n**{}**\n{}", clamp(&label, 256), value_or_dash(value)));
+    }
+    body.push_str(&format!("\n\n-# from {who}"));
 
     json!({
         "username": "Modal Form",
-        "embeds": [{
-            "title": clamp(&format!("New submission · {}", modal.title), 256),
-            "fields": fields,
-            "footer": { "text": clamp(&format!("from {who}"), 2048) },
+        "flags": FLAG_IS_COMPONENTS_V2,
+        "components": [{
+            "type": COMPONENT_CONTAINER,
+            "components": [{
+                "type": COMPONENT_TEXT_DISPLAY,
+                "content": clamp(&body, MAX_V2_TEXT),
+            }],
         }]
     })
 }

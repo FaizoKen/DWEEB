@@ -62,8 +62,7 @@ const MAX_GALLERY_ITEMS: usize = 10;
 /// in src/core/serialization/version.ts — bump them together.
 const SHARE_VERSION: &str = "1";
 
-/// Hard ceilings Discord enforces on an interaction reply.
-const MAX_CONTENT: usize = 2000;
+/// Hard ceiling Discord enforces on a Components V2 Text Display reply.
 const MAX_V2_TEXT: usize = 4000;
 
 // Command names, as registered. The match in `respond` is the only consumer;
@@ -302,15 +301,17 @@ fn message_info(app: &App, interaction: &Value) -> Response {
 
     let text = lines.join("\n");
     match button {
-        // The info text is a handful of bounded lines, always inside the
-        // 2000-char content budget — the buttoned shape never needs the
-        // oversize fallbacks.
+        // Components V2: the info text is a Text Display, the toggle an action
+        // row beside it. The text is a handful of bounded lines, always inside
+        // the budget — the buttoned shape never needs the oversize fallbacks.
         Some(b) => Json(json!({
             "type": RESPONSE_CHANNEL_MESSAGE,
             "data": {
-                "content": text,
-                "flags": FLAG_EPHEMERAL,
-                "components": [{ "type": TYPE_ACTION_ROW, "components": [b] }],
+                "flags": FLAG_EPHEMERAL | FLAG_IS_COMPONENTS_V2,
+                "components": [
+                    { "type": TYPE_TEXT_DISPLAY, "content": text },
+                    { "type": TYPE_ACTION_ROW, "components": [b] },
+                ],
             }
         }))
         .into_response(),
@@ -427,12 +428,10 @@ fn refresh_info_reply(
     message_id: &str,
 ) -> Response {
     let permanent = app.store.permanent_details(message_id);
-    // A component interaction carries the message it sits on; if its content
-    // is somehow missing, confirm plainly rather than failing the click.
-    let Some(content) = interaction
-        .pointer("/message/content")
-        .and_then(Value::as_str)
-    else {
+    // The reply is Components V2, so its text lives in the leading Text
+    // Display, not the message's (now empty) `content`. If it's somehow
+    // missing, confirm plainly rather than failing the click.
+    let Some(text) = info_reply_text(interaction) else {
         return ephemeral(&format!(
             "{}{}",
             if permanent.is_some() {
@@ -443,14 +442,14 @@ fn refresh_info_reply(
             usage_suffix(app, guild_id)
         ));
     };
-    let interactive = interactive_from_content(content);
+    let interactive = interactive_from_content(text);
     let expiry = expiry_line(app, message_id, interactive, permanent.as_ref());
     let slots = app
         .store
         .list(guild_id)
         .map(|rows| slots_line(rows.len(), app.permanent_slots))
         .ok();
-    let content: Vec<&str> = content
+    let patched: Vec<&str> = text
         .lines()
         .map(|line| {
             if line.starts_with("**Expiry:**") {
@@ -466,15 +465,30 @@ fn refresh_info_reply(
         .pointer("/data/custom_id")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let components = match toggle_button(guild_id, permanent.as_ref(), interactive, custom_id) {
-        Some(b) => json!([{ "type": TYPE_ACTION_ROW, "components": [b] }]),
-        None => json!([]),
-    };
+    // Rebuild the V2 tree: the patched Text Display, plus the toggle's action
+    // row when there's still something to toggle. The message keeps its V2
+    // flag across an UPDATE_MESSAGE, so the components alone carry the edit.
+    let mut components = vec![json!({ "type": TYPE_TEXT_DISPLAY, "content": patched.join("\n") })];
+    if let Some(b) = toggle_button(guild_id, permanent.as_ref(), interactive, custom_id) {
+        components.push(json!({ "type": TYPE_ACTION_ROW, "components": [b] }));
+    }
     Json(json!({
         "type": RESPONSE_UPDATE_MESSAGE,
-        "data": { "content": content.join("\n"), "components": components }
+        "data": { "components": components }
     }))
     .into_response()
+}
+
+/// The "Message Info" text, read back from the V2 reply the toggle sits on:
+/// the content of its leading Text Display ([`message_info`] always puts the
+/// text there). `None` if no Text Display is present.
+fn info_reply_text(interaction: &Value) -> Option<&str> {
+    interaction
+        .pointer("/message/components")?
+        .as_array()?
+        .iter()
+        .find(|c| c.get("type").and_then(Value::as_u64) == Some(TYPE_TEXT_DISPLAY))
+        .and_then(|c| c.get("content").and_then(Value::as_str))
 }
 
 /// The interactive-component count, recovered from the info reply's own
@@ -932,26 +946,10 @@ pub(crate) fn share_token(payload: &Value) -> String {
 
 // ── Reply plumbing ───────────────────────────────────────────────────────────
 
-/// Ephemeral reply sized to Discord's limits: plain `content` up to 2000
-/// chars, a Components V2 Text Display up to 4000, `None` beyond that.
+/// Ephemeral reply sized to Discord's limit: a Components V2 Text Display
+/// holds up to 4000 chars (`ephemeral` builds it), `None` beyond that.
 fn reply_sized(text: String) -> Option<Response> {
-    let len = text.chars().count();
-    if len <= MAX_CONTENT {
-        return Some(ephemeral(&text));
-    }
-    if len <= MAX_V2_TEXT {
-        return Some(
-            Json(json!({
-                "type": RESPONSE_CHANNEL_MESSAGE,
-                "data": {
-                    "flags": FLAG_EPHEMERAL | FLAG_IS_COMPONENTS_V2,
-                    "components": [{ "type": TYPE_TEXT_DISPLAY, "content": text }],
-                }
-            }))
-            .into_response(),
-        );
-    }
-    None
+    (text.chars().count() <= MAX_V2_TEXT).then(|| ephemeral(&text))
 }
 
 /// Last-resort reply when even the compressed link outgrows a message: point

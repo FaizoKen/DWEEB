@@ -74,7 +74,7 @@ export function Preview({ onClose, swipeProps }: PreviewProps = {}) {
         <article className={styles.message} aria-label="Message preview">
           <button
             type="button"
-            className={styles.avatar}
+            className={avatar ? styles.avatar : `${styles.avatar} ${styles.avatarEmpty}`}
             onClick={() => focusMetaField("avatar")}
             aria-label="Edit avatar URL"
             title="Edit avatar URL"

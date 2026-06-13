@@ -55,21 +55,25 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
 
     validate_webhook(&cfg.forward_webhook)?;
 
+    // The reply is either a plain-text message or a saved Components V2 message.
     let has_components = cfg
         .reply
         .payload
-        .get("components")
+        .as_ref()
+        .and_then(|p| p.get("components"))
         .and_then(|c| c.as_array())
         .is_some_and(|a| !a.is_empty());
-    if !has_components {
-        return Err("Reply must be a Components V2 message with at least one component.".into());
+    let reply_text = cfg.reply.text.as_deref().map(str::trim).unwrap_or("");
+    if !has_components && reply_text.is_empty() {
+        return Err("Reply needs a plain-text message or a saved Components V2 message.".into());
     }
-    if serde_json::to_string(&cfg.reply.payload)
-        .map(|s| s.len())
-        .unwrap_or(usize::MAX)
-        > MAX_REPLY_BYTES
-    {
-        return Err("Reply message is too large.".into());
+    if reply_text.chars().count() > 2000 {
+        return Err("Plain-text reply must be ≤ 2000 characters.".into());
+    }
+    if let Some(payload) = &cfg.reply.payload {
+        if serde_json::to_string(payload).map(|s| s.len()).unwrap_or(usize::MAX) > MAX_REPLY_BYTES {
+            return Err("Reply message is too large.".into());
+        }
     }
 
     Ok(())

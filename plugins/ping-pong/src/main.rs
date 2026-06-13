@@ -53,7 +53,10 @@ const TYPE_MESSAGE_COMPONENT: u64 = 3;
 // Interaction callback (response) types.
 const RESPONSE_PONG: u64 = 1;
 const RESPONSE_CHANNEL_MESSAGE: u64 = 4;
+// Components V2: the reply carries a Text Display instead of plain `content`.
+const TYPE_TEXT_DISPLAY: u64 = 10;
 const FLAG_EPHEMERAL: u64 = 1 << 6; // 64
+const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15; // 32768
 
 struct App {
     public_key_hex: String,
@@ -189,14 +192,21 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let (reply, ephemeral) = decode_custom_id(custom_id);
-            let mut flags = 0u64;
+            // Every reply is Components V2 — the text rides in a Text Display.
+            let mut flags = FLAG_IS_COMPONENTS_V2;
             if ephemeral {
                 flags |= FLAG_EPHEMERAL;
             }
             let detail = latency_report(&interaction, &headers, now_us, started);
             Json(json!({
                 "type": RESPONSE_CHANNEL_MESSAGE,
-                "data": { "content": format!("{reply}\n{detail}"), "flags": flags }
+                "data": {
+                    "flags": flags,
+                    "components": [{
+                        "type": TYPE_TEXT_DISPLAY,
+                        "content": format!("{reply}\n{detail}"),
+                    }],
+                }
             }))
             .into_response()
         }

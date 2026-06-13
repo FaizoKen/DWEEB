@@ -36,7 +36,7 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "schemaVersion": 1,
             "id": "modal-form",
             "name": "Modal Form",
-            "description": "Open a modal on click, forward the answers to a webhook, and reply with a saved message.",
+            "description": "Open a modal on click, forward the answers to a webhook, and reply with a plain-text or saved message.",
             "version": env!("CARGO_PKG_VERSION"),
             "publisher": "DWEEB",
             "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/modal-form",
@@ -167,7 +167,11 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
     };
     match state.store.get(id) {
         Ok(Some(cfg)) => {
-            let submit_id = format!("modalform_submit:{id}");
+            // Keep the submit id under the plugin's own `modalform:` prefix so
+            // the dispatcher routes it back here (it matches on prefix, and a
+            // plugin owns exactly one custom_id namespace). The interaction
+            // *type* — not this id — is what tells a click apart from a submit.
+            let submit_id = format!("modalform:submit:{id}");
             Json(discord::modal_response(&submit_id, &cfg.modal)).into_response()
         }
         Ok(None) => Json(discord::ephemeral_text("This form is no longer available.")).into_response(),
@@ -178,15 +182,15 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
     }
 }
 
-/// Modal submit → forward the answers to the webhook, then reply with the saved
-/// message. The forward is best-effort (short timeout); it must never block or
+/// Modal submit → forward the answers to the webhook, then reply with the
+/// configured message. The forward is best-effort (short timeout); it must never block or
 /// fail the user-facing reply, which Discord expects within ~3s.
 async fn handle_modal_submit(state: &AppState, interaction: &discord::Interaction) -> Response {
     let Some(data) = interaction.data.as_ref() else {
         return Json(discord::ephemeral_text("Empty submission.")).into_response();
     };
     let custom_id = data.custom_id.as_deref().unwrap_or_default();
-    let Some(id) = custom_id.strip_prefix("modalform_submit:") else {
+    let Some(id) = custom_id.strip_prefix("modalform:submit:") else {
         return Json(discord::ephemeral_text("Unknown form.")).into_response();
     };
     let cfg = match state.store.get(id) {
@@ -208,13 +212,22 @@ async fn handle_modal_submit(state: &AppState, interaction: &discord::Interactio
         .or(interaction.user.as_ref());
     let forward = discord::build_forward_message(&cfg.modal, &values, submitter);
 
-    match state.http.post(&cfg.forward_webhook).json(&forward).send().await {
+    // `with_components=true` is required for Discord to respect the V2
+    // components on the execute (without it they're silently dropped).
+    match state
+        .http
+        .post(&cfg.forward_webhook)
+        .query(&[("with_components", "true")])
+        .json(&forward)
+        .send()
+        .await
+    {
         Ok(resp) if resp.status().is_success() => {}
         Ok(resp) => tracing::warn!(status = %resp.status(), "forward webhook returned non-2xx"),
         Err(e) => tracing::warn!(error = %e, "forward webhook failed"),
     }
 
-    Json(discord::reply_with_payload(&cfg.reply)).into_response()
+    Json(discord::build_reply(&cfg.reply)).into_response()
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

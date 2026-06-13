@@ -97,7 +97,11 @@ const TYPE_MESSAGE_COMPONENT: u64 = 3;
 const RESPONSE_PONG: u64 = 1;
 const RESPONSE_CHANNEL_MESSAGE: u64 = 4;
 const RESPONSE_UPDATE_MESSAGE: u64 = 7;
+/// Text Display — how a Components V2 message carries text (V2 forbids the
+/// plain `content` field).
+const TYPE_TEXT_DISPLAY: u64 = 10;
 const FLAG_EPHEMERAL: u64 = 1 << 6; // 64
+const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15; // 32768
 /// First millisecond of 2015 — the epoch Discord snowflakes count from.
 const DISCORD_EPOCH_MS: u64 = 1_420_070_400_000;
 /// Discord snowflakes are 17–20 digits today; accept a small range with slack.
@@ -902,11 +906,16 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Minimal user-facing reply for the cases where no plugin answered.
-fn ephemeral(message: &str) -> Response {
+/// Minimal user-facing reply for the cases where no plugin answered. Always
+/// Components V2: the text rides in a Text Display, not the plain `content`
+/// field (which the V2 flag forbids).
+pub(crate) fn ephemeral(message: &str) -> Response {
     Json(json!({
         "type": RESPONSE_CHANNEL_MESSAGE,
-        "data": { "content": message, "flags": FLAG_EPHEMERAL }
+        "data": {
+            "flags": FLAG_EPHEMERAL | FLAG_IS_COMPONENTS_V2,
+            "components": [{ "type": TYPE_TEXT_DISPLAY, "content": message }],
+        }
     }))
     .into_response()
 }

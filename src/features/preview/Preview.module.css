@@ -63,7 +63,10 @@
   height: 40px;
   border-radius: 50%;
   overflow: hidden;
-  background: var(--discord-accent);
+  /* Transparent by default so an avatar PNG's own alpha shows the message
+   * background through — like real Discord. The accent disc is only the
+   * backdrop for the fallback glyph (.avatarEmpty), never behind an image. */
+  background: transparent;
   display: grid;
   place-items: center;
   border: none;
@@ -71,6 +74,9 @@
   cursor: pointer;
   position: relative;
   transition: box-shadow 120ms ease, transform 120ms ease;
+}
+.avatarEmpty {
+  background: var(--discord-accent);
 }
 .avatar:hover,
 .avatar:focus-visible {

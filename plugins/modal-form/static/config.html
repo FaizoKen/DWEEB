@@ -100,11 +100,15 @@
       is posted there as an embed.
     </div>
 
-    <h2>Reply with a saved message</h2>
-    <select id="reply">
-      <option value="">— pick one of your DWEEB saved messages —</option>
+    <h2>Reply to the submitter</h2>
+    <textarea id="replyText" rows="3" maxlength="2000" placeholder="Type a plain message…"></textarea>
+    <select id="reply" style="margin-top: 8px">
+      <option value="">— or pick a saved DWEEB message —</option>
     </select>
-    <div class="hint" id="replyHint">The user gets this (ephemeral) after submitting.</div>
+    <div class="hint" id="replyHint">
+      Type a plain message, or pick one you saved in DWEEB. The user gets this
+      (ephemeral) after submitting.
+    </div>
 
     <div class="err" id="error"></div>
 
@@ -196,30 +200,42 @@
       });
 
       // ── Reply picker ────────────────────────────────────────────────────
+      // Two ways to reply, mirroring "Forward submissions to": type a plain
+      // message above, or pick a saved DWEEB message here. A saved pick wins, so
+      // selecting one clears the textarea; typing again is what you'd reset to.
       function renderReplyOptions() {
         const sel = $("reply");
         sel.innerHTML = "";
         if (instanceId && existingReplyPayload) {
           const keep = document.createElement("option");
           keep.value = "__keep__";
-          keep.textContent = "Keep current reply";
+          keep.textContent = "Keep current saved message";
           sel.appendChild(keep);
-        } else {
-          const ph = document.createElement("option");
-          ph.value = "";
-          ph.textContent = "— pick a saved message —";
-          sel.appendChild(ph);
         }
+        const ph = document.createElement("option");
+        ph.value = "";
+        ph.textContent = savedMessages.length
+          ? "— or pick a saved DWEEB message —"
+          : "— no saved DWEEB messages —";
+        sel.appendChild(ph);
         for (const m of savedMessages) {
           const o = document.createElement("option");
           o.value = m.id;
           o.textContent = m.name;
           sel.appendChild(o);
         }
-        $("replyHint").textContent = savedMessages.length
-          ? "The user gets this (ephemeral) after submitting."
-          : "No saved messages found in DWEEB yet — save one first, then reopen.";
+        sel.disabled = savedMessages.length === 0 && !(instanceId && existingReplyPayload);
       }
+
+      // The two reply sources are mutually exclusive: picking a saved message
+      // (or "keep") clears the typed reply, and typing a reply resets the picker
+      // to its placeholder — so what's selected always matches what gets sent.
+      $("reply").addEventListener("change", () => {
+        if ($("reply").value) $("replyText").value = "";
+      });
+      $("replyText").addEventListener("input", () => {
+        if ($("replyText").value.trim()) $("reply").value = "";
+      });
 
       // ── Saved-webhook picker ────────────────────────────────────────────
       // Picking one just fills the URL field above (the single source of truth
@@ -325,6 +341,7 @@
           fields = (data.modal?.fields || []).map(newField);
           if (!fields.length) fields = [newField()];
           existingReplyPayload = data.reply?.payload || null;
+          if (data.reply?.text) $("replyText").value = data.reply.text;
           webhookAlreadySet = !!data.forward_webhook_set;
           if (webhookAlreadySet) $("webhook").placeholder = "•••••••• (unchanged — type to replace)";
         } catch {
@@ -348,16 +365,19 @@
           if (!f.label.trim()) return fail("Every field needs a label.");
         }
 
-        // Resolve the reply payload.
+        // Resolve the reply: a typed plain message wins; otherwise the saved pick.
+        const flatText = $("replyText").value.trim();
         const replyChoice = $("reply").value;
-        let replyPayload = null;
-        if (replyChoice === "__keep__") {
-          replyPayload = existingReplyPayload;
+        let reply = null;
+        if (flatText) {
+          reply = { text: flatText };
+        } else if (replyChoice === "__keep__") {
+          reply = { payload: existingReplyPayload };
         } else if (replyChoice) {
           const picked = savedMessages.find((m) => m.id === replyChoice);
-          replyPayload = picked ? picked.payload : null;
+          if (picked) reply = { payload: picked.payload };
         }
-        if (!replyPayload) return fail("Pick a saved message to reply with.");
+        if (!reply) return fail("Type a reply, or pick a saved message.");
 
         // Resolve the forward webhook.
         const webhookInput = $("webhook").value.trim();
@@ -378,7 +398,7 @@
             })),
           },
           forward_webhook: webhookInput, // "" => keep existing on update
-          reply: { payload: replyPayload },
+          reply,
         };
 
         setBusy(true);
