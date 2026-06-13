@@ -43,15 +43,16 @@
 }
 
 /* ── Library trigger ─────────────────────────────────────────────────────── */
+/* Deliberately richer than a plain row: an accent-tinted puzzle tile and a
+   value line make the plugin path the thing the eye lands on first, so users
+   reach for a ready-made action before hand-wiring a custom_id. */
 .browse {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 10px;
   text-align: left;
-  font-size: 13px;
   background: var(--app-bg-input);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
@@ -63,12 +64,39 @@
 }
 .browse:hover {
   background: var(--app-bg-hover);
-  border-color: var(--app-border-strong);
+  border-color: var(--app-accent);
 }
 .browse:focus-visible {
   outline: none;
   border-color: var(--app-border-focus);
   box-shadow: var(--app-focus-ring);
+}
+
+.browseIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--app-accent-text);
+  background: var(--app-accent-soft);
+}
+
+.browseBody {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.browseTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+.browseSub {
+  font-size: 12px;
+  color: var(--app-text-muted);
 }
 
 .browseCount {
@@ -77,9 +105,38 @@
   font-weight: 600;
   padding: 1px 7px;
   border-radius: 999px;
-  background: var(--app-bg-hover);
-  border: 1px solid var(--app-border);
-  color: var(--app-text-muted);
+  background: var(--app-accent-soft);
+  border: 1px solid transparent;
+  color: var(--app-accent-text);
+}
+
+.browseChevron {
+  flex: none;
+  color: var(--app-text-subtle);
+}
+
+/* ── "or set the id manually" divider ────────────────────────────────────── */
+/* A centered label on a hairline rule — frames the plugin and the custom_id
+   below as the two ends of one either/or choice. */
+.orRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -2px 0;
+  color: var(--app-text-subtle);
+}
+.orRow::before,
+.orRow::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--app-border);
+}
+.orText {
+  flex: none;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 /* ── Attached chip ───────────────────────────────────────────────────────── */

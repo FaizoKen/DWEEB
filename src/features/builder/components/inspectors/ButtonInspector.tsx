@@ -29,7 +29,6 @@ import { EmojiIcon } from "@/ui/Icon";
 import { GuildEmojiPanel } from "@/features/guild/MentionPicker";
 import { useAttachedPlugin } from "@/features/plugins/useAttachedPlugin";
 import { CapabilityNote } from "./CapabilityNote";
-import { CustomIdField } from "./CustomIdField";
 import styles from "./ButtonInspector.module.css";
 
 interface Props {
@@ -162,18 +161,9 @@ export function ButtonInspector({ node }: Props) {
         }
         label="Disabled"
       />
-
-      {/* custom_id sits last so it's adjacent to the Plugin panel that follows
-          in the Inspector — the plugin binding *is* this value, so keep the two
-          visually grouped. Locked read-only while a plugin owns the button. */}
-      {node.style !== ButtonStyle.Link && node.style !== ButtonStyle.Premium ? (
-        <CustomIdField
-          node={node}
-          maxLength={LIMITS.BUTTON_CUSTOM_ID}
-          hint="Your bot receives this when the button is clicked — set it to wire up the action."
-          attachedPlugin={attachedPlugin}
-        />
-      ) : null}
+      {/* The interaction's custom_id lives in the Action panel the Inspector
+          renders next — it's bound to (or freed from) a plugin there, so the
+          two halves of that one decision stay together. */}
     </>
   );
 }

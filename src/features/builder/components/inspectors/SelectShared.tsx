@@ -12,7 +12,6 @@ import { Field } from "@/ui/Field";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { CapabilityNote } from "./CapabilityNote";
-import { CustomIdField } from "./CustomIdField";
 import styles from "./inspectors.module.css";
 
 interface Props {
@@ -105,16 +104,9 @@ export function SelectBaseFields({ node }: Props) {
         }
         label="Disabled"
       />
-
-      {/* custom_id sits last so it's adjacent to the Plugin panel that follows
-          in the Inspector — the plugin binding *is* this value, so keep the two
-          visually grouped. Locked read-only while a plugin owns the select. */}
-      <CustomIdField
-        node={node}
-        maxLength={LIMITS.SELECT_CUSTOM_ID}
-        hint="Sent to your bot when a user changes the selection — set it to wire up the action."
-        attachedPlugin={attachedPlugin}
-      />
+      {/* The interaction's custom_id lives in the Action panel the Inspector
+          renders next — it's bound to (or freed from) a plugin there, so the
+          two halves of that one decision stay together. */}
     </>
   );
 }
