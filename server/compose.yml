@@ -179,9 +179,10 @@ services:
 
   # Self Role (../plugins/self-role): members self-assign roles from a button or
   # select. Unlike the other plugins it calls the Discord REST API, so it needs a
-  # bot token with Manage Roles — supplied per instance in the config UI, or a
-  # deployment-wide shared bot via BOT_TOKEN below. Its own registry, config UI
-  # and config API, backed by one SQLite file. Served at selfrole.$PLUGINS_DOMAIN.
+  # single deployment-wide bot with Manage Roles via BOT_TOKEN below — there is
+  # no per-instance token; that one bot does ALL role assignment and without it
+  # the config UI can't connect a server. Its own registry, config UI and config
+  # API, backed by one SQLite file. Served at selfrole.$PLUGINS_DOMAIN.
   self-role:
     image: ghcr.io/faizoken/dweeb-self-role:${SELFROLE_TAG:-latest}
     build: ../plugins/self-role
@@ -192,9 +193,13 @@ services:
       # Lets the dispatcher vouch for a custom app's verifying key (see the
       # dispatcher service above). Must match the dispatcher's value.
       DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
-      # Optional shared "Self Role" bot so admins can use it by inviting it
-      # instead of pasting a token. Leave blank to require per-instance tokens.
-      BOT_TOKEN: ${SELFROLE_BOT_TOKEN:-}
+      # The shared bot that performs every role assignment (needs Manage Roles
+      # and its role above the ones it hands out). REQUIRED in practice — if
+      # blank, /api/connect answers "no Self Role bot configured" and no menu
+      # can be set up. We point it at the main DWEEB bot (SELFROLE_BOT_TOKEN =
+      # DISCORD_BOT_TOKEN in .env). The invite URL is optional, surfaced as a
+      # one-click "add the bot (Manage Roles)" button in the config UI.
+      BOT_TOKEN: ${SELFROLE_BOT_TOKEN:?set SELFROLE_BOT_TOKEN in .env (e.g. = DISCORD_BOT_TOKEN)}
       BOT_INVITE_URL: ${SELFROLE_BOT_INVITE_URL:-}
       RUST_LOG: info
     volumes:
