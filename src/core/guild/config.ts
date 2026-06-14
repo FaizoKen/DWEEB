@@ -115,11 +115,46 @@ export function consumeIncomingWebhook(): IncomingWebhookResult | null {
 }
 
 /**
- * OAuth URL to add the DWEEB bot to a server. `permissions=0` because reading
- * roles/channels/emojis needs no privileged permissions — and webhook creation
- * goes through Discord's `webhook.incoming` flow (see `webhookCreateUrl`), not
- * the bot, so the bot never needs Manage Webhooks. Empty when no client id is
- * configured (the caller hides the CTA in that case).
+ * Permission bits the shared DWEEB bot must request on EVERY invite URL — both
+ * here and in each plugin that adds the same bot (e.g. self-role).
+ *
+ * Discord's bot invite is destructive on re-authorization: adding the bot to a
+ * guild sets its integration-managed role to *exactly* the `permissions` value
+ * in the URL — it replaces, it never merges. Because the bot is shared and a
+ * single message can mix plugins with different needs, an invite that asked for
+ * less than the full set would strip the permissions the other plugins rely on
+ * (e.g. re-inviting through a `permissions=0` link wipes self-role's Manage
+ * Roles). So every invite URL requests the SAME union and re-inviting is
+ * idempotent.
+ *
+ * The base is 0 — the bot's own read features (roles/channels/emojis) and the
+ * `webhook.incoming` flow need no privileged permission. Each bit below is here
+ * only because a bundled plugin requires it; add a line as new plugins land.
+ *
+ * Keep this aligned with any plugin that builds its own invite — self-role
+ * mirrors this value (`SHARED_BOT_PERMISSIONS` in `plugins/self-role/src/`).
+ */
+const SHARED_BOT_PERMISSION_BITS = {
+  /** self-role — assigns/removes roles (`PUT …/members/{user}/roles/{role}`). */
+  MANAGE_ROLES: 1n << 28n,
+} as const;
+
+/**
+ * The union of {@link SHARED_BOT_PERMISSION_BITS}, as the decimal string
+ * Discord's `permissions=` query parameter expects. Computed with BigInt
+ * because Discord permission bits run past 2^31, where JS `|` would overflow.
+ */
+export const SHARED_BOT_PERMISSIONS: string = Object.values(SHARED_BOT_PERMISSION_BITS)
+  .reduce((acc, bit) => acc | bit, 0n)
+  .toString();
+
+/**
+ * OAuth URL to add the DWEEB bot to a server, requesting
+ * {@link SHARED_BOT_PERMISSIONS} (the full union every invite must carry — see
+ * there for why). Webhook creation still goes through Discord's
+ * `webhook.incoming` flow (see `webhookCreateUrl`), not the bot, so the bot
+ * never needs Manage Webhooks. Empty when no client id is configured (the
+ * caller hides the CTA in that case).
  *
  * When run in the browser we send the user back to the site after they add the
  * bot (`response_type=code` + `redirect_uri`), so a full reload picks up the
@@ -133,7 +168,7 @@ export function botInviteUrl(): string {
   const params = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
     scope: "bot",
-    permissions: "0",
+    permissions: SHARED_BOT_PERMISSIONS,
   });
   const origin = typeof window !== "undefined" ? window.location?.origin : "";
   if (origin) {
