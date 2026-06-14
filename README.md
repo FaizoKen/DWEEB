@@ -14,9 +14,11 @@ sending: signing in with Discord, the AI assistant, or a plugin you attach.
 That makes DWEEB a security-conscious choice for sensitive announcements
 and for large communities and teams.
 
-DWEEB is **free and open source** (MIT). The code lives on GitHub at
+DWEEB is **source-available** and **free for noncommercial use** under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). The code lives on GitHub at
 **[github.com/FaizoKen/DWEEB](https://github.com/FaizoKen/DWEEB)** — issues and
-pull requests welcome.
+pull requests welcome. **Commercial use is not permitted** (see
+[License](#license)).
 
 ![DWEEB — editor on the left, pixel-accurate Discord preview on the right](docs/screenshot.png)
 
@@ -344,12 +346,26 @@ Hosted on GitHub Pages with automatic builds and deploys on every push
 
 Contributions are welcome. Open an issue to discuss a change, or send a pull
 request. Run `bun run typecheck` and `bun run build` before submitting so CI
-stays green.
+stays green. By submitting a contribution you agree that it is licensed under
+the same terms as the project (see [License](#license)).
 
 ## License
 
-DWEEB is open source under the [MIT License](LICENSE) — use it, fork it, and
-ship it. See [`LICENSE`](LICENSE) for the full text.
+DWEEB is **source-available**, licensed under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). In short:
+
+- ✅ **Allowed** — use, copy, modify, self-host, and share DWEEB for **any
+  noncommercial purpose**: personal and private projects, hobby and amateur
+  use, study and research, and use by nonprofit, educational, and government
+  organizations.
+- ❌ **Not allowed** — any **commercial use**. You may not use DWEEB (or a fork
+  or derivative of it) in a product or service you sell, monetize, or run for
+  commercial advantage, including building a competing product. Reach out if you
+  want a commercial license.
+
+This is **not** an OSI "open source" license — it is source-available with a
+noncommercial restriction. See [`LICENSE`](LICENSE) for the full, binding text;
+the summary above is for convenience only.
 
 The hosted instance at [dweeb.faizo.net](https://dweeb.faizo.net) is also
 governed by its [Terms of Service](https://dweeb.faizo.net/terms) and

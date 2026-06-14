@@ -294,7 +294,7 @@ function JsonExportPanel() {
 
 /**
  * About panel — surfaces a short description of the app, the author
- * credit, the open-source/GitHub link, the support-server invite, and the
+ * credit, the source-available/GitHub link, the support-server invite, and the
  * legal pages. Lives in the Share dialog so it's reachable from the same
  * place as Import/Export.
  */
@@ -319,7 +319,8 @@ function AboutPanel() {
         And yes, it stands for <em>Discord Webhook Embed Builder</em>. 🤓
       </p>
       <p className={styles.lead}>
-        DWEEB is <strong>free and open source</strong> (MIT). The code lives on{" "}
+        DWEEB is <strong>source-available</strong> and free for noncommercial use (commercial use
+        isn't permitted). The code lives on{" "}
         <a href="https://github.com/FaizoKen/DWEEB" target="_blank" rel="noopener noreferrer">
           GitHub
         </a>{" "}
