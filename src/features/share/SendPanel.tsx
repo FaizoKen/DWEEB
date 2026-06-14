@@ -896,7 +896,7 @@ export function SendPanel({
               if (claim.full) {
                 // Slots filled up between the confirm fetch and now.
                 permanentError =
-                  "All permanent slots were taken in the meantime — free one under Managed messages in the account menu, then update the message to try again.";
+                  "All never-expire slots were taken in the meantime — free one under Managed messages in the account menu, then update the message to try again.";
               } else {
                 isPermanent = true;
               }

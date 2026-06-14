@@ -367,12 +367,12 @@ fn toggle_permanent(
         .unwrap_or(0);
     if permissions & MANAGE_GUILD == 0 {
         return ephemeral(
-            "You need the **Manage Server** permission to manage permanent messages.",
+            "You need the **Manage Server** permission to manage which messages never expire.",
         );
     }
     if app.component_ttl_ms.is_none() {
         return ephemeral(
-            "Components never expire on this deployment — every message is already permanent.",
+            "Components never expire on this deployment — there's nothing to toggle.",
         );
     }
     // The ids come from the custom_id, not the (signed) payload — shape-check
@@ -386,7 +386,7 @@ fn toggle_permanent(
         // unreachable from here, exactly like the dashboard path.
         return match app.store.remove(guild_id, message_id) {
             Ok(true) => refresh_info_reply(app, interaction, guild_id, message_id),
-            Ok(false) => ephemeral("That message's permanent slot belongs to another server."),
+            Ok(false) => ephemeral("That message's never-expire slot belongs to another server."),
             Err(err) => storage_error(err),
         };
     }
@@ -407,7 +407,7 @@ fn toggle_permanent(
             refresh_info_reply(app, interaction, guild_id, message_id)
         }
         Ok(crate::store::Add::Full) => ephemeral(&format!(
-            "Every permanent slot is taken.{} Release one from a permanent message's \
+            "Every never-expire slot is taken.{} Release one from a never-expire message's \
              **Message Info** button, or from the dashboard's *Managed messages*.",
             usage_suffix(app, guild_id)
         )),
@@ -435,9 +435,9 @@ fn refresh_info_reply(
         return ephemeral(&format!(
             "{}{}",
             if permanent.is_some() {
-                "\u{1F512} This message is now permanent."
+                "\u{1F512} This message now never expires."
             } else {
-                "\u{1F513} Permanent slot released."
+                "\u{1F513} This message will expire again."
             },
             usage_suffix(app, guild_id)
         ));
@@ -454,7 +454,7 @@ fn refresh_info_reply(
         .map(|line| {
             if line.starts_with("**Expiry:**") {
                 expiry.as_str()
-            } else if line.ends_with("permanent slots used in this server.") {
+            } else if line.ends_with("never-expire slots used in this server.") {
                 slots.as_deref().unwrap_or(line)
             } else {
                 line
@@ -593,7 +593,7 @@ fn expiry_line(
 ) -> String {
     match (permanent, app.component_ttl_ms) {
         (Some(details), _) => format!(
-            "**Expiry:** \u{1F512} permanent — components never expire. \
+            "**Expiry:** \u{1F512} never expires — components stay clickable. \
              Slot granted by <@{}> <t:{}:R>.",
             details.added_by,
             details.added_at / 1000
@@ -625,7 +625,7 @@ fn expiry_line(
 /// The slots-used subtext. [`refresh_info_reply`] finds this line again by
 /// its tail — keep the wording in sync with the match there.
 fn slots_line(used: usize, total: u32) -> String {
-    format!("-# {used}/{total} permanent slots used in this server.")
+    format!("-# {used}/{total} never-expire slots used in this server.")
 }
 
 /// The permanent-slot toggle button matching the store's current state, or
@@ -642,7 +642,7 @@ fn toggle_button(
         Some(details) if details.guild_id == guild_id => Some(json!({
             "type": TYPE_BUTTON,
             "style": BUTTON_DANGER,
-            "label": "Release Permanent Slot",
+            "label": "Let it expire",
             "custom_id": custom_id,
         })),
         // Another guild's slot — not ours to release.
@@ -650,7 +650,7 @@ fn toggle_button(
         None if interactive > 0 => Some(json!({
             "type": TYPE_BUTTON,
             "style": BUTTON_PRIMARY,
-            "label": "Make Permanent",
+            "label": "Never expire",
             "custom_id": custom_id,
         })),
         None => None,

@@ -220,18 +220,16 @@ function PermanentOptIn({
   const { used, cap, alreadyPermanent, checked, onChange, slotsFull, onManageSlots } = option;
 
   const sub = slotsFull
-    ? `All ${cap} permanent slots are used by other messages — free one to use it here`
+    ? `All ${cap} never-expire slots are used by other messages — free one to use it here`
     : alreadyPermanent && !checked
       ? "Frees its slot — buttons & selects will expire"
-      : `Buttons & selects never expire · ${used}/${cap} slots used`;
+      : `Buttons & selects keep working · ${used}/${cap} slots used`;
 
   return (
     <div className={styles.permanentBox}>
       <div className={styles.permanentRow}>
         <span className={styles.permanentCopy} id="send-confirm-permanent">
-          <span className={styles.permanentTitle}>
-            {alreadyPermanent ? "Keep permanent" : "Make permanent"}
-          </span>
+          <span className={styles.permanentTitle}>Never expire</span>
           <span className={styles.permanentSub}>{sub}</span>
         </span>
         {!slotsFull ? (

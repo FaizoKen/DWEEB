@@ -135,17 +135,17 @@ export function ManagedMessagesDialog({
       <>
         <p className={styles.lead}>
           Buttons &amp; selects stop working <strong>{ttlDays} days</strong> after sending — unless
-          the message holds one of {guildName ?? "this server"}’s {slots.cap} permanent slots.
+          the message is one of {guildName ?? "this server"}’s {slots.cap} set to never expire.
         </p>
 
         <div className={styles.sectionHead}>
-          <h3 className={styles.sectionTitle}>Permanent</h3>
+          <h3 className={styles.sectionTitle}>Never expire</h3>
           <span className={styles.usage}>
             {slots.used}/{slots.cap} used
           </span>
         </div>
         {slots.items.length === 0 ? (
-          <p className={styles.note}>None yet — turn on Make permanent when posting.</p>
+          <p className={styles.note}>None yet — turn on Never expire when posting.</p>
         ) : (
           <ul className={styles.slotList}>
             {slots.items.map((item, i) => {
@@ -161,7 +161,7 @@ export function ManagedMessagesDialog({
                     // modified clicks keep their native open-in-new-tab behaviour.
                     onClick={(ev) => handleDiscordLinkClick(ev, url)}
                   >
-                    Permanent message {i + 1} ↗
+                    Message {i + 1} ↗
                   </a>
                   <span className={styles.slotMeta}>
                     added {new Date(item.added_at).toLocaleDateString([], { dateStyle: "medium" })}
@@ -186,11 +186,11 @@ export function ManagedMessagesDialog({
         <details className={styles.storage}>
           <summary>Where this data lives</summary>
           <p>
-            DWEEB’s database stores only the permanent slots. Expiring messages are never stored
+            DWEEB’s database stores only the never-expire slots. Expiring messages are never stored
             anywhere — not on a server, not in this browser. Expiry is computed from the message’s
             send date, and the first click afterwards just disables the buttons on the message
             itself. The time limit exists so a message can’t keep generating button traffic forever;
-            permanent slots are the deliberate exceptions.
+            never-expire slots are the deliberate exceptions.
           </p>
         </details>
 

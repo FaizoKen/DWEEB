@@ -76,7 +76,7 @@ export function PermanentStatusValue({
         Never expires
       </Line>
     );
-    sub = <p className={styles.sub}>This message is permanent</p>;
+    sub = <p className={styles.sub}>Buttons &amp; selects stay clickable</p>;
   } else if (status === "expiring") {
     const sentAt = messageId ? messageSentAt(messageId) : null;
     const expiresAt =
@@ -102,7 +102,7 @@ export function PermanentStatusValue({
         )}
       </Line>
     );
-    sub = <p className={styles.sub}>Update this message to make it permanent</p>;
+    sub = <p className={styles.sub}>Update this message to make it never expire</p>;
   } else {
     line = (
       <Line tone="warning" icon={<ClockIcon size={14} />}>
@@ -110,7 +110,7 @@ export function PermanentStatusValue({
       </Line>
     );
     if (signInHint) {
-      sub = <p className={styles.sub}>Sign in before sending to make a message permanent</p>;
+      sub = <p className={styles.sub}>Sign in before sending to make a message never expire</p>;
     }
   }
 
