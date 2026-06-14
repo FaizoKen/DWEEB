@@ -223,6 +223,76 @@ services:
     # Not published to the host — only the proxy talks to it over the compose
     # network. Add a `ports:` mapping only if you need to inspect it directly.
 
+  # ── Monitoring ───────────────────────────────────────────────────────────────
+  # Three lightweight, self-hosted pillars (first-run setup: ./MONITORING.md):
+  #   • Beszel  — host + per-container metrics (CPU/mem/disk/net) with alerts
+  #   • Gatus   — synthetic uptime checks of the PUBLIC endpoints, config-as-code
+  #   • Dozzle  — live container logs (localhost-only; reach it over an SSH tunnel)
+  # Beszel's and Gatus's web UIs sit behind Caddy at *.$PLUGINS_DOMAIN (same
+  # wildcard cert as the plugins, so no DNS work). The whole section is optional:
+  # leave the .env values blank and the core stack runs exactly as before — the
+  # monitoring containers just idle until configured, and nothing here can take
+  # the proxy/dispatcher down (Caddy only gains plain reverse_proxy blocks).
+
+  # Beszel hub: stores the metrics and serves the dashboard (its OWN login).
+  # Caddy publishes it at https://beszel.$PLUGINS_DOMAIN; the 127.0.0.1:8090
+  # publish exists only so the host-networked agent below can dial back in — it
+  # is NOT reachable from the public internet.
+  beszel:
+    image: henrygd/beszel:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - beszel_data:/beszel_data
+
+  # Beszel agent: reads true host metrics (needs host networking) plus per-
+  # container Docker stats (read-only socket) and pushes them to the hub. KEY +
+  # TOKEN are shown by the hub UI on first run (Settings → Tokens) — paste them
+  # into .env and `docker compose up -d beszel-agent`. Until then the agent just
+  # can't register; nothing else is affected. LISTEN binds 45876 on the host but
+  # the firewall only opens 80/443, so it stays private.
+  beszel-agent:
+    image: henrygd/beszel-agent:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - beszel_agent_data:/var/lib/beszel-agent
+    environment:
+      LISTEN: 45876
+      HUB_URL: http://localhost:8090
+      TOKEN: ${BESZEL_TOKEN:-}
+      KEY: ${BESZEL_KEY:-}
+
+  # Gatus: pings the public endpoints on a schedule and alerts Discord on
+  # failure. Endpoints AND alert rules are declared in ./gatus/config.yaml; the
+  # env vars below are substituted into it. Served at https://status.$PLUGINS_DOMAIN.
+  gatus:
+    image: twinproduction/gatus:latest
+    restart: unless-stopped
+    volumes:
+      - ./gatus/config.yaml:/config/config.yaml:ro
+      - gatus_data:/data
+    environment:
+      DOMAIN: ${DOMAIN:-}
+      PLUGINS_DOMAIN: ${PLUGINS_DOMAIN:-}
+      MONITORING_DISCORD_WEBHOOK: ${MONITORING_DISCORD_WEBHOOK:-}
+
+  # Dozzle: live, searchable container logs in the browser. Deliberately NOT
+  # fronted by Caddy — raw logs do not belong on the public internet — so it
+  # binds to localhost only. Reach it over an SSH tunnel:
+  #   ssh -L 8080:localhost:8081 contabo   # then open http://localhost:8080
+  dozzle:
+    image: amir20/dozzle:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      DOZZLE_NO_ANALYTICS: "true"
+
 volumes:
   caddy_data:
   caddy_config:
@@ -230,3 +300,6 @@ volumes:
   dispatcher_data:
   modalform_data:
   selfrole_data:
+  beszel_data:
+  beszel_agent_data:
+  gatus_data:

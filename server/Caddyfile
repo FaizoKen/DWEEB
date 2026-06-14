@@ -80,3 +80,22 @@ selfrole.{$PLUGINS_DOMAIN} {
 	import site_defaults
 	reverse_proxy self-role:8092
 }
+
+# ── Monitoring ───────────────────────────────────────────────────────────────
+# Self-hosted monitoring UIs on the plugins wildcard (no DNS work). Dozzle (raw
+# container logs) is intentionally absent — it stays localhost-only and is
+# reached over an SSH tunnel (see compose.yml) so logs never touch the internet.
+# If a monitoring container is down these blocks just return 502; they can't
+# affect the proxy or dispatcher.
+
+# Beszel — metrics dashboard (protected by its own login).
+beszel.{$PLUGINS_DOMAIN} {
+	import site_defaults
+	reverse_proxy beszel:8090
+}
+
+# Gatus — uptime status page (read-only; safe to be public).
+status.{$PLUGINS_DOMAIN} {
+	import site_defaults
+	reverse_proxy gatus:8080
+}

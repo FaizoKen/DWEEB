@@ -1,0 +1,94 @@
+# Gatus — synthetic uptime monitoring for the DWEEB stack, as code.
+# Mounted read-only into the gatus container at /config/config.yaml (compose.yml).
+# ${VAR} placeholders are filled from the container's environment, which compose
+# wires to .env (DOMAIN, PLUGINS_DOMAIN, MONITORING_DISCORD_WEBHOOK).
+#
+# These checks hit the PUBLIC URLs, so each one exercises the whole path a real
+# user does: DNS → Caddy (TLS) → the service's /health. That catches edge
+# failures (expired cert, Caddy down, DNS) that an internal check would miss.
+# If your VPS can't reach its own public IP (no NAT hairpin) and you see false
+# failures, swap a url for the internal address, e.g.
+#   url: "http://dispatcher:8095/health"   # gatus is on the compose network too
+
+# Persist uptime history across restarts (a tiny SQLite file on the gatus_data
+# volume). Drop this block to keep history in memory only.
+storage:
+  type: sqlite
+  path: /data/data.db
+
+# Post to Discord on failure / recovery. Leave MONITORING_DISCORD_WEBHOOK blank
+# in .env to disable alerting entirely (checks still run + show on the page).
+alerting:
+  discord:
+    webhook-url: "${MONITORING_DISCORD_WEBHOOK}"
+    # Applied to every `- type: discord` alert below unless overridden.
+    default-alert:
+      # Alert after 3 consecutive failures (~3 min at 60s) — rides out blips.
+      failure-threshold: 3
+      # Resolve after 2 consecutive successes.
+      success-threshold: 2
+      send-on-resolved: true
+      description: "DWEEB production"
+
+endpoints:
+  # The Discord interactions endpoint — the single most important URL: if this
+  # is down, every button/modal/command in every server stops working.
+  - name: interactions (dispatcher)
+    group: edge
+    url: "https://interactions.${PLUGINS_DOMAIN}/health"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 1500"
+    alerts:
+      - type: discord
+
+  # The builder/dashboard API (the Rust proxy) on the apex domain.
+  - name: proxy / dashboard API
+    group: edge
+    url: "https://${DOMAIN}/health"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 1500"
+    alerts:
+      - type: discord
+
+  # ── Plugins ────────────────────────────────────────────────────────────────
+  - name: modal-form
+    group: plugins
+    url: "https://modalform.${PLUGINS_DOMAIN}/health"
+    interval: 120s
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
+
+  - name: ping-pong
+    group: plugins
+    url: "https://pingpong.${PLUGINS_DOMAIN}/health"
+    interval: 120s
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
+
+  - name: self-role
+    group: plugins
+    url: "https://selfrole.${PLUGINS_DOMAIN}/health"
+    interval: 120s
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
+
+  # TLS expiry early-warning on the interactions cert (Caddy auto-renews ~30d
+  # out; alert if it ever slips under 14 days, which means renewal is failing).
+  - name: TLS certificate (interactions)
+    group: edge
+    url: "https://interactions.${PLUGINS_DOMAIN}/health"
+    interval: 6h
+    conditions:
+      - "[CERTIFICATE_EXPIRATION] > 336h"
+    alerts:
+      - type: discord
