@@ -2,6 +2,8 @@
 
 > **DWEEB** — the **D**iscord **W**ebhook **E**mbed Builder.
 
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
+
 A visual editor for Discord webhook messages using **Components V2**. Build rich
 messages with containers, sections, buttons, media, and files, watch a
 pixel-accurate live preview, and share the result through a single URL — no
