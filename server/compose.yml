@@ -247,13 +247,16 @@ services:
       - beszel_data:/beszel_data
 
   # Beszel agent: reads true host metrics (needs host networking) plus per-
-  # container Docker stats (read-only socket) and pushes them to the hub. KEY +
-  # TOKEN are shown by the hub UI on first run (Settings → Tokens) — paste them
-  # into .env and `docker compose up -d beszel-agent`. Until then the agent just
-  # can't register; nothing else is affected. LISTEN binds 45876 on the host but
-  # the firewall only opens 80/443, so it stays private.
+  # container Docker stats (read-only socket) and pushes them to the hub. The
+  # agent REFUSES to start without a KEY, so it sits behind a compose profile —
+  # plain `up -d` (incl. the CD forced-command) never starts it, so it can't
+  # crash-loop before it is configured. First run: create the hub admin, copy
+  # KEY (Add System → Docker) + TOKEN (Settings → Tokens) into .env, then:
+  #   docker compose --profile beszel-agent up -d beszel-agent
+  # LISTEN binds 45876 on the host but the firewall only opens 80/443.
   beszel-agent:
     image: henrygd/beszel-agent:latest
+    profiles: ["beszel-agent"]
     restart: unless-stopped
     network_mode: host
     volumes:

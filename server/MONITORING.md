@@ -58,7 +58,11 @@ a one-time copy-paste:
    BESZEL_KEY=ssh-ed25519 AAAA...
    BESZEL_TOKEN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
    ```
-4. `docker compose up -d beszel-agent`
+4. Start the agent (it lives behind a profile so it can't crash-loop before
+   it's configured — see below):
+   ```
+   docker compose --profile beszel-agent up -d beszel-agent
+   ```
 
 Within ~15s the system appears in the hub with live CPU/mem/disk/network plus a
 row per running container.
