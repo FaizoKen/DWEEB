@@ -1,0 +1,112 @@
+name: Uptime watchdog
+
+# Off-host dead-man's switch for the production interactions endpoint. The
+# on-box monitors (Beszel, Gatus) go silent if the whole VPS or its network
+# drops — this runs on GitHub's infrastructure instead, so it can still shout
+# when contabo is completely unreachable.
+#
+# EDGE-TRIGGERED: it opens a tracking issue and pings Discord ONCE when the
+# endpoint goes down, and once more when it recovers (closing the issue) — no
+# repeat alerts every 5 minutes during an outage. The "currently down" state
+# lives in that GitHub issue (matched by INCIDENT_TITLE), so only the default
+# GITHUB_TOKEN is needed (issues: write) — no PAT, no external storage. The
+# Discord webhook is the encrypted MONITORING_DISCORD_WEBHOOK repo secret.
+#
+# Caveats (fine for a backstop): GitHub cron granularity is ~5 min and runs can
+# be delayed/skipped under heavy load; scheduled workflows auto-disable after 60
+# days of NO repo activity (this repo is active, so a non-issue). A run also
+# exits non-zero while the endpoint is down, so the red X in the Actions tab —
+# and GitHub's "failed scheduled workflow" email — act as extra signals.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # every 5 min (GitHub's finest granularity)
+  workflow_dispatch:
+    inputs:
+      test_alert:
+        description: "Send a test Discord message and exit (verifies the webhook)"
+        type: boolean
+        default: false
+
+# Edge-trigger state is a GitHub issue; that is all this touches.
+permissions:
+  issues: write
+
+# Never run two checks at once, and don't cancel an in-flight one.
+concurrency:
+  group: uptime-watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Probe interactions endpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TARGET_URL: https://interactions.dweeb.faizo.net/health
+      # Stable issue title that holds the "down" state + serves as an incident
+      # log. Must not change — it is how a later run finds the open incident.
+      INCIDENT_TITLE: "🔴 [uptime-watchdog] interactions endpoint is DOWN"
+      WEBHOOK: ${{ secrets.MONITORING_DISCORD_WEBHOOK }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Probe and reconcile
+        run: |
+          set -uo pipefail
+
+          send_discord() {
+            # $1 = message content. No-op if the secret is unset.
+            if [ -z "${WEBHOOK:-}" ]; then
+              echo "::warning::MONITORING_DISCORD_WEBHOOK secret not set — skipping Discord"
+              return 0
+            fi
+            curl -sS -X POST "$WEBHOOK" \
+              -H 'Content-Type: application/json' \
+              --data "$(jq -n --arg c "$1" '{content:$c}')" \
+              -o /dev/null -w 'discord: HTTP %{http_code}\n' || true
+          }
+
+          # Manual test path: prove the webhook works without faking downtime.
+          if [ "${{ inputs.test_alert }}" = "true" ]; then
+            send_discord "🧪 DWEEB uptime-watchdog test — the off-host dead-man's switch is wired up correctly."
+            echo "test message sent; exiting"
+            exit 0
+          fi
+
+          # --- probe with retries to ride out a transient blip ---
+          ok=0; code=000
+          for i in 1 2 3; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$TARGET_URL" || echo 000)
+            echo "attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then ok=1; break; fi
+            [ "$i" -lt 3 ] && sleep 15
+          done
+
+          # --- find an existing open incident (the persisted state) ---
+          incident=$(gh issue list --state open --limit 50 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"$INCIDENT_TITLE\")][0].number // empty")
+
+          if [ "$ok" -eq 0 ]; then
+            # ---- DOWN ----
+            if [ -z "$incident" ]; then
+              echo "endpoint DOWN, no open incident -> alert + open incident"
+              body=$(printf 'Off-host watchdog could not reach `%s` (last HTTP `%s`) after 3 attempts at %s UTC.\n\nThis runs on GitHub Actions, so it fires even when the VPS itself is unreachable — the on-box monitors (Beszel/Gatus) cannot alert in that case. Auto-closes on recovery.' "$TARGET_URL" "$code" "$(date -u '+%Y-%m-%d %H:%M')")
+              gh issue create --title "$INCIDENT_TITLE" --body "$body" >/dev/null
+              send_discord "🔴 **DWEEB watchdog (off-host)**: \`$TARGET_URL\` is DOWN (HTTP \`$code\`). The VPS or its network may be fully down — Beszel/Gatus can't alert in that case. Check contabo."
+            else
+              echo "endpoint DOWN, incident #$incident already open -> no repeat alert"
+            fi
+            # Non-zero so the Actions tab (and GitHub's failed-run email) flag it.
+            exit 1
+          else
+            # ---- UP ----
+            if [ -n "$incident" ]; then
+              echo "endpoint UP, closing incident #$incident -> recovery alert"
+              gh issue close "$incident" --comment "✅ Recovered at $(date -u '+%Y-%m-%d %H:%M') UTC — endpoint returned HTTP 200." >/dev/null
+              send_discord "✅ **DWEEB watchdog (off-host)**: \`$TARGET_URL\` RECOVERED (HTTP 200). Incident closed."
+            else
+              echo "endpoint UP, no open incident -> all good (no alert)"
+            fi
+          fi
