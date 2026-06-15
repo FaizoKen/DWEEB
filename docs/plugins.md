@@ -272,7 +272,7 @@ own origin, `https://<id>.dweeb.faizo.net` — covered by ONE wildcard DNS recor
 (`frame-src https://*.dweeb.faizo.net` in the CSP built from `vite.config.ts`), so none of that
 recurs per plugin.
 
-Adding a plugin (say `ping-pong`, prefix `pingpong:`) is four edits:
+Adding a plugin (say `ping-pong`, prefix `pingpong:`) is five edits:
 
 | # | File | Edit |
 |---|---|---|
@@ -280,10 +280,16 @@ Adding a plugin (say `ping-pong`, prefix `pingpong:`) is four edits:
 | 2 | `server/Caddyfile` | Copy a plugin block: `pingpong.{$PLUGINS_DOMAIN} { import site_defaults; reverse_proxy ping-pong:8090 }`. |
 | 3 | `server/compose.yml` (dispatcher) | Add `"pingpong:": "http://ping-pong:8090"` to `ROUTES`. |
 | 4 | `src/core/plugins/registry.json` | Add the manifest with `configUrl: https://pingpong.dweeb.faizo.net/config.html`. |
+| 5 | `server/gatus/config.yaml` | Copy a `plugins`-group endpoint hitting `https://pingpong.{$PLUGINS_DOMAIN}/health`, so the new plugin shows on the status page and alerts on failure. |
 
 Then `docker compose pull && docker compose up -d` on the server (Caddy issues
 the new subdomain's certificate automatically) and push so the frontend
-rebuilds with the new registry. The plugin itself just implements this
+rebuilds with the new registry. Note that CD only pulls images — the
+bind-mounted `server/` config files (`Caddyfile`, `compose.yml`,
+`gatus/config.yaml`) must be copied to the host yourself: reload Caddy after a
+`Caddyfile` change and restart Gatus (`docker compose restart gatus`) after a
+`gatus/config.yaml` change, since neither picks up a content-only edit on its
+own. The plugin itself just implements this
 document's protocol plus `GET /health` and a signature-verified
 `POST /interactions` — the dispatcher forwards the raw body and signature
 headers untouched, so verification works exactly as if Discord called the

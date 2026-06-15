@@ -82,9 +82,27 @@ endpoints:
     alerts:
       - type: discord
 
+  - name: tickets
+    group: plugins
+    url: "https://tickets.${PLUGINS_DOMAIN}/health"
+    interval: 120s
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
+
   - name: giveaway
     group: plugins
     url: "https://giveaway.${PLUGINS_DOMAIN}/health"
+    interval: 120s
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
+
+  - name: quick-replies
+    group: plugins
+    url: "https://quickreplies.${PLUGINS_DOMAIN}/health"
     interval: 120s
     conditions:
       - "[STATUS] == 200"
