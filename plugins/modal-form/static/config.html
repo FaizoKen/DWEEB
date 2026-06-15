@@ -15,7 +15,6 @@
         --muted: #b5bac1;
         --accent: #5865f2;
         --green: #3ba55d;
-        --yellow: #f0b232;
         --danger: #da373c;
         --radius: 8px;
       }
@@ -41,7 +40,7 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
         color: var(--muted);
-        margin: 22px 0 8px;
+        margin: 18px 0 8px;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -60,7 +59,7 @@
         font-weight: 700;
       }
       .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
-      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
       input[type="text"], input[type="url"], input[type="number"], select, textarea {
         width: 100%;
         padding: 8px 10px;
@@ -76,7 +75,6 @@
         border-color: var(--accent);
       }
       .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-      .hint code, .callout code { color: var(--accent); }
       button {
         padding: 8px 12px;
         border-radius: 6px;
@@ -93,22 +91,8 @@
       .bar .grow { flex: 1; }
       .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
 
-      /* Callouts. */
-      .callout {
-        border: 1px solid var(--border);
-        border-left: 3px solid var(--accent);
-        background: var(--panel);
-        border-radius: 6px;
-        padding: 10px 12px;
-        font-size: 13px;
-        margin-top: 8px;
-      }
-      .callout.good { border-left-color: var(--green); }
-      .callout.warn { border-left-color: var(--yellow); }
-      .callout b { color: var(--text); }
-
       details { margin-top: 8px; }
-      summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+      summary { cursor: pointer; color: var(--muted); font-size: 13px; }
       details.help ol { margin: 8px 0 0; padding-left: 20px; }
       details.help li { margin: 4px 0; color: var(--muted); }
 
@@ -135,132 +119,57 @@
       button.icon:hover { color: var(--text); }
       button.icon.del:hover { color: var(--danger); border-color: var(--danger); }
       .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
-      .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 10px; cursor: pointer; }
+      .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
       .check input { flex: none; accent-color: var(--accent); margin: 0; }
-      .adv { margin-top: 8px; }
       .adv summary { color: var(--muted); }
-
-      /* Live preview — a faux Discord modal. */
-      .preview-wrap { margin-top: 12px; }
-      .preview-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-      .modal-mock {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 14px;
-        max-width: 460px;
-      }
-      .modal-mock .m-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
-      .modal-mock .pf-label {
-        font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em;
-        color: var(--muted); font-weight: 700; margin: 12px 0 4px;
-      }
-      .modal-mock .pf-label .req { color: var(--danger); margin-left: 3px; }
-      .modal-mock .pf-input {
-        background: var(--panel-2);
-        border: 1px solid var(--border);
-        border-radius: 4px;
-        padding: 8px 10px;
-        font-size: 14px;
-        min-height: 36px;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      .modal-mock .pf-input.para { min-height: 70px; }
-      .modal-mock .pf-input.ph { color: var(--muted); }
-      .modal-mock .pf-meta { font-size: 11px; color: var(--muted); margin-top: 3px; text-align: right; }
-      .modal-mock .submit {
-        margin-top: 14px; text-align: right;
-      }
-      .modal-mock .submit span {
-        display: inline-block; background: var(--accent); color: #fff;
-        padding: 6px 14px; border-radius: 4px; font-size: 13px; font-weight: 600;
-      }
-
-      /* Segmented control. */
-      .seg { display: flex; gap: 6px; margin-top: 8px; }
-      .seg button { flex: 1; }
-      .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
     </style>
   </head>
   <body>
-    <div class="callout">
-      Build a <b>form</b> that pops up when a member clicks your button. Their
-      answers get <b>sent to a channel</b> you choose, and they get a private
-      “thanks” reply. Great for applications, suggestions, reports, and ticket
-      intake.
-    </div>
-
     <!-- Step 1 — build the form -------------------------------------------- -->
     <h2><span class="step-num">1</span> Build your form</h2>
     <label class="lbl" for="title">Form title</label>
     <input id="title" type="text" maxlength="45" placeholder="e.g. Staff application" />
-    <div class="hint">Shown at the top of the pop-up. Up to 45 characters.</div>
 
-    <h2 style="margin-top: 16px"><span class="step-num" style="background: var(--panel-2); color: var(--muted)">·</span> Fields <span class="count" id="fieldCount"></span></h2>
+    <label class="lbl">Fields <span class="count" id="fieldCount"></span></label>
     <div id="fields"></div>
     <button id="addField" type="button" style="margin-top: 8px">+ Add field</button>
 
-    <div class="preview-wrap">
-      <div class="preview-label">Live preview — how the pop-up will look:</div>
-      <div id="preview" class="modal-mock"></div>
-    </div>
-
-    <!-- Step 2 — where submissions go --------------------------------------- -->
-    <h2><span class="step-num">2</span> Where submissions go</h2>
+    <!-- Step 2 — where answers go ------------------------------------------- -->
+    <h2><span class="step-num">2</span> Where answers go</h2>
     <input id="webhook" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off" />
     <select id="savedWebhook" style="margin-top: 8px">
-      <option value="">— or pick a saved DWEEB webhook —</option>
+      <option value="">— or pick a saved webhook —</option>
     </select>
-    <div class="hint">
-      Paste a Discord <b>webhook URL</b> for the channel that should receive
-      answers, or pick one you saved in DWEEB.
-    </div>
     <details class="help">
       <summary>How do I get a webhook URL?</summary>
       <ol>
-        <li>In Discord, open <b>Server Settings → Integrations → Webhooks</b>.</li>
-        <li>Click <b>New Webhook</b>, choose the channel answers should land in.</li>
-        <li>Click <b>Copy Webhook URL</b> and paste it above.</li>
+        <li>Discord → <b>Server Settings → Integrations → Webhooks</b>.</li>
+        <li><b>New Webhook</b>, pick the channel answers should land in.</li>
+        <li><b>Copy Webhook URL</b> and paste it above.</li>
       </ol>
     </details>
 
-    <label class="lbl" for="forwardName" style="margin-top: 14px">Posted under this name (optional)</label>
+    <label class="lbl" for="forwardName" style="margin-top: 12px">Posted-as name (optional)</label>
     <input id="forwardName" type="text" maxlength="80" placeholder="Modal Form" autocomplete="off" />
-    <div class="hint">What the forwarded message shows as the sender. Leave blank for “Modal Form”.</div>
 
     <label class="check" style="margin-top: 12px">
       <input id="includeSubmitter" type="checkbox" checked />
-      <span>Show who submitted each response</span>
+      <span>Show who submitted</span>
     </label>
-    <div class="hint" id="anonHint">
-      On: the forwarded message names the member. Turn off for an
-      <b>anonymous</b> suggestion or report box.
-    </div>
+    <div class="hint">Off = anonymous box.</div>
 
-    <!-- Step 3 — reply to the submitter ------------------------------------- -->
+    <!-- Step 3 — reply ----------------------------------------------------- -->
     <h2><span class="step-num">3</span> Reply to the submitter</h2>
-    <div class="seg" id="replySeg">
-      <button type="button" data-rmode="plain" class="sel">Plain message</button>
-      <button type="button" data-rmode="saved">Saved DWEEB message</button>
-    </div>
-    <textarea id="replyText" rows="2" maxlength="2000" style="margin-top: 8px"
-      placeholder="e.g. Thanks! We've received your application and will be in touch."></textarea>
-    <select id="reply" style="margin-top: 8px; display: none">
-      <option value="">— pick a saved DWEEB message —</option>
-    </select>
-    <div class="hint">Sent privately to the member (only they see it) right after they submit.</div>
+    <textarea id="replyText" rows="2" maxlength="2000"
+      placeholder="e.g. Thanks! We've received your submission."></textarea>
+    <div class="hint">Sent privately — only they see it.</div>
 
-    <!-- Step 4 — options ---------------------------------------------------- -->
+    <!-- Step 4 — options --------------------------------------------------- -->
     <h2><span class="step-num">4</span> Options</h2>
     <label class="check">
       <input id="limitOne" type="checkbox" />
-      <span>Limit to one response per person</span>
+      <span>One response per person</span>
     </label>
-    <div class="hint">
-      On: after someone submits, clicking the button again tells them they've
-      already responded. Perfect for applications and one-time forms.
-    </div>
 
     <div class="err" id="error"></div>
 
@@ -278,18 +187,10 @@
       let nonce = null;
       let hostOrigin = "*";
       let instanceId = null; // set when reconfiguring
-      let savedMessages = []; // [{ id, name, payload }]
       let savedWebhooks = []; // [{ id, name, url, channelName?, guildName? }]
-      let existingReplyPayload = null; // saved-message reply already stored (reconfigure)
       let webhookAlreadySet = false; // reconfigure: keep existing if input left blank
-      let replyMode = "plain"; // "plain" | "saved"
 
       const $ = (id) => document.getElementById(id);
-      const escapeHtml = (s) =>
-        String(s).replace(
-          /[&<>"']/g,
-          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
-        );
 
       // ── Field list model ────────────────────────────────────────────────
       const MAX_FIELDS = 5;
@@ -327,7 +228,7 @@
                 <label class="lbl">Answer style</label>
                 <select data-k="style">
                   <option value="short">Short (single line)</option>
-                  <option value="paragraph">Paragraph (multi-line)</option>
+                  <option value="paragraph">Paragraph</option>
                 </select>
               </div>
               <label class="check" style="align-self: end; margin: 0 0 8px">
@@ -336,9 +237,9 @@
             </div>
             <details class="adv">
               <summary>Advanced</summary>
-              <label class="lbl">Placeholder (greyed-out hint text)</label>
+              <label class="lbl">Placeholder</label>
               <input type="text" maxlength="100" placeholder="optional" data-k="placeholder" />
-              <label class="lbl">Prefilled text (the answer box starts with this)</label>
+              <label class="lbl">Prefilled text</label>
               <textarea rows="2" maxlength="4000" placeholder="optional" data-k="value"></textarea>
               <div class="grid">
                 <div>
@@ -362,7 +263,6 @@
             const k = input.getAttribute("data-k");
             input.addEventListener("input", () => {
               f[k] = input.type === "checkbox" ? input.checked : input.value;
-              renderPreview();
             });
           });
           const up = el.querySelector(".up");
@@ -374,7 +274,6 @@
           el.querySelector(".del").addEventListener("click", () => {
             fields.splice(i, 1);
             renderFields();
-            renderPreview();
           });
           wrap.appendChild(el);
         });
@@ -388,123 +287,13 @@
         if (j < 0 || j >= fields.length) return;
         [fields[i], fields[j]] = [fields[j], fields[i]];
         renderFields();
-        renderPreview();
       }
 
       $("addField").addEventListener("click", () => {
         if (fields.length >= MAX_FIELDS) return;
         fields.push(newField());
         renderFields();
-        renderPreview();
       });
-
-      // ── Live preview ────────────────────────────────────────────────────
-      // Built entirely with textContent / createElement so a label, placeholder
-      // or prefill can never inject markup into this page.
-      function renderPreview() {
-        const box = $("preview");
-        box.innerHTML = "";
-        const titleEl = document.createElement("div");
-        titleEl.className = "m-title";
-        titleEl.textContent = $("title").value.trim() || "Your form";
-        box.appendChild(titleEl);
-
-        if (!fields.length) {
-          const empty = document.createElement("div");
-          empty.className = "hint";
-          empty.textContent = "Add a field to see it here.";
-          box.appendChild(empty);
-        }
-
-        fields.forEach((f) => {
-          const lbl = document.createElement("div");
-          lbl.className = "pf-label";
-          lbl.textContent = f.label.trim() || "Untitled field";
-          if (f.required) {
-            const req = document.createElement("span");
-            req.className = "req";
-            req.textContent = "*";
-            lbl.appendChild(req);
-          }
-          box.appendChild(lbl);
-
-          const inp = document.createElement("div");
-          inp.className = "pf-input" + (f.style === "paragraph" ? " para" : "");
-          if (f.value) {
-            inp.textContent = f.value;
-          } else if (f.placeholder) {
-            inp.textContent = f.placeholder;
-            inp.classList.add("ph");
-          } else {
-            inp.innerHTML = "&nbsp;";
-          }
-          box.appendChild(inp);
-
-          const min = parseInt(f.min_length, 10);
-          const max = parseInt(f.max_length, 10);
-          if (min > 0 || max > 0) {
-            const meta = document.createElement("div");
-            meta.className = "pf-meta";
-            meta.textContent =
-              min > 0 && max > 0 ? `${min}–${max} characters`
-              : max > 0 ? `up to ${max} characters`
-              : `at least ${min} characters`;
-            box.appendChild(meta);
-          }
-        });
-
-        const submit = document.createElement("div");
-        submit.className = "submit";
-        const btn = document.createElement("span");
-        btn.textContent = "Submit";
-        submit.appendChild(btn);
-        box.appendChild(submit);
-        sendResize();
-      }
-
-      $("title").addEventListener("input", renderPreview);
-
-      // ── Anonymous toggle hint ───────────────────────────────────────────
-      $("includeSubmitter").addEventListener("change", () => {
-        $("anonHint").innerHTML = $("includeSubmitter").checked
-          ? "On: the forwarded message names the member. Turn off for an <b>anonymous</b> suggestion or report box."
-          : "<b>Anonymous:</b> the forwarded message won't say who submitted it.";
-        sendResize();
-      });
-
-      // ── Reply mode (segmented) ──────────────────────────────────────────
-      for (const btn of $("replySeg").children) {
-        btn.addEventListener("click", () => {
-          replyMode = btn.dataset.rmode;
-          for (const b of $("replySeg").children) b.classList.toggle("sel", b === btn);
-          $("replyText").style.display = replyMode === "plain" ? "" : "none";
-          $("reply").style.display = replyMode === "saved" ? "" : "none";
-          sendResize();
-        });
-      }
-
-      function renderReplyOptions() {
-        const sel = $("reply");
-        sel.innerHTML = "";
-        if (instanceId && existingReplyPayload) {
-          const keep = document.createElement("option");
-          keep.value = "__keep__";
-          keep.textContent = "Keep current saved message";
-          sel.appendChild(keep);
-        }
-        const ph = document.createElement("option");
-        ph.value = "";
-        ph.textContent = savedMessages.length
-          ? "— pick a saved DWEEB message —"
-          : "— no saved DWEEB messages yet —";
-        sel.appendChild(ph);
-        for (const m of savedMessages) {
-          const o = document.createElement("option");
-          o.value = m.id;
-          o.textContent = m.name;
-          sel.appendChild(o);
-        }
-      }
 
       // ── Saved-webhook picker ────────────────────────────────────────────
       // Picking one just fills the URL field above (the single source of truth
@@ -515,8 +304,8 @@
         const ph = document.createElement("option");
         ph.value = "";
         ph.textContent = savedWebhooks.length
-          ? "— or pick a saved DWEEB webhook —"
-          : "— no saved DWEEB webhooks —";
+          ? "— or pick a saved webhook —"
+          : "— no saved webhooks —";
         sel.appendChild(ph);
         for (const w of savedWebhooks) {
           const o = document.createElement("option");
@@ -558,22 +347,15 @@
             fields = [newField({ label: "Your answer", style: "paragraph", required: true })];
           }
           renderFields();
-          renderPreview();
-          requestResource("savedMessages");
           requestResource("savedWebhooks");
           return;
         }
 
         if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
           pendingReqs.delete(msg.requestId);
-          if (msg.ok && Array.isArray(msg.data)) {
-            if (msg.resource === "savedMessages") {
-              savedMessages = msg.data.filter((m) => m && m.id && m.payload);
-              renderReplyOptions();
-            } else if (msg.resource === "savedWebhooks") {
-              savedWebhooks = msg.data.filter((w) => w && w.id && w.url);
-              renderWebhookOptions();
-            }
+          if (msg.ok && Array.isArray(msg.data) && msg.resource === "savedWebhooks") {
+            savedWebhooks = msg.data.filter((w) => w && w.id && w.url);
+            renderWebhookOptions();
           }
           sendResize();
           return;
@@ -612,27 +394,10 @@
           if (!fields.length) fields = [newField()];
 
           $("forwardName").value = data.forward_username || "";
-          if (typeof data.include_submitter === "boolean") {
+          if (typeof data.include_submitter === "boolean")
             $("includeSubmitter").checked = data.include_submitter;
-            $("includeSubmitter").dispatchEvent(new Event("change"));
-          }
           $("limitOne").checked = !!data.limit_one;
-
-          // Reply: saved-message payload takes the "saved" tab, plain text the
-          // "plain" tab. A stored payload offers "Keep current" so the admin
-          // needn't re-pick it.
-          existingReplyPayload = data.reply?.payload || null;
-          if (existingReplyPayload) {
-            replyMode = "saved";
-            for (const b of $("replySeg").children)
-              b.classList.toggle("sel", b.dataset.rmode === "saved");
-            $("replyText").style.display = "none";
-            $("reply").style.display = "";
-          } else if (data.reply?.text) {
-            $("replyText").value = data.reply.text;
-          }
-          renderReplyOptions();
-          if (existingReplyPayload) $("reply").value = "__keep__";
+          if (data.reply?.text) $("replyText").value = data.reply.text;
 
           webhookAlreadySet = !!data.forward_webhook_set;
           if (webhookAlreadySet) $("webhook").placeholder = "•••••••• (unchanged — type to replace)";
@@ -661,26 +426,13 @@
             return fail(`Field “${f.label.trim()}”: min length can't be larger than max length.`);
         }
 
-        // Resolve the reply from the active tab.
-        let reply = null;
-        if (replyMode === "plain") {
-          const text = $("replyText").value.trim();
-          if (!text) return fail("Type the reply members get after submitting.");
-          reply = { text };
-        } else {
-          const choice = $("reply").value;
-          if (choice === "__keep__") reply = { payload: existingReplyPayload };
-          else if (choice) {
-            const picked = savedMessages.find((m) => m.id === choice);
-            if (picked) reply = { payload: picked.payload };
-          }
-          if (!reply) return fail("Pick a saved DWEEB message, or switch to a plain message.");
-        }
+        const replyText = $("replyText").value.trim();
+        if (!replyText) return fail("Type the reply members get after submitting.");
 
         // Resolve the forward webhook ("" => keep the stored one on update).
         const webhookInput = $("webhook").value.trim();
         if (!webhookInput && !(instanceId && webhookAlreadySet))
-          return fail("Add a Discord webhook URL so submissions have somewhere to go.");
+          return fail("Add a Discord webhook URL so answers have somewhere to go.");
 
         const forwardName = $("forwardName").value.trim();
         const body = {
@@ -701,7 +453,7 @@
           forward_username: forwardName || null,
           include_submitter: $("includeSubmitter").checked,
           limit_one: $("limitOne").checked,
-          reply,
+          reply: { text: replyText },
         };
 
         setBusy(true);

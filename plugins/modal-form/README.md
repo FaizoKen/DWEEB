@@ -4,8 +4,7 @@ Attach this to an **interactive button** in DWEEB. When a Discord user clicks it
 
 1. a **form** (a modal you design) pops up,
 2. their answers are **forwarded to a channel** via a webhook (e.g. staff intake),
-3. they get a private **ephemeral reply** — a **plain message** you type, or one
-   of your DWEEB **saved messages**.
+3. they get a private **ephemeral reply** — a message you type.
 
 Classic uses: applications, suggestions, ticket intake, report forms, feedback
 boxes (including **anonymous** ones).
@@ -31,12 +30,11 @@ Discord ─clicks─▶  POST /interactions  ──modal──▶  user
 | **Where submissions go** | A Discord webhook URL (paste it, or pick a saved DWEEB webhook). Each submission is posted there as a tidy Components V2 message. |
 | **Posted-under name** | An optional display name for the forwarded message (defaults to “Modal Form”). |
 | **Anonymous mode** | Turn off *“show who submitted”* and the forward never names the member — an anonymous suggestion/report box. |
-| **Reply** | A plain message you type, or one of your saved DWEEB messages. Sent privately (ephemeral) the moment they submit. |
+| **Reply** | A message you type, sent privately (ephemeral) the moment they submit. |
 | **One response per person** | Optional. After a member submits, a second click is turned away *before* the form opens — perfect for applications. |
 
-The config UI is **stepped, live-previewed, and self-explanatory**: a faux modal
-updates as you type so a first-time admin sees exactly what members will get,
-and a built-in help panel explains how to grab a webhook URL.
+The config UI is **stepped and self-explanatory**: four short steps, and a
+built-in help panel explains how to grab a webhook URL.
 
 ## Why button-only (no select target)
 
@@ -117,4 +115,4 @@ $5 VPS. Give it a small persistent volume for the `.db` file.
 | [`src/discord.rs`](src/discord.rs) | Signature verify, interaction types, and the pure modal/forward/reply builders (unit-tested). |
 | [`src/validate.rs`](src/validate.rs) | Input validation + SSRF guard (unit-tested). |
 | [`src/routes.rs`](src/routes.rs) | HTTP handlers + the interaction flow. |
-| [`static/config.html`](static/config.html) | The config iframe (stepped builder, live preview, reply picker). |
+| [`static/config.html`](static/config.html) | The config iframe (stepped builder). |
