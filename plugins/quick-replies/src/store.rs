@@ -40,9 +40,19 @@ pub struct QuickReply {
     /// own label is part of the DWEEB message the admin designs.
     #[serde(default)]
     pub label: String,
-    /// Optional unicode emoji for the select option (e.g. "📜").
+    /// Optional emoji for the select option. For a unicode emoji this is the
+    /// glyph itself (e.g. "📜"); for a custom guild emoji it is the emoji's
+    /// name/alias, paired with [`emoji_id`](Self::emoji_id).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emoji: Option<String>,
+    /// Set only for a **custom** guild emoji: its snowflake id. Stored purely so
+    /// the config UI can re-show the chosen emoji on reconfigure; the click path
+    /// never reads it (DWEEB owns the wired select option).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji_id: Option<String>,
+    /// Whether a custom [`emoji_id`](Self::emoji_id) is animated (GIF).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji_animated: Option<bool>,
     /// Optional select-option subtitle shown under the label in the dropdown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,

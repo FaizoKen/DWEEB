@@ -1,11 +1,12 @@
-//! The thin Discord REST layer — a single, **optional** call: list a guild's
-//! roles so the config UI's role-gate picker can show real role names instead of
-//! asking for raw ids (`connect`).
+//! The thin Discord REST layer — a few **optional** reads, all in one `connect`:
+//! a guild's roles (so the role-gate picker shows real names, not raw ids) and
+//! its custom emoji (so the emoji picker offers the server's own emoji). The
+//! emoji read is best-effort — if it fails, connect still returns roles.
 //!
 //! The core of this plugin (click → reply) uses none of this — it runs entirely
 //! on the interaction payload. So a deployment with no `BOT_TOKEN` still works;
-//! it just can't populate the gate picker (the UI says so, and role-gating is
-//! simply unavailable).
+//! it just can't populate the pickers (the UI says so: role-gating is
+//! unavailable and the emoji picker offers standard unicode emoji only).
 //!
 //! The only host ever contacted is `discord.com`, so there is no SSRF surface
 //! even though the token is operator-supplied. The call inherits the shared
@@ -51,6 +52,14 @@ pub struct RoleView {
     pub managed: bool,
 }
 
+/// One custom emoji as the emoji picker needs it.
+#[derive(Debug, Serialize)]
+pub struct EmojiView {
+    pub id: String,
+    pub name: String,
+    pub animated: bool,
+}
+
 /// Everything `POST /api/connect` returns on success.
 #[derive(Debug, Serialize)]
 pub struct ConnectResult {
@@ -59,6 +68,8 @@ pub struct ConnectResult {
     pub bot_id: String,
     pub bot_name: String,
     pub roles: Vec<RoleView>,
+    /// The guild's custom emoji, for the config UI's emoji picker.
+    pub emojis: Vec<EmojiView>,
 }
 
 // ── Raw Discord shapes (only the fields we read) ─────────────────────────────
@@ -91,6 +102,24 @@ struct Role {
     managed: bool,
 }
 
+#[derive(Deserialize)]
+struct Emoji {
+    /// Standard (unicode) emoji come back with a null id; we only want custom ones.
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    animated: bool,
+    /// False while an emoji is unusable (e.g. lost to a server's boost downgrade).
+    #[serde(default = "default_true")]
+    available: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 fn auth(token: &str) -> String {
     format!("Bot {token}")
 }
@@ -109,6 +138,10 @@ pub async fn connect(
     // The guild doubles as our "is the bot in here?" probe (403/404 → not in).
     let guild: Guild = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}")).await?;
     let roles: Vec<Role> = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/roles")).await?;
+    // Emoji power the config UI's picker. Treat a fetch failure as "no custom
+    // emoji" rather than failing the whole connect — roles/gating still work.
+    let emojis: Vec<Emoji> =
+        get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/emojis")).await.unwrap_or_default();
 
     // Drop @everyone (id == guild id) and managed (integration/booster) roles —
     // they're not useful gate targets. Surface highest-first like the other
@@ -126,12 +159,26 @@ pub async fn connect(
         .collect();
     role_views.sort_by(|a, b| b.position.cmp(&a.position));
 
+    // Keep only usable custom emoji (real id, available); standard unicode emoji
+    // (null id) are offered client-side, so we don't echo them here.
+    let emoji_views: Vec<EmojiView> = emojis
+        .into_iter()
+        .filter(|e| e.available)
+        .filter_map(|e| match (e.id, e.name) {
+            (Some(id), Some(name)) if !id.is_empty() && !name.is_empty() => {
+                Some(EmojiView { id, name, animated: e.animated })
+            }
+            _ => None,
+        })
+        .collect();
+
     Ok(ConnectResult {
         guild_id: guild_id.to_string(),
         guild_name: guild.name,
         bot_id: me.id,
         bot_name,
         roles: role_views,
+        emojis: emoji_views,
     })
 }
 

@@ -44,22 +44,24 @@ A reply is more than a line of text:
   into the instance, so the reply keeps working even if you later edit or delete
   the original. `{user}`/`{username}`/`{server}` inside a saved message are still
   substituted per click, and mentions are pinned to the clicker exactly like a
-  typed reply — a public saved message can never `@everyone`. Saved messages are
+  typed reply — a saved message can never `@everyone`. Saved messages are
   client-side content, so **no bot token** is involved and the click path still
   does zero outbound I/O.
-- **Private or public** — each reply is ephemeral by default (only the clicker
-  sees it — ideal for FAQ/support), or flip it to post in the channel.
+- **Always private** — every reply is ephemeral: only the person who clicks sees
+  it. That's the right default for FAQ/support/link-hub macros and keeps a busy
+  channel quiet no matter how often a button is used.
 - **Variables** — `{user}` (a mention), `{username}` (their name), and
   `{server}`, substituted per click from the interaction payload — **no Discord
   lookup**. Unknown `{tokens}` are left untouched.
+- **Emoji picker** *(topic menus)* — each topic's dropdown emoji is chosen from a
+  picker: a set of common **unicode** emoji plus your server's own **custom
+  emoji**, fetched through the shared bot exactly like the DWEEB dashboard. Both
+  unicode and custom emoji are wired onto the select option (custom ones as
+  `{ id, name, animated }`).
 - **Role-gating** *(optional)* — restrict a reply to members holding **any one
   of** a set of roles. Someone without the role gets a private "this reply is
   for … only" notice instead. Trust is re-derived from the member's payload
   roles, so the gate can't be bypassed by a crafted click.
-
-The config UI shows a **live preview** of every reply as you type (heading,
-Markdown, the substituted variables, and the private/public badge), so there are
-no surprises when a member clicks.
 
 ## How a click becomes a reply
 
@@ -73,8 +75,9 @@ call, so it always answers well inside Discord's ~3s window:
    gated reply used outside a guild (no member roles) fails closed.
 3. **Substitute + send** — `{user}`/`{username}`/`{server}` are filled in (in the
    typed body, or in every `content` field of a saved message) and the reply goes
-   back as the interaction response, ephemeral or public. A reply with a usable
-   saved-message payload sends that; otherwise it sends the typed title/body.
+   back as the interaction response — **always ephemeral** (only the clicker sees
+   it). A reply with a usable saved-message payload sends that; otherwise it sends
+   the typed title/body.
 
 Because the reply is just the interaction response, it works whether the message
 was posted through a DWEEB webhook **or** a guild's own
@@ -89,10 +92,10 @@ way, and a guild posting with its own bot still gets the exact reply you wrote.
 | `{username}` | Their display name | Plain text. |
 | `{server}` | The server's name | Falls back to "the server" when unknown. |
 
-A **public** reply sets `allowed_mentions` to `{ parse: [], users: [clicker] }`,
-so a stray `@everyone`/`@here`/role mention in the text (or in a display name)
-never pings the channel — only the clicker can be mentioned, and only via
-`{user}`.
+Every reply sets `allowed_mentions` to `{ parse: [], users: [clicker] }`, so a
+stray `@everyone`/`@here`/role mention in the text (or in a display name) never
+pings anyone — only the clicker can be mentioned, and only via `{user}`. (Replies
+are ephemeral, but the pin is kept defensively regardless.)
 
 ## Architecture & safety
 
@@ -103,27 +106,29 @@ never pings the channel — only the clicker can be mentioned, and only via
 | Option-value integrity | A select's options are wired **and locked** by DWEEB; the handler maps a picked `value` to a known reply key and ignores anything it doesn't recognise — never acting on a raw client-supplied value. |
 | Role-gating | Re-derived from the member's payload roles (intersected with the configured set), never from a client claim; fails closed outside a guild. |
 | Mention safety | Every reply sets `allowed_mentions` to ping **only** the clicker (`parse: []`), so canned text — or a member's own name — can never `@everyone` the channel. |
-| Reply within Discord's 3s window | A click does **zero** outbound I/O — it's a config read and a pure builder. The only Discord call anywhere is the optional config-time role listing. |
+| Reply within Discord's 3s window | A click does **zero** outbound I/O — it's a config read and a pure builder. The only Discord calls anywhere are the optional config-time role + custom-emoji listing. |
 | No stored secrets | No bot token, no webhook URL, nothing per-instance to leak — the database holds only your reply text/option keys and any snapshotted saved-message content (itself pure content). |
 | Saved-message safety | A saved message rides in as Components V2 with the **same** `allowed_mentions` pin as a typed reply; only its `content` text is variable-substituted, so `custom_id`s/URLs are never mangled. A content/embeds-only payload (no V2 components) is ignored and the typed body sends instead. |
 | Resource bounds | 1–25 replies, body ≤ 1500 chars, title ≤ 200, saved-message payload ≤ 16 KB, option label/description ≤ 100, ≤ 25 gate roles per reply. |
-| XSS in the config UI | Every Discord-supplied string (role names) is rendered with `textContent`; the live preview escapes input **before** applying its Markdown-lite subset, so a reply body can't inject HTML. |
+| XSS in the config UI | Every Discord-supplied string (role names, emoji names/ids) is rendered with `textContent` or as `src`/`alt` attributes, never as HTML, so nothing the bot or browser supplies can inject markup. |
 
 ## The bot (optional)
 
 Quick Replies works with **no bot at all**. If the deployment configures the
-shared DWEEB bot (`BOT_TOKEN`), the config UI gains one convenience: the
+shared DWEEB bot (`BOT_TOKEN`), the config UI gains two conveniences: the
 **role-gate picker** can list a server's roles so you pick "Subscribers" instead
-of pasting a role id. A server admin only ever *invites* the bot — never pastes a
-token — and the invite's `permissions` are normalized to the same shared union
-the other plugins use (Quick Replies itself needs no privileged bit, but the
-union must match so re-inviting can't strip another plugin's grant).
-`BOT_INVITE_URL` surfaces a one-click "add the bot" button.
+of pasting a role id, and the **emoji picker** can list the server's custom emoji
+(both come from the one `/api/connect` probe). A server admin only ever *invites*
+the bot — never pastes a token — and the invite's `permissions` are normalized to
+the same shared union the other plugins use (Quick Replies itself needs no
+privileged bit, but the union must match so re-inviting can't strip another
+plugin's grant). `BOT_INVITE_URL` surfaces a one-click "add the bot" button.
 
 > **Operators:** if `BOT_TOKEN` is set it grants full bot access — treat the
 > database as a secret store and only run plugins you trust, the same reason the
 > DWEEB registry is bundled and curated. If it's unset, the config UI says
-> role-gating isn't available; nothing else changes.
+> role-gating isn't available and the emoji picker offers standard unicode emoji
+> only; nothing else changes.
 
 ## Run locally
 
@@ -165,7 +170,7 @@ On the DWEEB production stack it's wired exactly like the other plugins — see
 | GET | `/registry.json` | DWEEB plugin registry (one plugin). CORS-open. |
 | GET | `/config.html` | The config iframe DWEEB embeds. |
 | GET | `/api/meta` | Whether a shared bot exists (for the gate picker) + its invite URL. |
-| POST | `/api/connect` | Probe a guild with the shared bot → its roles for the gate picker. Stores nothing. |
+| POST | `/api/connect` | Probe a guild with the shared bot → its roles (gate picker) and custom emoji (emoji picker). Stores nothing. |
 | POST | `/api/instances` | Create a menu → `{ id }`. |
 | GET | `/api/instances/:id` | Read a menu's config. |
 | PUT | `/api/instances/:id` | Replace a menu's config. |
@@ -179,7 +184,7 @@ On the DWEEB production stack it's wired exactly like the other plugins — see
 | [`src/config.rs`](src/config.rs) | Env parsing (incl. the optional shared bot + invite normalization). |
 | [`src/store.rs`](src/store.rs) | SQLite store + config / reply types. |
 | [`src/discord.rs`](src/discord.rs) | Signature verify, interaction parsing, and the **pure** core: variable substitution, the role-gate decision, and the Components V2 reply builder. |
-| [`src/rest.rs`](src/rest.rs) | The thin (optional) Discord REST: list a guild's roles for the gate picker. |
+| [`src/rest.rs`](src/rest.rs) | The thin (optional) Discord REST: list a guild's roles + custom emoji for the config pickers. |
 | [`src/validate.rs`](src/validate.rs) | Input validation for everything the browser sends. |
 | [`src/routes.rs`](src/routes.rs) | HTTP handlers + the click → reply flow. |
-| [`static/config.html`](static/config.html) | The config iframe (replies, live preview, variables, role-gate). |
+| [`static/config.html`](static/config.html) | The config iframe (replies, saved-message + emoji pickers, variables, role-gate). |

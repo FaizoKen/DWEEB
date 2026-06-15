@@ -393,6 +393,8 @@ mod tests {
             key: "k1".into(),
             label: "Topic".into(),
             emoji: None,
+            emoji_id: None,
+            emoji_animated: None,
             description: None,
             title: None,
             payload: None,

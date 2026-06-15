@@ -123,7 +123,13 @@
         background: var(--accent); color: #fff;
         font-size: 11px; font-weight: 700;
       }
-      .card-head .emoji { flex: none; width: 48px; text-align: center; }
+      .emoji-btn {
+        flex: none; width: 44px; height: 38px; padding: 0;
+        display: inline-grid; place-items: center;
+        font-size: 20px; line-height: 1;
+      }
+      .emoji-btn.muted { opacity: 0.5; }
+      .emoji-img { width: 22px; height: 22px; object-fit: contain; vertical-align: middle; }
       .card-head .label { flex: 1; }
       button.icon { flex: none; width: 30px; padding: 0; color: var(--muted); }
       button.icon:hover { color: var(--text); }
@@ -138,7 +144,7 @@
       }
       .chip:hover { border-color: var(--accent); }
 
-      /* Visibility segmented control. */
+      /* Segmented control (reply source). */
       .seg { display: flex; gap: 6px; margin-top: 10px; }
       .seg button { flex: 1; }
       .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -161,26 +167,42 @@
       .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
       .role .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-      /* Live preview — a little Discord message bubble. */
-      .preview { margin-top: 12px; }
-      .pv-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
-      .pv-card {
+      /* Emoji picker popover. */
+      .emoji-pop {
+        position: absolute;
+        z-index: 50;
+        width: 260px;
+        max-height: 320px;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
         border: 1px solid var(--border);
-        border-left: 3px solid var(--muted);
-        border-radius: 6px;
-        background: var(--panel-2);
-        padding: 10px 12px;
-        font-size: 14px;
-        word-wrap: break-word;
-        overflow-wrap: anywhere;
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        padding: 8px;
       }
-      .pv-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
-      .pv-body { white-space: normal; }
-      .pv-empty { color: var(--muted); font-style: italic; }
-      .pv-mention { color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 3px; padding: 0 2px; }
-      .pv-link { color: #00a8fc; }
-      .pv-card code { background: var(--bg); padding: 0 4px; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 13px; }
-      .pv-foot { margin-top: 8px; font-size: 12px; color: var(--muted); }
+      .emoji-pop-search {
+        width: 100%; padding: 6px 8px; margin-bottom: 6px;
+        background: var(--panel-2); border: 1px solid var(--border);
+        border-radius: 6px; color: var(--text); font: inherit;
+      }
+      .emoji-pop-scroll { overflow: auto; }
+      .emoji-group-label {
+        font-size: 11px; color: var(--muted); text-transform: uppercase;
+        letter-spacing: 0.04em; margin: 8px 2px 4px;
+      }
+      .emoji-pop-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+      .emoji-cell {
+        width: 100%; aspect-ratio: 1; padding: 0; border: none; background: none;
+        display: grid; place-items: center; font-size: 18px; line-height: 1;
+        border-radius: 6px; cursor: pointer;
+      }
+      .emoji-cell:hover { background: var(--panel-2); }
+      .emoji-clear {
+        width: 100%; text-align: left; margin-bottom: 4px;
+        color: var(--muted); font-size: 12px;
+      }
+      .emoji-clear:hover { color: var(--danger); border-color: var(--danger); }
     </style>
   </head>
   <body>
@@ -233,6 +255,13 @@
       // plugin protocol. A reply can send one of these instead of typed text.
       let savedMessages = []; // [{ id, name, savedAt, payload }] — only ones with components
 
+      // ── Server custom emoji (from the bot, optional) ────────────────────
+      // The connected server's custom emoji, fetched the same way the DWEEB
+      // dashboard does (via the shared bot, through /api/connect), to power the
+      // emoji picker. Empty when there's no bot/connected server — the picker
+      // then offers standard unicode emoji only.
+      let guildEmojis = []; // [{ id, name, animated }]
+
       // ── Reply cards ─────────────────────────────────────────────────────
       let cards = [];
 
@@ -240,8 +269,6 @@
       const isSelect = () => target === "string_select";
       const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
       const hexColor = (n) => (n && n > 0 ? "#" + n.toString(16).padStart(6, "0") : "#99aab5");
-      const escapeHtml = (s) =>
-        String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
       // A saved-message payload is only usable here when it carries a non-empty
       // Components V2 `components` array — that's what the click path sends. A
@@ -255,7 +282,11 @@
         return {
           key: typeof seed.key === "string" && seed.key ? seed.key : newKey(),
           label: seed.label || "",
+          // Option emoji: `emoji` is the unicode glyph or a custom emoji's name;
+          // `emojiId` (+ `emojiAnimated`) are set only for a custom guild emoji.
           emoji: seed.emoji || "",
+          emojiId: seed.emoji_id || "",
+          emojiAnimated: seed.emoji_animated === true,
           description: seed.description || "",
           title: seed.title || "",
           body: seed.body || "",
@@ -263,7 +294,8 @@
           source: payload ? "saved" : "write",
           payload, // the saved message snapshot (Components V2 wire payload)
           savedId: payload ? matchSavedId(payload) : "", // dropdown selection, best-effort
-          ephemeral: seed.ephemeral !== false, // default private
+          // Replies are always private (ephemeral) — only the clicker sees them.
+          ephemeral: true,
           gate: new Set((seed.allowed_roles || []).map((r) => r.id)),
         };
       }
@@ -297,7 +329,7 @@
         el.innerHTML = `
           <div class="card-head">
             <span class="num">${i + 1}</span>
-            <input type="text" class="emoji" data-k="emoji" maxlength="8" placeholder="🙂" title="Optional emoji" />
+            <button type="button" class="emoji-btn" title="Pick an emoji" aria-label="Pick an emoji"></button>
             <input type="text" class="label" data-k="label" maxlength="100" placeholder="Topic label (e.g. Server Rules)" />
             <button type="button" class="icon up" title="Move up">↑</button>
             <button type="button" class="icon down" title="Move down">↓</button>
@@ -322,23 +354,15 @@
             </div>
           </div>
           <div class="saved-src"></div>
-          <div class="seg vis">
-            <button type="button" data-vis="eph">🔒 Only them (private)</button>
-            <button type="button" data-vis="pub">👥 Everyone (public)</button>
-          </div>
           <details class="gate">
             <summary>Limit who can use this reply (optional)</summary>
             <div class="gate-body"></div>
-          </details>
-          <div class="preview">
-            <div class="pv-label">Live preview</div>
-            <div class="pv-out"></div>
-          </div>`;
+          </details>`;
 
         // Option-only fields hide for a button (its label/emoji live in the
         // DWEEB message you design, and a button has no dropdown options).
         const select = isSelect();
-        el.querySelector(".emoji").style.display = select ? "" : "none";
+        el.querySelector(".emoji-btn").style.display = select ? "" : "none";
         el.querySelector(".label").style.display = select ? "" : "none";
         el.querySelector(".optdesc").style.display = select ? "" : "none";
         // A button always has exactly one card — no number, reorder or delete.
@@ -346,22 +370,17 @@
           el.querySelector(sel).style.display = select ? "" : "none";
 
         // Populate values.
-        el.querySelector(".emoji").value = card.emoji;
         el.querySelector(".label").value = card.label;
         el.querySelector(".optdesc").value = card.description;
         el.querySelector(".title").value = card.title;
         el.querySelector(".body").value = card.body;
 
-        const out = el.querySelector(".pv-out");
-        const renderThis = () => renderPreview(card, out);
-
-        // Live value binding — update the model + preview without re-rendering
-        // (so typing never steals focus).
+        // Live value binding — update the model without re-rendering (so typing
+        // never steals focus).
         el.querySelectorAll("[data-k]").forEach((input) => {
           const k = input.getAttribute("data-k");
           input.addEventListener("input", () => {
             card[k] = input.value;
-            renderThis();
             if (k === "body" || k === "label") updateCount();
           });
         });
@@ -372,23 +391,13 @@
           chip.addEventListener("click", () => {
             insertAtCaret(body, chip.getAttribute("data-var"));
             card.body = body.value;
-            renderThis();
           });
         });
 
-        // Visibility segmented control.
-        const segButtons = el.querySelectorAll(".vis button");
-        const paintVis = () => {
-          segButtons.forEach((b) => b.classList.toggle("sel", b.dataset.vis === (card.ephemeral ? "eph" : "pub")));
-        };
-        segButtons.forEach((b) =>
-          b.addEventListener("click", () => {
-            card.ephemeral = b.dataset.vis === "eph";
-            paintVis();
-            renderThis();
-          }),
-        );
-        paintVis();
+        // Emoji picker (select options only).
+        const emojiBtn = el.querySelector(".emoji-btn");
+        paintEmojiButton(card, emojiBtn);
+        emojiBtn.addEventListener("click", () => openEmojiPicker(card, emojiBtn));
 
         // Source segmented control: typed reply vs. a saved DWEEB message.
         const writeBox = el.querySelector(".write-src");
@@ -407,11 +416,10 @@
             // one is already chosen; otherwise the picker prompts for one.
             if (card.source === "saved" && card.savedId) applySaved(card, card.savedId);
             paintSource();
-            renderThis();
             sendResize();
           }),
         );
-        renderSavedPicker(card, savedBox, renderThis);
+        renderSavedPicker(card, savedBox);
         paintSource();
 
         // Reorder / delete.
@@ -432,12 +440,11 @@
         // Re-fit when the gate is expanded.
         el.querySelector(".gate").addEventListener("toggle", sendResize);
 
-        renderThis();
         return el;
       }
 
       // ── Saved-message picker (per card) ─────────────────────────────────
-      function renderSavedPicker(card, box, renderThis) {
+      function renderSavedPicker(card, box) {
         box.innerHTML = "";
         // No saved messages to offer — point the user at how to make one.
         if (!savedMessages.length && !card.payload) {
@@ -479,7 +486,6 @@
         }
         sel.addEventListener("change", () => {
           if (sel.value && sel.value !== "__snapshot__") applySaved(card, sel.value);
-          renderThis();
         });
         box.appendChild(sel);
 
@@ -525,60 +531,174 @@
         textarea.setSelectionRange(pos, pos);
       }
 
-      // ── Live preview (safe Markdown-lite) ───────────────────────────────
-      function renderPreview(card, out) {
-        let html = "";
-        if (card.source === "saved") {
-          const text = card.payload ? savedPreviewText(card.payload) : "";
-          html += `<div class="pv-body">${
-            text ? renderInline(text) : '<span class="pv-empty">Pick a saved message to preview it here…</span>'
-          }</div>`;
-        } else {
-          const title = (card.title || "").trim();
-          if (title) html += `<div class="pv-title">${renderInline(title)}</div>`;
-          const bodyHtml = renderInline(card.body || "");
-          html += `<div class="pv-body">${bodyHtml || '<span class="pv-empty">Your reply preview shows here as you type…</span>'}</div>`;
-        }
-        const badge = card.ephemeral
-          ? "🔒 Only the person who clicks can see this"
-          : "👥 Posted in the channel for everyone";
-        out.innerHTML = `<div class="pv-card">${html}<div class="pv-foot">${badge}</div></div>`;
-        sendResize();
+      // ── Emoji picker (per select option) ────────────────────────────────
+      // A small, curated set of common unicode emoji so picking one doesn't need
+      // a megabyte dataset. The server's own custom emoji (fetched via the bot,
+      // exactly like the DWEEB dashboard) are shown alongside when connected.
+      const COMMON_EMOJI = (
+        "😀 😄 😁 😂 🤣 😊 😍 😎 🤔 🙃 😅 😇 🥳 😺 👍 👎 👋 🙌 🙏 💪 👀 🧠 " +
+        "✅ ☑️ ❌ ⚠️ ❓ ❗ ➕ ➖ 🔒 🔑 🔔 📌 📍 📎 📝 📋 📁 📂 🗂️ 📅 📊 📈 " +
+        "📜 📖 📚 🔖 🏷️ 💬 💡 🔥 ⭐ 🌟 ✨ 🎉 🎁 🎮 🎵 🎧 🏆 🥇 🚀 🛠️ ⚙️ 🧩 " +
+        "💻 🖥️ 📱 🌐 🔗 📣 📢 💯 ♻️ 🆕 🆗 🆘 ❤️ 🧡 💛 💚 💙 💜 🤍 🖤 🤝 👏"
+      ).split(/\s+/).filter(Boolean);
+
+      // The single floating popover, reused across cards (only one open at once).
+      let emojiPop = null;
+      function closeEmojiPicker() {
+        if (emojiPop) { emojiPop.remove(); emojiPop = null; }
+        document.removeEventListener("click", onEmojiOutside, true);
+        document.removeEventListener("keydown", onEmojiKey, true);
+        sendResize(); // shrink the iframe back to the content height
+      }
+      function onEmojiOutside(e) {
+        if (emojiPop && !emojiPop.contains(e.target) && !e.target.closest(".emoji-btn")) closeEmojiPicker();
+      }
+      function onEmojiKey(e) {
+        if (e.key === "Escape") closeEmojiPicker();
       }
 
-      // Best-effort text preview of a saved Components V2 message: gather every
-      // `content` string (the same fields the click path substitutes) in order.
-      // It's a readable approximation, not a faithful render of buttons/media.
-      function savedPreviewText(payload) {
-        const parts = [];
-        const walk = (v) => {
-          if (Array.isArray(v)) v.forEach(walk);
-          else if (v && typeof v === "object") {
-            for (const [k, val] of Object.entries(v)) {
-              if (k === "content" && typeof val === "string") parts.push(val);
-              else walk(val);
+      // Show what's currently picked on the card's trigger button: a custom
+      // emoji image, a unicode glyph, or a muted placeholder when unset.
+      function paintEmojiButton(card, btn) {
+        btn.innerHTML = "";
+        if (card.emojiId) {
+          const img = document.createElement("img");
+          img.className = "emoji-img";
+          img.src = `https://cdn.discordapp.com/emojis/${card.emojiId}.${card.emojiAnimated ? "gif" : "webp"}?size=32`;
+          img.alt = card.emoji || "emoji";
+          btn.appendChild(img);
+        } else if (card.emoji) {
+          btn.textContent = card.emoji;
+          btn.classList.remove("muted");
+        } else {
+          btn.textContent = "🙂";
+          btn.classList.add("muted");
+        }
+        if (card.emojiId || card.emoji) btn.classList.remove("muted");
+      }
+
+      function setCardEmoji(card, btn, { emoji = "", id = "", animated = false }) {
+        card.emoji = emoji;
+        card.emojiId = id;
+        card.emojiAnimated = animated;
+        paintEmojiButton(card, btn);
+      }
+
+      function openEmojiPicker(card, btn) {
+        if (emojiPop) { closeEmojiPicker(); return; }
+        const pop = document.createElement("div");
+        pop.className = "emoji-pop";
+
+        const search = document.createElement("input");
+        search.type = "text";
+        search.className = "emoji-pop-search";
+        search.placeholder = "Search emoji…";
+        pop.appendChild(search);
+
+        const scroll = document.createElement("div");
+        scroll.className = "emoji-pop-scroll";
+        pop.appendChild(scroll);
+
+        const draw = () => {
+          scroll.innerHTML = "";
+          const q = search.value.trim().toLowerCase();
+
+          // Clear / none.
+          const clear = document.createElement("button");
+          clear.type = "button";
+          clear.className = "emoji-clear";
+          clear.textContent = "✕ No emoji";
+          clear.addEventListener("click", () => { setCardEmoji(card, btn, {}); closeEmojiPicker(); });
+          scroll.appendChild(clear);
+
+          // Server custom emoji (fetched via the bot, like the dashboard).
+          const custom = guildEmojis.filter((e) => !q || e.name.toLowerCase().includes(q));
+          if (custom.length) {
+            scroll.appendChild(groupLabelEl(guildName ? `${guildName} emoji` : "Server emoji"));
+            const grid = document.createElement("div");
+            grid.className = "emoji-pop-grid";
+            for (const e of custom.slice(0, 200)) {
+              const cell = document.createElement("button");
+              cell.type = "button";
+              cell.className = "emoji-cell";
+              cell.title = `:${e.name}:`;
+              const img = document.createElement("img");
+              img.className = "emoji-img";
+              img.loading = "lazy";
+              img.src = `https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? "gif" : "webp"}?size=32`;
+              img.alt = `:${e.name}:`;
+              cell.appendChild(img);
+              cell.addEventListener("click", () => {
+                setCardEmoji(card, btn, { emoji: e.name, id: e.id, animated: !!e.animated });
+                closeEmojiPicker();
+              });
+              grid.appendChild(cell);
             }
+            scroll.appendChild(grid);
+          }
+
+          // Common unicode emoji. (We can't name-search these, so only show the
+          // full set when the search box is empty.)
+          if (!q) {
+            scroll.appendChild(groupLabelEl("Emoji"));
+            const grid = document.createElement("div");
+            grid.className = "emoji-pop-grid";
+            for (const ch of COMMON_EMOJI) {
+              const cell = document.createElement("button");
+              cell.type = "button";
+              cell.className = "emoji-cell";
+              cell.textContent = ch;
+              cell.addEventListener("click", () => {
+                setCardEmoji(card, btn, { emoji: ch });
+                closeEmojiPicker();
+              });
+              grid.appendChild(cell);
+            }
+            scroll.appendChild(grid);
+          } else if (!custom.length) {
+            scroll.appendChild(hint("No custom emoji match. Clear the search to browse standard emoji."));
           }
         };
-        walk(payload.components);
-        return parts.join("\n\n");
+        search.addEventListener("input", draw);
+        draw();
+
+        document.body.appendChild(pop);
+        emojiPop = pop;
+        positionEmojiPop(pop, btn);
+        fitForPopover(pop);
+        // Defer outside-click wiring so the opening click doesn't immediately close it.
+        setTimeout(() => {
+          document.addEventListener("click", onEmojiOutside, true);
+          document.addEventListener("keydown", onEmojiKey, true);
+          search.focus();
+        }, 0);
       }
 
-      // Escape first, then apply a small, safe subset of Markdown and finally
-      // swap the {variables} for sample values. Because escaping runs before any
-      // tag is introduced, none of the user's text can inject HTML.
-      function renderInline(raw) {
-        let s = escapeHtml(raw);
-        s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, t, u) => `<span class="pv-link" title="${escapeHtml(u)}">${t}</span>`);
-        s = s.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
-        s = s.replace(/(^|[^_])_([^_\n]+)_/g, "$1<i>$2</i>");
-        s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
-        s = s.replace(/\n/g, "<br>");
-        s = s
-          .replace(/\{username\}/g, '<span class="pv-mention">You</span>')
-          .replace(/\{user\}/g, '<span class="pv-mention">@You</span>')
-          .replace(/\{server\}/g, escapeHtml(guildName || "your server"));
-        return s;
+      // The popover is out of flow, so it doesn't grow document.scrollHeight; ask
+      // the host to make the iframe tall enough to show it (restored on close).
+      function fitForPopover(pop) {
+        if (nonce == null) return;
+        const needed = pop.offsetTop + pop.offsetHeight + 16;
+        const height = Math.max(document.body.scrollHeight + 24, needed);
+        parent.postMessage({ type: "dweeb:plugin:resize", nonce, height }, hostOrigin);
+      }
+
+      function groupLabelEl(text) {
+        const d = document.createElement("div");
+        d.className = "emoji-group-label";
+        d.textContent = text;
+        return d;
+      }
+
+      // Anchor the popover under its trigger, nudged left to stay on-screen.
+      function positionEmojiPop(pop, btn) {
+        const r = btn.getBoundingClientRect();
+        const w = pop.offsetWidth || 260;
+        let left = r.left + window.scrollX;
+        left = Math.min(left, window.scrollX + document.documentElement.clientWidth - w - 8);
+        left = Math.max(left, window.scrollX + 8);
+        pop.style.left = left + "px";
+        pop.style.top = r.bottom + window.scrollY + 6 + "px";
       }
 
       // ── Role gate picker (per card) ─────────────────────────────────────
@@ -820,6 +940,7 @@
           }
           guildName = data.guild_name || guildName;
           roles = Array.isArray(data.roles) ? data.roles : [];
+          guildEmojis = Array.isArray(data.emojis) ? data.emojis : [];
           rolesLoaded = true;
           gateError = "";
           // Drop any gate selections whose role no longer exists.
@@ -898,17 +1019,23 @@
 
         const replies = cards.map((c) => {
           const saved = usesSaved(c);
+          const hasEmoji = isSelect() && (c.emojiId || c.emoji.trim());
           return {
             key: c.key,
             label: isSelect() ? c.label.trim() : "",
-            emoji: isSelect() && c.emoji.trim() ? c.emoji.trim() : null,
+            // Store the emoji name (unicode glyph or custom alias); a custom
+            // emoji also carries its id + animated flag so it round-trips.
+            emoji: hasEmoji ? c.emoji.trim() : null,
+            emoji_id: isSelect() && c.emojiId ? c.emojiId : null,
+            emoji_animated: isSelect() && c.emojiId && c.emojiAnimated ? true : null,
             description: isSelect() && c.description.trim() ? c.description.trim() : null,
             // A saved message carries its own layout, so drop the typed
             // title/body and send the payload instead.
             title: saved ? null : c.title.trim() || null,
             payload: saved ? c.payload : null,
             body: saved ? "" : c.body.replace(/\s+$/g, ""),
-            ephemeral: c.ephemeral,
+            // Replies are always private.
+            ephemeral: true,
             allowed_roles: roleRefs(c.gate),
           };
         });
@@ -939,7 +1066,7 @@
             ? { label: "Quick Replies", description: `${n} topic${n === 1 ? "" : "s"}` + (anyGated ? " · role-gated" : "") }
             : {
                 label: buttonSummaryLabel(cards[0]),
-                description: (cards[0].ephemeral ? "Private" : "Public") + (anyGated ? " · role-gated" : ""),
+                description: "Private" + (anyGated ? " · role-gated" : ""),
               };
           parent.postMessage(
             {
@@ -954,7 +1081,9 @@
                     options: cards.map((c) => {
                       const o = { label: c.label.trim().slice(0, 100) || "Option", value: c.key };
                       if (c.description.trim()) o.description = c.description.trim().slice(0, 100);
-                      if (c.emoji.trim()) o.emoji = { name: c.emoji.trim() };
+                      // Custom emoji wire as { id, name, animated }; unicode as { name }.
+                      if (c.emojiId) o.emoji = { id: c.emojiId, name: c.emoji.trim() || undefined, ...(c.emojiAnimated ? { animated: true } : {}) };
+                      else if (c.emoji.trim()) o.emoji = { name: c.emoji.trim() };
                       return o;
                     }),
                   }

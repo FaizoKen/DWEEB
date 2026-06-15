@@ -92,6 +92,13 @@ fn validate_reply(reply: &QuickReply, is_button: bool) -> Result<(), String> {
             return Err("A topic emoji is too long — use a single emoji.".into());
         }
     }
+    // A custom emoji id must be a real snowflake (it's wired onto the select
+    // option). Animated only makes sense alongside one.
+    if let Some(id) = reply.emoji_id.as_deref() {
+        if !is_snowflake(id) {
+            return Err("A topic's custom emoji id is invalid.".into());
+        }
+    }
 
     if let Some(desc) = reply.description.as_deref() {
         if desc.chars().count() > MAX_OPTION_FIELD {
@@ -169,6 +176,8 @@ mod tests {
             key: key.into(),
             label: "Topic".into(),
             emoji: None,
+            emoji_id: None,
+            emoji_animated: None,
             description: None,
             title: None,
             payload: None,
@@ -235,6 +244,25 @@ mod tests {
         let mut empty = reply("k1", "");
         empty.payload = Some(serde_json::json!({ "components": [] }));
         assert!(validate_config(&cfg("button", vec![empty])).is_err());
+    }
+
+    #[test]
+    fn validates_custom_emoji_id() {
+        let mut bad = reply("k1", "a");
+        bad.emoji = Some("wave".into());
+        bad.emoji_id = Some("not-a-snowflake".into());
+        assert!(validate_config(&cfg("string_select", vec![bad])).is_err());
+
+        let mut ok = reply("k1", "a");
+        ok.emoji = Some("wave".into());
+        ok.emoji_id = Some("123456789012345678".into());
+        ok.emoji_animated = Some(true);
+        assert!(validate_config(&cfg("string_select", vec![ok])).is_ok());
+
+        // A plain unicode emoji (no id) is still fine.
+        let mut uni = reply("k1", "a");
+        uni.emoji = Some("📜".into());
+        assert!(validate_config(&cfg("string_select", vec![uni])).is_ok());
     }
 
     #[test]
