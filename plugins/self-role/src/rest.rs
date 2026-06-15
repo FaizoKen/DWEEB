@@ -45,6 +45,19 @@ impl ConnectError {
     }
 }
 
+/// Why a click-time role add/remove didn't take. The interaction reply phrases
+/// these two very differently, so collapsing them (as a bare `Err(())` would)
+/// is exactly what makes a transient blip read as "move my role up."
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoleError {
+    /// Discord refused the change — a 403, or a 404 on the member/role. Almost
+    /// always role hierarchy or a missing Manage Roles permission: admin fix.
+    Denied,
+    /// A 429 rate-limit, a 5xx, or a network error reaching Discord. Transient
+    /// and not the admin's fault — the member should just try again shortly.
+    Busy,
+}
+
 /// One role as the config picker needs it.
 #[derive(Debug, Serialize)]
 pub struct RoleView {
@@ -231,9 +244,9 @@ async fn get_json<T: for<'de> Deserialize<'de>>(
     })
 }
 
-/// Add one role to a member. `Ok(())` on success; `Err(())` on any refusal
-/// (the caller only needs success/failure to build the reply — the human-facing
-/// "why" is almost always role hierarchy, said once in `build_reply`).
+/// Add one role to a member. `Ok(())` on success; on failure, [`RoleError`]
+/// tells the reply whether to blame role hierarchy (`Denied`) or a transient
+/// blip (`Busy`) — collapsing the two is what produces a misleading message.
 pub async fn add_role(
     http: &reqwest::Client,
     token: &str,
@@ -241,8 +254,8 @@ pub async fn add_role(
     user_id: &str,
     role_id: &str,
     reason: &str,
-) -> Result<(), ()> {
-    role_op(http, http.put(role_url(guild_id, user_id, role_id)), token, reason).await
+) -> Result<(), RoleError> {
+    role_op(http.put(role_url(guild_id, user_id, role_id)), token, reason).await
 }
 
 /// Remove one role from a member.
@@ -253,9 +266,8 @@ pub async fn remove_role(
     user_id: &str,
     role_id: &str,
     reason: &str,
-) -> Result<(), ()> {
+) -> Result<(), RoleError> {
     role_op(
-        http,
         http.delete(role_url(guild_id, user_id, role_id)),
         token,
         reason,
@@ -268,24 +280,31 @@ fn role_url(guild_id: &str, user_id: &str, role_id: &str) -> String {
 }
 
 async fn role_op(
-    _http: &reqwest::Client,
     req: reqwest::RequestBuilder,
     token: &str,
     reason: &str,
-) -> Result<(), ()> {
+) -> Result<(), RoleError> {
     let resp = req
         .header("Authorization", auth(token))
         // Shows up in the server's audit log so admins can see what happened.
         .header("X-Audit-Log-Reason", clamp_reason(reason))
         .send()
         .await
-        .map_err(|_| ())?;
-    if resp.status().is_success() {
-        Ok(())
-    } else {
-        tracing::warn!(status = %resp.status(), "role op rejected by Discord");
-        Err(())
+        .map_err(|_| RoleError::Busy)?;
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(());
     }
+    tracing::warn!(status = %status, "role op rejected by Discord");
+    // A 403, or a 404 on the member/role, means Discord refused the change
+    // itself — for self-role that's almost always role hierarchy or a missing
+    // Manage Roles permission, which only an admin can fix. Everything else
+    // (429 rate-limit, 5xx, or the network error mapped above) is transient:
+    // tell the member to try again rather than sending them to re-rank roles.
+    Err(match status.as_u16() {
+        403 | 404 => RoleError::Denied,
+        _ => RoleError::Busy,
+    })
 }
 
 /// Audit-log reasons travel in an HTTP header, and `HeaderValue` rejects any

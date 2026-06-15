@@ -246,7 +246,7 @@ async fn handle_component(state: &AppState, interaction: &discord::Interaction) 
     let changes = plan_changes(&managed, &current, &requested, &cfg.mode);
 
     if changes.is_empty() {
-        return Json(discord::build_reply(&cfg, &[], &[], &[])).into_response();
+        return Json(discord::build_reply(&cfg, &[], &[], &[], &[])).into_response();
     }
 
     // Fire every add/remove concurrently so even a multi-role "pick one" swap
@@ -264,10 +264,8 @@ async fn handle_component(state: &AppState, interaction: &discord::Interaction) 
             reason.clone(),
         );
         futs.push(tokio::spawn(async move {
-            let ok = rest::add_role(&http, &token, &guild_id, &user_id, &rid, &reason)
-                .await
-                .is_ok();
-            (rid, true, ok) // (role id, is_add, succeeded)
+            let res = rest::add_role(&http, &token, &guild_id, &user_id, &rid, &reason).await;
+            (rid, true, res) // (role id, is_add, outcome)
         }));
     }
     for rid in &changes.remove {
@@ -280,26 +278,26 @@ async fn handle_component(state: &AppState, interaction: &discord::Interaction) 
             reason.clone(),
         );
         futs.push(tokio::spawn(async move {
-            let ok = rest::remove_role(&http, &token, &guild_id, &user_id, &rid, &reason)
-                .await
-                .is_ok();
-            (rid, false, ok)
+            let res = rest::remove_role(&http, &token, &guild_id, &user_id, &rid, &reason).await;
+            (rid, false, res)
         }));
     }
 
     let mut added = Vec::new();
     let mut removed = Vec::new();
-    let mut failed = Vec::new();
+    let mut denied = Vec::new();
+    let mut busy = Vec::new();
     for joined in join_all(futs).await {
-        let Ok((rid, is_add, ok)) = joined else { continue };
-        match (ok, is_add) {
-            (true, true) => added.push(rid),
-            (true, false) => removed.push(rid),
-            (false, _) => failed.push(rid),
+        let Ok((rid, is_add, res)) = joined else { continue };
+        match (res, is_add) {
+            (Ok(()), true) => added.push(rid),
+            (Ok(()), false) => removed.push(rid),
+            (Err(rest::RoleError::Denied), _) => denied.push(rid),
+            (Err(rest::RoleError::Busy), _) => busy.push(rid),
         }
     }
 
-    Json(discord::build_reply(&cfg, &added, &removed, &failed)).into_response()
+    Json(discord::build_reply(&cfg, &added, &removed, &denied, &busy)).into_response()
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

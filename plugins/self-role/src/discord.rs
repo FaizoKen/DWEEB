@@ -298,15 +298,17 @@ fn role_label(roles: &[ManagedRole], id: &str) -> String {
 
 /// Build the ephemeral confirmation after a (possibly partial) change.
 ///
-/// `added`/`removed` are the role ids that actually changed; `failed` are ones
-/// Discord refused (almost always role hierarchy) — surfaced separately with a
-/// plain-language fix, because "nothing happened" is the most confusing outcome
-/// for a self-role menu.
+/// `added`/`removed` are the role ids that actually changed. `denied` are ones
+/// Discord refused (almost always role hierarchy) and `busy` are ones a
+/// transient error (rate-limit / 5xx / network) stopped — each gets its own
+/// plain-language line, because "nothing happened," or the *wrong* reason for
+/// it, is the most confusing outcome for a self-role menu.
 pub fn build_reply(
     cfg: &InstanceConfig,
     added: &[String],
     removed: &[String],
-    failed: &[String],
+    denied: &[String],
+    busy: &[String],
 ) -> Value {
     let mut lines: Vec<String> = Vec::new();
 
@@ -332,10 +334,18 @@ pub fn build_reply(
         }
     }
 
-    if !failed.is_empty() {
-        let names: Vec<String> = failed.iter().map(|id| role_label(&cfg.roles, id)).collect();
+    if !denied.is_empty() {
+        let names: Vec<String> = denied.iter().map(|id| role_label(&cfg.roles, id)).collect();
         lines.push(format!(
             "\u{26A0}\u{FE0F} I couldn't change {} — my role must sit **above** it and I need the **Manage Roles** permission. Ask an admin to move my role up.",
+            join_human(&names)
+        ));
+    }
+
+    if !busy.is_empty() {
+        let names: Vec<String> = busy.iter().map(|id| role_label(&cfg.roles, id)).collect();
+        lines.push(format!(
+            "\u{26A0}\u{FE0F} Discord was busy and I couldn't finish {} — give it a moment and click again.",
             join_human(&names)
         ));
     }
@@ -441,5 +451,29 @@ mod tests {
         let requested = set(&["a"]);
         let c = plan_changes(&managed, &current, &requested, "add");
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn reply_separates_denied_from_busy() {
+        let id = "1".repeat(18);
+        let cfg = InstanceConfig {
+            target: "button".into(),
+            guild_id: id.clone(),
+            guild_name: String::new(),
+            roles: vec![ManagedRole { id: id.clone(), name: "Red".into(), color: 0 }],
+            mode: "toggle".into(),
+            response: ResponseDef::default(),
+        };
+        let text = |v: &Value| {
+            v["data"]["components"][0]["content"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        // A refusal blames hierarchy; a transient blip tells them to retry.
+        let denied = build_reply(&cfg, &[], &[], std::slice::from_ref(&id), &[]);
+        assert!(text(&denied).contains("above"));
+        let busy = build_reply(&cfg, &[], &[], &[], std::slice::from_ref(&id));
+        assert!(text(&busy).contains("busy"));
     }
 }

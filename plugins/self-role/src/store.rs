@@ -97,11 +97,22 @@ impl Store {
         })
     }
 
+    /// Take the connection lock, shrugging off poisoning.
+    ///
+    /// The only thing that runs under this lock is a single `rusqlite` call,
+    /// which returns errors rather than panicking — so the lock can't actually
+    /// be poisoned today. Recovering anyway (instead of `unwrap()`) keeps one
+    /// unlucky panic in a future caller from bricking every later DB op for the
+    /// life of the process.
+    fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+
     /// Insert a new instance under a fresh id.
     pub fn create(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<()> {
         let json = serde_json::to_string(config).expect("serialize config");
         let now = unix_millis();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute(
             "INSERT INTO instances (id, created_at, config) VALUES (?1, ?2, ?3)",
             (id, now, json),
@@ -112,13 +123,13 @@ impl Store {
     /// Replace an existing instance's config. Returns false if the id is unknown.
     pub fn update(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<bool> {
         let json = serde_json::to_string(config).expect("serialize config");
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let n = conn.execute("UPDATE instances SET config = ?2 WHERE id = ?1", (id, json))?;
         Ok(n > 0)
     }
 
     pub fn get(&self, id: &str) -> rusqlite::Result<Option<InstanceConfig>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let row: Option<String> = conn
             .query_row("SELECT config FROM instances WHERE id = ?1", [id], |r| {
                 r.get(0)
