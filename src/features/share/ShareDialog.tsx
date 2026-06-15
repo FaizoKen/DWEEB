@@ -350,6 +350,9 @@ function AboutPanel() {
         <a href="/terms" target="_blank" rel="noopener noreferrer">
           Terms of Service
         </a>
+        <a href="https://status.dweeb.faizo.net" target="_blank" rel="noopener noreferrer">
+          Status
+        </a>
       </nav>
     </>
   );

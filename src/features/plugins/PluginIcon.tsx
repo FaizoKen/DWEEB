@@ -47,6 +47,44 @@ const BUILTIN_ICONS: Record<string, { color: string; bg: string; paths: ReactNod
       </>
     ),
   },
+  // An admission ticket with a perforated stub.
+  tickets: {
+    color: "#fbbf24",
+    bg: "rgba(251, 191, 36, 0.14)",
+    paths: (
+      <>
+        <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" />
+        <path d="M13 5v2" />
+        <path d="M13 11v2" />
+        <path d="M13 17v2" />
+      </>
+    ),
+  },
+  // A wrapped gift box — the prize on the line.
+  giveaway: {
+    color: "#f472b6",
+    bg: "rgba(244, 114, 182, 0.14)",
+    paths: (
+      <>
+        <rect x="3" y="8" width="18" height="4" rx="1" />
+        <path d="M12 8v13" />
+        <path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" />
+        <path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5" />
+      </>
+    ),
+  },
+  // A chat bubble with a reply arrow.
+  "quick-replies": {
+    color: "#2dd4bf",
+    bg: "rgba(45, 212, 191, 0.14)",
+    paths: (
+      <>
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <path d="m10 7-3 3 3 3" />
+        <path d="M17 13v-1a2 2 0 0 0-2-2H7" />
+      </>
+    ),
+  },
 };
 
 /** Deterministic hue from a plugin id, for the monogram fallback tint. */
