@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quick Replies — configure</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1f22;
+        --panel: #2b2d31;
+        --panel-2: #232428;
+        --border: #3a3c41;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #5865f2;
+        --green: #3ba55d;
+        --yellow: #f0b232;
+        --danger: #da373c;
+        --radius: 8px;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #f2f3f5;
+        --panel-2: #e3e5e8;
+        --border: #d7d9dc;
+        --text: #1e1f22;
+        --muted: #4e5058;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 20px 0 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h2:first-of-type { margin-top: 0; }
+      .step-num {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="text"], select, textarea {
+        width: 100%;
+        padding: 8px 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+      }
+      textarea { resize: vertical; }
+      input:focus-visible, select:focus-visible, textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+      .hint code, .callout code { color: var(--accent); }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
+      .bar .grow { flex: 1; }
+      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+      .callout {
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+      .callout.good { border-left-color: var(--green); }
+      .callout.warn { border-left-color: var(--yellow); }
+      .callout.bad { border-left-color: var(--danger); }
+      .callout b { color: var(--text); }
+
+      /* Reply / topic cards. */
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px;
+        margin-top: 10px;
+      }
+      .card-head { display: flex; gap: 6px; align-items: center; }
+      .card-head .num {
+        flex: none; width: 22px; height: 22px;
+        display: inline-grid; place-items: center;
+        border-radius: 50%;
+        background: var(--accent); color: #fff;
+        font-size: 11px; font-weight: 700;
+      }
+      .card-head .emoji { flex: none; width: 48px; text-align: center; }
+      .card-head .label { flex: 1; }
+      button.icon { flex: none; width: 30px; padding: 0; color: var(--muted); }
+      button.icon:hover { color: var(--text); }
+      button.icon.del:hover { color: var(--danger); border-color: var(--danger); }
+
+      /* Variable chips. */
+      .vars { margin-top: 6px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+      .chip {
+        padding: 2px 8px; font-size: 12px; border-radius: 999px;
+        background: var(--panel-2); border: 1px solid var(--border); color: var(--accent);
+        cursor: pointer; font-family: ui-monospace, monospace;
+      }
+      .chip:hover { border-color: var(--accent); }
+
+      /* Visibility segmented control. */
+      .seg { display: flex; gap: 6px; margin-top: 10px; }
+      .seg button { flex: 1; }
+      .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+      /* Gate (advanced) inside a card. */
+      details.gate { margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); }
+      details.gate > summary { cursor: pointer; padding: 8px 10px; font-size: 13px; color: var(--text); list-style: none; }
+      details.gate > summary::-webkit-details-marker { display: none; }
+      details.gate > summary::before { content: "▸ "; color: var(--muted); }
+      details.gate[open] > summary::before { content: "▾ "; }
+      .gate-body { padding: 0 10px 10px; }
+      .roles { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 200px; overflow: auto; }
+      .role {
+        display: flex; align-items: center; gap: 10px;
+        padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+        background: var(--panel); cursor: pointer;
+      }
+      .role:hover { border-color: var(--accent); }
+      .role input { flex: none; margin: 0; width: auto; accent-color: var(--accent); }
+      .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
+      .role .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      /* Live preview — a little Discord message bubble. */
+      .preview { margin-top: 12px; }
+      .pv-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+      .pv-card {
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--muted);
+        border-radius: 6px;
+        background: var(--panel-2);
+        padding: 10px 12px;
+        font-size: 14px;
+        word-wrap: break-word;
+        overflow-wrap: anywhere;
+      }
+      .pv-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+      .pv-body { white-space: normal; }
+      .pv-empty { color: var(--muted); font-style: italic; }
+      .pv-mention { color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 3px; padding: 0 2px; }
+      .pv-link { color: #00a8fc; }
+      .pv-card code { background: var(--bg); padding: 0 4px; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 13px; }
+      .pv-foot { margin-top: 8px; font-size: 12px; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <!-- Intro (varies by target) ----------------------------------------------->
+    <h2><span class="step-num">1</span> <span id="introTitle">Your reply</span>
+      <span class="count" id="cardCount"></span></h2>
+    <div id="introHint" class="hint"></div>
+
+    <div id="replies"></div>
+    <button id="addCard" type="button" style="margin-top: 10px; display: none">+ Add topic</button>
+
+    <div id="selectNote"></div>
+
+    <div class="err" id="error"></div>
+
+    <div class="bar">
+      <button id="cancel" type="button">Cancel</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script>
+      "use strict";
+      const PREFIX = "quickreplies:";
+      const MAX_CARDS = 25;
+      const MAX_BODY = 1500;
+
+      // ── Session / protocol state ────────────────────────────────────────
+      let nonce = null;
+      let hostOrigin = "*";
+      let instanceId = null; // set when reconfiguring
+      let target = "button"; // "button" | "string_select"
+
+      // ── Capabilities (from /api/meta) ───────────────────────────────────
+      let defaultBot = false; // deployment runs a shared bot (for the gate role picker)
+      let inviteUrl = null;
+
+      // ── Host context (the server DWEEB is connected to) ─────────────────
+      let autoGuild = false; // DWEEB told us the current server id
+      let guildId = "";
+      let guildName = "";
+
+      // ── Role-gate state ─────────────────────────────────────────────────
+      let roles = []; // [{ id, name, color }] — live list once connected (or seeded from saves)
+      let rolesLoaded = false; // true once the live guild list is in hand
+      let gateError = ""; // last connect failure, shown in each card's gate section
+
+      // ── Reply cards ─────────────────────────────────────────────────────
+      let cards = [];
+
+      const $ = (id) => document.getElementById(id);
+      const isSelect = () => target === "string_select";
+      const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
+      const hexColor = (n) => (n && n > 0 ? "#" + n.toString(16).padStart(6, "0") : "#99aab5");
+      const escapeHtml = (s) =>
+        String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+      const newKey = () => "k_" + Math.random().toString(36).slice(2, 10);
+      function newCard(seed = {}) {
+        return {
+          key: typeof seed.key === "string" && seed.key ? seed.key : newKey(),
+          label: seed.label || "",
+          emoji: seed.emoji || "",
+          description: seed.description || "",
+          title: seed.title || "",
+          body: seed.body || "",
+          ephemeral: seed.ephemeral !== false, // default private
+          gate: new Set((seed.allowed_roles || []).map((r) => r.id)),
+        };
+      }
+
+      // ── Render the whole card list ──────────────────────────────────────
+      function renderCards() {
+        const wrap = $("replies");
+        wrap.innerHTML = "";
+        cards.forEach((card, i) => wrap.appendChild(renderCard(card, i)));
+        $("addCard").disabled = cards.length >= MAX_CARDS;
+        updateCount();
+        sendResize();
+      }
+
+      function renderCard(card, i) {
+        const el = document.createElement("div");
+        el.className = "card";
+        // Static skeleton only — no user data is interpolated here. Values are
+        // assigned via .value below and dynamic rows via createElement, so
+        // there's no injection surface.
+        el.innerHTML = `
+          <div class="card-head">
+            <span class="num">${i + 1}</span>
+            <input type="text" class="emoji" data-k="emoji" maxlength="8" placeholder="🙂" title="Optional emoji" />
+            <input type="text" class="label" data-k="label" maxlength="100" placeholder="Topic label (e.g. Server Rules)" />
+            <button type="button" class="icon up" title="Move up">↑</button>
+            <button type="button" class="icon down" title="Move down">↓</button>
+            <button type="button" class="icon del" title="Remove">✕</button>
+          </div>
+          <input type="text" class="optdesc" data-k="description" maxlength="100" placeholder="Dropdown subtitle (optional)" style="margin-top:8px" />
+          <label class="lbl">Reply heading (optional)</label>
+          <input type="text" class="title" data-k="title" maxlength="200" placeholder="e.g. 📜 Server Rules" />
+          <label class="lbl">Reply message</label>
+          <textarea class="body" data-k="body" rows="4" maxlength="${MAX_BODY}" placeholder="What should they see? **Markdown** and https://links work."></textarea>
+          <div class="vars">
+            <span>Insert:</span>
+            <button type="button" class="chip" data-var="{user}">{user}</button>
+            <button type="button" class="chip" data-var="{username}">{username}</button>
+            <button type="button" class="chip" data-var="{server}">{server}</button>
+            <span>— filled in for each person.</span>
+          </div>
+          <div class="seg vis">
+            <button type="button" data-vis="eph">🔒 Only them (private)</button>
+            <button type="button" data-vis="pub">👥 Everyone (public)</button>
+          </div>
+          <details class="gate">
+            <summary>Limit who can use this reply (optional)</summary>
+            <div class="gate-body"></div>
+          </details>
+          <div class="preview">
+            <div class="pv-label">Live preview</div>
+            <div class="pv-out"></div>
+          </div>`;
+
+        // Option-only fields hide for a button (its label/emoji live in the
+        // DWEEB message you design, and a button has no dropdown options).
+        const select = isSelect();
+        el.querySelector(".emoji").style.display = select ? "" : "none";
+        el.querySelector(".label").style.display = select ? "" : "none";
+        el.querySelector(".optdesc").style.display = select ? "" : "none";
+        // A button always has exactly one card — no number, reorder or delete.
+        for (const sel of [".num", ".up", ".down", ".del"])
+          el.querySelector(sel).style.display = select ? "" : "none";
+
+        // Populate values.
+        el.querySelector(".emoji").value = card.emoji;
+        el.querySelector(".label").value = card.label;
+        el.querySelector(".optdesc").value = card.description;
+        el.querySelector(".title").value = card.title;
+        el.querySelector(".body").value = card.body;
+
+        const out = el.querySelector(".pv-out");
+        const renderThis = () => renderPreview(card, out);
+
+        // Live value binding — update the model + preview without re-rendering
+        // (so typing never steals focus).
+        el.querySelectorAll("[data-k]").forEach((input) => {
+          const k = input.getAttribute("data-k");
+          input.addEventListener("input", () => {
+            card[k] = input.value;
+            renderThis();
+            if (k === "body" || k === "label") updateCount();
+          });
+        });
+
+        // Variable chips insert at the caret in this card's body.
+        const body = el.querySelector(".body");
+        el.querySelectorAll(".chip").forEach((chip) => {
+          chip.addEventListener("click", () => {
+            insertAtCaret(body, chip.getAttribute("data-var"));
+            card.body = body.value;
+            renderThis();
+          });
+        });
+
+        // Visibility segmented control.
+        const segButtons = el.querySelectorAll(".vis button");
+        const paintVis = () => {
+          segButtons.forEach((b) => b.classList.toggle("sel", b.dataset.vis === (card.ephemeral ? "eph" : "pub")));
+        };
+        segButtons.forEach((b) =>
+          b.addEventListener("click", () => {
+            card.ephemeral = b.dataset.vis === "eph";
+            paintVis();
+            renderThis();
+          }),
+        );
+        paintVis();
+
+        // Reorder / delete.
+        const up = el.querySelector(".up");
+        const down = el.querySelector(".down");
+        up.disabled = i === 0;
+        down.disabled = i === cards.length - 1;
+        up.addEventListener("click", () => moveCard(i, -1));
+        down.addEventListener("click", () => moveCard(i, 1));
+        el.querySelector(".del").addEventListener("click", () => {
+          if (cards.length <= 1) return;
+          cards.splice(i, 1);
+          renderCards();
+        });
+
+        // Role gate.
+        renderGate(card, el.querySelector(".gate-body"));
+        // Re-fit when the gate is expanded.
+        el.querySelector(".gate").addEventListener("toggle", sendResize);
+
+        renderThis();
+        return el;
+      }
+
+      function moveCard(i, dir) {
+        const j = i + dir;
+        if (j < 0 || j >= cards.length) return;
+        [cards[i], cards[j]] = [cards[j], cards[i]];
+        renderCards();
+      }
+
+      $("addCard").addEventListener("click", () => {
+        if (cards.length >= MAX_CARDS) return;
+        cards.push(newCard());
+        renderCards();
+      });
+
+      function updateCount() {
+        $("cardCount").textContent = isSelect() ? `(${cards.length}/${MAX_CARDS} topics)` : "";
+      }
+
+      function insertAtCaret(textarea, text) {
+        const start = textarea.selectionStart ?? textarea.value.length;
+        const end = textarea.selectionEnd ?? textarea.value.length;
+        textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+        const pos = start + text.length;
+        textarea.focus();
+        textarea.setSelectionRange(pos, pos);
+      }
+
+      // ── Live preview (safe Markdown-lite) ───────────────────────────────
+      function renderPreview(card, out) {
+        const title = (card.title || "").trim();
+        let html = "";
+        if (title) html += `<div class="pv-title">${renderInline(title)}</div>`;
+        const bodyHtml = renderInline(card.body || "");
+        html += `<div class="pv-body">${bodyHtml || '<span class="pv-empty">Your reply preview shows here as you type…</span>'}</div>`;
+        const badge = card.ephemeral
+          ? "🔒 Only the person who clicks can see this"
+          : "👥 Posted in the channel for everyone";
+        out.innerHTML = `<div class="pv-card">${html}<div class="pv-foot">${badge}</div></div>`;
+        sendResize();
+      }
+
+      // Escape first, then apply a small, safe subset of Markdown and finally
+      // swap the {variables} for sample values. Because escaping runs before any
+      // tag is introduced, none of the user's text can inject HTML.
+      function renderInline(raw) {
+        let s = escapeHtml(raw);
+        s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, t, u) => `<span class="pv-link" title="${escapeHtml(u)}">${t}</span>`);
+        s = s.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+        s = s.replace(/(^|[^_])_([^_\n]+)_/g, "$1<i>$2</i>");
+        s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+        s = s.replace(/\n/g, "<br>");
+        s = s
+          .replace(/\{username\}/g, '<span class="pv-mention">You</span>')
+          .replace(/\{user\}/g, '<span class="pv-mention">@You</span>')
+          .replace(/\{server\}/g, escapeHtml(guildName || "your server"));
+        return s;
+      }
+
+      // ── Role gate picker (per card) ─────────────────────────────────────
+      function renderGate(card, box) {
+        box.innerHTML = "";
+        if (!defaultBot) {
+          box.appendChild(callout("warn", "Role-gating needs the shared bot, which isn't set up on this deployment. The reply still works for everyone."));
+          return;
+        }
+        if (!autoGuild) {
+          box.appendChild(callout("warn", "To limit a reply to certain roles, connect your server in DWEEB first (sign in and pick the server you're building for), then reopen this menu."));
+          return;
+        }
+        if (gateError) {
+          const c = callout("warn", gateError + " ");
+          if (inviteUrl) {
+            const a = document.createElement("a");
+            a.href = inviteUrl;
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = "Add the bot";
+            c.appendChild(a);
+          }
+          box.appendChild(c);
+          return;
+        }
+        if (!rolesLoaded) {
+          box.appendChild(hint("Loading this server's roles…"));
+          return;
+        }
+
+        const help = hint("Only members with at least one of the checked roles can use this reply. Leave all unchecked = everyone.");
+        box.appendChild(help);
+        const search = document.createElement("input");
+        search.type = "text";
+        search.placeholder = "Search roles…";
+        search.style.marginTop = "8px";
+        box.appendChild(search);
+        const list = document.createElement("div");
+        list.className = "roles";
+        box.appendChild(list);
+        const draw = () => renderGateList(card, list, search.value);
+        search.addEventListener("input", draw);
+        draw();
+      }
+
+      function renderGateList(card, list, query) {
+        list.innerHTML = "";
+        const q = (query || "").trim().toLowerCase();
+        const shown = roles.filter((r) => !q || r.name.toLowerCase().includes(q));
+        if (!roles.length) {
+          list.appendChild(hint("This server has no roles to gate by."));
+          return;
+        }
+        if (!shown.length) {
+          list.appendChild(hint("No roles match."));
+          return;
+        }
+        for (const r of shown) {
+          const row = document.createElement("label");
+          row.className = "role";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = card.gate.has(r.id);
+          input.addEventListener("change", () => {
+            if (input.checked) card.gate.add(r.id);
+            else card.gate.delete(r.id);
+          });
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = r.name;
+          row.append(input, dot, name);
+          list.appendChild(row);
+        }
+        sendResize();
+      }
+
+      function callout(kind, text) {
+        const d = document.createElement("div");
+        d.className = "callout " + kind;
+        d.append(document.createTextNode(text));
+        return d;
+      }
+      function hint(text) {
+        const d = document.createElement("div");
+        d.className = "hint";
+        d.textContent = text;
+        return d;
+      }
+
+      // ── Per-target chrome ───────────────────────────────────────────────
+      function applyTargetChrome() {
+        if (isSelect()) {
+          $("introTitle").textContent = "Your topics";
+          $("introHint").innerHTML =
+            "Each topic becomes one option in the dropdown. A member picks one and gets its reply. Add up to 25.";
+          $("addCard").style.display = "";
+          $("selectNote").innerHTML =
+            `<div class="callout good">✓ DWEEB wires these topics onto your select menu as its options and locks them — you never map anything by hand. Just <b>Save</b>.</div>`;
+        } else {
+          $("introTitle").textContent = "Your reply";
+          $("introHint").innerHTML =
+            "When someone clicks the button, they get this reply. Want a menu of several answers instead? Attach Quick Replies to a <b>select menu</b> instead of a button.";
+          $("addCard").style.display = "none";
+          $("selectNote").innerHTML = "";
+        }
+      }
+
+      // ── DWEEB protocol ──────────────────────────────────────────────────
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+
+      window.addEventListener("message", async (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          const resolve = pendingReqs.get(msg.requestId);
+          pendingReqs.delete(msg.requestId);
+          resolve(msg.ok ? msg.data : null);
+          return;
+        }
+
+        if (msg.type !== "dweeb:plugin:init") return;
+        nonce = msg.nonce;
+        hostOrigin = event.origin;
+        if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+        target = msg.target === "string_select" ? "string_select" : "button";
+
+        await loadMeta();
+
+        // Ask DWEEB which server the editor is connected to — for {server} and
+        // to enable the role-gate picker. Absent is fine: plain replies need no
+        // server.
+        const guild = await requestResource("guild");
+        if (guild && typeof guild.id === "string" && isSnowflake(guild.id)) {
+          autoGuild = true;
+          guildId = guild.id;
+          guildName = typeof guild.name === "string" ? guild.name : "";
+        }
+
+        if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
+          instanceId = msg.customId.slice(PREFIX.length);
+          await loadInstance(instanceId);
+        }
+
+        // Seed a friendly starting point for a fresh menu.
+        if (!cards.length) {
+          cards = isSelect()
+            ? [
+                newCard({ emoji: "📜", label: "Server rules", title: "📜 Server Rules", body: "1. Be kind.\n2. No spam.\n3. Keep it on-topic." }),
+                newCard({ emoji: "🙋", label: "How do I get roles?", title: "🙋 Getting roles", body: "Head to the **#roles** channel and pick the ones you want, {user}!" }),
+              ]
+            : [newCard({ body: "Hi {user}! Here's the info you're after.\n\n• Link one: https://example.com\n• Link two: https://example.com" })];
+        }
+
+        applyTargetChrome();
+        renderCards();
+        maybeConnect();
+      });
+
+      // ── Request editor data from DWEEB (one promise per request) ────────
+      const pendingReqs = new Map();
+      function requestResource(resource) {
+        return new Promise((resolve) => {
+          if (nonce == null) return resolve(null);
+          const requestId = "req_" + Math.random().toString(36).slice(2);
+          pendingReqs.set(requestId, resolve);
+          parent.postMessage({ type: "dweeb:plugin:request", nonce, requestId, resource }, hostOrigin);
+          setTimeout(() => {
+            if (pendingReqs.has(requestId)) {
+              pendingReqs.delete(requestId);
+              resolve(null);
+            }
+          }, 4000);
+        });
+      }
+
+      function sendResize() {
+        if (nonce == null) return;
+        parent.postMessage(
+          { type: "dweeb:plugin:resize", nonce, height: document.body.scrollHeight + 24 },
+          hostOrigin,
+        );
+      }
+
+      async function loadMeta() {
+        try {
+          const res = await fetch("/api/meta");
+          if (res.ok) {
+            const m = await res.json();
+            defaultBot = !!m.defaultBot;
+            inviteUrl = m.inviteUrl || null;
+          }
+        } catch {
+          /* leave defaults */
+        }
+      }
+
+      // Connect with the shared bot purely to list roles for the gate picker.
+      // No-op (and no error) when there's no bot or no connected server — the
+      // core works without either.
+      async function maybeConnect() {
+        if (!defaultBot || !autoGuild || !isSnowflake(guildId)) return;
+        try {
+          const res = await fetch("/api/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ guild_id: guildId }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            gateError = data.error || "Couldn't load this server's roles.";
+            renderCards();
+            return;
+          }
+          guildName = data.guild_name || guildName;
+          roles = Array.isArray(data.roles) ? data.roles : [];
+          rolesLoaded = true;
+          gateError = "";
+          // Drop any gate selections whose role no longer exists.
+          const ids = new Set(roles.map((r) => r.id));
+          for (const c of cards) c.gate = new Set([...c.gate].filter((id) => ids.has(id)));
+          renderCards();
+        } catch {
+          gateError = "Couldn't reach the Quick Replies service to load roles.";
+          renderCards();
+        }
+      }
+
+      // ── Reconfigure ─────────────────────────────────────────────────────
+      async function loadInstance(id) {
+        try {
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          target = d.target === "string_select" ? "string_select" : "button";
+          if (d.guild_id && isSnowflake(d.guild_id)) guildId = d.guild_id;
+          if (d.guild_name) guildName = d.guild_name;
+          cards = (d.replies || []).map(newCard);
+          // Seed the role list with any saved gate roles so they show by name
+          // even before a live connect; maybeConnect() then refreshes the list.
+          const seen = new Set(roles.map((r) => r.id));
+          for (const r of d.replies || [])
+            for (const gr of r.allowed_roles || [])
+              if (!seen.has(gr.id)) { roles.push({ id: gr.id, name: gr.name || gr.id, color: gr.color || 0 }); seen.add(gr.id); }
+          if (roles.length) rolesLoaded = true;
+        } catch {
+          /* fresh form */
+        }
+      }
+
+      // ── Save ────────────────────────────────────────────────────────────
+      $("cancel").addEventListener("click", () => {
+        parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
+      });
+      $("save").addEventListener("click", save);
+
+      function roleRefs(gate) {
+        return roles.filter((r) => gate.has(r.id)).map((r) => ({ id: r.id, name: r.name, color: r.color || 0 }));
+      }
+
+      async function save() {
+        $("error").textContent = "";
+        if (!cards.length) return fail("Add at least one reply.");
+        if (!isSelect() && cards.length !== 1) return fail("A button has exactly one reply.");
+
+        for (const c of cards) {
+          if (isSelect() && !c.label.trim())
+            return fail("Every topic needs a label for its dropdown option.");
+          if (!c.body.trim()) return fail("Every reply needs a message — one of them is empty.");
+          if (c.body.length > MAX_BODY) return fail(`A reply is too long (max ${MAX_BODY} characters).`);
+        }
+
+        // Any reply gated by role makes this menu server-specific (the role ids
+        // only resolve in that server), so hand DWEEB the guild to warn on a
+        // cross-server post. Plain text replies stay portable (no guildId).
+        const anyGated = cards.some((c) => c.gate.size > 0);
+
+        const replies = cards.map((c) => ({
+          key: c.key,
+          label: isSelect() ? c.label.trim() : "",
+          emoji: isSelect() && c.emoji.trim() ? c.emoji.trim() : null,
+          description: isSelect() && c.description.trim() ? c.description.trim() : null,
+          title: c.title.trim() || null,
+          body: c.body.replace(/\s+$/g, ""),
+          ephemeral: c.ephemeral,
+          allowed_roles: roleRefs(c.gate),
+        }));
+
+        const body = {
+          target,
+          guild_id: autoGuild && isSnowflake(guildId) ? guildId : null,
+          guild_name: guildName || "",
+          replies,
+        };
+
+        setBusy(true);
+        try {
+          const url = instanceId ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
+          const res = await fetch(url, {
+            method: instanceId ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setBusy(false);
+            return fail(data.error || `Server returned ${res.status}.`);
+          }
+          const id = data.id || instanceId;
+          const n = cards.length;
+          const summary = isSelect()
+            ? { label: "Quick Replies", description: `${n} topic${n === 1 ? "" : "s"}` + (anyGated ? " · role-gated" : "") }
+            : {
+                label: cards[0].title.trim() || "Quick reply",
+                description: (cards[0].ephemeral ? "Private" : "Public") + (anyGated ? " · role-gated" : ""),
+              };
+          parent.postMessage(
+            {
+              type: "dweeb:plugin:save",
+              nonce,
+              customId: PREFIX + id,
+              summary,
+              // For a select, hand DWEEB the option list to wire + lock onto the
+              // menu (one per topic, value = the reply key). Ignored for buttons.
+              ...(isSelect()
+                ? {
+                    options: cards.map((c) => {
+                      const o = { label: c.label.trim().slice(0, 100) || "Option", value: c.key };
+                      if (c.description.trim()) o.description = c.description.trim().slice(0, 100);
+                      if (c.emoji.trim()) o.emoji = { name: c.emoji.trim() };
+                      return o;
+                    }),
+                  }
+                : {}),
+              // Only warn about cross-server posting when a gate makes us
+              // server-specific; a plain text menu is portable.
+              ...(anyGated && isSnowflake(guildId) ? { guildId } : {}),
+            },
+            hostOrigin,
+          );
+        } catch {
+          setBusy(false);
+          fail("Couldn't reach the Quick Replies service.");
+        }
+      }
+
+      function fail(m) {
+        $("error").textContent = m;
+        sendResize();
+      }
+      function setBusy(b) {
+        $("save").disabled = b;
+        $("save").textContent = b ? "Saving…" : "Save";
+      }
+    </script>
+  </body>
+</html>

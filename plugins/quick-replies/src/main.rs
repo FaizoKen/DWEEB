@@ -1,0 +1,116 @@
+//! DWEEB "Quick Replies" plugin.
+//!
+//! Attach it to an **interactive button** or a **string select** in DWEEB and
+//! each click (or picked option) sends a canned reply — text, links and a few
+//! `{user}`/`{server}` variables — privately (ephemeral) or in the channel. It's
+//! the cheapest plugin to host: a click is a pure config-blob → pick → reply, so
+//! there is **no Discord REST call on the hot path and no bot token required**.
+//! One small Rust service that is, all at once:
+//!   • the plugin **registry** DWEEB reads (`GET /registry.json`),
+//!   • the **config iframe** DWEEB embeds (`GET /config.html`),
+//!   • the config **API** that iframe talks to (`/api/instances`, `/api/connect`),
+//!   • the Discord **interactions** endpoint (`POST /interactions`).
+//!
+//! Classic uses: self-service FAQ, server rules, "where do I find X", support
+//! macros, and role-gated link hubs.
+//!
+//! The shared bot (`BOT_TOKEN`) is **optional** and used for exactly one thing:
+//! listing a guild's roles in the config UI's role-gate picker, so an admin
+//! picks "Subscribers" instead of pasting a role id. Leave it unset and the core
+//! still works — role-gating just can't be set up (the UI says so). State is a
+//! single SQLite file; no secret is ever stored per instance.
+
+mod config;
+mod discord;
+mod rest;
+mod routes;
+mod store;
+mod validate;
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::{
+    routing::{get, post},
+    Router,
+};
+use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::EnvFilter;
+
+use crate::config::Config;
+use crate::routes::AppState;
+use crate::store::Store;
+
+#[tokio::main]
+async fn main() {
+    dotenvy::dotenv().ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .init();
+
+    let config = match Config::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("configuration error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let store = Store::open(&config.database_path).expect("failed to open database");
+    // One client, used only at config time to list a guild's roles for the
+    // gate picker. 2.5s keeps that probe responsive; the interaction path makes
+    // no outbound call at all.
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_millis(2500))
+        .user_agent(concat!(
+            "dweeb-quick-replies/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/FaizoKen/DWEEB)"
+        ))
+        .build()
+        .expect("failed to build HTTP client");
+
+    let port = config.port;
+    let state = AppState {
+        store: Arc::new(store),
+        http,
+        config: Arc::new(config),
+    };
+
+    let app = Router::new()
+        .route("/health", get(routes::health))
+        .route("/registry.json", get(routes::registry))
+        .route("/config.html", get(routes::config_html))
+        .route("/api/meta", get(routes::meta))
+        .route("/api/connect", post(routes::connect))
+        .route("/api/instances", post(routes::create_instance))
+        .route(
+            "/api/instances/:id",
+            get(routes::get_instance).put(routes::update_instance),
+        )
+        .route("/interactions", post(routes::interactions))
+        .with_state(state)
+        // The registry is fetched cross-origin by DWEEB; the config API is hit
+        // by the iframe. Both are public/capability-gated, so a permissive
+        // (credential-less) CORS policy is fine.
+        .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http());
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind");
+    tracing::info!(%addr, "quick-replies plugin listening");
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("server error");
+}
+
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+    tracing::info!("shutting down");
+}

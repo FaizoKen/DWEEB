@@ -94,7 +94,7 @@ services:
     restart: unless-stopped
     environment:
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
-      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094"}'
+      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094", "quickreplies:": "http://quick-replies:8096"}'
       # The /dashboard slash command (answered inline, no plugin) replies with
       # this URL. Register the command once: node scripts/register-commands.mjs
       # NOT derived from DOMAIN — that is the API host, not the dashboard.
@@ -286,6 +286,41 @@ services:
       retries: 3
       start_period: 5s
 
+  # Quick Replies (../plugins/quick-replies): attach canned replies to a button
+  # or topic menu — each click/option sends text, links and {user}/{server}
+  # variables, privately or publicly, with optional role-gating. The cheapest
+  # plugin to host: a click is answered straight from the interaction, so there
+  # is NO REST call on the hot path. BOT_TOKEN is OPTIONAL and powers ONLY the
+  # config UI's role-gate picker (listing a guild's roles); unset and the core
+  # still works, role-gating just can't be set up. Its own registry, config UI
+  # and config API, backed by one SQLite file. Served at quickreplies.$PLUGINS_DOMAIN.
+  quick-replies:
+    image: ghcr.io/faizoken/dweeb-quick-replies:${QUICKREPLIES_TAG:-latest}
+    build: ../plugins/quick-replies
+    restart: unless-stopped
+    environment:
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://quickreplies.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      # Lets the dispatcher vouch for a custom app's verifying key (see the
+      # dispatcher service above). Must match the dispatcher's value.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
+      # OPTIONAL — only for the config UI's role-gate picker. Unset and the core
+      # plugin still works; role-gating just can't be set up. We point it at the
+      # main DWEEB bot when present.
+      BOT_TOKEN: ${QUICKREPLIES_BOT_TOKEN:-}
+      BOT_INVITE_URL: ${QUICKREPLIES_BOT_INVITE_URL:-}
+      RUST_LOG: info
+    volumes:
+      # The plugin's only state: the SQLite file with menu configs.
+      - quickreplies_data:/data
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8096 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   # Only started when you opt in with `--profile redis`. Shared cache +
   # rate-limit store for running several `proxy` replicas behind a balancer.
   redis:
@@ -378,6 +413,7 @@ volumes:
   selfrole_data:
   tickets_data:
   giveaway_data:
+  quickreplies_data:
   beszel_data:
   beszel_agent_data:
   gatus_data:

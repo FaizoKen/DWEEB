@@ -62,6 +62,19 @@
       "targets": ["button"],
       "configUrl": "https://giveaway.dweeb.faizo.net/config.html",
       "customIdPrefix": "giveaway:"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "quick-replies",
+      "name": "Quick Replies",
+      "description": "Attach canned replies to a button or topic menu — each one sends text, links and {user}/{server} variables privately or publicly, with optional role-gating. No bot needed.",
+      "version": "0.1.0",
+      "publisher": "DWEEB",
+      "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/quick-replies",
+      "targets": ["button", "string_select"],
+      "configUrl": "https://quickreplies.dweeb.faizo.net/config.html",
+      "customIdPrefix": "quickreplies:",
+      "managesSelectOptions": true
     }
   ]
 }

@@ -35,6 +35,7 @@ const DEV_CONFIG_ORIGINS: Record<string, string> = {
   "self-role": (import.meta.env.VITE_DEV_SELF_ROLE_ORIGIN || "http://localhost:8092").trim(),
   "tickets": (import.meta.env.VITE_DEV_TICKETS_ORIGIN || "http://localhost:8093").trim(),
   "giveaway": (import.meta.env.VITE_DEV_GIVEAWAY_ORIGIN || "http://localhost:8094").trim(),
+  "quick-replies": (import.meta.env.VITE_DEV_QUICK_REPLIES_ORIGIN || "http://localhost:8096").trim(),
 };
 
 /** Repoint a plugin's configUrl at its local dev origin, preserving the path. */

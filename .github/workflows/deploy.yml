@@ -28,6 +28,7 @@ on:
       - Plugin Self Role
       - Plugin Tickets
       - Plugin Giveaway
+      - Plugin Quick Replies
     types: [completed]
     branches: [main]
   workflow_dispatch:

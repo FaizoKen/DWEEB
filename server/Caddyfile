@@ -93,6 +93,12 @@ giveaway.{$PLUGINS_DOMAIN} {
 	reverse_proxy giveaway:8094
 }
 
+# Quick Replies.
+quickreplies.{$PLUGINS_DOMAIN} {
+	import site_defaults
+	reverse_proxy quick-replies:8096
+}
+
 # ── Monitoring ───────────────────────────────────────────────────────────────
 # Self-hosted monitoring UIs on the plugins wildcard (no DNS work). Dozzle (raw
 # container logs) is intentionally absent — it stays localhost-only and is
