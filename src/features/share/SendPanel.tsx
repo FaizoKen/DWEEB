@@ -123,7 +123,7 @@ import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
-import { LockIcon, PlusIcon } from "@/ui/Icon";
+import { ChevronRightIcon, LockIcon, PlusIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
 import {
@@ -232,6 +232,12 @@ export function SendPanel({
   const [messageIdInput, setMessageIdInput] = useState(() => restoredFrom?.messageId ?? "");
   const [mode, setMode] = useState<"new" | "update">(() => (restoredFrom ? "update" : "new"));
   const [revealUrl, setRevealUrl] = useState(false);
+  // Manual URL entry is the secondary path: when a proxy is configured the
+  // primary flow is "create a webhook for me", so the paste field stays
+  // collapsed behind a toggle until the user opts in (or a URL is already
+  // loaded). `urlInputRef` lets the toggle focus the field when it opens.
+  const [pasteMode, setPasteMode] = useState(false);
+  const urlInputRef = useRef<HTMLInputElement>(null);
   const [history, setHistory] = useState<WebhookHistoryEntry[]>(() => loadHistory());
   const [state, setState] = useState<SendState>({ kind: "idle" });
   const [showRaw, setShowRaw] = useState(false);
@@ -1089,16 +1095,19 @@ export function SendPanel({
     return () => ac.abort();
   }, [initialWebhook]);
 
+  // The fast path — let DWEEB (or a registered custom bot) create the webhook —
+  // only exists when a proxy is configured to run the OAuth flow. The manual
+  // paste field then shows when there's no create flow at all, when the user
+  // opted into pasting, or when a URL is already loaded (recents, restore, a
+  // just-created webhook) so they can see and edit what's active.
+  const proxyOn = isProxyConfigured();
+  const showUrlInput = !proxyOn || pasteMode || url.trim().length > 0;
+
   return (
     <>
       <p className={styles.lead}>
         Posts straight from your browser to Discord — nothing touches our servers.
       </p>
-
-      <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
-        <strong>Treat the webhook URL like a password.</strong> It's a credential that lets anyone
-        post to your channel — keep it secret and only use webhooks you own.
-      </Callout>
 
       <div className={styles.modeToggle} role="radiogroup" aria-label="Send mode">
         <button
@@ -1133,41 +1142,94 @@ export function SendPanel({
         onChange={() => setHistory(loadHistory())}
       />
 
-      <Field
-        label="Webhook URL"
-        error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
-        hint={isProxyConfigured() ? <CreateWebhookLinks /> : undefined}
-      >
-        {(id) => (
-          <div className={styles.urlRow}>
-            <TextInput
-              id={id}
-              masked={!revealUrl}
-              spellCheck={false}
-              value={url}
-              onChange={(e) => setUrl(e.currentTarget.value)}
-              invalid={urlInvalid}
-              placeholder="https://discord.com/api/webhooks/…"
-            />
-            <button
-              type="button"
-              className={styles.revealBtn}
-              onClick={() => setRevealUrl((v) => !v)}
-              aria-pressed={revealUrl}
-            >
-              {revealUrl ? "Hide" : "Show"}
-            </button>
-            <button
-              type="button"
-              className={styles.revealBtn}
-              onClick={handleSaveWebhook}
-              disabled={saving || sending || !parsedUrl}
-            >
-              {saving ? "Checking…" : "Save"}
-            </button>
+      {/* Destination — how the message reaches Discord. The fast path (let DWEEB
+          or a registered custom bot create the webhook) is primary; pasting a
+          raw URL is the secondary, "advanced" path tucked below. */}
+      {proxyOn ? (
+        <section className={styles.destination} aria-label="Create a webhook">
+          <div className={styles.destinationHead}>
+            <span className={styles.destinationTitle}>Create a webhook</span>
+            <span className={styles.destinationSub}>
+              One click — DWEEB sets it up on the channel you pick. No copying tokens around.
+            </span>
           </div>
-        )}
-      </Field>
+          <CreateWebhookOptions />
+        </section>
+      ) : null}
+
+      {proxyOn && !showUrlInput ? (
+        <button
+          type="button"
+          className={styles.pasteToggle}
+          onClick={() => {
+            setPasteMode(true);
+            // Field mounts this render; focus it once it's in the DOM.
+            requestAnimationFrame(() => urlInputRef.current?.focus());
+          }}
+        >
+          Already have a webhook URL?{" "}
+          <span className={styles.pasteToggleAccent}>Paste it instead</span>
+        </button>
+      ) : null}
+
+      {showUrlInput ? (
+        <div className={styles.pasteSection}>
+          <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
+            <strong>Treat the webhook URL like a password.</strong> It's a credential that lets
+            anyone post to your channel — keep it secret and only use webhooks you own.
+          </Callout>
+          <Field
+            label="Webhook URL"
+            error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
+            hint={
+              proxyOn ? (
+                <button
+                  type="button"
+                  className={styles.pasteBack}
+                  onClick={() => {
+                    setPasteMode(false);
+                    setUrl("");
+                    setState({ kind: "idle" });
+                  }}
+                >
+                  ← Clear &amp; create one instead
+                </button>
+              ) : undefined
+            }
+          >
+            {(id) => (
+              <div className={styles.urlRow}>
+                <TextInput
+                  ref={urlInputRef}
+                  id={id}
+                  masked={!revealUrl}
+                  spellCheck={false}
+                  value={url}
+                  onChange={(e) => setUrl(e.currentTarget.value)}
+                  invalid={urlInvalid}
+                  placeholder="https://discord.com/api/webhooks/…"
+                />
+                <button
+                  type="button"
+                  className={styles.revealBtn}
+                  onClick={() => setRevealUrl((v) => !v)}
+                  aria-pressed={revealUrl}
+                >
+                  {revealUrl ? "Hide" : "Show"}
+                </button>
+                <button
+                  type="button"
+                  className={styles.revealBtn}
+                  onClick={handleSaveWebhook}
+                  disabled={saving || sending || !parsedUrl}
+                >
+                  {saving ? "Checking…" : "Save"}
+                </button>
+              </div>
+            )}
+          </Field>
+        </div>
+      ) : null}
 
       <Field label="Thread ID (optional)" hint="Post into a forum thread or text-channel thread.">
         {(id) => (
@@ -1567,20 +1629,23 @@ export function SendPanel({
 }
 
 /**
- * The "create a webhook" affordances under the URL field.
+ * The "create a webhook" cards — the primary way to pick a destination.
  *
  * Always offers Discord's standard `webhook.incoming` flow (a webhook owned
  * by the DWEEB app). When the connected server has custom bots registered
  * (account menu → Custom bot) with a stored client secret, each one appears
- * as its own option — the webhook then belongs to THEIR app, so the message
+ * as its own card — the webhook then belongs to THEIR app, so the message
  * posts under their bot's identity and its components route through DWEEB.
  * One click, no secret prompt: the proxy uses the secret stored (encrypted)
  * at registration.
  *
- * The custom-bot list is fetched quietly when the section mounts; any
- * failure (signed out, feature off, network) just leaves the default link.
+ * Custom-bot cards lead (and carry the accent "recommended" styling) when any
+ * exist, since posting under your own bot is the nicer outcome; otherwise the
+ * standard DWEEB card is the highlighted one. The custom-bot list is fetched
+ * quietly when the section mounts; any failure (signed out, feature off,
+ * network) just leaves the default card.
  */
-function CreateWebhookLinks() {
+function CreateWebhookOptions() {
   const authed = useAuthStore((s) => s.status === "authed");
   const guildId = useGuildStore((s) => s.guildId);
   const [bots, setBots] = useState<CustomBotItem[]>([]);
@@ -1598,26 +1663,18 @@ function CreateWebhookLinks() {
     return () => ac.abort();
   }, [authed, guildId]);
 
+  // With a custom bot available, posting under it is the recommended path, so
+  // the bot cards take the accent highlight and the DWEEB one steps back.
+  const hasBots = guildId !== "" && bots.length > 0;
+
   return (
-    <span className={styles.createWebhookLinks}>
-      <button
-        type="button"
-        className={styles.createWebhookLink}
-        onClick={() => {
-          // Pre-select the server the builder is connected to, if any, so
-          // the webhook lands where the user is already working.
-          window.location.href = webhookCreateUrl(useGuildStore.getState().guildId);
-        }}
-      >
-        <PlusIcon size={13} className={styles.createWebhookIcon} />
-        Don’t have one? Create a webhook on a Discord channel
-      </button>
-      {guildId
+    <div className={styles.createGrid}>
+      {hasBots && guildId
         ? bots.map((bot) => (
             <button
               key={bot.application_id}
               type="button"
-              className={styles.createWebhookLink}
+              className={cn(styles.createCard, styles.createCardPrimary)}
               disabled={starting}
               onClick={() => {
                 setStarting(true);
@@ -1632,12 +1689,42 @@ function CreateWebhookLinks() {
                   });
               }}
             >
-              <PlusIcon size={13} className={styles.createWebhookIcon} />
-              Create a webhook from {bot.name || "your custom bot"}
-              <span className={styles.createWebhookBadge}>your bot</span>
+              <span className={styles.createCardIcon} aria-hidden>
+                <PlusIcon size={15} />
+              </span>
+              <span className={styles.createCardBody}>
+                <span className={styles.createCardTitle}>
+                  Create with {bot.name || "your custom bot"}
+                  <span className={styles.createCardBadge}>your bot</span>
+                </span>
+                <span className={styles.createCardSub}>
+                  Posts under your bot — buttons &amp; menus stay interactive.
+                </span>
+              </span>
+              <ChevronRightIcon size={15} className={styles.createCardChevron} aria-hidden />
             </button>
           ))
         : null}
-    </span>
+      <button
+        type="button"
+        className={cn(styles.createCard, !hasBots && styles.createCardPrimary)}
+        onClick={() => {
+          // Pre-select the server the builder is connected to, if any, so
+          // the webhook lands where the user is already working.
+          window.location.href = webhookCreateUrl(useGuildStore.getState().guildId);
+        }}
+      >
+        <span className={styles.createCardIcon} aria-hidden>
+          <PlusIcon size={15} />
+        </span>
+        <span className={styles.createCardBody}>
+          <span className={styles.createCardTitle}>Create a webhook on a channel</span>
+          <span className={styles.createCardSub}>
+            {hasBots ? "Posts as DWEEB." : "Posts as DWEEB — pick a channel and you're set."}
+          </span>
+        </span>
+        <ChevronRightIcon size={15} className={styles.createCardChevron} aria-hidden />
+      </button>
+    </div>
   );
 }

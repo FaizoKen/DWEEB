@@ -31,18 +31,111 @@
   background: var(--app-bg-hover);
 }
 
-/* The create-webhook options under the Webhook URL field: the standard
-   DWEEB flow, plus one row per registered custom bot with a stored secret. */
-.createWebhookLinks {
+/* Destination block — the primary "let us create the webhook for you" path,
+   shown above the (secondary) manual paste field. */
+.destination {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  gap: 8px;
+}
+.destinationHead {
+  display: flex;
+  flex-direction: column;
   gap: 2px;
 }
+.destinationTitle {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--app-text);
+}
+.destinationSub {
+  font-size: var(--app-text-xs);
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
 
-/* "your bot" chip on a custom-bot row, so it reads differently from the
+/* The create-webhook options: prominent cards — the standard DWEEB flow plus
+   one card per registered custom bot with a stored secret. */
+.createGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.createCard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  color: var(--app-text);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.createCard:hover {
+  background: var(--app-bg-hover);
+  border-color: var(--app-border-strong);
+}
+.createCard:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* The recommended card — accent-highlighted so the priority path pops. */
+.createCardPrimary {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+}
+.createCardPrimary:hover {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+}
+
+.createCardIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--app-accent);
+  color: #fff;
+}
+
+.createCardBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.createCardTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.createCardSub {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+.createCardChevron {
+  flex: none;
+  color: var(--app-text-subtle);
+}
+
+/* "your bot" chip on a custom-bot card, so it reads differently from the
    standard DWEEB-owned flow at a glance. */
-.createWebhookBadge {
+.createCardBadge {
   flex: none;
   padding: 0 6px;
   border-radius: 999px;
@@ -53,29 +146,50 @@
   background: var(--app-bg-hover);
   color: var(--app-text-muted);
 }
+.createCardPrimary .createCardBadge {
+  background: var(--app-accent);
+  color: #fff;
+}
 
-/* Slim inline link under the Webhook URL field that starts Discord's
-   webhook.incoming flow — the easy path to a URL, without a bulky CTA. */
-.createWebhookLink {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+/* Secondary "paste a URL instead" toggle under the create cards. */
+.pasteToggle {
   align-self: flex-start;
   padding: 0;
   background: none;
   border: none;
   font: inherit;
   font-size: 12px;
-  font-weight: 500;
-  color: var(--app-accent, #5865f2);
+  color: var(--app-text-muted);
   cursor: pointer;
 }
-.createWebhookLink:hover {
+.pasteToggle:hover {
+  color: var(--app-text);
+}
+.pasteToggleAccent {
+  font-weight: 500;
+  color: var(--app-accent, #5865f2);
+}
+.pasteToggle:hover .pasteToggleAccent {
   text-decoration: underline;
 }
 
-.createWebhookIcon {
-  flex: none;
+/* The manual paste path — the credential warning + the URL field. */
+.pasteSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pasteBack {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: var(--app-text-xs);
+  color: var(--app-accent, #5865f2);
+  cursor: pointer;
+}
+.pasteBack:hover {
+  text-decoration: underline;
 }
 
 /* Validation errors that block a send — rendered inside a danger Callout. */
