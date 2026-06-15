@@ -35,6 +35,18 @@ const BUILTIN_ICONS: Record<string, { color: string; bg: string; paths: ReactNod
     bg: "rgba(52, 211, 153, 0.14)",
     paths: <path d="M2.5 12H6l2.5-7 6.5 14 2.5-7h4" />,
   },
+  // A member with a check badge — granting yourself a role.
+  "self-role": {
+    color: "#60a5fa",
+    bg: "rgba(96, 165, 250, 0.14)",
+    paths: (
+      <>
+        <circle cx="9" cy="7" r="4" />
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <path d="M15.5 11l2 2 4-4" />
+      </>
+    ),
+  },
 };
 
 /** Deterministic hue from a plugin id, for the monogram fallback tint. */
