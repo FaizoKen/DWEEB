@@ -12,6 +12,9 @@ When a Discord user clicks:
 Classic uses: colour pickers, pronoun/region roles, opt-in pings, “verify” /
 rules-agreement buttons, reaction-role boards (the modern button version).
 
+> **This is DWEEB's reference plugin** — new plugins are measured against it.
+> See the quality bar in [`docs/plugins.md` §6](../../docs/plugins.md).
+
 It's a single small Rust service that *is* its own registry, config UI, config
 API, and Discord interactions endpoint — backed by one SQLite file. The one
 thing it needs that the stateless plugins don't is a **bot token**, because

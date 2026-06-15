@@ -292,3 +292,94 @@ when the secret matches** (constant-time compare) and fall back to its
 configured key otherwise — see `attested_key` in any bundled plugin. A
 plugin that skips this still works for the main app; custom-app clicks just
 fail its verification.
+
+## 6. The quality bar (the reference plugin)
+
+§1–5 are the *minimum* to make a plugin function. They are not the bar for
+adding one to the bundled registry. Because the registry is curated, a listed
+plugin is trusted with real credentials (the `savedWebhooks` gate hands over
+webhook tokens with no user gesture) and, if it touches Discord, a shared bot
+token. A plugin that ships is held to the standard below.
+
+**[`plugins/self-role/`](../plugins/self-role/) is the reference
+implementation — start there and copy its shape.** It is the smallest plugin
+that exercises *everything*: stateful config, the config iframe with editor-data
+reads, signature verification, custom-app attestation, and Discord REST calls
+under a hard latency budget. Its file layout is the suggested skeleton:
+
+| File | Responsibility |
+|---|---|
+| `main.rs` | Wiring only: env → router → listen, plus graceful shutdown. |
+| `config.rs` | Parse env once at startup; fail fast with a clear message. |
+| `store.rs` | Persistence. Small surface (`create` / `get` / `update`). |
+| `discord.rs` | Signature verify, request shapes, and the **pure** decision logic. |
+| `rest.rs` | The thin outbound HTTP layer (the only I/O that can fail slowly). |
+| `validate.rs` | Validate everything the browser sends before it is stored. |
+| `routes.rs` | HTTP handlers — the imperative shell that glues the above. |
+| `static/config.html` | The config iframe, embedded in the binary (`include_str!`). |
+
+The other bundled plugins are narrower references: [`ping-pong`](../plugins/ping-pong/)
+(minimal stateless), [`modal-form`](../plugins/modal-form/) (the iframe + a
+forwarding flow), [`dispatcher`](../plugins/dispatcher/) (routing).
+
+### Checklist
+
+**Security**
+- [ ] Verify the Ed25519 signature on the **raw body, before JSON parsing**;
+      missing/bad signature → `401`, fail closed.
+- [ ] Honor custom-app attestation: prefer the forwarded `x-dweeb-public-key`
+      **only** when `x-dweeb-forward-auth` matches in **constant time** (§5).
+- [ ] Treat the iframe as untrusted input: `validate.rs` rejects anything
+      malformed *before* it is stored; the interaction path re-derives trust from
+      the payload (e.g. intersect a select's submitted values with the menu's
+      managed set — never act on a raw client-supplied id).
+- [ ] Keep secrets in env, never in the database, never in a browser response.
+      If you call a third party, pin the host so there is no SSRF surface.
+- [ ] If reconfiguration is capability-gated by an id in the `custom_id`, make
+      that id ≥ 128 bits of CSPRNG entropy (`getrandom`), not a sequence.
+- [ ] In the config iframe, render any Discord-supplied string (role/channel
+      names) with `textContent` / `createElement`; `escapeHtml` before any
+      `innerHTML`.
+
+**Robustness**
+- [ ] An interaction must answer inside Discord's ~3s window *after* the
+      dispatcher hop — give the outbound HTTP client a sub-3s timeout (self-role
+      uses 2.5s) and fan out independent calls concurrently.
+- [ ] Map failure causes to **distinct, actionable** replies. Don't collapse
+      "Discord refused this (fix hierarchy)" with "Discord was busy (try again)".
+- [ ] Bound every resource the user controls (counts, string lengths) and clamp
+      values that must satisfy a downstream contract (e.g. audit-log reasons are
+      ASCII-only header values).
+- [ ] Serve `GET /health`. Exit non-zero on a fatal config error at startup.
+
+**UX & footprint**
+- [ ] User-facing strings name the problem *and* the fix in plain language.
+- [ ] Optimize the release binary for size (`opt-level="z"`, `lto`, `strip`) and
+      ship a multi-stage `debian-slim` image — plugins target the cheapest tiers.
+
+### Design & testing
+
+Keep the **decision** pure and the **I/O** thin — a pure-core / imperative-shell
+split. In self-role the entire "which roles change" rule is one pure function
+(`plan_changes`) with no I/O, so it is exhaustively unit-tested while `rest.rs`
+and `routes.rs` stay glue. **That pure core is the part you are expected to
+cover with tests**; mocking Discord is not.
+
+### Storage: SQLite by default
+
+A plugin's state is almost always a **bag of config blobs keyed by an
+unguessable id** — written once on Save, read once per interaction. That is a
+three-method store (`create` / `get` / `update`), and the right backend is an
+**embedded SQLite file** (`rusqlite` with `bundled`, WAL mode): no DB server to
+run, secure, or pay for; it compiles into the binary; the whole datastore is one
+file on a small volume. This is what lets a plugin run on a free tier or a $5
+VPS, and it is the default every new plugin should use.
+
+> **Reach for Postgres only to run multiple replicas of one plugin behind a load
+> balancer (horizontal scale / HA).** Local-file SQLite breaks there because each
+> replica gets its own file — that, or a shared/relational data model across
+> plugins, is the *only* reason to take on an external database. It is not
+> warranted by data size or write rate at this scale: a config read is an
+> in-process microsecond lookup, and a network round-trip to Postgres would eat
+> into the 3s interaction budget for nothing. Don't pre-migrate; the `store.rs`
+> surface is small enough to swap a backend behind if that day ever comes.
