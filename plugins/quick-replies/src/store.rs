@@ -47,10 +47,23 @@ pub struct QuickReply {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Optional heading rendered above the body (as a Markdown `### heading`).
+    /// Only used for a *typed* reply; a saved-message reply carries its own
+    /// layout, so this is ignored when [`payload`](Self::payload) is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// An optional DWEEB **saved message** to send instead of the typed
+    /// title/body — a Components V2 wire payload the admin built and saved in
+    /// DWEEB, handed to us over the plugin protocol's `savedMessages` resource.
+    /// When it carries a non-empty `components` array it takes priority over
+    /// `body`; `{user}`/`{username}`/`{server}` inside its text are still
+    /// substituted per click, and mentions are pinned to the clicker exactly
+    /// like a typed reply, so a public saved message can never `@everyone`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
     /// The reply text — Markdown, links, and `{user}`/`{username}`/`{server}`
-    /// variables, substituted at click time from the interaction payload.
+    /// variables, substituted at click time from the interaction payload. May be
+    /// empty when [`payload`](Self::payload) supplies the message instead.
+    #[serde(default)]
     pub body: String,
     /// Whether the reply is ephemeral (only the clicker sees it). Defaults true
     /// — the safe, low-noise choice for an FAQ/support macro.

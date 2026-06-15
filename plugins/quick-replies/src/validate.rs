@@ -17,6 +17,10 @@ const MAX_REPLIES: usize = 25;
 /// generous single canned reply and leaves headroom for the title + variables.
 const MAX_BODY: usize = 1500;
 const MAX_TITLE: usize = 200;
+/// Serialized byte ceiling for a saved-message payload. Generous enough for a
+/// rich Components V2 message while keeping one stored reply from ballooning the
+/// DB or the interaction response. Mirrors the Modal Form plugin.
+const MAX_PAYLOAD_BYTES: usize = 16_000;
 /// Discord's select-option label / description ceiling.
 const MAX_OPTION_FIELD: usize = 100;
 /// A generous bound for a (possibly multi-codepoint / ZWJ) unicode emoji.
@@ -101,12 +105,29 @@ fn validate_reply(reply: &QuickReply, is_button: bool) -> Result<(), String> {
         }
     }
 
+    // A reply sends either a typed body or a DWEEB saved message. A saved
+    // message is usable only when it carries a non-empty Components V2
+    // `components` array (what the click path actually sends).
+    let has_payload = reply
+        .payload
+        .as_ref()
+        .and_then(|p| p.get("components"))
+        .and_then(|c| c.as_array())
+        .is_some_and(|a| !a.is_empty());
+
     let body = reply.body.trim();
-    if body.is_empty() {
-        return Err("A reply is empty — type the message it should send.".into());
+    if !has_payload && body.is_empty() {
+        return Err("A reply is empty — type a message or pick a saved message.".into());
     }
+    // The typed body is bounded whether or not it's the active source (it may
+    // linger as a fallback), but a saved message has its own, larger bound.
     if body.chars().count() > MAX_BODY {
         return Err(format!("A reply is too long (max {MAX_BODY} characters)."));
+    }
+    if let Some(payload) = &reply.payload {
+        if serde_json::to_string(payload).map(|s| s.len()).unwrap_or(usize::MAX) > MAX_PAYLOAD_BYTES {
+            return Err("That saved message is too large to send.".into());
+        }
     }
 
     validate_roles(&reply.allowed_roles)?;
@@ -150,6 +171,7 @@ mod tests {
             emoji: None,
             description: None,
             title: None,
+            payload: None,
             body: body.into(),
             ephemeral: true,
             allowed_roles: vec![],
@@ -198,6 +220,31 @@ mod tests {
         assert!(validate_config(&cfg("button", vec![reply("k1", "   ")])).is_err());
         let long = "x".repeat(MAX_BODY + 1);
         assert!(validate_config(&cfg("button", vec![reply("k1", &long)])).is_err());
+    }
+
+    #[test]
+    fn a_saved_payload_satisfies_the_empty_body_check() {
+        // No body, but a non-empty saved message → valid.
+        let mut r = reply("k1", "   ");
+        r.payload = Some(serde_json::json!({
+            "components": [{ "type": 10, "content": "Saved!" }]
+        }));
+        assert!(validate_config(&cfg("button", vec![r])).is_ok());
+
+        // A payload with no usable components doesn't rescue an empty body.
+        let mut empty = reply("k1", "");
+        empty.payload = Some(serde_json::json!({ "components": [] }));
+        assert!(validate_config(&cfg("button", vec![empty])).is_err());
+    }
+
+    #[test]
+    fn rejects_an_oversized_saved_payload() {
+        let mut r = reply("k1", "");
+        let huge = "x".repeat(MAX_PAYLOAD_BYTES + 1);
+        r.payload = Some(serde_json::json!({
+            "components": [{ "type": 10, "content": huge }]
+        }));
+        assert!(validate_config(&cfg("button", vec![r])).is_err());
     }
 
     #[test]

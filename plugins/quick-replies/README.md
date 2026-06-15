@@ -37,6 +37,16 @@ A reply is more than a line of text:
 
 - **Heading + body** — an optional `### heading` over a Markdown body with links.
   It's sent as a Components V2 **container** (a tidy card), not a bare line.
+- **Or a saved message** — instead of typing a reply, point it at one of your
+  **DWEEB saved messages** (the rich Components V2 messages you build and name in
+  the editor). The config UI fetches them over the plugin protocol's
+  `savedMessages` resource and offers a picker; the chosen one is **snapshotted**
+  into the instance, so the reply keeps working even if you later edit or delete
+  the original. `{user}`/`{username}`/`{server}` inside a saved message are still
+  substituted per click, and mentions are pinned to the clicker exactly like a
+  typed reply — a public saved message can never `@everyone`. Saved messages are
+  client-side content, so **no bot token** is involved and the click path still
+  does zero outbound I/O.
 - **Private or public** — each reply is ephemeral by default (only the clicker
   sees it — ideal for FAQ/support), or flip it to post in the channel.
 - **Variables** — `{user}` (a mention), `{username}` (their name), and
@@ -61,8 +71,10 @@ call, so it always answers well inside Discord's ~3s window:
 2. **Role gate** — if the reply is gated, the member's payload roles must include
    one of the allowed roles, or they get the private "not for you" notice. A
    gated reply used outside a guild (no member roles) fails closed.
-3. **Substitute + send** — `{user}`/`{username}`/`{server}` are filled in and the
-   reply goes back as the interaction response, ephemeral or public.
+3. **Substitute + send** — `{user}`/`{username}`/`{server}` are filled in (in the
+   typed body, or in every `content` field of a saved message) and the reply goes
+   back as the interaction response, ephemeral or public. A reply with a usable
+   saved-message payload sends that; otherwise it sends the typed title/body.
 
 Because the reply is just the interaction response, it works whether the message
 was posted through a DWEEB webhook **or** a guild's own
@@ -92,8 +104,9 @@ never pings the channel — only the clicker can be mentioned, and only via
 | Role-gating | Re-derived from the member's payload roles (intersected with the configured set), never from a client claim; fails closed outside a guild. |
 | Mention safety | Every reply sets `allowed_mentions` to ping **only** the clicker (`parse: []`), so canned text — or a member's own name — can never `@everyone` the channel. |
 | Reply within Discord's 3s window | A click does **zero** outbound I/O — it's a config read and a pure builder. The only Discord call anywhere is the optional config-time role listing. |
-| No stored secrets | No bot token, no webhook URL, nothing per-instance to leak — the database holds only your reply text + option keys. |
-| Resource bounds | 1–25 replies, body ≤ 1500 chars, title ≤ 200, option label/description ≤ 100, ≤ 25 gate roles per reply. |
+| No stored secrets | No bot token, no webhook URL, nothing per-instance to leak — the database holds only your reply text/option keys and any snapshotted saved-message content (itself pure content). |
+| Saved-message safety | A saved message rides in as Components V2 with the **same** `allowed_mentions` pin as a typed reply; only its `content` text is variable-substituted, so `custom_id`s/URLs are never mangled. A content/embeds-only payload (no V2 components) is ignored and the typed body sends instead. |
+| Resource bounds | 1–25 replies, body ≤ 1500 chars, title ≤ 200, saved-message payload ≤ 16 KB, option label/description ≤ 100, ≤ 25 gate roles per reply. |
 | XSS in the config UI | Every Discord-supplied string (role names) is rendered with `textContent`; the live preview escapes input **before** applying its Markdown-lite subset, so a reply body can't inject HTML. |
 
 ## The bot (optional)

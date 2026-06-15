@@ -228,6 +228,11 @@
       let rolesLoaded = false; // true once the live guild list is in hand
       let gateError = ""; // last connect failure, shown in each card's gate section
 
+      // ── Saved messages (from DWEEB, optional) ───────────────────────────
+      // The user's named, saved Components V2 messages, fetched once over the
+      // plugin protocol. A reply can send one of these instead of typed text.
+      let savedMessages = []; // [{ id, name, savedAt, payload }] — only ones with components
+
       // ── Reply cards ─────────────────────────────────────────────────────
       let cards = [];
 
@@ -238,8 +243,15 @@
       const escapeHtml = (s) =>
         String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
+      // A saved-message payload is only usable here when it carries a non-empty
+      // Components V2 `components` array — that's what the click path sends. A
+      // content/embeds-only payload can't ride in a V2 interaction response.
+      const hasComponents = (p) =>
+        !!p && typeof p === "object" && Array.isArray(p.components) && p.components.length > 0;
+
       const newKey = () => "k_" + Math.random().toString(36).slice(2, 10);
       function newCard(seed = {}) {
+        const payload = hasComponents(seed.payload) ? seed.payload : null;
         return {
           key: typeof seed.key === "string" && seed.key ? seed.key : newKey(),
           label: seed.label || "",
@@ -247,9 +259,23 @@
           description: seed.description || "",
           title: seed.title || "",
           body: seed.body || "",
+          // "write" = typed title/body; "saved" = send a DWEEB saved message.
+          source: payload ? "saved" : "write",
+          payload, // the saved message snapshot (Components V2 wire payload)
+          savedId: payload ? matchSavedId(payload) : "", // dropdown selection, best-effort
           ephemeral: seed.ephemeral !== false, // default private
           gate: new Set((seed.allowed_roles || []).map((r) => r.id)),
         };
+      }
+
+      // Best-effort: find the saved message whose payload matches this snapshot,
+      // so reopening a reply pre-selects the right dropdown entry. Payloads come
+      // from the same serializer, so a stable stringify compare is good enough; a
+      // miss (message edited or deleted) just shows the snapshot as-is.
+      function matchSavedId(payload) {
+        const target = JSON.stringify(payload);
+        const hit = savedMessages.find((m) => JSON.stringify(m.payload) === target);
+        return hit ? hit.id : "";
       }
 
       // ── Render the whole card list ──────────────────────────────────────
@@ -278,17 +304,24 @@
             <button type="button" class="icon del" title="Remove">✕</button>
           </div>
           <input type="text" class="optdesc" data-k="description" maxlength="100" placeholder="Dropdown subtitle (optional)" style="margin-top:8px" />
-          <label class="lbl">Reply heading (optional)</label>
-          <input type="text" class="title" data-k="title" maxlength="200" placeholder="e.g. 📜 Server Rules" />
-          <label class="lbl">Reply message</label>
-          <textarea class="body" data-k="body" rows="4" maxlength="${MAX_BODY}" placeholder="What should they see? **Markdown** and https://links work."></textarea>
-          <div class="vars">
-            <span>Insert:</span>
-            <button type="button" class="chip" data-var="{user}">{user}</button>
-            <button type="button" class="chip" data-var="{username}">{username}</button>
-            <button type="button" class="chip" data-var="{server}">{server}</button>
-            <span>— filled in for each person.</span>
+          <div class="seg src">
+            <button type="button" data-src="write">✍️ Write a reply</button>
+            <button type="button" data-src="saved">💾 Use a saved message</button>
           </div>
+          <div class="write-src">
+            <label class="lbl">Reply heading (optional)</label>
+            <input type="text" class="title" data-k="title" maxlength="200" placeholder="e.g. 📜 Server Rules" />
+            <label class="lbl">Reply message</label>
+            <textarea class="body" data-k="body" rows="4" maxlength="${MAX_BODY}" placeholder="What should they see? **Markdown** and https://links work."></textarea>
+            <div class="vars">
+              <span>Insert:</span>
+              <button type="button" class="chip" data-var="{user}">{user}</button>
+              <button type="button" class="chip" data-var="{username}">{username}</button>
+              <button type="button" class="chip" data-var="{server}">{server}</button>
+              <span>— filled in for each person.</span>
+            </div>
+          </div>
+          <div class="saved-src"></div>
           <div class="seg vis">
             <button type="button" data-vis="eph">🔒 Only them (private)</button>
             <button type="button" data-vis="pub">👥 Everyone (public)</button>
@@ -357,6 +390,30 @@
         );
         paintVis();
 
+        // Source segmented control: typed reply vs. a saved DWEEB message.
+        const writeBox = el.querySelector(".write-src");
+        const savedBox = el.querySelector(".saved-src");
+        const srcButtons = el.querySelectorAll(".src button");
+        const paintSource = () => {
+          const saved = card.source === "saved";
+          srcButtons.forEach((b) => b.classList.toggle("sel", b.dataset.src === card.source));
+          writeBox.style.display = saved ? "none" : "";
+          savedBox.style.display = saved ? "" : "none";
+        };
+        srcButtons.forEach((b) =>
+          b.addEventListener("click", () => {
+            card.source = b.dataset.src;
+            // Adopt the picked saved message when first switching to "saved" and
+            // one is already chosen; otherwise the picker prompts for one.
+            if (card.source === "saved" && card.savedId) applySaved(card, card.savedId);
+            paintSource();
+            renderThis();
+            sendResize();
+          }),
+        );
+        renderSavedPicker(card, savedBox, renderThis);
+        paintSource();
+
         // Reorder / delete.
         const up = el.querySelector(".up");
         const down = el.querySelector(".down");
@@ -377,6 +434,69 @@
 
         renderThis();
         return el;
+      }
+
+      // ── Saved-message picker (per card) ─────────────────────────────────
+      function renderSavedPicker(card, box, renderThis) {
+        box.innerHTML = "";
+        // No saved messages to offer — point the user at how to make one.
+        if (!savedMessages.length && !card.payload) {
+          box.appendChild(
+            callout(
+              "warn",
+              "You haven't saved any messages in DWEEB yet. Build a message, choose Save in DWEEB to name it, then reopen this menu to pick it here.",
+            ),
+          );
+          return;
+        }
+
+        const lbl = document.createElement("label");
+        lbl.className = "lbl";
+        lbl.textContent = "Saved message";
+        box.appendChild(lbl);
+
+        const sel = document.createElement("select");
+        const ph = document.createElement("option");
+        ph.value = "";
+        ph.textContent = "— pick a saved message —";
+        sel.appendChild(ph);
+        for (const m of savedMessages) {
+          const o = document.createElement("option");
+          o.value = m.id;
+          o.textContent = m.name || "Untitled";
+          sel.appendChild(o);
+        }
+        // A snapshot whose origin message is gone/edited still round-trips: show
+        // it as a selectable, clearly-labelled entry so saving keeps it intact.
+        if (card.payload && !card.savedId) {
+          const o = document.createElement("option");
+          o.value = "__snapshot__";
+          o.textContent = "Saved snapshot (no longer in your list)";
+          sel.appendChild(o);
+          sel.value = "__snapshot__";
+        } else {
+          sel.value = card.savedId || "";
+        }
+        sel.addEventListener("change", () => {
+          if (sel.value && sel.value !== "__snapshot__") applySaved(card, sel.value);
+          renderThis();
+        });
+        box.appendChild(sel);
+
+        const note = document.createElement("div");
+        note.className = "hint";
+        note.textContent =
+          "Sent as-is when clicked. Variables like {user}, {username} and {server} inside the saved message are still filled in per person.";
+        box.appendChild(note);
+      }
+
+      // Point a card at a saved message: snapshot its payload so the reply keeps
+      // working even if the saved message is later edited or deleted in DWEEB.
+      function applySaved(card, id) {
+        const m = savedMessages.find((x) => x.id === id);
+        if (!m) return;
+        card.savedId = id;
+        card.payload = JSON.parse(JSON.stringify(m.payload)); // own copy
       }
 
       function moveCard(i, dir) {
@@ -407,16 +527,41 @@
 
       // ── Live preview (safe Markdown-lite) ───────────────────────────────
       function renderPreview(card, out) {
-        const title = (card.title || "").trim();
         let html = "";
-        if (title) html += `<div class="pv-title">${renderInline(title)}</div>`;
-        const bodyHtml = renderInline(card.body || "");
-        html += `<div class="pv-body">${bodyHtml || '<span class="pv-empty">Your reply preview shows here as you type…</span>'}</div>`;
+        if (card.source === "saved") {
+          const text = card.payload ? savedPreviewText(card.payload) : "";
+          html += `<div class="pv-body">${
+            text ? renderInline(text) : '<span class="pv-empty">Pick a saved message to preview it here…</span>'
+          }</div>`;
+        } else {
+          const title = (card.title || "").trim();
+          if (title) html += `<div class="pv-title">${renderInline(title)}</div>`;
+          const bodyHtml = renderInline(card.body || "");
+          html += `<div class="pv-body">${bodyHtml || '<span class="pv-empty">Your reply preview shows here as you type…</span>'}</div>`;
+        }
         const badge = card.ephemeral
           ? "🔒 Only the person who clicks can see this"
           : "👥 Posted in the channel for everyone";
         out.innerHTML = `<div class="pv-card">${html}<div class="pv-foot">${badge}</div></div>`;
         sendResize();
+      }
+
+      // Best-effort text preview of a saved Components V2 message: gather every
+      // `content` string (the same fields the click path substitutes) in order.
+      // It's a readable approximation, not a faithful render of buttons/media.
+      function savedPreviewText(payload) {
+        const parts = [];
+        const walk = (v) => {
+          if (Array.isArray(v)) v.forEach(walk);
+          else if (v && typeof v === "object") {
+            for (const [k, val] of Object.entries(v)) {
+              if (k === "content" && typeof val === "string") parts.push(val);
+              else walk(val);
+            }
+          }
+        };
+        walk(payload.components);
+        return parts.join("\n\n");
       }
 
       // Escape first, then apply a small, safe subset of Markdown and finally
@@ -577,6 +722,11 @@
           guildName = typeof guild.name === "string" ? guild.name : "";
         }
 
+        // Fetch the user's saved messages so a reply can send one. Done before
+        // loadInstance so a reconfigured reply can match its snapshot back to a
+        // named entry. Absent/empty is fine — typed replies need none.
+        await loadSavedMessages();
+
         if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
           instanceId = msg.customId.slice(PREFIX.length);
           await loadInstance(instanceId);
@@ -633,6 +783,22 @@
         } catch {
           /* leave defaults */
         }
+      }
+
+      // Pull the user's named saved messages over the plugin protocol. We keep
+      // only those that carry V2 components (the only kind a click can send) and
+      // store a defensive copy so later edits in DWEEB don't mutate our list.
+      async function loadSavedMessages() {
+        const data = await requestResource("savedMessages");
+        if (!Array.isArray(data)) return;
+        savedMessages = data
+          .filter((m) => m && typeof m.id === "string" && hasComponents(m.payload))
+          .map((m) => ({
+            id: m.id,
+            name: typeof m.name === "string" ? m.name : "Untitled",
+            savedAt: m.savedAt,
+            payload: m.payload,
+          }));
       }
 
       // Connect with the shared bot purely to list roles for the gate picker.
@@ -698,15 +864,30 @@
         return roles.filter((r) => gate.has(r.id)).map((r) => ({ id: r.id, name: r.name, color: r.color || 0 }));
       }
 
+      // A short label for the button's plugin chip in DWEEB: the saved message's
+      // name when sending one, else the typed heading, else a generic fallback.
+      function buttonSummaryLabel(c) {
+        if (c.source === "saved" && hasComponents(c.payload)) {
+          const m = savedMessages.find((x) => x.id === c.savedId);
+          return (m && m.name) || "Saved message";
+        }
+        return c.title.trim() || "Quick reply";
+      }
+
       async function save() {
         $("error").textContent = "";
         if (!cards.length) return fail("Add at least one reply.");
         if (!isSelect() && cards.length !== 1) return fail("A button has exactly one reply.");
 
+        const usesSaved = (c) => c.source === "saved" && hasComponents(c.payload);
+
         for (const c of cards) {
           if (isSelect() && !c.label.trim())
             return fail("Every topic needs a label for its dropdown option.");
-          if (!c.body.trim()) return fail("Every reply needs a message — one of them is empty.");
+          if (c.source === "saved" && !usesSaved(c))
+            return fail("Pick a saved message for every reply set to “Use a saved message”, or switch it back to writing one.");
+          if (!usesSaved(c) && !c.body.trim())
+            return fail("Every reply needs a message — type one or pick a saved message.");
           if (c.body.length > MAX_BODY) return fail(`A reply is too long (max ${MAX_BODY} characters).`);
         }
 
@@ -715,16 +896,22 @@
         // cross-server post. Plain text replies stay portable (no guildId).
         const anyGated = cards.some((c) => c.gate.size > 0);
 
-        const replies = cards.map((c) => ({
-          key: c.key,
-          label: isSelect() ? c.label.trim() : "",
-          emoji: isSelect() && c.emoji.trim() ? c.emoji.trim() : null,
-          description: isSelect() && c.description.trim() ? c.description.trim() : null,
-          title: c.title.trim() || null,
-          body: c.body.replace(/\s+$/g, ""),
-          ephemeral: c.ephemeral,
-          allowed_roles: roleRefs(c.gate),
-        }));
+        const replies = cards.map((c) => {
+          const saved = usesSaved(c);
+          return {
+            key: c.key,
+            label: isSelect() ? c.label.trim() : "",
+            emoji: isSelect() && c.emoji.trim() ? c.emoji.trim() : null,
+            description: isSelect() && c.description.trim() ? c.description.trim() : null,
+            // A saved message carries its own layout, so drop the typed
+            // title/body and send the payload instead.
+            title: saved ? null : c.title.trim() || null,
+            payload: saved ? c.payload : null,
+            body: saved ? "" : c.body.replace(/\s+$/g, ""),
+            ephemeral: c.ephemeral,
+            allowed_roles: roleRefs(c.gate),
+          };
+        });
 
         const body = {
           target,
@@ -751,7 +938,7 @@
           const summary = isSelect()
             ? { label: "Quick Replies", description: `${n} topic${n === 1 ? "" : "s"}` + (anyGated ? " · role-gated" : "") }
             : {
-                label: cards[0].title.trim() || "Quick reply",
+                label: buttonSummaryLabel(cards[0]),
                 description: (cards[0].ephemeral ? "Private" : "Public") + (anyGated ? " · role-gated" : ""),
               };
           parent.postMessage(

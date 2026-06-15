@@ -240,15 +240,36 @@ pub fn ephemeral_text(content: &str) -> Value {
     })
 }
 
-/// Build the configured reply for one click — pure. The title/body have their
-/// `{...}` variables substituted and ride in a Components V2 Container (a tidy
-/// card), ephemeral or public per the reply's setting.
+/// Build the configured reply for one click — pure. A reply is either a DWEEB
+/// **saved message** (a Components V2 payload, used as-is with its `{...}`
+/// variables substituted) or a typed title/body that rides in a Components V2
+/// Container (a tidy card); either way it is ephemeral or public per the reply's
+/// setting.
 ///
 /// `allowed_mentions` pins the only ping that may fire to the clicker
 /// themselves (so a `{user}` greeting works), while `parse: []` neutralises any
-/// `@everyone`/`@here`/role mention a stray name or pasted link might carry — a
-/// public reply must never let arbitrary text ping the channel.
+/// `@everyone`/`@here`/role mention a stray name, pasted link, or saved-message
+/// body might carry — a public reply must never let arbitrary text ping the
+/// channel.
 pub fn build_reply(reply: &QuickReply, ctx: &ReplyContext) -> Value {
+    let mut flags = FLAG_IS_COMPONENTS_V2;
+    if reply.ephemeral {
+        flags |= FLAG_EPHEMERAL;
+    }
+
+    // A saved message takes priority over the typed title/body: send its own
+    // Components V2 layout, with every text node's `{...}` variables substituted.
+    if let Some(components) = saved_components(reply, ctx) {
+        return json!({
+            "type": RESPONSE_CHANNEL_MESSAGE,
+            "data": {
+                "flags": flags,
+                "allowed_mentions": { "parse": [], "users": [ctx.user_id] },
+                "components": components,
+            }
+        });
+    }
+
     let mut text = String::new();
     if let Some(title) = reply.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         text.push_str("### ");
@@ -256,11 +277,6 @@ pub fn build_reply(reply: &QuickReply, ctx: &ReplyContext) -> Value {
         text.push('\n');
     }
     text.push_str(&substitute(&reply.body, ctx));
-
-    let mut flags = FLAG_IS_COMPONENTS_V2;
-    if reply.ephemeral {
-        flags |= FLAG_EPHEMERAL;
-    }
 
     json!({
         "type": RESPONSE_CHANNEL_MESSAGE,
@@ -276,6 +292,49 @@ pub fn build_reply(reply: &QuickReply, ctx: &ReplyContext) -> Value {
             }],
         }
     })
+}
+
+/// The saved message's `components`, with this click's variables substituted —
+/// or `None` if the reply has no usable saved payload (so the caller falls back
+/// to the typed body). We only treat a payload as a saved message when it
+/// carries a **non-empty** `components` array (matching the Components V2 shape
+/// DWEEB hands over); a `content`/`embeds`-only payload is ignored, since a V2
+/// interaction response can't carry those fields.
+fn saved_components(reply: &QuickReply, ctx: &ReplyContext) -> Option<Value> {
+    let components = reply.payload.as_ref()?.get("components")?;
+    if components.as_array().is_none_or(|a| a.is_empty()) {
+        return None;
+    }
+    let mut components = components.clone();
+    substitute_in_content(&mut components, ctx);
+    Some(components)
+}
+
+/// Recursively substitute `{user}`/`{username}`/`{server}` into every Components
+/// V2 **`content`** string (Text Displays, container/section text). Only
+/// `content` is touched on purpose — URLs, `custom_id`s and other machine fields
+/// live under different keys, so a `{token}` there is never mangled, and a saved
+/// message can greet the clicker the same way a typed one does.
+fn substitute_in_content(value: &mut Value, ctx: &ReplyContext) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                if k == "content" {
+                    if let Value::String(s) = v {
+                        *s = substitute(s, ctx);
+                        continue;
+                    }
+                }
+                substitute_in_content(v, ctx);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                substitute_in_content(item, ctx);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The ephemeral notice a member gets when they use a reply they're not allowed
@@ -336,6 +395,7 @@ mod tests {
             emoji: None,
             description: None,
             title: None,
+            payload: None,
             body: body.into(),
             ephemeral: true,
             allowed_roles: vec![],
@@ -417,6 +477,66 @@ mod tests {
         let text = body_text(&build_reply(&r, &ctx()));
         assert!(text.starts_with("### Server Rules\n"));
         assert!(text.contains("the body"));
+    }
+
+    // ── saved-message reply ──────────────────────────────────────────────────────
+    #[test]
+    fn build_reply_uses_a_saved_payload_over_the_typed_body() {
+        let mut r = reply("ignored typed body");
+        r.title = Some("ignored title".into());
+        r.payload = Some(json!({
+            "components": [{
+                "type": COMPONENT_CONTAINER,
+                "components": [{ "type": COMPONENT_TEXT_DISPLAY, "content": "Hi {user} from {server}!" }],
+            }],
+        }));
+        let v = build_reply(&r, &ctx());
+        // The saved layout is sent, with variables substituted in its content…
+        let content = v["data"]["components"][0]["components"][0]["content"].as_str().unwrap();
+        assert_eq!(content, "Hi <@42> from Cool Server!");
+        // …the typed body/title are not present…
+        assert!(!serde_json::to_string(&v).unwrap().contains("ignored"));
+        // …and mention safety still pins pings to the clicker.
+        assert_eq!(v["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(v["data"]["allowed_mentions"]["users"][0], "42");
+    }
+
+    #[test]
+    fn build_reply_public_saved_payload_keeps_only_the_v2_flag() {
+        let mut r = reply("");
+        r.ephemeral = false;
+        r.payload = Some(json!({ "components": [{ "type": COMPONENT_TEXT_DISPLAY, "content": "hi" }] }));
+        let v = build_reply(&r, &ctx());
+        assert_eq!(v["data"]["flags"].as_u64().unwrap(), FLAG_IS_COMPONENTS_V2);
+    }
+
+    #[test]
+    fn build_reply_falls_back_to_body_for_an_empty_or_componentless_payload() {
+        // Empty components array → not a usable saved message → typed body wins.
+        let mut r = reply("typed wins");
+        r.payload = Some(json!({ "components": [] }));
+        assert_eq!(body_text(&build_reply(&r, &ctx())), "typed wins");
+        // A content/embeds-only payload (no V2 components) is ignored too.
+        let mut r2 = reply("typed wins again");
+        r2.payload = Some(json!({ "content": "plain", "embeds": [] }));
+        assert_eq!(body_text(&build_reply(&r2, &ctx())), "typed wins again");
+    }
+
+    #[test]
+    fn substitute_in_content_leaves_non_content_fields_untouched() {
+        let mut v = json!({
+            "components": [{
+                "type": COMPONENT_TEXT_DISPLAY,
+                "content": "Hello {user}",
+                "url": "https://example.com/{user}",
+                "custom_id": "thing:{user}",
+            }],
+        });
+        substitute_in_content(&mut v, &ctx());
+        assert_eq!(v["components"][0]["content"], "Hello <@42>");
+        // URLs and custom_ids keep their literal braces — only `content` is filled.
+        assert_eq!(v["components"][0]["url"], "https://example.com/{user}");
+        assert_eq!(v["components"][0]["custom_id"], "thing:{user}");
     }
 
     // ── gate-denied notice ──────────────────────────────────────────────────────
