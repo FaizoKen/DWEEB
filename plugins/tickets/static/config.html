@@ -1,0 +1,1005 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tickets — configure</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1f22;
+        --panel: #2b2d31;
+        --panel-2: #232428;
+        --border: #3a3c41;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #5865f2;
+        --green: #3ba55d;
+        --yellow: #f0b232;
+        --danger: #da373c;
+        --radius: 8px;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #f2f3f5;
+        --panel-2: #e3e5e8;
+        --border: #d7d9dc;
+        --text: #1e1f22;
+        --muted: #4e5058;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 20px 0 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h2:first-of-type { margin-top: 0; }
+      .step-num {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="text"], input[type="number"], select, textarea {
+        width: 100%;
+        padding: 8px 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+      }
+      textarea { resize: vertical; }
+      input:focus-visible, select:focus-visible, textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+      .hint code, .callout code { color: var(--accent); }
+      .row2 { display: flex; gap: 8px; }
+      .row2 > * { flex: 1; }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
+      .bar .grow { flex: 1; }
+      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+      .locked { opacity: 0.45; pointer-events: none; filter: grayscale(0.3); }
+
+      .callout {
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+      .callout.good { border-left-color: var(--green); }
+      .callout.warn { border-left-color: var(--yellow); }
+      .callout.bad { border-left-color: var(--danger); }
+      .callout b { color: var(--text); }
+
+      details { margin-top: 8px; }
+      summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+      details.adv { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 8px; }
+      details.adv > summary { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+      .help ol { margin: 8px 0 0; padding-left: 20px; }
+      .help li { margin: 4px 0; color: var(--muted); }
+
+      .list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 280px; overflow: auto; }
+      .pick {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 9px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-2);
+        cursor: pointer;
+      }
+      .pick:hover { border-color: var(--accent); }
+      .pick input { flex: none; margin: 0; accent-color: var(--accent); }
+      .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
+      .pick .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pick .tag { flex: none; font-size: 11px; color: var(--yellow); }
+      .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+      .search { margin-top: 8px; }
+
+      .seg { display: flex; gap: 6px; margin-top: 8px; }
+      .seg button { flex: 1; }
+      .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+      .check { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; }
+      .check input { margin: 3px 0 0; accent-color: var(--accent); flex: none; }
+      .check .t { font-size: 13px; }
+      .check .d { font-size: 12px; color: var(--muted); }
+
+      /* Editor rows (topics / intake). */
+      .editor { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+      .item {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-2);
+        padding: 10px;
+      }
+      .item .head { display: flex; gap: 8px; align-items: center; }
+      .item .head .grow { flex: 1; }
+      .item .head button { padding: 4px 8px; font-size: 12px; }
+      .item .sub { display: flex; gap: 8px; margin-top: 8px; }
+      .item .sub > * { flex: 1; }
+      .miniseg { display: flex; gap: 4px; }
+      .miniseg button { padding: 6px 8px; font-size: 12px; }
+      .miniseg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .add { margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <!-- Step 1 — the shared DWEEB bot --------------------------------------->
+    <h2><span class="step-num">1</span> <span id="step1Title">Bot &amp; server</span></h2>
+    <div id="botIntro"></div>
+    <!-- Hidden value-holder for the connected server id (auto-filled). -->
+    <input id="guildId" type="hidden" />
+    <div class="err" id="connErr"></div>
+
+    <!-- Step 2 — topics (string select only) -------------------------------->
+    <div id="topicsWrap" style="display: none">
+      <h2><span class="step-num">2</span> Menu topics <span class="count" id="topicCount"></span></h2>
+      <div id="topicsSection" class="locked">
+        <div class="hint">
+          Each topic is one entry in the dropdown. Picking it opens a ticket
+          tagged with that topic — DWEEB wires the option values for you.
+        </div>
+        <div id="topics" class="editor"></div>
+        <button type="button" id="addTopic" class="add">+ Add topic</button>
+      </div>
+    </div>
+
+    <!-- Step 3 — staff & channels ------------------------------------------->
+    <h2><span class="step-num" id="staffStepNum">2</span> Who handles tickets
+      <span class="count" id="staffCount"></span></h2>
+    <div id="staffSection" class="locked">
+      <label class="lbl">Staff roles — they can see &amp; reply in every ticket</label>
+      <input id="staffSearch" class="search" type="text" placeholder="Search roles…" />
+      <div id="staffRoles" class="list"></div>
+      <div class="hint" id="staffHint">
+        No role is required — server admins always see tickets — but adding your
+        support role is the usual setup.
+      </div>
+
+      <label class="lbl" for="category">Create ticket channels under…</label>
+      <select id="category"></select>
+      <div class="hint">A category keeps tickets tidy. “Top level” drops them at the server root.</div>
+
+      <label class="lbl" for="logChannel">Log &amp; transcript channel</label>
+      <select id="logChannel"></select>
+      <div class="hint">Where open/close notices and HTML transcripts are posted. Optional.</div>
+    </div>
+
+    <!-- Step 4 — welcome ---------------------------------------------------->
+    <h2><span class="step-num" id="welcomeStepNum">3</span> Welcome message</h2>
+    <div id="welcomeSection" class="locked">
+      <textarea id="welcome" rows="4" maxlength="1500"></textarea>
+      <div class="hint">
+        Placeholders: <code>{user}</code> (mention) · <code>{username}</code> ·
+        <code>{ticket}</code> (channel) · <code>{topic}</code> ·
+        <code>{staff}</code> (your staff roles).
+      </div>
+
+      <!-- Advanced — hidden by default so the quick path is short. -->
+      <details class="adv">
+        <summary>Advanced options</summary>
+
+        <h2 style="margin-top:16px"><span class="step-num">+</span> Intake form
+          <span class="count" id="intakeCount"></span></h2>
+        <div class="hint">
+          Ask 0–5 questions in a pop-up <b>before</b> the ticket opens. Leave empty
+          to open instantly. Answers are posted at the top of the ticket.
+        </div>
+        <div id="intake" class="editor"></div>
+        <button type="button" id="addField" class="add">+ Add question</button>
+
+        <h2 style="margin-top:20px"><span class="step-num">+</span> Channel &amp; pings</h2>
+        <label class="lbl">Channel name</label>
+        <div class="seg" id="namingSeg">
+          <button type="button" data-naming="number" class="sel">Numbered · ticket-0001</button>
+          <button type="button" data-naming="username">Username · ticket-name</button>
+        </div>
+        <label class="check"><input type="checkbox" id="pingOpener" checked />
+          <span><span class="t">Ping the opener</span><div class="d">Mention them in the welcome so they get a notification.</div></span></label>
+        <label class="check"><input type="checkbox" id="pingStaff" />
+          <span><span class="t">Ping staff roles</span><div class="d">Notify your staff roles when a ticket opens (roles must be mentionable).</div></span></label>
+
+        <h2 style="margin-top:20px"><span class="step-num">+</span> Closing</h2>
+        <label class="lbl">When a ticket is closed</label>
+        <div class="seg" id="closeSeg">
+          <button type="button" data-close="delete" class="sel">Delete the channel</button>
+          <button type="button" data-close="lock">Lock &amp; keep it</button>
+        </div>
+        <div class="hint" id="closeHint">Deleting is cleanest. Locking keeps the channel (read-only) with Reopen / Delete buttons for the record.</div>
+        <label class="check"><input type="checkbox" id="closeConfirm" checked />
+          <span><span class="t">Ask for a reason on close</span><div class="d">Pops a quick box (also guards against an accidental close).</div></span></label>
+        <label class="check"><input type="checkbox" id="openerClose" checked />
+          <span><span class="t">Let the opener close their own ticket</span><div class="d">Staff can always close; this also lets the person who opened it.</div></span></label>
+        <label class="check"><input type="checkbox" id="claimEnabled" checked />
+          <span><span class="t">Show a Claim button</span><div class="d">Staff can take ownership of a ticket so two people don't double up.</div></span></label>
+        <label class="check"><input type="checkbox" id="transcripts" />
+          <span><span class="t">Save an HTML transcript on close</span><div class="d" id="transcriptsHint">Posted to the log channel above. Pick a log channel to enable.</div></span></label>
+
+        <h2 style="margin-top:20px"><span class="step-num">+</span> Anti-spam limits</h2>
+        <div class="row2">
+          <div>
+            <label class="lbl" for="maxOpen">Max open tickets per member</label>
+            <input id="maxOpen" type="number" min="0" max="50" value="1" />
+            <div class="hint">0 = unlimited.</div>
+          </div>
+          <div>
+            <label class="lbl" for="cooldown">Cooldown between opens (seconds)</label>
+            <input id="cooldown" type="number" min="0" max="86400" value="30" />
+            <div class="hint">0 = none.</div>
+          </div>
+        </div>
+
+        <h2 style="margin-top:20px"><span class="step-num">+</span> Reply to the opener</h2>
+        <div class="seg" id="replySeg">
+          <button type="button" data-rmode="summary" class="sel">Automatic</button>
+          <button type="button" data-rmode="custom">Custom message</button>
+        </div>
+        <div class="hint" id="summaryHint">A private “🎫 Opened your ticket: #channel” the moment they click.</div>
+        <textarea id="replyText" rows="2" maxlength="500" style="display: none; margin-top: 8px"
+          placeholder="e.g. Thanks! We've opened {ticket} — we'll be with you shortly."></textarea>
+      </details>
+    </div>
+
+    <div class="err" id="error"></div>
+
+    <div class="bar">
+      <button id="cancel" type="button">Cancel</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script>
+      "use strict";
+      const PREFIX = "tickets:";
+      const DEFAULT_WELCOME =
+        "Hi {user}, thanks for reaching out — {staff} will be with you shortly.\n\nPlease describe your issue in as much detail as you can. Use the **Close** button below when you're done.";
+
+      // ── Session / protocol state ────────────────────────────────────────
+      let nonce = null;
+      let hostOrigin = "*";
+      let instanceId = null;
+
+      // ── Capabilities (from /api/meta) ───────────────────────────────────
+      let defaultBot = false;
+      let inviteUrl = null;
+
+      // ── Host context (the server DWEEB is connected to) ─────────────────
+      let autoGuild = false;
+      let hostGuildId = "";
+      let hostGuildName = "";
+      let autoState = "idle"; // idle | connecting | ok | error
+      let autoError = "";
+      let guildMismatch = false;
+
+      // ── Editor model ────────────────────────────────────────────────────
+      let target = "button";
+      let connected = false;
+      let rolesLive = false;
+      let guildName = "";
+      let botName = "";
+      let botCanManageChannels = true;
+      let botCanManageRoles = true;
+      let roles = []; // [{ id, name, color, mentionable }]
+      let categories = []; // [{ id, name }]
+      let textChannels = []; // [{ id, name }]
+
+      let staffSelected = new Set();
+      let categoryId = "";
+      let categoryName = "";
+      let logChannelId = "";
+      let logChannelName = "";
+      let naming = "number";
+      let pingOpener = true;
+      let pingStaff = false;
+      let intake = []; // [{ id, label, style, required, placeholder }]
+      let topics = []; // [{ id, label, emoji, description }]
+      let closeMode = "delete";
+      let closeConfirmation = true;
+      let allowOpenerClose = true;
+      let claimEnabled = true;
+      let transcripts = false;
+      let maxOpen = 1;
+      let cooldown = 30;
+      let welcome = DEFAULT_WELCOME;
+      let replyMode = "summary";
+
+      const $ = (id) => document.getElementById(id);
+      const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
+      const isSelect = () => target === "string_select";
+      const genId = () => "x" + Math.random().toString(36).slice(2, 10);
+      const hexColor = (n) => (n && n > 0 ? "#" + n.toString(16).padStart(6, "0") : "#99aab5");
+      const escapeHtml = (s) =>
+        String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+      const autoMode = () => defaultBot && autoGuild;
+
+      function botInviteUrl() {
+        if (!inviteUrl) return null;
+        const gid = ($("guildId").value || "").trim();
+        if (!isSnowflake(gid)) return inviteUrl;
+        try {
+          const u = new URL(inviteUrl);
+          u.searchParams.set("guild_id", gid);
+          return u.toString();
+        } catch {
+          return inviteUrl;
+        }
+      }
+
+      // ── Step-1 status ────────────────────────────────────────────────────
+      function renderBotIntro() {
+        const intro = $("botIntro");
+        if (!defaultBot) {
+          $("step1Title").textContent = "Bot";
+          intro.innerHTML = `<div class="callout bad">This deployment has no Tickets bot configured. The operator needs to set <code>BOT_TOKEN</code> (a bot with <b>Manage Channels</b> + <b>Manage Roles</b>) for Tickets to work.</div>`;
+          sendResize();
+          return;
+        }
+        if (autoMode()) {
+          const targetName = guildName || hostGuildName;
+          const where = targetName ? `<b>${escapeHtml(targetName)}</b>` : "this server";
+          if (autoState === "ok" && guildMismatch) {
+            const built = guildName ? `<b>${escapeHtml(guildName)}</b>` : "a different server";
+            const here = hostGuildName ? `<b>${escapeHtml(hostGuildName)}</b>` : "the server you're building for";
+            intro.innerHTML = `<div class="callout warn">⚠ This panel was set up for ${built}, but you're now building in ${here}. <a href="#" id="switchLink">switch it to ${here}</a> to rebuild it here, or reopen it with ${built} selected in DWEEB.</div>`;
+            const sw = $("switchLink");
+            if (sw) sw.onclick = (e) => { e.preventDefault(); switchToHostGuild(); };
+          } else if (autoState === "ok") {
+            const pre = preflightHtml();
+            intro.innerHTML = `<div class="callout good">✓ Using the <b>DWEEB bot</b> in ${where}.</div>${pre}`;
+          } else if (autoState === "error") {
+            const lead = autoError ? escapeHtml(autoError) : `The <b>DWEEB bot</b> isn't in ${where} yet.`;
+            const invite = botInviteUrl();
+            const add = invite ? ` <a href="${invite}" target="_blank" rel="noopener">Add the DWEEB bot</a> ·` : "";
+            intro.innerHTML = `<div class="callout bad">${lead}${add} <a href="#" id="retryLink">Try again</a></div>`;
+            const retry = $("retryLink");
+            if (retry) retry.onclick = (e) => { e.preventDefault(); connect(); };
+          } else {
+            intro.innerHTML = `<div class="callout">Connecting to ${where} with the <b>DWEEB bot</b>…</div>`;
+          }
+          sendResize();
+          return;
+        }
+        // Shared bot exists, but no server connected — point them back to DWEEB.
+        const invite = botInviteUrl();
+        const addBot = invite ? ` Haven't added the bot? <a href="${invite}" target="_blank" rel="noopener">Add the DWEEB bot</a>.` : "";
+        if (instanceId) {
+          const built = guildName ? `<b>${escapeHtml(guildName)}</b>` : "another server";
+          intro.innerHTML = `<div class="callout warn">⚠ This panel runs in ${built}. Connect your server in DWEEB first — sign in and pick the server you're building for, then reopen this panel to edit it.${addBot}</div>`;
+        } else {
+          intro.innerHTML = `<div class="callout warn">Connect your server in DWEEB first — pick the server you're building this message for, then reopen this panel. It'll use that exact server automatically.${addBot}</div>`;
+        }
+        sendResize();
+      }
+
+      // The permission pre-flight banner, naming the exact fix.
+      function preflightHtml() {
+        if (botCanManageChannels && botCanManageRoles) return "";
+        const missing = [];
+        if (!botCanManageChannels) missing.push("<b>Manage Channels</b>");
+        if (!botCanManageRoles) missing.push("<b>Manage Roles</b>");
+        const invite = botInviteUrl();
+        const add = invite ? ` The quickest fix: <a href="${invite}" target="_blank" rel="noopener">re-add the bot</a> with the right permissions.` : "";
+        return `<div class="callout bad">⚠️ The bot is missing ${missing.join(" and ")}, so it can't ${!botCanManageChannels ? "create ticket channels" : "set who can see a ticket"}. Give its role those permissions in <b>Server Settings → Roles</b>, then click <a href="#" id="retryLink2">re-check</a>.${add}</div>`;
+      }
+
+      // ── Connect (auto, with the shared bot) ──────────────────────────────
+      async function connect() {
+        $("connErr").textContent = "";
+        const auto = autoMode();
+        const guildId = $("guildId").value.trim();
+        if (!isSnowflake(guildId)) {
+          if (auto) return autoFail("No server detected — open this from a connected server.");
+          return;
+        }
+        if (auto && autoState !== "ok") {
+          autoState = "connecting";
+          autoError = "";
+          renderBotIntro();
+        }
+        try {
+          const res = await fetch("/api/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ guild_id: guildId }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            if (auto) return autoFail(data.error || `Couldn't connect (${res.status}).`);
+            return;
+          }
+          guildName = data.guild_name || hostGuildName || "your server";
+          botName = data.bot_name || "DWEEB bot";
+          botCanManageChannels = data.bot_can_manage_channels !== false;
+          botCanManageRoles = data.bot_can_manage_roles !== false;
+          roles = Array.isArray(data.roles) ? data.roles : [];
+          categories = Array.isArray(data.categories) ? data.categories : [];
+          textChannels = Array.isArray(data.text_channels) ? data.text_channels : [];
+          // Drop selections whose role/channel no longer exists.
+          const roleIds = new Set(roles.map((r) => r.id));
+          staffSelected = new Set([...staffSelected].filter((id) => roleIds.has(id)));
+          const catIds = new Set(categories.map((c) => c.id));
+          if (categoryId && !catIds.has(categoryId)) { categoryId = ""; categoryName = ""; }
+          const chIds = new Set(textChannels.map((c) => c.id));
+          if (logChannelId && !chIds.has(logChannelId)) { logChannelId = ""; logChannelName = ""; }
+          connected = true;
+          rolesLive = true;
+          if (auto) { autoState = "ok"; autoError = ""; }
+          renderBotIntro();
+          unlock();
+          renderStaff();
+          renderCategorySelect();
+          renderLogSelect();
+          renderTranscriptsState();
+        } catch (e) {
+          if (auto) return autoFail("Couldn't reach the Tickets service.");
+        }
+      }
+      function autoFail(m) { autoState = "error"; autoError = m || ""; renderBotIntro(); }
+
+      function unlock() {
+        for (const id of ["topicsSection", "staffSection", "welcomeSection"]) $(id).classList.remove("locked");
+      }
+
+      // ── Staff roles ──────────────────────────────────────────────────────
+      $("staffSearch").addEventListener("input", renderStaff);
+      function renderStaff() {
+        const wrap = $("staffRoles");
+        const q = $("staffSearch").value.trim().toLowerCase();
+        wrap.innerHTML = "";
+        const shown = roles.filter((r) => !q || r.name.toLowerCase().includes(q));
+        if (!shown.length) wrap.innerHTML = `<div class="hint">No roles match.</div>`;
+        for (const r of shown) {
+          const row = document.createElement("label");
+          row.className = "pick";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = staffSelected.has(r.id);
+          input.addEventListener("change", () => {
+            if (input.checked) staffSelected.add(r.id);
+            else staffSelected.delete(r.id);
+            updateStaffCount();
+          });
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = r.name;
+          row.append(input, dot, name);
+          if (pingStaff && r.mentionable === false) {
+            const tag = document.createElement("span");
+            tag.className = "tag";
+            tag.textContent = "⚠ not mentionable";
+            tag.title = "This role can't be pinged unless it's set mentionable, so 'ping staff' won't notify it.";
+            row.appendChild(tag);
+          }
+          wrap.appendChild(row);
+        }
+        updateStaffCount();
+        sendResize();
+      }
+      function updateStaffCount() {
+        $("staffCount").textContent = staffSelected.size ? `(${staffSelected.size} selected)` : "(optional)";
+      }
+
+      function renderCategorySelect() {
+        const sel = $("category");
+        sel.innerHTML = "";
+        sel.appendChild(new Option("Top level (no category)", ""));
+        for (const c of categories) {
+          const o = new Option(c.name, c.id);
+          o.selected = c.id === categoryId;
+          sel.appendChild(o);
+        }
+        sel.value = categoryId;
+      }
+      $("category").addEventListener("change", (e) => {
+        categoryId = e.target.value;
+        categoryName = categories.find((c) => c.id === categoryId)?.name || "";
+      });
+
+      function renderLogSelect() {
+        const sel = $("logChannel");
+        sel.innerHTML = "";
+        sel.appendChild(new Option("None — no logs or transcripts", ""));
+        for (const c of textChannels) {
+          const o = new Option("#" + c.name, c.id);
+          o.selected = c.id === logChannelId;
+          sel.appendChild(o);
+        }
+        sel.value = logChannelId;
+      }
+      $("logChannel").addEventListener("change", (e) => {
+        logChannelId = e.target.value;
+        logChannelName = textChannels.find((c) => c.id === logChannelId)?.name || "";
+        renderTranscriptsState();
+      });
+
+      function renderTranscriptsState() {
+        const box = $("transcripts");
+        const hasLog = !!logChannelId;
+        box.disabled = !hasLog;
+        if (!hasLog) { transcripts = false; box.checked = false; }
+        $("transcriptsHint").textContent = hasLog
+          ? "Posted to the log channel above."
+          : "Pick a log channel above to enable transcripts.";
+      }
+
+      // ── Topics editor (string select) ─────────────────────────────────────
+      $("addTopic").addEventListener("click", () => {
+        if (topics.length >= 25) return;
+        topics.push({ id: genId(), label: "", emoji: "", description: "" });
+        renderTopics();
+      });
+      function renderTopics() {
+        const wrap = $("topics");
+        wrap.innerHTML = "";
+        topics.forEach((t, i) => {
+          const item = document.createElement("div");
+          item.className = "item";
+          const head = document.createElement("div");
+          head.className = "head";
+          const label = document.createElement("input");
+          label.type = "text";
+          label.className = "grow";
+          label.maxLength = 100;
+          label.placeholder = "Topic label (e.g. Billing)";
+          label.value = t.label;
+          label.addEventListener("input", () => { t.label = label.value; });
+          const del = document.createElement("button");
+          del.type = "button";
+          del.textContent = "✕";
+          del.title = "Remove";
+          del.addEventListener("click", () => { topics.splice(i, 1); renderTopics(); });
+          head.append(label, del);
+          const sub = document.createElement("div");
+          sub.className = "sub";
+          const emoji = document.createElement("input");
+          emoji.type = "text";
+          emoji.maxLength = 8;
+          emoji.placeholder = "Emoji (optional)";
+          emoji.value = t.emoji || "";
+          emoji.addEventListener("input", () => { t.emoji = emoji.value; });
+          const desc = document.createElement("input");
+          desc.type = "text";
+          desc.maxLength = 100;
+          desc.placeholder = "Short description (optional)";
+          desc.value = t.description || "";
+          desc.addEventListener("input", () => { t.description = desc.value; });
+          sub.append(emoji, desc);
+          item.append(head, sub);
+          wrap.appendChild(item);
+        });
+        $("topicCount").textContent = topics.length ? `(${topics.length})` : "";
+        sendResize();
+      }
+
+      // ── Intake editor ──────────────────────────────────────────────────────
+      $("addField").addEventListener("click", () => {
+        if (intake.length >= 5) return;
+        intake.push({ id: genId(), label: "", style: "short", required: false, placeholder: "" });
+        renderIntake();
+      });
+      function renderIntake() {
+        const wrap = $("intake");
+        wrap.innerHTML = "";
+        intake.forEach((f, i) => {
+          const item = document.createElement("div");
+          item.className = "item";
+          const head = document.createElement("div");
+          head.className = "head";
+          const label = document.createElement("input");
+          label.type = "text";
+          label.className = "grow";
+          label.maxLength = 45;
+          label.placeholder = "Question (e.g. What's the issue?)";
+          label.value = f.label;
+          label.addEventListener("input", () => { f.label = label.value; });
+          const del = document.createElement("button");
+          del.type = "button";
+          del.textContent = "✕";
+          del.addEventListener("click", () => { intake.splice(i, 1); renderIntake(); });
+          head.append(label, del);
+          const sub = document.createElement("div");
+          sub.className = "sub";
+          const seg = document.createElement("div");
+          seg.className = "miniseg";
+          for (const s of ["short", "paragraph"]) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.textContent = s === "short" ? "Short" : "Paragraph";
+            b.className = f.style === s ? "sel" : "";
+            b.addEventListener("click", () => { f.style = s; renderIntake(); });
+            seg.appendChild(b);
+          }
+          const ph = document.createElement("input");
+          ph.type = "text";
+          ph.maxLength = 100;
+          ph.placeholder = "Placeholder (optional)";
+          ph.value = f.placeholder || "";
+          ph.addEventListener("input", () => { f.placeholder = ph.value; });
+          sub.append(seg, ph);
+          const req = document.createElement("label");
+          req.className = "check";
+          req.style.marginTop = "8px";
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = !!f.required;
+          cb.addEventListener("change", () => { f.required = cb.checked; });
+          const txt = document.createElement("span");
+          txt.className = "t";
+          txt.textContent = "Required";
+          req.append(cb, txt);
+          item.append(head, sub, req);
+          wrap.appendChild(item);
+        });
+        $("intakeCount").textContent = intake.length ? `(${intake.length}/5)` : "";
+        sendResize();
+      }
+
+      // ── Segmented controls ─────────────────────────────────────────────────
+      function wireSeg(segId, onPick) {
+        for (const btn of $(segId).children) {
+          btn.addEventListener("click", () => {
+            for (const b of $(segId).children) b.classList.toggle("sel", b === btn);
+            onPick(btn.dataset);
+          });
+        }
+      }
+      wireSeg("namingSeg", (d) => { naming = d.naming; });
+      wireSeg("closeSeg", (d) => { closeMode = d.close; });
+      wireSeg("replySeg", (d) => {
+        replyMode = d.rmode;
+        $("replyText").style.display = replyMode === "custom" ? "" : "none";
+        $("summaryHint").style.display = replyMode === "custom" ? "none" : "";
+        sendResize();
+      });
+
+      $("pingOpener").addEventListener("change", (e) => { pingOpener = e.target.checked; });
+      $("pingStaff").addEventListener("change", (e) => { pingStaff = e.target.checked; renderStaff(); });
+      $("closeConfirm").addEventListener("change", (e) => { closeConfirmation = e.target.checked; });
+      $("openerClose").addEventListener("change", (e) => { allowOpenerClose = e.target.checked; });
+      $("claimEnabled").addEventListener("change", (e) => { claimEnabled = e.target.checked; });
+      $("transcripts").addEventListener("change", (e) => { transcripts = e.target.checked && !!logChannelId; });
+      $("welcome").addEventListener("input", (e) => { welcome = e.target.value; });
+      $("maxOpen").addEventListener("input", (e) => { maxOpen = clampInt(e.target.value, 0, 50, 1); });
+      $("cooldown").addEventListener("input", (e) => { cooldown = clampInt(e.target.value, 0, 86400, 30); });
+      const clampInt = (v, lo, hi, dflt) => {
+        const n = parseInt(v, 10);
+        if (Number.isNaN(n)) return dflt;
+        return Math.min(hi, Math.max(lo, n));
+      };
+
+      // ── DWEEB protocol ──────────────────────────────────────────────────
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+
+      window.addEventListener("message", async (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          const resolve = pendingReqs.get(msg.requestId);
+          pendingReqs.delete(msg.requestId);
+          resolve(msg.ok ? msg.data : null);
+          return;
+        }
+        if (msg.type !== "dweeb:plugin:init") return;
+
+        nonce = msg.nonce;
+        hostOrigin = event.origin;
+        if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+        target = msg.target === "string_select" ? "string_select" : "button";
+        $("welcome").value = welcome;
+        applyTargetVisibility();
+
+        await loadMeta();
+
+        const guild = await requestResource("guild");
+        if (guild && typeof guild.id === "string" && isSnowflake(guild.id)) {
+          autoGuild = true;
+          hostGuildId = guild.id;
+          hostGuildName = typeof guild.name === "string" ? guild.name : "";
+          if (!$("guildId").value) $("guildId").value = guild.id;
+        }
+
+        if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
+          instanceId = msg.customId.slice(PREFIX.length);
+          await loadInstance(instanceId);
+        }
+        renderBotIntro();
+        renderTopics();
+        renderIntake();
+        updateStaffCount();
+        sendResize();
+        maybeAutoConnect();
+      });
+
+      // Topics step appears for a select; renumber the later steps accordingly.
+      function applyTargetVisibility() {
+        $("topicsWrap").style.display = isSelect() ? "" : "none";
+        $("staffStepNum").textContent = isSelect() ? "3" : "2";
+        $("welcomeStepNum").textContent = isSelect() ? "4" : "3";
+      }
+
+      const pendingReqs = new Map();
+      function requestResource(resource) {
+        return new Promise((resolve) => {
+          if (nonce == null) return resolve(null);
+          const requestId = "req_" + Math.random().toString(36).slice(2);
+          pendingReqs.set(requestId, resolve);
+          parent.postMessage({ type: "dweeb:plugin:request", nonce, requestId, resource }, hostOrigin);
+          setTimeout(() => {
+            if (pendingReqs.has(requestId)) { pendingReqs.delete(requestId); resolve(null); }
+          }, 4000);
+        });
+      }
+
+      function maybeAutoConnect() {
+        if (!autoMode()) return;
+        if (guildMismatch) return;
+        if (connected && rolesLive) return;
+        if (!isSnowflake($("guildId").value.trim())) return;
+        connect();
+      }
+
+      function switchToHostGuild() {
+        if (!isSnowflake(hostGuildId)) return;
+        $("guildId").value = hostGuildId;
+        guildName = hostGuildName;
+        guildMismatch = false;
+        rolesLive = false;
+        connected = false;
+        staffSelected = new Set();
+        categoryId = ""; logChannelId = "";
+        roles = []; categories = []; textChannels = [];
+        autoState = "connecting";
+        renderStaff();
+        connect();
+      }
+
+      function sendResize() {
+        if (nonce == null) return;
+        parent.postMessage({ type: "dweeb:plugin:resize", nonce, height: document.body.scrollHeight + 24 }, hostOrigin);
+      }
+
+      // Delegated handler for the "re-check" link in the preflight banner.
+      document.addEventListener("click", (e) => {
+        if (e.target && e.target.id === "retryLink2") { e.preventDefault(); connect(); }
+      });
+
+      async function loadMeta() {
+        try {
+          const res = await fetch("/api/meta");
+          if (res.ok) {
+            const m = await res.json();
+            defaultBot = !!m.defaultBot;
+            inviteUrl = m.inviteUrl || null;
+          }
+        } catch { /* leave defaults */ }
+      }
+
+      // ── Reconfigure ─────────────────────────────────────────────────────
+      async function loadInstance(id) {
+        try {
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          target = d.target === "string_select" ? "string_select" : "button";
+          applyTargetVisibility();
+          const savedGuild = d.guild_id || $("guildId").value;
+          guildName = d.guild_name || (savedGuild === hostGuildId ? hostGuildName : "") || "";
+          $("guildId").value = savedGuild;
+          if (isSnowflake(savedGuild)) guildMismatch = !!hostGuildId && hostGuildId !== savedGuild;
+
+          staffSelected = new Set((d.staff_roles || []).map((r) => r.id));
+          // Seed the role list with saved staff so they show even before a live
+          // connect refreshes names/colours.
+          roles = (d.staff_roles || []).map((r) => ({ id: r.id, name: r.name || r.id, color: r.color || 0, mentionable: true }));
+          categoryId = d.category_id || ""; categoryName = d.category_name || "";
+          logChannelId = d.log_channel_id || ""; logChannelName = d.log_channel_name || "";
+          naming = d.naming || "number";
+          welcome = typeof d.welcome === "string" ? d.welcome : DEFAULT_WELCOME;
+          $("welcome").value = welcome;
+          pingOpener = d.ping_opener !== false;
+          pingStaff = !!d.ping_staff;
+          intake = Array.isArray(d.intake) ? d.intake.map((f) => ({ id: f.id || genId(), label: f.label || "", style: f.style === "paragraph" ? "paragraph" : "short", required: !!f.required, placeholder: f.placeholder || "" })) : [];
+          topics = Array.isArray(d.topics) ? d.topics.map((t) => ({ id: t.id || genId(), label: t.label || "", emoji: t.emoji || "", description: t.description || "" })) : [];
+          closeMode = d.close_mode === "lock" ? "lock" : "delete";
+          closeConfirmation = d.close_confirmation !== false;
+          allowOpenerClose = d.allow_opener_close !== false;
+          claimEnabled = d.claim_enabled !== false;
+          transcripts = !!d.transcripts;
+          maxOpen = Number.isInteger(d.max_open_per_user) ? d.max_open_per_user : 1;
+          cooldown = Number.isInteger(d.cooldown_secs) ? d.cooldown_secs : 30;
+          if (d.response?.mode === "custom") {
+            replyMode = "custom";
+            $("replyText").value = d.response.text || "";
+          }
+
+          // Reflect into the controls.
+          syncControls();
+
+          if (guildMismatch || !autoGuild) {
+            connected = false;
+            renderStaff();
+            renderCategorySelect();
+            renderLogSelect();
+            return;
+          }
+        } catch { /* fresh form */ }
+      }
+
+      // Push the model into the form controls (used after a reconfigure load).
+      function syncControls() {
+        for (const b of $("namingSeg").children) b.classList.toggle("sel", b.dataset.naming === naming);
+        for (const b of $("closeSeg").children) b.classList.toggle("sel", b.dataset.close === closeMode);
+        for (const b of $("replySeg").children) b.classList.toggle("sel", b.dataset.rmode === replyMode);
+        $("replyText").style.display = replyMode === "custom" ? "" : "none";
+        $("summaryHint").style.display = replyMode === "custom" ? "none" : "";
+        $("pingOpener").checked = pingOpener;
+        $("pingStaff").checked = pingStaff;
+        $("closeConfirm").checked = closeConfirmation;
+        $("openerClose").checked = allowOpenerClose;
+        $("claimEnabled").checked = claimEnabled;
+        $("transcripts").checked = transcripts;
+        $("maxOpen").value = maxOpen;
+        $("cooldown").value = cooldown;
+        renderCategorySelect();
+        renderLogSelect();
+        renderTranscriptsState();
+        renderTopics();
+        renderIntake();
+      }
+
+      // ── Save ────────────────────────────────────────────────────────────
+      $("cancel").addEventListener("click", () => {
+        parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
+      });
+      $("save").addEventListener("click", save);
+
+      function save() {
+        $("error").textContent = "";
+        const guildId = $("guildId").value.trim();
+        if (guildMismatch) return fail(`This panel belongs to ${guildName || "another server"}. Switch it to your current server first, or reopen it with that server selected in DWEEB.`);
+        if (defaultBot && !autoGuild) return fail("Connect your server in DWEEB first — sign in and pick it, then reopen this panel.");
+        if (!connected) return fail("Finish step 1 first (the DWEEB bot needs to reach your server).");
+        if (!isSnowflake(guildId)) return fail("That server doesn't look right.");
+        const w = $("welcome").value.trim();
+        if (!w) return fail("Write a welcome message for new tickets.");
+
+        if (isSelect()) {
+          const clean = topics.filter((t) => t.label.trim());
+          if (!clean.length) return fail("Add at least one topic for the menu.");
+          if (clean.length > 25) return fail("A menu can have at most 25 topics.");
+        }
+        for (const f of intake) {
+          if (!f.label.trim()) return fail("An intake question is missing its text — fill it in or remove it.");
+        }
+        const replyText = $("replyText").value.trim();
+        if (replyMode === "custom" && !replyText) return fail("Type your custom reply, or switch to the automatic summary.");
+
+        const staffRoles = roles.filter((r) => staffSelected.has(r.id)).map((r) => ({ id: r.id, name: r.name, color: r.color || 0 }));
+        const cleanTopics = topics.filter((t) => t.label.trim()).map((t) => ({
+          id: t.id,
+          label: t.label.trim().slice(0, 100),
+          ...(t.emoji && t.emoji.trim() ? { emoji: t.emoji.trim() } : {}),
+          ...(t.description && t.description.trim() ? { description: t.description.trim().slice(0, 100) } : {}),
+        }));
+        const cleanIntake = intake.filter((f) => f.label.trim()).map((f) => ({
+          id: f.id,
+          label: f.label.trim().slice(0, 45),
+          style: f.style === "paragraph" ? "paragraph" : "short",
+          required: !!f.required,
+          ...(f.placeholder && f.placeholder.trim() ? { placeholder: f.placeholder.trim().slice(0, 100) } : {}),
+        }));
+
+        const body = {
+          target,
+          guild_id: guildId,
+          guild_name: guildName || "",
+          staff_roles: staffRoles,
+          category_id: categoryId || null,
+          category_name: categoryName || "",
+          log_channel_id: logChannelId || null,
+          log_channel_name: logChannelName || "",
+          naming,
+          welcome: w,
+          ping_opener: pingOpener,
+          ping_staff: pingStaff,
+          intake: cleanIntake,
+          topics: isSelect() ? cleanTopics : [],
+          close_mode: closeMode,
+          close_confirmation: closeConfirmation,
+          allow_opener_close: allowOpenerClose,
+          claim_enabled: claimEnabled,
+          transcripts: transcripts && !!logChannelId,
+          max_open_per_user: maxOpen,
+          cooldown_secs: cooldown,
+          response: replyMode === "custom" ? { mode: "custom", text: replyText } : { mode: "summary" },
+        };
+
+        setBusy(true);
+        const url = instanceId ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
+        fetch(url, {
+          method: instanceId ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+          .then(async (res) => {
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { setBusy(false); return fail(data.error || `Server returned ${res.status}.`); }
+            const id = data.id || instanceId;
+            const desc = isSelect()
+              ? `${cleanTopics.length} topic${cleanTopics.length === 1 ? "" : "s"}`
+              : (staffRoles.length ? `${staffRoles.length} staff role${staffRoles.length === 1 ? "" : "s"}` : "private support");
+            parent.postMessage(
+              {
+                type: "dweeb:plugin:save",
+                nonce,
+                customId: PREFIX + "open:" + id,
+                guildId,
+                summary: { label: "Tickets", description: desc },
+                // For a select, hand DWEEB the locked option list (value = topic id).
+                ...(isSelect()
+                  ? {
+                      options: cleanTopics.map((t) => ({
+                        label: t.label,
+                        value: t.id,
+                        ...(t.description ? { description: t.description } : {}),
+                        ...(t.emoji ? { emoji: t.emoji } : {}),
+                      })),
+                    }
+                  : {}),
+              },
+              hostOrigin,
+            );
+          })
+          .catch(() => { setBusy(false); fail("Couldn't reach the plugin service."); });
+      }
+
+      function fail(m) { $("error").textContent = m; sendResize(); }
+      function setBusy(b) { $("save").disabled = b; $("save").textContent = b ? "Saving…" : "Save"; }
+    </script>
+  </body>
+</html>

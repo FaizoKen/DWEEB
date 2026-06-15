@@ -13,14 +13,17 @@ use std::env;
 // only because a bundled plugin requires it.
 //
 // This MUST mirror `SHARED_BOT_PERMISSIONS` in the DWEEB frontend
-// (`src/core/guild/config.ts`): both produce the one value every invite carries.
-// Bump both together when a plugin's needs change.
+// (`src/core/guild/config.ts`) and the same constant in every other plugin that
+// builds an invite for the shared bot (e.g. self-role): all of them produce the
+// one value every invite carries. Bump them together when a plugin's needs
+// change.
 
-/// Manage Channels — the tickets plugin creates/deletes per-ticket channels.
-/// Self Role doesn't use it, but the shared bot's invite must still request it
-/// so re-inviting through *this* plugin's link can't strip tickets' grant.
+/// Manage Channels — tickets creates/deletes the per-ticket channel
+/// (`POST /guilds/{guild}/channels`, `DELETE /channels/{id}`).
 const MANAGE_CHANNELS: u64 = 1 << 4;
-/// Manage Roles — self-role assigns/removes roles (`PUT …/members/{user}/roles`).
+/// Manage Roles — required to set a channel's permission overwrites (the
+/// per-ticket "only the opener + staff can see this" rule). Also what self-role
+/// needs to assign roles, so it is shared across both plugins.
 const MANAGE_ROLES: u64 = 1 << 28;
 
 /// The union every shared-bot invite must request: Manage Channels + Manage Roles.
@@ -55,10 +58,10 @@ fn normalize_invite_permissions(raw: &str) -> String {
 
 #[derive(Clone)]
 pub struct Config {
-    /// Port to bind. Defaults to 8092.
+    /// Port to bind. Defaults to 8093.
     pub port: u16,
     /// Public origin this service is reachable at, e.g.
-    /// `https://selfrole.example.com`. Used to build the `configUrl` in the
+    /// `https://tickets.example.com`. Used to build the `configUrl` in the
     /// registry so DWEEB embeds the right iframe. No trailing slash.
     pub public_base_url: String,
     /// Discord application **public key** (hex), from the Developer Portal.
@@ -70,13 +73,13 @@ pub struct Config {
     /// still get cryptographically verified here. None = only the primary key
     /// ever verifies.
     pub dispatcher_forward_secret: Option<String>,
-    /// SQLite database file path. Defaults to `./self-role.db`.
+    /// SQLite database file path. Defaults to `./tickets.db`.
     pub database_path: String,
-    /// The deployment-wide shared "Self Role" bot token. Every instance assigns
-    /// roles with this bot — a server admin only ever *invites* it, never pastes
-    /// a token. Stored only in memory, never returned to a browser. None = no bot
-    /// configured, so the config UI refuses to set up a menu and clicks can't
-    /// assign roles.
+    /// The deployment-wide shared "Tickets" bot token. Every panel opens tickets
+    /// with this bot — a server admin only ever *invites* it, never pastes a
+    /// token. Stored only in memory, never returned to a browser. None = no bot
+    /// configured, so the config UI refuses to set up a panel and clicks can't
+    /// open tickets.
     pub default_bot_token: Option<String>,
     /// Optional OAuth invite URL for the shared bot above (`scope=bot`),
     /// surfaced by `/api/meta` so the config UI can offer a one-click "Add the
@@ -94,7 +97,7 @@ impl Config {
         let port = env::var("PORT")
             .ok()
             .and_then(|p| p.parse().ok())
-            .unwrap_or(8092);
+            .unwrap_or(8093);
 
         let public_base_url = env::var("PUBLIC_BASE_URL")
             .unwrap_or_else(|_| format!("http://localhost:{port}"))
@@ -115,8 +118,7 @@ impl Config {
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty());
 
-        let database_path =
-            env::var("DATABASE_PATH").unwrap_or_else(|_| "./self-role.db".to_string());
+        let database_path = env::var("DATABASE_PATH").unwrap_or_else(|_| "./tickets.db".to_string());
 
         let default_bot_token = env::var("BOT_TOKEN")
             .ok()
@@ -140,8 +142,8 @@ impl Config {
         })
     }
 
-    /// True when the deployment has the shared bot configured, so menus can be
-    /// set up and clicks can assign roles.
+    /// True when the deployment has the shared bot configured, so panels can be
+    /// set up and clicks can open tickets.
     pub fn has_default_bot(&self) -> bool {
         self.default_bot_token.is_some()
     }
@@ -159,6 +161,16 @@ mod tests {
             .map(|(_, v)| v.into_owned())
     }
 
+    /// The union string every DWEEB shared-bot invite must carry. Mirrors
+    /// `SHARED_BOT_PERMISSIONS` in the frontend and self-role; this test is the
+    /// tripwire that fails if the three drift apart.
+    const UNION: &str = "268435472"; // (1<<4) | (1<<28)
+
+    #[test]
+    fn union_is_manage_channels_plus_manage_roles() {
+        assert_eq!(SHARED_BOT_PERMISSIONS.to_string(), UNION);
+    }
+
     #[test]
     fn rewrites_a_too_narrow_permissions_to_the_union() {
         // Operator pasted permissions=0 — must be forced up to the shared union
@@ -166,7 +178,7 @@ mod tests {
         let out = normalize_invite_permissions(
             "https://discord.com/oauth2/authorize?client_id=123&scope=bot&permissions=0",
         );
-        assert_eq!(perms_of(&out).as_deref(), Some("268435472"));
+        assert_eq!(perms_of(&out).as_deref(), Some(UNION));
     }
 
     #[test]
@@ -184,9 +196,8 @@ mod tests {
             url.query_pairs().find(|(k, _)| k == "scope").map(|(_, v)| v.into_owned()),
             Some("bot".to_string())
         );
-        // …and the union is appended.
-        assert_eq!(perms_of(&out).as_deref(), Some("268435472"));
-        // Exactly one `permissions` param, never duplicated.
+        // …and the union is appended, exactly once.
+        assert_eq!(perms_of(&out).as_deref(), Some(UNION));
         assert_eq!(url.query_pairs().filter(|(k, _)| k == "permissions").count(), 1);
     }
 

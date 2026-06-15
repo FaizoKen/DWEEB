@@ -26,6 +26,7 @@ on:
       - Plugin Modal Form
       - Plugin Ping Pong
       - Plugin Self Role
+      - Plugin Tickets
     types: [completed]
     branches: [main]
   workflow_dispatch:

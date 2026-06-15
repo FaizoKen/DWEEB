@@ -33,6 +33,7 @@ const DEV_CONFIG_ORIGINS: Record<string, string> = {
   "modal-form": (import.meta.env.VITE_DEV_MODAL_FORM_ORIGIN || "http://localhost:8090").trim(),
   "ping-pong": (import.meta.env.VITE_DEV_PING_PONG_ORIGIN || "http://localhost:8091").trim(),
   "self-role": (import.meta.env.VITE_DEV_SELF_ROLE_ORIGIN || "http://localhost:8092").trim(),
+  "tickets": (import.meta.env.VITE_DEV_TICKETS_ORIGIN || "http://localhost:8093").trim(),
 };
 
 /** Repoint a plugin's configUrl at its local dev origin, preserving the path. */

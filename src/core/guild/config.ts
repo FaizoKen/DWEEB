@@ -135,7 +135,12 @@ export function consumeIncomingWebhook(): IncomingWebhookResult | null {
  * mirrors this value (`SHARED_BOT_PERMISSIONS` in `plugins/self-role/src/`).
  */
 const SHARED_BOT_PERMISSION_BITS = {
-  /** self-role — assigns/removes roles (`PUT …/members/{user}/roles/{role}`). */
+  /** tickets — creates/deletes the per-ticket channel (`POST/DELETE …/channels`). */
+  MANAGE_CHANNELS: 1n << 4n,
+  /**
+   * self-role — assigns/removes roles (`PUT …/members/{user}/roles/{role}`).
+   * Also what tickets needs to set a ticket channel's permission overwrites.
+   */
   MANAGE_ROLES: 1n << 28n,
 } as const;
 

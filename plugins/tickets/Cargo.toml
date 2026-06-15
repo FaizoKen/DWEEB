@@ -1,0 +1,40 @@
+[package]
+name = "dweeb-tickets"
+version = "0.1.0"
+edition = "2021"
+description = "DWEEB plugin: private support tickets from a button or topic menu. Opens a per-ticket private channel, optional intake form, staff claim, close with transcript, anti-spam limits."
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time", "sync"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+# Loads a local `.env` for `cargo run`; a no-op under Docker (which injects env).
+dotenvy = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Talks to the Discord REST API (create/delete the ticket channel, set its
+# permission overwrites, post the welcome + controls, fetch messages for the
+# transcript, upload it). rustls avoids an OpenSSL system dependency, keeping the
+# deploy image tiny; `multipart` is for the transcript file upload.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+# Fan out the independent config-time probes (roles/channels/bot member) and the
+# few click-time calls concurrently so everything still fits Discord's 3s window.
+futures = "0.3"
+# Verify Discord's Ed25519 interaction signatures.
+ed25519-dalek = "2"
+hex = "0.4"
+# Single-file embedded store — no separate DB server to pay for. `bundled`
+# compiles SQLite from source, so the image needs no system libsqlite.
+rusqlite = { version = "0.31", features = ["bundled"] }
+# CSPRNG for unguessable instance ids (the capability that gates reconfigure).
+getrandom = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Small, low-throughput service — optimise the release binary for size so it
+# fits the cheapest hosting tiers.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

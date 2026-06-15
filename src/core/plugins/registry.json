@@ -37,6 +37,19 @@
       "configUrl": "https://selfrole.dweeb.faizo.net/config.html",
       "customIdPrefix": "selfrole:",
       "managesSelectOptions": true
+    },
+    {
+      "schemaVersion": 1,
+      "id": "tickets",
+      "name": "Tickets",
+      "description": "Private support tickets from a button or topic menu — per-ticket channel, optional intake form, staff claim, close with transcript.",
+      "version": "0.1.0",
+      "publisher": "DWEEB",
+      "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/tickets",
+      "targets": ["button", "string_select"],
+      "configUrl": "https://tickets.dweeb.faizo.net/config.html",
+      "customIdPrefix": "tickets:",
+      "managesSelectOptions": true
     }
   ]
 }

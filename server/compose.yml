@@ -94,7 +94,7 @@ services:
     restart: unless-stopped
     environment:
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
-      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092"}'
+      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093"}'
       # The /dashboard slash command (answered inline, no plugin) replies with
       # this URL. Register the command once: node scripts/register-commands.mjs
       # NOT derived from DOMAIN — that is the API host, not the dashboard.
@@ -213,6 +213,44 @@ services:
       retries: 3
       start_period: 5s
 
+  # Tickets (../plugins/tickets): members open a private support ticket from a
+  # button or topic menu. Like self-role it calls the Discord REST API, so it
+  # needs the same shared bot — here with MANAGE CHANNELS (create/delete the
+  # ticket channel) and MANAGE ROLES (set who can see it). Point TICKETS_BOT_TOKEN
+  # at the main DWEEB bot (= DISCORD_BOT_TOKEN). Its own registry, config UI and
+  # config API, backed by one SQLite file (panel configs + open tickets). Served
+  # at tickets.$PLUGINS_DOMAIN.
+  tickets:
+    image: ghcr.io/faizoken/dweeb-tickets:${TICKETS_TAG:-latest}
+    build: ../plugins/tickets
+    restart: unless-stopped
+    environment:
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://tickets.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      # Lets the dispatcher vouch for a custom app's verifying key (see the
+      # dispatcher service above). Must match the dispatcher's value.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
+      # The shared bot that creates/deletes ticket channels and sets their
+      # overwrites (needs Manage Channels + Manage Roles). REQUIRED in practice —
+      # if blank, /api/connect answers "no Tickets bot configured" and no panel
+      # can be set up. We point it at the main DWEEB bot (TICKETS_BOT_TOKEN =
+      # DISCORD_BOT_TOKEN in .env). The invite URL is optional, surfaced as a
+      # one-click "add the bot" button in the config UI; its permissions are
+      # normalized to the shared union (Manage Channels + Manage Roles).
+      BOT_TOKEN: ${TICKETS_BOT_TOKEN:?set TICKETS_BOT_TOKEN in .env (e.g. = DISCORD_BOT_TOKEN)}
+      BOT_INVITE_URL: ${TICKETS_BOT_INVITE_URL:-}
+      RUST_LOG: info
+    volumes:
+      # The plugin's only state: the SQLite file with panel configs + open tickets.
+      - tickets_data:/data
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8093 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   # Only started when you opt in with `--profile redis`. Shared cache +
   # rate-limit store for running several `proxy` replicas behind a balancer.
   redis:
@@ -303,6 +341,7 @@ volumes:
   dispatcher_data:
   modalform_data:
   selfrole_data:
+  tickets_data:
   beszel_data:
   beszel_agent_data:
   gatus_data:
