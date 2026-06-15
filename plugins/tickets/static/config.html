@@ -743,8 +743,14 @@
           if (!$("guildId").value) $("guildId").value = guild.id;
         }
 
-        if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
-          instanceId = msg.customId.slice(PREFIX.length);
+        // The panel component's custom_id is `tickets:open:<id>` — the "open:"
+        // segment is what routes a click to the open flow (see save() below).
+        // Strip BOTH segments to recover the bare instance id; slicing only
+        // PREFIX would leave "open:<id>", and every /api/instances/<id> call
+        // would then 404 ("Unknown instance.") on reconfigure + re-save.
+        const OPEN_PREFIX = PREFIX + "open:";
+        if (typeof msg.customId === "string" && msg.customId.startsWith(OPEN_PREFIX)) {
+          instanceId = msg.customId.slice(OPEN_PREFIX.length);
           await loadInstance(instanceId);
         }
         renderBotIntro();
