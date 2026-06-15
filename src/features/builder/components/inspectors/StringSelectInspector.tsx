@@ -12,6 +12,7 @@
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
+import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import type { StringSelectComponent, StringSelectOption } from "@/core/schema/types";
 import { useAttachedPlugin } from "@/features/plugins/useAttachedPlugin";
@@ -20,6 +21,7 @@ import { IconButton } from "@/ui/IconButton";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { LockIcon, TrashIcon } from "@/ui/Icon";
+import { EmojiField } from "./EmojiField";
 import { SelectBaseFields } from "./SelectShared";
 import styles from "./inspectors.module.css";
 
@@ -29,6 +31,7 @@ interface Props {
 
 export function StringSelectInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
+  const advancedMode = useUiPrefs((s) => s.advancedMode);
   const attachedPlugin = useAttachedPlugin(node);
 
   // A plugin only owns the option list when it declares `managesSelectOptions`
@@ -128,6 +131,11 @@ export function StringSelectInspector({ node }: Props) {
                 />
               )}
             </Field>
+            <EmojiField
+              emoji={opt.emoji}
+              advancedMode={advancedMode}
+              onChange={(emoji) => updateOption(i, { ...opt, emoji })}
+            />
             <Field label="Value" hint="Sent to your bot when the option is picked.">
               {(id) => (
                 <TextInput
