@@ -82,6 +82,15 @@ endpoints:
     alerts:
       - type: discord
 
+  - name: giveaway
+    group: plugins
+    url: "https://giveaway.${PLUGINS_DOMAIN}/health"
+    interval: 120s
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
+
   # TLS expiry early-warning on the interactions cert (Caddy auto-renews ~30d
   # out; alert if it ever slips under 14 days, which means renewal is failing).
   - name: TLS certificate (interactions)

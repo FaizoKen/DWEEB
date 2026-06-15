@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Giveaway — configure</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1f22;
+        --panel: #2b2d31;
+        --panel-2: #232428;
+        --border: #3a3c41;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #5865f2;
+        --green: #3ba55d;
+        --yellow: #f0b232;
+        --danger: #da373c;
+        --radius: 8px;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #f2f3f5;
+        --panel-2: #e3e5e8;
+        --border: #d7d9dc;
+        --text: #1e1f22;
+        --muted: #4e5058;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 20px 0 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h2:first-of-type { margin-top: 0; }
+      .step-num {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="text"], input[type="number"], input[type="datetime-local"], select, textarea {
+        width: 100%;
+        padding: 8px 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+      }
+      input:focus-visible, select:focus-visible, textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+      .hint code, .callout code { color: var(--accent); }
+      .row2 { display: flex; gap: 8px; }
+      .row2 > * { flex: 1; }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
+      .bar .grow { flex: 1; }
+      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+      .callout {
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+      .callout.good { border-left-color: var(--green); }
+      .callout.warn { border-left-color: var(--yellow); }
+      .callout.bad { border-left-color: var(--danger); }
+      .callout b { color: var(--text); }
+
+      details { margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+      summary { cursor: pointer; padding: 10px 12px; font-weight: 600; color: var(--text); list-style: none; }
+      summary::-webkit-details-marker { display: none; }
+      summary::before { content: "▸ "; color: var(--muted); }
+      details[open] summary::before { content: "▾ "; }
+      .details-body { padding: 0 12px 12px; }
+
+      .checkrow { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+      .checkrow input { flex: none; width: auto; accent-color: var(--accent); }
+
+      /* Role list. */
+      .roles { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 220px; overflow: auto; }
+      .role {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 9px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-2);
+        cursor: pointer;
+      }
+      .role:hover { border-color: var(--accent); }
+      .role input { flex: none; margin: 0; width: auto; accent-color: var(--accent); }
+      .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
+      .role .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .role-search { margin-top: 8px; }
+      .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+      .locked { opacity: 0.5; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <!-- Step 1 — server status ----------------------------------------------->
+    <h2><span class="step-num">1</span> Server</h2>
+    <div id="serverIntro"></div>
+    <!-- Hidden value-holder for the connected server id (no raw-id field). -->
+    <input id="guildId" type="hidden" />
+    <div class="err" id="connErr"></div>
+
+    <!-- Step 2 — the prize ---------------------------------------------------->
+    <h2><span class="step-num">2</span> The prize</h2>
+    <div id="prizeSection">
+      <label class="lbl" for="prize">What are you giving away? <span style="color:var(--danger)">*</span></label>
+      <input id="prize" type="text" maxlength="256" placeholder="e.g. a month of Discord Nitro" />
+      <div class="row2" style="margin-top: 10px">
+        <div>
+          <label class="lbl" for="winners">How many winners?</label>
+          <input id="winners" type="number" min="1" max="20" value="1" />
+        </div>
+        <div>
+          <label class="lbl" for="hostId">Host (optional)</label>
+          <input id="hostId" type="text" inputmode="numeric" placeholder="user id — leave blank for none" />
+        </div>
+      </div>
+      <label class="lbl" for="description">Details (optional)</label>
+      <textarea id="description" rows="2" maxlength="1500"
+        placeholder="Anything extra to show — how to claim, rules, etc."></textarea>
+      <div class="hint">
+        Tip: write the giveaway text in your DWEEB message however you like, then attach
+        this button to it. The <b>live entrant count</b> appears right on the button.
+      </div>
+    </div>
+
+    <!-- Advanced — requirements, deadline, winners notify --------------------->
+    <details id="advanced">
+      <summary>Advanced options</summary>
+      <div class="details-body">
+        <!-- Entry requirements -->
+        <h2 style="margin-top: 12px"><span class="step-num">3</span> Who can enter
+          <span class="count" id="reqCount"></span></h2>
+        <div id="reqIntro" class="hint">
+          By default <b>anyone</b> can enter, once each.
+        </div>
+
+        <label class="lbl">Required roles</label>
+        <div id="rolesUnavailable" class="callout" style="display:none"></div>
+        <div id="rolesWrap">
+          <input id="roleSearch" class="role-search" type="text" placeholder="Search roles…" />
+          <div id="roles" class="roles"></div>
+          <div class="checkrow" id="requireAllWrap" style="display:none">
+            <input id="requireAll" type="checkbox" />
+            <label for="requireAll" style="margin:0;cursor:pointer">Must have <b>all</b> selected roles (otherwise any one)</label>
+          </div>
+        </div>
+
+        <label class="lbl" for="minAge" style="margin-top: 12px">Minimum account age</label>
+        <select id="minAge">
+          <option value="0">No minimum</option>
+          <option value="1">1 day old</option>
+          <option value="3">3 days old</option>
+          <option value="7">7 days old</option>
+          <option value="14">14 days old</option>
+          <option value="30">30 days old</option>
+          <option value="90">90 days old</option>
+        </select>
+        <div class="hint">Blocks brand-new alt accounts. Derived from the account's age — no extra setup.</div>
+
+        <!-- Deadline -->
+        <h2><span class="step-num">4</span> Deadline (optional)</h2>
+        <div class="hint" id="deadlineHint">
+          Sets a countdown and <b>closes entries</b> when it passes. There's no auto-draw —
+          you draw the winners yourself with the host controls, whenever you're ready.
+        </div>
+        <div class="row2" style="margin-top: 8px">
+          <div>
+            <label class="lbl" for="durValue">Ends in</label>
+            <input id="durValue" type="number" min="0" placeholder="e.g. 24" />
+          </div>
+          <div>
+            <label class="lbl" for="durUnit">&nbsp;</label>
+            <select id="durUnit">
+              <option value="minutes">minutes</option>
+              <option value="hours" selected>hours</option>
+              <option value="days">days</option>
+            </select>
+          </div>
+        </div>
+        <div class="hint" id="endsAtPreview"></div>
+
+        <!-- Winners / notify -->
+        <h2><span class="step-num">5</span> When you draw</h2>
+        <div class="checkrow">
+          <input id="dmWinners" type="checkbox" />
+          <label for="dmWinners" style="margin:0;cursor:pointer">DM each winner so they don't miss it</label>
+        </div>
+        <div class="hint" id="dmHint"></div>
+
+        <label class="lbl" for="announcement" style="margin-top: 10px">Custom announcement (optional)</label>
+        <textarea id="announcement" rows="2" maxlength="1500"
+          placeholder="Default: 🎉 Giveaway ended! Congratulations {winners} — you won {prize}!"></textarea>
+        <div class="hint">Use <code>{winners}</code> and <code>{prize}</code> — they're filled in for you.</div>
+
+        <!-- Host roles -->
+        <label class="lbl" style="margin-top: 12px">Extra host roles
+          <span class="count" id="hostCount"></span></label>
+        <div class="hint">Server managers can always draw. Add roles here to let others run it too.</div>
+        <div id="hostRolesWrap">
+          <input id="hostRoleSearch" class="role-search" type="text" placeholder="Search roles…" />
+          <div id="hostRoles" class="roles"></div>
+        </div>
+      </div>
+    </details>
+
+    <div class="err" id="error"></div>
+
+    <div class="bar">
+      <button id="cancel" type="button">Cancel</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script>
+      "use strict";
+      const PREFIX = "giveaway:";
+
+      // ── Session / protocol state ────────────────────────────────────────
+      let nonce = null;
+      let hostOrigin = "*";
+      let instanceId = null; // set when reconfiguring
+
+      // ── Capabilities (from /api/meta) ───────────────────────────────────
+      let defaultBot = false; // deployment runs a shared bot (for role picker + DMs)
+      let inviteUrl = null;
+
+      // ── Host context (the server DWEEB is connected to) ─────────────────
+      let autoGuild = false;
+      let hostGuildName = "";
+      let guildName = "";
+
+      // ── Editor model ────────────────────────────────────────────────────
+      let roles = []; // [{ id, name, color }] live list, once connected
+      let selectedReq = new Set(); // requirement role ids
+      let selectedHost = new Set(); // host role ids
+      let savedStatus = null; // when reconfiguring: open/ended/cancelled
+      let savedEntries = 0;
+
+      const $ = (id) => document.getElementById(id);
+      const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
+      const hexColor = (n) => (n && n > 0 ? "#" + n.toString(16).padStart(6, "0") : "#99aab5");
+      const escapeHtml = (s) =>
+        String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+      // ── Step-1 status ────────────────────────────────────────────────────
+      function renderServerIntro() {
+        const intro = $("serverIntro");
+        if (autoGuild) {
+          const where = guildName || hostGuildName ? `<b>${escapeHtml(guildName || hostGuildName)}</b>` : "this server";
+          let extra = "";
+          if (savedStatus && savedStatus !== "open") {
+            extra = ` <span style="color:var(--yellow)">This giveaway is <b>${escapeHtml(savedStatus)}</b>.</span>`;
+          } else if (instanceId) {
+            extra = ` <span class="hint" style="display:inline">${savedEntries} entered so far.</span>`;
+          }
+          intro.innerHTML = `<div class="callout good">✓ Building for ${where}.${extra}</div>`;
+        } else {
+          intro.innerHTML = `<div class="callout warn">Connect your server in DWEEB first — sign in and pick the server you're building this message for, then reopen this giveaway. It'll target that exact server automatically.</div>`;
+        }
+        sendResize();
+      }
+
+      // ── Connect (best-effort: only to list roles) ────────────────────────
+      // The giveaway itself needs no bot. We only reach out to populate the
+      // role pickers; everything else works without it.
+      async function maybeConnect() {
+        if (!defaultBot) {
+          showRolesUnavailable(
+            "Role requirements need the shared bot, which isn't configured on this deployment. Everything else still works — prize, winner count, account age, and deadline.",
+          );
+          return;
+        }
+        const gid = $("guildId").value.trim();
+        if (!isSnowflake(gid)) return;
+        try {
+          const res = await fetch("/api/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ guild_id: gid }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            showRolesUnavailable(
+              (data.error || "Couldn't load this server's roles.") +
+                (inviteUrl ? ` <a href="${inviteUrl}" target="_blank" rel="noopener">Add the bot</a> and reopen.` : ""),
+            );
+            return;
+          }
+          guildName = data.guild_name || guildName;
+          roles = Array.isArray(data.roles) ? data.roles : [];
+          // Drop selections that no longer exist.
+          const ids = new Set(roles.map((r) => r.id));
+          selectedReq = new Set([...selectedReq].filter((id) => ids.has(id)));
+          selectedHost = new Set([...selectedHost].filter((id) => ids.has(id)));
+          $("rolesUnavailable").style.display = "none";
+          $("rolesWrap").classList.remove("locked");
+          $("hostRolesWrap").classList.remove("locked");
+          renderRoles();
+          renderRoles(true);
+          renderServerIntro();
+        } catch {
+          showRolesUnavailable("Couldn't reach the giveaway service to load roles.");
+        }
+      }
+
+      function showRolesUnavailable(msg) {
+        const box = $("rolesUnavailable");
+        box.className = "callout warn";
+        box.innerHTML = msg;
+        box.style.display = "";
+        $("rolesWrap").classList.add("locked");
+        $("hostRolesWrap").classList.add("locked");
+        sendResize();
+      }
+
+      // ── Role pickers (requirement + host) ───────────────────────────────
+      $("roleSearch").addEventListener("input", () => renderRoles(false));
+      $("hostRoleSearch").addEventListener("input", () => renderRoles(true));
+
+      function renderRoles(host) {
+        const wrap = host ? $("hostRoles") : $("roles");
+        const search = host ? $("hostRoleSearch") : $("roleSearch");
+        const selected = host ? selectedHost : selectedReq;
+        const q = (search.value || "").trim().toLowerCase();
+        wrap.innerHTML = "";
+        const shown = roles.filter((r) => !q || r.name.toLowerCase().includes(q));
+        if (!roles.length) {
+          wrap.innerHTML = `<div class="hint">No roles loaded.</div>`;
+        } else if (!shown.length) {
+          wrap.innerHTML = `<div class="hint">No roles match.</div>`;
+        }
+        for (const r of shown) {
+          const row = document.createElement("label");
+          row.className = "role";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = selected.has(r.id);
+          input.addEventListener("change", () => {
+            if (input.checked) selected.add(r.id);
+            else selected.delete(r.id);
+            updateCounts();
+          });
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = r.name;
+          row.append(input, dot, name);
+          wrap.appendChild(row);
+        }
+        updateCounts();
+        sendResize();
+      }
+
+      function updateCounts() {
+        $("reqCount").textContent = selectedReq.size ? `(${selectedReq.size} selected)` : "";
+        $("hostCount").textContent = selectedHost.size ? `(${selectedHost.size} selected)` : "";
+        $("requireAllWrap").style.display = selectedReq.size > 1 ? "" : "none";
+        $("reqIntro").style.display = selectedReq.size || +$("minAge").value ? "none" : "";
+      }
+      $("minAge").addEventListener("change", updateCounts);
+
+      // ── Deadline preview ─────────────────────────────────────────────────
+      for (const el of [$("durValue"), $("durUnit")]) el.addEventListener("input", renderDeadlinePreview);
+      function computeEndsAt() {
+        const v = parseFloat($("durValue").value);
+        if (!v || v <= 0) return null;
+        const mult = { minutes: 60, hours: 3600, days: 86400 }[$("durUnit").value] || 3600;
+        return Math.floor(Date.now() / 1000 + v * mult);
+      }
+      function renderDeadlinePreview() {
+        const ends = computeEndsAt();
+        $("endsAtPreview").textContent = ends
+          ? `Entries close ${new Date(ends * 1000).toLocaleString()}.`
+          : "No deadline — entries stay open until you draw.";
+        sendResize();
+      }
+
+      // ── DWEEB protocol ──────────────────────────────────────────────────
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+
+      window.addEventListener("message", async (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          const resolve = pendingReqs.get(msg.requestId);
+          pendingReqs.delete(msg.requestId);
+          resolve(msg.ok ? msg.data : null);
+          return;
+        }
+
+        if (msg.type !== "dweeb:plugin:init") return;
+        nonce = msg.nonce;
+        hostOrigin = event.origin;
+        if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+
+        await loadMeta();
+        const guild = await requestResource("guild");
+        if (guild && typeof guild.id === "string" && isSnowflake(guild.id)) {
+          autoGuild = true;
+          $("guildId").value = guild.id;
+          hostGuildName = typeof guild.name === "string" ? guild.name : "";
+          guildName = hostGuildName;
+        }
+
+        if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
+          instanceId = msg.customId.slice(PREFIX.length);
+          await loadInstance(instanceId);
+        }
+
+        renderServerIntro();
+        renderDeadlinePreview();
+        renderDmHint();
+        updateCounts();
+        renderRoles(false);
+        renderRoles(true);
+        sendResize();
+        maybeConnect();
+      });
+
+      const pendingReqs = new Map();
+      function requestResource(resource) {
+        return new Promise((resolve) => {
+          if (nonce == null) return resolve(null);
+          const requestId = "req_" + Math.random().toString(36).slice(2);
+          pendingReqs.set(requestId, resolve);
+          parent.postMessage({ type: "dweeb:plugin:request", nonce, requestId, resource }, hostOrigin);
+          setTimeout(() => {
+            if (pendingReqs.has(requestId)) {
+              pendingReqs.delete(requestId);
+              resolve(null);
+            }
+          }, 4000);
+        });
+      }
+
+      function sendResize() {
+        if (nonce == null) return;
+        parent.postMessage(
+          { type: "dweeb:plugin:resize", nonce, height: document.body.scrollHeight + 24 },
+          hostOrigin,
+        );
+      }
+
+      async function loadMeta() {
+        try {
+          const res = await fetch("/api/meta");
+          if (res.ok) {
+            const m = await res.json();
+            defaultBot = !!m.defaultBot;
+            inviteUrl = m.inviteUrl || null;
+          }
+        } catch {
+          /* leave defaults */
+        }
+      }
+
+      function renderDmHint() {
+        const dm = $("dmWinners");
+        if (!defaultBot) {
+          dm.checked = false;
+          dm.disabled = true;
+          $("dmHint").innerHTML =
+            "DMs need the shared bot, which isn't configured here — winners are still announced in the channel.";
+        } else {
+          dm.disabled = false;
+          $("dmHint").textContent = "If their DMs are closed, the public announcement still reaches them.";
+        }
+      }
+
+      // ── Reconfigure ─────────────────────────────────────────────────────
+      async function loadInstance(id) {
+        try {
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          guildName = d.guild_name || guildName;
+          if (d.guild_id && isSnowflake(d.guild_id)) $("guildId").value = d.guild_id;
+          savedStatus = d.status || "open";
+          savedEntries = d.entries || 0;
+          $("prize").value = d.prize || "";
+          $("winners").value = Math.max(1, Math.min(20, d.winner_count || 1));
+          $("description").value = d.description || "";
+          $("hostId").value = d.host_user_id || "";
+          $("announcement").value = d.announcement || "";
+          $("dmWinners").checked = !!d.dm_winners;
+          const reqs = d.requirements || {};
+          selectedReq = new Set((reqs.roles || []).map((r) => r.id));
+          selectedHost = new Set((d.host_roles || []).map((r) => r.id));
+          $("requireAll").checked = !!reqs.require_all;
+          $("minAge").value = String(reqs.min_account_age_days || 0);
+          // Seed the role lists with the saved ones so they show even before a
+          // live connect; maybeConnect() refreshes with the full guild list.
+          const seed = [...(reqs.roles || []), ...(d.host_roles || [])];
+          const byId = new Map(roles.map((r) => [r.id, r]));
+          for (const r of seed) if (!byId.has(r.id)) { roles.push({ id: r.id, name: r.name || r.id, color: r.color || 0 }); byId.set(r.id, r); }
+          if (d.ends_at) {
+            const secs = d.ends_at - Math.floor(Date.now() / 1000);
+            if (secs > 0) {
+              if (secs % 86400 === 0) { $("durValue").value = secs / 86400; $("durUnit").value = "days"; }
+              else if (secs % 3600 === 0) { $("durValue").value = secs / 3600; $("durUnit").value = "hours"; }
+              else { $("durValue").value = Math.round(secs / 60); $("durUnit").value = "minutes"; }
+            }
+          }
+          if (selectedReq.size || selectedHost.size || reqs.min_account_age_days || d.announcement || d.ends_at) {
+            $("advanced").open = true;
+          }
+        } catch {
+          /* fresh form */
+        }
+      }
+
+      // ── Save ────────────────────────────────────────────────────────────
+      $("cancel").addEventListener("click", () => {
+        parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
+      });
+      $("save").addEventListener("click", save);
+
+      function roleRefs(selected) {
+        return roles.filter((r) => selected.has(r.id)).map((r) => ({ id: r.id, name: r.name, color: r.color || 0 }));
+      }
+
+      async function save() {
+        $("error").textContent = "";
+        const guildId = $("guildId").value.trim();
+        if (!autoGuild || !isSnowflake(guildId))
+          return fail("Connect your server in DWEEB first — sign in and pick it, then reopen this giveaway.");
+
+        const prize = $("prize").value.trim();
+        if (!prize) return fail("Enter a prize — what are people winning?");
+        const winnerCount = Math.max(1, Math.min(20, parseInt($("winners").value, 10) || 1));
+        const hostId = $("hostId").value.trim();
+        if (hostId && !isSnowflake(hostId)) return fail("The host id should be a Discord user id (17–20 digits), or blank.");
+
+        const body = {
+          target: "button",
+          guild_id: guildId,
+          guild_name: guildName || "",
+          prize,
+          winner_count: winnerCount,
+          description: $("description").value.trim() || null,
+          host_user_id: hostId || null,
+          ends_at: computeEndsAt(),
+          requirements: {
+            roles: roleRefs(selectedReq),
+            require_all: selectedReq.size > 1 && $("requireAll").checked,
+            min_account_age_days: parseInt($("minAge").value, 10) || 0,
+          },
+          host_roles: roleRefs(selectedHost),
+          dm_winners: $("dmWinners").checked && defaultBot,
+          announcement: $("announcement").value.trim() || null,
+        };
+
+        setBusy(true);
+        try {
+          const url = instanceId ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
+          const res = await fetch(url, {
+            method: instanceId ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setBusy(false);
+            return fail(data.error || `Server returned ${res.status}.`);
+          }
+          const id = data.id || instanceId;
+          parent.postMessage(
+            {
+              type: "dweeb:plugin:save",
+              nonce,
+              customId: PREFIX + id,
+              guildId,
+              summary: {
+                label: "Giveaway",
+                description: `${prize.slice(0, 60)} · ${winnerCount} winner${winnerCount === 1 ? "" : "s"}`,
+              },
+            },
+            hostOrigin,
+          );
+        } catch {
+          setBusy(false);
+          fail("Couldn't reach the giveaway service.");
+        }
+      }
+
+      function fail(m) {
+        $("error").textContent = m;
+        sendResize();
+      }
+      function setBusy(b) {
+        $("save").disabled = b;
+        $("save").textContent = b ? "Saving…" : "Save";
+      }
+    </script>
+  </body>
+</html>

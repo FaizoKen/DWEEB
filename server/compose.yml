@@ -94,7 +94,7 @@ services:
     restart: unless-stopped
     environment:
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
-      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093"}'
+      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094"}'
       # The /dashboard slash command (answered inline, no plugin) replies with
       # this URL. Register the command once: node scripts/register-commands.mjs
       # NOT derived from DOMAIN — that is the API host, not the dashboard.
@@ -251,6 +251,41 @@ services:
       retries: 3
       start_period: 5s
 
+  # Giveaway (../plugins/giveaway): members enter from a button; the live entrant
+  # count rides on the button, and a host draws N winners at random when ready.
+  # Unlike self-role/tickets it needs NO bot to run — entering, the count, the
+  # draw and the announcement all happen over interaction responses. BOT_TOKEN is
+  # OPTIONAL here, powering only the config UI's role picker (entry requirements)
+  # and the "DM the winners" extra; point it at the main DWEEB bot if you want
+  # those. Its own registry, config UI and config API, backed by one SQLite file
+  # (giveaway configs + the per-user entry ledger). Served at giveaway.$PLUGINS_DOMAIN.
+  giveaway:
+    image: ghcr.io/faizoken/dweeb-giveaway:${GIVEAWAY_TAG:-latest}
+    build: ../plugins/giveaway
+    restart: unless-stopped
+    environment:
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://giveaway.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      # Lets the dispatcher vouch for a custom app's verifying key (see the
+      # dispatcher service above). Must match the dispatcher's value.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
+      # OPTIONAL — only for the config UI's role picker + winner DMs. Unset and
+      # the core giveaway still works; role requirements just can't be set up and
+      # winners aren't DMed. We point it at the main DWEEB bot when present.
+      BOT_TOKEN: ${GIVEAWAY_BOT_TOKEN:-}
+      BOT_INVITE_URL: ${GIVEAWAY_BOT_INVITE_URL:-}
+      RUST_LOG: info
+    volumes:
+      # The plugin's only state: the SQLite file with giveaway configs + entries.
+      - giveaway_data:/data
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8094 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   # Only started when you opt in with `--profile redis`. Shared cache +
   # rate-limit store for running several `proxy` replicas behind a balancer.
   redis:
@@ -342,6 +377,7 @@ volumes:
   modalform_data:
   selfrole_data:
   tickets_data:
+  giveaway_data:
   beszel_data:
   beszel_agent_data:
   gatus_data:

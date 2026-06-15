@@ -50,6 +50,18 @@
       "configUrl": "https://tickets.dweeb.faizo.net/config.html",
       "customIdPrefix": "tickets:",
       "managesSelectOptions": true
+    },
+    {
+      "schemaVersion": 1,
+      "id": "giveaway",
+      "name": "Giveaway",
+      "description": "Run a giveaway from a button: live entrant count, entry requirements (role / account age / one-per-person), a fair random draw of N winners, reroll, and cancel.",
+      "version": "0.1.0",
+      "publisher": "DWEEB",
+      "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/giveaway",
+      "targets": ["button"],
+      "configUrl": "https://giveaway.dweeb.faizo.net/config.html",
+      "customIdPrefix": "giveaway:"
     }
   ]
 }

@@ -27,6 +27,7 @@ on:
       - Plugin Ping Pong
       - Plugin Self Role
       - Plugin Tickets
+      - Plugin Giveaway
     types: [completed]
     branches: [main]
   workflow_dispatch:
