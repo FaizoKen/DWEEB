@@ -49,9 +49,17 @@ async fn main() {
     };
 
     let store = Store::open(&config.database_path).expect("failed to open database");
+    // The modal-submit handler awaits this forward POST before replying, so its
+    // timeout is part of the interaction's latency budget. 2.5s keeps the whole
+    // round-trip inside Discord's ~3s window even after the dispatcher hop; the
+    // forward is best-effort and the reply is sent whether or not it succeeds.
     let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .user_agent(concat!("dweeb-modal-form/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_millis(2500))
+        .user_agent(concat!(
+            "dweeb-modal-form/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/FaizoKen/DWEEB)"
+        ))
         .build()
         .expect("failed to build HTTP client");
 

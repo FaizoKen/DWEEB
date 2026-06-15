@@ -14,6 +14,8 @@
         --text: #f2f3f5;
         --muted: #b5bac1;
         --accent: #5865f2;
+        --green: #3ba55d;
+        --yellow: #f0b232;
         --danger: #da373c;
         --radius: 8px;
       }
@@ -34,8 +36,30 @@
         background: var(--bg);
         color: var(--text);
       }
-      h2 { font-size: 14px; margin: 18px 0 8px; }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 22px 0 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
       h2:first-of-type { margin-top: 0; }
+      .step-num {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
       label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
       input[type="text"], input[type="url"], input[type="number"], select, textarea {
         width: 100%;
@@ -46,22 +70,13 @@
         color: var(--text);
         font: inherit;
       }
+      textarea { resize: vertical; }
       input:focus-visible, select:focus-visible, textarea:focus-visible {
         outline: none;
         border-color: var(--accent);
       }
-      .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
-      .field {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 10px;
-        margin-top: 8px;
-      }
-      .field-top { display: flex; gap: 8px; align-items: center; }
-      .field-top input { flex: 1; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
-      .check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+      .hint code, .callout code { color: var(--accent); }
       button {
         padding: 8px 12px;
         border-radius: 6px;
@@ -73,46 +88,183 @@
       }
       button:hover { border-color: var(--accent); }
       button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-      button.icon { flex: none; width: 34px; padding: 0; color: var(--muted); }
-      button.icon:hover { color: var(--danger); border-color: var(--danger); }
       button:disabled { opacity: 0.5; cursor: not-allowed; }
-      .row { display: flex; gap: 8px; margin-top: 20px; }
-      .row .grow { flex: 1; }
+      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
+      .bar .grow { flex: 1; }
       .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
-      code { color: var(--accent); }
+
+      /* Callouts. */
+      .callout {
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+      .callout.good { border-left-color: var(--green); }
+      .callout.warn { border-left-color: var(--yellow); }
+      .callout b { color: var(--text); }
+
+      details { margin-top: 8px; }
+      summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+      details.help ol { margin: 8px 0 0; padding-left: 20px; }
+      details.help li { margin: 4px 0; color: var(--muted); }
+
+      /* Field cards. */
+      .field {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 10px;
+        margin-top: 8px;
+      }
+      .field-top { display: flex; gap: 6px; align-items: center; }
+      .field-top .num {
+        flex: none;
+        width: 20px; height: 20px;
+        display: inline-grid; place-items: center;
+        border-radius: 5px;
+        background: var(--panel-2);
+        color: var(--muted);
+        font-size: 11px; font-weight: 700;
+      }
+      .field-top input { flex: 1; }
+      button.icon { flex: none; width: 30px; padding: 0; color: var(--muted); }
+      button.icon:hover { color: var(--text); }
+      button.icon.del:hover { color: var(--danger); border-color: var(--danger); }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+      .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 10px; cursor: pointer; }
+      .check input { flex: none; accent-color: var(--accent); margin: 0; }
+      .adv { margin-top: 8px; }
+      .adv summary { color: var(--muted); }
+
+      /* Live preview — a faux Discord modal. */
+      .preview-wrap { margin-top: 12px; }
+      .preview-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+      .modal-mock {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 14px;
+        max-width: 460px;
+      }
+      .modal-mock .m-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+      .modal-mock .pf-label {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em;
+        color: var(--muted); font-weight: 700; margin: 12px 0 4px;
+      }
+      .modal-mock .pf-label .req { color: var(--danger); margin-left: 3px; }
+      .modal-mock .pf-input {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 8px 10px;
+        font-size: 14px;
+        min-height: 36px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .modal-mock .pf-input.para { min-height: 70px; }
+      .modal-mock .pf-input.ph { color: var(--muted); }
+      .modal-mock .pf-meta { font-size: 11px; color: var(--muted); margin-top: 3px; text-align: right; }
+      .modal-mock .submit {
+        margin-top: 14px; text-align: right;
+      }
+      .modal-mock .submit span {
+        display: inline-block; background: var(--accent); color: #fff;
+        padding: 6px 14px; border-radius: 4px; font-size: 13px; font-weight: 600;
+      }
+
+      /* Segmented control. */
+      .seg { display: flex; gap: 6px; margin-top: 8px; }
+      .seg button { flex: 1; }
+      .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
     </style>
   </head>
   <body>
-    <h2>Modal title</h2>
-    <input id="title" type="text" maxlength="45" placeholder="e.g. Application form" />
+    <div class="callout">
+      Build a <b>form</b> that pops up when a member clicks your button. Their
+      answers get <b>sent to a channel</b> you choose, and they get a private
+      “thanks” reply. Great for applications, suggestions, reports, and ticket
+      intake.
+    </div>
 
-    <h2>Fields <span class="hint" id="fieldCount"></span></h2>
+    <!-- Step 1 — build the form -------------------------------------------- -->
+    <h2><span class="step-num">1</span> Build your form</h2>
+    <label class="lbl" for="title">Form title</label>
+    <input id="title" type="text" maxlength="45" placeholder="e.g. Staff application" />
+    <div class="hint">Shown at the top of the pop-up. Up to 45 characters.</div>
+
+    <h2 style="margin-top: 16px"><span class="step-num" style="background: var(--panel-2); color: var(--muted)">·</span> Fields <span class="count" id="fieldCount"></span></h2>
     <div id="fields"></div>
     <button id="addField" type="button" style="margin-top: 8px">+ Add field</button>
 
-    <h2>Forward submissions to</h2>
-    <input id="webhook" type="url" placeholder="https://discord.com/api/webhooks/…" />
+    <div class="preview-wrap">
+      <div class="preview-label">Live preview — how the pop-up will look:</div>
+      <div id="preview" class="modal-mock"></div>
+    </div>
+
+    <!-- Step 2 — where submissions go --------------------------------------- -->
+    <h2><span class="step-num">2</span> Where submissions go</h2>
+    <input id="webhook" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off" />
     <select id="savedWebhook" style="margin-top: 8px">
       <option value="">— or pick a saved DWEEB webhook —</option>
     </select>
     <div class="hint">
-      Paste a Discord webhook URL, or pick one you saved in DWEEB. Each submission
-      is posted there as an embed.
+      Paste a Discord <b>webhook URL</b> for the channel that should receive
+      answers, or pick one you saved in DWEEB.
+    </div>
+    <details class="help">
+      <summary>How do I get a webhook URL?</summary>
+      <ol>
+        <li>In Discord, open <b>Server Settings → Integrations → Webhooks</b>.</li>
+        <li>Click <b>New Webhook</b>, choose the channel answers should land in.</li>
+        <li>Click <b>Copy Webhook URL</b> and paste it above.</li>
+      </ol>
+    </details>
+
+    <label class="lbl" for="forwardName" style="margin-top: 14px">Posted under this name (optional)</label>
+    <input id="forwardName" type="text" maxlength="80" placeholder="Modal Form" autocomplete="off" />
+    <div class="hint">What the forwarded message shows as the sender. Leave blank for “Modal Form”.</div>
+
+    <label class="check" style="margin-top: 12px">
+      <input id="includeSubmitter" type="checkbox" checked />
+      <span>Show who submitted each response</span>
+    </label>
+    <div class="hint" id="anonHint">
+      On: the forwarded message names the member. Turn off for an
+      <b>anonymous</b> suggestion or report box.
     </div>
 
-    <h2>Reply to the submitter</h2>
-    <textarea id="replyText" rows="3" maxlength="2000" placeholder="Type a plain message…"></textarea>
-    <select id="reply" style="margin-top: 8px">
-      <option value="">— or pick a saved DWEEB message —</option>
+    <!-- Step 3 — reply to the submitter ------------------------------------- -->
+    <h2><span class="step-num">3</span> Reply to the submitter</h2>
+    <div class="seg" id="replySeg">
+      <button type="button" data-rmode="plain" class="sel">Plain message</button>
+      <button type="button" data-rmode="saved">Saved DWEEB message</button>
+    </div>
+    <textarea id="replyText" rows="2" maxlength="2000" style="margin-top: 8px"
+      placeholder="e.g. Thanks! We've received your application and will be in touch."></textarea>
+    <select id="reply" style="margin-top: 8px; display: none">
+      <option value="">— pick a saved DWEEB message —</option>
     </select>
-    <div class="hint" id="replyHint">
-      Type a plain message, or pick one you saved in DWEEB. The user gets this
-      (ephemeral) after submitting.
+    <div class="hint">Sent privately to the member (only they see it) right after they submit.</div>
+
+    <!-- Step 4 — options ---------------------------------------------------- -->
+    <h2><span class="step-num">4</span> Options</h2>
+    <label class="check">
+      <input id="limitOne" type="checkbox" />
+      <span>Limit to one response per person</span>
+    </label>
+    <div class="hint">
+      On: after someone submits, clicking the button again tells them they've
+      already responded. Perfect for applications and one-time forms.
     </div>
 
     <div class="err" id="error"></div>
 
-    <div class="row">
+    <div class="bar">
       <button id="cancel" type="button">Cancel</button>
       <span class="grow"></span>
       <button id="save" type="button" class="primary">Save</button>
@@ -128,19 +280,29 @@
       let instanceId = null; // set when reconfiguring
       let savedMessages = []; // [{ id, name, payload }]
       let savedWebhooks = []; // [{ id, name, url, channelName?, guildName? }]
-      let existingReplyPayload = null; // reply payload already stored (reconfigure)
+      let existingReplyPayload = null; // saved-message reply already stored (reconfigure)
       let webhookAlreadySet = false; // reconfigure: keep existing if input left blank
+      let replyMode = "plain"; // "plain" | "saved"
 
       const $ = (id) => document.getElementById(id);
+      const escapeHtml = (s) =>
+        String(s).replace(
+          /[&<>"']/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        );
 
       // ── Field list model ────────────────────────────────────────────────
+      const MAX_FIELDS = 5;
       let fields = [];
       const newField = (f = {}) => ({
+        // A stable id, preserved across reorders so answers never get reshuffled.
         id: f.id || "f_" + Math.random().toString(36).slice(2, 9),
         label: f.label || "",
         style: f.style === "paragraph" ? "paragraph" : "short",
         required: !!f.required,
         placeholder: f.placeholder || "",
+        value: f.value || "",
+        min_length: f.min_length || "",
         max_length: f.max_length || "",
       });
 
@@ -150,59 +312,177 @@
         fields.forEach((f, i) => {
           const el = document.createElement("div");
           el.className = "field";
+          // No user data is interpolated into this template; values are assigned
+          // via the .value/.checked properties below, so there's no injection.
           el.innerHTML = `
             <div class="field-top">
-              <input type="text" maxlength="45" placeholder="Field label" data-k="label" />
-              <button type="button" class="icon" title="Remove field" data-del>✕</button>
+              <span class="num">${i + 1}</span>
+              <input type="text" maxlength="45" placeholder="Question / field label" data-k="label" />
+              <button type="button" class="icon up" title="Move up">↑</button>
+              <button type="button" class="icon down" title="Move down">↓</button>
+              <button type="button" class="icon del" title="Remove field">✕</button>
             </div>
             <div class="grid">
               <div>
-                <label class="lbl">Style</label>
+                <label class="lbl">Answer style</label>
                 <select data-k="style">
                   <option value="short">Short (single line)</option>
-                  <option value="paragraph">Paragraph</option>
+                  <option value="paragraph">Paragraph (multi-line)</option>
                 </select>
               </div>
-              <div>
-                <label class="lbl">Max length</label>
-                <input type="number" min="1" max="4000" placeholder="optional" data-k="max_length" />
-              </div>
+              <label class="check" style="align-self: end; margin: 0 0 8px">
+                <input type="checkbox" data-k="required" /> <span>Required</span>
+              </label>
             </div>
-            <label class="lbl">Placeholder</label>
-            <input type="text" maxlength="100" placeholder="optional" data-k="placeholder" />
-            <label class="check"><input type="checkbox" data-k="required" /> Required</label>`;
+            <details class="adv">
+              <summary>Advanced</summary>
+              <label class="lbl">Placeholder (greyed-out hint text)</label>
+              <input type="text" maxlength="100" placeholder="optional" data-k="placeholder" />
+              <label class="lbl">Prefilled text (the answer box starts with this)</label>
+              <textarea rows="2" maxlength="4000" placeholder="optional" data-k="value"></textarea>
+              <div class="grid">
+                <div>
+                  <label class="lbl">Min length</label>
+                  <input type="number" min="0" max="4000" placeholder="optional" data-k="min_length" />
+                </div>
+                <div>
+                  <label class="lbl">Max length</label>
+                  <input type="number" min="1" max="4000" placeholder="optional" data-k="max_length" />
+                </div>
+              </div>
+            </details>`;
           el.querySelector('[data-k="label"]').value = f.label;
           el.querySelector('[data-k="style"]').value = f.style;
-          el.querySelector('[data-k="max_length"]').value = f.max_length;
-          el.querySelector('[data-k="placeholder"]').value = f.placeholder;
           el.querySelector('[data-k="required"]').checked = f.required;
+          el.querySelector('[data-k="placeholder"]').value = f.placeholder;
+          el.querySelector('[data-k="value"]').value = f.value;
+          el.querySelector('[data-k="min_length"]').value = f.min_length;
+          el.querySelector('[data-k="max_length"]').value = f.max_length;
           el.querySelectorAll("[data-k]").forEach((input) => {
             const k = input.getAttribute("data-k");
             input.addEventListener("input", () => {
               f[k] = input.type === "checkbox" ? input.checked : input.value;
+              renderPreview();
             });
           });
-          el.querySelector("[data-del]").addEventListener("click", () => {
+          const up = el.querySelector(".up");
+          const down = el.querySelector(".down");
+          up.disabled = i === 0;
+          down.disabled = i === fields.length - 1;
+          up.addEventListener("click", () => moveField(i, -1));
+          down.addEventListener("click", () => moveField(i, 1));
+          el.querySelector(".del").addEventListener("click", () => {
             fields.splice(i, 1);
             renderFields();
+            renderPreview();
           });
           wrap.appendChild(el);
         });
-        $("fieldCount").textContent = `(${fields.length}/5)`;
-        $("addField").disabled = fields.length >= 5;
+        $("fieldCount").textContent = `(${fields.length}/${MAX_FIELDS})`;
+        $("addField").disabled = fields.length >= MAX_FIELDS;
         sendResize();
       }
 
+      function moveField(i, dir) {
+        const j = i + dir;
+        if (j < 0 || j >= fields.length) return;
+        [fields[i], fields[j]] = [fields[j], fields[i]];
+        renderFields();
+        renderPreview();
+      }
+
       $("addField").addEventListener("click", () => {
-        if (fields.length >= 5) return;
+        if (fields.length >= MAX_FIELDS) return;
         fields.push(newField());
         renderFields();
+        renderPreview();
       });
 
-      // ── Reply picker ────────────────────────────────────────────────────
-      // Two ways to reply, mirroring "Forward submissions to": type a plain
-      // message above, or pick a saved DWEEB message here. A saved pick wins, so
-      // selecting one clears the textarea; typing again is what you'd reset to.
+      // ── Live preview ────────────────────────────────────────────────────
+      // Built entirely with textContent / createElement so a label, placeholder
+      // or prefill can never inject markup into this page.
+      function renderPreview() {
+        const box = $("preview");
+        box.innerHTML = "";
+        const titleEl = document.createElement("div");
+        titleEl.className = "m-title";
+        titleEl.textContent = $("title").value.trim() || "Your form";
+        box.appendChild(titleEl);
+
+        if (!fields.length) {
+          const empty = document.createElement("div");
+          empty.className = "hint";
+          empty.textContent = "Add a field to see it here.";
+          box.appendChild(empty);
+        }
+
+        fields.forEach((f) => {
+          const lbl = document.createElement("div");
+          lbl.className = "pf-label";
+          lbl.textContent = f.label.trim() || "Untitled field";
+          if (f.required) {
+            const req = document.createElement("span");
+            req.className = "req";
+            req.textContent = "*";
+            lbl.appendChild(req);
+          }
+          box.appendChild(lbl);
+
+          const inp = document.createElement("div");
+          inp.className = "pf-input" + (f.style === "paragraph" ? " para" : "");
+          if (f.value) {
+            inp.textContent = f.value;
+          } else if (f.placeholder) {
+            inp.textContent = f.placeholder;
+            inp.classList.add("ph");
+          } else {
+            inp.innerHTML = "&nbsp;";
+          }
+          box.appendChild(inp);
+
+          const min = parseInt(f.min_length, 10);
+          const max = parseInt(f.max_length, 10);
+          if (min > 0 || max > 0) {
+            const meta = document.createElement("div");
+            meta.className = "pf-meta";
+            meta.textContent =
+              min > 0 && max > 0 ? `${min}–${max} characters`
+              : max > 0 ? `up to ${max} characters`
+              : `at least ${min} characters`;
+            box.appendChild(meta);
+          }
+        });
+
+        const submit = document.createElement("div");
+        submit.className = "submit";
+        const btn = document.createElement("span");
+        btn.textContent = "Submit";
+        submit.appendChild(btn);
+        box.appendChild(submit);
+        sendResize();
+      }
+
+      $("title").addEventListener("input", renderPreview);
+
+      // ── Anonymous toggle hint ───────────────────────────────────────────
+      $("includeSubmitter").addEventListener("change", () => {
+        $("anonHint").innerHTML = $("includeSubmitter").checked
+          ? "On: the forwarded message names the member. Turn off for an <b>anonymous</b> suggestion or report box."
+          : "<b>Anonymous:</b> the forwarded message won't say who submitted it.";
+        sendResize();
+      });
+
+      // ── Reply mode (segmented) ──────────────────────────────────────────
+      for (const btn of $("replySeg").children) {
+        btn.addEventListener("click", () => {
+          replyMode = btn.dataset.rmode;
+          for (const b of $("replySeg").children) b.classList.toggle("sel", b === btn);
+          $("replyText").style.display = replyMode === "plain" ? "" : "none";
+          $("reply").style.display = replyMode === "saved" ? "" : "none";
+          sendResize();
+        });
+      }
+
       function renderReplyOptions() {
         const sel = $("reply");
         sel.innerHTML = "";
@@ -215,8 +495,8 @@
         const ph = document.createElement("option");
         ph.value = "";
         ph.textContent = savedMessages.length
-          ? "— or pick a saved DWEEB message —"
-          : "— no saved DWEEB messages —";
+          ? "— pick a saved DWEEB message —"
+          : "— no saved DWEEB messages yet —";
         sel.appendChild(ph);
         for (const m of savedMessages) {
           const o = document.createElement("option");
@@ -224,18 +504,7 @@
           o.textContent = m.name;
           sel.appendChild(o);
         }
-        sel.disabled = savedMessages.length === 0 && !(instanceId && existingReplyPayload);
       }
-
-      // The two reply sources are mutually exclusive: picking a saved message
-      // (or "keep") clears the typed reply, and typing a reply resets the picker
-      // to its placeholder — so what's selected always matches what gets sent.
-      $("reply").addEventListener("change", () => {
-        if ($("reply").value) $("replyText").value = "";
-      });
-      $("replyText").addEventListener("input", () => {
-        if ($("replyText").value.trim()) $("reply").value = "";
-      });
 
       // ── Saved-webhook picker ────────────────────────────────────────────
       // Picking one just fills the URL field above (the single source of truth
@@ -270,7 +539,7 @@
         $("savedWebhook").value = "";
       });
 
-      // ── Protocol ────────────────────────────────────────────────────────
+      // ── DWEEB protocol ──────────────────────────────────────────────────
       parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
 
       window.addEventListener("message", async (event) => {
@@ -289,6 +558,7 @@
             fields = [newField({ label: "Your answer", style: "paragraph", required: true })];
           }
           renderFields();
+          renderPreview();
           requestResource("savedMessages");
           requestResource("savedWebhooks");
           return;
@@ -340,8 +610,30 @@
           $("title").value = data.modal?.title || "";
           fields = (data.modal?.fields || []).map(newField);
           if (!fields.length) fields = [newField()];
+
+          $("forwardName").value = data.forward_username || "";
+          if (typeof data.include_submitter === "boolean") {
+            $("includeSubmitter").checked = data.include_submitter;
+            $("includeSubmitter").dispatchEvent(new Event("change"));
+          }
+          $("limitOne").checked = !!data.limit_one;
+
+          // Reply: saved-message payload takes the "saved" tab, plain text the
+          // "plain" tab. A stored payload offers "Keep current" so the admin
+          // needn't re-pick it.
           existingReplyPayload = data.reply?.payload || null;
-          if (data.reply?.text) $("replyText").value = data.reply.text;
+          if (existingReplyPayload) {
+            replyMode = "saved";
+            for (const b of $("replySeg").children)
+              b.classList.toggle("sel", b.dataset.rmode === "saved");
+            $("replyText").style.display = "none";
+            $("reply").style.display = "";
+          } else if (data.reply?.text) {
+            $("replyText").value = data.reply.text;
+          }
+          renderReplyOptions();
+          if (existingReplyPayload) $("reply").value = "__keep__";
+
           webhookAlreadySet = !!data.forward_webhook_set;
           if (webhookAlreadySet) $("webhook").placeholder = "•••••••• (unchanged — type to replace)";
         } catch {
@@ -359,32 +651,38 @@
       async function save() {
         $("error").textContent = "";
         const title = $("title").value.trim();
-        if (!title) return fail("Give the modal a title.");
+        if (!title) return fail("Give your form a title.");
         if (!fields.length) return fail("Add at least one field.");
         for (const f of fields) {
           if (!f.label.trim()) return fail("Every field needs a label.");
+          const min = f.min_length === "" ? null : Number(f.min_length);
+          const max = f.max_length === "" ? null : Number(f.max_length);
+          if (min !== null && max !== null && min > max)
+            return fail(`Field “${f.label.trim()}”: min length can't be larger than max length.`);
         }
 
-        // Resolve the reply: a typed plain message wins; otherwise the saved pick.
-        const flatText = $("replyText").value.trim();
-        const replyChoice = $("reply").value;
+        // Resolve the reply from the active tab.
         let reply = null;
-        if (flatText) {
-          reply = { text: flatText };
-        } else if (replyChoice === "__keep__") {
-          reply = { payload: existingReplyPayload };
-        } else if (replyChoice) {
-          const picked = savedMessages.find((m) => m.id === replyChoice);
-          if (picked) reply = { payload: picked.payload };
+        if (replyMode === "plain") {
+          const text = $("replyText").value.trim();
+          if (!text) return fail("Type the reply members get after submitting.");
+          reply = { text };
+        } else {
+          const choice = $("reply").value;
+          if (choice === "__keep__") reply = { payload: existingReplyPayload };
+          else if (choice) {
+            const picked = savedMessages.find((m) => m.id === choice);
+            if (picked) reply = { payload: picked.payload };
+          }
+          if (!reply) return fail("Pick a saved DWEEB message, or switch to a plain message.");
         }
-        if (!reply) return fail("Type a reply, or pick a saved message.");
 
-        // Resolve the forward webhook.
+        // Resolve the forward webhook ("" => keep the stored one on update).
         const webhookInput = $("webhook").value.trim();
-        if (!webhookInput && !(instanceId && webhookAlreadySet)) {
-          return fail("Enter a Discord webhook URL to forward submissions to.");
-        }
+        if (!webhookInput && !(instanceId && webhookAlreadySet))
+          return fail("Add a Discord webhook URL so submissions have somewhere to go.");
 
+        const forwardName = $("forwardName").value.trim();
         const body = {
           modal: {
             title,
@@ -394,10 +692,15 @@
               style: f.style,
               required: !!f.required,
               placeholder: f.placeholder ? String(f.placeholder).slice(0, 100) : null,
-              max_length: f.max_length ? Number(f.max_length) || null : null,
+              value: f.value ? String(f.value).slice(0, 4000) : null,
+              min_length: f.min_length === "" ? null : Number(f.min_length) || null,
+              max_length: f.max_length === "" ? null : Number(f.max_length) || null,
             })),
           },
-          forward_webhook: webhookInput, // "" => keep existing on update
+          forward_webhook: webhookInput,
+          forward_username: forwardName || null,
+          include_submitter: $("includeSubmitter").checked,
+          limit_one: $("limitOne").checked,
           reply,
         };
 
@@ -416,15 +719,18 @@
             return fail(data.error || `Server returned ${res.status}.`);
           }
           const id = data.id || instanceId;
+          const n = fields.length;
+          const tags = [];
+          if (!$("includeSubmitter").checked) tags.push("anonymous");
+          if ($("limitOne").checked) tags.push("one per person");
+          const description =
+            `${n} field${n === 1 ? "" : "s"}` + (tags.length ? ` · ${tags.join(" · ")}` : "");
           parent.postMessage(
             {
               type: "dweeb:plugin:save",
               nonce,
               customId: PREFIX + id,
-              summary: {
-                label: title,
-                description: `${fields.length} field${fields.length === 1 ? "" : "s"} → webhook + reply`,
-              },
+              summary: { label: title, description },
             },
             hostOrigin,
           );

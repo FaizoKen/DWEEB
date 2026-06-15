@@ -36,7 +36,7 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "schemaVersion": 1,
             "id": "modal-form",
             "name": "Modal Form",
-            "description": "Open a modal on click, forward the answers to a webhook, and reply with a plain-text or saved message.",
+            "description": "Pop up a form on click, forward the answers to a channel (named or anonymous), and reply privately. Optional one-response-per-person.",
             "version": env!("CARGO_PKG_VERSION"),
             "publisher": "DWEEB",
             "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/modal-form",
@@ -109,6 +109,9 @@ pub async fn get_instance(State(state): State<AppState>, Path(id): Path<String>)
             modal: cfg.modal,
             reply: cfg.reply,
             forward_webhook_set: !cfg.forward_webhook.trim().is_empty(),
+            forward_username: cfg.forward_username,
+            include_submitter: cfg.include_submitter,
+            limit_one: cfg.limit_one,
         })
         .into_response(),
         Ok(None) => not_found(),
@@ -155,7 +158,9 @@ pub async fn interactions(
     }
 }
 
-/// Button click → respond with the configured modal.
+/// Button click → respond with the configured modal, unless this form is
+/// one-response-per-person and the member already submitted (turned away here,
+/// before the modal opens, so they never fill in a form that would be rejected).
 fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Response {
     let custom_id = interaction
         .data
@@ -165,26 +170,48 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
     let Some(id) = custom_id.strip_prefix("modalform:") else {
         return Json(discord::ephemeral_text("Unknown action.")).into_response();
     };
-    match state.store.get(id) {
-        Ok(Some(cfg)) => {
-            // Keep the submit id under the plugin's own `modalform:` prefix so
-            // the dispatcher routes it back here (it matches on prefix, and a
-            // plugin owns exactly one custom_id namespace). The interaction
-            // *type* — not this id — is what tells a click apart from a submit.
-            let submit_id = format!("modalform:submit:{id}");
-            Json(discord::modal_response(&submit_id, &cfg.modal)).into_response()
+    let cfg = match state.store.get(id) {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return Json(discord::ephemeral_text("This form is no longer available.")).into_response()
         }
-        Ok(None) => Json(discord::ephemeral_text("This form is no longer available.")).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "component lookup");
-            Json(discord::ephemeral_text("Something went wrong.")).into_response()
+            return Json(discord::ephemeral_text("Something went wrong.")).into_response();
+        }
+    };
+
+    if cfg.limit_one {
+        if let Some(uid) = interaction.actor_id() {
+            // Fail *open* on a storage hiccup: better to let a member submit
+            // (perhaps twice) than to wall off a working form behind a DB blip.
+            match state.store.has_submitted(id, uid) {
+                Ok(true) => {
+                    return Json(discord::ephemeral_text(
+                        "You've already submitted this form — only one response per person is allowed.",
+                    ))
+                    .into_response()
+                }
+                Ok(false) => {}
+                Err(e) => tracing::warn!(error = %e, "has_submitted check"),
+            }
         }
     }
+
+    // Keep the submit id under the plugin's own `modalform:` prefix so the
+    // dispatcher routes it back here (it matches on prefix, and a plugin owns
+    // exactly one custom_id namespace). The interaction *type* — not this id —
+    // is what tells a click apart from a submit.
+    let submit_id = format!("modalform:submit:{id}");
+    Json(discord::modal_response(&submit_id, &cfg.modal)).into_response()
 }
 
 /// Modal submit → forward the answers to the webhook, then reply with the
-/// configured message. The forward is best-effort (short timeout); it must never block or
-/// fail the user-facing reply, which Discord expects within ~3s.
+/// configured message. The forward is best-effort (short timeout); it must never
+/// block or fail the user-facing reply, which Discord expects within ~3s. For a
+/// one-response-per-person form, the submission is recorded only when the
+/// forward actually reached the destination, so a transient failure can't lock
+/// the member out forever.
 async fn handle_modal_submit(state: &AppState, interaction: &discord::Interaction) -> Response {
     let Some(data) = interaction.data.as_ref() else {
         return Json(discord::ephemeral_text("Empty submission.")).into_response();
@@ -205,16 +232,11 @@ async fn handle_modal_submit(state: &AppState, interaction: &discord::Interactio
     };
 
     let values = discord::collect_modal_values(data);
-    let submitter = interaction
-        .member
-        .as_ref()
-        .and_then(|m| m.user.as_ref())
-        .or(interaction.user.as_ref());
-    let forward = discord::build_forward_message(&cfg.modal, &values, submitter);
+    let forward = discord::build_forward_message(&cfg, &values, interaction.actor());
 
     // `with_components=true` is required for Discord to respect the V2
     // components on the execute (without it they're silently dropped).
-    match state
+    let forwarded_ok = match state
         .http
         .post(&cfg.forward_webhook)
         .query(&[("with_components", "true")])
@@ -222,9 +244,23 @@ async fn handle_modal_submit(state: &AppState, interaction: &discord::Interactio
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => {}
-        Ok(resp) => tracing::warn!(status = %resp.status(), "forward webhook returned non-2xx"),
-        Err(e) => tracing::warn!(error = %e, "forward webhook failed"),
+        Ok(resp) if resp.status().is_success() => true,
+        Ok(resp) => {
+            tracing::warn!(status = %resp.status(), "forward webhook returned non-2xx");
+            false
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "forward webhook failed");
+            false
+        }
+    };
+
+    if cfg.limit_one && forwarded_ok {
+        if let Some(uid) = interaction.actor_id() {
+            if let Err(e) = state.store.record_submission(id, uid) {
+                tracing::warn!(error = %e, "record submission");
+            }
+        }
     }
 
     Json(discord::build_reply(&cfg.reply)).into_response()

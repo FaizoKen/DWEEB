@@ -1,8 +1,8 @@
 [package]
 name = "dweeb-modal-form"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "DWEEB plugin: a Discord button/select that opens a modal, forwards the values to a webhook, and replies with a saved message."
+description = "DWEEB plugin: a Discord button that opens a form, forwards the answers to a channel (named or anonymous), and replies privately. Reorderable fields, prefills, length limits, and optional one-response-per-person."
 
 [dependencies]
 axum = "0.7"
