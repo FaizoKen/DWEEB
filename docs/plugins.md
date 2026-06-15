@@ -76,6 +76,7 @@ renders nothing). `configUrl` (and any `icon`/`homepage`) must be `https://`, or
 | `customIdPrefix` | yes      | Every `custom_id` you mint must start with this. How DWEEB re-binds on reload and how it validates your saves. Keep it short and unique, e.g. `"rolemenu:"`. |
 | `apiVersion`     | no       | Highest protocol version you speak. Defaults to `1`. |
 | `managesSelectOptions` | no | `string_select` plugins only. Set `true` to own the menu's option list: your `save` may return `options`, and DWEEB **wires them onto the select and locks the options editor** (see §3). Omit for a select plugin that leaves options to the user. |
+| `managesFields`  | no       | Component fields you own beyond `custom_id`/options, as a string array. Each named field is set from your `save` payload's `fields` and **locked** in the inspector, so the user can't edit it and break your binding — e.g. a menu that grants exactly one role declares `["min_values", "max_values"]` and saves `fields: { min_values: 1, max_values: 1 }`. Lockable today: `min_values`, `max_values`, `placeholder`, `disabled`. Unknown names are dropped. |
 
 A manifest that fails validation is silently dropped — it just won't appear in
 the picker.
@@ -123,7 +124,7 @@ so an external link (e.g. an OAuth invite) can open in a new tab via
 ```
 your iframe → DWEEB : "dweeb:plugin:ready"    { apiVersion? }
 DWEEB → your iframe : "dweeb:plugin:init"     { nonce, apiVersion, target, customId?, theme, locale }
-your iframe → DWEEB : "dweeb:plugin:save"     { nonce, customId, summary?, options?, guildId? }  // adopt id (+ wire options)
+your iframe → DWEEB : "dweeb:plugin:save"     { nonce, customId, summary?, options?, fields?, guildId? }  // adopt id (+ wire options/fields)
 your iframe → DWEEB : "dweeb:plugin:cancel"   { nonce }                       // user backed out
 your iframe → DWEEB : "dweeb:plugin:resize"   { nonce, height }              // optional auto-height
 your iframe → DWEEB : "dweeb:plugin:request"  { nonce, requestId, resource }  // read editor data
@@ -152,6 +153,12 @@ Rules:
   **locks** the options editor so the user can't break the `value` contract your
   service matches on. It's the select analogue of owning the `custom_id`: stop
   making users hand-map each option's value (e.g. a role id) by copy-paste.
+- `fields` is optional: values for the component fields your manifest declared in
+  `managesFields` (e.g. `{ min_values: 1, max_values: 1 }`). DWEEB accepts only
+  declared fields, clamps each to Discord's limits, writes them onto the
+  component, and **locks** them in the inspector — so the user can't widen
+  `max_values` and break a menu you built for a single pick. Fields you didn't
+  declare are ignored.
 - Always target DWEEB's origin in `postMessage` (use `event.origin` from the
   `init` message), never `"*"`.
 

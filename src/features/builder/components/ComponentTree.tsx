@@ -88,6 +88,7 @@ import {
   useValidationSummary,
   useValidationView,
   worstSeverity,
+  type ValidationView,
 } from "@/features/builder/useValidation";
 import { useFileDrop } from "./useFileDrop";
 import { addFilesToGallery, replaceGalleryItemFiles } from "./galleryUpload";
@@ -314,6 +315,11 @@ export function ComponentTree() {
   const [dropTarget, setDropTarget] = useState<DragSession["dropTarget"]>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Zero-height marker just after the meta header. An IntersectionObserver
+  // watches it so we know when the header's at-rest issue summary has scrolled
+  // out of view — the cue to float a reminder pill near where the user is editing.
+  const metaSentinelRef = useRef<HTMLDivElement>(null);
+  const [headerOffscreen, setHeaderOffscreen] = useState(false);
   const dragSession = useMemo<DragSession>(
     () => ({
       drag,
@@ -347,12 +353,28 @@ export function ComponentTree() {
   const pluginIssues = usePluginGuildIssues();
   const validation = useMemo(() => mergeNodeIssues(base, pluginIssues), [base, pluginIssues]);
 
+  // Float the issue reminder only once the header summary has scrolled away.
+  useEffect(() => {
+    const root = scrollRef.current;
+    const target = metaSentinelRef.current;
+    if (!root || !target) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry) setHeaderOffscreen(!entry.isIntersecting);
+      },
+      { root },
+    );
+    obs.observe(target);
+    return () => obs.disconnect();
+  }, []);
+
   return (
     <ValidationContext.Provider value={validation}>
       <DragContext.Provider value={dragSession}>
         <div className={styles.tree}>
           <div ref={scrollRef} className={styles.scroll}>
             <MetaHeader />
+            <div ref={metaSentinelRef} aria-hidden className={styles.metaSentinel} />
 
             {components.length === 0 ? (
               <div className={styles.empty}>
@@ -393,10 +415,63 @@ export function ComponentTree() {
               )}
             />
           </div>
+
+          <FloatingIssueSummary view={validation} visible={headerOffscreen} />
         </div>
         <DragGhost />
       </DragContext.Provider>
     </ValidationContext.Provider>
+  );
+}
+
+/**
+ * Floating mirror of the meta header's error / warning pills. Once the header
+ * (which carries the at-rest summary) has scrolled out of view, this fades in
+ * over the bottom-left of the tree — stacked just above the Add-component pill —
+ * so an outstanding problem stays visible, and one click from being fixed, while
+ * editing rows far down the message. Clicking jumps to the first offending
+ * component, exactly like the header pill it mirrors.
+ */
+function FloatingIssueSummary({ view, visible }: { view: ValidationView; visible: boolean }) {
+  const select = useMessageStore((s) => s.select);
+  const { errorCount, warningCount, firstErrorNodeId, firstWarningNodeId } = view;
+
+  if (!visible || (errorCount === 0 && warningCount === 0)) return null;
+
+  const jump = (id: EditorId | null) => {
+    if (!id) return;
+    select(id);
+    scrollTreeRowIntoView(id);
+    scrollPreviewNodeIntoView(id);
+  };
+
+  return (
+    <div className={styles.floatingIssues} role="status">
+      {errorCount > 0 ? (
+        <button
+          type="button"
+          className={cn(styles.statPill, styles.issuePillError, styles.floatingPill)}
+          onClick={() => jump(firstErrorNodeId)}
+          disabled={!firstErrorNodeId}
+          title="Jump to the first component with an error"
+        >
+          <AlertCircleIcon size={13} />
+          {errorCount} {errorCount === 1 ? "error" : "errors"}
+        </button>
+      ) : null}
+      {warningCount > 0 ? (
+        <button
+          type="button"
+          className={cn(styles.statPill, styles.issuePillWarn, styles.floatingPill)}
+          onClick={() => jump(firstWarningNodeId)}
+          disabled={!firstWarningNodeId}
+          title="Jump to the first component with a warning"
+        >
+          <AlertTriangleIcon size={13} />
+          {warningCount} {warningCount === 1 ? "warning" : "warnings"}
+        </button>
+      ) : null}
+    </div>
   );
 }
 

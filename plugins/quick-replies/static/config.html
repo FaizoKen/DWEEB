@@ -1076,6 +1076,8 @@
               summary,
               // For a select, hand DWEEB the option list to wire + lock onto the
               // menu (one per topic, value = the reply key). Ignored for buttons.
+              // Also pin it to a single pick — one reply fires per use, so lock
+              // min/max to 1 so the user can't widen it and break the menu.
               ...(isSelect()
                 ? {
                     options: cards.map((c) => {
@@ -1086,6 +1088,7 @@
                       else if (c.emoji.trim()) o.emoji = { name: c.emoji.trim() };
                       return o;
                     }),
+                    fields: { min_values: 1, max_values: 1 },
                   }
                 : {}),
               // Only warn about cross-server posting when a gate makes us

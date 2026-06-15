@@ -986,7 +986,9 @@
                 customId: PREFIX + "open:" + id,
                 guildId,
                 summary: { label: "Tickets", description: desc },
-                // For a select, hand DWEEB the locked option list (value = topic id).
+                // For a select, hand DWEEB the locked option list (value = topic id)
+                // and pin it to a single pick — opening a ticket is one topic at a
+                // time, so lock min/max to 1 (the user can't widen it and break it).
                 ...(isSelect()
                   ? {
                       options: cleanTopics.map((t) => ({
@@ -995,6 +997,7 @@
                         ...(t.description ? { description: t.description } : {}),
                         ...(t.emoji ? { emoji: t.emoji } : {}),
                       })),
+                      fields: { min_values: 1, max_values: 1 },
                     }
                   : {}),
               },

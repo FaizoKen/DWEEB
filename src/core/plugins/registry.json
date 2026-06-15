@@ -36,7 +36,8 @@
       "targets": ["button", "string_select"],
       "configUrl": "https://selfrole.dweeb.faizo.net/config.html",
       "customIdPrefix": "selfrole:",
-      "managesSelectOptions": true
+      "managesSelectOptions": true,
+      "managesFields": ["min_values", "max_values"]
     },
     {
       "schemaVersion": 1,
@@ -49,7 +50,8 @@
       "targets": ["button", "string_select"],
       "configUrl": "https://tickets.dweeb.faizo.net/config.html",
       "customIdPrefix": "tickets:",
-      "managesSelectOptions": true
+      "managesSelectOptions": true,
+      "managesFields": ["min_values", "max_values"]
     },
     {
       "schemaVersion": 1,
@@ -74,7 +76,8 @@
       "targets": ["button", "string_select"],
       "configUrl": "https://quickreplies.dweeb.faizo.net/config.html",
       "customIdPrefix": "quickreplies:",
-      "managesSelectOptions": true
+      "managesSelectOptions": true,
+      "managesFields": ["min_values", "max_values"]
     }
   ]
 }

@@ -18,6 +18,7 @@
 
 import type { PluginTarget } from "./targets";
 import { ALL_PLUGIN_TARGETS } from "./targets";
+import { parseManagedFields, type ManagedField } from "./managedFields";
 
 /** Manifest schema version. Bump when the shape below changes incompatibly. */
 export const PLUGIN_MANIFEST_SCHEMA_VERSION = 1 as const;
@@ -68,6 +69,15 @@ export interface PluginManifest {
    * Defaults to false: a select plugin that leaves options to the user.
    */
   managesSelectOptions?: boolean;
+  /**
+   * Component fields this plugin owns beyond `custom_id` and (for selects) the
+   * option list. Each named field is set from the plugin's `save` payload and
+   * **locked** in the inspector — so a plugin that needs, say, exactly one
+   * selection can pin `min_values`/`max_values` to 1 and the user can't widen it
+   * and break the binding. See `managedFields.ts` for the lockable set. Absent
+   * for a plugin that leaves every standard field to the user.
+   */
+  managesFields?: ManagedField[];
 }
 
 /** Shape the registry endpoint returns. */
@@ -114,6 +124,8 @@ export function parseManifest(raw: unknown): PluginManifest | null {
     : [];
   if (targets.length === 0) return null;
 
+  const managesFields = parseManagedFields(o.managesFields);
+
   const manifest: PluginManifest = {
     schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
     id: o.id,
@@ -128,6 +140,7 @@ export function parseManifest(raw: unknown): PluginManifest | null {
     ...(isNonEmptyString(o.publisher) ? { publisher: o.publisher } : {}),
     ...(typeof o.apiVersion === "number" ? { apiVersion: o.apiVersion } : {}),
     ...(o.managesSelectOptions === true ? { managesSelectOptions: true } : {}),
+    ...(managesFields ? { managesFields } : {}),
   };
   return manifest;
 }

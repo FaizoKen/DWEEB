@@ -22,6 +22,7 @@
  */
 
 import { newId } from "@/lib/id";
+import type { ManagedFieldValues } from "./managedFields";
 
 /** Theme hint passed to the iframe so it can match the editor's appearance. */
 export type PluginTheme = "light" | "dark";
@@ -83,6 +84,14 @@ export interface PluginSaveMessage {
    * host; ignored entirely for non-`string_select` targets.
    */
   options?: PluginSelectOption[];
+  /**
+   * Values for the component fields this plugin declared it owns (the manifest's
+   * `managesFields`). The host accepts only declared fields, clamps each to
+   * Discord's limits, writes them onto the component, and locks them in the
+   * inspector — so a plugin can pin e.g. `min_values`/`max_values` and the user
+   * can't widen them and break the binding. Ignored for fields not declared.
+   */
+  fields?: ManagedFieldValues;
   /**
    * The Discord guild this binding targets, when the plugin is guild-scoped
    * (e.g. Self Role only changes roles in the server it was configured for).

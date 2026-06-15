@@ -2,6 +2,8 @@
   display: grid;
   grid-template-rows: 1fr auto;
   min-height: 0;
+  /* Anchor for the floating issue pill, which docks to this pane's top-right. */
+  position: relative;
 }
 
 .scroll {
@@ -606,6 +608,58 @@ button.statPill {
   border-radius: 999px !important;
   font-size: var(--app-text-base) !important;
   box-shadow: var(--app-shadow-lg);
+}
+
+/* Zero-height marker after the meta header, watched by an IntersectionObserver
+   to detect when the header's issue summary has scrolled out of view. */
+.metaSentinel {
+  height: 0;
+}
+
+/* Floating mirror of the header's issue pills, docked to the editor pane's
+   top-right. Shown only once the header summary has scrolled away, so an
+   outstanding error stays visible — and one tap from being fixed — while editing
+   rows lower down. */
+.floatingIssues {
+  position: absolute;
+  top: 10px;
+  right: 16px;
+  z-index: var(--app-z-toolbar);
+  display: flex;
+  gap: 6px;
+  animation: floatingIssuesIn 140ms ease both;
+}
+
+/* Lift the pill off the scrolling content it floats over, and — unlike the
+   subtle inline summary it mirrors — give it a solid, high-contrast fill so it
+   reads as an alert that can't be missed. */
+.floatingPill {
+  font-weight: 600;
+  padding: 5px 12px;
+  border: none;
+  box-shadow: var(--app-shadow);
+}
+.floatingPill.issuePillError {
+  background: var(--app-danger);
+  color: #fff;
+}
+.floatingPill.issuePillWarn {
+  background: var(--app-warning);
+  color: #2a1d04;
+}
+.floatingPill:hover {
+  filter: brightness(1.08);
+}
+
+@keyframes floatingIssuesIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .advanced {

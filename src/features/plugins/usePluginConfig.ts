@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { LIMITS } from "@/core/schema/limits";
 import { pluginOrigin, PLUGIN_API_VERSION, type PluginManifest } from "@/core/plugins/manifest";
+import { sanitizeManagedFields, type ManagedFieldValues } from "@/core/plugins/managedFields";
 import {
   isCancelMessage,
   isReadyMessage,
@@ -42,6 +43,12 @@ export interface PluginSaveResult {
    * `string_select`. Only populated for that target; `undefined` otherwise.
    */
   options?: PluginSelectOption[];
+  /**
+   * Sanitized values for the component fields the plugin declared it owns
+   * (`managesFields`). Written onto the component and locked in the inspector.
+   * Only ever the fields the manifest declared; `undefined` when none apply.
+   */
+  fields?: ManagedFieldValues;
   /**
    * The guild this binding targets, when the plugin is guild-scoped. Cached per
    * binding so the Send panel can warn before posting to a different server.
@@ -148,6 +155,8 @@ export function usePluginConfig({
             target === "string_select"
               ? sanitizeOptions(data.options, LIMITS.SELECT_OPTIONS)
               : undefined,
+          // Only the fields the manifest declared can be set + locked.
+          fields: sanitizeManagedFields(data.fields, manifest.managesFields),
           guildId: sanitizeGuildId(data.guildId),
         });
         return;

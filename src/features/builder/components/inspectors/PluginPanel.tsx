@@ -129,6 +129,10 @@ export function PluginPanel({ node }: Props) {
     // the plugin stays attached.
     const fields: Partial<StringSelectComponent> = { custom_id: result.customId };
     if (target === "string_select" && result.options?.length) fields.options = result.options;
+    // Fields the plugin owns (e.g. min/max selections) — written here and locked
+    // in the inspector while attached. Already sanitized + limited to the
+    // manifest's declared set by usePluginConfig.
+    if (result.fields) Object.assign(fields, result.fields);
     patch<StringSelectComponent>(node._id, fields);
     // Cache the summary plus, for a guild-scoped plugin, the guild it targets —
     // the Send panel uses the latter to warn before posting to another server.

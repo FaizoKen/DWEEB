@@ -916,7 +916,18 @@
               // For a string select, hand DWEEB the option list to wire + lock
               // onto the menu (one per role, value = role ID). DWEEB ignores
               // this for buttons. No more hand-mapping each option's value.
-              ...(isSelect() ? { options: buildOptions() } : {}),
+              // Also pin the selection bounds and lock them so the user can't
+              // widen them and break the mode: "pick one (swap)" is exactly one
+              // role; the other modes let a member pick any of the roles at once.
+              ...(isSelect()
+                ? {
+                    options: buildOptions(),
+                    fields:
+                      mode === "unique"
+                        ? { min_values: 1, max_values: 1 }
+                        : { min_values: 1, max_values: Math.max(1, chosen.length) },
+                  }
+                : {}),
             },
             hostOrigin,
           );

@@ -168,6 +168,40 @@
   color: var(--app-text-muted);
 }
 
+/* A single plugin-owned scalar field (min/max selections, placeholder), shown
+   read-only. Mirrors the locked custom_id chip so a value the plugin set reads
+   as owned-elsewhere rather than editable. */
+.lockedField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--app-control-h);
+  padding: 8px 12px;
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  cursor: default;
+}
+.lockedFieldIcon {
+  flex: none;
+  color: var(--app-text-subtle);
+}
+.lockedFieldValue {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--app-text-muted);
+  font-size: var(--app-text-sm);
+  text-overflow: ellipsis;
+  cursor: text;
+}
+.lockedFieldValue:focus {
+  outline: none;
+}
+
 .note {
   margin: 0;
   font-size: var(--app-text-xs);
