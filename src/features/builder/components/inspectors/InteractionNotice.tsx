@@ -22,26 +22,19 @@ export function InteractionNotice({ node }: { node: AnyComponent }) {
   if (attachedPlugin) {
     return (
       <CapabilityNote tone="info">
-        <strong>Handled by {attachedPlugin.name}.</strong> {select ? "Selections" : "Clicks"} are
-        processed by the plugin's service — send this message through an application-owned webhook
-        so they reach it.
+        <strong>Handled by {attachedPlugin.name}.</strong> Send through a bot- or app-owned webhook
+        so {select ? "selections" : "clicks"} reach it.
       </CapabilityNote>
     );
   }
 
   return (
     <CapabilityNote>
-      <strong>Needs an application-owned webhook.</strong>{" "}
+      <strong>Needs an app-owned webhook.</strong>{" "}
       {select ? (
-        <>
-          Discord rejects messages containing select menus when sent through a regular user-created
-          webhook — only application/bot-owned webhooks can post them.
-        </>
+        <>A regular webhook can't post select menus — only a bot- or app-owned one can.</>
       ) : (
-        <>
-          Discord rejects messages with interactive buttons when sent through a regular user-created
-          webhook. Use a Link button if you just want a hyperlink.
-        </>
+        <>A regular webhook can't post clickable buttons. Just want a link? Use a Link button.</>
       )}
     </CapabilityNote>
   );

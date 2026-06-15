@@ -63,8 +63,8 @@ export function ButtonInspector({ node }: Props) {
           Action panel to hang under. */}
       {node.style === ButtonStyle.Premium ? (
         <CapabilityNote>
-          <strong>Needs app monetization.</strong> Premium buttons require the webhook's application
-          to have a configured SKU; without that, the button can't actually charge anyone.
+          <strong>Needs app monetization.</strong> A Premium button only works if the owning app has
+          a product set up — otherwise it can't charge anyone.
         </CapabilityNote>
       ) : null}
       <Field label="Style">

@@ -281,10 +281,9 @@ function RoutingNotice({
       <div className={styles.routingAlert} role="alert">
         <strong>The {what} here won’t respond.</strong>
         <p className={styles.pingDetail}>
-          Discord delivers component clicks to the app that owns the webhook, and “{webhookName}”
-          belongs to a different app — not DWEEB and not one of this server’s registered custom
-          bots. Every click on those components would fail, so the send is blocked. Post through a
-          webhook created in DWEEB to make them work.
+          Clicks go to whichever app owns the webhook, and “{webhookName}” belongs to a different
+          app — not DWEEB or one of this server’s custom bots. Post through a webhook created in
+          DWEEB to make them work.
         </p>
       </div>
     );
@@ -292,11 +291,11 @@ function RoutingNotice({
   if (routing === "unverified") {
     return (
       <div className={styles.routingNote} role="note">
-        <strong>Couldn’t confirm the {what} will route through DWEEB.</strong>
+        <strong>Couldn’t confirm the {what} reach DWEEB.</strong>
         <p className={styles.pingDetail}>
-          “{webhookName}” is owned by an app, but whether that app delivers clicks to DWEEB couldn’t
-          be checked. If it isn’t DWEEB’s own webhook or one of this server’s registered custom
-          bots, those components will post but never respond.
+          “{webhookName}” is app-owned, but we couldn’t check whether that app sends clicks to
+          DWEEB. If it isn’t DWEEB or one of this server’s custom bots, the components will post but
+          never respond.
         </p>
       </div>
     );
@@ -360,9 +359,7 @@ export function SendConfirm({
       <dl className={styles.facts}>
         <div className={styles.fact}>
           <dt>Action</dt>
-          <dd>
-            {mode === "update" ? "Edit an existing message in place (PATCH)" : "Post a new message"}
-          </dd>
+          <dd>{mode === "update" ? "Edit a message you already posted" : "Post a new message"}</dd>
         </div>
         <div className={styles.fact}>
           <dt>Webhook</dt>
@@ -473,9 +470,9 @@ export function SendConfirm({
           <strong>Wrong server for this {pluginGuildMismatch.pluginName} menu.</strong>
           <p className={styles.pingDetail}>
             It was set up for {pluginGuildMismatch.configuredGuildName}, but “{targetName}” posts to{" "}
-            {pluginGuildMismatch.webhookGuildName ?? "another server"}. Clicks will just return
-            “this menu was set up for a different server.” Post through a webhook in{" "}
-            {pluginGuildMismatch.configuredGuildName}, or reconfigure the menu for this server.
+            {pluginGuildMismatch.webhookGuildName ?? "another server"}. Clicks here would do
+            nothing. Post through a webhook in {pluginGuildMismatch.configuredGuildName}, or set the
+            menu up for this server.
           </p>
         </div>
       ) : null}

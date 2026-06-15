@@ -30,19 +30,8 @@
  * later. Send-time validation lives in `validation.ts`.
  */
 
-import {
-  isActionRow,
-  isButton,
-  isContainer,
-  isSection,
-  isSelect,
-} from "./guards";
-import {
-  ButtonStyle,
-  type AnyComponent,
-  type EditorId,
-  type WebhookMessage,
-} from "./types";
+import { isActionRow, isButton, isContainer, isSection, isSelect } from "./guards";
+import { ButtonStyle, type AnyComponent, type EditorId, type WebhookMessage } from "./types";
 
 export type CapabilityKind =
   | "app_webhook"
@@ -89,9 +78,9 @@ export function inspectCapabilities(
     notes.push({
       kind: "app_webhook",
       severity: "warning",
-      title: `Needs an application-owned webhook (${interactive.length} interactive component${interactive.length === 1 ? "" : "s"})`,
+      title: `Needs an app-owned webhook (${interactive.length} interactive component${interactive.length === 1 ? "" : "s"})`,
       detail:
-        "Discord only accepts interactive components (buttons with custom_id, select menus) from webhooks owned by an application/bot. Sending this message through a regular user-created webhook will be rejected by Discord.",
+        "Buttons and menus only work from a webhook owned by a bot or app. A regular webhook can't post them.",
       nodes: interactive,
     });
   }
@@ -102,20 +91,20 @@ export function inspectCapabilities(
       severity: "warning",
       title: `Needs app monetization (${premium.length} Premium button${premium.length === 1 ? "" : "s"})`,
       detail:
-        "Premium buttons require the webhook's application to have a configured SKU. Without that, the button links to the app's store page or fails to render.",
+        "Premium buttons only work if the owning app has a product set up. Otherwise the button won't.",
       nodes: premium,
     });
   }
 
   if (message.thread_name || (message.applied_tags && message.applied_tags.length > 0)) {
     const parts: string[] = [];
-    if (message.thread_name) parts.push("thread_name");
-    if (message.applied_tags && message.applied_tags.length > 0) parts.push("applied_tags");
+    if (message.thread_name) parts.push("thread name");
+    if (message.applied_tags && message.applied_tags.length > 0) parts.push("applied tags");
     notes.push({
       kind: "forum_channel",
       severity: "warning",
       title: "Needs a forum or media channel",
-      detail: `${parts.join(" + ")} only takes effect when the webhook posts into a forum or media channel. Discord ignores ${parts.length > 1 ? "them" : "it"} on text channels.`,
+      detail: `Your ${parts.join(" and ")} only take${parts.length > 1 ? "" : "s"} effect in a forum or media channel — Discord ignores ${parts.length > 1 ? "them" : "it"} on text channels.`,
     });
   }
 
@@ -123,17 +112,16 @@ export function inspectCapabilities(
     notes.push({
       kind: "conflict",
       severity: "warning",
-      title: "thread_id and thread_name both set",
+      title: "Two thread settings clash",
       detail:
-        "thread_id posts into an existing thread; thread_name starts a new forum post. Pick one — Discord will use thread_id and ignore thread_name.",
+        "You set both a thread to post in and a new thread name. Discord uses the thread you picked and ignores the name — pick one.",
     });
   } else if (ctx.threadIdProvided) {
     notes.push({
       kind: "existing_thread",
       severity: "info",
       title: "Posts into an existing thread",
-      detail:
-        "thread_id is set — the message will be delivered to that thread rather than the webhook's default channel.",
+      detail: "A thread is set, so this posts there instead of the webhook's main channel.",
     });
   }
 
@@ -141,9 +129,9 @@ export function inspectCapabilities(
     notes.push({
       kind: "tts_noop",
       severity: "warning",
-      title: "TTS has no effect with Components V2",
+      title: "Text-to-speech won't play",
       detail:
-        "Discord's text-to-speech reads the `content` field; V2 messages send `components` only. The tts flag is accepted but nothing audible plays.",
+        "Text-to-speech reads plain text, which this message type doesn't use. The setting is ignored.",
     });
   }
 

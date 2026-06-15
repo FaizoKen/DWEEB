@@ -1118,7 +1118,7 @@ export function SendPanel({
           onClick={() => setMode("new")}
         >
           <strong>Send as new</strong>
-          <span>Post a new message (POST).</span>
+          <span>Post a brand-new message.</span>
         </button>
         <button
           type="button"
@@ -1128,7 +1128,7 @@ export function SendPanel({
           onClick={() => setMode("update")}
         >
           <strong>Update existing</strong>
-          <span>Edit a posted message (PATCH).</span>
+          <span>Edit a message you already posted.</span>
         </button>
       </div>
 
@@ -1273,9 +1273,8 @@ export function SendPanel({
           title="Update overwrites the entire message."
           more={
             <>
-              What’s in the editor now replaces the original completely — anything you don’t rebuild
-              here is removed. Only this webhook can edit its own messages (Discord 404s otherwise).
-              To tweak the live message instead of replacing it, pull it in from the{" "}
+              What’s in the editor replaces the original completely — anything you don’t rebuild
+              here is removed. To tweak the live message instead, pull it in from the{" "}
               <strong>Restore</strong> tab first.
             </>
           }
@@ -1325,9 +1324,8 @@ export function SendPanel({
           }
           more={
             <>
-              Discord only accepts interactive components (buttons with custom_id, select menus)
-              from application-owned webhooks. Use a bot/app-owned webhook, or remove the
-              interactive components.
+              Buttons and menus only work from a webhook owned by a bot or app. Use one of those, or
+              remove the interactive components.
             </>
           }
           moreLabel="Why"
@@ -1355,12 +1353,10 @@ export function SendPanel({
             }
             more={
               <>
-                Discord delivers component clicks to the app that owns the webhook. This one belongs
-                to a different app — not DWEEB and not one of this server’s registered custom bots —
-                so DWEEB’s backend never sees them. Sent here every click would fail, so the send is
-                blocked. To make them work, post through a webhook created in DWEEB (see the links
-                under the URL field), or register the owning app as a custom bot first — or remove
-                the interactive components.
+                Clicks go to whichever app owns the webhook, and this one belongs to a different app
+                — not DWEEB or one of this server’s custom bots — so DWEEB never sees them. Post
+                through a webhook created in DWEEB, register that app as a custom bot, or remove the
+                interactive components.
               </>
             }
             moreLabel="Why"
@@ -1385,10 +1381,9 @@ export function SendPanel({
               }
               more={
                 <>
-                  These components only respond when the webhook’s owning app routes interactions
-                  through DWEEB — DWEEB’s own webhooks do, and so do this server’s registered custom
-                  bots. Signing in lets DWEEB verify that automatically, so the clicks aren’t
-                  silently dropped. Until then it can’t be confirmed, so the send is held.
+                  These components only work when the webhook’s app sends clicks to DWEEB — DWEEB’s
+                  own webhooks do, and so do this server’s custom bots. Sign in so DWEEB can check;
+                  until then the send is held.
                 </>
               }
               moreLabel="Why"
@@ -1408,11 +1403,10 @@ export function SendPanel({
               more={
                 <>
                   The {pluginNames.join(" / ")} component
-                  {pluginBound.length === 1 ? "" : "s"} here only respond when the webhook’s owning
-                  app routes interactions through DWEEB — DWEEB’s own webhooks do, and so do the
-                  server’s registered custom bots. The registration check didn’t go through, so this
-                  couldn’t be confirmed. If the app is unrelated, the message still posts but those
-                  components never respond.
+                  {pluginBound.length === 1 ? "" : "s"} here only work when the webhook’s app sends
+                  clicks to DWEEB — its own webhooks do, and so do this server’s custom bots. We
+                  couldn’t check this one, so if it’s an unrelated app the message still posts but
+                  the components won’t respond.
                 </>
               }
               moreLabel="What this means"
@@ -1428,9 +1422,8 @@ export function SendPanel({
                 “{knownName || "This webhook"}”{" "}
                 {componentRouting === "dweeb"
                   ? "belongs to DWEEB"
-                  : "belongs to a custom bot registered for this server"}
-                , so Discord delivers button and select clicks to DWEEB’s backend, where the
-                attached plugins respond.
+                  : "is a custom bot registered for this server"}
+                , so clicks go to DWEEB and the attached plugins handle them.
               </>
             }
             moreLabel="What this means"
@@ -1442,9 +1435,9 @@ export function SendPanel({
             title="Interactive responses are handled by the bot’s server."
             more={
               <>
-                “{knownName || "This webhook"}” is app-owned, so Discord accepts and renders the
-                buttons and select menus. Clicks are delivered to the owning app — its backend has
-                to be running to respond. This builder only posts the message.{" "}
+                “{knownName || "This webhook"}” is app-owned, so the buttons and menus show up fine.
+                Clicks go to that app — its backend has to be running to respond. This builder only
+                posts the message.{" "}
                 <a
                   href="https://discord.com/developers/docs/interactions/receiving-and-responding"
                   target="_blank"
@@ -1471,11 +1464,10 @@ export function SendPanel({
           }
           more={
             <>
-              It only changes roles in <strong>{mismatchGuildName}</strong>, but this webhook posts
-              to {knownGuildName ? <strong>{knownGuildName}</strong> : "another server"}. Sent here
-              every click would just return “this menu was set up for a different server” and change
-              nothing, so the send is blocked. Post through a webhook in{" "}
-              <strong>{mismatchGuildName}</strong>, or reconfigure the menu for this server.
+              It only works in <strong>{mismatchGuildName}</strong>, but this webhook posts to{" "}
+              {knownGuildName ? <strong>{knownGuildName}</strong> : "another server"}. Sent here,
+              every click would do nothing. Post through a webhook in{" "}
+              <strong>{mismatchGuildName}</strong>, or set the menu up for this server.
             </>
           }
           moreLabel="Why"
