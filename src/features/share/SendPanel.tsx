@@ -123,7 +123,7 @@ import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
-import { ChevronRightIcon, LockIcon, PlusIcon } from "@/ui/Icon";
+import { CheckCircleIcon, ChevronRightIcon, LockIcon, PlusIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
 import {
@@ -1096,12 +1096,25 @@ export function SendPanel({
   }, [initialWebhook]);
 
   // The fast path — let DWEEB (or a registered custom bot) create the webhook —
-  // only exists when a proxy is configured to run the OAuth flow. The manual
-  // paste field then shows when there's no create flow at all, when the user
-  // opted into pasting, or when a URL is already loaded (recents, restore, a
-  // just-created webhook) so they can see and edit what's active.
+  // only exists when a proxy is configured to run the OAuth flow. When it does,
+  // the manual URL field is the secondary path: a one-line summary once a valid
+  // webhook is set, expanding to the full credential field only when the user
+  // opts to edit it (`pasteMode`) or the typed URL still needs fixing. With no
+  // fast path at all, the field is the only way in, so it's always open.
   const proxyOn = isProxyConfigured();
-  const showUrlInput = !proxyOn || pasteMode || url.trim().length > 0;
+  const editingUrl = !proxyOn || pasteMode || (url.trim().length > 0 && !parsedUrl);
+  // Open the URL field, revealed and focused — used by both "Paste it instead"
+  // and "Edit URL". Revealing matches intent: you asked to see/change the URL.
+  const openUrlField = () => {
+    setRevealUrl(true);
+    setPasteMode(true);
+    requestAnimationFrame(() => urlInputRef.current?.focus());
+  };
+  // Collapse the field back to the summary (keeps the URL) and re-mask it.
+  const closeUrlField = () => {
+    setPasteMode(false);
+    setRevealUrl(false);
+  };
 
   return (
     <>
@@ -1137,6 +1150,9 @@ export function SendPanel({
         activeId={parsedUrl?.id ?? null}
         onUse={(entry) => {
           setUrl(entry.url);
+          // Picking a saved entry collapses to the summary — the recents row
+          // already shows what's active, so drop out of any manual edit mode.
+          closeUrlField();
           setState({ kind: "idle" });
         }}
         onChange={() => setHistory(loadHistory())}
@@ -1157,22 +1173,37 @@ export function SendPanel({
         </section>
       ) : null}
 
-      {proxyOn && !showUrlInput ? (
-        <button
-          type="button"
-          className={styles.pasteToggle}
-          onClick={() => {
-            setPasteMode(true);
-            // Field mounts this render; focus it once it's in the DOM.
-            requestAnimationFrame(() => urlInputRef.current?.focus());
-          }}
-        >
-          Already have a webhook URL?{" "}
-          <span className={styles.pasteToggleAccent}>Paste it instead</span>
-        </button>
+      {/* Collapsed states (a create flow is available). Either a webhook is set
+          — show a one-line summary with an Edit affordance — or none is, in
+          which case the create cards above are primary and this is just a quiet
+          link to paste an existing URL. */}
+      {proxyOn && !editingUrl ? (
+        parsedUrl ? (
+          <div className={styles.urlSet}>
+            <span className={styles.urlSetIcon} aria-hidden>
+              <CheckCircleIcon size={16} />
+            </span>
+            <span className={styles.urlSetBody}>
+              <span className={styles.urlSetTitle}>Webhook URL set</span>
+              <span className={styles.urlSetSub}>Posting straight to your channel.</span>
+            </span>
+            <button type="button" className={styles.urlSetEdit} onClick={openUrlField}>
+              Edit URL
+            </button>
+          </div>
+        ) : (
+          <button type="button" className={styles.pasteToggle} onClick={openUrlField}>
+            Already have a webhook URL?{" "}
+            <span className={styles.pasteToggleAccent}>Paste it instead</span>
+          </button>
+        )
       ) : null}
 
-      {showUrlInput ? (
+      {/* Expanded credential field. The footer offers a single contextual
+          action: collapse to the summary once the URL is valid (Done), wipe a
+          bad/leftover URL (Clear), or back out of an empty field (Cancel). With
+          no create flow to fall back on there's nowhere to go, so it's omitted. */}
+      {editingUrl ? (
         <div className={styles.pasteSection}>
           <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
             <strong>Treat the webhook URL like a password.</strong> It's a credential that lets
@@ -1183,17 +1214,27 @@ export function SendPanel({
             error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
             hint={
               proxyOn ? (
-                <button
-                  type="button"
-                  className={styles.pasteBack}
-                  onClick={() => {
-                    setPasteMode(false);
-                    setUrl("");
-                    setState({ kind: "idle" });
-                  }}
-                >
-                  ← Clear &amp; create one instead
-                </button>
+                parsedUrl ? (
+                  <button type="button" className={styles.pasteBack} onClick={closeUrlField}>
+                    Done — use this webhook
+                  </button>
+                ) : url.trim().length > 0 ? (
+                  <button
+                    type="button"
+                    className={styles.pasteBack}
+                    onClick={() => {
+                      setUrl("");
+                      setState({ kind: "idle" });
+                      requestAnimationFrame(() => urlInputRef.current?.focus());
+                    }}
+                  >
+                    Clear
+                  </button>
+                ) : (
+                  <button type="button" className={styles.pasteBack} onClick={closeUrlField}>
+                    Cancel
+                  </button>
+                )
               ) : undefined
             }
           >
@@ -1683,7 +1724,7 @@ function CreateWebhookOptions() {
                   });
               }}
             >
-              <span className={styles.createCardIcon} aria-hidden>
+              <span className={`${styles.createCardIcon} ${styles.createCardIconBot}`} aria-hidden>
                 <PlusIcon size={15} />
               </span>
               <span className={styles.createCardBody}>
@@ -1712,7 +1753,7 @@ function CreateWebhookOptions() {
           <PlusIcon size={15} />
         </span>
         <span className={styles.createCardBody}>
-          <span className={styles.createCardTitle}>Create a webhook on a channel</span>
+          <span className={styles.createCardTitle}>Create with DWEEB</span>
           <span className={styles.createCardSub}>
             {hasBots ? "Posts as DWEEB." : "Posts as DWEEB — pick a channel and you're set."}
           </span>
