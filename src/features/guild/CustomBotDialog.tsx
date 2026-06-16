@@ -28,6 +28,7 @@ import {
   type CustomBots,
 } from "@/core/guild/api";
 import { interactionsEndpointUrl, oauthCallbackUrl } from "@/core/guild/config";
+import { copyText } from "@/core/serialization/clipboard";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
@@ -186,9 +187,72 @@ export function CustomBotDialog({
   } else {
     const { bots } = state;
     const showForm = bots.used < bots.cap || editingId != null;
+    // A first-time registration gets the full numbered walkthrough; an "Update"
+    // (editingId set) is just a key/secret swap, so it skips the portal steps.
+    const freshRegister = showForm && editingId == null;
     const editingName = editingId
       ? bots.items.find((i) => i.application_id === editingId)?.name
       : undefined;
+
+    const formFields = (
+      <div className={styles.formGrid}>
+        <Field
+          label="Application ID"
+          hint="General Information · its name loads in automatically"
+          className={styles.colFull}
+        >
+          {(id) => (
+            <TextInput
+              id={id}
+              value={appId}
+              onChange={(e) => setAppId(e.target.value)}
+              placeholder="1234567890123456789"
+              inputMode="numeric"
+              disabled={editingId != null}
+            />
+          )}
+        </Field>
+        <Field
+          label="Public key"
+          hint="General Information → Public Key"
+          className={styles.colFull}
+        >
+          {(id) => (
+            <TextInput
+              id={id}
+              value={publicKey}
+              onChange={(e) => setPublicKey(e.target.value)}
+              placeholder="64 hex characters"
+              spellCheck={false}
+            />
+          )}
+        </Field>
+        <Field
+          label="Client secret"
+          hint="OAuth2 → Client Secret · stored encrypted, never shown again"
+          className={styles.colFull}
+        >
+          {(id) => (
+            <TextInput
+              id={id}
+              masked
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              placeholder="••••••••••••••••"
+            />
+          )}
+        </Field>
+      </div>
+    );
+
+    // The two URLs the owner pastes back into their app's portal settings.
+    const portalUrls = (
+      <>
+        <CopyField label="OAuth2 → Redirects" value={callbackUrl} />
+        <CopyField label="General Information → Interactions Endpoint URL" value={endpointUrl} />
+      </>
+    );
+
     body = (
       <>
         <p className={styles.lead}>
@@ -261,96 +325,84 @@ export function CustomBotDialog({
           ) : null}
         </section>
 
-        {showForm ? (
-          <section>
-            <div className={styles.sectionHead}>
-              <h3 className={styles.sectionTitle}>
-                {editingId ? `Update ${editingName || "app"}` : "Register your app"}
-              </h3>
-              {editingId ? (
-                <button type="button" className={styles.linkBtn} onClick={resetForm}>
-                  Cancel
-                </button>
-              ) : null}
-            </div>
-            <div className={styles.formGrid}>
-              <Field
-                label="Application ID"
-                hint="The bot's name is fetched from Discord automatically"
-                className={styles.colFull}
-              >
-                {(id) => (
-                  <TextInput
-                    id={id}
-                    value={appId}
-                    onChange={(e) => setAppId(e.target.value)}
-                    placeholder="1234567890123456789"
-                    inputMode="numeric"
-                    disabled={editingId != null}
-                  />
-                )}
-              </Field>
-              <Field
-                label="Public key"
-                hint="General Information → Public Key"
-                className={styles.colFull}
-              >
-                {(id) => (
-                  <TextInput
-                    id={id}
-                    value={publicKey}
-                    onChange={(e) => setPublicKey(e.target.value)}
-                    placeholder="64 hex characters"
-                    spellCheck={false}
-                  />
-                )}
-              </Field>
-              <Field
-                label="Client secret"
-                hint="OAuth2 → Client Secret · stored encrypted, never shown again"
-                className={styles.colFull}
-              >
-                {(id) => (
-                  <TextInput
-                    id={id}
-                    masked
-                    value={clientSecret}
-                    onChange={(e) => setClientSecret(e.target.value)}
-                    placeholder="••••••••••••••••"
-                  />
-                )}
-              </Field>
-            </div>
-            <div className={styles.formActions}>
-              <Button size="sm" disabled={busy} onClick={() => void handleRegister()}>
-                {editingId ? "Save changes" : "Register"}
-              </Button>
-            </div>
-          </section>
-        ) : (
-          <p className={styles.note}>
-            {bots.items.length === 0
-              ? "Registrations are closed on this deployment."
-              : "Quota in use — higher limits arrive with server plans."}
-          </p>
-        )}
+        {freshRegister ? (
+          <ol className={styles.guide}>
+            <li className={styles.step}>
+              <span className={styles.stepNum}>1</span>
+              <div className={styles.stepBody}>
+                <span className={styles.stepTitle}>Create your app</span>
+                <span className={styles.stepHint}>
+                  In Discord’s Developer Portal, click <strong>New Application</strong> and give it
+                  a name.
+                </span>
+                <a
+                  className={styles.portalBtn}
+                  href="https://discord.com/developers/applications"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open Developer Portal ↗
+                </a>
+              </div>
+            </li>
 
-        <details className={styles.setup}>
-          <summary>Setup in the Developer Portal</summary>
-          <ol className={styles.steps}>
-            <li>
-              Register the app here first (Discord verifies the endpoint the moment it’s saved).
+            <li className={styles.step}>
+              <span className={styles.stepNum}>2</span>
+              <div className={styles.stepBody}>
+                <span className={styles.stepTitle}>Paste its details here</span>
+                {formFields}
+                <div className={styles.formActions}>
+                  <Button size="sm" disabled={busy} onClick={() => void handleRegister()}>
+                    Register
+                  </Button>
+                </div>
+              </div>
             </li>
-            <li>
-              <strong>OAuth2 → Redirects</strong> — add{" "}
-              <code className={styles.code}>{callbackUrl}</code>
-            </li>
-            <li>
-              <strong>General Information → Interactions Endpoint URL</strong> — set{" "}
-              <code className={styles.code}>{endpointUrl}</code>
+
+            <li className={styles.step}>
+              <span className={styles.stepNum}>3</span>
+              <div className={styles.stepBody}>
+                <span className={styles.stepTitle}>Point it back at DWEEB</span>
+                <span className={styles.stepHint}>
+                  After registering, paste each into your app’s portal and save — Discord checks
+                  them right away.
+                </span>
+                {portalUrls}
+              </div>
             </li>
           </ol>
-        </details>
+        ) : showForm ? (
+          <section>
+            <div className={styles.sectionHead}>
+              <h3 className={styles.sectionTitle}>Update {editingName || "app"}</h3>
+              <button type="button" className={styles.linkBtn} onClick={resetForm}>
+                Cancel
+              </button>
+            </div>
+            {formFields}
+            <div className={styles.formActions}>
+              <Button size="sm" disabled={busy} onClick={() => void handleRegister()}>
+                Save changes
+              </Button>
+            </div>
+            <details className={styles.setup}>
+              <summary>Developer Portal URLs</summary>
+              <div className={styles.urlRef}>{portalUrls}</div>
+            </details>
+          </section>
+        ) : (
+          <>
+            <p className={styles.note}>
+              {bots.items.length === 0
+                ? "Registrations are closed on this deployment."
+                : "Quota in use — higher limits arrive with server plans."}
+            </p>
+            <details className={styles.setup}>
+              <summary>Developer Portal URLs</summary>
+              <div className={styles.urlRef}>{portalUrls}</div>
+            </details>
+          </>
+        )}
 
         {actionError ? <p className={styles.error}>{actionError}</p> : null}
       </>
@@ -370,5 +422,34 @@ export function CustomBotDialog({
     >
       {body}
     </Modal>
+  );
+}
+
+/**
+ * One labeled, copy-to-clipboard URL row — used for the redirect and
+ * interactions-endpoint values a beginner has to paste back into their app's
+ * Developer Portal. The value is long and copy-paste-only, so a one-click Copy
+ * beats asking them to select it by hand. Renders nothing when the URL is empty
+ * (no proxy configured).
+ */
+function CopyField({ label, value }: { label: ReactNode; value: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  const onCopy = async () => {
+    if (await copyText(value)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
+  return (
+    <div className={styles.copyField}>
+      <span className={styles.copyLabel}>{label}</span>
+      <div className={styles.copyRow}>
+        <code className={styles.copyValue}>{value}</code>
+        <Button size="sm" variant="ghost" onClick={() => void onCopy()}>
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+    </div>
   );
 }
