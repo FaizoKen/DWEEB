@@ -13,16 +13,24 @@
 
 import { create } from "zustand";
 
+/** Which chip the gallery lands on when opened. Callers that want the user's
+ *  saved messages front-and-centre pass "Saved"; everything else defaults to
+ *  "All". The gallery reads this once on mount. */
+export type GalleryInitialFilter = "All" | "Saved";
+
 interface TemplateGalleryState {
   open: boolean;
-  openGallery(): void;
+  /** Filter to pre-select the next time the gallery opens. */
+  initialFilter: GalleryInitialFilter;
+  openGallery(filter?: GalleryInitialFilter): void;
   closeGallery(): void;
 }
 
 export const useTemplateGalleryStore = create<TemplateGalleryState>((set) => ({
   open: false,
-  openGallery() {
-    set({ open: true });
+  initialFilter: "All",
+  openGallery(filter = "All") {
+    set({ open: true, initialFilter: filter });
   },
   closeGallery() {
     set({ open: false });

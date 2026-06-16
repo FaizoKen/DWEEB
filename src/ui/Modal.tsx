@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import styles from "./Modal.module.css";
@@ -11,6 +11,9 @@ interface ModalProps {
   footer?: ReactNode;
   /** "sm" renders a compact centered dialog that stays small on mobile. */
   size?: "sm" | "md";
+  /** Inline overrides for the backdrop — e.g. a raised `zIndex` so the dialog
+   *  clears another full-screen overlay it's opened on top of. */
+  backdropStyle?: CSSProperties;
   children: ReactNode;
 }
 
@@ -23,7 +26,15 @@ interface ModalProps {
  * Rendered into `document.body` via a portal so it escapes any scroll
  * container the trigger lives in.
  */
-export function Modal({ open, onClose, title, footer, size = "md", children }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  title,
+  footer,
+  size = "md",
+  backdropStyle,
+  children,
+}: ModalProps) {
   const lastFocused = useRef<Element | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -49,7 +60,11 @@ export function Modal({ open, onClose, title, footer, size = "md", children }: M
   if (!open) return null;
 
   return createPortal(
-    <div className={styles.backdrop} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className={styles.backdrop}
+      style={backdropStyle}
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
       <div
         ref={dialogRef}
         role="dialog"

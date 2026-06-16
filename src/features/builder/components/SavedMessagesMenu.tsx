@@ -4,25 +4,19 @@
  * Three jobs:
  *  - Stash the current message under a user-supplied name (localStorage).
  *  - Wipe the editor back to an empty message.
- *  - Load a previously saved message back into the editor.
+ *  - Jump to the full-screen gallery, where saved messages are browsed, loaded,
+ *    and deleted alongside the templates.
  *
- * Saved messages are listed inline so loading is one click; each row carries a
- * delete affordance. A short naming dialog appears when the user picks "Save
- * current message…". Templates (and the saved-message browser) live in the
- * full-screen gallery, reachable here via "Browse gallery…".
+ * A short naming dialog appears when the user picks "Save current message…".
  */
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
-import {
-  normalizeSavedMessageName,
-  useSavedMessagesStore,
-  type SavedMessageRecord,
-} from "@/core/state/savedMessagesStore";
+import { normalizeSavedMessageName, useSavedMessagesStore } from "@/core/state/savedMessagesStore";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
-import { Menu, MenuDivider, MenuItem } from "@/ui/Menu";
+import { Menu, MenuItem } from "@/ui/Menu";
 import { Modal } from "@/ui/Modal";
 import { TextInput } from "@/ui/TextInput";
 import { BookmarkIcon, ChevronDownIcon, SaveIcon, TemplateIcon, TrashIcon } from "@/ui/Icon";
@@ -31,40 +25,19 @@ import styles from "./SavedMessagesMenu.module.css";
 
 export function SavedMessagesMenu() {
   const clearAll = useMessageStore((s) => s.clearAll);
-  const replaceMessage = useMessageStore((s) => s.replaceMessage);
   const currentMessage = useMessageStore((s) => s.message);
 
   const entries = useSavedMessagesStore((s) => s.entries);
   const saveEntry = useSavedMessagesStore((s) => s.save);
-  const loadEntry = useSavedMessagesStore((s) => s.load);
-  const removeEntry = useSavedMessagesStore((s) => s.remove);
 
   const openGallery = useTemplateGalleryStore((s) => s.openGallery);
 
   const [saveOpen, setSaveOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<SavedMessageRecord | null>(null);
 
   const handleSave = (name: string) => {
     saveEntry(name, currentMessage);
     setSaveOpen(false);
     pushToast(`Saved "${name}"`, "success");
-  };
-
-  const handleLoad = (entry: SavedMessageRecord) => {
-    const message = loadEntry(entry.id);
-    if (!message) {
-      pushToast("Couldn't load that saved message — it may be corrupted.", "error");
-      return;
-    }
-    replaceMessage(message);
-    pushToast(`Loaded "${entry.name}"`, "success");
-  };
-
-  const confirmDelete = () => {
-    if (!pendingDelete) return;
-    removeEntry(pendingDelete.id);
-    pushToast(`Deleted "${pendingDelete.name}"`, "info");
-    setPendingDelete(null);
   };
 
   return (
@@ -78,7 +51,7 @@ export function SavedMessagesMenu() {
             leadingIcon={<BookmarkIcon />}
             trailingIcon={<ChevronDownIcon />}
             collapseLabel
-            title="Save the current message locally, load a saved one, clear everything, or open the gallery"
+            title="Save the current message locally, clear everything, or browse saved messages and templates in the gallery"
           >
             Saved
           </Button>
@@ -95,6 +68,17 @@ export function SavedMessagesMenu() {
             >
               Save current message…
             </MenuItem>
+            {entries.length > 0 ? (
+              <MenuItem
+                icon={<BookmarkIcon />}
+                onSelect={() => {
+                  close();
+                  openGallery("Saved");
+                }}
+              >
+                Saved messages ({entries.length})
+              </MenuItem>
+            ) : null}
             <MenuItem
               icon={<TrashIcon />}
               onSelect={() => {
@@ -113,30 +97,6 @@ export function SavedMessagesMenu() {
             >
               Browse gallery…
             </MenuItem>
-            <MenuDivider />
-            <div className={styles.sectionLabel}>Saved messages</div>
-            {entries.length === 0 ? (
-              <div className={styles.empty}>
-                Nothing saved yet. Use "Save current message…" to stash this one.
-              </div>
-            ) : (
-              <div className={styles.list}>
-                {entries.map((entry) => (
-                  <SavedRow
-                    key={entry.id}
-                    entry={entry}
-                    onLoad={() => {
-                      close();
-                      handleLoad(entry);
-                    }}
-                    onDelete={() => {
-                      close();
-                      setPendingDelete(entry);
-                    }}
-                  />
-                ))}
-              </div>
-            )}
           </div>
         )}
       </Menu>
@@ -147,70 +107,7 @@ export function SavedMessagesMenu() {
         onCancel={() => setSaveOpen(false)}
         onSave={handleSave}
       />
-
-      <DeleteConfirmDialog
-        entry={pendingDelete}
-        onCancel={() => setPendingDelete(null)}
-        onConfirm={confirmDelete}
-      />
     </>
-  );
-}
-
-interface DeleteConfirmDialogProps {
-  entry: SavedMessageRecord | null;
-  onCancel: () => void;
-  onConfirm: () => void;
-}
-
-function DeleteConfirmDialog({ entry, onCancel, onConfirm }: DeleteConfirmDialogProps) {
-  return (
-    <Modal open={!!entry} onClose={onCancel} title="Delete saved message?" size="sm">
-      <div className={styles.confirmBody}>
-        <p className={styles.confirmText}>
-          Permanently delete <strong>"{entry?.name}"</strong>? This can't be undone.
-        </p>
-        <div className={styles.saveActions}>
-          <Button variant="ghost" onClick={onCancel} type="button">
-            Cancel
-          </Button>
-          <Button variant="danger" onClick={onConfirm} type="button" leadingIcon={<TrashIcon />}>
-            Delete
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-interface SavedRowProps {
-  entry: SavedMessageRecord;
-  onLoad: () => void;
-  onDelete: () => void;
-}
-
-function SavedRow({ entry, onLoad, onDelete }: SavedRowProps) {
-  return (
-    <div className={styles.row}>
-      <button
-        type="button"
-        className={styles.rowLoad}
-        onClick={onLoad}
-        title={`Load "${entry.name}"`}
-      >
-        <span className={styles.rowName}>{entry.name}</span>
-        <span className={styles.rowMeta}>{formatRelative(entry.savedAt)}</span>
-      </button>
-      <button
-        type="button"
-        className={styles.rowDelete}
-        onClick={onDelete}
-        aria-label={`Delete saved message "${entry.name}"`}
-        title="Delete"
-      >
-        <TrashIcon size={14} />
-      </button>
-    </div>
   );
 }
 
@@ -285,20 +182,4 @@ function SaveMessageDialog({ open, existingNames, onCancel, onSave }: SaveMessag
       </form>
     </Modal>
   );
-}
-
-/** Compact "2m ago" / "yesterday" / "Mar 4" formatter for the menu list. */
-function formatRelative(savedAt: number): string {
-  const diffMs = Date.now() - savedAt;
-  const minutes = Math.round(diffMs / 60_000);
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(savedAt).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
 }

@@ -3,95 +3,12 @@
 }
 
 .menu {
-  /* The Menu panel grows beyond its default min-width to comfortably show
-   * saved-message names. Caps with a scrolling list so a large library
-   * doesn't push the viewport. */
-  min-width: 260px;
+  /* A comfortable width for the three actions. */
+  min-width: 240px;
   max-width: 320px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-.sectionLabel {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--app-text-subtle);
-  padding: 6px 10px 2px;
-}
-
-.empty {
-  font-size: 12px;
-  color: var(--app-text-muted);
-  padding: 6px 10px 8px;
-  line-height: 1.4;
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 280px;
-  overflow-y: auto;
-  /* Trim the inner scroll gutter so it doesn't visually overflow the menu. */
-  padding-right: 2px;
-}
-
-.row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 4px;
-  border-radius: var(--app-radius-sm);
-}
-.row:hover {
-  background: var(--app-bg-hover);
-}
-
-.rowLoad {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px 6px 10px;
-  background: transparent;
-  border: none;
-  text-align: left;
-  cursor: pointer;
-  color: var(--app-text);
-  min-width: 0;
-}
-
-.rowName {
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.rowMeta {
-  font-size: 11px;
-  color: var(--app-text-muted);
-}
-
-.rowDelete {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-right: 4px;
-  border-radius: var(--app-radius-sm);
-  background: transparent;
-  border: none;
-  color: var(--app-text-muted);
-  cursor: pointer;
-}
-.rowDelete:hover {
-  background: var(--app-bg-input);
-  color: var(--app-danger);
 }
 
 /* Save dialog form layout. */
@@ -104,20 +21,4 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-}
-.error {
-  font-size: 12px;
-  color: var(--app-danger);
-}
-
-.confirmBody {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.confirmText {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--app-text);
 }

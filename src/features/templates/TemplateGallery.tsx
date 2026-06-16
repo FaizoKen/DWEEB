@@ -44,7 +44,9 @@ import {
 } from "@/data/presets";
 import type { WebhookMessage } from "@/core/schema/types";
 import { Preview } from "@/features/preview/Preview";
-import { CloseIcon, PlusIcon, PuzzleIcon, SearchIcon, SparkleIcon } from "@/ui/Icon";
+import { Button } from "@/ui/Button";
+import { Modal } from "@/ui/Modal";
+import { CloseIcon, PlusIcon, PuzzleIcon, SearchIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { useTemplateGalleryStore } from "./templateGalleryStore";
 import styles from "./TemplateGallery.module.css";
@@ -74,6 +76,8 @@ interface CardData {
   /** Continue / saved only — the small pill shown in place of a category. */
   badge?: string;
   onPick: () => void;
+  /** Saved only — remove this entry; drives the card's delete affordance. */
+  onDelete?: () => void;
 }
 
 /** Lowercased search haystack for one card. */
@@ -101,9 +105,15 @@ export function TemplateGallery() {
   const clearAll = useMessageStore((s) => s.clearAll);
   const closeGallery = useTemplateGalleryStore((s) => s.closeGallery);
   const savedEntries = useSavedMessagesStore((s) => s.entries);
+  const removeEntry = useSavedMessagesStore((s) => s.remove);
 
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("All");
+  // Seeded once from the store so callers can deep-link straight to "Saved";
+  // the gallery is remounted on each open, so this initialiser re-runs fresh.
+  const [filter, setFilter] = useState<Filter>(
+    () => useTemplateGalleryStore.getState().initialFilter,
+  );
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   // Focus search on open so a user can start typing immediately.
@@ -186,6 +196,7 @@ export function TemplateGallery() {
           closeGallery();
           pushToast(`Loaded "${entry.name}"`, "success");
         },
+        onDelete: () => setPendingDelete({ id: entry.id, name: entry.name }),
       })),
     [savedMessages, replaceMessage, closeGallery],
   );
@@ -248,121 +259,159 @@ export function TemplateGallery() {
     pushToast("Started a blank message", "info");
   };
 
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    removeEntry(pendingDelete.id);
+    pushToast(`Deleted "${pendingDelete.name}"`, "info");
+    setPendingDelete(null);
+  };
+
   return createPortal(
-    <div
-      className={styles.backdrop}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Start a message"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) closeGallery();
-      }}
-    >
-      <div className={styles.panel}>
-        <header className={styles.header}>
-          <div className={styles.headingRow}>
-            <div className={styles.heading}>
-              <h2 className={styles.title}>
-                <span className={styles.titleSpark} aria-hidden>
-                  <SparkleIcon size={20} />
-                </span>
-                Start a message
-              </h2>
-              <p className={styles.subtitle}>
-                Continue your last message, reuse a saved one, or pick a template — everything is
-                fully editable.
-              </p>
-            </div>
-            <button
-              type="button"
-              className={styles.close}
-              onClick={closeGallery}
-              aria-label="Close template gallery"
-            >
-              <CloseIcon size={20} />
-            </button>
-          </div>
-
-          <div className={styles.controls}>
-            <div className={styles.search}>
-              <SearchIcon size={16} className={styles.searchIcon} aria-hidden />
-              <input
-                ref={searchRef}
-                type="text"
-                className={styles.searchInput}
-                value={query}
-                onChange={(e) => setQuery(e.currentTarget.value)}
-                placeholder={`Search ${TEMPLATES.length} templates…`}
-                aria-label="Search templates"
-              />
-              {query ? (
-                <button
-                  type="button"
-                  className={styles.searchClear}
-                  onClick={() => {
-                    setQuery("");
-                    searchRef.current?.focus();
-                  }}
-                  aria-label="Clear search"
-                >
-                  <CloseIcon size={14} />
-                </button>
-              ) : null}
-            </div>
-
-            <div className={styles.chips} role="group" aria-label="Filter templates by category">
-              {filters.map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  aria-pressed={filter === f}
-                  className={`${styles.chip} ${filter === f ? styles.chipActive : ""}`}
-                  onClick={() => setFilter(f)}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-          </div>
-        </header>
-
-        <div className={styles.body}>
-          {shown.length === 0 ? (
-            <div className={styles.empty}>
-              <SearchIcon size={28} aria-hidden />
-              <p className={styles.emptyTitle}>No matches for “{query.trim()}”.</p>
+    <>
+      <div
+        className={styles.backdrop}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Start a message"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) closeGallery();
+        }}
+      >
+        <div className={styles.panel}>
+          <header className={styles.header}>
+            <div className={styles.headingRow}>
+              <div className={styles.heading}>
+                <h2 className={styles.title}>
+                  <span className={styles.titleSpark} aria-hidden>
+                    <SparkleIcon size={20} />
+                  </span>
+                  Start a message
+                </h2>
+                <p className={styles.subtitle}>
+                  Continue your last message, reuse a saved one, or pick a template — everything is
+                  fully editable.
+                </p>
+              </div>
               <button
                 type="button"
-                className={styles.emptyReset}
-                onClick={() => {
-                  setQuery("");
-                  setFilter("All");
-                }}
+                className={styles.close}
+                onClick={closeGallery}
+                aria-label="Close template gallery"
               >
-                Clear filters
+                <CloseIcon size={20} />
               </button>
             </div>
-          ) : (
-            <div className={styles.grid}>
-              {shown.map((c) => (
-                <GalleryCard key={c.key} card={c} />
-              ))}
-            </div>
-          )}
-        </div>
 
-        <footer className={styles.footer}>
-          <span className={styles.footerHint}>
-            {shown.length} {shown.length === 1 ? "result" : "results"} · reopen this any time from
-            the toolbar
-          </span>
-          <button type="button" className={styles.blankBtn} onClick={startBlank}>
-            <PlusIcon size={16} />
-            Start from scratch
-          </button>
-        </footer>
+            <div className={styles.controls}>
+              <div className={styles.search}>
+                <SearchIcon size={16} className={styles.searchIcon} aria-hidden />
+                <input
+                  ref={searchRef}
+                  type="text"
+                  className={styles.searchInput}
+                  value={query}
+                  onChange={(e) => setQuery(e.currentTarget.value)}
+                  placeholder={`Search ${TEMPLATES.length} templates…`}
+                  aria-label="Search templates"
+                />
+                {query ? (
+                  <button
+                    type="button"
+                    className={styles.searchClear}
+                    onClick={() => {
+                      setQuery("");
+                      searchRef.current?.focus();
+                    }}
+                    aria-label="Clear search"
+                  >
+                    <CloseIcon size={14} />
+                  </button>
+                ) : null}
+              </div>
+
+              <div className={styles.chips} role="group" aria-label="Filter templates by category">
+                {filters.map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    aria-pressed={filter === f}
+                    className={`${styles.chip} ${filter === f ? styles.chipActive : ""}`}
+                    onClick={() => setFilter(f)}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </header>
+
+          <div className={styles.body}>
+            {shown.length === 0 ? (
+              <div className={styles.empty}>
+                <SearchIcon size={28} aria-hidden />
+                <p className={styles.emptyTitle}>No matches for “{query.trim()}”.</p>
+                <button
+                  type="button"
+                  className={styles.emptyReset}
+                  onClick={() => {
+                    setQuery("");
+                    setFilter("All");
+                  }}
+                >
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <div className={styles.grid}>
+                {shown.map((c) => (
+                  <GalleryCard key={c.key} card={c} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <footer className={styles.footer}>
+            <span className={styles.footerHint}>
+              {shown.length} {shown.length === 1 ? "result" : "results"} · reopen this any time from
+              the toolbar
+            </span>
+            <button type="button" className={styles.blankBtn} onClick={startBlank}>
+              <PlusIcon size={16} />
+              Start from scratch
+            </button>
+          </footer>
+        </div>
       </div>
-    </div>,
+
+      <Modal
+        open={!!pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        title="Delete saved message?"
+        size="sm"
+        // The gallery overlay sits at --app-z-tooltip; lift the confirm above it
+        // so it (and its scrim) land on top rather than behind the gallery.
+        backdropStyle={{ zIndex: "calc(var(--app-z-tooltip) + 10)" }}
+      >
+        <div className={styles.confirmBody}>
+          <p className={styles.confirmText}>
+            Permanently delete <strong>"{pendingDelete?.name}"</strong>? This can't be undone.
+          </p>
+          <div className={styles.confirmActions}>
+            <Button variant="ghost" type="button" onClick={() => setPendingDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              type="button"
+              leadingIcon={<TrashIcon />}
+              onClick={confirmDelete}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </>,
     document.body,
   );
 }
@@ -370,6 +419,9 @@ export function TemplateGallery() {
 function GalleryCard({ card }: { card: CardData }) {
   const onKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      // Only the card itself activates on Enter/Space — keys aimed at the inner
+      // delete button (a real <button>) must not also trigger a load.
+      if (e.target !== e.currentTarget) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         card.onPick();
@@ -401,6 +453,20 @@ function GalleryCard({ card }: { card: CardData }) {
       <div className={styles.cardPreview}>
         <TemplateThumbnail message={card.message} />
         <div className={styles.cardFade} aria-hidden />
+        {card.onDelete ? (
+          <button
+            type="button"
+            className={styles.cardDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              card.onDelete?.();
+            }}
+            aria-label={`Delete saved message "${card.name}"`}
+            title="Delete saved message"
+          >
+            <TrashIcon size={15} />
+          </button>
+        ) : null}
         {card.requiresBot ? (
           <span
             className={styles.botBadge}

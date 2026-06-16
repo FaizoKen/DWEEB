@@ -323,6 +323,49 @@
   backdrop-filter: blur(2px);
 }
 
+/* Delete affordance on saved cards. Sits above the hover overlay so it stays
+ * clickable; fades in on hover/focus (always shown on touch — see mobile). */
+.cardDelete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(10, 11, 15, 0.7);
+  border: 1px solid var(--app-border);
+  color: var(--app-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  backdrop-filter: blur(2px);
+  transition:
+    opacity 140ms ease,
+    background 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+.card:hover .cardDelete,
+.card:focus-within .cardDelete {
+  opacity: 1;
+}
+.cardDelete:hover {
+  background: rgba(28, 10, 12, 0.88);
+  color: var(--app-danger);
+  border-color: color-mix(in srgb, var(--app-danger) 55%, transparent);
+}
+.cardDelete:active {
+  transform: scale(0.92);
+}
+.cardDelete:focus-visible {
+  opacity: 1;
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
 /* Hover affordance over the preview — a centered "Use this template" pill. */
 .cardHover {
   position: absolute;
@@ -448,6 +491,24 @@
       transparent 55%
     ),
     var(--app-bg-subtle);
+}
+
+/* ── Delete confirmation dialog ─────────────────────────────────────────── */
+.confirmBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.confirmText {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+.confirmActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 /* ── Empty state ────────────────────────────────────────────────────────── */
@@ -585,6 +646,10 @@
   }
   .cardPreview {
     height: 184px;
+  }
+  /* No hover on touch — keep the delete button visible so it's reachable. */
+  .cardDelete {
+    opacity: 1;
   }
   .footerHint {
     display: none;
