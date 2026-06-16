@@ -7,12 +7,15 @@
  * `messageStore.bootstrap` / `replaceMessage`) so a template can be applied
  * repeatedly without colliding ids.
  *
- * The set is deliberately small and each template wears a distinct look — a
- * striped kitchen-sink, a borderless image-led layout, a typographic rulebook,
- * and a side-by-side card — so they read as different starting points rather
- * than recolors of one another. Every template is **static**: layout, text,
- * media, and link buttons only — no select menus or clickable (custom_id)
- * buttons, so they post cleanly through any webhook without a bot.
+ * The set is split across categories and surfaced in the full-screen Template
+ * Gallery (see `features/templates/TemplateGallery.tsx`). Most templates are
+ * **static** — layout, text, media, and link buttons only — so they post
+ * cleanly through any webhook without a bot. A handful are **interactive**:
+ * they include a clickable (custom_id) button or a select menu designed to pair
+ * with a DWEEB plugin (Tickets, Self Role, Giveaway, Quick Replies…). Those are
+ * tagged `requiresBot` because Discord only delivers component interactions to
+ * the app that owns the webhook — the gallery surfaces that with a "Bot needed"
+ * badge and a "Pairs with …" hint so a beginner knows what to wire up next.
  */
 
 import {
@@ -25,7 +28,33 @@ import { newId } from "@/lib/id";
 
 const id = newId;
 
-/** A named, pickable starting message shown in the Saved → Templates menu. */
+/** Brand-ish accent colors reused across templates and their gallery cards. */
+const ACCENT = {
+  blurple: 0x5865f2,
+  green: 0x57f287,
+  gold: 0xfee75c,
+  red: 0xed4245,
+  fuchsia: 0xeb459e,
+  blue: 0x3498db,
+  orange: 0xe67e22,
+  purple: 0x9b59b6,
+  teal: 0x1abc9c,
+} as const;
+
+/** Gallery sections, in display order. Every template names one of these. */
+export const TEMPLATE_CATEGORIES = [
+  "Featured",
+  "Welcome",
+  "Community",
+  "Events",
+  "Support",
+  "Commerce",
+  "Fun",
+] as const;
+
+export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
+
+/** A named, pickable starting message shown in the Template Gallery. */
 export interface MessageTemplate {
   /** Stable key — used as the React key and to address the template. */
   id: string;
@@ -33,24 +62,39 @@ export interface MessageTemplate {
   name: string;
   /** One-line description of the use case, shown under the name. */
   description: string;
-  /** Leading glyph for the menu row. */
+  /** Leading glyph for the card / menu row. */
   emoji: string;
+  /** Gallery section this template lives under. */
+  category: TemplateCategory;
+  /** Free-text keywords the gallery search matches against, beyond name/desc. */
+  tags?: string[];
+  /** Card chrome accent (0xRRGGBB) — usually mirrors the message's container. */
+  accent?: number;
+  /**
+   * True when the message carries an interactive component (a custom_id button
+   * or a select menu). Those only respond through a bot/app-owned webhook, so
+   * the gallery flags them "Bot needed".
+   */
+  requiresBot?: boolean;
+  /** Display name of the DWEEB plugin this template is built to pair with. */
+  pairsWith?: string;
   /** The message this template drops into the editor. */
   message: WebhookMessage;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Component showcase — striped blurple container, the full kit. The original
-// default tour and the first-run message.
-// ────────────────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// FEATURED
+// ════════════════════════════════════════════════════════════════════════════
 
-const DEFAULT_MESSAGE: WebhookMessage = {
+// Component showcase — striped blurple container, the full kit. Doubles as the
+// first-run default message.
+const SHOWCASE_MESSAGE: WebhookMessage = {
   username: "DWEEB",
   components: [
     {
       _id: id(),
       type: ComponentType.Container,
-      accent_color: 0x5865f2,
+      accent_color: ACCENT.blurple,
       components: [
         {
           _id: id(),
@@ -141,15 +185,235 @@ const DEFAULT_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# There's more in this editor than the tour shows — dropdown menus, clickable (non-link) buttons, and file uploads all work too. File uploads go through any webhook, but Discord only accepts interactive components (clickable buttons, select menus) when the webhook URL was created by a bot or app — on regular user-created webhooks the message will be rejected. Link buttons and layout-only components are fine on any webhook. Open **Saved → Templates** any time to bring this tour back.",
+        "-# There's more in this editor than the tour shows — dropdown menus, clickable (non-link) buttons, and file uploads all work too. File uploads go through any webhook, but Discord only accepts interactive components (clickable buttons, select menus) when the webhook URL was created by a bot or app — on regular user-created webhooks the message will be rejected. Link buttons and layout-only components are fine on any webhook. Open the **Template Gallery** any time to bring this tour back.",
     },
   ],
 };
 
-// ────────────────────────────────────────────────────────────────────────────
-// Announcement — borderless and image-led. No container (no accent stripe): a
-// full-width banner up top, headline, highlights, and call-to-action links.
-// ────────────────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// WELCOME & ONBOARDING
+// ════════════════════════════════════════════════════════════════════════════
+
+const WELCOME_MESSAGE: WebhookMessage = {
+  username: "Welcome",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blurple,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 👋 Welcome to the server!\nWe're really glad you found us. Here's everything you need to settle in.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.MediaGallery,
+          items: [
+            {
+              _id: id(),
+              media: { url: "https://picsum.photos/seed/wb-welcome/900/300" },
+              description: "Welcome banner",
+            },
+          ],
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Large,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**Get started in three steps**\n- 📜 Read the **#rules** so everyone stays on the same page\n- 🎭 Pick up your roles in **#get-roles**\n- 💬 Say hi and introduce yourself in **#general**",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "Stuck on anything? A friendly mod is only a message away.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "📖 Community guide",
+              url: "https://example.com/guide",
+            },
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "💬 Jump into chat",
+              url: "https://discord.gg/2wB7rHRDg2",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content: "-# Glad to have you — enjoy your stay! 💜",
+    },
+  ],
+};
+
+const RULES_MESSAGE: WebhookMessage = {
+  username: "Server Rules",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.green,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "# 📜 Server Rules\nWelcome! Being here means you agree to follow these.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Large,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**1.** Be respectful — no harassment, hate speech, or discrimination.\n**2.** Keep it civil — no spam, flooding, or wall-to-wall caps.\n**3.** Use the right channels and stay on topic.\n**4.** No NSFW, gore, or illegal content.\n**5.** No unsolicited advertising or DM spam.\n**6.** Follow staff direction — their word is final.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "> Breaking the rules may lead to a warning, mute, kick, or ban depending on severity.",
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content: "-# Last updated June 2026 • Questions? Ask a moderator.",
+    },
+  ],
+};
+
+const CHANNEL_GUIDE_MESSAGE: WebhookMessage = {
+  username: "Server Guide",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.teal,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "# 🧭 Find your way around\nA quick map of where everything lives.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**🚪 Start here**\n**#welcome** — you are here\n**#rules** — the house rules\n**#announcements** — important updates",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**💬 Hang out**\n**#general** — everyday chatter\n**#introductions** — say hello\n**#media** — share your pics & clips",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**🛟 Need help?**\n**#support** — open a ticket\n**#faq** — answers to common questions",
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content: "-# Tip: long-press (or right-click) any channel to mute or favourite it.",
+    },
+  ],
+};
+
+const VERIFY_MESSAGE: WebhookMessage = {
+  username: "Verification",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.green,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# ✅ One last step\nClick the button below to verify you're human and unlock the rest of the server.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "By verifying you confirm you've read and agree to the **#rules**. Welcome aboard! 🎉",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Success,
+              label: "Verify me",
+              emoji: { name: "✅" },
+              custom_id: "verify_me",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# Wire the button to the Quick Replies plugin to grant a role and reply privately.",
+    },
+  ],
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// COMMUNITY
+// ════════════════════════════════════════════════════════════════════════════
 
 const ANNOUNCEMENT_MESSAGE: WebhookMessage = {
   username: "Announcements",
@@ -211,35 +475,18 @@ const ANNOUNCEMENT_MESSAGE: WebhookMessage = {
   ],
 };
 
-// ────────────────────────────────────────────────────────────────────────────
-// Server rules — striped green container, purely typographic. No media, no
-// buttons: a heading, a numbered list, and a consequences blockquote.
-// ────────────────────────────────────────────────────────────────────────────
-
-const RULES_MESSAGE: WebhookMessage = {
-  username: "Server Rules",
+const PATCH_NOTES_MESSAGE: WebhookMessage = {
+  username: "Changelog",
   components: [
     {
       _id: id(),
       type: ComponentType.Container,
-      accent_color: 0x57f287,
+      accent_color: ACCENT.purple,
       components: [
         {
           _id: id(),
           type: ComponentType.TextDisplay,
-          content: "# 📜 Server Rules\nWelcome! Being here means you agree to follow these.",
-        },
-        {
-          _id: id(),
-          type: ComponentType.Separator,
-          divider: true,
-          spacing: SeparatorSpacing.Large,
-        },
-        {
-          _id: id(),
-          type: ComponentType.TextDisplay,
-          content:
-            "**1.** Be respectful — no harassment, hate speech, or discrimination.\n**2.** Keep it civil — no spam, flooding, or wall-to-wall caps.\n**3.** Use the right channels and stay on topic.\n**4.** No NSFW, gore, or illegal content.\n**5.** No unsolicited advertising or DM spam.\n**6.** Follow staff direction — their word is final.",
+          content: "# 🛠️ Patch Notes — v2.4\n-# Released June 16, 2026",
         },
         {
           _id: id(),
@@ -251,22 +498,263 @@ const RULES_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.TextDisplay,
           content:
-            "> Breaking the rules may lead to a warning, mute, kick, or ban depending on severity.",
+            "### ✨ New\n- Added dark-mode dashboards\n- You can now pin up to 10 favourites",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "### 🔧 Improved\n- 30% faster load times\n- Cleaner mobile layout",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "### 🐛 Fixed\n- Notifications no longer double-fire\n- Squashed a rare crash on export",
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.ActionRow,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.Button,
+          style: ButtonStyle.Link,
+          label: "Full changelog",
+          url: "https://example.com/changelog",
+        },
+      ],
+    },
+  ],
+};
+
+const INTRODUCTIONS_MESSAGE: WebhookMessage = {
+  username: "Introductions",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.fuchsia,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🙋 Introduce yourself!\nNew here? Copy the template below and tell us about you.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "> **Name / nickname:**\n> **Where you're from:**\n> **What brought you here:**\n> **A hobby or fun fact:**\n> **Currently into:**",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "Don't be shy — everyone started with their first message. 😊",
+        },
+      ],
+    },
+  ],
+};
+
+const REACTION_ROLES_MESSAGE: WebhookMessage = {
+  username: "Roles",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blurple,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🎭 Pick your roles\nChoose what you're into — it unlocks channels and pings for the things you care about.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "Open the menu and select any that fit. Pick as many as you like.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.StringSelect,
+              custom_id: "reaction_roles",
+              placeholder: "Choose your interests…",
+              min_values: 0,
+              max_values: 4,
+              options: [
+                {
+                  label: "Gaming",
+                  value: "gaming",
+                  description: "Squad up and find players",
+                  emoji: { name: "🎮" },
+                },
+                {
+                  label: "Art & Design",
+                  value: "art",
+                  description: "Share and critique creative work",
+                  emoji: { name: "🎨" },
+                },
+                {
+                  label: "Music",
+                  value: "music",
+                  description: "Recommendations and listening parties",
+                  emoji: { name: "🎵" },
+                },
+                {
+                  label: "Movies & TV",
+                  value: "movies",
+                  description: "Watch parties and hot takes",
+                  emoji: { name: "🍿" },
+                },
+              ],
+            },
+          ],
         },
       ],
     },
     {
       _id: id(),
       type: ComponentType.TextDisplay,
-      content: "-# Last updated June 2026 • Questions? Ask a moderator.",
+      content: "-# Wire the menu to the Self Role plugin so picks instantly grant/remove roles.",
     },
   ],
 };
 
-// ────────────────────────────────────────────────────────────────────────────
-// Giveaway — striped gold container built around a Section: prize details on
-// the left, a prize thumbnail on the right, then the entry steps.
-// ────────────────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// EVENTS & ENGAGEMENT
+// ════════════════════════════════════════════════════════════════════════════
+
+const EVENT_MESSAGE: WebhookMessage = {
+  username: "Events",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.orange,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "# 🎟️ Community Game Night",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Section,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.TextDisplay,
+              content:
+                "### Friday, June 20 · 8:00 PM ET\nJump into voice for a relaxed evening of party games. All skill levels welcome — bring a friend!",
+            },
+          ],
+          accessory: {
+            _id: id(),
+            type: ComponentType.Thumbnail,
+            media: { url: "https://picsum.photos/seed/wb-event/256/256" },
+            description: "Event cover",
+          },
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**📍 Where:** Game Night voice channel\n**🎮 Playing:** Jackbox, Gartic Phone & more\n**👥 Spots:** Unlimited",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Add to calendar",
+              url: "https://example.com/event.ics",
+            },
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Event details",
+              url: "https://example.com/event",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content: "-# React with 🎉 if you're coming so we know how many to expect!",
+    },
+  ],
+};
+
+const POLL_MESSAGE: WebhookMessage = {
+  username: "Polls",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blue,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "# 📊 Community Poll\n**What should we host next month?**",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "🇦 — Movie night\n🇧 — Game tournament\n🇨 — Art jam\n🇩 — Q&A with the team",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "> React with the option you want. Voting closes in 48 hours!",
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content: "-# One vote per person, please — let's keep it fair. 🙏",
+    },
+  ],
+};
 
 const GIVEAWAY_MESSAGE: WebhookMessage = {
   username: "Giveaways",
@@ -274,7 +762,7 @@ const GIVEAWAY_MESSAGE: WebhookMessage = {
     {
       _id: id(),
       type: ComponentType.Container,
-      accent_color: 0xfee75c,
+      accent_color: ACCENT.gold,
       components: [
         {
           _id: id(),
@@ -321,38 +809,634 @@ const GIVEAWAY_MESSAGE: WebhookMessage = {
   ],
 };
 
+const GIVEAWAY_BUTTON_MESSAGE: WebhookMessage = {
+  username: "Giveaways",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.gold,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "# 🎉 GIVEAWAY 🎉",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Section,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.TextDisplay,
+              content:
+                "### Nitro x3 — one click to enter!\n**🎁 Prize:** 3× Discord Nitro\n**🏆 Winners:** 3\n**⏰ Ends:** in 24 hours\n**👥 Entries:** 0",
+            },
+          ],
+          accessory: {
+            _id: id(),
+            type: ComponentType.Thumbnail,
+            media: { url: "https://picsum.photos/seed/wb-nitro/256/256" },
+            description: "Prize",
+          },
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "Tap **Enter** below. The live count updates and a fair draw runs on its own.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Success,
+              label: "Enter Giveaway",
+              emoji: { name: "🎉" },
+              custom_id: "giveaway_enter",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# Wire the button to the Giveaway plugin for live entries, requirements & a fair draw.",
+    },
+  ],
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// SUPPORT
+// ════════════════════════════════════════════════════════════════════════════
+
+const SUPPORT_MESSAGE: WebhookMessage = {
+  username: "Support",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blue,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🛟 Need a hand?\nOpen a private ticket and a staff member will be right with you.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**Before you open a ticket**\n- 📚 Check **#faq** — it covers the common stuff\n- 📝 Have your details ready so we can help faster\n- 🤝 One ticket per issue, please",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Primary,
+              label: "Open a ticket",
+              emoji: { name: "🎫" },
+              custom_id: "ticket_open",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content: "-# Wire the button to the Tickets plugin to spin up a private channel per request.",
+    },
+  ],
+};
+
+const FAQ_MESSAGE: WebhookMessage = {
+  username: "FAQ",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.teal,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "# ❓ Frequently Asked Questions",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**How do I get roles?**\nHead to **#get-roles** and pick from the menu — they apply instantly.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**How do I report someone?**\nOpen a ticket in **#support** or DM a moderator with details.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**Can I promote my own stuff?**\nOnly in **#self-promo**, and please keep it occasional.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**I found a bug — where do I post it?**\nDrop it in **#feedback** with steps to reproduce. Thank you! 🙏",
+        },
+      ],
+    },
+  ],
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// COMMERCE & SHOWCASE
+// ════════════════════════════════════════════════════════════════════════════
+
+const PRODUCT_MESSAGE: WebhookMessage = {
+  username: "Shop",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.fuchsia,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.Section,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.TextDisplay,
+              content:
+                "# ✨ Aurora Hoodie\n**$48.00** · Free shipping over $50\n\nUltra-soft brushed fleece in three colourways. Runs true to size.",
+            },
+          ],
+          accessory: {
+            _id: id(),
+            type: ComponentType.Thumbnail,
+            media: { url: "https://picsum.photos/seed/wb-product/256/256" },
+            description: "Aurora Hoodie",
+          },
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "⭐ **4.8/5** from 320+ reviews · 🚚 Ships in 1–2 business days",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Buy now",
+              url: "https://example.com/product",
+            },
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "View sizing",
+              url: "https://example.com/sizing",
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const PRICING_MESSAGE: WebhookMessage = {
+  username: "Pricing",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.green,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "# 💎 Membership Tiers\nPick the plan that fits — upgrade or cancel any time.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "### 🌱 Free — $0\n- Access to public channels\n- Community events\n- Basic role",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "### ⭐ Plus — $5/mo\n- Everything in Free\n- Members-only channels\n- Custom colour role\n- Priority support",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "### 🚀 Pro — $12/mo\n- Everything in Plus\n- Early access drops\n- Monthly AMA seat\n- Shiny Pro badge",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Upgrade now",
+              url: "https://example.com/upgrade",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content: "-# Prices in USD • Cancel anytime • 7-day money-back guarantee",
+    },
+  ],
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// FUN & MISC
+// ════════════════════════════════════════════════════════════════════════════
+
+const LINK_HUB_MESSAGE: WebhookMessage = {
+  username: "Links",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.purple,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "# 🔗 Find us everywhere\nFollow along and never miss a thing.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "🌐 Website",
+              url: "https://example.com",
+            },
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "🐦 Twitter / X",
+              url: "https://twitter.com",
+            },
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "📺 YouTube",
+              url: "https://youtube.com",
+            },
+          ],
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "📸 Instagram",
+              url: "https://instagram.com",
+            },
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "🎵 TikTok",
+              url: "https://tiktok.com",
+            },
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "💜 Support us",
+              url: "https://example.com/donate",
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const SPOTLIGHT_MESSAGE: WebhookMessage = {
+  username: "Spotlight",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content: "# 🌟 Member Spotlight",
+    },
+    {
+      _id: id(),
+      type: ComponentType.MediaGallery,
+      items: [
+        {
+          _id: id(),
+          media: { url: "https://picsum.photos/seed/wb-sp1/500/500" },
+          description: "Featured work 1",
+        },
+        {
+          _id: id(),
+          media: { url: "https://picsum.photos/seed/wb-sp2/500/500" },
+          description: "Featured work 2",
+        },
+        {
+          _id: id(),
+          media: { url: "https://picsum.photos/seed/wb-sp3/500/500" },
+          description: "Featured work 3",
+        },
+        {
+          _id: id(),
+          media: { url: "https://picsum.photos/seed/wb-sp4/500/500" },
+          description: "Featured work 4",
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "This week we're celebrating **@artist** for their incredible series above. Drop a 💜 to show some love, and tag us to be featured next!",
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content: "-# Want the spotlight? Post in #showcase with the tag #feature-me.",
+    },
+  ],
+};
+
 /**
- * Ordered template list shown in the Saved → Templates menu. The first entry
- * is the component showcase that doubles as the first-run default message.
+ * Ordered template list shown in the Template Gallery (and the Saved menu's
+ * quick picks). The first entry is the component showcase that doubles as the
+ * first-run default message.
  */
 export const TEMPLATES: MessageTemplate[] = [
   {
     id: "showcase",
     name: "Component showcase",
-    description: "A guided tour of every block",
+    description: "A guided tour of every block — the best place to learn the editor.",
     emoji: "🧩",
-    message: DEFAULT_MESSAGE,
+    category: "Featured",
+    tags: ["tour", "demo", "kit", "learn", "example"],
+    accent: ACCENT.blurple,
+    message: SHOWCASE_MESSAGE,
   },
   {
-    id: "announcement",
-    name: "Announcement",
-    description: "Borderless banner for big news",
-    emoji: "📢",
-    message: ANNOUNCEMENT_MESSAGE,
+    id: "welcome",
+    name: "Welcome",
+    description: "Greet new members and point them to the essentials.",
+    emoji: "👋",
+    category: "Welcome",
+    tags: ["onboarding", "intro", "greeting", "new members", "banner"],
+    accent: ACCENT.blurple,
+    message: WELCOME_MESSAGE,
   },
   {
     id: "rules",
     name: "Server rules",
-    description: "Clean, numbered rulebook",
+    description: "A clean, numbered rulebook with a consequences note.",
     emoji: "📜",
+    category: "Welcome",
+    tags: ["guidelines", "moderation", "terms", "conduct"],
+    accent: ACCENT.green,
     message: RULES_MESSAGE,
+  },
+  {
+    id: "channel-guide",
+    name: "Channel guide",
+    description: "Map out where everything lives so newcomers don't get lost.",
+    emoji: "🧭",
+    category: "Welcome",
+    tags: ["onboarding", "navigation", "channels", "map", "directory"],
+    accent: ACCENT.teal,
+    message: CHANNEL_GUIDE_MESSAGE,
+  },
+  {
+    id: "verify",
+    name: "Verification gate",
+    description: "A one-click verify button to unlock the server.",
+    emoji: "✅",
+    category: "Welcome",
+    tags: ["verify", "gate", "human", "captcha", "role", "button"],
+    accent: ACCENT.green,
+    requiresBot: true,
+    pairsWith: "Quick Replies",
+    message: VERIFY_MESSAGE,
+  },
+  {
+    id: "announcement",
+    name: "Announcement",
+    description: "A borderless, image-led banner for big news.",
+    emoji: "📢",
+    category: "Community",
+    tags: ["news", "update", "broadcast", "banner"],
+    accent: ACCENT.blurple,
+    message: ANNOUNCEMENT_MESSAGE,
+  },
+  {
+    id: "patch-notes",
+    name: "Patch notes",
+    description: "Tidy New / Improved / Fixed changelog sections.",
+    emoji: "🛠️",
+    category: "Community",
+    tags: ["changelog", "release", "update", "version", "notes"],
+    accent: ACCENT.purple,
+    message: PATCH_NOTES_MESSAGE,
+  },
+  {
+    id: "introductions",
+    name: "Introductions",
+    description: "A copy-and-fill prompt that gets new members talking.",
+    emoji: "🙋",
+    category: "Community",
+    tags: ["intro", "icebreaker", "about", "prompt"],
+    accent: ACCENT.fuchsia,
+    message: INTRODUCTIONS_MESSAGE,
+  },
+  {
+    id: "reaction-roles",
+    name: "Reaction roles",
+    description: "A select menu that grants roles by interest.",
+    emoji: "🎭",
+    category: "Community",
+    tags: ["self role", "menu", "select", "interests", "pings"],
+    accent: ACCENT.blurple,
+    requiresBot: true,
+    pairsWith: "Self Role",
+    message: REACTION_ROLES_MESSAGE,
+  },
+  {
+    id: "event",
+    name: "Event / RSVP",
+    description: "A dated event card with cover art and details.",
+    emoji: "🎟️",
+    category: "Events",
+    tags: ["event", "rsvp", "calendar", "meetup", "schedule"],
+    accent: ACCENT.orange,
+    message: EVENT_MESSAGE,
+  },
+  {
+    id: "poll",
+    name: "Poll",
+    description: "Lettered options ready for reaction voting.",
+    emoji: "📊",
+    category: "Events",
+    tags: ["vote", "survey", "question", "reactions"],
+    accent: ACCENT.blue,
+    message: POLL_MESSAGE,
   },
   {
     id: "giveaway",
     name: "Giveaway",
-    description: "Prize card with entry steps",
+    description: "A prize card with entry steps — react to enter.",
     emoji: "🎉",
+    category: "Events",
+    tags: ["prize", "raffle", "contest", "react"],
+    accent: ACCENT.gold,
     message: GIVEAWAY_MESSAGE,
+  },
+  {
+    id: "giveaway-button",
+    name: "Giveaway (button entry)",
+    description: "One-click entry with a live count and fair draw.",
+    emoji: "🎁",
+    category: "Events",
+    tags: ["prize", "raffle", "contest", "button", "enter"],
+    accent: ACCENT.gold,
+    requiresBot: true,
+    pairsWith: "Giveaway",
+    message: GIVEAWAY_BUTTON_MESSAGE,
+  },
+  {
+    id: "support",
+    name: "Support desk",
+    description: "An open-a-ticket button for private help.",
+    emoji: "🛟",
+    category: "Support",
+    tags: ["tickets", "help", "support", "staff", "button"],
+    accent: ACCENT.blue,
+    requiresBot: true,
+    pairsWith: "Tickets",
+    message: SUPPORT_MESSAGE,
+  },
+  {
+    id: "faq",
+    name: "FAQ",
+    description: "Common questions answered up front to cut repeat pings.",
+    emoji: "❓",
+    category: "Support",
+    tags: ["help", "questions", "answers", "support"],
+    accent: ACCENT.teal,
+    message: FAQ_MESSAGE,
+  },
+  {
+    id: "product",
+    name: "Product card",
+    description: "A shop listing with thumbnail, rating, and buy link.",
+    emoji: "✨",
+    category: "Commerce",
+    tags: ["shop", "store", "product", "sell", "buy"],
+    accent: ACCENT.fuchsia,
+    message: PRODUCT_MESSAGE,
+  },
+  {
+    id: "pricing",
+    name: "Pricing tiers",
+    description: "Three side-by-side plans with an upgrade call-to-action.",
+    emoji: "💎",
+    category: "Commerce",
+    tags: ["plans", "membership", "subscription", "tiers", "pricing"],
+    accent: ACCENT.green,
+    message: PRICING_MESSAGE,
+  },
+  {
+    id: "links",
+    name: "Link hub",
+    description: "All your social links as tidy rows of buttons.",
+    emoji: "🔗",
+    category: "Fun",
+    tags: ["social", "links", "linktree", "follow", "buttons"],
+    accent: ACCENT.purple,
+    message: LINK_HUB_MESSAGE,
+  },
+  {
+    id: "spotlight",
+    name: "Member spotlight",
+    description: "A borderless gallery to feature community work.",
+    emoji: "🌟",
+    category: "Fun",
+    tags: ["feature", "gallery", "showcase", "highlight", "art"],
+    accent: ACCENT.gold,
+    message: SPOTLIGHT_MESSAGE,
   },
 ];
 
@@ -360,4 +1444,4 @@ export const TEMPLATES: MessageTemplate[] = [
  * Used as the initial message on first visit (no draft, no share URL) and as
  * the fallback "default" message elsewhere. Mirrors `TEMPLATES[0]`.
  */
-export const DEFAULT_PRESET: { message: WebhookMessage } = { message: DEFAULT_MESSAGE };
+export const DEFAULT_PRESET: { message: WebhookMessage } = { message: SHOWCASE_MESSAGE };

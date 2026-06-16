@@ -1,0 +1,599 @@
+/* Full-screen gallery overlay. Sits above every pane, FAB, and the mobile
+ * preview sheet so it reads as a dedicated "choose a starting point" surface. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-z-tooltip);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 7, 10, 0.66);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: galleryFade 160ms ease;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1240px, 100%);
+  height: min(940px, 100%);
+  max-height: 100%;
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-lg);
+  overflow: hidden;
+  animation: galleryRise 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.header {
+  flex-shrink: 0;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--app-border);
+  /* A faint blurple wash up top so the gallery feels like its own place. */
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(88, 101, 242, 0.12), transparent 60%),
+    var(--app-bg-elevated);
+}
+
+.headingRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.heading {
+  min-width: 0;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--app-text);
+}
+
+.titleSpark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: #fff;
+  background: linear-gradient(135deg, #5865f2 0%, #8a5cf6 60%, #c026d3 100%);
+  box-shadow: 0 4px 14px rgba(120, 80, 230, 0.45);
+}
+
+.subtitle {
+  margin: 6px 0 0;
+  font-size: var(--app-text-base);
+  color: var(--app-text-muted);
+  max-width: 60ch;
+}
+
+.close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--app-radius);
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+.close:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.close:active {
+  transform: scale(0.94);
+}
+.close:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+/* ── Controls (search + category chips) ─────────────────────────────────── */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 280px;
+  min-width: 220px;
+  max-width: 420px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 12px;
+  color: var(--app-text-subtle);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  height: 40px;
+  padding: 0 36px 0 36px;
+  border-radius: 999px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  color: var(--app-text);
+  font-size: var(--app-text-base);
+  font-family: inherit;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.searchInput::placeholder {
+  color: var(--app-text-subtle);
+}
+.searchInput:focus {
+  outline: none;
+  border-color: var(--app-border-focus);
+  box-shadow: var(--app-focus-ring);
+}
+
+.searchClear {
+  position: absolute;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--app-text-subtle);
+  cursor: pointer;
+}
+.searchClear:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chip {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  color: var(--app-text-muted);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.chip:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+.chipActive,
+.chipActive:hover {
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+  color: #fff;
+}
+
+/* ── Body grid ──────────────────────────────────────────────────────────── */
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 24px 28px;
+  overscroll-behavior: contain;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
+  gap: 18px;
+}
+
+/* ── Card ───────────────────────────────────────────────────────────────── */
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    border-color 140ms ease;
+  animation: cardIn 240ms ease both;
+}
+/* A thin accent ribbon at the very top gives every card a colour identity. */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--card-accent, var(--app-accent));
+  z-index: 2;
+}
+.card:hover {
+  transform: translateY(-4px);
+  border-color: var(--app-border-strong);
+  box-shadow: var(--app-shadow);
+}
+.card:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+.card:active {
+  transform: translateY(-1px);
+}
+
+.cardPreview {
+  position: relative;
+  height: 196px;
+  overflow: hidden;
+  background: var(--discord-bg-primary);
+  border-bottom: 1px solid var(--app-border);
+}
+
+/* Clipping window for the scaled live render. pointer-events none cascades to
+ * the whole preview so taps fall through to the card. */
+.thumbViewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Render the real Preview at 2× then scale to 0.5 so it fills the window at any
+ * width, revealing the top of the message — same trick as MiniPreview. */
+.thumbStage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 200%;
+  height: 200%;
+  display: flex;
+  transform: scale(0.5);
+  transform-origin: top left;
+}
+
+/* Fade the bottom edge so clipped content reads as "there's more below". */
+.cardFade {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 56px;
+  background: linear-gradient(to top, var(--app-bg-subtle), transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.botBadge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-warning-text);
+  background: rgba(20, 16, 8, 0.82);
+  border: 1px solid rgba(240, 178, 50, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+/* Hover affordance over the preview — a centered "Use this template" pill. */
+.cardHover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 11, 15, 0.45);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.card:hover .cardHover,
+.card:focus-visible .cardHover {
+  opacity: 1;
+}
+
+.useBtn {
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--app-accent);
+  color: #fff;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  box-shadow: var(--app-shadow);
+  transform: translateY(6px);
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.card:hover .useBtn,
+.card:focus-visible .useBtn {
+  transform: translateY(0);
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 13px 14px 14px;
+  flex: 1;
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.cardEmoji {
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.cardName {
+  font-size: var(--app-text-lg);
+  font-weight: 650;
+  color: var(--app-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardDesc {
+  margin: 0;
+  font-size: var(--app-text-sm);
+  line-height: 1.45;
+  color: var(--app-text-muted);
+  /* Clamp to two lines so card heights stay even. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.cardCategory {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--app-text-subtle);
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+}
+
+.cardPlugin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-accent-text);
+  background: var(--app-accent-soft);
+  border: 1px solid transparent;
+}
+
+.cardTime {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--app-text-subtle);
+}
+
+/* The Continue card is the primary "resume" action — give it a soft accent wash
+ * and a tinted border so it reads as a highlighted starting point. */
+.card[data-kind="continue"] {
+  border-color: color-mix(in srgb, var(--card-accent) 45%, var(--app-border));
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--card-accent) 12%, transparent),
+      transparent 55%
+    ),
+    var(--app-bg-subtle);
+}
+
+/* ── Empty state ────────────────────────────────────────────────────────── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 64px 24px;
+  color: var(--app-text-subtle);
+  text-align: center;
+}
+.emptyTitle {
+  margin: 0;
+  font-size: var(--app-text-lg);
+  color: var(--app-text-muted);
+}
+.emptyReset {
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  color: var(--app-text);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.emptyReset:hover {
+  background: var(--app-bg-hover);
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+.footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 24px;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-bg-elevated);
+}
+
+.footerHint {
+  font-size: var(--app-text-sm);
+  color: var(--app-text-subtle);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.blankBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--app-radius);
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border-strong);
+  color: var(--app-text);
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    transform 120ms ease;
+}
+.blankBtn:hover {
+  background: var(--app-bg-hover);
+}
+.blankBtn:active {
+  transform: scale(0.97);
+}
+.blankBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+@keyframes galleryFade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes galleryRise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+}
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ── Mobile ─────────────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .backdrop {
+    padding: 0;
+  }
+  .panel {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: none;
+    border-radius: 0;
+  }
+  .header {
+    padding: 16px 16px 12px;
+  }
+  .title {
+    font-size: 20px;
+  }
+  .subtitle {
+    font-size: var(--app-text-sm);
+  }
+  .controls {
+    margin-top: 14px;
+  }
+  .search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .body {
+    padding: 16px 16px 24px;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .cardPreview {
+    height: 184px;
+  }
+  .footerHint {
+    display: none;
+  }
+  .footer {
+    justify-content: center;
+  }
+  .blankBtn {
+    flex: 1;
+    justify-content: center;
+  }
+}

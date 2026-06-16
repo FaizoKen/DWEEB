@@ -1,15 +1,15 @@
 /**
  * "Saved" dropdown — replaces the old Reset button.
  *
- * Four jobs:
+ * Three jobs:
  *  - Stash the current message under a user-supplied name (localStorage).
  *  - Wipe the editor back to an empty message.
- *  - Drop in one of the built-in templates as a starting point.
  *  - Load a previously saved message back into the editor.
  *
- * Templates and saved messages are listed inline in the menu so loading is one
- * click. Saved rows carry a delete affordance. A short naming dialog appears
- * when the user picks "Save current message…".
+ * Saved messages are listed inline so loading is one click; each row carries a
+ * delete affordance. A short naming dialog appears when the user picks "Save
+ * current message…". Templates (and the saved-message browser) live in the
+ * full-screen gallery, reachable here via "Browse gallery…".
  */
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -19,13 +19,13 @@ import {
   useSavedMessagesStore,
   type SavedMessageRecord,
 } from "@/core/state/savedMessagesStore";
-import { TEMPLATES, type MessageTemplate } from "@/data/presets";
+import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { Menu, MenuDivider, MenuItem } from "@/ui/Menu";
 import { Modal } from "@/ui/Modal";
 import { TextInput } from "@/ui/TextInput";
-import { BookmarkIcon, ChevronDownIcon, SaveIcon, TrashIcon } from "@/ui/Icon";
+import { BookmarkIcon, ChevronDownIcon, SaveIcon, TemplateIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import styles from "./SavedMessagesMenu.module.css";
 
@@ -38,6 +38,8 @@ export function SavedMessagesMenu() {
   const saveEntry = useSavedMessagesStore((s) => s.save);
   const loadEntry = useSavedMessagesStore((s) => s.load);
   const removeEntry = useSavedMessagesStore((s) => s.remove);
+
+  const openGallery = useTemplateGalleryStore((s) => s.openGallery);
 
   const [saveOpen, setSaveOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<SavedMessageRecord | null>(null);
@@ -58,11 +60,6 @@ export function SavedMessagesMenu() {
     pushToast(`Loaded "${entry.name}"`, "success");
   };
 
-  const handleLoadTemplate = (template: MessageTemplate) => {
-    replaceMessage(template.message);
-    pushToast(`Loaded the ${template.name} template`, "success");
-  };
-
   const confirmDelete = () => {
     if (!pendingDelete) return;
     removeEntry(pendingDelete.id);
@@ -81,7 +78,7 @@ export function SavedMessagesMenu() {
             leadingIcon={<BookmarkIcon />}
             trailingIcon={<ChevronDownIcon />}
             collapseLabel
-            title="Save the current message locally, start from a template, load a saved one, or clear everything"
+            title="Save the current message locally, load a saved one, clear everything, or open the gallery"
           >
             Saved
           </Button>
@@ -107,6 +104,15 @@ export function SavedMessagesMenu() {
             >
               Clear everything
             </MenuItem>
+            <MenuItem
+              icon={<TemplateIcon />}
+              onSelect={() => {
+                close();
+                openGallery();
+              }}
+            >
+              Browse gallery…
+            </MenuItem>
             <MenuDivider />
             <div className={styles.sectionLabel}>Saved messages</div>
             {entries.length === 0 ? (
@@ -131,20 +137,6 @@ export function SavedMessagesMenu() {
                 ))}
               </div>
             )}
-            <MenuDivider />
-            <div className={styles.sectionLabel}>Templates</div>
-            <div className={styles.list}>
-              {TEMPLATES.map((template) => (
-                <TemplateRow
-                  key={template.id}
-                  template={template}
-                  onLoad={() => {
-                    close();
-                    handleLoadTemplate(template);
-                  }}
-                />
-              ))}
-            </div>
           </div>
         )}
       </Menu>
@@ -188,30 +180,6 @@ function DeleteConfirmDialog({ entry, onCancel, onConfirm }: DeleteConfirmDialog
         </div>
       </div>
     </Modal>
-  );
-}
-
-interface TemplateRowProps {
-  template: MessageTemplate;
-  onLoad: () => void;
-}
-
-function TemplateRow({ template, onLoad }: TemplateRowProps) {
-  return (
-    <button
-      type="button"
-      className={styles.templateRow}
-      onClick={onLoad}
-      title={`Start from the ${template.name} template`}
-    >
-      <span className={styles.templateEmoji} aria-hidden>
-        {template.emoji}
-      </span>
-      <span className={styles.templateText}>
-        <span className={styles.rowName}>{template.name}</span>
-        <span className={styles.rowMeta}>{template.description}</span>
-      </span>
-    </button>
   );
 }
 

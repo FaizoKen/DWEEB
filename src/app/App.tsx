@@ -42,10 +42,20 @@ const RemoveInteractiveConfirm = lazy(() =>
 const AiChatPanel = lazy(() =>
   import("@/features/ai/AiChatPanel").then((m) => ({ default: m.AiChatPanel })),
 );
+const TemplateGallery = lazy(() =>
+  import("@/features/templates/TemplateGallery").then((m) => ({ default: m.TemplateGallery })),
+);
 import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
-import { consumeIncomingWebhook, type IncomingWebhook } from "@/core/guild/config";
+import {
+  consumeIncomingWebhook,
+  hasIncomingWebhook,
+  type IncomingWebhook,
+} from "@/core/guild/config";
+import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
+import { readShareTokenFromHash } from "@/core/serialization/url";
+import { readShortLinkId } from "@/core/serialization/shortlink";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAutoSaveDraft } from "./useAutoSaveDraft";
@@ -227,6 +237,12 @@ export function App() {
   const openAi = useAiStore((s) => s.openPanel);
   const closeAi = useAiStore((s) => s.closePanel);
 
+  // The full-screen Template Gallery. Auto-opens on a genuine first visit (no
+  // saved draft, no share/webhook deep link, never seen before) and is
+  // reopenable any time from the Builder action bar or the Saved menu.
+  const galleryOpen = useTemplateGalleryStore((s) => s.open);
+  const openGallery = useTemplateGalleryStore((s) => s.openGallery);
+
   // Mount the AI panel the first time it opens through any path (FAB or
   // keyboard shortcut), then keep it mounted so its slide animation and draft
   // survive subsequent toggles.
@@ -263,6 +279,20 @@ export function App() {
     }
     setIncomingWebhook(result);
     openShareDialog("send");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Landing screen: open the Template Gallery on every visit so the user always
+  // starts from a deliberate choice — continue their last message, reuse a saved
+  // one, or pick a template — instead of a cold editor. Stands down only when
+  // we'd be interrupting a dedicated flow: a share/short link being decoded into
+  // the editor, or a webhook redirect about to open the Send panel.
+  useEffect(() => {
+    if (hasIncomingWebhook()) return;
+    if (readShareTokenFromHash(window.location.hash) || readShortLinkId(window.location.pathname)) {
+      return;
+    }
+    openGallery();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -381,6 +411,11 @@ export function App() {
               open={confirmStripOpen}
               onClose={() => setConfirmStripOpen(false)}
             />
+          </Suspense>
+        ) : null}
+        {galleryOpen ? (
+          <Suspense fallback={null}>
+            <TemplateGallery />
           </Suspense>
         ) : null}
         <ToastViewport />

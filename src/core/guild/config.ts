@@ -94,6 +94,17 @@ export type IncomingWebhookResult = IncomingWebhook | { error: true };
  * right away so the credential doesn't linger in the address bar or browser
  * history; anything else in the fragment is preserved.
  */
+/**
+ * Non-destructive check for a pending webhook redirect — true when this load is
+ * a `webhook.incoming` return, without clearing the fragment. Lets first-load
+ * UX (e.g. the Template Gallery) stand down so it doesn't pop over the Send
+ * panel that {@link consumeIncomingWebhook} is about to open.
+ */
+export function hasIncomingWebhook(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.hash.includes(WEBHOOK_HASH_KEY);
+}
+
 export function consumeIncomingWebhook(): IncomingWebhookResult | null {
   if (typeof window === "undefined") return null;
   const hash = window.location.hash;
