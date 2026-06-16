@@ -144,53 +144,22 @@
 /* Collapsed summary shown once a valid webhook URL is set: a quiet status row
    with an Edit affordance, standing in for the full credential field. */
 .urlSet {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  background: var(--app-bg);
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius);
-}
-.urlSetIcon {
-  flex: none;
-  display: inline-flex;
-  color: var(--app-success);
-}
-.urlSetBody {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.urlSetTitle {
+  margin: 0;
   font-size: 12px;
-  font-weight: 600;
-}
-.urlSetSub {
-  font-size: 11px;
   line-height: 1.4;
   color: var(--app-text-muted);
 }
-.urlSetEdit {
-  flex: none;
-  padding: 5px 12px;
-  background: var(--app-bg);
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
-  color: var(--app-text);
+.urlSetLink {
+  padding: 0;
+  background: none;
+  border: none;
   font: inherit;
-  font-size: 12px;
   font-weight: 500;
+  color: var(--app-accent, #5865f2);
   cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease;
 }
-.urlSetEdit:hover {
-  background: var(--app-bg-hover);
-  border-color: var(--app-border-strong);
+.urlSetLink:hover {
+  text-decoration: underline;
 }
 
 /* Secondary "paste a URL instead" toggle under the create cards. */

@@ -123,7 +123,7 @@ import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
-import { CheckCircleIcon, ChevronRightIcon, LockIcon, PlusIcon } from "@/ui/Icon";
+import { ChevronRightIcon, LockIcon, PlusIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
 import {
@@ -1179,18 +1179,12 @@ export function SendPanel({
           link to paste an existing URL. */}
       {proxyOn && !editingUrl ? (
         parsedUrl ? (
-          <div className={styles.urlSet}>
-            <span className={styles.urlSetIcon} aria-hidden>
-              <CheckCircleIcon size={16} />
-            </span>
-            <span className={styles.urlSetBody}>
-              <span className={styles.urlSetTitle}>Webhook URL set</span>
-              <span className={styles.urlSetSub}>Posting straight to your channel.</span>
-            </span>
-            <button type="button" className={styles.urlSetEdit} onClick={openUrlField}>
+          <p className={styles.urlSet}>
+            Webhook URL set — posting straight to your channel.{" "}
+            <button type="button" className={styles.urlSetLink} onClick={openUrlField}>
               Edit URL
             </button>
-          </div>
+          </p>
         ) : (
           <button type="button" className={styles.pasteToggle} onClick={openUrlField}>
             Already have a webhook URL?{" "}
