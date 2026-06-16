@@ -87,16 +87,6 @@
   cursor: progress;
 }
 
-/* The recommended card — accent-highlighted so the priority path pops. */
-.createCardPrimary {
-  background: var(--app-accent-soft);
-  border-color: var(--app-accent);
-}
-.createCardPrimary:hover {
-  background: var(--app-accent-soft);
-  border-color: var(--app-accent);
-}
-
 .createCardIcon {
   flex: none;
   display: inline-flex;
@@ -145,10 +135,6 @@
   text-transform: uppercase;
   background: var(--app-bg-hover);
   color: var(--app-text-muted);
-}
-.createCardPrimary .createCardBadge {
-  background: var(--app-accent);
-  color: #fff;
 }
 
 /* Secondary "paste a URL instead" toggle under the create cards. */

@@ -1631,11 +1631,12 @@ export function SendPanel({
  * One click, no secret prompt: the proxy uses the secret stored (encrypted)
  * at registration.
  *
- * Custom-bot cards lead (and carry the accent "recommended" styling) when any
- * exist, since posting under your own bot is the nicer outcome; otherwise the
- * standard DWEEB card is the highlighted one. The custom-bot list is fetched
- * quietly when the section mounts; any failure (signed out, feature off,
- * network) just leaves the default card.
+ * Custom-bot cards lead when any exist, since posting under your own bot is the
+ * nicer outcome; otherwise the standard DWEEB card is first. The cards are plain
+ * buttons — their order (and the "your bot" tag) signals the recommended one,
+ * rather than an accent fill that reads as a pre-selected option. The custom-bot
+ * list is fetched quietly when the section mounts; any failure (signed out,
+ * feature off, network) just leaves the default card.
  */
 function CreateWebhookOptions() {
   const authed = useAuthStore((s) => s.status === "authed");
@@ -1656,7 +1657,8 @@ function CreateWebhookOptions() {
   }, [authed, guildId]);
 
   // With a custom bot available, posting under it is the recommended path, so
-  // the bot cards take the accent highlight and the DWEEB one steps back.
+  // the bot cards lead; the cards stay plain (no accent fill) so none of them
+  // reads as a pre-selected option.
   const hasBots = guildId !== "" && bots.length > 0;
 
   return (
@@ -1666,7 +1668,7 @@ function CreateWebhookOptions() {
             <button
               key={bot.application_id}
               type="button"
-              className={cn(styles.createCard, styles.createCardPrimary)}
+              className={styles.createCard}
               disabled={starting}
               onClick={() => {
                 setStarting(true);
@@ -1699,7 +1701,7 @@ function CreateWebhookOptions() {
         : null}
       <button
         type="button"
-        className={cn(styles.createCard, !hasBots && styles.createCardPrimary)}
+        className={styles.createCard}
         onClick={() => {
           // Pre-select the server the builder is connected to, if any, so
           // the webhook lands where the user is already working.

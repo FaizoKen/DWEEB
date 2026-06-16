@@ -419,31 +419,27 @@ function AccountPanel({
           {botGuilds.map((g) => (
             <Fragment key={g.id}>
               <ServerRow guild={g} active={g.id === connectedId} onPick={() => onPick(g.id)} />
-              {/* Nested under the connected server's row so it's obvious which
-                  server's messages the dialog manages — slots are per-guild. */}
+              {/* Connected to the active server's row by a tree line so it's
+                  obvious these actions apply to that guild — per-guild slots/bots. */}
               {g.id === connectedId ? (
-                <>
-                  <li>
-                    <button
-                      type="button"
-                      className={styles.serverSubRow}
-                      onClick={onManageMessages}
-                    >
-                      <ClockIcon size={14} />
-                      <span>Managed messages</span>
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      type="button"
-                      className={styles.serverSubRow}
-                      onClick={onManageCustomBot}
-                    >
-                      <SettingsIcon size={14} />
-                      <span>Custom bot</span>
-                    </button>
-                  </li>
-                </>
+                <li className={styles.serverSubGroup}>
+                  <button
+                    type="button"
+                    className={styles.serverSubRow}
+                    onClick={onManageMessages}
+                  >
+                    <ClockIcon size={14} />
+                    <span>Managed messages</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.serverSubRow}
+                    onClick={onManageCustomBot}
+                  >
+                    <SettingsIcon size={14} />
+                    <span>Custom bot</span>
+                  </button>
+                </li>
               ) : null}
             </Fragment>
           ))}

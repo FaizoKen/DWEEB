@@ -169,6 +169,7 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   line-height: 1.5;
+  white-space: nowrap;
 }
 
 /* Smaller variant for the recents list. */
@@ -180,6 +181,22 @@
 .ownerBot {
   background: rgba(88, 101, 242, 0.18);
   color: rgb(120, 130, 255);
+}
+/* DWEEB's own app — brand purple, same family as the generic bot chip. */
+.ownerDweeb {
+  background: rgba(88, 101, 242, 0.18);
+  color: rgb(120, 130, 255);
+}
+/* A custom bot you registered for this server — distinct teal so it reads as
+   "yours" and not the generic/other bot. */
+.ownerYourBot {
+  background: rgba(45, 191, 196, 0.18);
+  color: rgb(74, 209, 214);
+}
+/* A different / unrelated app — muted, since it's not yours. */
+.ownerOtherBot {
+  background: var(--app-bg-hover);
+  color: var(--app-text-muted);
 }
 .ownerUser {
   background: rgba(35, 165, 89, 0.16);

@@ -31,6 +31,8 @@ import {
   type WebhookHistoryEntry,
   type WebhookOwnerKind,
 } from "@/core/webhook";
+import { fetchCustomBots } from "@/core/guild/api";
+import { DISCORD_CLIENT_ID, isProxyConfigured } from "@/core/guild/config";
 import { ChevronRightIcon, SettingsIcon, TrashIcon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
 import { pushToast } from "@/ui/Toast";
@@ -83,11 +85,35 @@ export function WebhookRecents({
   // data — the server from the user's guild list, the channel from the connected
   // guild. When nothing resolves we fall back to the webhook id.
   const guilds = useAuthStore((s) => s.guilds);
+  const authStatus = useAuthStore((s) => s.status);
   const connectedData = useGuildStore((s) => s.data);
   const connectedId = useGuildStore((s) => s.guildId);
 
   // Re-collapse "other servers" when you switch the connected guild.
   useEffect(() => setShowOthers(false), [connectedId]);
+
+  // The connected guild's registered custom-bot app ids, used to split the
+  // generic "Bot" chip into "Your bot" vs. "Other bot" (DWEEB's own app is told
+  // apart by id alone, no fetch needed). Only the connected guild is fetched —
+  // that's where the primary list's webhooks live; bot webhooks in other
+  // servers, whose registries we don't have, stay a plain "Bot". Needs a signed
+  // -in session and a proxy to ask.
+  const [customBotIds, setCustomBotIds] = useState<{ guildId: string; ids: string[] } | null>(null);
+  useEffect(() => {
+    if (authStatus !== "authed" || !isProxyConfigured() || connectedId === "") {
+      setCustomBotIds(null);
+      return;
+    }
+    const ac = new AbortController();
+    fetchCustomBots(connectedId, ac.signal)
+      .then((b) =>
+        setCustomBotIds({ guildId: connectedId, ids: b.items.map((i) => i.application_id) }),
+      )
+      .catch(() => {
+        if (!ac.signal.aborted) setCustomBotIds(null);
+      });
+    return () => ac.abort();
+  }, [authStatus, connectedId]);
 
   // Health-check the saved webhooks against Discord when the list mounts: each
   // already carries its own token, so a token GET (no auth) tells us whether the
@@ -154,6 +180,53 @@ export function WebhookRecents({
     return null;
   };
 
+  // The owner chip for an entry: refines a bot-owned webhook into DWEEB / your
+  // custom bot / a different bot, so the list says *which* bot posts under it.
+  // DWEEB's own app is known by id; the your/other split needs the connected
+  // guild's custom-bot registry and so only applies to entries in that guild —
+  // elsewhere a bot webhook stays a plain "Bot". Person/follower chips are
+  // unchanged. Returns null when there's nothing to show.
+  const ownerBadge = (
+    entry: WebhookHistoryEntry,
+  ): { text: string; className: string | undefined; title: string } | null => {
+    const kind = entry.ownerKind;
+    if (!kind || kind === "unknown") return null;
+    if (kind !== "bot") {
+      return {
+        text: OWNER_COPY[kind].badge,
+        className: OWNER_BADGE_CLASS[kind],
+        title: OWNER_COPY[kind].label,
+      };
+    }
+
+    const appId = entry.applicationId;
+    if (appId && DISCORD_CLIENT_ID && appId === DISCORD_CLIENT_ID) {
+      return { text: "DWEEB", className: styles.ownerDweeb, title: "Created by the DWEEB bot." };
+    }
+    // The registry we hold is the connected guild's, so the your/other verdict
+    // is only trustworthy for entries that actually live there.
+    const registry =
+      appId && customBotIds && entry.guildId === customBotIds.guildId ? customBotIds.ids : null;
+    if (appId && registry) {
+      return registry.includes(appId)
+        ? {
+            text: "Your bot",
+            className: styles.ownerYourBot,
+            title: "Created by your registered custom bot.",
+          }
+        : {
+            text: "Other bot",
+            className: styles.ownerOtherBot,
+            title: "Created by a different bot / app — not DWEEB or your custom bot.",
+          };
+    }
+    return {
+      text: OWNER_COPY.bot.badge,
+      className: OWNER_BADGE_CLASS.bot,
+      title: OWNER_COPY.bot.label,
+    };
+  };
+
   if (history.length === 0) return null;
 
   const handleForget = (entry: WebhookHistoryEntry) => {
@@ -169,6 +242,7 @@ export function WebhookRecents({
     // A health check found this one deleted/revoked on Discord — it stays in the
     // list (struck through, with a clear remove) rather than vanishing silently.
     const deleted = !!entry.deletedAt;
+    const badge = deleted ? null : ownerBadge(entry);
     return (
       <li
         key={entry.id}
@@ -199,16 +273,12 @@ export function WebhookRecents({
               >
                 Gone
               </span>
-            ) : entry.ownerKind && entry.ownerKind !== "unknown" ? (
+            ) : badge ? (
               <span
-                className={cn(
-                  styles.ownerBadge,
-                  styles.ownerBadgeSm,
-                  OWNER_BADGE_CLASS[entry.ownerKind],
-                )}
-                title={OWNER_COPY[entry.ownerKind].label}
+                className={cn(styles.ownerBadge, styles.ownerBadgeSm, badge.className)}
+                title={badge.title}
               >
-                {OWNER_COPY[entry.ownerKind].badge}
+                {badge.text}
               </span>
             ) : null}
           </span>

@@ -245,17 +245,28 @@
   flex: none;
 }
 
-/* Per-server sub-action ("Managed messages"), nested under the connected
- * server's row. The indent lines it up with the server name above (10px row
- * padding + 24px guild icon + 10px gap), which is what reads as "belongs to
- * that server". */
+/* Per-server actions ("Managed messages" / "Custom bot") joined to the active
+ * server's row by a tree line — a vertical rail under the guild-icon centre
+ * (10px row padding + ~12px half-icon = 22px) with an elbow into each row, so
+ * it's clear these settings belong to that guild (per-guild slots/bots). */
+.serverSubGroup {
+  position: relative;
+  margin-bottom: 5px;
+  padding: 2px 0;
+  /* Soft accent (indigo) wash — a colour, not the neutral grey of the row hover
+   * states, so it reads as a distinct settings panel for the active server
+   * rather than a hovered list item. */
+  background: rgba(88, 101, 242, 0.1);
+  border-radius: var(--app-radius-sm);
+}
 .serverSubRow {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   min-height: 30px;
-  padding: 5px 10px 5px 44px;
+  padding: 5px 10px 5px 42px;
   border: none;
   background: transparent;
   border-radius: var(--app-radius-sm);
@@ -266,11 +277,41 @@
   cursor: pointer;
 }
 .serverSubRow:hover {
-  background: var(--app-bg-hover);
+  background: var(--app-accent-soft);
 }
 .serverSubRow svg {
   color: var(--app-text-muted);
   flex: none;
+}
+/* Vertical rail: full height for the upper rows, stopping at the elbow on the
+ * last one so the branch terminates cleanly (└ rather than ├). The first row
+ * reaches up past the list gap to meet the server row above. */
+.serverSubRow::before {
+  content: "";
+  position: absolute;
+  left: 22px;
+  top: -2px;
+  bottom: 0;
+  width: 2px;
+  background: var(--app-border-strong);
+}
+.serverSubRow:first-child::before {
+  top: -5px;
+}
+.serverSubRow:last-child::before {
+  bottom: auto;
+  height: calc(50% + 2px);
+}
+/* Elbow from the rail into each row, at its vertical centre. */
+.serverSubRow::after {
+  content: "";
+  position: absolute;
+  left: 22px;
+  top: 50%;
+  width: 13px;
+  height: 2px;
+  border-bottom-left-radius: 2px;
+  background: var(--app-border-strong);
 }
 
 /* ── Footer actions (invite / refresh) ────────────────────────────────── */
