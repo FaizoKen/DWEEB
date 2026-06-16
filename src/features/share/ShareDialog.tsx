@@ -31,7 +31,6 @@ import {
   encodeJson,
   encodeShare,
   isShortLinkConfigured,
-  writeShareTokenToHash,
   type V1ImportNote,
 } from "@/core/serialization";
 import {
@@ -200,15 +199,6 @@ function ShareLinkPanel() {
           }}
         >
           Copy URL
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            writeShareTokenToHash(token);
-            pushToast("URL updated. Reload to verify.", "info");
-          }}
-        >
-          Update address bar
         </Button>
       </div>
 
