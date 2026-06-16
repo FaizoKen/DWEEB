@@ -149,6 +149,8 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
           Restore
         </Button>
         <Button
+          // Stable anchor for the post-setup coach-mark (see SendCoachMark).
+          id="builder-send-action"
           variant="primary"
           size="sm"
           leadingIcon={<SendIcon />}

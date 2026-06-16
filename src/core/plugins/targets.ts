@@ -154,6 +154,27 @@ export function interactiveComponents(message: WebhookMessage): InteractiveNode[
   return out;
 }
 
+/**
+ * Locate an interactive component by its current `custom_id`, returning its
+ * editor id + resolved target, or `null`. The guided template-setup flow uses
+ * this to map each declared plugin slot — keyed by the placeholder `custom_id`
+ * the template ships — to the live component, so it can wire several plugins in
+ * one message without the user hunting for any of them.
+ */
+export function targetableNodeByCustomId(
+  message: WebhookMessage,
+  customId: string,
+): { nodeId: EditorId; target: PluginTarget } | null {
+  for (const node of walkAll(message)) {
+    const t = targetOf(node);
+    if (!t) continue;
+    if ((node as { custom_id?: unknown }).custom_id === customId) {
+      return { nodeId: node._id, target: t };
+    }
+  }
+  return null;
+}
+
 /** Yields every node (top-level + nested), mirroring the capability walker. */
 function* walkAll(message: WebhookMessage): Generator<AnyComponent> {
   for (const top of message.components) yield* deep(top);

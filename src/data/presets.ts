@@ -54,6 +54,20 @@ export const TEMPLATE_CATEGORIES = [
 
 export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
 
+/**
+ * One interactive component a template ships that should be wired to a plugin,
+ * identified by the placeholder `custom_id` it carries. A template can declare
+ * several (one button → Tickets, one menu → Self Role…); the guided setup flow
+ * walks them as a checklist. The placeholder id survives `replaceMessage` (only
+ * `_id`s are reassigned), so it's a stable handle to the live component.
+ */
+export interface TemplatePluginSlot {
+  /** The placeholder `custom_id` on the component this slot configures. */
+  customId: string;
+  /** Registry id of the plugin to wire it to (e.g. `"tickets"`). */
+  pluginId: string;
+}
+
 /** A named, pickable starting message shown in the Template Gallery. */
 export interface MessageTemplate {
   /** Stable key — used as the React key and to address the template. */
@@ -76,8 +90,17 @@ export interface MessageTemplate {
    * the gallery flags them "Bot needed".
    */
   requiresBot?: boolean;
-  /** Display name of the DWEEB plugin this template is built to pair with. */
+  /** Display name(s) of the DWEEB plugin(s) this template pairs with, shown on
+   *  the gallery card (e.g. "Tickets", or "Tickets + Self Role"). */
   pairsWith?: string;
+  /**
+   * The interactive components this template ships that pair with a plugin, in
+   * the order the guided setup should walk them. When non-empty, picking the
+   * template launches `TemplateSetup`, which configures each one in place so the
+   * user never has to hunt for the component or pick the plugin by hand. Keep in
+   * sync with `pairsWith` (the display summary).
+   */
+  pluginSlots?: TemplatePluginSlot[];
   /** The message this template drops into the editor. */
   message: WebhookMessage;
 }
@@ -407,6 +430,112 @@ const VERIFY_MESSAGE: WebhookMessage = {
       type: ComponentType.TextDisplay,
       content:
         "-# Wire the button to the Quick Replies plugin to grant a role and reply privately.",
+    },
+  ],
+};
+
+// Onboarding panel that pairs TWO plugins in one message — a verify button
+// (Quick Replies) and a roles menu (Self Role). Drives the multi-plugin path of
+// the guided setup checklist.
+const WELCOME_HUB_MESSAGE: WebhookMessage = {
+  username: "Get Started",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blurple,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🚀 Get started here\nTwo quick steps and you're in — verify, then pick the roles you want.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**Step 1 — Verify**\nTap the button to confirm you're human and unlock the server.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Success,
+              label: "Verify me",
+              emoji: { name: "✅" },
+              custom_id: "welcome_verify",
+            },
+          ],
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Large,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**Step 2 — Pick your roles**\nChoose what you're into to unlock channels and pings. Take as many as you like.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.StringSelect,
+              custom_id: "welcome_roles",
+              placeholder: "Choose your interests…",
+              min_values: 0,
+              max_values: 4,
+              options: [
+                {
+                  label: "Gaming",
+                  value: "gaming",
+                  description: "Squad up and find players",
+                  emoji: { name: "🎮" },
+                },
+                {
+                  label: "Art & Design",
+                  value: "art",
+                  description: "Share and critique creative work",
+                  emoji: { name: "🎨" },
+                },
+                {
+                  label: "Music",
+                  value: "music",
+                  description: "Recommendations and listening parties",
+                  emoji: { name: "🎵" },
+                },
+                {
+                  label: "Announcements",
+                  value: "announcements",
+                  description: "Get pinged for big news",
+                  emoji: { name: "📢" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# Wire the button to Quick Replies and the menu to Self Role — the guided setup does both in one go.",
     },
   ],
 };
@@ -1290,7 +1419,24 @@ export const TEMPLATES: MessageTemplate[] = [
     accent: ACCENT.green,
     requiresBot: true,
     pairsWith: "Quick Replies",
+    pluginSlots: [{ customId: "verify_me", pluginId: "quick-replies" }],
     message: VERIFY_MESSAGE,
+  },
+  {
+    id: "welcome-hub",
+    name: "Welcome & roles hub",
+    description: "Verify and self-assign roles in one onboarding panel.",
+    emoji: "🚀",
+    category: "Welcome",
+    tags: ["onboarding", "verify", "self role", "roles", "menu", "button", "gate"],
+    accent: ACCENT.blurple,
+    requiresBot: true,
+    pairsWith: "Quick Replies + Self Role",
+    pluginSlots: [
+      { customId: "welcome_verify", pluginId: "quick-replies" },
+      { customId: "welcome_roles", pluginId: "self-role" },
+    ],
+    message: WELCOME_HUB_MESSAGE,
   },
   {
     id: "announcement",
@@ -1332,6 +1478,7 @@ export const TEMPLATES: MessageTemplate[] = [
     accent: ACCENT.blurple,
     requiresBot: true,
     pairsWith: "Self Role",
+    pluginSlots: [{ customId: "reaction_roles", pluginId: "self-role" }],
     message: REACTION_ROLES_MESSAGE,
   },
   {
@@ -1374,6 +1521,7 @@ export const TEMPLATES: MessageTemplate[] = [
     accent: ACCENT.gold,
     requiresBot: true,
     pairsWith: "Giveaway",
+    pluginSlots: [{ customId: "giveaway_enter", pluginId: "giveaway" }],
     message: GIVEAWAY_BUTTON_MESSAGE,
   },
   {
@@ -1386,6 +1534,7 @@ export const TEMPLATES: MessageTemplate[] = [
     accent: ACCENT.blue,
     requiresBot: true,
     pairsWith: "Tickets",
+    pluginSlots: [{ customId: "ticket_open", pluginId: "tickets" }],
     message: SUPPORT_MESSAGE,
   },
   {

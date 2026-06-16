@@ -1,0 +1,114 @@
+/* Full-screen, click-through layer holding the spotlight. `pointer-events:none`
+   keeps the Send button (and everything else) fully usable underneath; a global
+   listener in the component handles dismissal. Sits above the toolbar and the
+   mobile preview sheet so the ring + callout are always visible. */
+.layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-z-tooltip);
+  pointer-events: none;
+}
+
+/* Dims + blurs the editor section while the hint shows, scoped to the editor
+   pane (sized inline) so the preview never fades. An inline clip-path punches a
+   hole over the Send button — removing it from both the paint and the pointer
+   hit-testing, so it stays crisp and clickable. `pointer-events: auto` lets the
+   dim catch clicks (which dismiss the hint) instead of letting them fall through
+   to the editor underneath.
+
+   Sits one layer below the mobile preview sheet (`--app-z-modal - 1`): on mobile
+   the builder pane is full-width and the preview slides up over it, so keeping
+   the scrim under the sheet means only the editor peeking above it blurs — never
+   the sheet. The ring/callout stay in `.layer` (above the sheet) so they remain
+   visible over Send. On desktop the scrim only covers the builder column, so
+   this z-index is harmless there. */
+.scrim {
+  position: fixed;
+  z-index: calc(var(--app-z-modal) - 2);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  pointer-events: auto;
+  animation: coachFade 200ms ease-out both;
+}
+
+/* Accent ring drawn around the Send button — ties the callout to its target. */
+.ring {
+  position: fixed;
+  border: 2px solid var(--app-accent);
+  border-radius: var(--app-radius);
+  box-shadow:
+    0 0 0 4px var(--app-accent-soft),
+    0 0 14px 2px var(--app-accent-soft);
+  animation: coachIn 200ms ease-out both;
+}
+
+/* Callout below the button, pointing up at it. */
+.callout {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 13px;
+  border-radius: var(--app-radius);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow-lg);
+  color: var(--app-text);
+  animation: coachIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* The upward arrow. A rotated square sharing the callout's surface + border, so
+   only its top-left edges show as the pointer. `left` is set inline to track
+   the button centre. */
+.arrow {
+  position: absolute;
+  top: -6px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  background: var(--app-bg-elevated);
+  border-left: 1px solid var(--app-border);
+  border-top: 1px solid var(--app-border);
+  transform: rotate(45deg);
+}
+
+.title {
+  font-size: var(--app-text-sm);
+  font-weight: 700;
+  color: var(--app-accent-text);
+}
+
+.text {
+  font-size: var(--app-text-sm);
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+
+@keyframes coachIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes coachFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .ring,
+  .callout {
+    animation: none;
+  }
+}

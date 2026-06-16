@@ -1,0 +1,165 @@
+/* Footer button row. */
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+/* ── Progress stepper ────────────────────────────────────────────────────── */
+/* A compact three-step trail so a beginner sees where they are: template chosen
+   (done), connect plugins (here), post (next). */
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--app-text-subtle);
+}
+
+.stepDone {
+  color: var(--app-success-text);
+}
+
+.stepCurrent {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.stepMark {
+  display: inline-flex;
+  color: var(--app-success-text);
+}
+
+.stepNum {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-text-muted);
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+}
+.stepCurrent .stepNum {
+  color: var(--app-accent-text);
+  background: var(--app-accent-soft);
+  border-color: transparent;
+}
+
+/* Ready-count pill on the current step (multi-plugin templates only). */
+.stepPill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--app-accent-text);
+  background: var(--app-accent-soft);
+}
+
+/* ── Body copy ───────────────────────────────────────────────────────────── */
+.lead {
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--app-text);
+}
+
+.hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+/* ── Plugin checklist ────────────────────────────────────────────────────── */
+.slotList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.slotRow {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.slotRow[data-ready="true"] {
+  border-color: var(--app-success);
+  background: var(--app-success-soft);
+}
+
+.slotText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.slotName {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Which component this slot wires — a quiet qualifier after the plugin name. */
+.slotNoun {
+  flex: none;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--app-text-subtle);
+}
+
+.slotDesc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slotAction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.slotReady {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-success-text);
+}

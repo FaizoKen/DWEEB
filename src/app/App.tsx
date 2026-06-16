@@ -23,6 +23,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { TouchEvent as ReactTouchEvent } from "react";
 import { Builder } from "@/features/builder/Builder";
+import { SendCoachMark } from "@/features/builder/SendCoachMark";
 import { Preview } from "@/features/preview/Preview";
 import { MiniPreview } from "@/features/preview/MiniPreview";
 import { useAiStore } from "@/core/ai/aiStore";
@@ -45,6 +46,9 @@ const AiChatPanel = lazy(() =>
 const TemplateGallery = lazy(() =>
   import("@/features/templates/TemplateGallery").then((m) => ({ default: m.TemplateGallery })),
 );
+const TemplateSetup = lazy(() =>
+  import("@/features/templates/TemplateSetup").then((m) => ({ default: m.TemplateSetup })),
+);
 import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
@@ -54,6 +58,8 @@ import {
   type IncomingWebhook,
 } from "@/core/guild/config";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
+import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
+import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
@@ -243,6 +249,13 @@ export function App() {
   const galleryOpen = useTemplateGalleryStore((s) => s.open);
   const openGallery = useTemplateGalleryStore((s) => s.openGallery);
 
+  // Guided setup for an interactive template the gallery just applied: wires its
+  // paired plugin(s), then closes, leaving the editor in front.
+  const setupTemplateId = useTemplateSetupStore((s) => s.templateId);
+  // A "go post" nudge (raised when setup finishes): raise the mobile preview so
+  // the message is visible. The Send button's own pulse is wired in the Builder.
+  const sendNudge = useSendNudgeStore((s) => s.token);
+
   // Mount the AI panel the first time it opens through any path (FAB or
   // keyboard shortcut), then keep it mounted so its slide animation and draft
   // survive subsequent toggles.
@@ -295,6 +308,16 @@ export function App() {
     openGallery();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Post-setup nudge: the editor's preview is the desktop's side column already,
+  // but a mobile sheet — raise it so the user sees the message before tapping
+  // Send (which the SendCoachMark spotlights). Read the layout live so this only
+  // depends on the nudge token firing.
+  useEffect(() => {
+    if (sendNudge === 0) return;
+    if (window.matchMedia(MOBILE_SHEET_QUERY).matches) setPreviewOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sendNudge]);
 
   // Close the Share dialog and hand off to the confirmation popup over the editor.
   const requestRemoveInteractive = () => {
@@ -418,6 +441,12 @@ export function App() {
             <TemplateGallery />
           </Suspense>
         ) : null}
+        {setupTemplateId ? (
+          <Suspense fallback={null}>
+            <TemplateSetup templateId={setupTemplateId} />
+          </Suspense>
+        ) : null}
+        <SendCoachMark />
         <ToastViewport />
       </div>
     </>
