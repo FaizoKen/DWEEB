@@ -48,6 +48,12 @@ pub struct CustomAppRow {
     /// one-click "create webhook from this bot" flow available. The secret
     /// itself is never listed.
     pub has_secret: bool,
+    /// Unix millis when this dispatcher first received a validly-signed
+    /// interaction for the app, or `None` if it never has. A non-null value
+    /// proves end-to-end that the owner set the Interactions Endpoint URL to
+    /// this dispatcher *and* registered the correct public key — Discord only
+    /// delivers (and we only record) interactions whose signature verifies.
+    pub verified_at: Option<i64>,
 }
 
 pub enum AddApp {
@@ -98,6 +104,10 @@ impl Store {
             "ALTER TABLE custom_apps ADD COLUMN client_secret_enc TEXT NOT NULL DEFAULT ''",
             [],
         );
+        // Migration for the "first verified interaction" timestamp (nullable —
+        // an unverified app simply has no value). Same expected duplicate-column
+        // error on an already-migrated file.
+        let _ = conn.execute("ALTER TABLE custom_apps ADD COLUMN verified_at INTEGER", []);
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -215,8 +225,8 @@ impl Store {
     pub fn custom_apps_list(&self, guild_id: &str) -> rusqlite::Result<Vec<CustomAppRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT application_id, name, added_at, client_secret_enc <> '' FROM custom_apps
-             WHERE guild_id = ?1 ORDER BY added_at",
+            "SELECT application_id, name, added_at, client_secret_enc <> '', verified_at
+             FROM custom_apps WHERE guild_id = ?1 ORDER BY added_at",
         )?;
         let rows = stmt
             .query_map([guild_id], |r| {
@@ -225,10 +235,24 @@ impl Store {
                     name: r.get(1)?,
                     added_at: r.get(2)?,
                     has_secret: r.get(3)?,
+                    verified_at: r.get(4)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
+    }
+
+    /// Record the first validly-signed interaction seen for an app. Writes only
+    /// when `verified_at` is still null, so it captures the *first* time and is
+    /// a cheap no-op afterwards. Returns whether a row was actually stamped.
+    pub fn mark_custom_verified(&self, application_id: &str) -> rusqlite::Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE custom_apps SET verified_at = ?1
+             WHERE application_id = ?2 AND verified_at IS NULL",
+            (unix_millis(), application_id),
+        )?;
+        Ok(n > 0)
     }
 
     /// The sealed client secret for one of the guild's apps. Scoped to the

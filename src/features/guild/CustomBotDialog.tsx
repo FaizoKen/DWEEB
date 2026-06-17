@@ -23,10 +23,8 @@ import { useAuthStore } from "@/core/auth/authStore";
 import {
   addCustomBot,
   fetchCustomBots,
-  GuildApiError,
   isAuthError,
   removeCustomBot,
-  verifyCustomBot,
   type CustomBots,
 } from "@/core/guild/api";
 import { interactionsEndpointUrl, oauthCallbackUrl } from "@/core/guild/config";
@@ -43,23 +41,20 @@ type BotsState =
   | { kind: "unavailable" } // feature off on this deployment (501)
   | { kind: "error"; message: string };
 
-/** Live result of checking whether the owner finished the portal step. */
+/**
+ * Live result of checking whether the owner finished the portal step. The
+ * proof is end-to-end: the dispatcher reports `verified` once Discord has
+ * actually delivered a validly-signed interaction for the app — which only
+ * happens after its Interactions Endpoint URL points back at DWEEB with the
+ * right public key. (Reading the app's config back isn't possible — that
+ * needs a bot token, which registration never collects.)
+ */
 type VerifyState =
   | { kind: "idle" }
   | { kind: "checking" }
-  | { kind: "done"; endpointOk: boolean; redirectOk: boolean }
-  // 409 — no usable secret stored, so we can't read the app's config.
-  | { kind: "needsSecret"; message: string }
-  // 502 / network — couldn't reach Discord; transient, offer a retry.
+  | { kind: "done"; connected: boolean }
+  // Network / server hiccup re-fetching the registry; transient, offer a retry.
   | { kind: "unreachable"; message: string };
-
-/** True when two URLs match, ignoring a trailing slash and letter case (these
- *  URLs are all-lowercase host + literal path, so case-folding is safe here). */
-function sameUrl(a: string | null | undefined, b: string): boolean {
-  if (!a || !b) return false;
-  const norm = (s: string) => s.trim().replace(/\/+$/, "").toLowerCase();
-  return norm(a) === norm(b);
-}
 
 /** Discord snowflakes are 17–20 digits today; accept a small range with slack. */
 const SNOWFLAKE_RE = /^\d{15,25}$/;
@@ -116,27 +111,24 @@ export function CustomBotDialog({
     setVerify({ kind: "idle" });
   };
 
-  // Read the app's config back from Discord and compare it to the two URLs we
-  // show. Success is authoritative; a 502 means "couldn't check", never "wrong".
+  // Re-pull the registry and read the app's `verified` flag — true once the
+  // dispatcher has received a validly-signed interaction for it, i.e. the
+  // owner finished the Interactions Endpoint URL step. A failed fetch is
+  // "couldn't check" (retry), never a false "not connected".
   const runVerify = async (applicationId: string) => {
     setVerify({ kind: "checking" });
     try {
-      const res = await verifyCustomBot(guildId, applicationId);
-      setVerify({
-        kind: "done",
-        endpointOk: sameUrl(res.interactions_endpoint_url, interactionsEndpointUrl()),
-        redirectOk: res.redirect_uris.some((u) => sameUrl(u, oauthCallbackUrl())),
-      });
+      const bots = await fetchCustomBots(guildId);
+      setState({ kind: "ready", bots });
+      const item = bots.items.find((i) => i.application_id === applicationId);
+      setVerify({ kind: "done", connected: item?.verified ?? false });
     } catch (e) {
       if (isAuthError(e)) {
         useAuthStore.getState().markSignedOut();
         onClose();
         return;
       }
-      const status = e instanceof GuildApiError ? e.status : 0;
-      const message = e instanceof Error ? e.message : String(e);
-      if (status === 409) setVerify({ kind: "needsSecret", message });
-      else setVerify({ kind: "unreachable", message });
+      setVerify({ kind: "unreachable", message: e instanceof Error ? e.message : String(e) });
     }
   };
 
@@ -355,9 +347,22 @@ export function CustomBotDialog({
                       <span className={styles.botName}>
                         {item.name || `App ${item.application_id}`}
                       </span>
-                      {item.has_secret ? (
-                        <span className={styles.chipOk}>Ready</span>
+                      {item.verified ? (
+                        <span
+                          className={styles.chipOk}
+                          title="DWEEB is receiving this app's interactions — it's wired up"
+                        >
+                          Connected
+                        </span>
                       ) : (
+                        <span
+                          className={styles.chipWarn}
+                          title="Use Check to finish pointing this app's Interactions Endpoint URL at DWEEB"
+                        >
+                          Setup
+                        </span>
+                      )}
+                      {item.has_secret ? null : (
                         <span
                           className={styles.chipWarn}
                           title="Use Update to add the Client Secret — needed for one-click webhooks"
@@ -371,17 +376,15 @@ export function CustomBotDialog({
                       {new Date(item.added_at).toLocaleDateString([], { dateStyle: "medium" })}
                     </span>
                   </span>
-                  {item.has_secret ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      title="Check this app's portal points back at DWEEB"
-                      onClick={() => openSetup(item.application_id, item.name)}
-                    >
-                      Check
-                    </Button>
-                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    title="Finish setup / check this app is wired up to DWEEB"
+                    onClick={() => openSetup(item.application_id, item.name)}
+                  >
+                    Check
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -526,11 +529,12 @@ export function CustomBotDialog({
 
 /**
  * The "Point it back at DWEEB" step, kept on screen after a registration until
- * the owner has actually pasted DWEEB's two URLs into their app's Developer
- * Portal. "Check setup" reads the app's live config from Discord and reports a
- * per-URL ✓/✗; both green means the bot is wired up. A failed check (Discord
- * unreachable, or no stored secret) is explained rather than shown as "wrong",
- * and "Close" leaves the panel without forcing a green result.
+ * the bot is actually wired up. "Check connection" re-pulls the registry and
+ * reads the dispatcher's `verified` flag — green only once Discord has
+ * delivered a real signed interaction for the app, which proves its
+ * Interactions Endpoint URL points here with the right public key. A failed
+ * fetch is explained as "couldn't check", never as "not connected", and
+ * "Close" leaves the panel without forcing a green result.
  */
 function SetupStep({
   app,
@@ -550,71 +554,62 @@ function SetupStep({
   onClose: () => void;
 }) {
   const done = verify.kind === "done" ? verify : null;
-  const allOk = done != null && done.endpointOk && done.redirectOk;
+  const connected = done?.connected ?? false;
   const name = app.name || `App ${app.id}`;
-  const status = (ok: boolean | undefined): "ok" | "missing" | undefined =>
-    ok === undefined ? undefined : ok ? "ok" : "missing";
   const checkLabel =
     verify.kind === "checking"
       ? "Checking…"
       : verify.kind === "idle"
-        ? "Check setup"
+        ? "Check connection"
         : "Check again";
 
   return (
     <section className={styles.setupStep}>
       <div className={styles.sectionHead}>
         <h3 className={styles.sectionTitle}>
-          {allOk ? "Setup complete" : "Finish setup — point it back at DWEEB"}
+          {connected ? "Setup complete" : "Finish setup — point it back at DWEEB"}
         </h3>
         <button type="button" className={styles.linkBtn} onClick={onClose}>
-          {allOk ? "Done" : "Close"}
+          {connected ? "Done" : "Close"}
         </button>
       </div>
 
-      {allOk ? (
+      {connected ? (
         <p className={styles.successNote}>
-          ✓ {name} is connected — both URLs are set in Discord. Its components now work through
-          DWEEB.
+          ✓ {name} is connected — DWEEB is receiving its interactions, so its buttons and menus
+          work.
         </p>
       ) : (
         <>
           <p className={styles.stepHint}>
-            Paste each value into <strong>{name}</strong>’s Developer Portal and save, then check it
-            here. Discord verifies them the moment you save.
+            In <strong>{name}</strong>’s Developer Portal, set the Interactions Endpoint URL and
+            save — Discord pings DWEEB the instant you do — then check the connection here.
           </p>
           <div className={styles.urlRef}>
             <CopyField
-              label="OAuth2 → Redirects"
-              value={callbackUrl}
-              status={done ? status(done.redirectOk) : undefined}
-            />
-            <CopyField
               label="General Information → Interactions Endpoint URL"
               value={endpointUrl}
-              status={done ? status(done.endpointOk) : undefined}
+              status={done ? (connected ? "connected" : "waiting") : undefined}
             />
+            <CopyField label="OAuth2 → Redirects" value={callbackUrl} />
           </div>
+          <p className={styles.footnote}>
+            The redirect URL is only for one-click webhook creation — Discord checks it when you
+            create a webhook, so it isn’t part of this connection check.
+          </p>
         </>
       )}
 
-      {verify.kind === "needsSecret" ? (
-        <p className={styles.error}>
-          {verify.message} Use <strong>Update</strong> on the app above to re-add its client secret.
-        </p>
-      ) : verify.kind === "unreachable" ? (
+      {verify.kind === "unreachable" ? (
         <p className={styles.error}>{verify.message}</p>
-      ) : done && !allOk ? (
+      ) : done && !connected ? (
         <p className={styles.note}>
-          {!done.redirectOk && !done.endpointOk
-            ? "Neither URL is in place yet — add both in the portal, save, then check again."
-            : !done.redirectOk
-              ? "The redirect URL isn’t added yet — put it under OAuth2 → Redirects, save, then check again."
-              : "The Interactions Endpoint URL isn’t set yet — paste it in, save, then check again."}
+          No interaction from {name} has reached DWEEB yet. Make sure the Interactions Endpoint URL
+          above is saved in the portal (and the Public Key matches), then check again.
         </p>
       ) : null}
 
-      {!allOk ? (
+      {!connected ? (
         <div className={styles.formActions}>
           <Button size="sm" disabled={busy || verify.kind === "checking"} onClick={onCheck}>
             {checkLabel}
@@ -630,8 +625,9 @@ function SetupStep({
  * interactions-endpoint values a beginner has to paste back into their app's
  * Developer Portal. The value is long and copy-paste-only, so a one-click Copy
  * beats asking them to select it by hand. Renders nothing when the URL is empty
- * (no proxy configured). An optional `status` shows whether a verification
- * check found this URL already set on the app.
+ * (no proxy configured). An optional `status` shows the live connection check
+ * result for this URL ("connected" once interactions are flowing, "waiting"
+ * while none have arrived yet).
  */
 function CopyField({
   label,
@@ -640,7 +636,7 @@ function CopyField({
 }: {
   label: ReactNode;
   value: string;
-  status?: "ok" | "missing";
+  status?: "connected" | "waiting";
 }) {
   const [copied, setCopied] = useState(false);
   if (!value) return null;
@@ -654,10 +650,10 @@ function CopyField({
     <div className={styles.copyField}>
       <span className={styles.copyLabel}>
         <span>{label}</span>
-        {status === "ok" ? (
-          <span className={styles.chipOk}>Set</span>
-        ) : status === "missing" ? (
-          <span className={styles.chipWarn}>Not set yet</span>
+        {status === "connected" ? (
+          <span className={styles.chipOk}>Connected</span>
+        ) : status === "waiting" ? (
+          <span className={styles.chipWarn}>Waiting</span>
         ) : null}
       </span>
       <div className={styles.copyRow}>

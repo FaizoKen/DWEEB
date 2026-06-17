@@ -74,7 +74,7 @@ mod commands;
 mod store;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::SocketAddr,
     sync::{Arc, RwLock},
     time::Duration,
@@ -121,6 +121,11 @@ struct App {
     /// this process is the registry's only writer, so the map is
     /// authoritative and interactions never touch the database for keys.
     custom_keys: RwLock<HashMap<String, (VerifyingKey, String)>>,
+    /// App ids whose "first verified interaction" has already been persisted
+    /// this process — an in-memory guard so the latency-sensitive interaction
+    /// path touches SQLite at most once per app (the first time we see it),
+    /// then never again. Empty at boot; the DB write is idempotent regardless.
+    custom_verified: RwLock<HashSet<String>>,
     /// Custom-app registrations each guild may hold. Today a deployment-wide
     /// env; per-guild plan caps can replace this without changing the API
     /// (every response already carries `cap`).
@@ -262,6 +267,7 @@ async fn main() {
         primary_key,
         primary_key_hex,
         custom_keys: RwLock::new(custom_keys),
+        custom_verified: RwLock::new(HashSet::new()),
         custom_apps_cap,
         forward_secret,
         routes,
@@ -335,6 +341,39 @@ async fn health() -> impl IntoResponse {
     Json(json!({ "status": "ok" }))
 }
 
+impl App {
+    /// Note that a validly-signed interaction just arrived for a custom app —
+    /// the signal the dashboard reads as "this bot is connected". The first
+    /// sighting per process is persisted (`verified_at`); after that the
+    /// read-lock fast path returns immediately, so the interaction hot path
+    /// stays allocation- and DB-free for every subsequent click.
+    fn note_custom_verified(&self, app_id: &str) {
+        if self.custom_verified.read().unwrap().contains(app_id) {
+            return;
+        }
+        if !self
+            .custom_verified
+            .write()
+            .unwrap()
+            .insert(app_id.to_string())
+        {
+            return; // lost a race — the winner is persisting it
+        }
+        match self.store.mark_custom_verified(app_id) {
+            Ok(true) => {
+                tracing::info!(application_id = %app_id, "custom app verified (first interaction)")
+            }
+            // Already stamped on a previous run — fine, the flag stands.
+            Ok(false) => {}
+            Err(err) => {
+                tracing::warn!(%err, application_id = %app_id, "couldn't persist custom-app verified flag");
+                // Drop it from the guard so a later interaction retries.
+                self.custom_verified.write().unwrap().remove(app_id);
+            }
+        }
+    }
+}
+
 async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
     // Verify before acting; Discord probes with invalid signatures and a 401
     // here is what makes the endpoint pass their validation.
@@ -382,6 +421,9 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
             if !verify_signature(&key, signature, timestamp, &body) {
                 return (StatusCode::UNAUTHORIZED, "bad signature").into_response();
             }
+            // A real, correctly-signed interaction reached us for this app —
+            // record it as the dashboard's "connected" proof (once per app).
+            app.note_custom_verified(app_id);
             (parsed, std::borrow::Cow::Owned(hex))
         };
 
@@ -778,6 +820,9 @@ async fn custom_apps_remove(
             .into_response();
     }
     app.custom_keys.write().unwrap().remove(&application_id);
+    // Forget the in-memory "already persisted" guard too, so a later
+    // re-registration of the same id starts unverified and re-checks.
+    app.custom_verified.write().unwrap().remove(&application_id);
     match app.store.custom_apps_list(&guild_id) {
         Ok(rows) => custom_apps_json(&app, &rows).into_response(),
         Err(err) => internal_error(err),
@@ -818,6 +863,9 @@ fn custom_apps_json(app: &App, rows: &[store::CustomAppRow]) -> Json<Value> {
             "name": r.name,
             "added_at": r.added_at,
             "has_secret": r.has_secret,
+            // True once Discord has delivered a validly-signed interaction —
+            // i.e. the owner finished the Interactions Endpoint URL step.
+            "verified": r.verified_at.is_some(),
         })).collect::<Vec<_>>(),
     }))
 }
