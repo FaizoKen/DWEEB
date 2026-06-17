@@ -301,9 +301,9 @@ function AboutPanel() {
         <strong>Private by design.</strong> Everything runs in your browser — message drafts,
         webhook URLs, and share links never reach our servers (share state lives in the URL hash;
         webhook tokens go only to Discord). No account, no database, nothing uploaded. The one
-        exception is opt-in: creating a <em>short link</em> uploads that message so it can be
-        served from a tiny URL, and it's auto-deleted after 7 days — for sensitive announcements,
-        stick with the default hash link.
+        exception is opt-in: creating a <em>short link</em> uploads that message so it can be served
+        from a tiny URL, and it's auto-deleted after 7 days — for sensitive announcements, stick
+        with the default hash link.
       </p>
       <p className={styles.lead}>
         And yes, it stands for <em>Discord Webhook Embed Builder</em>. 🤓
@@ -554,12 +554,17 @@ function V1ConversionPreview({ fields, notes }: { fields: string[]; notes: V1Imp
 function RestorePanel({ onDone }: { onDone: () => void }) {
   const replaceFromRestore = useMessageStore((s) => s.replaceMessageFromRestore);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
+  // Set when an "Edit in DWEEB" link named a webhook this browser hasn't saved:
+  // the message id + thread are known, only the webhook URL is missing.
+  const pendingEditOrigin = useMessageStore((s) => s.pendingEditOrigin);
 
-  // Prefill when the user reopens the panel against an already-restored message.
+  // Prefill from an already-restored message, else from a pending "Edit in
+  // DWEEB" origin (which knows everything but the webhook URL).
+  const prefill = restoredFrom ?? pendingEditOrigin;
   const [url, setUrl] = useState(() => restoredFrom?.webhookUrl ?? "");
   const [revealUrl, setRevealUrl] = useState(false);
-  const [idInput, setIdInput] = useState(() => restoredFrom?.messageId ?? "");
-  const [threadId, setThreadId] = useState(() => restoredFrom?.threadId ?? "");
+  const [idInput, setIdInput] = useState(() => prefill?.messageId ?? "");
+  const [threadId, setThreadId] = useState(() => prefill?.threadId ?? "");
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -569,6 +574,17 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
 
   const saveAbortRef = useRef<AbortController | null>(null);
   useEffect(() => () => saveAbortRef.current?.abort(), []);
+
+  // The panel stays mounted across opens, so a pending origin arriving while
+  // it's already mounted (an "Edit in DWEEB" link opened it) won't re-run the
+  // initializers above — mirror it into the message id + thread fields here.
+  // The webhook URL is deliberately left for the user; only they hold it.
+  useEffect(() => {
+    if (!pendingEditOrigin) return;
+    setIdInput(pendingEditOrigin.messageId);
+    setThreadId(pendingEditOrigin.threadId ?? "");
+    setError(null);
+  }, [pendingEditOrigin]);
 
   const parsedUrl = useMemo(() => parseWebhookUrl(url), [url]);
   const messageId = useMemo(() => parseMessageIdInput(idInput), [idInput]);
@@ -678,6 +694,14 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
         Pull a message <strong>this webhook</strong> posted back into the editor — Discord won’t
         return user or bot messages, even in the same channel.
       </p>
+
+      {pendingEditOrigin && !restoredFrom ? (
+        <Callout tone="info" role="note">
+          Opened from Discord with the message ID filled in. Add the webhook that{" "}
+          <strong>posted this message</strong> below, then <strong>Restore</strong> — your edits
+          will update the original in place instead of posting a copy.
+        </Callout>
+      ) : null}
 
       <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
         <strong>Treat the webhook URL like a password.</strong> It's a credential that lets anyone

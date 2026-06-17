@@ -85,10 +85,28 @@ export interface RestoredOrigin {
   threadId?: string;
 }
 
+/**
+ * Origin of a message opened from an "Edit in DWEEB" deep link whose webhook
+ * *URL* (the secret needed to PATCH) isn't saved in this browser — so it can't
+ * become a {@link RestoredOrigin} yet. Carries only the public identifiers from
+ * the link so the Restore panel can prefill the message id + thread and tell
+ * the user which webhook to add; once they do, the restore promotes it to a
+ * real origin. Held in memory only; cleared on the next message swap.
+ */
+export interface PendingEditOrigin {
+  /** Webhook snowflake — matched against saved webhooks (none found yet). */
+  webhookId: string;
+  /** Message snowflake to restore. */
+  messageId: string;
+  /** Thread the message lives in, when it's threaded. */
+  threadId?: string;
+}
+
 export interface MessageState {
   message: WebhookMessage;
   selectedId: EditorId | null;
   restoredFrom: RestoredOrigin | null;
+  pendingEditOrigin: PendingEditOrigin | null;
 
   past: HistoryFrame[];
   future: HistoryFrame[];
@@ -108,6 +126,13 @@ export interface MessageState {
    * updating the message that's now live instead of posting a duplicate.
    */
   setRestoreOrigin(origin: RestoredOrigin | null): void;
+  /**
+   * Record (or clear) the origin of a message opened from an "Edit in DWEEB"
+   * link whose webhook isn't saved locally. Doesn't touch the message or
+   * history — the share bootstrap calls it right after `replaceMessage` so the
+   * Restore panel can prefill the message id and prompt for the webhook URL.
+   */
+  setPendingEditOrigin(origin: PendingEditOrigin | null): void;
   loadDefaultPreset(): void;
   /** Wipe the editor to a fully blank message — components plus every
    *  message-level option (username, avatar, mentions, etc.). Undoable. */
@@ -356,6 +381,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   message: bootstrap(),
   selectedId: null,
   restoredFrom: null,
+  pendingEditOrigin: null,
   past: initialHistory?.past ?? [],
   future: initialHistory?.future ?? [],
 
@@ -369,6 +395,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       message: reassignIds(next),
       selectedId: null,
       restoredFrom: null,
+      pendingEditOrigin: null,
     }));
   },
 
@@ -378,6 +405,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       message: reassignIds(next),
       selectedId: null,
       restoredFrom: origin,
+      // A real origin supersedes any pending one — the webhook is resolved now.
+      pendingEditOrigin: null,
     }));
   },
 
@@ -389,12 +418,17 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set({ restoredFrom: origin });
   },
 
+  setPendingEditOrigin(origin) {
+    set({ pendingEditOrigin: origin });
+  },
+
   loadDefaultPreset() {
     set((s) => ({
       ...pushHistory(s),
       message: reassignIds(DEFAULT_PRESET.message),
       selectedId: null,
       restoredFrom: null,
+      pendingEditOrigin: null,
     }));
   },
 
@@ -406,6 +440,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       message: { components: [] },
       selectedId: null,
       restoredFrom: null,
+      pendingEditOrigin: null,
     }));
   },
 

@@ -24,12 +24,17 @@ import { useEffect, useRef } from "react";
 // compression/migration code stays out of the initial bundle. The decoder —
 // which pulls in lz-string — is loaded on demand below, only when a share link
 // is actually present.
-import { clearShareTokenFromHash, readShareTokenFromHash } from "@/core/serialization/url";
+import {
+  clearShareTokenFromHash,
+  readShareOriginFromHash,
+  readShareTokenFromHash,
+} from "@/core/serialization/url";
 import {
   isShortLinkConfigured,
   readShortLinkId,
   resolveShortLink,
 } from "@/core/serialization/shortlink";
+import { loadHistory } from "@/core/webhook";
 import { useMessageStore } from "@/core/state/messageStore";
 import { pushToast } from "@/ui/Toast";
 
@@ -55,6 +60,8 @@ function stripShortLinkFromPath(): void {
 
 export function useShareUrlBootstrap(): void {
   const replaceMessage = useMessageStore((s) => s.replaceMessage);
+  const replaceMessageFromRestore = useMessageStore((s) => s.replaceMessageFromRestore);
+  const setPendingEditOrigin = useMessageStore((s) => s.setPendingEditOrigin);
   const ran = useRef(false);
 
   useEffect(() => {
@@ -87,11 +94,51 @@ export function useShareUrlBootstrap(): void {
       return;
     }
 
-    // Hash link: the token is right here in the URL.
+    // Hash link: the token is right here in the URL. An "Edit in DWEEB" link
+    // also carries the message's origin so the editor can update it in place.
     const token = readShareTokenFromHash(window.location.hash);
     if (!token) return;
-    void applyToken(token, replaceMessage).then((ok) => {
-      if (ok) clearShareTokenFromHash();
-    });
-  }, [replaceMessage]);
+    const origin = readShareOriginFromHash(window.location.hash);
+    if (!origin) {
+      // Plain share link — load the content, nothing to update.
+      void applyToken(token, replaceMessage).then((ok) => {
+        if (ok) clearShareTokenFromHash();
+      });
+      return;
+    }
+    void (async () => {
+      const { decodeShare } = await import("@/core/serialization/encode");
+      const result = decodeShare(token);
+      if (!result.ok) {
+        pushToast(`Couldn't load shared link: ${result.error}`, "error");
+        return; // Leave the token in the URL so a reload can retry.
+      }
+      // The link names the message's webhook. If this browser has that webhook
+      // saved (its URL holds the token needed to PATCH), open the message as a
+      // restore so edits update the original in place. Skip entries a prior
+      // health check found gone — restoring against a dead webhook would only
+      // fail at send time.
+      const saved = loadHistory().find((e) => e.id === origin.webhookId && !e.deletedAt);
+      if (saved) {
+        replaceMessageFromRestore(result.message, {
+          webhookUrl: saved.url,
+          messageId: origin.messageId,
+          threadId: origin.threadId,
+        });
+        pushToast("Loaded from Discord — edits will update the original in place.", "success");
+      } else {
+        // No saved webhook → only the user holds its URL. Load the content and
+        // stash the origin so that when the user opens the Restore panel, the
+        // message id + thread are already prefilled and they need only add the
+        // webhook that posted it.
+        replaceMessage(result.message);
+        setPendingEditOrigin(origin);
+        pushToast(
+          "Loaded from Discord. To update the original in place, add its webhook under Restore.",
+          "info",
+        );
+      }
+      clearShareTokenFromHash();
+    })();
+  }, [replaceMessage, replaceMessageFromRestore, setPendingEditOrigin]);
 }

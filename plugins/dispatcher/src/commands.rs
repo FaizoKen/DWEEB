@@ -21,8 +21,11 @@
 //! target message under `data.resolved.messages`, and the web editor already
 //! opens `#s=<version>.<lz-string>` share tokens (src/core/serialization).
 //! So "Edit in DWEEB" re-encodes the resolved message into exactly that
-//! token format — the deployed frontend needs zero changes, and the message
-//! travels inside the URL fragment, which never reaches any server.
+//! token format, and the message travels inside the URL fragment, which never
+//! reaches any server. For a webhook message the link also carries the public
+//! origin ids ([`origin_params`]) so the editor can offer to UPDATE the
+//! original in place — the webhook *token* stays out of it, resolved from the
+//! browser's own saved webhooks.
 //!
 //! Register the commands with `node scripts/register-commands.mjs` (the
 //! canonical list lives there; the names below must match it).
@@ -117,12 +120,16 @@ pub fn respond(app: &App, interaction: &Value) -> Response {
 /// "Edit in DWEEB": the resolved message, re-encoded as a share token the
 /// editor already opens. Two clicks from any message to editing it — no
 /// Developer Mode, no copying ids, no pasting webhook URLs.
+///
+/// A webhook message's link also carries its origin ([`origin_params`]) so the
+/// editor can offer to UPDATE the original in place instead of posting a copy.
 fn edit_in_dweeb(app: &App, interaction: &Value) -> Response {
     let Some(msg) = target_message(interaction) else {
         return ephemeral("Couldn't read the message from this interaction.");
     };
     let (payload, converted) = message_to_share_payload(msg);
-    let url = editor_url(app, &payload);
+    let origin = origin_params(interaction, msg);
+    let url = format!("{}{origin}", editor_url(app, &payload));
     let mut text = format!(
         "\u{1F4DD} **[Open this message in the DWEEB editor](<{url}>)**\n\
          -# The message travels inside the link's #fragment — it never touches a server. \
@@ -135,6 +142,12 @@ fn edit_in_dweeb(app: &App, interaction: &Value) -> Response {
         );
     } else if payload["components"].as_array().is_some_and(Vec::is_empty) {
         text.push_str("\n-# Nothing in this message maps to the editor yet, so it opens empty.");
+    }
+    if !origin.is_empty() {
+        text.push_str(
+            "\n-# If this message's webhook is saved in your browser, your edits can \
+             update the original in place — otherwise add it under **Restore**.",
+        );
     }
     reply_sized(text).unwrap_or_else(|| too_large(interaction))
 }
@@ -922,6 +935,45 @@ fn editor_url(app: &App, payload: &Value) -> String {
     format!("{}/#s={}", app.dashboard_url, share_token(payload))
 }
 
+/// Thread channel types (announcement, public, private). A message in one of
+/// these lives in the thread itself, so reading or updating it through a
+/// webhook must pass the thread id as `thread_id` — the webhook is bound to
+/// the parent channel.
+const CHANNEL_THREAD_TYPES: [u64; 3] = [10, 11, 12];
+
+/// The non-secret origin of a webhook message, as `&w=&m=[&t=]` params appended
+/// to an "Edit in DWEEB" link. Every id here is already visible to anyone who
+/// can read the message — `w` (webhook), `m` (message), and, for a threaded
+/// message, `t` (thread). The webhook *token*, the one secret needed to PATCH,
+/// never travels: the editor resolves it from the browser's own saved webhooks,
+/// keyed by `w`. Returns "" for messages no webhook posted (user/bot messages
+/// can't be edited in place, so they open as a fresh draft).
+fn origin_params(interaction: &Value, msg: &Value) -> String {
+    let (Some(webhook_id), Some(message_id)) = (
+        msg.get("webhook_id").and_then(Value::as_str),
+        msg.get("id").and_then(Value::as_str),
+    ) else {
+        return String::new();
+    };
+    let mut params = format!("&w={webhook_id}&m={message_id}");
+    // A threaded message's channel *is* the thread; its id doubles as the
+    // thread_id GET/PATCH need.
+    let in_thread = interaction
+        .pointer("/channel/type")
+        .and_then(Value::as_u64)
+        .is_some_and(|t| CHANNEL_THREAD_TYPES.contains(&t));
+    if in_thread {
+        if let Some(thread_id) = msg
+            .get("channel_id")
+            .and_then(Value::as_str)
+            .or_else(|| interaction.get("channel_id").and_then(Value::as_str))
+        {
+            params.push_str(&format!("&t={thread_id}"));
+        }
+    }
+    params
+}
+
 /// Encode a wire payload as a share token: JSON → LZ-String (URI-safe) →
 /// `v{N}.<body>`, byte-identical to what the frontend's `encodeShare` emits.
 /// The frontend reads the hash through `URLSearchParams`, which decodes `+`
@@ -1015,6 +1067,30 @@ mod tests {
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.'),
             "unexpected character in token: {token}"
         );
+    }
+
+    #[test]
+    fn origin_params_carry_webhook_and_message_ids() {
+        // A non-threaded channel: no thread_id, just the webhook + message.
+        let interaction = json!({ "channel_id": "100", "channel": { "id": "100", "type": 0 } });
+        let msg = json!({ "id": "55", "channel_id": "100", "webhook_id": "900" });
+        assert_eq!(origin_params(&interaction, &msg), "&w=900&m=55");
+    }
+
+    #[test]
+    fn origin_params_add_thread_id_in_threads() {
+        // A public thread (type 11): the message's channel id rides as thread_id.
+        let interaction = json!({ "channel_id": "200", "channel": { "id": "200", "type": 11 } });
+        let msg = json!({ "id": "55", "channel_id": "200", "webhook_id": "900" });
+        assert_eq!(origin_params(&interaction, &msg), "&w=900&m=55&t=200");
+    }
+
+    #[test]
+    fn origin_params_empty_for_non_webhook_message() {
+        // A user/bot message has no webhook_id — nothing to update in place.
+        let interaction = json!({ "channel_id": "100", "channel": { "id": "100", "type": 0 } });
+        let msg = json!({ "id": "55", "channel_id": "100", "author": { "id": "7" } });
+        assert_eq!(origin_params(&interaction, &msg), "");
     }
 
     #[test]
