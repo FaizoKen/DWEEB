@@ -25,7 +25,7 @@ import {
   type ContainerChildFactoryKey,
   type TopLevelFactoryKey,
 } from "@/core/factory/createComponent";
-import { DEFAULT_PRESET } from "@/data/presets";
+import { DEFAULT_PRESET } from "@/data/showcase";
 import { LIMITS } from "@/core/schema/limits";
 import { loadDraftMessage } from "./draftStorage";
 import { loadHistory, type HistoryFrame } from "./historyStorage";
@@ -297,7 +297,34 @@ function canAcceptChild(
   return false;
 }
 
-function pushHistory(state: MessageState): Pick<MessageState, "past" | "future"> {
+/** Field-edit bursts that share a tag within this window collapse into one
+ *  undo step (so typing a word is one undo, not one-per-keystroke). */
+const HISTORY_COALESCE_MS = 500;
+
+/**
+ * Tracks the last coalescable edit so a burst of field edits (typing in a text
+ * field, dragging the color picker, …) collapses into a single history frame
+ * instead of one per keystroke. Structural ops push with no tag and so never
+ * coalesce; undo/redo reset it so the next edit always records.
+ */
+let lastEditTag: string | null = null;
+let lastEditAt = 0;
+
+function pushHistory(
+  state: MessageState,
+  tag: string | null = null,
+): Pick<MessageState, "past" | "future"> {
+  const now = Date.now();
+  const coalesce = tag !== null && tag === lastEditTag && now - lastEditAt < HISTORY_COALESCE_MS;
+  lastEditTag = tag;
+  lastEditAt = now;
+  if (coalesce) {
+    // Continue the current burst: the frame pushed when it started already
+    // holds the pre-burst message, so don't add another. Still drop any redo
+    // stack — a new edit invalidates it (reuse the ref when already empty so
+    // we don't wake subscribers for nothing).
+    return { past: state.past, future: state.future.length ? [] : state.future };
+  }
   const past = [...state.past, { message: state.message }];
   if (past.length > HISTORY_LIMIT) past.shift();
   return { past, future: [] };
@@ -384,14 +411,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   setUsername(value) {
     set((s) => ({
-      ...pushHistory(s),
+      ...pushHistory(s, "msg:username"),
       message: { ...s.message, username: value || undefined },
     }));
   },
 
   setAvatarUrl(value) {
     set((s) => ({
-      ...pushHistory(s),
+      ...pushHistory(s, "msg:avatar"),
       message: { ...s.message, avatar_url: value || undefined },
     }));
   },
@@ -419,7 +446,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   setThreadName(value) {
     set((s) => ({
-      ...pushHistory(s),
+      ...pushHistory(s, "msg:threadName"),
       message: { ...s.message, thread_name: value || undefined },
     }));
   },
@@ -698,7 +725,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   patchGalleryItem(galleryId, itemId, patch) {
     set((s) => ({
-      ...pushHistory(s),
+      ...pushHistory(s, `gitem:${itemId}`),
       message: updateById<MediaGalleryComponent>(s.message, galleryId, (g) =>
         g.type === ComponentType.MediaGallery
           ? {
@@ -1053,7 +1080,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   patchNode(id, patch) {
     set((s) => ({
-      ...pushHistory(s),
+      ...pushHistory(s, `patch:${id}`),
       message: updateById(s.message, id, (n) => ({ ...n, ...patch }) as typeof n),
     }));
   },
@@ -1066,6 +1093,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   undo() {
+    // End any in-flight coalescing burst so the next field edit records its own
+    // frame rather than folding into the step we're about to restore.
+    lastEditTag = null;
     set((s) => {
       const prev = s.past[s.past.length - 1];
       if (!prev) return s;
@@ -1078,6 +1108,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   redo() {
+    lastEditTag = null;
     set((s) => {
       const [next, ...rest] = s.future;
       if (!next) return s;

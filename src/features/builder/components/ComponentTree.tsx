@@ -513,8 +513,11 @@ function MetaHeader() {
 
   const select = useMessageStore((s) => s.select);
 
-  const characters = countCharacters(message);
-  const components = countComponents(message);
+  // Both walk the whole tree. Keyed on `message` so a drag (which re-renders
+  // this header via its parent on every pointermove) doesn't re-walk the tree —
+  // only an actual message change recomputes.
+  const characters = useMemo(() => countCharacters(message), [message]);
+  const components = useMemo(() => countComponents(message), [message]);
 
   const { errorCount, warningCount, firstErrorNodeId, firstWarningNodeId, messageIssues } =
     useValidationSummary();

@@ -233,6 +233,23 @@ export function App() {
   // bottom sheet. On desktop the CSS keeps both panes visible regardless.
   const [previewOpen, setPreviewOpen] = useState(false);
 
+  // Whether the sheet's <Preview> should be in the tree. On mobile a second
+  // live <Preview> already renders inside the MiniPreview thumbnail, so keeping
+  // the (off-screen) sheet preview mounted while the sheet is closed just
+  // doubles the per-keystroke render + markdown parse for nothing. So on mobile
+  // we mount it only while open, lingering ~300ms past close (just over the
+  // sheet's 260ms slide-down) so it animates out with its content intact. On
+  // desktop the sheet *is* the permanent preview column, so it always renders.
+  const [previewMounted, setPreviewMounted] = useState(false);
+  useEffect(() => {
+    if (previewOpen) {
+      setPreviewMounted(true);
+      return;
+    }
+    const t = window.setTimeout(() => setPreviewMounted(false), 300);
+    return () => window.clearTimeout(t);
+  }, [previewOpen]);
+
   // Gates the live mini preview, which is a mobile-only affordance (and mounts
   // its own <Preview />, so we keep it off the desktop tree entirely).
   const isMobileSheet = useIsMobileSheet();
@@ -372,7 +389,9 @@ export function App() {
           aria-label="Message preview"
           aria-hidden={previewOpen ? undefined : "true"}
         >
-          <Preview onClose={closePreview} swipeProps={swipeProps} />
+          {!isMobileSheet || previewMounted ? (
+            <Preview onClose={closePreview} swipeProps={swipeProps} />
+          ) : null}
         </section>
 
         {aiMounted ? (
