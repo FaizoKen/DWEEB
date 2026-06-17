@@ -127,6 +127,56 @@
   color: var(--app-text-subtle);
 }
 
+/* Prerequisite note under the custom-bot cards: the redirect URL the user's app
+   must register, since Discord rejects the authorization otherwise and there's
+   no way for us to verify it ahead of time. */
+.redirectNote {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.redirectRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.redirectUrl {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--app-font-mono);
+  font-size: 11px;
+  padding: 4px 7px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+.redirectCopy {
+  flex: none;
+  padding: 4px 9px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--app-text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.redirectCopy:hover {
+  color: var(--app-text);
+  border-color: var(--app-accent);
+}
+
 /* "your bot" chip on a custom-bot card, so it reads differently from the
    standard DWEEB-owned flow at a glance. */
 .createCardBadge {

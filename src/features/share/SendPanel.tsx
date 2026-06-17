@@ -129,9 +129,11 @@ import { cn } from "@/lib/cn";
 import {
   DISCORD_CLIENT_ID,
   isProxyConfigured,
+  oauthCallbackUrl,
   webhookCreateUrl,
   type IncomingWebhook,
 } from "@/core/guild/config";
+import { copyText } from "@/core/serialization/clipboard";
 import { WebhookRecents } from "./WebhookRecents";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
@@ -1678,6 +1680,13 @@ function CreateWebhookOptions() {
   const guildId = useGuildStore((s) => s.guildId);
   const [bots, setBots] = useState<CustomBotItem[]>([]);
   const [starting, setStarting] = useState(false);
+  const [copiedRedirect, setCopiedRedirect] = useState(false);
+  // The proxy callback the user's app must list under OAuth2 → Redirects before
+  // Discord will let it authorize a webhook. We can't pre-check it (that needs a
+  // bot token), and an unregistered URI dead-ends on Discord's own error screen
+  // rather than coming back to us — so the only honest help is to surface the
+  // requirement (and the exact error Discord shows) up front, right here.
+  const callbackUrl = oauthCallbackUrl();
 
   useEffect(() => {
     if (!authed || !guildId) {
@@ -1754,6 +1763,32 @@ function CreateWebhookOptions() {
         </span>
         <ChevronRightIcon size={15} className={styles.createCardChevron} aria-hidden />
       </button>
+
+      {hasBots && callbackUrl ? (
+        <div className={styles.redirectNote}>
+          <span>
+            First time posting under your bot? Discord will ask you to authorize it — that needs
+            this URL under the bot’s <strong>OAuth2 → Redirects</strong>, or Discord rejects it with
+            “Invalid OAuth2 redirect_uri”:
+          </span>
+          <span className={styles.redirectRow}>
+            <code className={styles.redirectUrl}>{callbackUrl}</code>
+            <button
+              type="button"
+              className={styles.redirectCopy}
+              onClick={() => {
+                void copyText(callbackUrl).then((ok) => {
+                  if (!ok) return;
+                  setCopiedRedirect(true);
+                  setTimeout(() => setCopiedRedirect(false), 1500);
+                });
+              }}
+            >
+              {copiedRedirect ? "Copied" : "Copy"}
+            </button>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
