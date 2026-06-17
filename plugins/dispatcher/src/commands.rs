@@ -130,9 +130,9 @@ async fn edit_in_dweeb(app: &App, interaction: &Value) -> Response {
         return ephemeral("Couldn't read the message from this interaction.");
     };
     let (payload, converted) = message_to_share_payload(msg);
-    let token = share_token(&payload);
+    let raw = share_token_raw(&payload);
     let origin = origin_params(interaction, msg);
-    let url = format!("{}/#s={token}{origin}", app.dashboard_url);
+    let url = format!("{}/#s={}{origin}", app.dashboard_url, token_for_hash(&raw));
     let mut text = format!(
         "\u{1F4DD} **[Open this message in the DWEEB editor](<{url}>)**\n\
          -# The message travels inside the link's #fragment — it never touches a server. \
@@ -154,7 +154,7 @@ async fn edit_in_dweeb(app: &App, interaction: &Value) -> Response {
     }
     match reply_sized(text) {
         Some(response) => response,
-        None => too_large(app, &token, &origin).await,
+        None => too_large(app, &raw, &origin).await,
     }
 }
 
@@ -176,16 +176,16 @@ async fn export_json(app: &App, interaction: &Value) -> Response {
     if let Some(response) = reply_sized(fenced) {
         return response;
     }
-    let token = share_token(&payload);
+    let raw = share_token_raw(&payload);
     let origin = origin_params(interaction, msg);
-    let url = format!("{}/#s={token}{origin}", app.dashboard_url);
+    let url = format!("{}/#s={}{origin}", app.dashboard_url, token_for_hash(&raw));
     let text = format!(
         "The JSON is too large for an inline reply — \
          **[open the message in the editor](<{url}>)** and use *Share → JSON export*."
     );
     match reply_sized(text) {
         Some(response) => response,
-        None => too_large(app, &token, &origin).await,
+        None => too_large(app, &raw, &origin).await,
     }
 }
 
@@ -999,19 +999,33 @@ fn origin_params(interaction: &Value, msg: &Value) -> String {
 /// is percent-escaped; the rest of LZ-String's URI-safe alphabet survives
 /// as-is.
 pub(crate) fn share_token(payload: &Value) -> String {
+    token_for_hash(&share_token_raw(payload))
+}
+
+/// The raw share token: `<version>.<lz-string URI-safe body>`, byte-identical
+/// to what the frontend's `encodeShare` emits. This is the form the short-link
+/// service stores and validates — its `is_share_token` accepts lz-string's
+/// `+ - $` alphabet but NOT the `%`-escapes [`token_for_hash`] introduces, so
+/// short links MUST be created from this raw token, not the hash form.
+pub(crate) fn share_token_raw(payload: &Value) -> String {
     let json = serde_json::to_string(payload).unwrap_or_default();
     let compressed = lz_str::compress_to_encoded_uri_component(json.as_str());
-    let mut token = String::with_capacity(SHARE_VERSION.len() + 1 + compressed.len() + 16);
-    token.push_str(SHARE_VERSION);
-    token.push('.');
-    for ch in compressed.chars() {
+    format!("{SHARE_VERSION}.{compressed}")
+}
+
+/// A raw token, percent-escaped for embedding in a `#s=` hash: the frontend
+/// reads the hash through `URLSearchParams`, which would turn `+` into a space
+/// and re-encode `$`. The rest of lz-string's URI-safe alphabet survives as-is.
+fn token_for_hash(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len() + 16);
+    for ch in raw.chars() {
         match ch {
-            '+' => token.push_str("%2B"),
-            '$' => token.push_str("%24"),
-            c => token.push(c),
+            '+' => out.push_str("%2B"),
+            '$' => out.push_str("%24"),
+            c => out.push(c),
         }
     }
-    token
+    out
 }
 
 // ── Reply plumbing ───────────────────────────────────────────────────────────
@@ -1027,8 +1041,8 @@ fn reply_sized(text: String) -> Option<Response> {
 /// tiny `/s/<id>` URL. The origin params still ride in its `#fragment`, so
 /// update-in-place and server targeting survive the round trip. If the proxy is
 /// unreachable or the token exceeds its size cap, degrade to a plain note.
-async fn too_large(app: &App, token: &str, origin: &str) -> Response {
-    if let Some(id) = create_short_link(app, token).await {
+async fn too_large(app: &App, raw_token: &str, origin: &str) -> Response {
+    if let Some(id) = create_short_link(app, raw_token).await {
         let url = format!("{}/s/{id}{}", app.dashboard_url, origin_fragment(origin));
         let text = format!(
             "\u{1F4DD} **[Open this message in the DWEEB editor](<{url}>)**\n\
@@ -1053,14 +1067,16 @@ fn origin_fragment(origin: &str) -> String {
         .map_or(String::new(), |rest| format!("#{rest}"))
 }
 
-/// POST a share token to the proxy's short-link service; returns the minted id.
-/// `None` on any failure (unreachable, non-2xx, malformed body) so the caller
-/// can fall back — short links are a convenience, never load-bearing.
-async fn create_short_link(app: &App, token: &str) -> Option<String> {
+/// POST a **raw** share token (see [`share_token_raw`] — the escaped hash form
+/// fails the service's `is_share_token` check on its `%`) to the proxy's
+/// short-link service; returns the minted id. `None` on any failure
+/// (unreachable, non-2xx, malformed body) so the caller can fall back — short
+/// links are a convenience, never load-bearing.
+async fn create_short_link(app: &App, raw_token: &str) -> Option<String> {
     let resp = app
         .client
         .post(&app.shortlink_api)
-        .json(&json!({ "token": token }))
+        .json(&json!({ "token": raw_token }))
         .send()
         .await
         .ok()?;
@@ -1109,6 +1125,39 @@ mod tests {
             "flags": 32768,
         });
         assert_eq!(decode_token(&share_token(&payload)), payload);
+    }
+
+    #[test]
+    fn raw_token_is_what_the_shortlink_service_accepts() {
+        // The proxy's `is_share_token`, mirrored: `<digits>.<alnum + - $>`. The
+        // escaped hash form carries `%` (from %2B/%24) and fails it — so short
+        // links must POST the RAW token. Regression guard for the 400 we hit.
+        fn is_share_token(s: &str) -> bool {
+            let Some((version, body)) = s.split_once('.') else {
+                return false;
+            };
+            !version.is_empty()
+                && version.bytes().all(|b| b.is_ascii_digit())
+                && !body.is_empty()
+                && body
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'$'))
+        }
+        // Content with `$` and `+` so the compressed body is likely to use them.
+        let payload = json!({
+            "username": "Hook $ +",
+            "components": [{ "type": 10, "content": "hello **world** $1 + $2 ".repeat(8) }],
+            "flags": 32768,
+        });
+        let raw = share_token_raw(&payload);
+        assert!(
+            !raw.contains('%'),
+            "raw token must not be percent-escaped: {raw}"
+        );
+        assert!(
+            is_share_token(&raw),
+            "raw token must pass the short-link service's validation: {raw}"
+        );
     }
 
     #[test]
