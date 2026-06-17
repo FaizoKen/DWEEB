@@ -2,6 +2,10 @@
   display: grid;
   grid-template-rows: 1fr auto;
   min-height: 0;
+  /* Keep the tree from forcing the builder's grid column wider than the pane on
+     narrow screens — without this, a long row's intrinsic width would push the
+     whole column past the viewport and clip the row actions on the right. */
+  min-width: 0;
   /* Anchor for the floating issue pill, which docks to this pane's top-right. */
   position: relative;
 }
@@ -795,8 +799,16 @@ button.statPill {
 
 @media (max-width: 640px) {
   .row {
-    gap: 8px;
+    column-gap: 6px;
     padding: 10px 8px;
+  }
+
+  /* Trim the inline action buttons a touch on phones so a row carrying all four
+     (up / down / duplicate / delete) still fits the narrowest screens (~320px)
+     without clipping. Stays a comfortable touch target. */
+  .actions button {
+    width: 28px;
+    height: 28px;
   }
 
   .summary {

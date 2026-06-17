@@ -14,6 +14,9 @@
   background: var(--app-bg-elevated);
   border-bottom: 1px solid var(--app-border);
   z-index: var(--app-z-toolbar);
+  /* Let the bar shrink inside the builder's grid column rather than forcing the
+     whole pane (and the tree below it) wider than the viewport on phones. */
+  min-width: 0;
 }
 
 .actionGroup {
@@ -25,12 +28,15 @@
 
 @media (max-width: 900px) {
   .actionBar {
-    /* Keep both control groups on a single row on phones; the labelled
-       buttons collapse to icon-only (Button `collapseLabel`) so the cluster
-       stays compact instead of wrapping onto a second line. */
+    /* On phones every labelled button — including Send — collapses to icon-only
+       (Button `collapseLabel`), so the whole cluster fits one row down to ~352px
+       (covers 360px phones). `flex-wrap` is a safety net for anything narrower:
+       the second control group drops onto its own line rather than overflowing
+       the pane and clipping a control. Each group keeps `nowrap` so a group
+       never splits mid-cluster. */
     padding: 8px 10px;
     gap: 8px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
 
   .actionGroup {

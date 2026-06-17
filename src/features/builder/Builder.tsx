@@ -155,6 +155,8 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
           size="sm"
           leadingIcon={<SendIcon />}
           onClick={onSend}
+          collapseLabel
+          aria-label="Send"
           title="Post this message to your Discord webhook"
         >
           Send
