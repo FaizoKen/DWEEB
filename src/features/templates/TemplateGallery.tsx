@@ -327,6 +327,7 @@ export function TemplateGallery() {
                 <input
                   ref={searchRef}
                   type="text"
+                  name="templateSearch"
                   className={styles.searchInput}
                   value={query}
                   onChange={(e) => setQuery(e.currentTarget.value)}
