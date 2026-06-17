@@ -10,6 +10,7 @@
  * two stay in sync without prop drilling.
  */
 
+import { useLayoutEffect, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
@@ -69,8 +70,52 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
   const canUndo = useMessageStore((s) => s.past.length > 0);
   const canRedo = useMessageStore((s) => s.future.length > 0);
 
+  const barRef = useRef<HTMLDivElement>(null);
+  // We always *prefer* to show the "Send" label. It only drops to an icon when
+  // keeping the text would push the action bar onto a second row — i.e. on the
+  // narrowest phones where it genuinely can't fit. Unlike a fixed breakpoint,
+  // this shows the label on any viewport (or tablet) that has room for it.
+  const [sendCompact, setSendCompact] = useState(false);
+  // Bumped by the ResizeObserver below whenever the bar's *width* changes; drives
+  // a fresh measurement pass. (Width only — our own collapse changes the bar's
+  // height, and reacting to that would loop.)
+  const [barWidth, setBarWidth] = useState(0);
+
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const ro = new ResizeObserver(() => setBarWidth(bar.clientWidth));
+    ro.observe(bar);
+    return () => ro.disconnect();
+  }, []);
+
+  // On every width change, optimistically restore the label…
+  useLayoutEffect(() => {
+    setSendCompact(false);
+  }, [barWidth]);
+
+  // …then, with the label shown, collapse to an icon only if the two control
+  // groups can't sit side by side on one row. Each group keeps its natural width
+  // whether or not the bar has wrapped, so summing them (plus the gap between and
+  // the bar's padding) tells us what a single row needs — more reliable than
+  // `scrollWidth`, which `justify-content: space-between` leaves unchanged when
+  // items overflow. Runs before paint, so the optimistic expand never flashes.
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar || sendCompact) return;
+    const cs = getComputedStyle(bar);
+    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    const gap = parseFloat(cs.columnGap) || 0;
+    const groups = Array.from(bar.children) as HTMLElement[];
+    const needed =
+      groups.reduce((sum, g) => sum + g.getBoundingClientRect().width, 0) +
+      gap * Math.max(0, groups.length - 1) +
+      padX;
+    if (needed > bar.clientWidth + 1) setSendCompact(true);
+  }, [sendCompact, barWidth]);
+
   return (
-    <div className={styles.actionBar}>
+    <div ref={barRef} className={styles.actionBar}>
       <div className={styles.actionGroup}>
         {isProxyConfigured() ? <AccountMenu /> : null}
         <SavedMessagesMenu />
@@ -155,11 +200,11 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
           size="sm"
           leadingIcon={<SendIcon />}
           onClick={onSend}
-          collapseLabel
           aria-label="Send"
           title="Post this message to your Discord webhook"
         >
-          Send
+          {/* Hidden only when the bar would otherwise wrap (see sendCompact). */}
+          {sendCompact ? null : "Send"}
         </Button>
       </div>
     </div>

@@ -28,12 +28,12 @@
 
 @media (max-width: 900px) {
   .actionBar {
-    /* On phones every labelled button — including Send — collapses to icon-only
-       (Button `collapseLabel`), so the whole cluster fits one row down to ~352px
-       (covers 360px phones). `flex-wrap` is a safety net for anything narrower:
-       the second control group drops onto its own line rather than overflowing
-       the pane and clipping a control. Each group keeps `nowrap` so a group
-       never splits mid-cluster. */
+    /* On phones the secondary buttons collapse to icon-only (Button
+       `collapseLabel`); Send keeps its label whenever there's room and adapts
+       per-width in Builder.tsx. `flex-wrap` lets the second control group drop
+       onto its own line rather than overflow the pane and clip a control — it's
+       also what the Send-label measurement watches for. Each group keeps
+       `nowrap` so a group never splits mid-cluster. */
     padding: 8px 10px;
     gap: 8px;
     flex-wrap: wrap;
