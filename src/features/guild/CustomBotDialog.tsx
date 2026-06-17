@@ -603,10 +603,16 @@ function SetupStep({
       {verify.kind === "unreachable" ? (
         <p className={styles.error}>{verify.message}</p>
       ) : done && !connected ? (
-        <p className={styles.note}>
-          No interaction from {name} has reached DWEEB yet. Make sure the Interactions Endpoint URL
-          above is saved in the portal (and the Public Key matches), then check again.
-        </p>
+        <div className={styles.waiting}>
+          <p className={styles.note}>
+            Nothing’s reached DWEEB from {name} yet. Re-saving the same URL won’t help — Discord
+            only re-checks when the URL actually changes. Do one of these, then check again:
+          </p>
+          <ul className={styles.tips}>
+            <li>In the portal: clear the endpoint URL, save, paste it back, and save again.</li>
+            <li>Or click any button or menu on one of the bot’s messages.</li>
+          </ul>
+        </div>
       ) : null}
 
       {!connected ? (

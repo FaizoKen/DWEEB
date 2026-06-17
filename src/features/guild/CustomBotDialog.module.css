@@ -319,3 +319,21 @@
   line-height: 1.5;
   color: var(--app-success-text);
 }
+
+/* "Waiting" guidance: a short lead line + the two ways to trigger a check. */
+.waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tips {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-subtle);
+}
