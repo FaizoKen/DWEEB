@@ -1,7 +1,7 @@
 {
   "name": "dweeb",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.9.0",
   "type": "module",
   "description": "DWEEB — a visual Discord webhook & embed builder for Components V2 messages. Build, preview, and send Discord messages without writing JSON. Private by design (runs entirely in your browser, nothing uploaded), source-available, and built for large communities and teams.",
   "license": "PolyForm-Noncommercial-1.0.0",
