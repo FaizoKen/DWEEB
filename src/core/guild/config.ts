@@ -193,3 +193,28 @@ export function botInviteUrl(): string {
   }
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
 }
+
+/**
+ * OAuth URL to add a server's OWN registered custom bot to that server —
+ * optional, since DWEEB drives the app through its webhook and interaction
+ * responses (not its bot token), so it works without ever joining. Adding it
+ * just lists the bot in the member roster and surfaces its own commands.
+ *
+ * Hence **no privileged permissions** (`permissions=0`): the custom app holds
+ * none of the plugin work — self-role/tickets act under the shared DWEEB bot's
+ * token — so requesting Manage Roles/Channels here would be cosmetic and
+ * misleading. `applications.commands` lets its installed command set appear.
+ * No `redirect_uri` is attached: the site origin isn't a registered redirect on
+ * the custom app, so Discord would reject the invite — the user just gets
+ * Discord's own "added" confirmation instead of a bounce back here.
+ */
+export function customBotInviteUrl(applicationId: string): string {
+  const id = applicationId.trim();
+  if (!id) return "";
+  const params = new URLSearchParams({
+    client_id: id,
+    scope: "bot applications.commands",
+    permissions: "0",
+  });
+  return `https://discord.com/oauth2/authorize?${params.toString()}`;
+}

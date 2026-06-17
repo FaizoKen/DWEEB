@@ -123,6 +123,20 @@
   white-space: nowrap;
 }
 
+/* Optional "add this bot to the server" link — quiet, since it isn't required
+   for posting or interactive components (DWEEB drives the bot via its webhook
+   and interaction responses, not its bot token). */
+.inviteLink {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--app-accent-text);
+  text-decoration: none;
+}
+.inviteLink:hover {
+  text-decoration: underline;
+}
+
 /* Status chips: ready (secret on file) vs needs attention. */
 .chipOk,
 .chipWarn {

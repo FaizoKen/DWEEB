@@ -27,7 +27,7 @@ import {
   removeCustomBot,
   type CustomBots,
 } from "@/core/guild/api";
-import { interactionsEndpointUrl, oauthCallbackUrl } from "@/core/guild/config";
+import { customBotInviteUrl, interactionsEndpointUrl, oauthCallbackUrl } from "@/core/guild/config";
 import { copyText } from "@/core/serialization/clipboard";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -375,6 +375,15 @@ export function CustomBotDialog({
                       {item.application_id} ·{" "}
                       {new Date(item.added_at).toLocaleDateString([], { dateStyle: "medium" })}
                     </span>
+                    <a
+                      className={styles.inviteLink}
+                      href={customBotInviteUrl(item.application_id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Optional — lists the bot in your server and enables its own commands. Not needed for posting or interactive components."
+                    >
+                      Add to your server ↗
+                    </a>
                   </span>
                   <Button
                     size="sm"
