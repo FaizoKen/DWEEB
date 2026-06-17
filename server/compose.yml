@@ -99,6 +99,11 @@ services:
       # this URL. Register the command once: node scripts/register-commands.mjs
       # NOT derived from DOMAIN — that is the API host, not the dashboard.
       DASHBOARD_URL: ${DASHBOARD_URL:-https://dweeb.faizo.net}
+      # Proxy endpoint that mints share short links — the fallback when a
+      # message is too large to embed in an "Edit in DWEEB"/"Export JSON" reply.
+      # Defaults to the proxy's compose address; unreachable just degrades to a
+      # plain note. Same service the browser's opt-in short links use.
+      SHORTLINK_API: ${SHORTLINK_API:-http://proxy:8080/api/shortlink}
       # Days a component stays clickable after its message was sent; an expired
       # click disables the component instead of reaching a plugin. 0 = forever.
       COMPONENT_TTL_DAYS: ${COMPONENT_TTL_DAYS:-7}

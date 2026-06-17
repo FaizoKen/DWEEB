@@ -17,6 +17,11 @@ import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { loadLastGuildId } from "@/core/guild/cache";
+import {
+  clearPendingGuildId,
+  loadPendingGuildId,
+  savePendingGuildId,
+} from "@/core/guild/pendingGuild";
 import { botInviteUrl } from "@/core/guild/config";
 import { isValidGuildId, type AuthUser, type PickerGuild } from "@/core/guild/api";
 import { Menu } from "@/ui/Menu";
@@ -61,43 +66,6 @@ function clearBotAddQuery(): void {
   if (!changed) return;
   const query = url.searchParams.toString();
   window.history.replaceState(null, "", `${url.pathname}${query ? `?${query}` : ""}${url.hash}`);
-}
-
-/**
- * The just-added guild id is parked in sessionStorage so it survives the page
- * navigations the connect may have to wait on — most importantly a sign-in
- * redirect when the user added the bot while signed out. sessionStorage (not
- * local) keeps it tab-scoped and self-cleaning, and it persists across leaving
- * for Discord and coming back in the same tab.
- */
-const PENDING_GUILD_KEY = "dweeb.guild.pending";
-
-function loadPendingGuildId(): string | null {
-  if (typeof sessionStorage === "undefined") return null;
-  try {
-    const id = sessionStorage.getItem(PENDING_GUILD_KEY);
-    return id && isValidGuildId(id) ? id : null;
-  } catch {
-    return null;
-  }
-}
-
-function savePendingGuildId(id: string): void {
-  if (typeof sessionStorage === "undefined") return;
-  try {
-    sessionStorage.setItem(PENDING_GUILD_KEY, id);
-  } catch {
-    // ignore
-  }
-}
-
-function clearPendingGuildId(): void {
-  if (typeof sessionStorage === "undefined") return;
-  try {
-    sessionStorage.removeItem(PENDING_GUILD_KEY);
-  } catch {
-    // ignore
-  }
 }
 
 export function AccountMenu() {
@@ -423,19 +391,11 @@ function AccountPanel({
                   obvious these actions apply to that guild — per-guild slots/bots. */}
               {g.id === connectedId ? (
                 <li className={styles.serverSubGroup}>
-                  <button
-                    type="button"
-                    className={styles.serverSubRow}
-                    onClick={onManageMessages}
-                  >
+                  <button type="button" className={styles.serverSubRow} onClick={onManageMessages}>
                     <ClockIcon size={14} />
                     <span>Managed messages</span>
                   </button>
-                  <button
-                    type="button"
-                    className={styles.serverSubRow}
-                    onClick={onManageCustomBot}
-                  >
+                  <button type="button" className={styles.serverSubRow} onClick={onManageCustomBot}>
                     <SettingsIcon size={14} />
                     <span>Custom bot</span>
                   </button>

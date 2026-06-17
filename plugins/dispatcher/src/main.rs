@@ -68,6 +68,11 @@
 //!                       and /custom-apps APIs; unset = those APIs are disabled
 //!   DATABASE_PATH       SQLite file for the registries, default ./dispatcher.db
 //!   DASHBOARD_URL       URL /dashboard replies with, default https://dweeb.faizo.net
+//!   SHORTLINK_API       proxy endpoint that mints share short links, used as
+//!                       the fallback when a message is too large to embed in
+//!                       an "Edit in DWEEB"/"Export JSON" reply; default
+//!                       http://proxy:8080/api/shortlink (the compose service).
+//!                       Unreachable = the reply degrades to a plain note.
 //!   PORT                bind port, default 8095
 
 mod commands;
@@ -148,6 +153,9 @@ struct App {
     internal_token: Option<String>,
     /// What `/dashboard` replies with.
     dashboard_url: String,
+    /// Proxy endpoint that mints share short links — the fallback when a
+    /// message is too large to embed in a reply link (see `commands::too_large`).
+    shortlink_api: String,
     client: reqwest::Client,
 }
 
@@ -263,6 +271,14 @@ async fn main() {
         .trim_end_matches('/')
         .to_string();
 
+    // Where `too_large` mints a short link. Defaults to the proxy's compose
+    // service address — like ROUTES, this service addresses peers by name. A
+    // deployment without the proxy reachable just sees the graceful fallback.
+    let shortlink_api = std::env::var("SHORTLINK_API")
+        .unwrap_or_else(|_| "http://proxy:8080/api/shortlink".into())
+        .trim()
+        .to_string();
+
     let app = Arc::new(App {
         primary_key,
         primary_key_hex,
@@ -276,6 +292,7 @@ async fn main() {
         store,
         internal_token,
         dashboard_url,
+        shortlink_api,
         client: reqwest::Client::builder()
             // Discord gives the whole chain 3s; leave headroom to still send
             // the fallback reply if an upstream stalls.
@@ -433,7 +450,7 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
         // custom_id, and every one of them is a pure function of the payload
         // Discord just sent — so they are all answered inline (commands.rs),
         // skipping the forward hop entirely.
-        Some(TYPE_APPLICATION_COMMAND) => return commands::respond(&app, &interaction),
+        Some(TYPE_APPLICATION_COMMAND) => return commands::respond(&app, &interaction).await,
         _ => {}
     }
 

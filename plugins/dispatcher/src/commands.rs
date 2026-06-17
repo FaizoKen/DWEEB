@@ -91,7 +91,7 @@ const PERM_TOGGLE_PREFIX: &str = "dweeb:perm:";
 /// Answer any application-command interaction. Unknown names get a polite
 /// ephemeral shrug (a stale registration, or a custom app that registered
 /// extra commands we don't serve).
-pub fn respond(app: &App, interaction: &Value) -> Response {
+pub async fn respond(app: &App, interaction: &Value) -> Response {
     let name = interaction
         .pointer("/data/name")
         .and_then(Value::as_str)
@@ -104,8 +104,10 @@ pub fn respond(app: &App, interaction: &Value) -> Response {
                 app.dashboard_url
             ))
         }
-        CMD_EDIT => edit_in_dweeb(app, interaction),
-        CMD_EXPORT_JSON => export_json(app, interaction),
+        // These two embed the message in the link, so they may overflow the
+        // reply budget and fall back to a short link — an async (proxy) hop.
+        CMD_EDIT => edit_in_dweeb(app, interaction).await,
+        CMD_EXPORT_JSON => export_json(app, interaction).await,
         CMD_INFO | CMD_INFO_LEGACY => message_info(app, interaction),
         CMD_IDENTITY => webhook_identity(app, interaction),
         _ => {
@@ -123,13 +125,14 @@ pub fn respond(app: &App, interaction: &Value) -> Response {
 ///
 /// A webhook message's link also carries its origin ([`origin_params`]) so the
 /// editor can offer to UPDATE the original in place instead of posting a copy.
-fn edit_in_dweeb(app: &App, interaction: &Value) -> Response {
+async fn edit_in_dweeb(app: &App, interaction: &Value) -> Response {
     let Some(msg) = target_message(interaction) else {
         return ephemeral("Couldn't read the message from this interaction.");
     };
     let (payload, converted) = message_to_share_payload(msg);
+    let token = share_token(&payload);
     let origin = origin_params(interaction, msg);
-    let url = format!("{}{origin}", editor_url(app, &payload));
+    let url = format!("{}/#s={token}{origin}", app.dashboard_url);
     let mut text = format!(
         "\u{1F4DD} **[Open this message in the DWEEB editor](<{url}>)**\n\
          -# The message travels inside the link's #fragment — it never touches a server. \
@@ -143,19 +146,22 @@ fn edit_in_dweeb(app: &App, interaction: &Value) -> Response {
     } else if payload["components"].as_array().is_some_and(Vec::is_empty) {
         text.push_str("\n-# Nothing in this message maps to the editor yet, so it opens empty.");
     }
-    if !origin.is_empty() {
+    if msg.get("webhook_id").and_then(Value::as_str).is_some() {
         text.push_str(
             "\n-# If this message's webhook is saved in your browser, your edits can \
              update the original in place — otherwise add it under **Restore**.",
         );
     }
-    reply_sized(text).unwrap_or_else(|| too_large(interaction))
+    match reply_sized(text) {
+        Some(response) => response,
+        None => too_large(app, &token, &origin).await,
+    }
 }
 
 /// "Export JSON": the postable wire payload, pretty-printed in a code block.
 /// Falls back to an editor link (Share → JSON export) when it outgrows the
 /// reply budget — the link compresses, the code block doesn't.
-fn export_json(app: &App, interaction: &Value) -> Response {
+async fn export_json(app: &App, interaction: &Value) -> Response {
     let Some(msg) = target_message(interaction) else {
         return ephemeral("Couldn't read the message from this interaction.");
     };
@@ -170,12 +176,17 @@ fn export_json(app: &App, interaction: &Value) -> Response {
     if let Some(response) = reply_sized(fenced) {
         return response;
     }
-    let url = editor_url(app, &payload);
+    let token = share_token(&payload);
+    let origin = origin_params(interaction, msg);
+    let url = format!("{}/#s={token}{origin}", app.dashboard_url);
     let text = format!(
         "The JSON is too large for an inline reply — \
          **[open the message in the editor](<{url}>)** and use *Share → JSON export*."
     );
-    reply_sized(text).unwrap_or_else(|| too_large(interaction))
+    match reply_sized(text) {
+        Some(response) => response,
+        None => too_large(app, &token, &origin).await,
+    }
 }
 
 /// "Message Info": everything the interaction payload tells us about the
@@ -328,7 +339,8 @@ fn message_info(app: &App, interaction: &Value) -> Response {
             }
         }))
         .into_response(),
-        None => reply_sized(text).unwrap_or_else(|| too_large(interaction)),
+        None => reply_sized(text)
+            .unwrap_or_else(|| ephemeral("This message's details are too long to display.")),
     }
 }
 
@@ -941,34 +953,40 @@ fn editor_url(app: &App, payload: &Value) -> String {
 /// the parent channel.
 const CHANNEL_THREAD_TYPES: [u64; 3] = [10, 11, 12];
 
-/// The non-secret origin of a webhook message, as `&w=&m=[&t=]` params appended
-/// to an "Edit in DWEEB" link. Every id here is already visible to anyone who
-/// can read the message — `w` (webhook), `m` (message), and, for a threaded
-/// message, `t` (thread). The webhook *token*, the one secret needed to PATCH,
-/// never travels: the editor resolves it from the browser's own saved webhooks,
-/// keyed by `w`. Returns "" for messages no webhook posted (user/bot messages
-/// can't be edited in place, so they open as a fresh draft).
+/// The non-secret origin of an "Edit in DWEEB" link, as `&g=[&w=&m=[&t=]]`
+/// params. Every id here is already visible to anyone who can read the message:
+///   - `g` (guild) — present for any guild message; lets the editor switch to
+///     that server and load its roles/channels/emojis so mentions resolve.
+///   - `w`/`m` (webhook + message) — only for webhook messages, which are the
+///     only ones editable in place; with `t` (thread) when it's threaded.
+///
+/// The webhook *token*, the one secret needed to PATCH, never travels: the
+/// editor resolves it from the browser's own saved webhooks, keyed by `w`.
+/// Returns "" for a DM message no webhook posted (nothing to target or update).
 fn origin_params(interaction: &Value, msg: &Value) -> String {
-    let (Some(webhook_id), Some(message_id)) = (
+    let mut params = String::new();
+    if let Some(guild_id) = interaction.get("guild_id").and_then(Value::as_str) {
+        params.push_str(&format!("&g={guild_id}"));
+    }
+    if let (Some(webhook_id), Some(message_id)) = (
         msg.get("webhook_id").and_then(Value::as_str),
         msg.get("id").and_then(Value::as_str),
-    ) else {
-        return String::new();
-    };
-    let mut params = format!("&w={webhook_id}&m={message_id}");
-    // A threaded message's channel *is* the thread; its id doubles as the
-    // thread_id GET/PATCH need.
-    let in_thread = interaction
-        .pointer("/channel/type")
-        .and_then(Value::as_u64)
-        .is_some_and(|t| CHANNEL_THREAD_TYPES.contains(&t));
-    if in_thread {
-        if let Some(thread_id) = msg
-            .get("channel_id")
-            .and_then(Value::as_str)
-            .or_else(|| interaction.get("channel_id").and_then(Value::as_str))
-        {
-            params.push_str(&format!("&t={thread_id}"));
+    ) {
+        params.push_str(&format!("&w={webhook_id}&m={message_id}"));
+        // A threaded message's channel *is* the thread; its id doubles as the
+        // thread_id GET/PATCH need.
+        let in_thread = interaction
+            .pointer("/channel/type")
+            .and_then(Value::as_u64)
+            .is_some_and(|t| CHANNEL_THREAD_TYPES.contains(&t));
+        if in_thread {
+            if let Some(thread_id) = msg
+                .get("channel_id")
+                .and_then(Value::as_str)
+                .or_else(|| interaction.get("channel_id").and_then(Value::as_str))
+            {
+                params.push_str(&format!("&t={thread_id}"));
+            }
         }
     }
     params
@@ -1004,17 +1022,56 @@ fn reply_sized(text: String) -> Option<Response> {
     (text.chars().count() <= MAX_V2_TEXT).then(|| ephemeral(&text))
 }
 
-/// Last-resort reply when even the compressed link outgrows a message: point
-/// at the editor's Restore flow, which fetches by id instead of embedding.
-fn too_large(interaction: &Value) -> Response {
-    let message_id = interaction
-        .pointer("/data/target_id")
+/// Fallback when the message is too big to embed inline: mint a DWEEB short
+/// link (the proxy stores the full token, auto-expiring), and reply with the
+/// tiny `/s/<id>` URL. The origin params still ride in its `#fragment`, so
+/// update-in-place and server targeting survive the round trip. If the proxy is
+/// unreachable or the token exceeds its size cap, degrade to a plain note.
+async fn too_large(app: &App, token: &str, origin: &str) -> Response {
+    if let Some(id) = create_short_link(app, token).await {
+        let url = format!("{}/s/{id}{}", app.dashboard_url, origin_fragment(origin));
+        let text = format!(
+            "\u{1F4DD} **[Open this message in the DWEEB editor](<{url}>)**\n\
+             -# Too large to fit inline, so it's a one-tap short link — it expires in 7 days."
+        );
+        if let Some(response) = reply_sized(text) {
+            return response;
+        }
+    }
+    ephemeral(
+        "This message is too large to open from here, and the short-link service \
+         isn't reachable right now — try again shortly.",
+    )
+}
+
+/// Turn an [`origin_params`] string (`&k=v…`, built to append after a
+/// `#s=<token>`) into a standalone URL fragment (`#k=v…`) for a short link,
+/// which carries no `#` of its own. Empty in, empty out.
+fn origin_fragment(origin: &str) -> String {
+    origin
+        .strip_prefix('&')
+        .map_or(String::new(), |rest| format!("#{rest}"))
+}
+
+/// POST a share token to the proxy's short-link service; returns the minted id.
+/// `None` on any failure (unreachable, non-2xx, malformed body) so the caller
+/// can fall back — short links are a convenience, never load-bearing.
+async fn create_short_link(app: &App, token: &str) -> Option<String> {
+    let resp = app
+        .client
+        .post(&app.shortlink_api)
+        .json(&json!({ "token": token }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        tracing::warn!(status = %resp.status(), "shortlink create failed");
+        return None;
+    }
+    let body: Value = resp.json().await.ok()?;
+    body.get("id")
         .and_then(Value::as_str)
-        .unwrap_or("?");
-    ephemeral(&format!(
-        "This message is too large to fit in a link. Use **Restore** in the editor \
-         with the webhook URL and message ID `{message_id}`."
-    ))
+        .map(ToString::to_string)
 }
 
 fn usage_suffix(app: &App, guild_id: &str) -> String {
@@ -1070,27 +1127,47 @@ mod tests {
     }
 
     #[test]
-    fn origin_params_carry_webhook_and_message_ids() {
-        // A non-threaded channel: no thread_id, just the webhook + message.
-        let interaction = json!({ "channel_id": "100", "channel": { "id": "100", "type": 0 } });
+    fn origin_params_carry_guild_webhook_and_message_ids() {
+        // A non-threaded guild channel: guild + webhook + message, no thread_id.
+        let interaction =
+            json!({ "guild_id": "5", "channel_id": "100", "channel": { "id": "100", "type": 0 } });
         let msg = json!({ "id": "55", "channel_id": "100", "webhook_id": "900" });
-        assert_eq!(origin_params(&interaction, &msg), "&w=900&m=55");
+        assert_eq!(origin_params(&interaction, &msg), "&g=5&w=900&m=55");
     }
 
     #[test]
     fn origin_params_add_thread_id_in_threads() {
         // A public thread (type 11): the message's channel id rides as thread_id.
-        let interaction = json!({ "channel_id": "200", "channel": { "id": "200", "type": 11 } });
+        let interaction =
+            json!({ "guild_id": "5", "channel_id": "200", "channel": { "id": "200", "type": 11 } });
         let msg = json!({ "id": "55", "channel_id": "200", "webhook_id": "900" });
-        assert_eq!(origin_params(&interaction, &msg), "&w=900&m=55&t=200");
+        assert_eq!(origin_params(&interaction, &msg), "&g=5&w=900&m=55&t=200");
     }
 
     #[test]
-    fn origin_params_empty_for_non_webhook_message() {
-        // A user/bot message has no webhook_id — nothing to update in place.
-        let interaction = json!({ "channel_id": "100", "channel": { "id": "100", "type": 0 } });
+    fn origin_params_guild_only_for_non_webhook_message() {
+        // A user/bot message carries the guild (so the editor can target the
+        // server) but no webhook origin — it can't be updated in place.
+        let interaction =
+            json!({ "guild_id": "5", "channel_id": "100", "channel": { "id": "100", "type": 0 } });
+        let msg = json!({ "id": "55", "channel_id": "100", "author": { "id": "7" } });
+        assert_eq!(origin_params(&interaction, &msg), "&g=5");
+    }
+
+    #[test]
+    fn origin_params_empty_in_dm_for_non_webhook_message() {
+        // No guild_id (a DM) and no webhook — nothing to target or update.
+        let interaction = json!({ "channel_id": "100" });
         let msg = json!({ "id": "55", "channel_id": "100", "author": { "id": "7" } });
         assert_eq!(origin_params(&interaction, &msg), "");
+    }
+
+    #[test]
+    fn origin_fragment_starts_a_fragment() {
+        // The short-link URL has no `#`, so the leading `&` becomes one.
+        assert_eq!(origin_fragment("&g=5&w=9&m=55"), "#g=5&w=9&m=55");
+        // Nothing to carry → no fragment at all.
+        assert_eq!(origin_fragment(""), "");
     }
 
     #[test]

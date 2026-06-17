@@ -13,13 +13,15 @@
 const HASH_KEY = "s";
 
 /**
- * Extra hash params an "Edit in DWEEB" link carries beside `s=` — the message's
- * origin on Discord: webhook id (`w`), message id (`m`), and, for a threaded
- * message, thread id (`t`). All three are non-secret identifiers (visible to
- * anyone who can read the message); the webhook *token* needed to edit it never
- * travels — the editor resolves it from the browser's own saved webhooks.
+ * Extra hash params an "Edit in DWEEB" link carries beside `s=`, all non-secret
+ * identifiers (visible to anyone who can read the message):
+ *  - the message's edit origin — webhook id (`w`), message id (`m`), and, for a
+ *    threaded message, thread id (`t`); the webhook *token* needed to edit it
+ *    never travels (the editor resolves it from the browser's saved webhooks);
+ *  - the server (`g`) the message lives in, so the editor can switch to it.
  */
 const ORIGIN_KEYS = { webhookId: "w", messageId: "m", threadId: "t" } as const;
+const GUILD_KEY = "g";
 
 export interface ShareLinkOrigin {
   /** Webhook snowflake — keys the lookup into saved webhooks. */
@@ -54,6 +56,17 @@ export function readShareOriginFromHash(hash: string): ShareLinkOrigin | null {
 }
 
 /**
+ * Read the server id an "Edit in DWEEB" link names (the `g` param), so the
+ * editor can switch to that server. Independent of the edit origin above — it's
+ * present for any guild message, not just editable webhook ones.
+ */
+export function readShareGuildFromHash(hash: string): string | null {
+  const trimmed = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (!trimmed) return null;
+  return new URLSearchParams(trimmed).get(GUILD_KEY) || null;
+}
+
+/**
  * Build a full sharable URL for the current document. Replaces any existing
  * `s=` value but preserves other hash fragments so deep-linkable UI keeps
  * working alongside share links.
@@ -83,6 +96,7 @@ export function clearShareTokenFromHash(): void {
   const params = new URLSearchParams(hashBody);
   params.delete(HASH_KEY);
   for (const key of Object.values(ORIGIN_KEYS)) params.delete(key);
+  params.delete(GUILD_KEY);
   const next = params.toString();
   url.hash = next.length > 0 ? next : "";
   window.history.replaceState(null, "", url.toString());
