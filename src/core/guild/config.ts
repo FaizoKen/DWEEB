@@ -207,8 +207,13 @@ export function botInviteUrl(): string {
  * No `redirect_uri` is attached: the site origin isn't a registered redirect on
  * the custom app, so Discord would reject the invite — the user just gets
  * Discord's own "added" confirmation instead of a bounce back here.
+ *
+ * Pass `guildId` to pre-select that server in Discord's "Add to Server" picker
+ * (the dialog is always opened for a specific server). It's a pre-selection,
+ * not a lock — the user can still switch, and one they can't manage falls back
+ * to the full picker.
  */
-export function customBotInviteUrl(applicationId: string): string {
+export function customBotInviteUrl(applicationId: string, guildId?: string): string {
   const id = applicationId.trim();
   if (!id) return "";
   const params = new URLSearchParams({
@@ -216,5 +221,7 @@ export function customBotInviteUrl(applicationId: string): string {
     scope: "bot applications.commands",
     permissions: "0",
   });
+  const gid = guildId?.trim();
+  if (gid) params.set("guild_id", gid);
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
 }

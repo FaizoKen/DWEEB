@@ -377,7 +377,7 @@ export function CustomBotDialog({
                     </span>
                     <a
                       className={styles.inviteLink}
-                      href={customBotInviteUrl(item.application_id)}
+                      href={customBotInviteUrl(item.application_id, guildId)}
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Optional — lists the bot in your server and enables its own commands. Not needed for posting or interactive components."
