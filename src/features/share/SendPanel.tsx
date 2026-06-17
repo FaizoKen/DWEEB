@@ -1765,29 +1765,30 @@ function CreateWebhookOptions() {
       </button>
 
       {hasBots && callbackUrl ? (
-        <div className={styles.redirectNote}>
-          <span>
-            First time posting under your bot? Discord will ask you to authorize it — that needs
-            this URL under the bot’s <strong>OAuth2 → Redirects</strong>, or Discord rejects it with
-            “Invalid OAuth2 redirect_uri”:
-          </span>
-          <span className={styles.redirectRow}>
-            <code className={styles.redirectUrl}>{callbackUrl}</code>
-            <button
-              type="button"
-              className={styles.redirectCopy}
-              onClick={() => {
-                void copyText(callbackUrl).then((ok) => {
-                  if (!ok) return;
-                  setCopiedRedirect(true);
-                  setTimeout(() => setCopiedRedirect(false), 1500);
-                });
-              }}
-            >
-              {copiedRedirect ? "Copied" : "Copy"}
-            </button>
-          </span>
-        </div>
+        <details className={styles.redirectNote}>
+          <summary className={styles.redirectSummary}>Got “Invalid OAuth2 redirect_uri”?</summary>
+          <div className={styles.redirectBody}>
+            <span>
+              Add this URL under your bot’s <strong>OAuth2 → Redirects</strong>, then try again:
+            </span>
+            <span className={styles.redirectRow}>
+              <code className={styles.redirectUrl}>{callbackUrl}</code>
+              <button
+                type="button"
+                className={styles.redirectCopy}
+                onClick={() => {
+                  void copyText(callbackUrl).then((ok) => {
+                    if (!ok) return;
+                    setCopiedRedirect(true);
+                    setTimeout(() => setCopiedRedirect(false), 1500);
+                  });
+                }}
+              >
+                {copiedRedirect ? "Copied" : "Copy"}
+              </button>
+            </span>
+          </div>
+        </details>
       ) : null}
     </div>
   );

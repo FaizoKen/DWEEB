@@ -127,20 +127,30 @@
   color: var(--app-text-subtle);
 }
 
-/* Prerequisite note under the custom-bot cards: the redirect URL the user's app
-   must register, since Discord rejects the authorization otherwise and there's
-   no way for us to verify it ahead of time. */
+/* Collapsed-by-default help under the custom-bot cards: the redirect URL the
+   user's app must register. Tucked behind a disclosure since most of the time
+   it's already set — it's there for the moment Discord rejects the auth, which
+   we can't pre-check (that needs a bot token). */
 .redirectNote {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   margin-top: 2px;
-  padding: 8px 10px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
   font-size: 11px;
   line-height: 1.5;
   color: var(--app-text-muted);
+}
+.redirectSummary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--app-text-subtle);
+  user-select: none;
+}
+.redirectSummary:hover {
+  color: var(--app-text);
+}
+.redirectBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
 }
 .redirectRow {
   display: flex;
