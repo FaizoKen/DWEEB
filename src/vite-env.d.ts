@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="vite-plugin-pwa/client" />
 
 // Build-time configuration for the optional DWEEB proxy (see `server/` and
 // `.env.example`). Both are optional: with no base URL the guild features stay

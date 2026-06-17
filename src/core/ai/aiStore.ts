@@ -19,23 +19,24 @@ import type { WebhookMessage } from "@/core/schema/types";
 import type { AiSettings, ChatMessage } from "./types";
 import type { AiTurn } from "./providers";
 import { loadAiSettings, saveAiSettings } from "./settingsStorage";
+// `attachEditorFields` (normalize) and `validateMessage` (validation) are on the
+// app's critical path already — the editor store, draft persistence, and live
+// validation all import them — so they live in the main chunk regardless.
+// Importing them statically here (rather than via `loadEngine`'s dynamic batch)
+// avoids a Rollup "dynamic import won't move into another chunk" warning with no
+// bundle cost.
+import { attachEditorFields } from "@/core/serialization/normalize";
+import { validateMessage } from "@/core/schema/validation";
 
 /** How many automatic validation-repair turns to attempt after the first reply. */
 const MAX_REPAIR_TURNS = 1;
 
-// The chat engine (providers, system prompt, reply parsing, schema validation)
-// is only exercised once the user actually sends a turn, and it pulls in the
-// largest non-vendor modules in the app (the provider adapters and the
-// validator). Loading it lazily keeps all of that out of the initial bundle —
-// the store itself only carries the panel's open/settings/transcript state.
+// The chat engine (provider adapters, system prompt, reply parsing) is only
+// exercised once the user actually sends a turn and is the largest AI-only code
+// in the app. Loading it lazily keeps it out of the initial bundle — the store
+// itself only carries the panel's open/settings/transcript state.
 function loadEngine() {
-  return Promise.all([
-    import("./providers"),
-    import("./systemPrompt"),
-    import("./extractReply"),
-    import("@/core/serialization/normalize"),
-    import("@/core/schema/validation"),
-  ]);
+  return Promise.all([import("./providers"), import("./systemPrompt"), import("./extractReply")]);
 }
 
 interface AiState {
@@ -144,8 +145,6 @@ export const useAiStore = create<AiState>((set, get) => ({
       { callAI, toTurns },
       { buildSystemPrompt, buildRepairPrompt },
       { extractReply, streamingProse },
-      { attachEditorFields },
-      { validateMessage },
     ] = engine;
 
     const { settings } = get();

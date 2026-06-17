@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
+import { VitePWA } from "vite-plugin-pwa";
 import path from "node:path";
 
 // Security policy for the deployed site. GitHub Pages cannot attach response
@@ -57,7 +58,45 @@ function injectSecurityMeta(): Plugin {
 // still publishes a 404.html copy of the shell so stray deep links load
 // the app.)
 export default defineConfig({
-  plugins: [react(), injectSecurityMeta()],
+  plugins: [
+    react(),
+    injectSecurityMeta(),
+    // Service worker: precache the hashed app shell so repeat visits load from
+    // disk with no network round trip (GitHub Pages caps Cache-Control at ~10
+    // min and can't be customized, so without this every return visit
+    // re-validates each asset) and the editor works offline.
+    //
+    // `registerType: "prompt"` deliberately does NOT skipWaiting: a freshly
+    // deployed SW precaches in the background and waits, so any tab already open
+    // keeps being served the exact chunks its `index.html` references — a lazy
+    // import (Share dialog, AI panel, Template gallery…) can never 404 against a
+    // just-purged old chunk. The update applies on the next cold start; the app
+    // surfaces an unobtrusive "new version ready" toast (see `main.tsx`).
+    //
+    // `manifest: false` keeps the existing hand-tuned `public/manifest.webmanifest`
+    // (and its `<link rel="manifest">` in index.html) as the single source of truth.
+    VitePWA({
+      registerType: "prompt",
+      injectRegister: false,
+      manifest: false,
+      workbox: {
+        globPatterns: [
+          "assets/**/*.{js,css}",
+          "index.html",
+          "favicon.svg",
+          "icon-*.png",
+          "apple-touch-icon.png",
+          "manifest.webmanifest",
+        ],
+        // SPA + short-link (`/s/<id>`) navigations fall back to the cached shell.
+        // The standalone legal pages are real static files, not app routes, so
+        // they're excluded — the SW must let the network serve them.
+        navigateFallback: "/index.html",
+        navigateFallbackDenylist: [/^\/privacy/, /^\/terms/],
+        cleanupOutdatedCaches: true,
+      },
+    }),
+  ],
   resolve: {
     // React is aliased to Preact's compat layer to shrink the runtime: the
     // vendor chunk drops from ~47 kB gzip to ~12 kB. The app keeps writing
