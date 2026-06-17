@@ -40,8 +40,9 @@ use crate::config::Config;
 use crate::discord::Discord;
 use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
 use crate::routes::{
-    bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, emojis, health,
-    list_guilds, permanent_add, permanent_list, permanent_remove, roles, AppState, DispatcherApi,
+    bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, custom_apps_verify,
+    emojis, health, list_guilds, permanent_add, permanent_list, permanent_remove, roles, AppState,
+    DispatcherApi,
 };
 use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
 
@@ -234,6 +235,13 @@ async fn main() {
         .route(
             "/api/guilds/:guild_id/custom-apps/:application_id",
             axum::routing::delete(custom_apps_remove),
+        )
+        // Verify the owner pasted DWEEB's redirect + interactions URLs back
+        // into their app's portal — reads the app's config from Discord using
+        // the stored client secret.
+        .route(
+            "/api/guilds/:guild_id/custom-apps/:application_id/verify",
+            get(custom_apps_verify),
         )
         // Start the `webhook.incoming` OAuth flow under one of the guild's
         // registered custom bots, using its stored (sealed) client secret.

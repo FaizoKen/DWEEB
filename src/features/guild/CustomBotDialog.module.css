@@ -239,6 +239,9 @@
 }
 
 .copyLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   font-weight: 600;
   color: var(--app-text-muted);
@@ -289,4 +292,30 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* The "Point it back at DWEEB" step kept on screen after registering, with the
+   live verification status. Its own children flow on a tight gap, so reset the
+   margins the shared bits (head, url list, actions) carry elsewhere. */
+.setupStep {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setupStep .sectionHead,
+.setupStep .urlRef,
+.setupStep .formActions {
+  margin: 0;
+}
+
+.setupStep p {
+  margin: 0;
+}
+
+/* Both URLs confirmed set on the app — the bot is wired up. */
+.successNote {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--app-success-text);
 }

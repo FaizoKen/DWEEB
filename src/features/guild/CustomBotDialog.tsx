@@ -23,8 +23,10 @@ import { useAuthStore } from "@/core/auth/authStore";
 import {
   addCustomBot,
   fetchCustomBots,
+  GuildApiError,
   isAuthError,
   removeCustomBot,
+  verifyCustomBot,
   type CustomBots,
 } from "@/core/guild/api";
 import { interactionsEndpointUrl, oauthCallbackUrl } from "@/core/guild/config";
@@ -40,6 +42,24 @@ type BotsState =
   | { kind: "ready"; bots: CustomBots }
   | { kind: "unavailable" } // feature off on this deployment (501)
   | { kind: "error"; message: string };
+
+/** Live result of checking whether the owner finished the portal step. */
+type VerifyState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "done"; endpointOk: boolean; redirectOk: boolean }
+  // 409 — no usable secret stored, so we can't read the app's config.
+  | { kind: "needsSecret"; message: string }
+  // 502 / network — couldn't reach Discord; transient, offer a retry.
+  | { kind: "unreachable"; message: string };
+
+/** True when two URLs match, ignoring a trailing slash and letter case (these
+ *  URLs are all-lowercase host + literal path, so case-folding is safe here). */
+function sameUrl(a: string | null | undefined, b: string): boolean {
+  if (!a || !b) return false;
+  const norm = (s: string) => s.trim().replace(/\/+$/, "").toLowerCase();
+  return norm(a) === norm(b);
+}
 
 /** Discord snowflakes are 17–20 digits today; accept a small range with slack. */
 const SNOWFLAKE_RE = /^\d{15,25}$/;
@@ -69,11 +89,55 @@ export function CustomBotDialog({
   const [clientSecret, setClientSecret] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // The app whose "Point it back at DWEEB" step is currently on screen — set
+  // right after a registration (so step 3 doesn't vanish when the quota fills)
+  // and when a returning owner clicks "Check connection" on a registered app.
+  const [setupApp, setSetupApp] = useState<{ id: string; name: string } | null>(null);
+  const [verify, setVerify] = useState<VerifyState>({ kind: "idle" });
+
   const resetForm = () => {
     setEditingId(null);
     setAppId("");
     setPublicKey("");
     setClientSecret("");
+  };
+
+  // Open the finish-setup panel for one app, fresh (no stale verify result).
+  // Clears any in-progress edit so the two don't compete for the same area.
+  const openSetup = (id: string, name: string) => {
+    setActionError(null);
+    resetForm();
+    setVerify({ kind: "idle" });
+    setSetupApp({ id, name });
+  };
+
+  const closeSetup = () => {
+    setSetupApp(null);
+    setVerify({ kind: "idle" });
+  };
+
+  // Read the app's config back from Discord and compare it to the two URLs we
+  // show. Success is authoritative; a 502 means "couldn't check", never "wrong".
+  const runVerify = async (applicationId: string) => {
+    setVerify({ kind: "checking" });
+    try {
+      const res = await verifyCustomBot(guildId, applicationId);
+      setVerify({
+        kind: "done",
+        endpointOk: sameUrl(res.interactions_endpoint_url, interactionsEndpointUrl()),
+        redirectOk: res.redirect_uris.some((u) => sameUrl(u, oauthCallbackUrl())),
+      });
+    } catch (e) {
+      if (isAuthError(e)) {
+        useAuthStore.getState().markSignedOut();
+        onClose();
+        return;
+      }
+      const status = e instanceof GuildApiError ? e.status : 0;
+      const message = e instanceof Error ? e.message : String(e);
+      if (status === 409) setVerify({ kind: "needsSecret", message });
+      else setVerify({ kind: "unreachable", message });
+    }
   };
 
   useEffect(() => {
@@ -130,7 +194,17 @@ export function CustomBotDialog({
       const result = await addCustomBot(guildId, appId, publicKey, clientSecret);
       setState({ kind: "ready", bots: result.bots });
       if (result.ok) {
-        resetForm();
+        const registeredId = appId.trim();
+        if (editingId == null) {
+          // A fresh registration still has to paste DWEEB's two URLs into the
+          // app's portal — so keep that step on screen (openSetup clears the
+          // form) instead of letting it vanish once the quota fills.
+          const name = result.bots.items.find((i) => i.application_id === registeredId)?.name || "";
+          openSetup(registeredId, name);
+        } else {
+          // An Update is just a key/secret swap — no portal step to finish.
+          resetForm();
+        }
       } else if (result.reason === "app_taken") {
         setActionError("That application is already registered by another server.");
       } else {
@@ -149,6 +223,7 @@ export function CustomBotDialog({
     try {
       setState({ kind: "ready", bots: await removeCustomBot(guildId, applicationId) });
       if (editingId === applicationId) resetForm();
+      if (setupApp?.id === applicationId) closeSetup();
     } catch (e) {
       fail(e);
     } finally {
@@ -161,6 +236,7 @@ export function CustomBotDialog({
   // there's nothing to prefill). The name re-fetches from Discord on save.
   const startEdit = (applicationId: string) => {
     setActionError(null);
+    closeSetup();
     setEditingId(applicationId);
     setAppId(applicationId);
     setPublicKey("");
@@ -295,6 +371,17 @@ export function CustomBotDialog({
                       {new Date(item.added_at).toLocaleDateString([], { dateStyle: "medium" })}
                     </span>
                   </span>
+                  {item.has_secret ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      title="Check this app's portal points back at DWEEB"
+                      onClick={() => openSetup(item.application_id, item.name)}
+                    >
+                      Check
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -325,7 +412,19 @@ export function CustomBotDialog({
           ) : null}
         </section>
 
-        {freshRegister ? (
+        {setupApp ? (
+          // Persists past the quota flip: a freshly-registered app still has to
+          // have its two URLs pasted into the portal, and this verifies it.
+          <SetupStep
+            app={setupApp}
+            endpointUrl={endpointUrl}
+            callbackUrl={callbackUrl}
+            verify={verify}
+            busy={busy}
+            onCheck={() => void runVerify(setupApp.id)}
+            onClose={closeSetup}
+          />
+        ) : freshRegister ? (
           <ol className={styles.guide}>
             <li className={styles.step}>
               <span className={styles.stepNum}>1</span>
@@ -426,13 +525,123 @@ export function CustomBotDialog({
 }
 
 /**
+ * The "Point it back at DWEEB" step, kept on screen after a registration until
+ * the owner has actually pasted DWEEB's two URLs into their app's Developer
+ * Portal. "Check setup" reads the app's live config from Discord and reports a
+ * per-URL ✓/✗; both green means the bot is wired up. A failed check (Discord
+ * unreachable, or no stored secret) is explained rather than shown as "wrong",
+ * and "Close" leaves the panel without forcing a green result.
+ */
+function SetupStep({
+  app,
+  endpointUrl,
+  callbackUrl,
+  verify,
+  busy,
+  onCheck,
+  onClose,
+}: {
+  app: { id: string; name: string };
+  endpointUrl: string;
+  callbackUrl: string;
+  verify: VerifyState;
+  busy: boolean;
+  onCheck: () => void;
+  onClose: () => void;
+}) {
+  const done = verify.kind === "done" ? verify : null;
+  const allOk = done != null && done.endpointOk && done.redirectOk;
+  const name = app.name || `App ${app.id}`;
+  const status = (ok: boolean | undefined): "ok" | "missing" | undefined =>
+    ok === undefined ? undefined : ok ? "ok" : "missing";
+  const checkLabel =
+    verify.kind === "checking"
+      ? "Checking…"
+      : verify.kind === "idle"
+        ? "Check setup"
+        : "Check again";
+
+  return (
+    <section className={styles.setupStep}>
+      <div className={styles.sectionHead}>
+        <h3 className={styles.sectionTitle}>
+          {allOk ? "Setup complete" : "Finish setup — point it back at DWEEB"}
+        </h3>
+        <button type="button" className={styles.linkBtn} onClick={onClose}>
+          {allOk ? "Done" : "Close"}
+        </button>
+      </div>
+
+      {allOk ? (
+        <p className={styles.successNote}>
+          ✓ {name} is connected — both URLs are set in Discord. Its components now work through
+          DWEEB.
+        </p>
+      ) : (
+        <>
+          <p className={styles.stepHint}>
+            Paste each value into <strong>{name}</strong>’s Developer Portal and save, then check it
+            here. Discord verifies them the moment you save.
+          </p>
+          <div className={styles.urlRef}>
+            <CopyField
+              label="OAuth2 → Redirects"
+              value={callbackUrl}
+              status={done ? status(done.redirectOk) : undefined}
+            />
+            <CopyField
+              label="General Information → Interactions Endpoint URL"
+              value={endpointUrl}
+              status={done ? status(done.endpointOk) : undefined}
+            />
+          </div>
+        </>
+      )}
+
+      {verify.kind === "needsSecret" ? (
+        <p className={styles.error}>
+          {verify.message} Use <strong>Update</strong> on the app above to re-add its client secret.
+        </p>
+      ) : verify.kind === "unreachable" ? (
+        <p className={styles.error}>{verify.message}</p>
+      ) : done && !allOk ? (
+        <p className={styles.note}>
+          {!done.redirectOk && !done.endpointOk
+            ? "Neither URL is in place yet — add both in the portal, save, then check again."
+            : !done.redirectOk
+              ? "The redirect URL isn’t added yet — put it under OAuth2 → Redirects, save, then check again."
+              : "The Interactions Endpoint URL isn’t set yet — paste it in, save, then check again."}
+        </p>
+      ) : null}
+
+      {!allOk ? (
+        <div className={styles.formActions}>
+          <Button size="sm" disabled={busy || verify.kind === "checking"} onClick={onCheck}>
+            {checkLabel}
+          </Button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
  * One labeled, copy-to-clipboard URL row — used for the redirect and
  * interactions-endpoint values a beginner has to paste back into their app's
  * Developer Portal. The value is long and copy-paste-only, so a one-click Copy
  * beats asking them to select it by hand. Renders nothing when the URL is empty
- * (no proxy configured).
+ * (no proxy configured). An optional `status` shows whether a verification
+ * check found this URL already set on the app.
  */
-function CopyField({ label, value }: { label: ReactNode; value: string }) {
+function CopyField({
+  label,
+  value,
+  status,
+}: {
+  label: ReactNode;
+  value: string;
+  status?: "ok" | "missing";
+}) {
   const [copied, setCopied] = useState(false);
   if (!value) return null;
   const onCopy = async () => {
@@ -443,7 +652,14 @@ function CopyField({ label, value }: { label: ReactNode; value: string }) {
   };
   return (
     <div className={styles.copyField}>
-      <span className={styles.copyLabel}>{label}</span>
+      <span className={styles.copyLabel}>
+        <span>{label}</span>
+        {status === "ok" ? (
+          <span className={styles.chipOk}>Set</span>
+        ) : status === "missing" ? (
+          <span className={styles.chipWarn}>Not set yet</span>
+        ) : null}
+      </span>
       <div className={styles.copyRow}>
         <code className={styles.copyValue}>{value}</code>
         <Button size="sm" variant="ghost" onClick={() => void onCopy()}>

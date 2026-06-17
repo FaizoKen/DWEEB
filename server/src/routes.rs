@@ -466,6 +466,97 @@ pub async fn custom_apps_remove(
     Ok(resp)
 }
 
+/// `GET /api/guilds/:id/custom-apps/:application_id/verify` — confirm the
+/// owner actually pasted DWEEB's two URLs back into their app's Developer
+/// Portal (the last manual step of registering a custom bot). Using the stored
+/// client secret, this reads the app's own configuration from Discord and
+/// reports its Interactions Endpoint URL + OAuth2 redirect URIs; the FE
+/// compares them against the URLs it displays and shows a per-URL ✓/✗.
+///
+/// 409 when no usable secret is stored (verification needs one); 502 when
+/// Discord couldn't be reached, so a hiccup never reads as "not configured".
+pub async fn custom_apps_verify(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Path((guild, application_id)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    authorize_member(&st, &jar, &guild).await?;
+    if !is_snowflake(&application_id) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "application_id must be a Discord application id.".into(),
+            retry_after: None,
+        });
+    }
+    // Fetch the sealed secret from the registry (guild-scoped, so the
+    // authorization above maps one-to-one) and open it with our key — the
+    // same pattern the one-click webhook flow uses in `auth.rs`.
+    let api = dispatcher_api(&st)?;
+    let resp = api
+        .http
+        .get(format!(
+            "{}/custom-apps/{guild}/{application_id}/secret",
+            api.base
+        ))
+        .bearer_auth(&api.token)
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't reach the dispatcher: {e}")))?;
+    if resp.status().as_u16() == 404 {
+        return Err(AppError::Status {
+            status: StatusCode::NOT_FOUND,
+            message: "That app isn't registered as a custom bot for this server.".into(),
+            retry_after: None,
+        });
+    }
+    if !resp.status().is_success() {
+        return Err(AppError::BadGateway(
+            "The custom-bot registry answered unexpectedly.".into(),
+        ));
+    }
+    let sealed = resp
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|v| {
+            v.get("client_secret_enc")
+                .and_then(|s| s.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_default();
+    if sealed.is_empty() {
+        return Err(AppError::Status {
+            status: StatusCode::CONFLICT,
+            message:
+                "No client secret is stored for this app — use Update to add it, then verify."
+                    .into(),
+            retry_after: None,
+        });
+    }
+    let Some(client_secret) = crate::seal::open(&st.key, &sealed) else {
+        return Err(AppError::Status {
+            status: StatusCode::CONFLICT,
+            message: "The stored client secret can't be read anymore — re-add it with Update."
+                .into(),
+            retry_after: None,
+        });
+    };
+    match st
+        .discord
+        .application_config_via_secret(&application_id, &client_secret)
+        .await
+    {
+        Some((interactions_endpoint_url, redirect_uris)) => Ok(Json(json!({
+            "interactions_endpoint_url": interactions_endpoint_url,
+            "redirect_uris": redirect_uris,
+        }))
+        .into_response()),
+        None => Err(AppError::BadGateway(
+            "Couldn't check your app's settings with Discord — try again in a moment.".into(),
+        )),
+    }
+}
+
 /// The dispatcher client, or a clear "not enabled here" for deployments that
 /// don't run the dispatcher (e.g. proxy-only setups).
 pub(crate) fn dispatcher_api(st: &AppState) -> Result<&Arc<DispatcherApi>, AppError> {

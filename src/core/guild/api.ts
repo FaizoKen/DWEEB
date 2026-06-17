@@ -401,6 +401,31 @@ export async function createCustomBotWebhook(
   }
 }
 
+/** A custom app's own portal configuration, read back from Discord — used to
+ *  confirm the owner pasted DWEEB's two URLs into their app's settings. */
+export interface CustomBotVerification {
+  /** The app's Interactions Endpoint URL on Discord, or null when unset. */
+  interactions_endpoint_url: string | null;
+  /** The app's OAuth2 redirect URIs on Discord. */
+  redirect_uris: string[];
+}
+
+/**
+ * `GET /api/guilds/:id/custom-apps/:applicationId/verify` — read the app's own
+ * Interactions Endpoint URL + redirect URIs from Discord (via the stored client
+ * secret), so the caller can check the owner finished the portal step. Throws a
+ * `GuildApiError` the dialog distinguishes by `.status`: 409 = no usable secret
+ * stored (re-add it), 502 = Discord couldn't be reached (transient — retry).
+ */
+export async function verifyCustomBot(
+  guildId: string,
+  applicationId: string,
+): Promise<CustomBotVerification> {
+  return getJson<CustomBotVerification>(
+    `/api/guilds/${guildId.trim()}/custom-apps/${applicationId.trim()}/verify`,
+  );
+}
+
 /** `POST /auth/logout` — clear the session. Best-effort; never throws. */
 export async function postLogout(): Promise<void> {
   try {

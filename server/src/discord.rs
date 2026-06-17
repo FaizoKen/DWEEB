@@ -289,6 +289,67 @@ impl Discord {
         resp.json::<OauthMe>().await.ok()?.application.name
     }
 
+    /// Read a custom app's own portal configuration using its credentials — a
+    /// `client_credentials` grant, then `GET /applications/@me`, which returns
+    /// the full application object including the Interactions Endpoint URL and
+    /// the OAuth2 redirect URIs. Used to verify a server owner actually pasted
+    /// DWEEB's two URLs back into their app's Developer Portal (the last manual
+    /// step of registering a custom bot).
+    ///
+    /// Returns `(interactions_endpoint_url, redirect_uris)` — the endpoint is
+    /// `None` when the app has none set. `None` overall on any failure (bad
+    /// secret, Discord unreachable), which the caller surfaces as "couldn't
+    /// check, try again" rather than a false "not configured".
+    pub async fn application_config_via_secret(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Option<(Option<String>, Vec<String>)> {
+        #[derive(Deserialize)]
+        struct Grant {
+            access_token: String,
+        }
+        #[derive(Deserialize)]
+        struct AppConfig {
+            #[serde(default)]
+            interactions_endpoint_url: Option<String>,
+            #[serde(default)]
+            redirect_uris: Vec<String>,
+        }
+        let resp = self
+            .http
+            .post(format!("{API_BASE}/oauth2/token"))
+            .form(&[
+                ("client_id", client_id),
+                ("client_secret", client_secret),
+                ("grant_type", "client_credentials"),
+                ("scope", "identify"),
+            ])
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let grant = resp.json::<Grant>().await.ok()?;
+        let resp = self
+            .http
+            .get(format!("{API_BASE}/applications/@me"))
+            .header(AUTHORIZATION, format!("Bearer {}", grant.access_token))
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let cfg = resp.json::<AppConfig>().await.ok()?;
+        let endpoint = cfg
+            .interactions_endpoint_url
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        Some((endpoint, cfg.redirect_uris))
+    }
+
     /// Best-effort: install the DWEEB application-command set on an app using
     /// its own credentials. Run for custom apps at registration so their bot
     /// gets the same right-click menus as the main app (the dispatcher
