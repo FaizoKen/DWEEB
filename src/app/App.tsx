@@ -52,6 +52,7 @@ const TemplateSetup = lazy(() =>
 import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
+import { UpdatePrompt } from "./UpdatePrompt";
 import {
   consumeIncomingWebhook,
   hasIncomingWebhook,
@@ -470,6 +471,7 @@ export function App() {
           </Suspense>
         ) : null}
         <SendCoachMark />
+        <UpdatePrompt />
         <ToastViewport />
       </div>
     </>

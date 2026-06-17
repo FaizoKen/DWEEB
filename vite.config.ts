@@ -113,8 +113,9 @@ export default defineConfig({
     // deployed SW precaches in the background and waits, so any tab already open
     // keeps being served the exact chunks its `index.html` references — a lazy
     // import (Share dialog, AI panel, Template gallery…) can never 404 against a
-    // just-purged old chunk. The update applies on the next cold start; the app
-    // surfaces an unobtrusive "new version ready" toast (see `main.tsx`).
+    // just-purged old chunk. The waiting worker surfaces a persistent
+    // Discord-style "Update" button (see `UpdatePrompt`); clicking it activates
+    // it and reloads onto the new build (otherwise it applies on next cold start).
     //
     // `manifest: false` keeps the existing hand-tuned `public/manifest.webmanifest`
     // (and its `<link rel="manifest">` in index.html) as the single source of truth.

@@ -1,0 +1,120 @@
+/* Anchored to the top-right corner — the uncluttered preview side on desktop,
+   matching where the toasts sit so the update prompt reads as the same family
+   of corner notice (but persistent rather than auto-dismissing). */
+.viewport {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: var(--app-z-tooltip);
+  display: flex;
+  pointer-events: none;
+}
+
+/* On phones the builder action bar spans the full width, so drop below it
+   (~48px bar + a 16px gap) — same treatment as the toasts. */
+@media (max-width: 900px) {
+  .viewport {
+    top: 64px;
+  }
+}
+
+/* Highlighted accent pill with a soft pulsing glow that draws the eye without
+   nagging — the Discord-style "an update is ready" cue. */
+.prompt {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--app-fab-h);
+  padding: 0 18px;
+  border-radius: 999px;
+  border: none;
+  background: var(--app-accent);
+  color: #fff;
+  font-size: var(--app-text-base);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow:
+    var(--app-shadow-lg),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  animation:
+    update-in 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    update-glow 2.4s ease-in-out 220ms infinite;
+  transition:
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.prompt:hover {
+  background: var(--app-accent-hover);
+}
+
+.prompt:active {
+  transform: scale(0.97);
+}
+
+.prompt:focus-visible {
+  outline: none;
+  box-shadow: var(--app-shadow-lg), var(--app-focus-ring);
+}
+
+.prompt:disabled {
+  cursor: default;
+  opacity: 0.75;
+  animation: update-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The icon spins while the reload onto the new build is in flight. */
+.prompt:disabled .icon {
+  animation: update-spin 0.9s linear infinite;
+}
+
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.label {
+  white-space: nowrap;
+}
+
+@keyframes update-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes update-glow {
+  0%,
+  100% {
+    box-shadow:
+      var(--app-shadow-lg),
+      0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+      0 0 0 0 rgba(88, 101, 242, 0);
+  }
+  50% {
+    box-shadow:
+      var(--app-shadow-lg),
+      0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+      0 0 16px 2px rgba(88, 101, 242, 0.55);
+  }
+}
+
+@keyframes update-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Respect reduced-motion: keep the entrance but drop the looping glow/spin. */
+@media (prefers-reduced-motion: reduce) {
+  .prompt,
+  .prompt:disabled .icon {
+    animation: update-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}

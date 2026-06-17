@@ -3,18 +3,19 @@ import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import { App } from "@/app/App";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
-import { pushToast } from "@/ui/Toast";
+import { useUpdateStore } from "@/core/state/updateStore";
 import "@/styles/global.css";
 
 // Register the precache service worker (production only — the dev SW would
 // fight HMR). A new deploy installs in the background and waits (see the
 // `registerType: "prompt"` rationale in vite.config.ts), so this never
-// hot-swaps chunks under an open tab; we just let the user know an update is
-// ready and it takes effect on the next cold start.
+// hot-swaps chunks under an open tab. When it's ready we surface a persistent
+// Discord-style "Update" button (see `UpdatePrompt`); clicking it activates the
+// waiting worker via this same `updateSW` and reloads onto the new build.
 if (import.meta.env.PROD) {
-  registerSW({
+  const updateSW = registerSW({
     onNeedRefresh() {
-      pushToast("A new version of DWEEB is ready — reopen to update.", "info");
+      useUpdateStore.getState().markReady(updateSW);
     },
   });
 }
