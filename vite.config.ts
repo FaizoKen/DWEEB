@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { VitePWA } from "vite-plugin-pwa";
+import crypto from "node:crypto";
 import path from "node:path";
 
 // Security policy for the deployed site. GitHub Pages cannot attach response
@@ -14,40 +15,82 @@ import path from "node:path";
 // user-configured gateways (any https host) and there is no same-origin proxy
 // anymore, so provider hosts can't be enumerated. The tight `script-src`
 // remains the real injection defense.
-const CSP = [
-  "default-src 'self'",
-  "script-src 'self' https://www.googletagmanager.com",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' https: data: blob:",
-  "media-src 'self' https: blob:",
-  "font-src 'self' data:",
-  "connect-src 'self' https:",
-  // Plugins render their config UI in iframes under *.dweeb.faizo.net.
-  "frame-src 'self' https://*.dweeb.faizo.net",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join("; ");
+//
+// `script-src` allows 'self' (the bundle), the GA loader host, plus a SHA-256
+// for each inline <script> in the built HTML (currently just the short-link
+// early-resolve snippet in index.html). The hashes let the strict policy permit
+// those specific scripts without opening the door to 'unsafe-inline' — computed
+// at build time below so they track the exact emitted bytes.
+function buildCsp(inlineScriptHashes: readonly string[]): string {
+  return [
+    "default-src 'self'",
+    ["script-src 'self' https://www.googletagmanager.com", ...inlineScriptHashes].join(" "),
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' https: data: blob:",
+    "media-src 'self' https: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' https:",
+    // Plugins render their config UI in iframes under *.dweeb.faizo.net.
+    "frame-src 'self' https://*.dweeb.faizo.net",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+}
+
+/** SHA-256 (base64, CSP `'sha256-…'` form) of every inline, executable
+ *  <script> in the HTML. Scripts with `src` are served from an allowed host, and
+ *  non-executable blocks (JSON-LD, importmap) are ignored by `script-src`, so
+ *  both are skipped. */
+function inlineScriptHashes(html: string): string[] {
+  const hashes: string[] = [];
+  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    const attrs = m[1] ?? "";
+    if (/\bsrc\s*=/i.test(attrs)) continue; // external — covered by a host source
+    const type = (/\btype\s*=\s*("|')?([^"'\s>]+)/i.exec(attrs)?.[2] ?? "").toLowerCase();
+    const executable =
+      type === "" ||
+      type === "module" ||
+      type === "text/javascript" ||
+      type === "application/javascript";
+    if (!executable) continue;
+    const digest = crypto
+      .createHash("sha256")
+      .update(m[2] ?? "", "utf8")
+      .digest("base64");
+    hashes.push(`'sha256-${digest}'`);
+  }
+  return hashes;
+}
 
 function injectSecurityMeta(): Plugin {
   return {
     name: "inject-security-meta",
     apply: "build",
-    transformIndexHtml(html) {
-      return {
-        html,
-        tags: [
-          {
-            tag: "meta",
-            attrs: { "http-equiv": "Content-Security-Policy", content: CSP },
-            injectTo: "head-prepend",
-          },
-          {
-            tag: "meta",
-            attrs: { name: "referrer", content: "strict-origin-when-cross-origin" },
-            injectTo: "head-prepend",
-          },
-        ],
-      };
+    transformIndexHtml: {
+      // 'post' so Vite's built-in `%VITE_*%` env substitution (registered as a
+      // 'pre' hook) has already run — we hash the exact bytes the browser will
+      // execute, so the policy stays valid across proxy-URL configs.
+      order: "post",
+      handler(html) {
+        return {
+          html,
+          tags: [
+            {
+              tag: "meta",
+              attrs: {
+                "http-equiv": "Content-Security-Policy",
+                content: buildCsp(inlineScriptHashes(html)),
+              },
+              injectTo: "head-prepend",
+            },
+            {
+              tag: "meta",
+              attrs: { name: "referrer", content: "strict-origin-when-cross-origin" },
+              injectTo: "head-prepend",
+            },
+          ],
+        };
+      },
     },
   };
 }
