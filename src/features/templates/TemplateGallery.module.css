@@ -31,7 +31,7 @@
 /* ── Header ─────────────────────────────────────────────────────────────── */
 .header {
   flex-shrink: 0;
-  padding: 22px 24px 16px;
+  padding: 16px 24px 14px;
   border-bottom: 1px solid var(--app-border);
   /* A faint blurple wash up top so the gallery feels like its own place. */
   background:
@@ -53,9 +53,9 @@
 .title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   margin: 0;
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--app-text);
@@ -65,17 +65,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   color: #fff;
   background: linear-gradient(135deg, #5865f2 0%, #8a5cf6 60%, #c026d3 100%);
   box-shadow: 0 4px 14px rgba(120, 80, 230, 0.45);
 }
 
 .subtitle {
-  margin: 6px 0 0;
-  font-size: var(--app-text-base);
+  margin: 4px 0 0;
+  font-size: var(--app-text-sm);
   color: var(--app-text-muted);
   max-width: 60ch;
 }
@@ -115,7 +115,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  margin-top: 18px;
+  margin-top: 14px;
 }
 
 .search {
@@ -211,6 +211,25 @@
 .chipActive:hover {
   background: var(--app-accent);
   border-color: var(--app-accent);
+  color: #fff;
+}
+
+/* The "Saved" pseudo-category is the only chip that points at the user's own
+ * messages, so it carries a teal tint (matching the saved cards' accent) to set
+ * it apart from the neutral template categories. When selected it fills teal
+ * rather than the default blurple to keep that identity. */
+.chipSaved:not(.chipActive) {
+  color: #4fd4bb;
+  border-color: color-mix(in srgb, #1abc9c 40%, var(--app-border));
+  background: color-mix(in srgb, #1abc9c 14%, var(--app-bg-input));
+}
+.chipSaved:not(.chipActive):hover {
+  color: #79e3ce;
+  background: color-mix(in srgb, #1abc9c 22%, var(--app-bg-input));
+}
+.chipSaved.chipActive {
+  background: #1abc9c;
+  border-color: #1abc9c;
   color: #fff;
 }
 
@@ -480,17 +499,34 @@
   color: var(--app-text-subtle);
 }
 
-/* The Continue card is the primary "resume" action — give it a soft accent wash
- * and a tinted border so it reads as a highlighted starting point. */
+/* The Continue card is the primary "resume" action — give it a soft accent wash,
+ * a tinted border, and a faint accent glow ring so it reads as the highlighted
+ * starting point that draws the eye first. */
 .card[data-kind="continue"] {
-  border-color: color-mix(in srgb, var(--card-accent) 45%, var(--app-border));
+  border-color: color-mix(in srgb, var(--card-accent) 55%, var(--app-border));
   background:
     linear-gradient(
       160deg,
-      color-mix(in srgb, var(--card-accent) 12%, transparent),
-      transparent 55%
+      color-mix(in srgb, var(--card-accent) 16%, transparent),
+      transparent 58%
     ),
     var(--app-bg-subtle);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--card-accent) 30%, transparent),
+    0 8px 24px color-mix(in srgb, var(--card-accent) 18%, transparent);
+}
+.card[data-kind="continue"]:hover {
+  border-color: color-mix(in srgb, var(--card-accent) 70%, var(--app-border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--card-accent) 45%, transparent),
+    var(--app-shadow);
+}
+/* Lift the "Recent" badge to the accent colour so the highlight reads at a
+ * glance, not just from the card's wash. */
+.card[data-kind="continue"] .cardCategory {
+  color: var(--card-accent);
+  background: color-mix(in srgb, var(--card-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--card-accent) 38%, transparent);
 }
 
 /* ── Delete confirmation dialog ─────────────────────────────────────────── */

@@ -302,7 +302,7 @@ export function TemplateGallery() {
               <div className={styles.heading}>
                 <h2 className={styles.title}>
                   <span className={styles.titleSpark} aria-hidden>
-                    <SparkleIcon size={20} />
+                    <SparkleIcon size={17} />
                   </span>
                   Start a message
                 </h2>
@@ -354,7 +354,16 @@ export function TemplateGallery() {
                     key={f}
                     type="button"
                     aria-pressed={filter === f}
-                    className={`${styles.chip} ${filter === f ? styles.chipActive : ""}`}
+                    className={[
+                      styles.chip,
+                      // The Saved pseudo-category carries its own teal highlight
+                      // so a user's own messages stand out from the curated
+                      // template categories.
+                      f === SAVED_FILTER ? styles.chipSaved : "",
+                      filter === f ? styles.chipActive : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                     onClick={() => setFilter(f)}
                   >
                     {f}
@@ -491,7 +500,7 @@ function GalleryCard({ card }: { card: CardData }) {
             className={styles.botBadge}
             title="Includes interactive components — needs a bot/app webhook"
           >
-            Bot needed
+            Interactive
           </span>
         ) : null}
         <div className={styles.cardHover} aria-hidden>

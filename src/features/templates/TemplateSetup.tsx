@@ -174,12 +174,20 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
       footer={
         <div className={styles.footer}>
           <Button variant="ghost" onClick={handleDismiss}>
-            {pending > 0 ? "I'll finish later" : "Close"}
+            {pending > 0 ? "Skip & set up manually" : "Close"}
           </Button>
           <Button
             variant="primary"
             trailingIcon={<ChevronRightIcon size={16} />}
             onClick={handleDone}
+            disabled={pending > 0}
+            title={
+              pending > 0
+                ? `Connect ${
+                    pending === 1 ? "the remaining action" : `all ${slots.length} actions`
+                  } first, or skip to set them up manually.`
+                : undefined
+            }
           >
             Review in editor
           </Button>
