@@ -31,7 +31,7 @@ export function UpdatePrompt() {
         title="A new version of DWEEB is ready — click to update"
       >
         <span className={styles.icon} aria-hidden="true">
-          <RefreshIcon size={16} />
+          <RefreshIcon size={14} />
         </span>
         <span className={styles.label}>{applying ? "Updating…" : "Update available"}</span>
       </button>

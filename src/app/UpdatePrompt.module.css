@@ -24,14 +24,14 @@
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: var(--app-fab-h);
-  padding: 0 18px;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
   border-radius: 999px;
   border: none;
   background: var(--app-accent);
   color: #fff;
-  font-size: var(--app-text-base);
+  font-size: var(--app-text-sm);
   font-weight: 600;
   cursor: pointer;
   box-shadow:
