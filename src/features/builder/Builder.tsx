@@ -19,6 +19,7 @@ import {
   DownloadIcon,
   HistoryIcon,
   InfoIcon,
+  PencilIcon,
   RedoIcon,
   SendIcon,
   ShareIcon,
@@ -69,6 +70,12 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
   const canRedo = useMessageStore((s) => s.future.length > 0);
+  // The Send panel defaults to "Update existing" whenever a restore origin is
+  // set — after restoring a message, or after a successful send re-targets the
+  // form at the now-live message. Mirror that here so the action reads "Update"
+  // when the next post edits in place, "Send" when it posts something new.
+  const isUpdate = useMessageStore((s) => s.restoredFrom != null);
+  const sendLabel = isUpdate ? "Update" : "Send";
 
   const barRef = useRef<HTMLDivElement>(null);
   // We always *prefer* to show the "Send" label. It only drops to an icon when
@@ -89,10 +96,11 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
     return () => ro.disconnect();
   }, []);
 
-  // On every width change, optimistically restore the label…
+  // On every width change — or when the label itself changes ("Send" ↔
+  // "Update", which is wider) — optimistically restore the label…
   useLayoutEffect(() => {
     setSendCompact(false);
-  }, [barWidth]);
+  }, [barWidth, isUpdate]);
 
   // …then, with the label shown, collapse to an icon only if the two control
   // groups can't sit side by side on one row. Each group keeps its natural width
@@ -112,7 +120,7 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
       gap * Math.max(0, groups.length - 1) +
       padX;
     if (needed > bar.clientWidth + 1) setSendCompact(true);
-  }, [sendCompact, barWidth]);
+  }, [sendCompact, barWidth, isUpdate]);
 
   return (
     <div ref={barRef} className={styles.actionBar}>
@@ -198,13 +206,17 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
           id="builder-send-action"
           variant="primary"
           size="sm"
-          leadingIcon={<SendIcon />}
+          leadingIcon={isUpdate ? <PencilIcon /> : <SendIcon />}
           onClick={onSend}
-          aria-label="Send"
-          title="Post this message to your Discord webhook"
+          aria-label={sendLabel}
+          title={
+            isUpdate
+              ? "Update the message you last posted or restored"
+              : "Post this message to your Discord webhook"
+          }
         >
           {/* Hidden only when the bar would otherwise wrap (see sendCompact). */}
-          {sendCompact ? null : "Send"}
+          {sendCompact ? null : sendLabel}
         </Button>
       </div>
     </div>
