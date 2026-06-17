@@ -58,6 +58,7 @@ import {
   type IncomingWebhook,
 } from "@/core/guild/config";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
+import { shouldAutoOpenGallery, markGalleryAutoOpened } from "@/features/templates/galleryAutoOpen";
 import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { readShareTokenFromHash } from "@/core/serialization/url";
@@ -260,9 +261,9 @@ export function App() {
   const openAi = useAiStore((s) => s.openPanel);
   const closeAi = useAiStore((s) => s.closePanel);
 
-  // The full-screen Template Gallery. Auto-opens on a genuine first visit (no
-  // saved draft, no share/webhook deep link, never seen before) and is
-  // reopenable any time from the Builder action bar or the Saved menu.
+  // The full-screen Template Gallery. Auto-opens when useful — first visit, or a
+  // fresh session where the user isn't mid-edit (see `shouldAutoOpenGallery`) —
+  // and is reopenable any time from the Builder action bar or the Saved menu.
   const galleryOpen = useTemplateGalleryStore((s) => s.open);
   const openGallery = useTemplateGalleryStore((s) => s.openGallery);
 
@@ -312,9 +313,10 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Landing screen: open the Template Gallery on every visit so the user always
-  // starts from a deliberate choice — continue their last message, reuse a saved
-  // one, or pick a template — instead of a cold editor. Stands down only when
+  // Landing screen: auto-open the Template Gallery when it's actually useful —
+  // a first visit, or a fresh session where the user isn't mid-edit — instead of
+  // on every refresh (see `shouldAutoOpenGallery`). It stays reopenable any time
+  // from the Builder action bar or the Saved menu. Stands down entirely when
   // we'd be interrupting a dedicated flow: a share/short link being decoded into
   // the editor, or a webhook redirect about to open the Send panel.
   useEffect(() => {
@@ -322,6 +324,8 @@ export function App() {
     if (readShareTokenFromHash(window.location.hash) || readShortLinkId(window.location.pathname)) {
       return;
     }
+    if (!shouldAutoOpenGallery()) return;
+    markGalleryAutoOpened();
     openGallery();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

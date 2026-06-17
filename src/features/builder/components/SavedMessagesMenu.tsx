@@ -51,7 +51,7 @@ export function SavedMessagesMenu() {
             leadingIcon={<BookmarkIcon />}
             trailingIcon={<ChevronDownIcon />}
             collapseLabel
-            title="Save the current message locally, clear everything, or browse saved messages and templates in the gallery"
+            title="Save the current message locally, browse saved messages and templates in the gallery, or clear the current message"
           >
             Saved
           </Button>
@@ -80,15 +80,6 @@ export function SavedMessagesMenu() {
               </MenuItem>
             ) : null}
             <MenuItem
-              icon={<TrashIcon />}
-              onSelect={() => {
-                close();
-                clearAll();
-              }}
-            >
-              Clear everything
-            </MenuItem>
-            <MenuItem
               icon={<TemplateIcon />}
               onSelect={() => {
                 close();
@@ -96,6 +87,15 @@ export function SavedMessagesMenu() {
               }}
             >
               Browse gallery…
+            </MenuItem>
+            <MenuItem
+              icon={<TrashIcon />}
+              onSelect={() => {
+                close();
+                clearAll();
+              }}
+            >
+              Clear current message
             </MenuItem>
           </div>
         )}

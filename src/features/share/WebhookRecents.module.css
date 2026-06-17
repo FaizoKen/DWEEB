@@ -187,11 +187,11 @@
   background: rgba(88, 101, 242, 0.18);
   color: rgb(120, 130, 255);
 }
-/* A custom bot you registered for this server — distinct teal so it reads as
-   "yours" and not the generic/other bot. */
+/* A custom bot you registered for this server — green so it reads as "yours"
+   and matches the green "your bot" chip / "+" on the custom-bot create card. */
 .ownerYourBot {
-  background: rgba(45, 191, 196, 0.18);
-  color: rgb(74, 209, 214);
+  background: var(--app-success-soft);
+  color: var(--app-success-text);
 }
 /* A different / unrelated app — muted, since it's not yours. */
 .ownerOtherBot {

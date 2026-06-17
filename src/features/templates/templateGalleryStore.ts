@@ -6,9 +6,10 @@
  * action bar, the Saved menu, or the on-load effect in `App` — can summon the
  * gallery without prop drilling.
  *
- * The gallery is the app's landing screen: it opens on every visit (see `App`),
- * surfacing "Continue where you left off", saved messages, and templates so a
- * user always starts from a deliberate choice rather than a cold editor.
+ * The gallery is the app's landing screen: it auto-opens when useful (see
+ * `App` + `galleryAutoOpen`), surfacing "Continue where you left off", saved
+ * messages, and templates so a user can start from a deliberate choice rather
+ * than a cold editor.
  */
 
 import { create } from "zustand";

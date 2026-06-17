@@ -137,8 +137,8 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  background: var(--app-bg-hover);
-  color: var(--app-text-muted);
+  background: var(--app-success-soft);
+  color: var(--app-success-text);
 }
 
 /* Collapsed summary shown once a valid webhook URL is set: a quiet status row

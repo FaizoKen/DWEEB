@@ -499,34 +499,11 @@
   color: var(--app-text-subtle);
 }
 
-/* The Continue card is the primary "resume" action — give it a soft accent wash,
- * a tinted border, and a faint accent glow ring so it reads as the highlighted
- * starting point that draws the eye first. */
-.card[data-kind="continue"] {
-  border-color: color-mix(in srgb, var(--card-accent) 55%, var(--app-border));
-  background:
-    linear-gradient(
-      160deg,
-      color-mix(in srgb, var(--card-accent) 16%, transparent),
-      transparent 58%
-    ),
-    var(--app-bg-subtle);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--card-accent) 30%, transparent),
-    0 8px 24px color-mix(in srgb, var(--card-accent) 18%, transparent);
-}
-.card[data-kind="continue"]:hover {
-  border-color: color-mix(in srgb, var(--card-accent) 70%, var(--app-border));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--card-accent) 45%, transparent),
-    var(--app-shadow);
-}
-/* Lift the "Recent" badge to the accent colour so the highlight reads at a
- * glance, not just from the card's wash. */
-.card[data-kind="continue"] .cardCategory {
-  color: var(--card-accent);
-  background: color-mix(in srgb, var(--card-accent) 16%, transparent);
-  border-color: color-mix(in srgb, var(--card-accent) 38%, transparent);
+/* The Continue card is the primary "resume" action — give its text section a
+ * soft accent-tinted background so it reads as distinct from the template cards
+ * without any extra border or glow. */
+.card[data-kind="continue"] .cardBody {
+  background: color-mix(in srgb, var(--card-accent) 14%, var(--app-bg-subtle));
 }
 
 /* ── Delete confirmation dialog ─────────────────────────────────────────── */
