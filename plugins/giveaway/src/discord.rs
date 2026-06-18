@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::store::{Requirements, Status};
 
@@ -486,6 +486,276 @@ pub fn update_button_response(
     Some(json!({ "type": RESPONSE_UPDATE_MESSAGE, "data": data }))
 }
 
+// ── message placeholders (pure) ──────────────────────────────────────────────
+//
+// The host message can carry `{token}` placeholders the giveaway fills in: the
+// live entrant count, the prize, the winners once drawn, the status. DWEEB paints
+// the first values at send time; from then on only THIS service can keep the
+// (webhook-authored) message current, by re-rendering its stored template on each
+// click and replying `UPDATE_MESSAGE`. Re-rendering from the raw-token *template*
+// (never from the already-rendered message) is what makes it idempotent — the
+// count restamps and `{winners}` flips to mentions on the next click after a draw.
+
+/// The live values a giveaway message's placeholders resolve to right now. Built
+/// from the stored config plus the current count / winners / status.
+pub struct RenderVars {
+    pub prize: String,
+    pub entries: i64,
+    pub winner_count: u32,
+    /// Drawn winners' user ids (empty until a draw → `{winners}` renders `TBD`).
+    pub winners: Vec<String>,
+    pub status: Status,
+    pub host_user_id: Option<String>,
+}
+
+impl RenderVars {
+    /// Resolve one token to its rendered string, or `None` for a token this
+    /// plugin doesn't own (left verbatim by [`substitute`], so a stray `{foo}` in
+    /// prose survives untouched). Mirrors the DWEEB manifest's declared set.
+    fn value_of(&self, token: &str) -> Option<String> {
+        Some(match token {
+            "prize" => self.prize.clone(),
+            "entries" => commas(self.entries),
+            "winner_count" => self.winner_count.to_string(),
+            "winners" => {
+                if self.winners.is_empty() {
+                    "TBD".to_string()
+                } else {
+                    join_mentions(&self.winners)
+                }
+            }
+            "status" => status_label(self.status).to_string(),
+            // A `<@id>` mention renders as the host's name; empty when unset.
+            "host" => match &self.host_user_id {
+                Some(id) => format!("<@{id}>"),
+                None => String::new(),
+            },
+            _ => return None,
+        })
+    }
+}
+
+fn status_label(status: Status) -> &'static str {
+    match status {
+        Status::Open => "open",
+        Status::Ended => "ended",
+        Status::Cancelled => "cancelled",
+    }
+}
+
+/// Replace every known `{token}` in `text` with its value; an unknown or
+/// malformed `{…}` is left exactly as written. Pure.
+pub fn substitute(text: &str, vars: &RenderVars) -> String {
+    substitute_with(text, |token| vars.value_of(token))
+}
+
+/// Token substitution with an injected resolver — the shared core so the public
+/// announcement and the in-message render agree on `{token}` syntax to the byte.
+/// Scans on the ASCII `{`/`}` delimiters, so it never splits a multi-byte char.
+fn substitute_with(text: &str, mut resolve: impl FnMut(&str) -> Option<String>) -> String {
+    if !text.contains('{') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        if let Some(close) = after.find('}') {
+            let token = &after[..close];
+            if is_token(token) {
+                if let Some(value) = resolve(token) {
+                    out.push_str(&value);
+                    rest = &after[close + 1..];
+                    continue;
+                }
+            }
+        }
+        // Not a substitutable token: emit the `{` literally and keep scanning.
+        out.push('{');
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A placeholder token: `[a-z0-9_]{1,32}`, matching DWEEB's `PLACEHOLDER_TOKEN_RE`.
+fn is_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 32
+        && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// Render the bound giveaway message from its stored `template` (the host's own
+/// message, captured with raw `{tokens}`): substitute every Text Display content
+/// and button label, then restyle the Enter button (label + `disabled`, and pin
+/// its `custom_id` to `enter_id`). Returns the component tree for an
+/// `UPDATE_MESSAGE`. Pure — the template is cloned, never mutated.
+pub fn render_bound_message(
+    template: &Value,
+    vars: &RenderVars,
+    enter_id: &str,
+    enter_label: Option<&str>,
+    disabled: bool,
+) -> Value {
+    let mut out = template.clone();
+    substitute_tree(&mut out, vars);
+    // Patch the Enter button last so its computed label (live count / "ended")
+    // wins over any substitution done to it above.
+    patch_enter_button(&mut out, enter_id, enter_label, disabled);
+    out
+}
+
+/// Walk a component tree, substituting placeholders in the two user-text fields:
+/// Text Display `content` and button `label`. Generic descent keeps it correct as
+/// the layout nests (containers, sections, action rows).
+fn substitute_tree(v: &mut Value, vars: &RenderVars) {
+    match v {
+        Value::Array(a) => {
+            for item in a.iter_mut() {
+                substitute_tree(item, vars);
+            }
+        }
+        Value::Object(o) => {
+            // Compute first (ends the immutable borrow) then write.
+            if let Some(content) = o.get("content").and_then(Value::as_str).map(|s| substitute(s, vars)) {
+                o.insert("content".into(), Value::String(content));
+            }
+            if let Some(label) = o.get("label").and_then(Value::as_str).map(|s| substitute(s, vars)) {
+                o.insert("label".into(), Value::String(label));
+            }
+            for val in o.values_mut() {
+                substitute_tree(val, vars);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The label of the giveaway's Enter button in a (raw) template — the lone
+/// interactive button — so the live count can be appended to the host's own
+/// wording. None when the template carries no interactive button.
+pub fn enter_button_label(template: &Value) -> Option<String> {
+    fn walk(v: &Value) -> Option<String> {
+        match v {
+            Value::Array(a) => a.iter().find_map(walk),
+            Value::Object(o) => {
+                if is_interactive_button(o) {
+                    return Some(o.get("label").and_then(Value::as_str).unwrap_or_default().to_string());
+                }
+                o.values().find_map(walk)
+            }
+            _ => None,
+        }
+    }
+    walk(template)
+}
+
+/// Restyle the giveaway's Enter button inside a rendered tree: set its label
+/// (when given) + `disabled`, and pin its `custom_id` to `enter_id`. The stored
+/// template may carry a stale/default id (it was captured before DWEEB adopted
+/// the minted one), so we target the button already carrying `enter_id` or — for
+/// a freshly-attached template — the first interactive button.
+fn patch_enter_button(tree: &mut Value, enter_id: &str, label: Option<&str>, disabled: bool) {
+    if !patch_button_with_id(tree, enter_id, enter_id, label, disabled) {
+        patch_first_interactive_button(tree, enter_id, label, disabled);
+    }
+}
+
+/// Patch every button whose `custom_id == match_id` to `new_id` + label/disabled.
+/// Returns whether any matched.
+fn patch_button_with_id(
+    tree: &mut Value,
+    match_id: &str,
+    new_id: &str,
+    label: Option<&str>,
+    disabled: bool,
+) -> bool {
+    fn walk(v: &mut Value, match_id: &str, new_id: &str, label: Option<&str>, disabled: bool, hit: &mut bool) {
+        match v {
+            Value::Array(a) => {
+                for item in a.iter_mut() {
+                    walk(item, match_id, new_id, label, disabled, hit);
+                }
+            }
+            Value::Object(o) => {
+                if o.get("custom_id").and_then(Value::as_str) == Some(match_id) {
+                    apply_button(o, new_id, label, disabled);
+                    *hit = true;
+                }
+                for val in o.values_mut() {
+                    walk(val, match_id, new_id, label, disabled, hit);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut hit = false;
+    walk(tree, match_id, new_id, label, disabled, &mut hit);
+    hit
+}
+
+/// Patch the first interactive button found (depth-first), pinning it to
+/// `new_id`. Returns whether one was patched.
+fn patch_first_interactive_button(tree: &mut Value, new_id: &str, label: Option<&str>, disabled: bool) -> bool {
+    match tree {
+        Value::Array(a) => a
+            .iter_mut()
+            .any(|item| patch_first_interactive_button(item, new_id, label, disabled)),
+        Value::Object(o) => {
+            if is_interactive_button(o) {
+                apply_button(o, new_id, label, disabled);
+                return true;
+            }
+            o.values_mut()
+                .any(|val| patch_first_interactive_button(val, new_id, label, disabled))
+        }
+        _ => false,
+    }
+}
+
+/// An object that is an interactive button (type 2 carrying a `custom_id` — not a
+/// Link/Premium button, which have none).
+fn is_interactive_button(o: &Map<String, Value>) -> bool {
+    o.get("type").and_then(Value::as_u64) == Some(COMPONENT_TYPE_BUTTON as u64)
+        && o.contains_key("custom_id")
+}
+
+fn apply_button(o: &mut Map<String, Value>, custom_id: &str, label: Option<&str>, disabled: bool) {
+    o.insert("custom_id".into(), json!(custom_id));
+    if let Some(l) = label {
+        o.insert("label".into(), json!(clamp(l, MAX_LABEL)));
+    }
+    o.insert("disabled".into(), json!(disabled));
+}
+
+/// Build the `UPDATE_MESSAGE` that re-renders the bound message from `template`
+/// with current `vars`. Preserves the live message's V2 flag / plain content
+/// exactly like [`update_button_response`]. `allowed_mentions.parse = []` so a
+/// re-render can't ping `@everyone` and winners render as names without
+/// re-notifying (the public announcement already pinged them).
+pub fn update_message_from_template(
+    message: &MessageRef,
+    template: &Value,
+    vars: &RenderVars,
+    enter_id: &str,
+    enter_label: Option<&str>,
+    disabled: bool,
+) -> Value {
+    let components = render_bound_message(template, vars, enter_id, enter_label, disabled);
+    let mut data = json!({
+        "components": components,
+        "allowed_mentions": { "parse": [] },
+    });
+    let flags = message.flags.unwrap_or(0);
+    if flags & FLAG_IS_COMPONENTS_V2 != 0 {
+        data["flags"] = json!(FLAG_IS_COMPONENTS_V2);
+    } else if let Some(content) = message.content.as_deref() {
+        data["content"] = json!(content);
+    }
+    json!({ "type": RESPONSE_UPDATE_MESSAGE, "data": data })
+}
+
 // ── outgoing callbacks (pure) ────────────────────────────────────────────────
 
 pub fn pong() -> Value {
@@ -581,30 +851,31 @@ pub fn host_panel(id: &str, status: Status, entered: bool, entry_count: i64, win
 }
 
 /// The public winner announcement (a non-ephemeral interaction response, so it
-/// posts in the channel with **no bot token**). Pings only the winners.
-pub fn announcement_message(
-    prize: &str,
-    winners: &[String],
-    rerolled: bool,
-    custom: Option<&str>,
-) -> Value {
-    let mentions = join_mentions(winners);
+/// posts in the channel with **no bot token**). Pings only the winners. A custom
+/// template runs through the same [`substitute`] as the in-message placeholders,
+/// so `{winners}`, `{prize}`, `{entries}`, `{status}` … all work here too.
+pub fn announcement_message(vars: &RenderVars, rerolled: bool, custom: Option<&str>) -> Value {
     let text = match custom.map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => {
-            let body = t.replace("{winners}", &mentions).replace("{prize}", prize);
+            let body = substitute(t, vars);
             if rerolled {
                 format!("\u{1F501} **Reroll!** {body}")
             } else {
                 body
             }
         }
-        None => default_announcement(prize, &mentions, rerolled, winners.len()),
+        None => default_announcement(
+            &vars.prize,
+            &join_mentions(&vars.winners),
+            rerolled,
+            vars.winners.len(),
+        ),
     };
     json!({
         "type": RESPONSE_CHANNEL_MESSAGE,
         "data": {
             "content": clamp(&text, MAX_CONTENT),
-            "allowed_mentions": { "parse": [], "users": winners },
+            "allowed_mentions": { "parse": [], "users": vars.winners },
         }
     })
 }
@@ -930,10 +1201,21 @@ mod tests {
         v["data"]["content"].as_str().unwrap().to_string()
     }
 
+    /// A `RenderVars` for tests: ended giveaway for `prize` with these winners.
+    fn vars(prize: &str, winners: &[&str]) -> RenderVars {
+        RenderVars {
+            prize: prize.to_string(),
+            entries: winners.len() as i64,
+            winner_count: winners.len().max(1) as u32,
+            winners: ids(winners),
+            status: Status::Ended,
+            host_user_id: None,
+        }
+    }
+
     #[test]
     fn announcement_pings_only_winners_and_names_the_prize() {
-        let winners = ids(&["1", "2"]);
-        let v = announcement_message("Nitro", &winners, false, None);
+        let v = announcement_message(&vars("Nitro", &["1", "2"]), false, None);
         let text = ann_text(&v);
         assert!(text.contains("<@1>") && text.contains("<@2>") && text.contains("**Nitro**"));
         // allowed_mentions pings the two winners, nothing else.
@@ -943,13 +1225,13 @@ mod tests {
 
     #[test]
     fn announcement_reroll_says_so() {
-        let v = announcement_message("Nitro", &ids(&["1"]), true, None);
+        let v = announcement_message(&vars("Nitro", &["1"]), true, None);
         assert!(ann_text(&v).to_lowercase().contains("reroll"));
     }
 
     #[test]
     fn announcement_custom_template_substitutes_placeholders() {
-        let v = announcement_message("Nitro", &ids(&["1"]), false, Some("GG {winners}, enjoy {prize}!"));
+        let v = announcement_message(&vars("Nitro", &["1"]), false, Some("GG {winners}, enjoy {prize}!"));
         let text = ann_text(&v);
         assert!(text.contains("GG <@1>, enjoy Nitro!"));
     }
@@ -968,5 +1250,166 @@ mod tests {
         assert_eq!(commas(999), "999");
         assert_eq!(commas(1234), "1,234");
         assert_eq!(commas(1234567), "1,234,567");
+    }
+
+    // ── message placeholders ─────────────────────────────────────────────────
+    fn open_vars(prize: &str, entries: i64) -> RenderVars {
+        RenderVars {
+            prize: prize.to_string(),
+            entries,
+            winner_count: 2,
+            winners: vec![],
+            status: Status::Open,
+            host_user_id: Some("99".to_string()),
+        }
+    }
+
+    #[test]
+    fn substitute_resolves_known_tokens_and_keeps_unknown() {
+        let v = open_vars("Nitro", 1234);
+        assert_eq!(
+            substitute("Win {prize} · {entries} in · {winner_count} winner(s) · {status}", &v),
+            "Win Nitro · 1,234 in · 2 winner(s) · open"
+        );
+        // Host renders as a mention; an unknown token is left verbatim.
+        assert_eq!(substitute("by {host} {unknown}", &v), "by <@99> {unknown}");
+        // A malformed brace run is left alone (no token inside).
+        assert_eq!(substitute("a { b } c", &v), "a { b } c");
+    }
+
+    #[test]
+    fn winners_token_is_tbd_until_drawn_then_mentions() {
+        let mut v = open_vars("Nitro", 3);
+        assert_eq!(substitute("Winners: {winners}", &v), "Winners: TBD");
+        v.winners = ids(&["1", "2"]);
+        v.status = Status::Ended;
+        assert_eq!(substitute("Winners: {winners}", &v), "Winners: <@1> and <@2>");
+    }
+
+    #[test]
+    fn substitute_does_not_inject_mass_pings() {
+        // No token resolves to `@everyone` / `@here`; a winner is only ever a
+        // `<@id>` from the stored set, never raw client text.
+        let v = open_vars("@everyone", 1);
+        // Even a prize literally containing @everyone is just text — the public
+        // announcement's allowed_mentions (parse: []) is what stops it pinging.
+        assert!(substitute("{prize}", &v).contains("@everyone"));
+        // ...and the in-message UPDATE keeps parse empty (see the test below).
+    }
+
+    fn sample_template() -> Value {
+        // A V2 layout: a container with a text display + an action-row Enter
+        // button, plus a sibling text display that must survive untouched.
+        json!([
+            { "type": 17, "components": [
+                { "type": 10, "content": "🎁 Win {prize}! Entered: {entries}. Winners: {winners}." },
+                { "type": 1, "components": [
+                    { "type": 2, "style": 3, "label": "🎉 Enter", "custom_id": "giveaway:abc" }
+                ]}
+            ]},
+            { "type": 10, "content": "Good luck!" }
+        ])
+    }
+
+    #[test]
+    fn render_bound_message_substitutes_text_and_restyles_enter_button() {
+        let tree = sample_template();
+        let v = open_vars("Nitro", 3);
+        let out = render_bound_message(&tree, &v, "giveaway:abc", Some("🎉 Enter (3)"), false);
+
+        // Body text rendered; pre-draw winners show TBD.
+        assert_eq!(
+            out[0]["components"][0]["content"],
+            "🎁 Win Nitro! Entered: 3. Winners: TBD."
+        );
+        // The sibling text display is preserved verbatim.
+        assert_eq!(out[1]["content"], "Good luck!");
+        // The Enter button got the computed label + explicit (false) disabled.
+        let btn = &out[0]["components"][1]["components"][0];
+        assert_eq!(btn["label"], "🎉 Enter (3)");
+        assert_eq!(btn["disabled"], false);
+        assert_eq!(btn["custom_id"], "giveaway:abc");
+    }
+
+    #[test]
+    fn render_fills_winners_after_a_draw_and_is_idempotent() {
+        let tree = sample_template();
+        let drawn = RenderVars {
+            prize: "Nitro".into(),
+            entries: 9,
+            winner_count: 2,
+            winners: ids(&["1", "2"]),
+            status: Status::Ended,
+            host_user_id: None,
+        };
+        let once = render_bound_message(&tree, &drawn, "giveaway:abc", Some("🏁 Giveaway ended"), true);
+        assert_eq!(
+            once[0]["components"][0]["content"],
+            "🎁 Win Nitro! Entered: 9. Winners: <@1> and <@2>."
+        );
+        let btn = &once[0]["components"][1]["components"][0];
+        assert_eq!(btn["label"], "🏁 Giveaway ended");
+        assert_eq!(btn["disabled"], true);
+        // Rendering again from the same (raw-token) template yields the same
+        // result — re-render never compounds, so a reroll just swaps the winners.
+        let twice = render_bound_message(&tree, &drawn, "giveaway:abc", Some("🏁 Giveaway ended"), true);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn render_patches_the_button_even_with_a_stale_template_id() {
+        // A freshly-attached template still carries the editor's default id; the
+        // first interactive button is pinned to the real enter id on render.
+        let tree = json!([
+            { "type": 1, "components": [
+                { "type": 2, "style": 3, "label": "Enter", "custom_id": "button_action" }
+            ]}
+        ]);
+        let v = open_vars("Nitro", 0);
+        let out = render_bound_message(&tree, &v, "giveaway:xyz", Some("🎉 Enter (0)"), false);
+        let btn = &out[0]["components"][0];
+        assert_eq!(btn["custom_id"], "giveaway:xyz");
+        assert_eq!(btn["label"], "🎉 Enter (0)");
+    }
+
+    #[test]
+    fn enter_button_label_reads_the_lone_interactive_button() {
+        assert_eq!(enter_button_label(&sample_template()).as_deref(), Some("🎉 Enter"));
+        // A tree with only a link button (no custom_id) has no enter button.
+        let link_only = json!([{ "type": 1, "components": [
+            { "type": 2, "style": 5, "label": "Rules", "url": "https://x" }
+        ]}]);
+        assert_eq!(enter_button_label(&link_only), None);
+    }
+
+    #[test]
+    fn update_from_template_preserves_v2_flag_and_keeps_mentions_closed() {
+        let msg = MessageRef {
+            content: Some(String::new()),
+            components: Some(sample_template()),
+            flags: Some(FLAG_IS_COMPONENTS_V2),
+        };
+        let drawn = RenderVars {
+            prize: "Nitro".into(),
+            entries: 9,
+            winner_count: 1,
+            winners: ids(&["1"]),
+            status: Status::Ended,
+            host_user_id: None,
+        };
+        let v = update_message_from_template(
+            &msg,
+            &sample_template(),
+            &drawn,
+            "giveaway:abc",
+            Some("🏁 Giveaway ended"),
+            true,
+        );
+        assert_eq!(v["type"], 7);
+        assert_eq!(v["data"]["flags"], FLAG_IS_COMPONENTS_V2);
+        assert!(v["data"].get("content").is_none()); // V2 forbids content
+        // A re-render never pings — even though a winner mention is now in the body.
+        assert_eq!(v["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert!(v["data"]["allowed_mentions"].get("users").is_none());
     }
 }

@@ -52,7 +52,15 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/giveaway",
             "targets": ["button"],
             "configUrl": format!("{base}/config.html"),
-            "customIdPrefix": "giveaway:"
+            "customIdPrefix": "giveaway:",
+            "placeholders": [
+                { "token": "prize", "label": "Prize", "sample": "the prize" },
+                { "token": "entries", "label": "Entry count", "sample": "0" },
+                { "token": "winners", "label": "Winners", "sample": "TBD" },
+                { "token": "winner_count", "label": "Number of winners", "sample": "1" },
+                { "token": "host", "label": "Host", "sample": "the host" },
+                { "token": "status", "label": "Status", "sample": "open" }
+            ]
         }]
     }))
 }
@@ -250,7 +258,7 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
         account_ms,
         &g.config.requirements,
     ) {
-        Eligibility::Over => over_response(interaction, &g, id),
+        Eligibility::Over => over_response(state, interaction, &g, id),
         Eligibility::EntriesClosed => Json(discord::ephemeral_text(
             "\u{23F0} Entries have closed — the winners will be drawn soon. Good luck!",
         ))
@@ -266,9 +274,10 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
         .into_response(),
         Eligibility::Ok => match state.store.enter(id, uid) {
             Ok(true) => {
-                // A brand-new entry: restamp the live count onto the button.
+                // A brand-new entry: restamp the live count onto the button (and,
+                // when placeholders are in play, re-render `{entries}` in the body).
                 let count = state.store.count_entries(id).unwrap_or(1);
-                match entry_count_update(interaction, id, count) {
+                match entry_count_update(interaction, &g, id, count) {
                     Some(v) => Json(v).into_response(),
                     None => Json(discord::ephemeral_text(&format!(
                         "\u{2705} You're in! You're 1 of **{count}**. Good luck! \u{1F340}"
@@ -290,10 +299,13 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
 }
 
 /// The response to an Enter click on a giveaway that's already over: lazily flip
-/// the public message to its end state (disable the button, relabel it) so the
-/// message itself shows it's done. Falls back to an ephemeral note if the
-/// message carried no components to edit.
-fn over_response(interaction: &discord::Interaction, g: &Giveaway, id: &str) -> Response {
+/// the public message to its end state so the message itself shows it's done —
+/// the button disables and relabels, and (when the host used placeholders) the
+/// `{winners}` / `{status}` text fills in from the stored template. This is the
+/// click that finally refreshes the message after a draw, since a webhook message
+/// is editable only in reply to a click on it. Falls back to an ephemeral note if
+/// the message carried no components to edit.
+fn over_response(state: &AppState, interaction: &discord::Interaction, g: &Giveaway, id: &str) -> Response {
     let (label, note) = match g.status {
         Status::Cancelled => (
             "\u{274C} Giveaway cancelled",
@@ -311,9 +323,17 @@ fn over_response(interaction: &discord::Interaction, g: &Giveaway, id: &str) -> 
             },
         ),
     };
-    let custom = discord::enter_id(id);
+    let enter = discord::enter_id(id);
     if let Some(msg) = interaction.message.as_ref() {
-        if let Some(v) = discord::update_button_response(msg, &custom, Some(label), true) {
+        if let Some(template) = g.config.message_template.as_ref() {
+            // Re-render the whole message: winners, status and the final count all
+            // settle into the host's own text.
+            let count = state.store.count_entries(id).unwrap_or(0);
+            let vars = render_vars(&g.config, count, g.winners.clone(), g.status);
+            return Json(discord::update_message_from_template(msg, template, &vars, &enter, Some(label), true))
+                .into_response();
+        }
+        if let Some(v) = discord::update_button_response(msg, &enter, Some(label), true) {
             return Json(v).into_response();
         }
     }
@@ -397,8 +417,8 @@ fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -
     }
     maybe_dm_winners(state, &g.config, &winners);
 
-    Json(discord::announcement_message(&g.config.prize, &winners, false, g.config.announcement.as_deref()))
-        .into_response()
+    let vars = render_vars(&g.config, entrants.len() as i64, winners.clone(), Status::Ended);
+    Json(discord::announcement_message(&vars, false, g.config.announcement.as_deref())).into_response()
 }
 
 fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
@@ -436,8 +456,9 @@ fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str)
     }
     maybe_dm_winners(state, &g.config, &winners);
 
-    Json(discord::announcement_message(&g.config.prize, &winners, true, g.config.announcement.as_deref()))
-        .into_response()
+    let entries = state.store.count_entries(id).unwrap_or(pool.len() as i64);
+    let vars = render_vars(&g.config, entries, winners.clone(), Status::Ended);
+    Json(discord::announcement_message(&vars, true, g.config.announcement.as_deref())).into_response()
 }
 
 fn handle_cancel(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
@@ -466,17 +487,46 @@ fn handle_cancel(state: &AppState, interaction: &discord::Interaction, id: &str)
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /// Build the `UPDATE_MESSAGE` that restamps the entrant count on the Enter
-/// button, reusing the button's current label so the host's own wording is kept.
-fn entry_count_update(interaction: &discord::Interaction, id: &str, count: i64) -> Option<Value> {
+/// button. When the host used placeholders, re-render the whole message from the
+/// stored template (so `{entries}` updates in the body too, and the count rides
+/// the host's own button wording); otherwise just restamp the live button label,
+/// preserving the rest of the message exactly as before.
+fn entry_count_update(
+    interaction: &discord::Interaction,
+    g: &Giveaway,
+    id: &str,
+    count: i64,
+) -> Option<Value> {
     let msg = interaction.message.as_ref()?;
-    let custom = discord::enter_id(id);
+    let enter = discord::enter_id(id);
+
+    if let Some(template) = g.config.message_template.as_ref() {
+        let vars = render_vars(&g.config, count, g.winners.clone(), g.status);
+        let base = discord::enter_button_label(template).unwrap_or_else(|| "\u{1F389} Enter".to_string());
+        let label = discord::label_with_count(&discord::substitute(&base, &vars), count);
+        return Some(discord::update_message_from_template(msg, template, &vars, &enter, Some(&label), false));
+    }
+
     let current = msg
         .components
         .as_ref()
-        .and_then(|c| discord::find_button_label(c, &custom))
+        .and_then(|c| discord::find_button_label(c, &enter))
         .unwrap_or_else(|| "\u{1F389} Enter".to_string());
     let label = discord::label_with_count(&current, count);
-    discord::update_button_response(msg, &custom, Some(&label), false)
+    discord::update_button_response(msg, &enter, Some(&label), false)
+}
+
+/// Assemble the placeholder values for the giveaway's current state — the bridge
+/// from stored config + runtime to the pure renderer in `discord.rs`.
+fn render_vars(cfg: &InstanceConfig, entries: i64, winners: Vec<String>, status: Status) -> discord::RenderVars {
+    discord::RenderVars {
+        prize: cfg.prize.clone(),
+        entries,
+        winner_count: cfg.winner_count,
+        winners,
+        status,
+        host_user_id: cfg.host_user_id.clone(),
+    }
 }
 
 /// Turn a freshly-built (type 4) ephemeral reply into an `UPDATE_MESSAGE` (type
@@ -546,4 +596,164 @@ fn not_found() -> Response {
 
 fn storage_error() -> Response {
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Storage error." }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    //! Lifecycle integration tests: drive the real interaction handlers against a
+    //! live (in-memory) store and assert the Discord payloads they emit — the
+    //! glue the pure `discord.rs` tests can't cover (store reads, the
+    //! template-vs-fallback branch, the draw→over refresh).
+
+    use super::*;
+    use crate::config::Config;
+    use crate::store::Requirements;
+
+    const MANAGE_GUILD: &str = "32"; // 1 << 5
+
+    fn test_state() -> AppState {
+        let store = Store::open(":memory:").expect("open store");
+        let config = Config {
+            port: 0,
+            public_base_url: "http://localhost".into(),
+            discord_public_key: "0".repeat(64),
+            dispatcher_forward_secret: None,
+            database_path: ":memory:".into(),
+            default_bot_token: None,
+            bot_invite_url: None,
+        };
+        AppState { store: Arc::new(store), http: reqwest::Client::new(), config: Arc::new(config) }
+    }
+
+    /// A giveaway config for `Nitro`, 1 winner, in guild `1`, optionally carrying a
+    /// message template.
+    fn config_with(template: Option<Value>) -> InstanceConfig {
+        InstanceConfig {
+            target: "button".into(),
+            guild_id: "1".into(),
+            guild_name: String::new(),
+            prize: "Nitro".into(),
+            winner_count: 1,
+            description: None,
+            host_user_id: None,
+            ends_at: None,
+            requirements: Requirements::default(),
+            host_roles: vec![],
+            dm_winners: false,
+            announcement: None,
+            message_template: template,
+        }
+    }
+
+    /// A host message that uses every placeholder, plus the Enter button.
+    fn template(id: &str) -> Value {
+        json!([
+            { "type": 10, "content": "Win {prize}! In: {entries}. Winners: {winners}. [{status}]" },
+            { "type": 1, "components": [
+                { "type": 2, "style": 3, "label": "\u{1F389} Enter", "custom_id": format!("giveaway:{id}") }
+            ]}
+        ])
+    }
+
+    /// The components Discord echoes back on a click (a V2 message). For the
+    /// template path the body is irrelevant (we render from the stored template);
+    /// for the no-template path it's what gets restamped.
+    fn live_components(id: &str, body: &str) -> Value {
+        json!([
+            { "type": 10, "content": body },
+            { "type": 1, "components": [
+                { "type": 2, "style": 3, "label": "\u{1F389} Enter", "custom_id": format!("giveaway:{id}") }
+            ]}
+        ])
+    }
+
+    fn enter_click(id: &str, user: &str, perms: &str, components: Value) -> discord::Interaction {
+        serde_json::from_value(json!({
+            "type": 3,
+            "guild_id": "1",
+            "data": { "custom_id": format!("giveaway:{id}") },
+            "member": { "user": { "id": user }, "roles": [], "permissions": perms },
+            "message": { "content": "", "components": components, "flags": 32768 }
+        }))
+        .expect("interaction")
+    }
+
+    fn control_click(id: &str, verb: &str, perms: &str) -> discord::Interaction {
+        serde_json::from_value(json!({
+            "type": 3,
+            "guild_id": "1",
+            "data": { "custom_id": format!("giveaway:{verb}:{id}") },
+            "member": { "user": { "id": "1" }, "roles": [], "permissions": perms },
+            "message": { "content": "", "components": Value::Null, "flags": 64 }
+        }))
+        .expect("interaction")
+    }
+
+    /// Read the JSON body out of a handler's `Response`.
+    fn body_json(resp: Response) -> Value {
+        let bytes = futures::executor::block_on(axum::body::to_bytes(resp.into_body(), usize::MAX))
+            .expect("read body");
+        serde_json::from_slice(&bytes).expect("json body")
+    }
+
+    #[test]
+    fn entering_renders_placeholders_into_the_message_body_and_button() {
+        let state = test_state();
+        let id = "abc";
+        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+
+        let resp = handle_component(&state, &enter_click(id, "555", "0", template(id)));
+        let v = body_json(resp);
+        assert_eq!(v["type"], 7); // UPDATE_MESSAGE
+        let s = v.to_string();
+        // The body filled in: prize, the live count, winners-not-drawn, status.
+        assert!(s.contains("Win Nitro!"), "{s}");
+        assert!(s.contains("In: 1"), "{s}");
+        assert!(s.contains("Winners: TBD"), "{s}");
+        assert!(s.contains("[open]"), "{s}");
+        // The count also rides the host's own button wording, button still live.
+        assert!(s.contains("Enter (1)"), "{s}");
+        assert!(s.contains("\"disabled\":false"), "{s}");
+    }
+
+    #[test]
+    fn drawing_then_a_click_fills_the_winners_into_the_message() {
+        let state = test_state();
+        let id = "abc";
+        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        for u in ["100", "200", "300"] {
+            state.store.enter(id, u).unwrap();
+        }
+
+        // A host draws — public announcement, winners recorded.
+        let drawn = body_json(handle_component(&state, &control_click(id, "draw", MANAGE_GUILD)));
+        assert_eq!(drawn["type"], 4);
+        let winner = state.store.get(id).unwrap().unwrap().winners.into_iter().next().unwrap();
+        assert!(["100", "200", "300"].contains(&winner.as_str()));
+
+        // The next click on the original message refreshes it: winner mention in
+        // the body, status ended, the Enter button disabled.
+        let over = body_json(handle_component(&state, &enter_click(id, "999", "0", template(id))));
+        assert_eq!(over["type"], 7);
+        let s = over.to_string();
+        assert!(s.contains(&format!("<@{winner}>")), "{s}");
+        assert!(s.contains("[ended]"), "{s}");
+        assert!(s.contains("In: 3"), "{s}");
+        assert!(s.contains("\"disabled\":true"), "{s}");
+    }
+
+    #[test]
+    fn without_a_template_only_the_button_restamps() {
+        let state = test_state();
+        let id = "xyz";
+        state.store.create(id, &config_with(None)).unwrap();
+
+        let live = live_components(id, "My own giveaway copy");
+        let v = body_json(handle_component(&state, &enter_click(id, "555", "0", live)));
+        assert_eq!(v["type"], 7);
+        let s = v.to_string();
+        // The user's body is preserved verbatim; only the button gains the count.
+        assert!(s.contains("My own giveaway copy"), "{s}");
+        assert!(s.contains("Enter (1)"), "{s}");
+    }
 }

@@ -1,8 +1,9 @@
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, Fragment, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
-import { Menu, MenuDivider, MenuItem } from "@/ui/Menu";
+import { Menu, MenuDivider, MenuItem, MenuLabel } from "@/ui/Menu";
 import {
   BoldIcon,
+  BracesIcon,
   ChevronDownIcon,
   ClockIcon,
   CodeBlockIcon,
@@ -43,6 +44,7 @@ import {
   GuildEmojiPanel,
   GuildMentionPanel,
 } from "@/features/guild/MentionPicker";
+import type { PlaceholderGroup } from "@/core/plugins/placeholders";
 import styles from "./MarkdownToolbar.module.css";
 
 type Transform = (state: EditState) => EditResult;
@@ -52,6 +54,13 @@ interface MarkdownToolbarProps {
   state: EditState;
   /** Runs a transform against the current selection and commits the result. */
   onAction: (transform: Transform) => void;
+  /**
+   * Placeholders offered for this message, grouped by provider (the core
+   * server/channel set, then each attached plugin). When present, a `{}` dropdown
+   * inserts them at the caret, with each group under its own heading. Empty/omitted
+   * hides the control.
+   */
+  placeholders?: PlaceholderGroup[];
   disabled?: boolean;
 }
 
@@ -94,7 +103,7 @@ const ToolButton = forwardRef<HTMLButtonElement, ToolButtonProps>(function ToolB
  * pure transform in `markdownActions`; the component itself holds no state and
  * just reflects the selection it's handed.
  */
-export function MarkdownToolbar({ state, onAction, disabled }: MarkdownToolbarProps) {
+export function MarkdownToolbar({ state, onAction, placeholders, disabled }: MarkdownToolbarProps) {
   const inline = (marker: string, placeholder: string) => () =>
     onAction((s) => wrapInline(s, marker, placeholder));
   const active = (marker: string) => isInlineActive(state, marker);
@@ -302,6 +311,40 @@ export function MarkdownToolbar({ state, onAction, disabled }: MarkdownToolbarPr
             />
           )}
         </Menu>
+
+        {placeholders && placeholders.length > 0 ? (
+          <Menu
+            align="end"
+            trigger={
+              <ToolButton label="Placeholder" className={styles.btnMenu}>
+                <BracesIcon />
+                <ChevronDownIcon size={12} className={styles.caret} />
+              </ToolButton>
+            }
+          >
+            {(close) => (
+              <>
+                {placeholders.map((group, gi) => (
+                  <Fragment key={group.source}>
+                    {gi > 0 ? <MenuDivider /> : null}
+                    <MenuLabel>{group.source}</MenuLabel>
+                    {group.items.map((p) => (
+                      <MenuItem
+                        key={p.token}
+                        onSelect={() => {
+                          onAction((s) => insertSnippet(s, `{${p.token}}`));
+                          close();
+                        }}
+                      >
+                        {`${p.label} — {${p.token}}`}
+                      </MenuItem>
+                    ))}
+                  </Fragment>
+                ))}
+              </>
+            )}
+          </Menu>
+        ) : null}
       </div>
     </div>
   );

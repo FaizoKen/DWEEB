@@ -12,6 +12,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// One role referenced by a giveaway — an entry-requirement role or a host role.
 /// `name`/`color` are cached at save time purely so the config UI can render
@@ -91,6 +92,14 @@ pub struct InstanceConfig {
     /// default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub announcement: Option<String>,
+    /// The host's own message, captured as a Components V2 tree (a JSON array)
+    /// with its raw `{token}` placeholders intact — the *template* this plugin
+    /// re-renders on each click to keep the live count, winners and status
+    /// current. None = no placeholders in play (older giveaway, or a message that
+    /// uses none); the live count then falls back to restyling the button alone.
+    /// Captured by the config iframe on save via the `message` editor resource.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_template: Option<Value>,
 }
 
 fn default_target() -> String {

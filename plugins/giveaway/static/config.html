@@ -165,8 +165,11 @@
       <textarea id="description" rows="2" maxlength="1500"
         placeholder="Anything extra to show — how to claim, rules, etc."></textarea>
       <div class="hint">
-        Tip: write the giveaway text in your DWEEB message however you like, then attach
-        this button to it. The <b>live entrant count</b> appears right on the button.
+        Tip: write the giveaway text in your DWEEB message, then attach this button to it.
+        Drop these <b>placeholders</b> into the message text and they fill in — and stay
+        live: <code>{prize}</code>, <code>{entries}</code>, <code>{winners}</code>,
+        <code>{winner_count}</code>, <code>{host}</code>, <code>{status}</code>. The winners
+        appear the moment you draw, the entrant count keeps ticking (it also rides the button).
       </div>
     </div>
 
@@ -237,7 +240,7 @@
         <label class="lbl" for="announcement" style="margin-top: 10px">Custom announcement (optional)</label>
         <textarea id="announcement" rows="2" maxlength="1500"
           placeholder="Default: 🎉 Giveaway ended! Congratulations {winners} — you won {prize}!"></textarea>
-        <div class="hint">Use <code>{winners}</code> and <code>{prize}</code> — they're filled in for you.</div>
+        <div class="hint">Use <code>{winners}</code>, <code>{prize}</code>, <code>{entries}</code> and the other placeholders — they're filled in for you.</div>
 
         <!-- Host roles -->
         <label class="lbl" style="margin-top: 12px">Extra host roles
@@ -569,6 +572,27 @@
         return roles.filter((r) => selected.has(r.id)).map((r) => ({ id: r.id, name: r.name, color: r.color || 0 }));
       }
 
+      // The placeholders this giveaway fills into the host's message text.
+      const GIVEAWAY_TOKENS = ["prize", "entries", "winners", "winner_count", "host", "status"];
+
+      // True when the user actually dropped one of our placeholders into their
+      // message. We only keep a render template when they did — otherwise the
+      // live count keeps restamping the button alone, exactly as before, with no
+      // template to drift if they later edit the message.
+      function hasPlaceholders(components) {
+        const re = new RegExp("\\{(" + GIVEAWAY_TOKENS.join("|") + ")\\}");
+        let found = false;
+        const visit = (n) => {
+          if (found || !n || typeof n !== "object") return;
+          if (Array.isArray(n)) return n.forEach(visit);
+          if (typeof n.content === "string" && re.test(n.content)) return void (found = true);
+          if (typeof n.label === "string" && re.test(n.label)) return void (found = true);
+          for (const k in n) visit(n[k]);
+        };
+        visit(components);
+        return found;
+      }
+
       async function save() {
         $("error").textContent = "";
         const guildId = $("guildId").value.trim();
@@ -580,6 +604,15 @@
         const winnerCount = Math.max(1, Math.min(20, parseInt($("winners").value, 10) || 1));
         const hostId = $("hostId").value.trim();
         if (hostId && !isSnowflake(hostId)) return fail("The host id should be a Discord user id (17–20 digits), or blank.");
+
+        // Capture the message the user is building so we can re-render its
+        // placeholders live once it's posted (best-effort; null if the editor
+        // didn't answer, or the user used no placeholders → no template to keep).
+        const builtMessage = await requestResource("message");
+        const messageTemplate =
+          builtMessage && Array.isArray(builtMessage.components) && hasPlaceholders(builtMessage.components)
+            ? builtMessage.components
+            : null;
 
         const body = {
           target: "button",
@@ -598,6 +631,7 @@
           host_roles: roleRefs(selectedHost),
           dm_winners: $("dmWinners").checked && defaultBot,
           announcement: $("announcement").value.trim() || null,
+          message_template: messageTemplate,
         };
 
         setBusy(true);
@@ -614,6 +648,11 @@
             return fail(data.error || `Server returned ${res.status}.`);
           }
           const id = data.id || instanceId;
+          // Static values for the host's first paint of any `{token}` text — the
+          // real prize / winner count / host. The dynamic ones (entries, winners,
+          // status) fall back to their manifest samples until a click renders them.
+          const values = { prize, winner_count: String(winnerCount) };
+          if (hostId) values.host = `<@${hostId}>`;
           parent.postMessage(
             {
               type: "dweeb:plugin:save",
@@ -624,6 +663,7 @@
                 label: "Giveaway",
                 description: `${prize.slice(0, 60)} · ${winnerCount} winner${winnerCount === 1 ? "" : "s"}`,
               },
+              values,
             },
             hostOrigin,
           );

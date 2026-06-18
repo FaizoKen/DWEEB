@@ -25,6 +25,8 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { stripEditorFields } from "@/core/serialization/normalize";
+import { getPlugins } from "@/core/plugins/registry";
+import { bakeForeignPlaceholders, type PlaceholderContext } from "@/core/plugins/placeholders";
 import { loadHistory } from "@/core/webhook";
 
 /** Resources a plugin may request. Anything else is refused. */
@@ -44,6 +46,25 @@ interface ResourceContext {
   target: string;
   /** The component's current custom_id, when one exists. */
   customId?: string;
+  /**
+   * The requesting plugin's manifest id. Used to scope the `message` resource:
+   * tokens this plugin owns stay raw (it re-renders them live), every other
+   * token is baked to its first-paint value. Absent → no baking.
+   */
+  pluginId?: string;
+}
+
+/**
+ * Server/channel context known while a plugin's config iframe is open: the
+ * *connected* guild (the editor's preview server). The destination channel isn't
+ * chosen until send, so channel tokens bake to their sample here — see
+ * `bakeForeignPlaceholders` and the placeholders module header.
+ */
+function authoringContext(): PlaceholderContext {
+  const { guildId } = useGuildStore.getState();
+  if (!guildId) return {};
+  const name = useAuthStore.getState().guilds.find((g) => g.id === guildId)?.name;
+  return { serverId: guildId, ...(name ? { serverName: name } : {}) };
 }
 
 export function resolvePluginResource(resource: string, ctx: ResourceContext): ResourceResult {
@@ -84,8 +105,16 @@ export function resolvePluginResource(resource: string, ctx: ResourceContext): R
     }
     case "message": {
       // The message currently being built, as the clean Discord wire payload.
+      // When a plugin requests it (to capture as its live-render template), bake
+      // every token the plugin doesn't own to its first-paint value — so other
+      // providers' tokens (core server/channel, another plugin) don't decay to
+      // raw `{token}` text when this plugin re-renders the message after posting.
+      // The plugin's own tokens stay raw for it to keep rendering.
       const message = useMessageStore.getState().message;
-      return { ok: true, data: stripEditorFields(message) };
+      const baked = ctx.pluginId
+        ? bakeForeignPlaceholders(message, getPlugins(), ctx.pluginId, authoringContext())
+        : message;
+      return { ok: true, data: stripEditorFields(baked) };
     }
     case "component": {
       // Minimal context about the component the plugin is attached to.

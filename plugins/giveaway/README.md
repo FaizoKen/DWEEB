@@ -50,6 +50,38 @@ The shared bot (`BOT_TOKEN`) is therefore **optional**, used for just two extras
 Leave it unset and those two degrade gracefully (the UI says so); everything else
 works. State is a single SQLite file.
 
+## Placeholders in your message
+
+Write your giveaway however you like in DWEEB, and drop these tokens into the
+message text — they fill in and stay live:
+
+| Token | Becomes |
+|---|---|
+| `{prize}` | The prize. |
+| `{entries}` | The live entrant count (updates on every entry). |
+| `{winners}` | `TBD` until you draw, then the winner mentions. |
+| `{winner_count}` | How many winners are drawn. |
+| `{host}` | The host, as a mention (when set). |
+| `{status}` | `open` / `ended` / `cancelled`. |
+
+DWEEB's built-in server/channel tokens (`{server}`, `{channel}`, …) work here too
+and survive the live refresh — DWEEB bakes their value into the template, so they
+stay filled in alongside `{winners}` rather than reverting to raw text.
+
+DWEEB paints the first values when the message is posted (so it never shows raw
+`{tokens}`). After that, the same `UPDATE_MESSAGE`-on-click mechanism that keeps
+the entrant count current re-renders the whole message — so `{entries}` ticks up
+as people enter, and **`{winners}` / `{status}` fill in on the first click after
+you draw** (the public announcement still pings the winners instantly). Because a
+webhook message can only be edited in reply to a click on it, that post-draw
+refresh is lazy, not instant — effectively immediate in an active giveaway.
+
+Internally the plugin captures your message (with its raw tokens) as a *template*
+when you save, and re-renders it from that template on each click — see
+`substitute` / `render_bound_message` in [`src/discord.rs`](src/discord.rs). Use no
+placeholders and nothing changes: the live count just restamps the button as
+before. The same tokens also work in the **custom announcement**.
+
 ## How a click becomes an entry
 
 The decision is a pure function of the **interaction payload** alone — no Discord

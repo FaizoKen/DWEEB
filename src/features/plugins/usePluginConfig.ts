@@ -32,6 +32,7 @@ import {
   type PluginSummary,
   type PluginTheme,
 } from "@/core/plugins/protocol";
+import { sanitizePlaceholderValues } from "@/core/plugins/placeholders";
 import type { PluginTarget } from "@/core/plugins/targets";
 import { resolvePluginResource } from "./pluginData";
 
@@ -54,6 +55,12 @@ export interface PluginSaveResult {
    * binding so the Send panel can warn before posting to a different server.
    */
   guildId?: string;
+  /**
+   * Static placeholder values the plugin resolved at config time (token → value),
+   * cached per binding so the host can render the message's `{token}` text at
+   * send and in the preview. Sanitized; `undefined` when the plugin sent none.
+   */
+  values?: Record<string, string>;
 }
 
 interface Args {
@@ -158,6 +165,8 @@ export function usePluginConfig({
           // Only the fields the manifest declared can be set + locked.
           fields: sanitizeManagedFields(data.fields, manifest.managesFields),
           guildId: sanitizeGuildId(data.guildId),
+          // Static placeholder values for the message's `{token}` first paint.
+          values: sanitizePlaceholderValues(data.values),
         });
         return;
       }
@@ -174,7 +183,13 @@ export function usePluginConfig({
 
       if (isRequestMessage(data, nonce)) {
         // The resolver is the audited allow-list; it never returns credentials.
-        const result = resolvePluginResource(data.resource, { target, customId });
+        // `pluginId` scopes the `message` resource's placeholder baking to this
+        // plugin's own tokens (see pluginData.ts).
+        const result = resolvePluginResource(data.resource, {
+          target,
+          customId,
+          pluginId: manifest.id,
+        });
         const response: PluginResponseMessage = {
           type: "dweeb:plugin:response",
           nonce,

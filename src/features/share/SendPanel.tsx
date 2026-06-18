@@ -109,6 +109,7 @@ import {
 } from "@/core/webhook";
 import { getPlugins } from "@/core/plugins/registry";
 import { pluginBoundComponents } from "@/core/plugins/targets";
+import { collectMessagePlaceholders, substituteMessage } from "@/core/plugins/placeholders";
 import { getPluginBindingGuild } from "@/core/state/pluginSummaryCache";
 import {
   addPermanentMessage,
@@ -825,13 +826,29 @@ export function SendPanel({
         }
       }
 
+      // First paint of any placeholders: render `{token}` text in the outgoing
+      // copy only (the store keeps the raw tokens so drafts/share links stay
+      // editable). Core server/channel tokens resolve from this send's verified
+      // destination; plugin tokens from their cached values. Once posted, a plugin
+      // re-renders its own template on each interaction — that's where dynamic
+      // values like `{winners}` update.
+      const outgoing = substituteMessage(
+        message,
+        collectMessagePlaceholders(message, getPlugins(), {
+          serverId: resolvedGuildId ?? knownGuildId,
+          serverName: knownGuildName,
+          channelId: resolvedChannelId ?? knownChannelId,
+          channelName: knownChannelName,
+        }),
+      );
+
       const result =
         mode === "update" && parsedMessageId
-          ? await updateWebhookMessage(parsedUrl, parsedMessageId, message, {
+          ? await updateWebhookMessage(parsedUrl, parsedMessageId, outgoing, {
               threadId: threadId.trim() || undefined,
               signal: ac.signal,
             })
-          : await sendToWebhook(parsedUrl, message, {
+          : await sendToWebhook(parsedUrl, outgoing, {
               threadId: threadId.trim() || undefined,
               // Ask Discord to echo the created message so we can deep-link to it
               // from the success dialog (without `wait` a POST is a bodyless 204).

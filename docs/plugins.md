@@ -261,6 +261,106 @@ That half lives entirely in your service and is outside DWEEB's scope.
 > messages so slots can be freed (including ones held by deleted
 > messages). See the [dispatcher README](../plugins/dispatcher/README.md).
 
+## Placeholders: message text that follows your values
+
+A plugin can let the user drop **placeholders** into their *own* message text —
+`{prize}`, `{entries}`, `{winners}` — and have them filled with the plugin's
+values, both at send time and **live** after the message is posted (the Giveaway
+plugin's `{winners}` settles in once a draw happens). It's opt-in and additive: a
+plugin that declares none behaves exactly as before.
+
+There are two substitution moments, and they belong to different owners:
+
+| Moment | Who | What |
+|---|---|---|
+| **First paint** | DWEEB (host) | At send + in the live preview, DWEEB replaces each declared `{token}` with the value your `save` returned, falling back to the manifest `sample`. So no raw `{token}` ever reaches Discord. |
+| **Live render** | your plugin | Once posted, only you can keep the message current — a webhook message is editable solely via an `UPDATE_MESSAGE` reply to a click on it. You re-render your own stored copy on each interaction. DWEEB is not involved. |
+
+This split is forced by the platform: DWEEB stores nothing on the message but the
+`custom_id`, and a bot can't edit a webhook-authored message out of band. So
+**values that change after posting refresh on the next interaction, not
+instantly** — design for that (e.g. Giveaway fills `{winners}` on the first click
+after the draw; the public announcement carries the instant news).
+
+### Core (server/channel) tokens are always available
+
+Independent of any plugin, DWEEB offers a built-in **core** set of server/channel
+tokens on every message: `{server}`, `{server_id}`, `{channel}`, `{channel_id}`,
+and `{channel_mention}` (the clickable `<#id>`). Server tokens resolve from the
+connected guild in the preview; channel tokens resolve from the destination
+webhook at send. This namespace is **reserved** — a plugin that declares a token
+with one of those names has it dropped on parse, so `{server}` always means the
+server.
+
+### More than one provider on a message
+
+A message can carry the core tokens **and** one or more plugins' tokens at once.
+Resolution is deterministic: providers are walked **core first, then each plugin
+in binding order**, and the *first* to claim a token wins. The `{}` insert palette
+groups tokens under their provider's name and dedupes against that same order, so
+what the user inserts is what resolves. Keep your token names specific (`raffle_status`,
+not `status`) to avoid colliding with another plugin on the same message.
+
+Because your live re-render rebuilds the **whole** message from your stored template
+but only knows your *own* tokens, DWEEB hands you a template in which every token
+you don't own — the core tokens and any other plugin's — is **already baked to its
+first-paint value**; only your own tokens stay raw. So a `{server}` sitting next to
+your `{winners}` keeps its value on your lazy refresh instead of decaying to a
+literal `{server}`. You don't have to do anything for this — just request the
+`message` resource as usual (below) and store what you receive.
+
+### Declare them in the manifest
+
+```json
+"placeholders": [
+  { "token": "prize",   "label": "Prize",   "sample": "the prize" },
+  { "token": "entries", "label": "Entries", "sample": "0" },
+  { "token": "winners", "label": "Winners", "sample": "TBD" }
+]
+```
+
+| Field | Notes |
+|---|---|
+| `token` | `^[a-z0-9_]{1,32}$`. Written `{token}` in message text. |
+| `label` | Human name for the authoring UI. |
+| `sample` | Optional. Shown at first paint before a live value exists (dynamic tokens), or as a fallback when no per-instance value was cached. A token with no value and no sample renders literally. |
+
+Unknown/malformed `{…}` is left **verbatim** everywhere, so stray braces in prose
+are safe.
+
+### Send the values on save
+
+Your `save` message may carry a `values` map (token → string) for the values you
+know at config time (the real prize, the winner count). DWEEB sanitizes them
+(string-typed, length-clamped, `@everyone`/`@here` defanged so a value can't smuggle
+a mass ping) and caches them per binding next to the `summary`. Omit a token and it
+falls back to the manifest `sample` — that's how a *dynamic* value (`{winners}`)
+shows a friendly stand-in until your service renders it for real.
+
+```js
+parent.postMessage({ type: "dweeb:plugin:save", nonce, customId,
+  values: { prize: "a Nitro month", winner_count: "3" } }, hostOrigin);
+```
+
+### Render it live (your service)
+
+To re-render after posting you need a stable, raw-token **template**, because
+substituting `{winners}` → mentions is irreversible (and changes again on a
+reroll). Capture the user's message once on save — request the `message` resource
+(§3) and keep its `components`, with **your** `{tokens}` intact (other providers'
+tokens arrive already baked, as above) — store it, and on every interaction
+re-render it with the current values, replying `UPDATE_MESSAGE`.
+Render from the *template* each time, never from the already-rendered message, so
+the result is idempotent (the count restamps, winners swap on a reroll). Set
+`allowed_mentions.parse = []` on that edit so a re-render can never ping
+`@everyone`. The Giveaway plugin (`render_bound_message` / `substitute` in
+`plugins/giveaway/src/discord.rs`) is the worked example.
+
+> **Drift:** the template is captured at *save* time. If the user edits the
+> message text afterward without reopening your config, your first re-render uses
+> the stale copy. Re-capture on every save; treat it as the same expendable,
+> same-device convenience as the summary cache.
+
 ## 5. Hosting a plugin on the DWEEB production stack
 
 A Discord application has exactly **one** Interactions Endpoint URL, so all

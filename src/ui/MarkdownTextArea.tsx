@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { TextArea } from "@/ui/TextArea";
 import { MarkdownToolbar } from "@/ui/MarkdownToolbar";
 import { wrapInline, type EditResult, type EditState } from "@/ui/markdownActions";
+import type { PlaceholderGroup } from "@/core/plugins/placeholders";
 import styles from "./MarkdownTextArea.module.css";
 
 interface MarkdownTextAreaProps {
@@ -12,6 +13,8 @@ interface MarkdownTextAreaProps {
   rows?: number;
   placeholder?: string;
   invalid?: boolean;
+  /** Placeholders (grouped by provider) offered as a `{}` insert dropdown. */
+  placeholders?: PlaceholderGroup[];
 }
 
 /**
@@ -28,6 +31,7 @@ export function MarkdownTextArea({
   rows = 8,
   placeholder,
   invalid,
+  placeholders,
 }: MarkdownTextAreaProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   // Where to put the caret after the next controlled re-render. Only set by an
@@ -66,8 +70,7 @@ export function MarkdownTextArea({
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     const key = e.key.toLowerCase();
-    const marker =
-      key === "b" ? "**" : key === "i" ? "*" : key === "u" ? "__" : null;
+    const marker = key === "b" ? "**" : key === "i" ? "*" : key === "u" ? "__" : null;
     if (!marker) return;
     e.preventDefault();
     const placeholder =
@@ -80,6 +83,7 @@ export function MarkdownTextArea({
       <MarkdownToolbar
         state={{ text: value, selStart: selection.start, selEnd: selection.end }}
         onAction={apply}
+        placeholders={placeholders}
       />
       <TextArea
         ref={ref}

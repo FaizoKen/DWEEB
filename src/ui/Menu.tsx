@@ -167,3 +167,12 @@ export function MenuItem({ icon, children, onSelect, disabled }: MenuItemProps) 
 export function MenuDivider() {
   return <div className={styles.divider} role="separator" />;
 }
+
+/** Non-interactive section heading, for grouping items within one menu. */
+export function MenuLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className={styles.label} role="presentation">
+      {children}
+    </div>
+  );
+}

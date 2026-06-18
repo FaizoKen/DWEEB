@@ -19,6 +19,7 @@
 import type { PluginTarget } from "./targets";
 import { ALL_PLUGIN_TARGETS } from "./targets";
 import { parseManagedFields, type ManagedField } from "./managedFields";
+import { parsePlaceholders, type PluginPlaceholder } from "./placeholders";
 
 /** Manifest schema version. Bump when the shape below changes incompatibly. */
 export const PLUGIN_MANIFEST_SCHEMA_VERSION = 1 as const;
@@ -78,6 +79,14 @@ export interface PluginManifest {
    * for a plugin that leaves every standard field to the user.
    */
   managesFields?: ManagedField[];
+  /**
+   * Placeholders this plugin offers for the *message text* it's attached to.
+   * A user writes `{token}` in their own message and DWEEB renders it from the
+   * plugin's values — at send and in the preview (the manifest `sample` or the
+   * value the plugin sent on save), and live by the plugin itself once posted.
+   * Absent for a plugin that doesn't drive any message text. See `placeholders.ts`.
+   */
+  placeholders?: PluginPlaceholder[];
 }
 
 /** Shape the registry endpoint returns. */
@@ -125,6 +134,7 @@ export function parseManifest(raw: unknown): PluginManifest | null {
   if (targets.length === 0) return null;
 
   const managesFields = parseManagedFields(o.managesFields);
+  const placeholders = parsePlaceholders(o.placeholders);
 
   const manifest: PluginManifest = {
     schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
@@ -141,6 +151,7 @@ export function parseManifest(raw: unknown): PluginManifest | null {
     ...(typeof o.apiVersion === "number" ? { apiVersion: o.apiVersion } : {}),
     ...(o.managesSelectOptions === true ? { managesSelectOptions: true } : {}),
     ...(managesFields ? { managesFields } : {}),
+    ...(placeholders ? { placeholders } : {}),
   };
   return manifest;
 }

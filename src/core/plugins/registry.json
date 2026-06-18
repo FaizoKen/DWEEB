@@ -63,7 +63,15 @@
       "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/giveaway",
       "targets": ["button"],
       "configUrl": "https://giveaway.dweeb.faizo.net/config.html",
-      "customIdPrefix": "giveaway:"
+      "customIdPrefix": "giveaway:",
+      "placeholders": [
+        { "token": "prize", "label": "Prize", "sample": "the prize" },
+        { "token": "entries", "label": "Entry count", "sample": "0" },
+        { "token": "winners", "label": "Winners", "sample": "TBD" },
+        { "token": "winner_count", "label": "Number of winners", "sample": "1" },
+        { "token": "host", "label": "Host", "sample": "the host" },
+        { "token": "status", "label": "Status", "sample": "open" }
+      ]
     },
     {
       "schemaVersion": 1,

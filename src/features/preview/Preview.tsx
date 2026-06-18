@@ -12,8 +12,13 @@
  * to native scrolling whenever the message isn't at its top.
  */
 
-import { useMemo, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
 import { useMessageStore, selectMessage } from "@/core/state/messageStore";
+import { usePluginRegistry } from "@/core/state/pluginRegistryStore";
+import { useGuildStore } from "@/core/guild/guildStore";
+import { useAuthStore } from "@/core/auth/authStore";
+import { isPluginRegistryConfigured } from "@/core/plugins/registry";
+import { collectMessagePlaceholders, substituteMessage } from "@/core/plugins/placeholders";
 import type { WebhookMessage } from "@/core/schema/types";
 import { ComponentRenderer } from "./renderers/ComponentRenderer";
 import { PreviewCloseContext } from "./previewCloseContext";
@@ -37,6 +42,30 @@ export function Preview({ onClose, swipeProps, message: messageOverride }: Previ
   const storeMessage = useMessageStore(selectMessage);
   const message = messageOverride ?? storeMessage;
   const select = useMessageStore((s) => s.select);
+
+  // Show placeholders as their values/samples rather than raw `{token}` text —
+  // the same first-paint substitution the send path applies, so the preview
+  // matches what Discord will receive. Core server tokens resolve from the
+  // connected guild here (the destination channel isn't chosen until send, so
+  // channel tokens show their sample).
+  const plugins = usePluginRegistry((s) => s.plugins);
+  const loadPlugins = usePluginRegistry((s) => s.load);
+  useEffect(() => {
+    if (isPluginRegistryConfigured()) loadPlugins();
+  }, [loadPlugins]);
+  const connectedGuildId = useGuildStore((s) => s.guildId);
+  const authGuilds = useAuthStore((s) => s.guilds);
+  const rendered = useMemo(() => {
+    const serverName = authGuilds.find((g) => g.id === connectedGuildId)?.name;
+    return substituteMessage(
+      message,
+      collectMessagePlaceholders(message, plugins, {
+        ...(connectedGuildId ? { serverId: connectedGuildId } : {}),
+        ...(serverName ? { serverName } : {}),
+      }),
+    );
+  }, [message, plugins, connectedGuildId, authGuilds]);
+
   const displayName = message.username || "Webhook";
   const avatar = message.avatar_url;
   // The "sent at" time stands in for when the message would post; it shouldn't
@@ -119,10 +148,10 @@ export function Preview({ onClose, swipeProps, message: messageOverride }: Previ
                 <time className={styles.time}>{sentTime}</time>
               </header>
               <div className={styles.content}>
-                {message.components.length === 0 ? (
+                {rendered.components.length === 0 ? (
                   <p className={styles.empty}>This message has no components yet.</p>
                 ) : (
-                  message.components.map((c) => <ComponentRenderer key={c._id} node={c} />)
+                  rendered.components.map((c) => <ComponentRenderer key={c._id} node={c} />)
                 )}
               </div>
             </div>

@@ -101,6 +101,16 @@ export interface PluginSaveMessage {
    * ignored when absent or not a snowflake.
    */
   guildId?: string;
+  /**
+   * Static values for the placeholders this plugin declared in its manifest
+   * (`{prize}` → "a Nitro month"), used by the host to render the message's
+   * `{token}` text at send and in the preview (the *first paint*). Keyed by
+   * token; sanitized + clamped by the host (`sanitizePlaceholderValues`) and
+   * cached per binding alongside the summary. Dynamic tokens with no fixed value
+   * (e.g. `winners`) are simply omitted — they fall back to the manifest sample
+   * until the plugin renders them live. Ignored when absent.
+   */
+  values?: Record<string, string>;
 }
 
 export interface PluginCancelMessage {

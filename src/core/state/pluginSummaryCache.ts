@@ -29,6 +29,14 @@ interface CacheEntry {
    * would be dead); a miss just skips that check.
    */
   guildId?: string;
+  /**
+   * Static values for the placeholders the plugin declared, keyed by token
+   * (e.g. `prize → "a Nitro month"`). Used to render the message's `{token}`
+   * text at send and in the preview. Expendable like the rest: a miss falls back
+   * to each token's manifest sample, and the plugin still renders the live values
+   * itself once the message is posted.
+   */
+  placeholderValues?: Record<string, string>;
 }
 
 type CacheMap = Record<string, CacheEntry>;
@@ -71,16 +79,33 @@ export function getPluginBindingGuild(customId: string | undefined): string | nu
   return entry && typeof entry.guildId === "string" ? entry.guildId : null;
 }
 
-/** Remember the summary (and, for a guild-scoped binding, the guild) a plugin
- *  returned for a `custom_id`. */
+/** The static placeholder values cached for a binding, if any — used to render
+ *  the message's `{token}` text at send / in the preview. */
+export function getPluginPlaceholderValues(
+  customId: string | undefined,
+): Record<string, string> | null {
+  const entry = getPluginSummary(customId);
+  return entry && entry.placeholderValues && typeof entry.placeholderValues === "object"
+    ? entry.placeholderValues
+    : null;
+}
+
+/** Remember the summary (and, for a guild-scoped binding, the guild; plus any
+ *  placeholder values) a plugin returned for a `custom_id`. */
 export function setPluginSummary(
   customId: string,
   pluginId: string,
   summary: PluginSummary,
   guildId?: string,
+  placeholderValues?: Record<string, string>,
 ): void {
   const map = readAll();
-  map[customId] = { pluginId, summary, ...(guildId ? { guildId } : {}) };
+  map[customId] = {
+    pluginId,
+    summary,
+    ...(guildId ? { guildId } : {}),
+    ...(placeholderValues ? { placeholderValues } : {}),
+  };
   const keys = Object.keys(map);
   if (keys.length > MAX_ENTRIES) {
     // Cheap eviction: drop the oldest-inserted keys (JSON preserves order).

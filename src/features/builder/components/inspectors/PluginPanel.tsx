@@ -134,10 +134,14 @@ export function PluginPanel({ node }: Props) {
     // manifest's declared set by usePluginConfig.
     if (result.fields) Object.assign(fields, result.fields);
     patch<StringSelectComponent>(node._id, fields);
-    // Cache the summary plus, for a guild-scoped plugin, the guild it targets —
-    // the Send panel uses the latter to warn before posting to another server.
-    if (result.summary)
-      setPluginSummary(result.customId, manifest.id, result.summary, result.guildId);
+    // Cache the summary plus, for a guild-scoped plugin, the guild it targets
+    // (the Send panel warns before posting to another server) and any static
+    // placeholder values (to render the message's `{token}` text). All expendable
+    // cosmetics — fall back to the manifest name when there's no summary.
+    if (result.summary || result.guildId || result.values) {
+      const summary = result.summary ?? { label: manifest.name };
+      setPluginSummary(result.customId, manifest.id, summary, result.guildId, result.values);
+    }
     setConfiguring(null);
   };
 

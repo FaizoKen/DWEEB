@@ -17,6 +17,10 @@ const MAX_ROLES: usize = 25;
 const MAX_PRIZE: usize = 256;
 const MAX_DESCRIPTION: usize = 1500;
 const MAX_ANNOUNCEMENT: usize = 1500;
+/// Cap on the stored message template (a Components V2 tree). A real V2 message
+/// tops out near 4 KB of text plus component scaffolding; 16 KB is generous slack
+/// while still bounding what a single row can hold.
+const MAX_TEMPLATE_BYTES: usize = 16 * 1024;
 /// Accept an account-age floor up to ~5 years; beyond that it's a typo.
 const MAX_ACCOUNT_AGE_DAYS: u32 = 1825;
 
@@ -75,6 +79,17 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
         let text = text.trim();
         if !text.is_empty() && text.chars().count() > MAX_ANNOUNCEMENT {
             return Err(format!("The custom announcement is too long (max {MAX_ANNOUNCEMENT} characters)."));
+        }
+    }
+
+    if let Some(template) = &cfg.message_template {
+        // The template is the message's component tree — always a JSON array.
+        if !template.is_array() {
+            return Err("The message template is malformed.".into());
+        }
+        let len = serde_json::to_string(template).map(|s| s.len()).unwrap_or(usize::MAX);
+        if len > MAX_TEMPLATE_BYTES {
+            return Err("This message is too large to keep a live placeholder template for.".into());
         }
     }
 
