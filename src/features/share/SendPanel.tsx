@@ -1396,22 +1396,6 @@ export function SendPanel({
         </Field>
       ) : null}
 
-      {mode === "update" && !restoredFrom ? (
-        <Callout
-          tone="info"
-          role="note"
-          title="Update overwrites the entire message."
-          more={
-            <>
-              What’s in the editor replaces the original completely — anything you don’t rebuild
-              here is removed. To tweak the live message instead, pull it in from the{" "}
-              <strong>Restore</strong> tab first.
-            </>
-          }
-          moreLabel="What this means"
-        />
-      ) : null}
-
       {knownGone ? (
         <Callout
           tone="danger"

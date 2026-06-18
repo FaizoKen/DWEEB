@@ -607,7 +607,7 @@ export function GuildWebhookPicker({
       {actionError ? <p className={styles.error}>{actionError}</p> : null}
 
       {filteredGroups.length > 0 ? (
-        <ul className={styles.list}>
+        <ul className={cn(styles.list, styles.channelPanel)}>
           {filteredGroups.map((g) => {
             const key = groupKey(g.id);
             // Searching force-expands so a match is never hidden in a collapsed

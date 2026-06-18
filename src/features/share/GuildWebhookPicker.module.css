@@ -94,6 +94,17 @@
   overflow-y: auto;
 }
 
+/* The Send channel list reads as its own enclosed section — a bordered, inset
+   panel the category groups + channel rows sit inside — so it's clearly set
+   apart from the "Post as" / search controls above and the "Manage webhooks"
+   disclosure below it. (Declared after `.list` so its padding wins on tie.) */
+.channelPanel {
+  padding: 8px;
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+}
+
 .rowWrap {
   display: flex;
   flex-direction: column;
