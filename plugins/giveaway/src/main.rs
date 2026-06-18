@@ -90,6 +90,7 @@ async fn main() {
         store: Arc::new(store),
         http,
         config: Arc::new(config),
+        refreshers: Default::default(),
     };
 
     let app = Router::new()

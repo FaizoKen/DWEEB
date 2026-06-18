@@ -4,10 +4,13 @@
 //!     can show real role names instead of asking for raw ids (`connect`);
 //!   • draw time — DM each winner so they don't miss the news (`dm_user`),
 //!     fired concurrently and best-effort off the interaction's reply path.
-//! A third call, `create_followup_message`, needs **no bot token at all**: it
-//! posts a followup through the interaction's own webhook token, so it works on
-//! every deployment (it carries the host panel when a host's Enter click spends
-//! its single reply refreshing the public message).
+//! Two more calls need **no bot token at all** — they use an interaction's own
+//! webhook token, so they work on every deployment:
+//!   • `create_followup_message` carries the host panel when a host's Enter click
+//!     spends its single reply refreshing the public message;
+//!   • `edit_original_message` brings the public message current out of band
+//!     (reusing an earlier Enter click's token) after a host's Draw / Cancel /
+//!     Reroll, which click the ephemeral panel and can't otherwise reach it.
 //!
 //! The core giveaway (enter / live count / draw / announce) uses none of the
 //! bot-token calls — it runs entirely on interaction responses. So a deployment
@@ -221,4 +224,25 @@ pub async fn create_followup_message(
 ) -> bool {
     let url = format!("{API_BASE}/webhooks/{application_id}/{token}?with_components=true");
     matches!(http.post(url).json(data).send().await, Ok(resp) if resp.status().is_success())
+}
+
+/// Edit an interaction's original response via its **own webhook token** (no bot
+/// token). When that interaction was an Enter click we answered with an
+/// `UPDATE_MESSAGE`, `@original` *is* the public giveaway message — so a host's
+/// later Draw / Cancel / Reroll (which clicks the ephemeral panel, out of reach
+/// of the message) can still bring the message current by reusing that earlier
+/// click's token. `data` is the same edit body an `UPDATE_MESSAGE` reply carries;
+/// `with_components=true` keeps the (V2) components. Best-effort: the token is
+/// valid ~15 minutes, and on any failure the message just waits for the next
+/// click on it, so the result is only logged.
+pub async fn edit_original_message(
+    http: &reqwest::Client,
+    application_id: &str,
+    token: &str,
+    data: &Value,
+) -> bool {
+    let url = format!(
+        "{API_BASE}/webhooks/{application_id}/{token}/messages/@original?with_components=true"
+    );
+    matches!(http.patch(url).json(data).send().await, Ok(resp) if resp.status().is_success())
 }

@@ -166,7 +166,7 @@ pub struct User {
 
 /// The message a component sits on — its content, component tree, and flags, so
 /// an `UPDATE_MESSAGE` can echo them back verbatim with one button restyled.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MessageRef {
     #[serde(default)]
     pub content: Option<String>,

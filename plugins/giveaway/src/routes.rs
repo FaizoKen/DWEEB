@@ -10,11 +10,17 @@
 //! touch the message, so instead it puts the `UPDATE_MESSAGE` refresh in the
 //! reply and ships the panel as an ephemeral *followup* (interaction token, no
 //! bot token) — keeping a host-only giveaway's count / winners / status current.
-//! The winner announcement is the public (non-ephemeral) response to a host's
-//! Draw click; again no token. Winner DMs are the one thing that needs the bot,
-//! so they're spawned best-effort, off the 3s reply path.
+//! Draw / Cancel / Reroll click the ephemeral panel, out of reach of the
+//! message, so they refresh it *out of band*: each Enter click we answer caches
+//! the token whose `@original` is the message (see `AppState::refreshers`), and
+//! these reuse it to edit the message immediately (a restart or a >15-min gap
+//! just falls back to the next click on the message). The winner announcement is
+//! the public (non-ephemeral) response to the Draw click; again no token. Winner
+//! DMs are the one thing that needs the bot, so they're spawned best-effort, off
+//! the 3s reply path.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use axum::{
     body::Bytes,
@@ -35,7 +41,32 @@ pub struct AppState {
     pub store: Arc<Store>,
     pub http: reqwest::Client,
     pub config: Arc<Config>,
+    /// How to refresh each giveaway's public message *out of band*, keyed by
+    /// instance id. Captured whenever we answer an Enter click with an
+    /// `UPDATE_MESSAGE` (so `@original` of that interaction's token is the public
+    /// message): a host's later Draw / Cancel / Reroll clicks the ephemeral panel
+    /// and can't reach the message, so it reuses this handle to bring the winners
+    /// / status onto the message immediately instead of waiting for the next
+    /// click on it. RAM-only — the tokens are ~15-minute bearer credentials, so
+    /// they are never persisted; a restart or an expired/absent entry just falls
+    /// back to that next-click refresh.
+    pub refreshers: Arc<Mutex<HashMap<String, Refresher>>>,
 }
+
+/// A captured way to edit one giveaway's public message after the fact: the
+/// interaction token whose `@original` is that message, plus the message shape we
+/// last saw, to re-render from. See [`AppState::refreshers`].
+pub struct Refresher {
+    application_id: String,
+    token: String,
+    message: discord::MessageRef,
+    stored_at_ms: i64,
+}
+
+/// How long a captured [`Refresher`] is usable — comfortably inside Discord's
+/// ~15-minute interaction-token window, with margin so we never PATCH with a
+/// token about to expire.
+const REFRESHER_TTL_MS: i64 = 14 * 60 * 1000;
 
 pub async fn health() -> &'static str {
     "ok"
@@ -290,7 +321,12 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
                 // when placeholders are in play, re-render `{entries}` in the body).
                 let count = state.store.count_entries(id).unwrap_or(1);
                 match entry_count_update(interaction, &g, id, count) {
-                    Some(v) => Json(v).into_response(),
+                    Some(v) => {
+                        // This UPDATE_MESSAGE makes the click's `@original` the
+                        // public message — keep its token for a later host draw.
+                        remember_refresher(state, interaction, id);
+                        Json(v).into_response()
+                    }
                     None => Json(discord::ephemeral_text(&format!(
                         "\u{2705} You're in! You're 1 of **{count}**. Good luck! \u{1F340}"
                     )))
@@ -342,10 +378,12 @@ fn over_response(state: &AppState, interaction: &discord::Interaction, g: &Givea
             // settle into the host's own text.
             let count = state.store.count_entries(id).unwrap_or(0);
             let vars = render_vars(&g.config, count, g.winners.clone(), g.status);
+            remember_refresher(state, interaction, id);
             return Json(discord::update_message_from_template(msg, template, &vars, &enter, Some(label), true))
                 .into_response();
         }
         if let Some(v) = discord::update_button_response(msg, &enter, Some(label), true) {
+            remember_refresher(state, interaction, id);
             return Json(v).into_response();
         }
     }
@@ -429,7 +467,15 @@ fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -
     }
     maybe_dm_winners(state, &g.config, &winners);
 
-    let vars = render_vars(&g.config, entrants.len() as i64, winners.clone(), Status::Ended);
+    // The Draw button is on the ephemeral panel, so this reply (the public
+    // announcement) can't touch the giveaway message. Bring it current out of
+    // band — winners + "ended" + disabled button — from an earlier Enter click's
+    // captured token, instead of waiting for the next click on it.
+    let count = entrants.len() as i64;
+    let ended = ended_giveaway(&g, winners.clone());
+    spawn_public_refresh(state, &ended, id, count);
+
+    let vars = render_vars(&g.config, count, winners, Status::Ended);
     Json(discord::announcement_message(&vars, false, g.config.announcement.as_deref())).into_response()
 }
 
@@ -469,7 +515,12 @@ fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str)
     maybe_dm_winners(state, &g.config, &winners);
 
     let entries = state.store.count_entries(id).unwrap_or(pool.len() as i64);
-    let vars = render_vars(&g.config, entries, winners.clone(), Status::Ended);
+    // Refresh the public message to the rerolled winners out of band (see the
+    // note in `handle_draw`).
+    let ended = ended_giveaway(&g, winners.clone());
+    spawn_public_refresh(state, &ended, id, entries);
+
+    let vars = render_vars(&g.config, entries, winners, Status::Ended);
     Json(discord::announcement_message(&vars, true, g.config.announcement.as_deref())).into_response()
 }
 
@@ -485,6 +536,11 @@ fn handle_cancel(state: &AppState, interaction: &discord::Interaction, id: &str)
         tracing::error!(error = %e, "cancel");
         return Json(discord::ephemeral_text("Something went wrong cancelling — try again.")).into_response();
     }
+    // Refresh the public message to its cancelled state out of band (see the note
+    // in `handle_draw`) — button disabled, status "cancelled".
+    let count = state.store.count_entries(id).unwrap_or(0);
+    let cancelled = Giveaway { config: g.config.clone(), status: Status::Cancelled, winners: vec![] };
+    spawn_public_refresh(state, &cancelled, id, count);
     // Tell everyone, publicly — entrants deserve to know it's off.
     Json(json!({
         "type": 4,
@@ -566,9 +622,69 @@ fn host_enter_response(
             let data = live_message_data(g, msg, id, count)?;
             let panel_data = panel.get("data")?.clone();
             spawn_followup(state, app_id, token, panel_data);
+            // `@original` of this click is the public message, so keep its token
+            // around for the host's later Draw / Cancel / Reroll to reuse.
+            remember_refresher(state, interaction, id);
             Some(json!({ "type": 7, "data": data }))
         });
     refreshed.unwrap_or(panel)
+}
+
+/// Capture how to edit this giveaway's public message later. Call this only
+/// where we answer an Enter click with an `UPDATE_MESSAGE` — then this
+/// interaction's `@original` is that message, and its token can edit it for the
+/// life of the token. A no-op without a token / app id / message (e.g. tests).
+fn remember_refresher(state: &AppState, interaction: &discord::Interaction, id: &str) {
+    let (Some(app_id), Some(token), Some(message)) = (
+        interaction.application_id.as_deref(),
+        interaction.token.as_deref(),
+        interaction.message.as_ref(),
+    ) else {
+        return;
+    };
+    let now = unix_millis();
+    let entry = Refresher {
+        application_id: app_id.to_string(),
+        token: token.to_string(),
+        message: message.clone(),
+        stored_at_ms: now,
+    };
+    if let Ok(mut map) = state.refreshers.lock() {
+        // Drop stale entries so a long-lived process doesn't accumulate spent
+        // (expired) tokens for giveaways that have gone quiet.
+        map.retain(|_, r| now - r.stored_at_ms < REFRESHER_TTL_MS);
+        map.insert(id.to_string(), entry);
+    }
+}
+
+/// Best-effort: bring a giveaway's public message current out of band after a
+/// host action on the (ephemeral) panel — Draw / Cancel / Reroll — which can't
+/// reach the message itself. Reuses the token captured by [`remember_refresher`]
+/// from an earlier Enter click (whose `@original` is the message); renders the
+/// new state from the message shape we stored. A no-op when there's no fresh
+/// captured handle, or nothing editable, or no async runtime (tests).
+fn spawn_public_refresh(state: &AppState, g: &Giveaway, id: &str, count: i64) {
+    let now = unix_millis();
+    let captured = state.refreshers.lock().ok().and_then(|map| {
+        map.get(id).filter(|r| now - r.stored_at_ms < REFRESHER_TTL_MS).map(|r| {
+            (r.application_id.clone(), r.token.clone(), r.message.clone())
+        })
+    });
+    let Some((app_id, token, message)) = captured else {
+        return;
+    };
+    let Some(data) = live_message_data(g, &message, id, count) else {
+        return;
+    };
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    let http = state.http.clone();
+    tokio::spawn(async move {
+        if !crate::rest::edit_original_message(&http, &app_id, &token, &data).await {
+            tracing::debug!("giveaway public-message refresh didn't land");
+        }
+    });
 }
 
 /// Best-effort: post an interaction followup (the host control panel) via the
@@ -620,6 +736,14 @@ fn render_vars(cfg: &InstanceConfig, entries: i64, winners: Vec<String>, status:
         status,
         host_user_id: cfg.host_user_id.clone(),
     }
+}
+
+/// The just-ended view of a giveaway (status `Ended` + the drawn `winners`),
+/// built from the pre-action `g` so the out-of-band public-message refresh
+/// renders the new state. Keeps `handle_draw` / `handle_reroll` from juggling a
+/// second store read.
+fn ended_giveaway(g: &Giveaway, winners: Vec<String>) -> Giveaway {
+    Giveaway { config: g.config.clone(), status: Status::Ended, winners }
 }
 
 /// Turn a freshly-built (type 4) ephemeral reply into an `UPDATE_MESSAGE` (type
@@ -715,7 +839,12 @@ mod tests {
             default_bot_token: None,
             bot_invite_url: None,
         };
-        AppState { store: Arc::new(store), http: reqwest::Client::new(), config: Arc::new(config) }
+        AppState {
+            store: Arc::new(store),
+            http: reqwest::Client::new(),
+            config: Arc::new(config),
+            refreshers: Default::default(),
+        }
     }
 
     /// A giveaway config for `Nitro`, 1 winner, in guild `1`, optionally carrying a
@@ -893,6 +1022,50 @@ mod tests {
         let resp = body_json(handle_component(&state, &enter_click(id, "1", MANAGE_GUILD, template(id))));
         assert_eq!(resp["type"], 4);
         assert!(resp.to_string().contains("Host controls"), "{resp}");
+    }
+
+    #[test]
+    fn an_enter_click_captures_a_refresher_the_draw_can_reuse() {
+        let state = test_state();
+        let id = "abc";
+        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        state.store.enter(id, "100").unwrap();
+
+        // A host opening the panel (token present) captures how to edit the
+        // public message later — the token whose `@original` is that message.
+        let _ = handle_component(&state, &host_enter_click(id, template(id)));
+        let captured = {
+            let map = state.refreshers.lock().unwrap();
+            let r = map.get(id).expect("refresher captured");
+            assert_eq!(r.application_id, "999000");
+            assert_eq!(r.token, "tok_abc");
+            r.message.clone()
+        };
+
+        // That captured message shape renders exactly the ended state a draw
+        // would PATCH out of band: winner mention, status ended, button disabled.
+        state.store.set_winners(id, &["100".to_string()]).unwrap();
+        let g = state.store.get(id).unwrap().unwrap();
+        let data = live_message_data(&g, &captured, id, 1).expect("editable");
+        let s = data.to_string();
+        assert!(s.contains("<@100>"), "{s}");
+        assert!(s.contains("[ended]"), "{s}");
+        assert!(s.contains("\"disabled\":true"), "{s}");
+    }
+
+    #[test]
+    fn drawing_after_a_captured_refresher_never_panics_without_a_runtime() {
+        let state = test_state();
+        let id = "abc";
+        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        state.store.enter(id, "100").unwrap();
+        // Host opens the panel (captures a refresher), then draws: the out-of-band
+        // public-message refresh is attempted but skipped for lack of an async
+        // runtime under the test executor — the draw still answers normally.
+        let _ = handle_component(&state, &host_enter_click(id, template(id)));
+        let drawn = body_json(handle_component(&state, &control_click(id, "draw", MANAGE_GUILD)));
+        assert_eq!(drawn["type"], 4); // public announcement
+        assert!(drawn.to_string().contains("<@100>"), "{drawn}");
     }
 
     #[test]

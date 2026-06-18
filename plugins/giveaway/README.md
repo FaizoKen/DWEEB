@@ -40,7 +40,12 @@ to a click *on it* with an `UPDATE_MESSAGE`: a member's Enter click refreshes th
 message right in its reply. A *host's* Enter click would normally spend that one
 reply on the (ephemeral) control panel, so it instead puts the refresh in the
 reply and ships the panel as an ephemeral **followup** (the interaction's own
-webhook token — still no bot token), keeping a host-only giveaway live too. The
+webhook token — still no bot token), keeping a host-only giveaway live too.
+**Draw / Cancel / Reroll** click that ephemeral panel, out of reach of the
+message — so they refresh it *out of band*: each Enter click we answer caches the
+token whose original message *is* the giveaway message, and these reuse it to
+edit the message immediately (a restart, or drawing more than ~15 minutes after
+the last click, just falls back to the next click on the message). The
 winner announcement is the public (non-ephemeral) interaction response to the
 Draw click; again, no token. So the whole core — enter, live count,
 requirements, draw, reroll, cancel, announce — runs entirely off interaction
@@ -73,14 +78,14 @@ and survive the live refresh — DWEEB bakes their value into the template, so t
 stay filled in alongside `{winners}` rather than reverting to raw text.
 
 DWEEB paints the first values when the message is posted (so it never shows raw
-`{tokens}`). After that, the same mechanism that keeps the entrant count current
-re-renders the whole message — so `{entries}` ticks up as people enter, and
-**`{winners}` / `{status}` fill in after you draw** (the public announcement
-still pings the winners instantly). Both a member's and a host's Enter click
-refresh the message (the host gets the control panel as a followup), so even a
-giveaway only the host ever touches catches up each time they open the panel. The
-refresh is click-driven rather than a background timer — effectively immediate in
-an active giveaway.
+`{tokens}`). After that the plugin re-renders the whole message: `{entries}` ticks
+up as members enter (each Enter click refreshes it in the reply), and
+**`{winners}` / `{status}` fill in the moment you draw** — Draw / Cancel / Reroll
+refresh the message out of band by reusing a recent click's token, so you don't
+have to wait for the next click on it (the public announcement still pings the
+winners instantly). The only time the message lags is the corner case of drawing
+a giveaway nobody — not even the host — has clicked in the last ~15 minutes; the
+very next click on it brings it current.
 
 Internally the plugin captures your message (with its raw tokens) as a *template*
 when you save, and re-renders it from that template on each click — see
