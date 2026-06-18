@@ -225,6 +225,12 @@
   background: var(--app-success-soft);
   color: var(--app-success-text);
 }
+/* A webhook owned by one of the server's own registered custom bots — accented
+   like DWEEB (its components route back here too) but a distinct hue. */
+.chip_custombot {
+  background: rgba(124, 95, 240, 0.18);
+  color: rgb(150, 120, 245);
+}
 .chip_user {
   background: var(--app-bg-hover);
   color: var(--app-text-muted);
@@ -515,6 +521,117 @@
   flex: none;
   font-size: 11px;
   color: var(--app-text-muted);
+}
+
+/* "Create as <bot>" hint on a channel with no custom-bot webhook yet — clicking
+   opens Discord's OAuth flow (it picks the channel), so it reads as an action. */
+.createAs {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-accent);
+}
+.createAs svg {
+  flex: none;
+}
+
+/* ── "Post as" identity selector (Send) ─────────────────────────────────── */
+.postAs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.postAsLabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+.postAsPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.postAsPill {
+  padding: 4px 10px;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
+  color: var(--app-text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.postAsPill:hover {
+  color: var(--app-text);
+  border-color: var(--app-border-strong);
+}
+.postAsPillActive,
+.postAsPillActive:hover {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+}
+
+/* ── Collapsible category sections (Send) ───────────────────────────────── */
+.catGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.catHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 2px;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  color: var(--app-text-subtle);
+  cursor: pointer;
+}
+.catHeader:hover {
+  color: var(--app-text);
+}
+.catChevron {
+  flex: none;
+}
+.catName {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catCount {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--app-text-subtle);
+}
+.catChannels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 /* ── Manage-webhooks disclosure (advanced) ──────────────────────────────── */

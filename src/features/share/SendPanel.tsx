@@ -117,10 +117,10 @@ import {
   fetchPermanentSlots,
   isAuthError,
   removePermanentMessage,
-  type CustomBotItem,
   type GuildWebhook,
   type PermanentSlots,
 } from "@/core/guild/api";
+import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
@@ -1738,9 +1738,12 @@ export function SendPanel({
  * feature off, network) just leaves the default card.
  */
 function CreateWebhookOptions() {
-  const authed = useAuthStore((s) => s.status === "authed");
   const guildId = useGuildStore((s) => s.guildId);
-  const [bots, setBots] = useState<CustomBotItem[]>([]);
+  // Only bots with a stored secret can mint a webhook in one click (the proxy
+  // needs it to drive the OAuth flow); the shared hook caches the fetch so this
+  // and the channel picker don't each hit the endpoint.
+  const { bots: allBots } = useGuildCustomBots();
+  const bots = useMemo(() => allBots.filter((i) => i.has_secret), [allBots]);
   const [starting, setStarting] = useState(false);
   const [copiedRedirect, setCopiedRedirect] = useState(false);
   // The proxy callback the user's app must list under OAuth2 → Redirects before
@@ -1749,18 +1752,6 @@ function CreateWebhookOptions() {
   // rather than coming back to us — so the only honest help is to surface the
   // requirement (and the exact error Discord shows) up front, right here.
   const callbackUrl = oauthCallbackUrl();
-
-  useEffect(() => {
-    if (!authed || !guildId) {
-      setBots([]);
-      return;
-    }
-    const ac = new AbortController();
-    fetchCustomBots(guildId, ac.signal)
-      .then((b) => setBots(b.items.filter((i) => i.has_secret)))
-      .catch(() => setBots([]));
-    return () => ac.abort();
-  }, [authed, guildId]);
 
   // With a custom bot available, posting under it is the recommended path, so
   // the bot cards lead; the cards stay plain (no accent fill) so none of them

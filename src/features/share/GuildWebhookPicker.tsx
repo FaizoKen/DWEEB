@@ -15,17 +15,20 @@
  * shared bot holds Manage Webhooks and so does the signed-in user).
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useGuildWebhooks, useGuildWebhooksStore, webhookAvatarUrl } from "@/core/webhook";
 import {
+  createCustomBotWebhook,
   createGuildWebhook,
   deleteGuildWebhook,
   isAuthError,
   modifyGuildWebhook,
+  type CustomBotItem,
   type GuildWebhook,
   type WebhookEdit,
 } from "@/core/guild/api";
+import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
 import { botInviteUrl } from "@/core/guild/config";
 import { useAuthStore } from "@/core/auth/authStore";
 import type { GuildChannel } from "@/core/guild/types";
@@ -36,8 +39,11 @@ import { IconButton } from "@/ui/IconButton";
 import {
   AlertTriangleIcon,
   CheckCircleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   HashIcon,
   PencilIcon,
+  PlusIcon,
   RefreshIcon,
   SearchIcon,
   TrashIcon,
@@ -57,6 +63,10 @@ const MAX_AVATAR_BYTES = 800_000;
 
 type EditChannel = { id: string; name: string; type: number };
 
+/** Who a created/reused webhook posts as in the channel-first flow: DWEEB's own
+ *  app, or one of the server's registered custom bots. */
+type Identity = { kind: "dweeb" } | { kind: "bot"; applicationId: string; name: string };
+
 /**
  * Is this one of DWEEB's webhooks? Two flavours both count: the OAuth
  * `webhook.incoming` ones are *owned* by the app (`application_id`), while the
@@ -70,10 +80,25 @@ function isDweebWebhook(w: GuildWebhook, dweebAppId: string): boolean {
   return w.application_id === dweebAppId || w.creator?.id === dweebAppId;
 }
 
-/** Owner chip for a listed webhook — DWEEB (either flavour), another bot, or a person. */
-function ownerChip(w: GuildWebhook, dweebAppId: string): { text: string; kind: string } {
+/**
+ * Owner chip for a listed webhook. DWEEB (either flavour) and a server's own
+ * registered custom bot both get an accented chip — they're the webhooks whose
+ * components route back to DWEEB. `customBotName` returns the bot's name when
+ * the owning app id is one registered for this server (empty string for a
+ * registered-but-unnamed app), else `undefined`; any other app is a generic
+ * "Bot", and a person/follower webhook is "Others".
+ */
+function ownerChip(
+  w: GuildWebhook,
+  dweebAppId: string,
+  customBotName: (appId: string) => string | undefined,
+): { text: string; kind: string } {
   if (isDweebWebhook(w, dweebAppId)) return { text: "DWEEB", kind: "dweeb" };
-  if (w.application_id) return { text: "Bot", kind: "bot" };
+  if (w.application_id) {
+    const name = customBotName(w.application_id);
+    if (name !== undefined) return { text: name || "Custom bot", kind: "custombot" };
+    return { text: "Bot", kind: "bot" };
+  }
   return { text: "Others", kind: "user" };
 }
 
@@ -185,6 +210,67 @@ export function GuildWebhookPicker({
     [usable, activeId],
   );
 
+  // Registered custom bots for this server. Their webhooks route components back
+  // to DWEEB too, so the user can post under one (the preferred identity) and we
+  // mark / prioritise its webhooks. Labeling uses every registered app id; only
+  // bots with a stored secret can mint a fresh webhook (one-click OAuth).
+  const { bots: customBots } = useGuildCustomBots();
+  const secretBots = useMemo(() => customBots.filter((b) => b.has_secret), [customBots]);
+  // Name for a webhook's owning app when it's a registered custom bot, else
+  // undefined — drives the owner chip's "custom bot" flavour.
+  const customBotName = (appId: string): string | undefined =>
+    customBots.find((b) => b.application_id === appId)?.name;
+
+  // "Post as" selection (Send): defaults to the first custom bot once they load
+  // (posting under your own bot is the nicer outcome), else DWEEB. We seed it
+  // automatically only until the user picks — and snap back to DWEEB if the
+  // chosen bot is unregistered / loses its secret.
+  const [identity, setIdentity] = useState<Identity>({ kind: "dweeb" });
+  const identityTouched = useRef(false);
+  useEffect(() => {
+    if (
+      identity.kind === "bot" &&
+      !secretBots.some((b) => b.application_id === identity.applicationId)
+    ) {
+      setIdentity({ kind: "dweeb" });
+      return;
+    }
+    if (!identityTouched.current && identity.kind === "dweeb" && secretBots.length > 0) {
+      const b = secretBots[0]!;
+      setIdentity({ kind: "bot", applicationId: b.application_id, name: b.name });
+    }
+  }, [secretBots, identity]);
+
+  // Collapsed category sections (Send). Keyed by category id ("" for the
+  // no-category group); empty set = all expanded.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+
+  // Group the webhook-hostable channels by their category, ordered by the
+  // category's position (uncategorised first), each group's channels by theirs.
+  const channelGroups = useMemo(() => {
+    const byParent = new Map<string | null, GuildChannel[]>();
+    for (const c of webhookChannels) {
+      const key = c.parentId ?? null;
+      const arr = byParent.get(key);
+      if (arr) arr.push(c);
+      else byParent.set(key, [c]);
+    }
+    const groups = [...byParent.entries()].map(([parentId, channels]) => {
+      const cat = parentId ? guildData?.channelById[parentId] : undefined;
+      return {
+        id: parentId,
+        name: cat?.name ?? null,
+        // Uncategorised floats to the top; real categories keep Discord's order.
+        position: parentId == null ? -1 : (cat?.position ?? 0),
+        channels: channels
+          .slice()
+          .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name)),
+      };
+    });
+    groups.sort((a, b) => a.position - b.position);
+    return groups;
+  }, [webhookChannels, guildData]);
+
   if (!active) return null;
 
   const titleText = mode === "send" ? "Post to a channel" : "Your server’s webhooks";
@@ -256,11 +342,24 @@ export function GuildWebhookPicker({
     }
   };
 
-  // Pick the best webhook DWEEB already has in a channel (so we reuse instead of
-  // piling up duplicates). App-owned ones come first (their components route back
-  // to DWEEB), then one literally named "DWEEB", then the oldest. Person/other-
-  // bot webhooks are ignored — we'd rather make our own.
-  const reusableInChannel = (channelId: string): GuildWebhook | null => {
+  // The best existing webhook to reuse in a channel for the chosen identity, so
+  // we don't pile up duplicates. DWEEB: app-owned first (components route back),
+  // then one literally named "DWEEB", then oldest. A custom bot: any webhook
+  // owned by that app, preferring one named after the bot, then oldest.
+  const reusableInChannel = (channelId: string, id: Identity): GuildWebhook | null => {
+    if (id.kind === "bot") {
+      const mine = usable.filter(
+        (w) => w.channel_id === channelId && w.application_id === id.applicationId,
+      );
+      if (mine.length === 0) return null;
+      const want = id.name.trim().toLowerCase();
+      mine.sort((a, b) => {
+        const an = (a.name ?? "").trim().toLowerCase() === want ? 0 : 1;
+        const bn = (b.name ?? "").trim().toLowerCase() === want ? 0 : 1;
+        return an - bn || a.id.localeCompare(b.id);
+      });
+      return mine[0]!;
+    }
     const mine = usable.filter((w) => w.channel_id === channelId && isDweebWebhook(w, dweebAppId));
     if (mine.length === 0) return null;
     mine.sort((a, b) => {
@@ -274,17 +373,24 @@ export function GuildWebhookPicker({
     return mine[0]!;
   };
 
-  // The channel-first action: hand back a webhook for this channel, making one if
-  // DWEEB doesn't already own one here. The user never sees the webhook step.
+  // The channel-first action: hand back a webhook for this channel under the
+  // chosen identity. Reuse one if it exists; otherwise DWEEB mints one silently
+  // (no permission step), while a custom bot routes through Discord's OAuth
+  // webhook flow — which picks the channel itself — so we redirect the page.
   const onPickChannel = async (channelId: string) => {
     setActionError(null);
-    const existing = reusableInChannel(channelId);
+    const existing = reusableInChannel(channelId, identity);
     if (existing) {
       onPick(existing);
       return;
     }
     setResolvingChannel(channelId);
     try {
+      if (identity.kind === "bot") {
+        const url = await createCustomBotWebhook(connectedId, identity.applicationId);
+        window.location.assign(url);
+        return;
+      }
       const created = await createGuildWebhook(connectedId, channelId, AUTO_WEBHOOK_NAME);
       useGuildWebhooksStore.getState().upsertLocal(created);
       onPick(created);
@@ -399,7 +505,7 @@ export function GuildWebhookPicker({
                   <span className={styles.rowText}>
                     <span className={styles.rowName}>
                       {w.name || "(unnamed)"}
-                      <OwnerChip w={w} dweebAppId={dweebAppId} />
+                      <OwnerChip w={w} dweebAppId={dweebAppId} customBotName={customBotName} />
                       {matchChannelId != null && w.channel_id === matchChannelId ? (
                         <span className={styles.matchChip}>this channel</span>
                       ) : null}
@@ -424,10 +530,28 @@ export function GuildWebhookPicker({
   }
 
   /* ── Send: channel-first ─────────────────────────────────────────────── */
-  const channelList = webhookChannels.filter((c) => {
-    const q = query.trim().toLowerCase();
-    return !q || c.name.toLowerCase().includes(q);
-  });
+  const q = query.trim().toLowerCase();
+  // While searching, narrow each category to its matches and drop empty ones.
+  const filteredGroups = q
+    ? channelGroups
+        .map((g) => ({
+          ...g,
+          channels: g.channels.filter((c) => c.name.toLowerCase().includes(q)),
+        }))
+        .filter((g) => g.channels.length > 0)
+    : channelGroups;
+  // Headers only matter once there's a real category; with just the no-category
+  // group it stays a flat list (matches small servers' expectations).
+  const hasCategories = filteredGroups.some((g) => g.id != null);
+  const selectorVisible = secretBots.length > 0;
+  const groupKey = (id: string | null) => id ?? "";
+  const toggleCollapsed = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   return (
     <section className={styles.picker} aria-label="Destination">
@@ -435,6 +559,17 @@ export function GuildWebhookPicker({
       <p className={styles.note}>
         Pick a channel — DWEEB sets up the webhook for you. No tokens to copy.
       </p>
+
+      {selectorVisible ? (
+        <PostAsSelector
+          identity={identity}
+          bots={secretBots}
+          onSelect={(id) => {
+            identityTouched.current = true;
+            setIdentity(id);
+          }}
+        />
+      ) : null}
 
       {webhookChannels.length === 0 ? (
         <p className={styles.note}>
@@ -444,35 +579,55 @@ export function GuildWebhookPicker({
         </p>
       ) : null}
 
-      {webhookChannels.length > SEARCH_THRESHOLD ? (
+      {webhookChannels.length > 0 ? (
         <SearchBox value={query} onChange={setQuery} placeholder="Search channels…" />
       ) : null}
 
       {actionError ? <p className={styles.error}>{actionError}</p> : null}
 
-      {channelList.length > 0 ? (
+      {filteredGroups.length > 0 ? (
         <ul className={styles.list}>
-          {channelList.map((c) => {
-            const isActive = c.id === activeChannelId;
-            const busy = resolvingChannel === c.id;
+          {filteredGroups.map((g) => {
+            const key = groupKey(g.id);
+            // Searching force-expands so a match is never hidden in a collapsed
+            // section.
+            const isCollapsed = !q && collapsed.has(key);
+            const showHeader = g.name != null || (g.id == null && hasCategories);
             return (
-              <li key={c.id}>
-                <button
-                  type="button"
-                  className={cn(styles.channelRow, isActive && styles.rowActive)}
-                  disabled={busy}
-                  onClick={() => void onPickChannel(c.id)}
-                >
-                  <span className={styles.channelHash} aria-hidden>
-                    <HashIcon size={15} />
-                  </span>
-                  <span className={styles.channelName}>{c.name}</span>
-                  {busy ? (
-                    <span className={styles.channelStatus}>Setting up…</span>
-                  ) : isActive ? (
-                    <CheckCircleIcon size={16} className={styles.check} />
-                  ) : null}
-                </button>
+              <li key={key} className={styles.catGroup}>
+                {showHeader ? (
+                  <button
+                    type="button"
+                    className={styles.catHeader}
+                    onClick={() => toggleCollapsed(key)}
+                    aria-expanded={!isCollapsed}
+                  >
+                    {isCollapsed ? (
+                      <ChevronRightIcon size={13} className={styles.catChevron} />
+                    ) : (
+                      <ChevronDownIcon size={13} className={styles.catChevron} />
+                    )}
+                    <span className={styles.catName}>{g.name ?? "No category"}</span>
+                    <span className={styles.catCount}>{g.channels.length}</span>
+                  </button>
+                ) : null}
+                {!isCollapsed ? (
+                  <ul className={styles.catChannels}>
+                    {g.channels.map((c) => (
+                      <li key={c.id}>
+                        <ChannelRow
+                          channel={c}
+                          active={c.id === activeChannelId}
+                          busy={resolvingChannel === c.id}
+                          reuse={reusableInChannel(c.id, identity)}
+                          identity={identity}
+                          selectorVisible={selectorVisible}
+                          onPick={() => void onPickChannel(c.id)}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </li>
             );
           })}
@@ -574,7 +729,11 @@ export function GuildWebhookPicker({
                         <span className={styles.rowText}>
                           <span className={styles.rowName}>
                             {w.name || "(unnamed)"}
-                            <OwnerChip w={w} dweebAppId={dweebAppId} />
+                            <OwnerChip
+                              w={w}
+                              dweebAppId={dweebAppId}
+                              customBotName={customBotName}
+                            />
                           </span>
                           <span className={styles.rowDest}>
                             <HashIcon size={11} />
@@ -684,9 +843,138 @@ function SearchBox({
   );
 }
 
-function OwnerChip({ w, dweebAppId }: { w: GuildWebhook; dweebAppId: string }) {
-  const chip = ownerChip(w, dweebAppId);
+function OwnerChip({
+  w,
+  dweebAppId,
+  customBotName,
+}: {
+  w: GuildWebhook;
+  dweebAppId: string;
+  customBotName: (appId: string) => string | undefined;
+}) {
+  const chip = ownerChip(w, dweebAppId, customBotName);
   return <span className={cn(styles.chip, styles[`chip_${chip.kind}`])}>{chip.text}</span>;
+}
+
+/* ── "Post as" identity selector (Send) ─────────────────────────────────── */
+
+/**
+ * Choose whether a picked channel's webhook is created/reused under DWEEB or one
+ * of the server's registered custom bots. Only shown when at least one custom
+ * bot with a stored secret exists (so "create under it" is one click).
+ */
+function PostAsSelector({
+  identity,
+  bots,
+  onSelect,
+}: {
+  identity: Identity;
+  bots: CustomBotItem[];
+  onSelect: (id: Identity) => void;
+}) {
+  return (
+    <div className={styles.postAs}>
+      <span className={styles.postAsLabel}>Post as</span>
+      <div className={styles.postAsPills}>
+        <button
+          type="button"
+          className={cn(styles.postAsPill, identity.kind === "dweeb" && styles.postAsPillActive)}
+          aria-pressed={identity.kind === "dweeb"}
+          onClick={() => onSelect({ kind: "dweeb" })}
+        >
+          DWEEB
+        </button>
+        {bots.map((b) => {
+          const selected = identity.kind === "bot" && identity.applicationId === b.application_id;
+          return (
+            <button
+              key={b.application_id}
+              type="button"
+              className={cn(styles.postAsPill, selected && styles.postAsPillActive)}
+              aria-pressed={selected}
+              onClick={() =>
+                onSelect({ kind: "bot", applicationId: b.application_id, name: b.name })
+              }
+            >
+              {b.name || "Custom bot"}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ── Channel row (Send) ─────────────────────────────────────────────────── */
+
+/**
+ * One channel in the channel-first list. The right edge reflects what clicking
+ * will do under the chosen identity: reuse an existing webhook (check + an
+ * identity chip when a selector is shown), or — for a custom bot with no webhook
+ * here yet — open Discord to create one. DWEEB with no webhook here creates one
+ * silently, so it needs no affordance.
+ */
+function ChannelRow({
+  channel: c,
+  active,
+  busy,
+  reuse,
+  identity,
+  selectorVisible,
+  onPick,
+}: {
+  channel: GuildChannel;
+  active: boolean;
+  busy: boolean;
+  reuse: GuildWebhook | null;
+  identity: Identity;
+  selectorVisible: boolean;
+  onPick: () => void;
+}) {
+  // A check marks the active channel always; with the "Post as" selector shown
+  // it also marks any channel where an existing webhook will be reused (paired
+  // with the identity chip). Without the selector (no custom bots) only the
+  // active channel checks, matching the original single-identity behaviour.
+  const showCheck = active || (reuse != null && selectorVisible);
+  return (
+    <button
+      type="button"
+      className={cn(styles.channelRow, active && styles.rowActive)}
+      disabled={busy}
+      onClick={onPick}
+    >
+      <span className={styles.channelHash} aria-hidden>
+        <HashIcon size={15} />
+      </span>
+      <span className={styles.channelName}>{c.name}</span>
+      {busy ? (
+        <span className={styles.channelStatus}>
+          {identity.kind === "bot" ? "Opening Discord…" : "Setting up…"}
+        </span>
+      ) : (
+        <>
+          {selectorVisible && reuse ? (
+            <span
+              className={cn(
+                styles.chip,
+                identity.kind === "bot" ? styles.chip_custombot : styles.chip_dweeb,
+              )}
+            >
+              {identity.kind === "bot" ? identity.name || "Custom bot" : "DWEEB"}
+            </span>
+          ) : null}
+          {showCheck ? (
+            <CheckCircleIcon size={16} className={styles.check} />
+          ) : identity.kind === "bot" ? (
+            <span className={styles.createAs}>
+              <PlusIcon size={12} />
+              create as {identity.name || "your bot"}
+            </span>
+          ) : null}
+        </>
+      )}
+    </button>
+  );
 }
 
 /* ── Avatar picker (edit form) ──────────────────────────────────────────── */
