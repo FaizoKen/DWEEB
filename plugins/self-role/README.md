@@ -61,6 +61,18 @@ options you reconfigure (or detach) the plugin; hand-editing is disabled so the
 value↔role-ID contract can't drift. Step 4 of the config UI is now just a
 read-only preview of what will be wired.
 
+## Placeholders in your message
+
+Drop **`{roles}`** into your DWEEB message text and it renders the role(s) this
+menu grants — so you write *"Click to grab {roles}"* and never hand-paste a role.
+It's a **static** placeholder: the value (the role **names**, e.g. *"Red, Blue and
+Green"*) is sent to DWEEB on save and painted once when the message is posted, so
+there's no live re-render to do here. Names — not `<@&id>` mentions — so posting
+the message can never ping a whole role.
+
+DWEEB's built-in **`{server}` / `{channel}`** tokens work here too (they work in
+any message). See [the placeholder framework](../../docs/plugins.md#placeholders-message-text-that-follows-your-values).
+
 ## Architecture & safety
 
 | Concern | How it's handled |

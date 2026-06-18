@@ -361,6 +361,24 @@ the result is idempotent (the count restamps, winners swap on a reroll). Set
 > the stale copy. Re-capture on every save; treat it as the same expendable,
 > same-device convenience as the summary cache.
 
+### You often don't need a live render at all
+
+Live re-rendering is only worth it for values that **change after posting** *and*
+whose change is driven by **a click on that same message** (the giveaway's entrant
+count and winners). Two cases that are simpler:
+
+- **Static values** — known at config time and fixed thereafter (Self Role's
+  `{roles}`). Just send them in `values` on save; DWEEB paints them at first
+  paint and you store no template, render nothing. This is the common, easy case.
+- **Values whose change isn't a click on the message** — e.g. a count that moves
+  on an action taken *elsewhere* (a ticket closed from inside its own channel, a
+  form submitted in a modal). A webhook message can only be edited in reply to a
+  click on it, so such a placeholder would drift out of sync and mislead. Don't
+  offer it; the universal `{server}`/`{channel}` tokens still work in the message.
+
+So a plugin's three honest options are: **live** (giveaway), **static** (self
+role), or **none of its own** (it still inherits the core server/channel tokens).
+
 ## 5. Hosting a plugin on the DWEEB production stack
 
 A Discord application has exactly **one** Interactions Endpoint URL, so all

@@ -46,7 +46,10 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/self-role",
             "targets": ["button", "string_select"],
             "configUrl": format!("{base}/config.html"),
-            "customIdPrefix": "selfrole:"
+            "customIdPrefix": "selfrole:",
+            "placeholders": [
+                { "token": "roles", "label": "Roles", "sample": "the role" }
+            ]
         }]
     }))
 }

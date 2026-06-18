@@ -898,6 +898,14 @@
           }
           const id = data.id || instanceId;
           const modeLabel = MODE_DEFS[mode]?.title || mode;
+          // The `{roles}` placeholder's value for the host's first paint: the
+          // role *names*, read naturally. Names (not `<@&id>` mentions) so a
+          // self-role post can never ping the whole role on send.
+          const roleNames = chosen.map((r) => r.name || r.id);
+          const rolesValue =
+            roleNames.length <= 1
+              ? roleNames.join("")
+              : roleNames.slice(0, -1).join(", ") + " and " + roleNames[roleNames.length - 1];
           parent.postMessage(
             {
               type: "dweeb:plugin:save",
@@ -913,6 +921,9 @@
                   ? `${chosen.length} role${chosen.length === 1 ? "" : "s"} · ${modeLabel}`
                   : `${chosen[0]?.name || "1 role"} · ${modeLabel}`,
               },
+              // Static value for the `{roles}` placeholder in the host's message
+              // text — the role names this menu grants.
+              values: { roles: rolesValue },
               // For a string select, hand DWEEB the option list to wire + lock
               // onto the menu (one per role, value = role ID). DWEEB ignores
               // this for buttons. No more hand-mapping each option's value.

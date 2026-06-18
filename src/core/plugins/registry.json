@@ -37,7 +37,8 @@
       "configUrl": "https://selfrole.dweeb.faizo.net/config.html",
       "customIdPrefix": "selfrole:",
       "managesSelectOptions": true,
-      "managesFields": ["min_values", "max_values"]
+      "managesFields": ["min_values", "max_values"],
+      "placeholders": [{ "token": "roles", "label": "Roles", "sample": "the role" }]
     },
     {
       "schemaVersion": 1,
