@@ -26,8 +26,14 @@ const MANAGE_CHANNELS: u64 = 1 << 4;
 /// needs to assign roles, so it is shared across both plugins.
 const MANAGE_ROLES: u64 = 1 << 28;
 
-/// The union every shared-bot invite must request: Manage Channels + Manage Roles.
-const SHARED_BOT_PERMISSIONS: u64 = MANAGE_CHANNELS | MANAGE_ROLES;
+/// Manage Webhooks — the proxy's Webhook Manager enumerates and manages a
+/// server's webhooks through the shared bot token (`GET /guilds/{id}/webhooks`
+/// and every create/modify/delete call requires it).
+const MANAGE_WEBHOOKS: u64 = 1 << 29;
+
+/// The union every shared-bot invite must request: Manage Channels + Manage
+/// Roles + Manage Webhooks.
+const SHARED_BOT_PERMISSIONS: u64 = MANAGE_CHANNELS | MANAGE_ROLES | MANAGE_WEBHOOKS;
 
 /// Force an operator-supplied invite URL's `permissions` to [`SHARED_BOT_PERMISSIONS`].
 ///
@@ -164,7 +170,7 @@ mod tests {
     /// The union string every DWEEB shared-bot invite must carry. Mirrors
     /// `SHARED_BOT_PERMISSIONS` in the frontend and self-role; this test is the
     /// tripwire that fails if the three drift apart.
-    const UNION: &str = "268435472"; // (1<<4) | (1<<28)
+    const UNION: &str = "805306384"; // (1<<4) | (1<<28) | (1<<29)
 
     #[test]
     fn union_is_manage_channels_plus_manage_roles() {

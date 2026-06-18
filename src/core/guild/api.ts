@@ -52,6 +52,12 @@ export interface PickerGuild {
   icon: string | null;
   /** Whether the DWEEB bot is already a member (else the user must add it). */
   bot_present: boolean;
+  /**
+   * Whether the signed-in user holds Manage Webhooks (or Administrator/owner)
+   * in this server — the gate for the Webhook Manager. Optional so a response
+   * from a proxy predating the field is treated as `false` (no access shown).
+   */
+  can_manage_webhooks?: boolean;
 }
 
 /** A failed proxy call, carrying the HTTP status and any rate-limit hint. */
@@ -400,6 +406,161 @@ export async function createCustomBotWebhook(
     const body = (await res.json()) as { url?: string };
     if (!body.url) throw new Error();
     return body.url;
+  } catch {
+    throw new GuildApiError("The server returned an unexpected response.", res.status);
+  }
+}
+
+// ── Webhook management (Manage Webhooks gated) ─────────────────────────────
+// The Webhook Manager: enumerate, recover, create, edit, move, delete, and
+// rotate a server's webhooks through the shared bot's Manage Webhooks
+// permission. Every call is gated server-side on the signed-in user *also*
+// holding Manage Webhooks (or Administrator/owner) in the guild, mirroring
+// Discord — so a 403 here means the user lacks that permission, or the bot does
+// (the message distinguishes them). These are never cached: webhook tokens are
+// credentials.
+
+/** The member who created a webhook — only known because Manage Webhooks
+ *  exposes it. `name` is the display name; `avatar` is a hash or null. */
+export interface WebhookCreator {
+  id: string;
+  name: string;
+  avatar: string | null;
+}
+
+/** One webhook as the proxy returns it (see `routes::webhook_json`). */
+export interface GuildWebhook {
+  id: string;
+  /** 1 Incoming · 2 Channel Follower · 3 Application. */
+  type: number;
+  name: string | null;
+  avatar: string | null;
+  channel_id: string | null;
+  guild_id: string | null;
+  /** Owning app id when a bot/app made it; null for a person/follower webhook. */
+  application_id: string | null;
+  /** Ready-to-use execute URL — the recoverable credential. Incoming
+   *  (type 1) webhooks only; null otherwise (no token exists to recover). */
+  url: string | null;
+  creator: WebhookCreator | null;
+  /** Only on a rotate response when the old webhook couldn't be deleted. */
+  rotate_warning?: string;
+}
+
+/** `GET /api/guilds/:id/webhooks` response. */
+export interface GuildWebhooks {
+  webhooks: GuildWebhook[];
+  /** This deployment's own app id, so the FE can flag DWEEB-owned webhooks
+   *  without trusting its build-time env to match the proxy. */
+  dweeb_application_id: string;
+}
+
+/** Fields a webhook edit may change. `avatar: null` clears the picture;
+ *  `avatar: "data:image/…"` sets it; omitting `avatar` leaves it. `channelId`
+ *  moves the webhook to another channel. */
+export interface WebhookEdit {
+  name?: string;
+  avatar?: string | null;
+  channelId?: string;
+}
+
+/** `GET /api/guilds/:id/webhooks` — every webhook in the server, with recover
+ *  URLs + creators. Throws `GuildApiError` (403 = the user, or the bot, lacks
+ *  Manage Webhooks — the message says which). */
+export async function fetchGuildWebhooks(
+  guildId: string,
+  signal?: AbortSignal,
+): Promise<GuildWebhooks> {
+  const id = guildId.trim();
+  if (!isValidGuildId(id)) {
+    throw new GuildApiError("That doesn't look like a valid server ID.", 0);
+  }
+  const body = await getJson<GuildWebhooks>(`/api/guilds/${id}/webhooks`, signal);
+  return { webhooks: body.webhooks ?? [], dweeb_application_id: body.dweeb_application_id ?? "" };
+}
+
+/** `POST /api/guilds/:id/channels/:channelId/webhooks` — create an incoming
+ *  webhook in a channel. `avatar` is an image data URI or omitted for the
+ *  default picture. Returns the created webhook (its `url` is the new token). */
+export async function createGuildWebhook(
+  guildId: string,
+  channelId: string,
+  name: string,
+  avatar?: string,
+): Promise<GuildWebhook> {
+  return writeWebhook(
+    `/api/guilds/${guildId.trim()}/channels/${channelId.trim()}/webhooks`,
+    "POST",
+    avatar ? { name, avatar } : { name },
+  );
+}
+
+/** `PATCH /api/guilds/:id/webhooks/:webhookId` — rename / re-avatar / move.
+ *  Sends only the provided fields; `avatar: null` is forwarded verbatim to
+ *  clear the picture. */
+export async function modifyGuildWebhook(
+  guildId: string,
+  webhookId: string,
+  changes: WebhookEdit,
+): Promise<GuildWebhook> {
+  const body: Record<string, unknown> = {};
+  if (changes.name !== undefined) body.name = changes.name;
+  if (changes.avatar !== undefined) body.avatar = changes.avatar; // null clears
+  if (changes.channelId !== undefined) body.channel_id = changes.channelId;
+  return writeWebhook(`/api/guilds/${guildId.trim()}/webhooks/${webhookId.trim()}`, "PATCH", body);
+}
+
+/** `POST /api/guilds/:id/webhooks/:webhookId/rotate` — invalidate a leaked URL
+ *  by recreating the webhook (new token). Returns the fresh webhook; a
+ *  `rotate_warning` rides along if the old one couldn't be deleted. */
+export async function rotateGuildWebhook(
+  guildId: string,
+  webhookId: string,
+): Promise<GuildWebhook> {
+  return writeWebhook(
+    `/api/guilds/${guildId.trim()}/webhooks/${webhookId.trim()}/rotate`,
+    "POST",
+    undefined,
+  );
+}
+
+/** `DELETE /api/guilds/:id/webhooks/:webhookId` — delete a webhook. A 404
+ *  (already gone) is treated as success — the goal state is reached either way. */
+export async function deleteGuildWebhook(guildId: string, webhookId: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${PROXY_BASE_URL}/api/guilds/${guildId.trim()}/webhooks/${webhookId.trim()}`,
+      { method: "DELETE", credentials: "include" },
+    );
+  } catch {
+    throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
+  }
+  if (res.status === 404) return;
+  if (!res.ok) throw await toApiError(res);
+}
+
+/** Shared POST/PATCH helper for the webhook writes — credentialed JSON call
+ *  returning the webhook object, with the proxy's error shape normalised. */
+async function writeWebhook(
+  path: string,
+  method: "POST" | "PATCH",
+  body: Record<string, unknown> | undefined,
+): Promise<GuildWebhook> {
+  let res: Response;
+  try {
+    res = await fetch(`${PROXY_BASE_URL}${path}`, {
+      method,
+      credentials: "include",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
+  }
+  if (!res.ok) throw await toApiError(res);
+  try {
+    return (await res.json()) as GuildWebhook;
   } catch {
     throw new GuildApiError("The server returned an unexpected response.", res.status);
   }

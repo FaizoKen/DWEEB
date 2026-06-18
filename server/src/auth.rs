@@ -312,6 +312,7 @@ pub async fn callback(
             .into_iter()
             .filter(|g| !require || g.can_manage())
             .map(|g| UsableGuild {
+                can_manage_webhooks: g.can_manage_webhooks(),
                 id: g.id,
                 name: g.name,
                 icon: g.icon,

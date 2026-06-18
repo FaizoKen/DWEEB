@@ -1,0 +1,436 @@
+.lead {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-subtle);
+}
+
+.error {
+  margin: 4px 0 0;
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--app-danger-text);
+}
+
+.linkBtn {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--app-accent-text);
+  cursor: pointer;
+}
+.linkBtn:hover {
+  text-decoration: underline;
+}
+
+/* Permission-denied state. */
+.denied {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.reinvite {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.reinvite:hover {
+  border-color: var(--app-accent);
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.searchIcon {
+  position: absolute;
+  left: 9px;
+  color: var(--app-text-subtle);
+  pointer-events: none;
+}
+.searchInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px 7px 30px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.searchInput:focus {
+  outline: none;
+  border-color: var(--app-accent);
+}
+
+.toolButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── Audit banner ────────────────────────────────────────────────────────── */
+.audit {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-warning-soft);
+  border: 1px solid var(--app-border);
+}
+.auditHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.auditIcon {
+  color: var(--app-warning-text);
+  flex: none;
+}
+.auditSummary {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+.auditChannels {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.auditChannel {
+  font-size: 11.5px;
+  color: var(--app-text-muted);
+}
+.auditChannelFull {
+  color: var(--app-danger-text);
+  font-weight: 600;
+}
+
+/* ── Sub-panels (create / import / bulk) ─────────────────────────────────── */
+.panel {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-hover);
+}
+.panelHead {
+  margin-bottom: 10px;
+}
+.panelTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.editGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+.colWide {
+  grid-column: 1 / -1;
+}
+
+.select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.select:focus {
+  outline: none;
+  border-color: var(--app-accent);
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ── Bulk action bar ─────────────────────────────────────────────────────── */
+.bulkBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-accent-soft);
+}
+.bulkCount {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-accent-text);
+}
+.bulkActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Grouped list ────────────────────────────────────────────────────────── */
+.groupList,
+.rowList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.group + .group {
+  margin-top: 14px;
+}
+.groupHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--app-border);
+}
+.groupName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.groupCount {
+  flex: none;
+  font-size: 11px;
+  color: var(--app-text-subtle);
+}
+.groupCountFull {
+  color: var(--app-danger-text);
+  font-weight: 600;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 4px;
+  border-radius: var(--app-radius-sm);
+}
+.row + .row {
+  border-top: 1px solid var(--app-border);
+}
+.rowSelected {
+  background: var(--app-accent-soft);
+}
+
+.rowMain {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+}
+.check {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--app-accent);
+  cursor: pointer;
+}
+.avatar {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--app-bg-hover);
+}
+.rowText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rowNameLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.rowName {
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  color: var(--app-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.ownerBadge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: var(--app-bg-hover);
+  color: var(--app-text-muted);
+}
+.flag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  background: var(--app-bg-hover);
+  color: var(--app-text-subtle);
+  cursor: help;
+}
+.flagWarn {
+  background: var(--app-warning-soft);
+  color: var(--app-warning-text);
+}
+.rowMeta {
+  font-size: 11px;
+  color: var(--app-text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.iconBtn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--app-radius-sm);
+  border: none;
+  background: none;
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+.iconBtn:hover:not(:disabled) {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.iconBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.iconBtnDanger:hover:not(:disabled) {
+  color: var(--app-danger-text);
+}
+
+/* Inline confirm + edit form expand full width under the row. */
+.confirm {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-hover);
+}
+.confirmText {
+  flex: 1;
+  min-width: 180px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+.confirmActions {
+  display: flex;
+  gap: 6px;
+}
+
+.editForm {
+  flex-basis: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-hover);
+}
+
+/* ── Avatar picker ───────────────────────────────────────────────────────── */
+.avatarField {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.avatarPreview {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--app-bg);
+}
+.avatarPreviewEmpty {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px dashed var(--app-border);
+}
+.avatarBtns {
+  display: flex;
+  gap: 10px;
+}
+.avatarError {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--app-danger-text);
+}

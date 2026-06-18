@@ -139,11 +139,13 @@ export function consumeIncomingWebhook(): IncomingWebhookResult | null {
  * idempotent.
  *
  * The base is 0 — the bot's own read features (roles/channels/emojis) and the
- * `webhook.incoming` flow need no privileged permission. Each bit below is here
- * only because a bundled plugin requires it; add a line as new plugins land.
+ * builder's default `webhook.incoming` creation flow need no privileged
+ * permission. Each bit below is here because a bundled feature requires it; add
+ * a line as new ones land.
  *
- * Keep this aligned with any plugin that builds its own invite — self-role
- * mirrors this value (`SHARED_BOT_PERMISSIONS` in `plugins/self-role/src/`).
+ * Keep this aligned with any plugin that builds its own invite — self-role and
+ * the other plugins mirror this value (`SHARED_BOT_PERMISSIONS` in their
+ * `src/config.rs`). Bump all of them together.
  */
 const SHARED_BOT_PERMISSION_BITS = {
   /** tickets — creates/deletes the per-ticket channel (`POST/DELETE …/channels`). */
@@ -153,6 +155,15 @@ const SHARED_BOT_PERMISSION_BITS = {
    * Also what tickets needs to set a ticket channel's permission overwrites.
    */
   MANAGE_ROLES: 1n << 28n,
+  /**
+   * Webhook Manager — the proxy lists, creates, edits, moves, deletes, and
+   * rotates a server's webhooks through this shared bot. Enumerating a guild's
+   * webhooks (`GET /guilds/{id}/webhooks`) is the one Discord call that hard-
+   * requires it, and the write calls need it too. The builder's per-message
+   * "Create a webhook" still uses the no-permission `webhook.incoming` OAuth
+   * flow by default — this bit powers the separate Webhook Manager dashboard.
+   */
+  MANAGE_WEBHOOKS: 1n << 29n,
 } as const;
 
 /**
@@ -167,10 +178,11 @@ export const SHARED_BOT_PERMISSIONS: string = Object.values(SHARED_BOT_PERMISSIO
 /**
  * OAuth URL to add the DWEEB bot to a server, requesting
  * {@link SHARED_BOT_PERMISSIONS} (the full union every invite must carry — see
- * there for why). Webhook creation still goes through Discord's
- * `webhook.incoming` flow (see `webhookCreateUrl`), not the bot, so the bot
- * never needs Manage Webhooks. Empty when no client id is configured (the
- * caller hides the CTA in that case).
+ * there for why). The builder's per-message webhook creation still defaults to
+ * Discord's no-permission `webhook.incoming` flow (see `webhookCreateUrl`); the
+ * Manage Webhooks bit in the union powers the separate Webhook Manager
+ * dashboard. Empty when no client id is configured (the caller hides the CTA in
+ * that case).
  *
  * When run in the browser we send the user back to the site after they add the
  * bot (`response_type=code` + `redirect_uri`), so a full reload picks up the

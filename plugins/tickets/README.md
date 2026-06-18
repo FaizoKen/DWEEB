@@ -125,10 +125,12 @@ The config UI then needs zero setup in the common case:
 Because the bot is **shared** across plugins and Discord's invite is destructive
 on re-authorization (it *replaces* a bot's permissions, never merges), every
 DWEEB invite URL requests the **same union** — currently **Manage Channels +
-Manage Roles** (`268435472`). Tickets normalizes any operator-supplied
-`BOT_INVITE_URL` to that union at startup, and the value is mirrored in the DWEEB
-frontend (`src/core/guild/config.ts`) and self-role. Bump all three together when
-a plugin's needs change.
+Manage Roles + Manage Webhooks** (`805306384`). Tickets normalizes any
+operator-supplied `BOT_INVITE_URL` to that union at startup, and the value is
+mirrored in the DWEEB frontend (`src/core/guild/config.ts`) and every other
+plugin. Bump them all together when a plugin's needs change. (Manage Webhooks is
+required by the proxy's Webhook Manager, not by tickets itself, but the shared
+invite must carry it so re-inviting through this link doesn't strip it.)
 
 > **Operators:** the `BOT_TOKEN` grants full bot access, not just channel
 > management. Treat the plugin's database as a secret store and only run plugins

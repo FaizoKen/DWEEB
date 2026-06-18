@@ -20,7 +20,7 @@ use reqwest::header::AUTHORIZATION;
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tokio::sync::Semaphore;
 
 use crate::error::AppError;
@@ -30,6 +30,16 @@ const API_BASE: &str = "https://discord.com/api/v10";
 /// `MANAGE_GUILD` permission bit — held by admins/owners; our default gate for
 /// "may this user read this server in a webhook-builder tool".
 pub const MANAGE_GUILD: u64 = 0x20;
+
+/// `ADMINISTRATOR` permission bit — implies every other permission, so it's the
+/// catch-all when checking whether a user could do something in Discord itself.
+pub const ADMINISTRATOR: u64 = 0x8;
+
+/// `MANAGE_WEBHOOKS` permission bit (`1 << 29`). The Webhook Manager mirrors
+/// Discord's own gating: only a user who holds this (or Administrator, or is the
+/// owner) may see a guild's webhook tokens or manage them, even though the bot
+/// is what actually performs the calls.
+pub const MANAGE_WEBHOOKS: u64 = 0x2000_0000;
 
 pub struct Discord {
     http: Client,
@@ -89,6 +99,50 @@ pub struct Emoji {
     pub animated: bool,
     #[serde(default)]
     pub available: bool,
+}
+
+/// A guild/channel webhook as Discord returns it from the management endpoints
+/// (`GET /guilds/{id}/webhooks`, `POST /channels/{id}/webhooks`, …). These calls
+/// require the bot to hold `MANAGE_WEBHOOKS`, and the response carries fields a
+/// plain token GET never exposes: the creating `user` and, for type-1 incoming
+/// webhooks, the `token` itself. The handler decides what to forward to the
+/// browser (see `routes::webhooks_list`). `kind` keeps the wire name `type`.
+#[derive(Deserialize, Serialize)]
+pub struct Webhook {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: i64,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub guild_id: Option<String>,
+    #[serde(default)]
+    pub application_id: Option<String>,
+    /// Present only for type-1 (incoming) webhooks. The execute URL is
+    /// `…/webhooks/{id}/{token}`; this is the credential the Manager can recover.
+    #[serde(default)]
+    pub token: Option<String>,
+    /// The member who created the webhook — only included when the request held
+    /// `MANAGE_WEBHOOKS`, so it's the one new bit of attribution the permission buys.
+    #[serde(default)]
+    pub user: Option<WebhookUser>,
+}
+
+/// Trimmed creator object on a [`Webhook`]. `username`/`global_name` may both be
+/// present; the handler prefers the global (display) name when building output.
+#[derive(Deserialize, Serialize)]
+pub struct WebhookUser {
+    pub id: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub global_name: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 /// Discord's OAuth2 token response (only the fields we use).
@@ -155,6 +209,20 @@ impl UserGuild {
             .map(|p| p & MANAGE_GUILD != 0)
             .unwrap_or(false)
     }
+
+    /// Could the user manage this guild's webhooks in Discord itself? Owner,
+    /// Administrator, or the explicit `MANAGE_WEBHOOKS` bit. This is the gate
+    /// for the Webhook Manager — the bot does the work, but we only reveal a
+    /// guild's webhook tokens to someone who could already see them in Discord.
+    pub fn can_manage_webhooks(&self) -> bool {
+        if self.owner {
+            return true;
+        }
+        self.permissions
+            .parse::<u64>()
+            .map(|p| p & ADMINISTRATOR != 0 || p & MANAGE_WEBHOOKS != 0)
+            .unwrap_or(false)
+    }
 }
 
 impl Discord {
@@ -184,6 +252,87 @@ impl Discord {
 
     pub async fn emojis(&self, guild: &str) -> Result<Vec<Emoji>, AppError> {
         self.get_bot(&format!("/guilds/{guild}/emojis")).await
+    }
+
+    // ── Webhook management (needs the bot to hold MANAGE_WEBHOOKS) ──────────
+    //
+    // Unlike the reads above these are write-capable, so they thread an optional
+    // audit-log reason and map a 403 to an actionable "re-add the bot" message
+    // (a 403 here means the permission bit isn't on the bot's role yet — the
+    // server hasn't re-invited since the union was bumped).
+
+    /// Every webhook in a guild, across all its channels. The single Discord
+    /// call that genuinely needs `MANAGE_WEBHOOKS`; the response includes each
+    /// incoming webhook's token and its creator.
+    pub async fn guild_webhooks(&self, guild: &str) -> Result<Vec<Webhook>, AppError> {
+        self.get_bot(&format!("/guilds/{guild}/webhooks")).await
+    }
+
+    /// Create an incoming webhook in a channel. `avatar` is an image data URI
+    /// (`data:image/png;base64,…`) or None for Discord's default picture.
+    pub async fn create_webhook(
+        &self,
+        channel_id: &str,
+        name: &str,
+        avatar: Option<&str>,
+        reason: Option<&str>,
+    ) -> Result<Webhook, AppError> {
+        let mut body = Map::new();
+        body.insert("name".into(), Value::String(name.to_string()));
+        if let Some(a) = avatar {
+            body.insert("avatar".into(), Value::String(a.to_string()));
+        }
+        self.send_bot_json(
+            reqwest::Method::POST,
+            &format!("/channels/{channel_id}/webhooks"),
+            Value::Object(body),
+            reason,
+        )
+        .await
+    }
+
+    /// Modify a webhook by id. `name` renames; `avatar` is `None` to leave it,
+    /// `Some(Null)` to clear it, or `Some(String)` (a data URI) to set it;
+    /// `channel_id` moves it to another channel.
+    pub async fn modify_webhook(
+        &self,
+        webhook_id: &str,
+        name: Option<&str>,
+        avatar: Option<Value>,
+        channel_id: Option<&str>,
+        reason: Option<&str>,
+    ) -> Result<Webhook, AppError> {
+        let mut body = Map::new();
+        if let Some(n) = name {
+            body.insert("name".into(), Value::String(n.to_string()));
+        }
+        if let Some(a) = avatar {
+            body.insert("avatar".into(), a);
+        }
+        if let Some(c) = channel_id {
+            body.insert("channel_id".into(), Value::String(c.to_string()));
+        }
+        self.send_bot_json(
+            reqwest::Method::PATCH,
+            &format!("/webhooks/{webhook_id}"),
+            Value::Object(body),
+            reason,
+        )
+        .await
+    }
+
+    /// Delete a webhook by id (204 on success).
+    pub async fn delete_webhook(
+        &self,
+        webhook_id: &str,
+        reason: Option<&str>,
+    ) -> Result<(), AppError> {
+        self.send_bot_unit(
+            reqwest::Method::DELETE,
+            &format!("/webhooks/{webhook_id}"),
+            reason,
+        )
+        .await
     }
 
     /// Best-effort channel name for a `webhook.incoming` webhook's channel, so
@@ -393,6 +542,71 @@ impl Discord {
         self.get_json(path, &auth, false).await
     }
 
+    /// Authenticated bot request carrying a JSON body, decoded as `T`. Holds the
+    /// rate-budget permit across the call and threads an optional audit-log
+    /// reason (so the action is attributable in the server's audit log). Used by
+    /// the webhook create/modify calls; webhook-flavoured error mapping.
+    async fn send_bot_json<T: DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Value,
+        reason: Option<&str>,
+    ) -> Result<T, AppError> {
+        let resp = self.send_bot(method, path, Some(body), reason).await?;
+        if resp.status().is_success() {
+            return resp.json::<T>().await.map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
+    /// Like `send_bot_json` but for calls that answer with no body (DELETE → 204).
+    async fn send_bot_unit(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        reason: Option<&str>,
+    ) -> Result<(), AppError> {
+        let resp = self.send_bot(method, path, None, reason).await?;
+        if resp.status().is_success() {
+            return Ok(());
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
+    /// Shared transport for the write helpers: acquire the permit, attach the
+    /// bot auth + optional reason + optional JSON body, and return the raw
+    /// response for the caller to interpret. Only transport failures map to an
+    /// error here; HTTP status is the caller's to handle.
+    async fn send_bot(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Value>,
+        reason: Option<&str>,
+    ) -> Result<reqwest::Response, AppError> {
+        let _permit = self
+            .bot_sem
+            .acquire()
+            .await
+            .map_err(|_| AppError::Internal("rate-limit semaphore closed".into()))?;
+        let mut req = self
+            .http
+            .request(method, format!("{API_BASE}{path}"))
+            .header(AUTHORIZATION, format!("Bot {}", self.token));
+        if let Some(r) = reason.map(audit_reason).filter(|r| !r.is_empty()) {
+            req = req.header("X-Audit-Log-Reason", r);
+        }
+        if let Some(body) = body {
+            req = req.json(&body);
+        }
+        req.send()
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))
+    }
+
     // ── OAuth + user-token calls ───────────────────────────────────────────
 
     /// Exchange an OAuth2 authorization `code` for a user access token.
@@ -574,4 +788,79 @@ fn map_discord_error(
         },
         other => AppError::BadGateway(format!("Discord error {other}: {message}")),
     }
+}
+
+/// Map a non-success response from a webhook-management call onto an `AppError`.
+///
+/// Differs from `map_discord_error` in the 403 case: for these calls a 403 means
+/// the *bot* doesn't hold `MANAGE_WEBHOOKS` in the guild — which the user can fix
+/// by re-adding the bot now that the invite asks for it — so it surfaces as an
+/// actionable 403 rather than a generic 502. 404 (webhook/channel gone) and 429
+/// pass through with the right status.
+async fn webhook_error_from(resp: reqwest::Response) -> AppError {
+    let status = resp.status();
+    let retry_after = if status.as_u16() == 429 {
+        resp.headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<f64>().ok())
+    } else {
+        None
+    };
+    let text = resp.text().await.unwrap_or_default();
+    let message = serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|v| {
+            v.get("message")
+                .and_then(|m| m.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "Discord returned an error".to_string());
+
+    match status.as_u16() {
+        401 => AppError::BadGateway("Discord rejected the bot token — check DISCORD_BOT_TOKEN".into()),
+        403 => AppError::Status {
+            status: StatusCode::FORBIDDEN,
+            message:
+                "DWEEB's bot can't manage webhooks here yet — it needs the Manage Webhooks permission. \
+                 Re-add the bot to this server (Account → Add to another server) to grant it, then try again."
+                    .into(),
+            retry_after: None,
+        },
+        404 => AppError::Status {
+            status: StatusCode::NOT_FOUND,
+            message: "That webhook or channel no longer exists on Discord.".into(),
+            retry_after: None,
+        },
+        429 => AppError::Status {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: "Rate limited by Discord — try again shortly.".into(),
+            retry_after,
+        },
+        400 => AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("Discord rejected the request: {message}"),
+            retry_after: None,
+        },
+        other => AppError::BadGateway(format!("Discord error {other}: {message}")),
+    }
+}
+
+/// Sanitise a string for the `X-Audit-Log-Reason` header: keep printable ASCII,
+/// replace anything else with a space (the header is a latin-1 value and Discord
+/// caps the reason at 512 chars), and trim to a safe length. Empty → empty,
+/// which the caller drops so no header is sent.
+fn audit_reason(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_graphic() || c == ' ' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .take(400)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }

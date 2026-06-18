@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use axum::http::{header, HeaderValue, Method};
 use axum::middleware::from_fn_with_state;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use axum_extra::extract::cookie::Key;
 use tower_http::cors::CorsLayer;
@@ -41,7 +41,8 @@ use crate::discord::Discord;
 use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
 use crate::routes::{
     bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, emojis, health,
-    list_guilds, permanent_add, permanent_list, permanent_remove, roles, AppState, DispatcherApi,
+    list_guilds, permanent_add, permanent_list, permanent_remove, roles, webhook_create,
+    webhook_delete, webhook_modify, webhook_rotate, webhooks_list, AppState, DispatcherApi,
 };
 use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
 
@@ -225,6 +226,22 @@ async fn main() {
             "/api/guilds/:guild_id/permanent/:message_id",
             axum::routing::delete(permanent_remove),
         )
+        // Webhook management (login + Manage Webhooks gated). Enumerate every
+        // webhook in a server (with recover URLs + creators), and create / edit
+        // / move / delete / rotate them through the bot's MANAGE_WEBHOOKS.
+        .route("/api/guilds/:guild_id/webhooks", get(webhooks_list))
+        .route(
+            "/api/guilds/:guild_id/channels/:channel_id/webhooks",
+            post(webhook_create),
+        )
+        .route(
+            "/api/guilds/:guild_id/webhooks/:webhook_id",
+            patch(webhook_modify).delete(webhook_delete),
+        )
+        .route(
+            "/api/guilds/:guild_id/webhooks/:webhook_id/rotate",
+            post(webhook_rotate),
+        )
         // Custom bots: a guild's own Discord apps served by the dispatcher
         // (login + Manage Server gated, relayed to the dispatcher's registry).
         .route(
@@ -303,7 +320,7 @@ fn build_cors(config: &Config) -> CorsLayer {
         .collect();
 
     CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::DELETE])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers([header::CONTENT_TYPE])
         .allow_credentials(true)
         .allow_origin(origins)

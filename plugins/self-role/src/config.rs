@@ -23,8 +23,14 @@ const MANAGE_CHANNELS: u64 = 1 << 4;
 /// Manage Roles — self-role assigns/removes roles (`PUT …/members/{user}/roles`).
 const MANAGE_ROLES: u64 = 1 << 28;
 
-/// The union every shared-bot invite must request: Manage Channels + Manage Roles.
-const SHARED_BOT_PERMISSIONS: u64 = MANAGE_CHANNELS | MANAGE_ROLES;
+/// Manage Webhooks — the proxy's Webhook Manager enumerates and manages a
+/// server's webhooks through the shared bot token (`GET /guilds/{id}/webhooks`
+/// and every create/modify/delete call requires it).
+const MANAGE_WEBHOOKS: u64 = 1 << 29;
+
+/// The union every shared-bot invite must request: Manage Channels + Manage
+/// Roles + Manage Webhooks.
+const SHARED_BOT_PERMISSIONS: u64 = MANAGE_CHANNELS | MANAGE_ROLES | MANAGE_WEBHOOKS;
 
 /// Force an operator-supplied invite URL's `permissions` to [`SHARED_BOT_PERMISSIONS`].
 ///
@@ -166,7 +172,7 @@ mod tests {
         let out = normalize_invite_permissions(
             "https://discord.com/oauth2/authorize?client_id=123&scope=bot&permissions=0",
         );
-        assert_eq!(perms_of(&out).as_deref(), Some("268435472"));
+        assert_eq!(perms_of(&out).as_deref(), Some("805306384"));
     }
 
     #[test]
@@ -185,7 +191,7 @@ mod tests {
             Some("bot".to_string())
         );
         // …and the union is appended.
-        assert_eq!(perms_of(&out).as_deref(), Some("268435472"));
+        assert_eq!(perms_of(&out).as_deref(), Some("805306384"));
         // Exactly one `permissions` param, never duplicated.
         assert_eq!(url.query_pairs().filter(|(k, _)| k == "permissions").count(), 1);
     }

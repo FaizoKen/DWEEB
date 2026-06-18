@@ -278,6 +278,34 @@ time from `vite.config.ts`) allows any `https:` host under `connect-src`, so
 Discord's domains — and a different host, if you fork the app — need no
 allow-list changes.
 
+## Webhook Manager
+
+Servers that grant the DWEEB bot **Manage Webhooks** unlock a webhook dashboard
+(Account menu → **Webhooks**, shown to members who hold Manage Webhooks
+themselves). Listing a server's webhooks is the one Discord call that genuinely
+requires the permission, and the listing carries each incoming webhook's token
+and its creator — so the dashboard becomes a full control panel:
+
+- **Recover a lost URL** — every incoming webhook's execute URL is shown; copy
+  it, or drop it straight into the Send panel.
+- **Create** a webhook in any channel, no OAuth round-trip.
+- **Rename, re-avatar, and move** any webhook — not just ones you hold a token
+  for.
+- **Rotate** a leaked webhook: a fresh URL, the old one deleted.
+- **Audit** hygiene — default names ("Captain Hook"), third-party-app webhooks,
+  duplicates, and channels nearing Discord's 15-per-channel cap — with one-click
+  cleanup.
+- **Brand** a batch of webhooks with one identity, and **export / import** the
+  server's webhook inventory (names + channels; tokens never leave).
+
+The builder's per-message **Create a webhook** still defaults to Discord's
+no-permission `webhook.incoming` OAuth flow, so none of this is required just to
+send. Access is gated server-side on *your own* Manage Webhooks permission,
+mirroring Discord: the bot performs the calls, but only reveals a webhook's
+token to someone who could already see it in Server Settings. Adding the bit to
+the shared bot invite means existing servers must re-add the bot (Discord
+replaces a bot's permissions on re-invite) before the dashboard lights up.
+
 ## AI assistant
 
 The **AI** panel lets you describe a message in plain language and have a

@@ -58,6 +58,7 @@ import {
   hasIncomingWebhook,
   type IncomingWebhook,
 } from "@/core/guild/config";
+import { useWebhookHandoff } from "@/core/webhook/handoffStore";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { shouldAutoOpenGallery, markGalleryAutoOpened } from "@/features/templates/galleryAutoOpen";
 import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
@@ -222,9 +223,19 @@ export function App() {
   // Latches true on first open so the lazy chunk is fetched once and the dialog
   // stays mounted thereafter (preserving SendPanel's in-progress input).
   const [shareMounted, setShareMounted] = useState(false);
+  // Bumped to force a fresh ShareDialog mount when a webhook is handed in from
+  // the Webhook Manager — the Send panel seeds its URL field at mount time, so a
+  // remount is what makes the recovered URL land in the field.
+  const [shareKey, setShareKey] = useState(0);
   // A webhook just created via Discord's `webhook.incoming` redirect, picked up
   // from the URL fragment on load and handed to the Send panel to prefill.
   const [incomingWebhook, setIncomingWebhook] = useState<IncomingWebhook | undefined>(undefined);
+
+  // The Webhook Manager (behind the account menu) recovers a webhook URL and
+  // "uses it in the builder" through this one-shot bridge — a separate subtree,
+  // so a store is what connects them.
+  const pendingWebhook = useWebhookHandoff((s) => s.pending);
+  const clearPendingWebhook = useWebhookHandoff((s) => s.clear);
 
   // Confirmation popup for clearing interactive components. It opens *after*
   // the Share dialog closes, so it floats over the editor rather than the menu.
@@ -313,6 +324,19 @@ export function App() {
     openShareDialog("send");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // In-app hand-off from the Webhook Manager: drop its recovered URL into Send.
+  // Remount the dialog (shareKey) so the panel re-seeds its URL field from the
+  // new `incomingWebhook`, land on the Send tab, then clear the bridge.
+  useEffect(() => {
+    if (!pendingWebhook) return;
+    setIncomingWebhook(pendingWebhook);
+    setShareKey((k) => k + 1);
+    setShareMounted(true);
+    setShareInitialTab("send");
+    setShareOpen(true);
+    clearPendingWebhook();
+  }, [pendingWebhook, clearPendingWebhook]);
 
   // Landing screen: auto-open the Template Gallery when it's actually useful —
   // a first visit, or a fresh session where the user isn't mid-edit — instead of
@@ -444,6 +468,7 @@ export function App() {
         {shareMounted ? (
           <Suspense fallback={null}>
             <ShareDialog
+              key={shareKey}
               open={shareOpen}
               onClose={() => setShareOpen(false)}
               initialTab={shareInitialTab}
