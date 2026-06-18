@@ -1,19 +1,24 @@
-//! The thin Discord REST layer — both calls authenticated with the shared **bot
-//! token**, and both **optional**:
+//! The thin Discord REST layer. Two calls use the shared **bot token**, and both
+//! are **optional**:
 //!   • config time — list a guild's roles so the requirement / host-role pickers
 //!     can show real role names instead of asking for raw ids (`connect`);
 //!   • draw time — DM each winner so they don't miss the news (`dm_user`),
 //!     fired concurrently and best-effort off the interaction's reply path.
+//! A third call, `edit_original_message`, needs **no bot token at all**: it edits
+//! the clicked message through the interaction's own webhook token, so it works
+//! on every deployment (it's how a host's click still refreshes the message).
 //!
-//! The core giveaway (enter / live count / draw / announce) uses none of this —
-//! it runs entirely on interaction responses. So a deployment with no
-//! `BOT_TOKEN` still works; it just can't populate the role picker or DM winners.
+//! The core giveaway (enter / live count / draw / announce) uses none of the
+//! bot-token calls — it runs entirely on interaction responses. So a deployment
+//! with no `BOT_TOKEN` still works; it just can't populate the role picker or DM
+//! winners.
 //!
 //! The only host ever contacted is `discord.com`, so there is no SSRF surface
 //! even though the token is operator-supplied. Every call inherits the shared
 //! client's sub-3s timeout.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 const API_BASE: &str = "https://discord.com/api/v10";
 
@@ -192,4 +197,30 @@ pub async fn dm_user(http: &reqwest::Client, token: &str, user_id: &str, content
 #[derive(Deserialize)]
 struct DmChannel {
     id: String,
+}
+
+/// Edit the original message of a component interaction, out of band, using the
+/// interaction's **own webhook token** — no bot token, no `Authorization`
+/// header (the token in the path *is* the credential). For a component click,
+/// `@original` is the message the button sits on, so this edits the giveaway
+/// message itself — the way a *host's* click can still bring the live count /
+/// winners / status current even though it replied with the control panel.
+///
+/// `data` is the same message-edit body an `UPDATE_MESSAGE` reply carries
+/// (`components`, `allowed_mentions`, and the V2 `flags`). `with_components=true`
+/// is required for the `components` field to take on this webhook-style endpoint
+/// — without it Discord silently drops them (and our giveaway layout is
+/// Components V2). Best-effort: the interaction token is valid ~15 minutes, and
+/// a failure just leaves the message until the next click refreshes it, so the
+/// result is only logged.
+pub async fn edit_original_message(
+    http: &reqwest::Client,
+    application_id: &str,
+    token: &str,
+    data: &Value,
+) -> bool {
+    let url = format!(
+        "{API_BASE}/webhooks/{application_id}/{token}/messages/@original?with_components=true"
+    );
+    matches!(http.patch(url).json(data).send().await, Ok(resp) if resp.status().is_success())
 }

@@ -4,11 +4,14 @@
 //! pure logic in `discord.rs` to the store and the optional REST calls.
 //!
 //! Every member-facing step is pure request/response. The live entrant count
-//! rides on the Enter button's label, restamped by an `UPDATE_MESSAGE` response
-//! to each click (the only way to edit a webhook-authored message — no bot
-//! token). The winner announcement is the public (non-ephemeral) response to a
-//! host's Draw click; again no token. Winner DMs are the one thing that needs
-//! the bot, so they're spawned best-effort, off the 3s reply path.
+//! (and, with placeholders, the whole body) is restamped by an `UPDATE_MESSAGE`
+//! reply to each Enter click — no bot token. A *host's* click is the exception:
+//! it replies with the control panel, so the public message is refreshed out of
+//! band instead, via the interaction's own webhook token (`@original`), so a
+//! host-only giveaway still keeps its count / winners / status current. The
+//! winner announcement is the public (non-ephemeral) response to a host's Draw
+//! click; again no token. Winner DMs are the one thing that needs the bot, so
+//! they're spawned best-effort, off the 3s reply path.
 
 use std::sync::Arc;
 
@@ -245,6 +248,12 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
     if discord::is_host(interaction.actor_roles(), interaction.actor_permissions(), &g.config.host_roles) {
         let entered = state.store.is_entered(id, uid).unwrap_or(false);
         let count = state.store.count_entries(id).unwrap_or(0);
+        // The panel reply doesn't touch the public message, so it would keep
+        // showing its first-paint count / status forever in a giveaway only a
+        // host ever clicks. Refresh it out of band (best-effort) so each panel
+        // open brings the live count — and, post-draw, the winners + "ended" —
+        // into the message itself.
+        spawn_message_refresh(state, interaction, &g, id, count);
         return Json(discord::host_panel(id, g.status, entered, count, g.config.winner_count as usize))
             .into_response();
     }
@@ -308,11 +317,11 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
 fn over_response(state: &AppState, interaction: &discord::Interaction, g: &Giveaway, id: &str) -> Response {
     let (label, note) = match g.status {
         Status::Cancelled => (
-            "\u{274C} Giveaway cancelled",
+            LABEL_CANCELLED,
             "\u{274C} This giveaway was cancelled.".to_string(),
         ),
         _ => (
-            "\u{1F3C1} Giveaway ended",
+            LABEL_ENDED,
             if g.winners.is_empty() {
                 "\u{1F3C1} This giveaway has ended.".to_string()
             } else {
@@ -486,11 +495,93 @@ fn handle_cancel(state: &AppState, interaction: &discord::Interaction, id: &str)
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+/// The Enter button's label once a giveaway is over — shared by the in-reply
+/// refresh ([`over_response`]) and the out-of-band one ([`live_message_data`]).
+const LABEL_ENDED: &str = "\u{1F3C1} Giveaway ended";
+const LABEL_CANCELLED: &str = "\u{274C} Giveaway cancelled";
+
+/// The message-edit `data` that brings the bound giveaway message up to its
+/// current state: the live entrant count while open, or the final winners +
+/// status once it's over. This is the same `data` an `UPDATE_MESSAGE` reply
+/// carries — returned bare so it can also drive an out-of-band `@original` edit
+/// (the path that refreshes the message after a *host's* click). None when the
+/// message carried nothing editable (no stored template and no live components).
+fn live_message_data(g: &Giveaway, msg: &discord::MessageRef, id: &str, count: i64) -> Option<Value> {
+    let enter = discord::enter_id(id);
+    let vars = render_vars(&g.config, count, g.winners.clone(), g.status);
+    let (label, disabled) = match g.status {
+        Status::Open => {
+            // The host's own Enter wording (from the template, else the live
+            // button), substituted then stamped with the count — exactly as a
+            // fresh entry would restamp it.
+            let base = g
+                .config
+                .message_template
+                .as_ref()
+                .and_then(discord::enter_button_label)
+                .or_else(|| {
+                    msg.components
+                        .as_ref()
+                        .and_then(|c| discord::find_button_label(c, &enter))
+                })
+                .unwrap_or_else(|| "\u{1F389} Enter".to_string());
+            (discord::label_with_count(&discord::substitute(&base, &vars), count), false)
+        }
+        Status::Cancelled => (LABEL_CANCELLED.to_string(), true),
+        Status::Ended => (LABEL_ENDED.to_string(), true),
+    };
+    let resp = match g.config.message_template.as_ref() {
+        Some(template) => {
+            discord::update_message_from_template(msg, template, &vars, &enter, Some(&label), disabled)
+        }
+        None => discord::update_button_response(msg, &enter, Some(&label), disabled)?,
+    };
+    resp.get("data").cloned()
+}
+
+/// Best-effort: refresh the public giveaway message out of band via the
+/// interaction's own webhook token (no bot token). Used after a *host's* Enter
+/// click — which replies with the control panel rather than an `UPDATE_MESSAGE`,
+/// so the message would otherwise keep its first-paint count / status. For a
+/// component click, `@original` is the message the button sits on, i.e. the
+/// giveaway message itself. A missing token / app id (e.g. in tests) or nothing
+/// editable is a silent no-op, and the edit is fired off the reply path.
+fn spawn_message_refresh(
+    state: &AppState,
+    interaction: &discord::Interaction,
+    g: &Giveaway,
+    id: &str,
+    count: i64,
+) {
+    let (Some(app_id), Some(token), Some(msg)) = (
+        interaction.application_id.as_deref(),
+        interaction.token.as_deref(),
+        interaction.message.as_ref(),
+    ) else {
+        return;
+    };
+    let Some(data) = live_message_data(g, msg, id, count) else {
+        return;
+    };
+    let http = state.http.clone();
+    let (app_id, token) = (app_id.to_string(), token.to_string());
+    tokio::spawn(async move {
+        // A short beat so Discord has registered our (panel) response before we
+        // edit the interaction's original message.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        if !crate::rest::edit_original_message(&http, &app_id, &token, &data).await {
+            tracing::debug!("giveaway message refresh edit didn't land");
+        }
+    });
+}
+
 /// Build the `UPDATE_MESSAGE` that restamps the entrant count on the Enter
 /// button. When the host used placeholders, re-render the whole message from the
 /// stored template (so `{entries}` updates in the body too, and the count rides
 /// the host's own button wording); otherwise just restamp the live button label,
-/// preserving the rest of the message exactly as before.
+/// preserving the rest of the message exactly as before. Shares its rendering
+/// with the out-of-band [`live_message_data`] so a reply and a background edit
+/// can never disagree — here it's wrapped as the interaction's `UPDATE_MESSAGE`.
 fn entry_count_update(
     interaction: &discord::Interaction,
     g: &Giveaway,
@@ -498,22 +589,8 @@ fn entry_count_update(
     count: i64,
 ) -> Option<Value> {
     let msg = interaction.message.as_ref()?;
-    let enter = discord::enter_id(id);
-
-    if let Some(template) = g.config.message_template.as_ref() {
-        let vars = render_vars(&g.config, count, g.winners.clone(), g.status);
-        let base = discord::enter_button_label(template).unwrap_or_else(|| "\u{1F389} Enter".to_string());
-        let label = discord::label_with_count(&discord::substitute(&base, &vars), count);
-        return Some(discord::update_message_from_template(msg, template, &vars, &enter, Some(&label), false));
-    }
-
-    let current = msg
-        .components
-        .as_ref()
-        .and_then(|c| discord::find_button_label(c, &enter))
-        .unwrap_or_else(|| "\u{1F389} Enter".to_string());
-    let label = discord::label_with_count(&current, count);
-    discord::update_button_response(msg, &enter, Some(&label), false)
+    let data = live_message_data(g, msg, id, count)?;
+    Some(json!({ "type": 7, "data": data }))
 }
 
 /// Assemble the placeholder values for the giveaway's current state — the bridge
@@ -755,5 +832,72 @@ mod tests {
         // The user's body is preserved verbatim; only the button gains the count.
         assert!(s.contains("My own giveaway copy"), "{s}");
         assert!(s.contains("Enter (1)"), "{s}");
+    }
+
+    #[test]
+    fn a_host_enter_click_shows_the_panel_not_a_message_edit() {
+        let state = test_state();
+        let id = "abc";
+        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        // A manager clicking Enter gets the ephemeral control panel (type 4),
+        // never a message edit. The public message is brought current out of
+        // band instead — skipped here because the test interaction carries no
+        // webhook token (so `spawn_message_refresh` is a no-op, as in prod when
+        // the token is somehow absent).
+        let resp = body_json(handle_component(&state, &enter_click(id, "1", MANAGE_GUILD, template(id))));
+        assert_eq!(resp["type"], 4);
+        assert!(resp.to_string().contains("Host controls"), "{resp}");
+    }
+
+    #[test]
+    fn live_message_data_reflects_open_count_then_final_winners() {
+        let state = test_state();
+        let id = "abc";
+        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        let msg = discord::MessageRef {
+            content: Some(String::new()),
+            components: Some(template(id)),
+            flags: Some(32768),
+        };
+
+        // Open: the live count lands in the body and on the host's own button
+        // wording, and the button stays clickable.
+        let g = state.store.get(id).unwrap().unwrap();
+        let open = live_message_data(&g, &msg, id, 2).expect("editable");
+        let s = open.to_string();
+        assert!(s.contains("In: 2"), "{s}");
+        assert!(s.contains("Winners: TBD"), "{s}");
+        assert!(s.contains("[open]"), "{s}");
+        assert!(s.contains("Enter (2)"), "{s}");
+        assert!(s.contains("\"disabled\":false"), "{s}");
+
+        // After a draw: the winner mention + "ended" status fill in and the
+        // button disables — the same data the next click's reply would carry.
+        state.store.set_winners(id, &["100".to_string()]).unwrap();
+        let g = state.store.get(id).unwrap().unwrap();
+        let over = live_message_data(&g, &msg, id, 2).expect("editable");
+        let s = over.to_string();
+        assert!(s.contains("<@100>"), "{s}");
+        assert!(s.contains("[ended]"), "{s}");
+        assert!(s.contains("Giveaway ended"), "{s}");
+        assert!(s.contains("\"disabled\":true"), "{s}");
+    }
+
+    #[test]
+    fn live_message_data_without_template_restamps_button_only() {
+        let state = test_state();
+        let id = "xyz";
+        state.store.create(id, &config_with(None)).unwrap();
+        let msg = discord::MessageRef {
+            content: Some("My own copy".into()),
+            components: Some(live_components(id, "My own copy")),
+            flags: Some(0),
+        };
+        let g = state.store.get(id).unwrap().unwrap();
+        let data = live_message_data(&g, &msg, id, 5).expect("editable");
+        let s = data.to_string();
+        assert!(s.contains("Enter (5)"), "{s}");
+        // No template ⇒ the echoed body is preserved, never re-rendered.
+        assert!(s.contains("My own copy"), "{s}");
     }
 }

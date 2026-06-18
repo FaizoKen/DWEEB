@@ -35,12 +35,15 @@ entries.
 ### Why there's (almost) no bot token
 
 The giveaway message is posted through a **webhook**, and a bot **cannot edit a
-webhook-authored message**. The only way to touch it is an `UPDATE_MESSAGE`
-response to a click *on it* — which is exactly how the live count stays current,
-with **no bot token**. The winner announcement is the public (non-ephemeral)
-interaction response to the Draw click; again, no token. So the whole core —
-enter, live count, requirements, draw, reroll, cancel, announce — runs entirely
-off interaction responses.
+webhook-authored message**. It's kept current two ways, both **token-free**: an
+`UPDATE_MESSAGE` response to a click *on it* (how a member's Enter click restamps
+the count), and — when a *host* clicks Enter, which replies with the control
+panel rather than editing the message — an out-of-band edit of the interaction's
+`@original` (the clicked message) via the interaction's own webhook token, so a
+host-only giveaway still keeps its count / winners / status live. The winner
+announcement is the public (non-ephemeral) interaction response to the Draw
+click; again, no token. So the whole core — enter, live count, requirements,
+draw, reroll, cancel, announce — runs entirely off interaction responses.
 
 The shared bot (`BOT_TOKEN`) is therefore **optional**, used for just two extras:
 
@@ -69,12 +72,14 @@ and survive the live refresh — DWEEB bakes their value into the template, so t
 stay filled in alongside `{winners}` rather than reverting to raw text.
 
 DWEEB paints the first values when the message is posted (so it never shows raw
-`{tokens}`). After that, the same `UPDATE_MESSAGE`-on-click mechanism that keeps
-the entrant count current re-renders the whole message — so `{entries}` ticks up
-as people enter, and **`{winners}` / `{status}` fill in on the first click after
-you draw** (the public announcement still pings the winners instantly). Because a
-webhook message can only be edited in reply to a click on it, that post-draw
-refresh is lazy, not instant — effectively immediate in an active giveaway.
+`{tokens}`). After that, the same mechanism that keeps the entrant count current
+re-renders the whole message — so `{entries}` ticks up as people enter, and
+**`{winners}` / `{status}` fill in after you draw** (the public announcement
+still pings the winners instantly). A member's Enter click refreshes it in the
+reply; a host's Enter click refreshes it out of band (the host gets the control
+panel), so even a giveaway only the host ever touches catches up each time the
+panel is opened. The refresh is click-driven rather than a background timer —
+effectively immediate in an active giveaway.
 
 Internally the plugin captures your message (with its raw tokens) as a *template*
 when you save, and re-renders it from that template on each click — see

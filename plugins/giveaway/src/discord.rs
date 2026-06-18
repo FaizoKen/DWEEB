@@ -125,6 +125,18 @@ pub struct Interaction {
     /// live count current — the only way to edit a webhook-authored message.
     #[serde(default)]
     pub message: Option<MessageRef>,
+    /// This interaction's webhook token. With the `application_id` it addresses
+    /// `/webhooks/{app}/{token}/messages/@original` — the message the component
+    /// sits on — so we can edit that message *out of band* (no bot token), the
+    /// path that refreshes the giveaway after a host's click (which replies with
+    /// the control panel instead of an `UPDATE_MESSAGE`). Valid ~15 minutes.
+    #[serde(default)]
+    pub token: Option<String>,
+    /// The application this interaction is for — the first path segment of the
+    /// interaction-webhook URL above. (A custom app carries its own id here; the
+    /// edit then runs against that app's interaction, exactly as it should.)
+    #[serde(default)]
+    pub application_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
