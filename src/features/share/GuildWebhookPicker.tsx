@@ -26,7 +26,7 @@ import {
   type GuildWebhook,
   type WebhookEdit,
 } from "@/core/guild/api";
-import { botInviteUrl } from "@/core/guild/config";
+import { botInviteUrl, webhookCreateUrl } from "@/core/guild/config";
 import { useAuthStore } from "@/core/auth/authStore";
 import type { GuildChannel } from "@/core/guild/types";
 import { Button } from "@/ui/Button";
@@ -137,6 +137,7 @@ export function GuildWebhookPicker({
   activeId,
   onPick,
   matchChannelId,
+  interactive = false,
 }: {
   /** Send is channel-first (auto webhook); Restore selects an exact webhook. */
   mode: "send" | "restore";
@@ -147,6 +148,13 @@ export function GuildWebhookPicker({
   /** Restore: channel parsed from a pasted message link — its webhooks float to
    *  the top and are tagged, so the right one is obvious. */
   matchChannelId?: string | null;
+  /**
+   * Send: the message carries buttons/menus, which Discord only delivers through
+   * an *app-owned* webhook. A webhook DWEEB's bot makes via REST isn't app-owned,
+   * so for a channel without an existing app-owned DWEEB webhook we route to the
+   * OAuth `webhook.incoming` flow instead of creating a dead one.
+   */
+  interactive?: boolean;
 }) {
   const { active, connectedId, status, webhooks, dweebAppId, error, canReinvite, reload } =
     useGuildWebhooks();
@@ -184,6 +192,15 @@ export function GuildWebhookPicker({
     () => usable.find((w) => w.id === activeId)?.channel_id ?? null,
     [usable, activeId],
   );
+  // Channels that already have an app-owned DWEEB webhook — the only ones a
+  // message with buttons/menus can post to without an OAuth round-trip.
+  const appOwnedChannelIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const w of usable) {
+      if (w.application_id === dweebAppId && w.channel_id) ids.add(w.channel_id);
+    }
+    return ids;
+  }, [usable, dweebAppId]);
 
   if (!active) return null;
 
@@ -276,8 +293,34 @@ export function GuildWebhookPicker({
 
   // The channel-first action: hand back a webhook for this channel, making one if
   // DWEEB doesn't already own one here. The user never sees the webhook step.
+  //
+  // Buttons/menus are the one exception: Discord only delivers them through an
+  // app-owned webhook, and a bot-REST create isn't app-owned. So for an
+  // interactive message we reuse an existing app-owned DWEEB webhook if the
+  // channel has one, otherwise hand off to the OAuth `webhook.incoming` flow
+  // (which does mint an app-owned webhook) rather than create a dead one.
   const onPickChannel = async (channelId: string) => {
     setActionError(null);
+
+    if (interactive) {
+      const appOwned = usable.find(
+        (w) => w.channel_id === channelId && w.application_id === dweebAppId,
+      );
+      if (appOwned) {
+        onPick(appOwned);
+        return;
+      }
+      const name = channelName(channelId);
+      pushToast(
+        name
+          ? `Buttons & menus need an app-owned webhook — pick #${name} on the next screen.`
+          : "Buttons & menus need an app-owned webhook — pick the channel on the next screen.",
+        "info",
+      );
+      window.location.href = webhookCreateUrl(connectedId);
+      return;
+    }
+
     const existing = reusableInChannel(channelId);
     if (existing) {
       onPick(existing);
@@ -433,7 +476,9 @@ export function GuildWebhookPicker({
     <section className={styles.picker} aria-label="Destination">
       {header}
       <p className={styles.note}>
-        Pick a channel — DWEEB sets up the webhook for you. No tokens to copy.
+        {interactive
+          ? "Pick a channel. Buttons & menus need an app-owned webhook — channels that already have one are marked “ready”; picking another opens Discord to set one up."
+          : "Pick a channel — DWEEB sets up the webhook for you. No tokens to copy."}
       </p>
 
       {webhookChannels.length === 0 ? (
@@ -455,6 +500,7 @@ export function GuildWebhookPicker({
           {channelList.map((c) => {
             const isActive = c.id === activeChannelId;
             const busy = resolvingChannel === c.id;
+            const ready = appOwnedChannelIds.has(c.id);
             return (
               <li key={c.id}>
                 <button
@@ -469,9 +515,14 @@ export function GuildWebhookPicker({
                   <span className={styles.channelName}>{c.name}</span>
                   {busy ? (
                     <span className={styles.channelStatus}>Setting up…</span>
-                  ) : isActive ? (
-                    <CheckCircleIcon size={16} className={styles.check} />
+                  ) : interactive && !isActive ? (
+                    ready ? (
+                      <span className={styles.channelReady}>ready</span>
+                    ) : (
+                      <span className={styles.channelStatus}>via Discord</span>
+                    )
                   ) : null}
+                  {isActive ? <CheckCircleIcon size={16} className={styles.check} /> : null}
                 </button>
               </li>
             );
