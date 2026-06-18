@@ -1182,18 +1182,23 @@ export function SendPanel({
         </button>
       </div>
 
-      <WebhookRecents
-        history={history}
-        activeId={parsedUrl?.id ?? null}
-        onUse={(entry) => {
-          setUrl(entry.url);
-          // Picking a saved entry collapses to the summary — the recents row
-          // already shows what's active, so drop out of any manual edit mode.
-          closeUrlField();
-          setState({ kind: "idle" });
-        }}
-        onChange={() => setHistory(loadHistory())}
-      />
+      {/* Browser-saved recents are redundant once the auto-detect picker is
+          showing the connected server's webhooks live — hide them there to keep
+          the panel focused on the picker. */}
+      {!pickerActive ? (
+        <WebhookRecents
+          history={history}
+          activeId={parsedUrl?.id ?? null}
+          onUse={(entry) => {
+            setUrl(entry.url);
+            // Picking a saved entry collapses to the summary — the recents row
+            // already shows what's active, so drop out of any manual edit mode.
+            closeUrlField();
+            setState({ kind: "idle" });
+          }}
+          onChange={() => setHistory(loadHistory())}
+        />
+      ) : null}
 
       {/* Destination — how the message reaches Discord. The fast path (let DWEEB
           or a registered custom bot create the webhook) is primary; pasting a

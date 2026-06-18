@@ -94,18 +94,21 @@
   overflow-y: auto;
 }
 
+.rowWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
   width: 100%;
-  text-align: left;
-  padding: 8px 10px;
+  padding-right: 6px;
   background: var(--app-bg);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
-  color: var(--app-text);
-  cursor: pointer;
   transition:
     background 120ms ease,
     border-color 120ms ease;
@@ -121,6 +124,29 @@
 .rowActive:hover {
   background: var(--app-accent-soft);
   border-color: var(--app-accent);
+}
+
+/* Clickable selection area — fills the row, leaving space for the action icons. */
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  color: var(--app-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.rowActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .avatar {
@@ -284,4 +310,145 @@
   padding: 8px 10px;
   border-radius: var(--app-radius-sm);
   font-size: 12px;
+}
+
+/* Inline delete confirmation under a row. */
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(237, 66, 69, 0.08);
+  border: 1px solid rgba(237, 66, 69, 0.3);
+  border-radius: var(--app-radius-sm);
+}
+.confirmText {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+
+/* Purge duplicates — collapsed nudge + expanded confirm. */
+.purgeToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  color: rgb(240, 178, 50);
+  cursor: pointer;
+}
+.purgeToggle:hover .purgeToggleAccent {
+  text-decoration: underline;
+}
+.purgeToggleAccent {
+  font-weight: 600;
+}
+.purge {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(240, 178, 50, 0.08);
+  border: 1px solid rgba(240, 178, 50, 0.32);
+  border-radius: var(--app-radius);
+}
+.purgeHead {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+.purgeIcon {
+  flex: none;
+  margin-top: 1px;
+  color: rgb(240, 178, 50);
+}
+.purgeList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.purgeItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  padding: 3px 0;
+  border-top: 1px dashed var(--app-border);
+}
+.purgeItem:first-child {
+  border-top: none;
+}
+.purgeName {
+  font-weight: 600;
+  color: var(--app-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.purgeDest {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--app-text-muted);
+}
+.purgeDest svg {
+  color: var(--app-text-subtle);
+}
+
+/* Avatar picker (create + edit forms). */
+.avatarField {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.avatarPreview {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: var(--app-bg-hover);
+}
+.avatarPreviewEmpty {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--app-bg-hover);
+}
+.avatarBtns {
+  display: flex;
+  gap: 12px;
+}
+.linkBtn {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--app-accent, #5865f2);
+  cursor: pointer;
+}
+.linkBtn:hover {
+  text-decoration: underline;
+}
+.avatarError {
+  width: 100%;
+  font-size: 11px;
+  color: var(--app-danger, rgb(237, 66, 69));
 }

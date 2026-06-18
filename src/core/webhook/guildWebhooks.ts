@@ -47,8 +47,11 @@ interface GuildWebhooksState {
   /** Fetch the guild's webhooks (deduped; cached for {@link TTL_MS} unless
    *  `force`). Safe to call from both panels' mount effects. */
   load: (guildId: string, opts?: { force?: boolean }) => Promise<void>;
-  /** Splice a freshly-created webhook into the list without a refetch. */
+  /** Splice a freshly-created (or edited) webhook into the list without a
+   *  refetch — replaces an entry with the same id, else prepends it. */
   upsertLocal: (webhook: GuildWebhook) => void;
+  /** Drop a deleted webhook from the list without a refetch. */
+  removeLocal: (webhookId: string) => void;
 }
 
 // Module-scoped in-flight guard so concurrent mounts share one request.
@@ -133,9 +136,17 @@ export const useGuildWebhooksStore = create<GuildWebhooksState>((set, get) => ({
 
   upsertLocal(webhook) {
     set((prev) => {
-      const without = prev.webhooks.filter((w) => w.id !== webhook.id);
-      return { webhooks: [webhook, ...without] };
+      const idx = prev.webhooks.findIndex((w) => w.id === webhook.id);
+      if (idx === -1) return { webhooks: [webhook, ...prev.webhooks] };
+      // Replace in place so an edit doesn't make the row jump to the top.
+      const next = prev.webhooks.slice();
+      next[idx] = webhook;
+      return { webhooks: next };
     });
+  },
+
+  removeLocal(webhookId) {
+    set((prev) => ({ webhooks: prev.webhooks.filter((w) => w.id !== webhookId) }));
   },
 }));
 
