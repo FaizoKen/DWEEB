@@ -124,8 +124,14 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
     if (slot.target === "string_select" && result.options?.length) fields.options = result.options;
     if (result.fields) Object.assign(fields, result.fields);
     patchNode<StringSelectComponent>(slot.nodeId, fields);
-    if (result.summary)
-      setPluginSummary(result.customId, slot.manifest.id, result.summary, result.guildId);
+    // Cache the summary, the per-binding guild, AND any static placeholder values
+    // (e.g. Giveaway's `{prize}`) — mirroring the inspector's Action panel. Without
+    // the values, a template configured here would render `{token}` text as the
+    // manifest sample instead of the real value at first paint.
+    if (result.summary || result.guildId || result.values) {
+      const summary = result.summary ?? { label: slot.manifest.name };
+      setPluginSummary(result.customId, slot.manifest.id, summary, result.guildId, result.values);
+    }
     setConfiguring(null);
   };
 

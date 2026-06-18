@@ -860,7 +860,7 @@ const GIVEAWAY_BUTTON_MESSAGE: WebhookMessage = {
               _id: id(),
               type: ComponentType.TextDisplay,
               content:
-                "### Nitro x3 — one click to enter!\n**🎁 Prize:** 3× Discord Nitro\n**🏆 Winners:** 3\n**⏰ Ends:** in 24 hours\n**👥 Entries:** 0",
+                "### 🎁 {prize}\nTap **Enter** below — the count ticks up live and a fair winner is drawn on its own.",
             },
           ],
           accessory: {
@@ -879,7 +879,8 @@ const GIVEAWAY_BUTTON_MESSAGE: WebhookMessage = {
         {
           _id: id(),
           type: ComponentType.TextDisplay,
-          content: "Tap **Enter** below. The live count updates and a fair draw runs on its own.",
+          content:
+            "**🏆 Winners:** {winner_count} • **👥 Entered:** {entries} • **✨ Status:** {status}\n**🎊 Winner(s):** {winners}",
         },
         {
           _id: id(),
@@ -901,7 +902,7 @@ const GIVEAWAY_BUTTON_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# Wire the button to the Giveaway plugin for live entries, requirements & a fair draw.",
+        "-# 🍀 Open to everyone in {server} • one entry per person • winners drawn at random",
     },
   ],
 };
@@ -1415,7 +1416,7 @@ export const TEMPLATES: MessageTemplate[] = [
   {
     id: "giveaway-button",
     name: "Giveaway (button entry)",
-    description: "One-click entry with a live count and fair draw.",
+    description: "One-click entry — the prize, live count and winners fill themselves in.",
     emoji: "🎁",
     category: "Events",
     tags: ["prize", "raffle", "contest", "button", "enter"],
