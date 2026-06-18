@@ -497,6 +497,14 @@
   opacity: 0.6;
   cursor: progress;
 }
+/* Selected channel — the accent highlight. Needs the compound selector to
+   outweigh `.channelRow`'s own background/border, which are declared later in
+   this file than the shared `.rowActive` rule and would otherwise win on tie. */
+.channelRow.rowActive,
+.channelRow.rowActive:hover {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+}
 .channelHash {
   flex: none;
   display: inline-flex;
