@@ -74,9 +74,9 @@ pub struct UsableGuild {
     pub name: String,
     pub icon: Option<String>,
     /// Whether the user holds Manage Webhooks (or Administrator/owner) here —
-    /// the gate for the Webhook Manager. `#[serde(default)]` so entries cached
-    /// before this field existed still decode (they default to false, and a
-    /// data refresh re-resolves them).
+    /// the gate for the Send/Restore webhook picker. `#[serde(default)]` so
+    /// entries cached before this field existed still decode (they default to
+    /// false, and a data refresh re-resolves them).
     #[serde(default)]
     pub can_manage_webhooks: bool,
 }
@@ -511,18 +511,18 @@ async fn relay_dispatcher(req: reqwest::RequestBuilder) -> Result<Response, AppE
     }
 }
 
-// ── Webhook management (login + Manage Webhooks gated) ─────────────────────
+// ── Webhook auto-detect (login + Manage Webhooks gated) ────────────────────
 //
-// The one feature that needs the BOT to hold MANAGE_WEBHOOKS. Enumerating a
-// guild's webhooks is the only Discord call that hard-requires it, and the
-// response carries each incoming webhook's token + creator — so the Manager can
-// recover lost URLs, audit who made what, and create / rename / move / delete /
-// rotate webhooks the user never held a token for. Every handler is gated on the
-// USER also holding Manage Webhooks (`authorize_webhooks`), mirroring Discord,
-// and every webhook or channel a write touches is verified to belong to THIS
-// guild first — so a guessed id from another server can't be reached through our
-// shared bot token. Webhook tokens are sensitive, so these reads are never
-// cached (the existing roles/channels cache holds only non-secret data).
+// Powers the Send/Restore webhook picker. Enumerating a guild's webhooks is the
+// only Discord call that hard-requires the BOT to hold MANAGE_WEBHOOKS, and the
+// response carries each incoming webhook's token + creator — so the builder can
+// recover an existing webhook's URL or create a fresh one in a channel, without
+// the user ever pasting a token. Both handlers are gated on the USER also
+// holding Manage Webhooks (`authorize_webhooks`), mirroring Discord, and the
+// channel a create targets is verified to belong to THIS guild first — so a
+// guessed id from another server can't be reached through our shared bot token.
+// Webhook tokens are sensitive, so these reads are never cached (the existing
+// roles/channels cache holds only non-secret data).
 
 #[derive(Deserialize)]
 pub struct WebhookCreateBody {
@@ -590,178 +590,6 @@ pub async fn webhook_create(
         .create_webhook(&channel_id, name, avatar.as_deref(), Some(&reason))
         .await?;
     Ok(value_response(&webhook_json(&w)))
-}
-
-/// `PATCH /api/guilds/:id/webhooks/:webhook_id` `{ name?, avatar?, channel_id? }`
-/// — rename, re-avatar (string sets, `null` clears), and/or move the webhook.
-/// The raw `Value` body lets `avatar: null` (clear) read differently from an
-/// absent `avatar` (leave) — a distinction `Option<String>` would collapse.
-pub async fn webhook_modify(
-    State(st): State<AppState>,
-    jar: PrivateCookieJar,
-    Path((guild, webhook_id)): Path<(String, String)>,
-    Json(body): Json<Value>,
-) -> Result<Response, AppError> {
-    let session = authorize_webhooks(&st, &jar, &guild).await?;
-    if !is_snowflake(&webhook_id) {
-        return Err(client_error(
-            StatusCode::BAD_REQUEST,
-            "webhook_id must be a Discord id.",
-        ));
-    }
-    let obj = body
-        .as_object()
-        .ok_or_else(|| client_error(StatusCode::BAD_REQUEST, "Body must be a JSON object."))?;
-
-    let name = match obj.get("name") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => {
-            let t = s.trim();
-            validate_webhook_name(t)?;
-            Some(t.to_string())
-        }
-        Some(_) => {
-            return Err(client_error(
-                StatusCode::BAD_REQUEST,
-                "name must be a string.",
-            ))
-        }
-    };
-    let avatar: Option<Value> = match obj.get("avatar") {
-        None => None,
-        Some(Value::Null) => Some(Value::Null),
-        Some(Value::String(s)) if valid_data_uri(s) => Some(Value::String(s.clone())),
-        Some(_) => {
-            return Err(client_error(
-                StatusCode::BAD_REQUEST,
-                "avatar must be a data: image URI, or null to clear it.",
-            ))
-        }
-    };
-    let move_to = match obj.get("channel_id") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => {
-            let t = s.trim();
-            if !is_snowflake(t) {
-                return Err(client_error(
-                    StatusCode::BAD_REQUEST,
-                    "channel_id must be a Discord id.",
-                ));
-            }
-            Some(t.to_string())
-        }
-        Some(_) => {
-            return Err(client_error(
-                StatusCode::BAD_REQUEST,
-                "channel_id must be a string.",
-            ))
-        }
-    };
-    if name.is_none() && avatar.is_none() && move_to.is_none() {
-        return Err(client_error(StatusCode::BAD_REQUEST, "Nothing to change."));
-    }
-
-    ensure_webhook_in_guild(&st, &guild, &webhook_id).await?;
-    if let Some(c) = &move_to {
-        ensure_channel_in_guild(&st, &guild, c).await?;
-    }
-    let reason = format!("Edited via DWEEB by {}", session.uid);
-    let w = st
-        .discord
-        .modify_webhook(
-            &webhook_id,
-            name.as_deref(),
-            avatar,
-            move_to.as_deref(),
-            Some(&reason),
-        )
-        .await?;
-    Ok(value_response(&webhook_json(&w)))
-}
-
-/// `DELETE /api/guilds/:id/webhooks/:webhook_id` — delete a webhook in this guild.
-pub async fn webhook_delete(
-    State(st): State<AppState>,
-    jar: PrivateCookieJar,
-    Path((guild, webhook_id)): Path<(String, String)>,
-) -> Result<Response, AppError> {
-    let session = authorize_webhooks(&st, &jar, &guild).await?;
-    if !is_snowflake(&webhook_id) {
-        return Err(client_error(
-            StatusCode::BAD_REQUEST,
-            "webhook_id must be a Discord id.",
-        ));
-    }
-    ensure_webhook_in_guild(&st, &guild, &webhook_id).await?;
-    let reason = format!("Deleted via DWEEB by {}", session.uid);
-    st.discord
-        .delete_webhook(&webhook_id, Some(&reason))
-        .await?;
-    Ok(value_response(&json!({ "ok": true })))
-}
-
-/// `POST /api/guilds/:id/webhooks/:webhook_id/rotate` — invalidate a (possibly
-/// leaked) webhook URL by recreating it: make a fresh webhook in the same
-/// channel with the same name, then delete the old one. The new webhook has a
-/// new token, so the old URL stops working. Create-then-delete, so a failure to
-/// create leaves the original intact; a failure to delete still rotated the URL
-/// and is reported softly. Avatar isn't carried (we only have the hash, not the
-/// bytes) — the FE says so.
-pub async fn webhook_rotate(
-    State(st): State<AppState>,
-    jar: PrivateCookieJar,
-    Path((guild, webhook_id)): Path<(String, String)>,
-) -> Result<Response, AppError> {
-    let session = authorize_webhooks(&st, &jar, &guild).await?;
-    if !is_snowflake(&webhook_id) {
-        return Err(client_error(
-            StatusCode::BAD_REQUEST,
-            "webhook_id must be a Discord id.",
-        ));
-    }
-    let hooks = st.discord.guild_webhooks(&guild).await?;
-    let Some(target) = hooks.iter().find(|w| w.id == webhook_id) else {
-        return Err(client_error(
-            StatusCode::NOT_FOUND,
-            "That webhook isn't in this server.",
-        ));
-    };
-    if target.kind != 1 {
-        return Err(client_error(
-            StatusCode::BAD_REQUEST,
-            "Only incoming webhooks can be rotated.",
-        ));
-    }
-    let Some(channel_id) = target.channel_id.clone() else {
-        return Err(client_error(
-            StatusCode::BAD_REQUEST,
-            "That webhook has no channel to recreate in.",
-        ));
-    };
-    let name = target.name.clone().unwrap_or_else(|| "Webhook".to_string());
-    let reason = format!("Rotated via DWEEB by {}", session.uid);
-    let fresh = st
-        .discord
-        .create_webhook(&channel_id, &name, None, Some(&reason))
-        .await?;
-    let mut out = webhook_json(&fresh);
-    if st
-        .discord
-        .delete_webhook(&webhook_id, Some(&reason))
-        .await
-        .is_err()
-    {
-        if let Value::Object(m) = &mut out {
-            m.insert(
-                "rotate_warning".into(),
-                Value::String(
-                    "Created a fresh webhook, but couldn't delete the old one — remove it from the list manually."
-                        .into(),
-                ),
-            );
-        }
-    }
-    Ok(value_response(&out))
 }
 
 // ── Webhook handler helpers ────────────────────────────────────────────────
@@ -868,24 +696,6 @@ async fn ensure_channel_in_guild(
     ))
 }
 
-/// Ensure `webhook_id` belongs to `guild` before a write touches it — the bot
-/// token can otherwise act on any webhook id, in any server it's in.
-async fn ensure_webhook_in_guild(
-    st: &AppState,
-    guild: &str,
-    webhook_id: &str,
-) -> Result<(), AppError> {
-    let hooks = st.discord.guild_webhooks(guild).await?;
-    if hooks.iter().any(|w| w.id == webhook_id) {
-        Ok(())
-    } else {
-        Err(client_error(
-            StatusCode::NOT_FOUND,
-            "That webhook isn't in this server.",
-        ))
-    }
-}
-
 // ── Authorization ──────────────────────────────────────────────────────────
 
 /// Decode a valid, unexpired session or reject with 401.
@@ -925,11 +735,12 @@ pub(crate) async fn authorize_member(
     }
 }
 
-/// Stricter gate for the Webhook Manager: a member of the guild (as above) who
-/// *additionally* holds Manage Webhooks (or Administrator/owner) there. The bot
-/// is what performs the calls, but we mirror Discord's own gating so a guild's
-/// webhook tokens are only ever revealed to someone who could already see them
-/// in Server Settings. Returns the session so writes can record who acted.
+/// Stricter gate for the webhook picker (list + create): a member of the guild
+/// (as above) who *additionally* holds Manage Webhooks (or Administrator/owner)
+/// there. The bot is what performs the calls, but we mirror Discord's own gating
+/// so a guild's webhook tokens are only ever revealed to someone who could
+/// already see them in Server Settings. Returns the session so a create can
+/// record who acted.
 pub(crate) async fn authorize_webhooks(
     st: &AppState,
     jar: &PrivateCookieJar,

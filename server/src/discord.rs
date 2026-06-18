@@ -35,10 +35,10 @@ pub const MANAGE_GUILD: u64 = 0x20;
 /// catch-all when checking whether a user could do something in Discord itself.
 pub const ADMINISTRATOR: u64 = 0x8;
 
-/// `MANAGE_WEBHOOKS` permission bit (`1 << 29`). The Webhook Manager mirrors
-/// Discord's own gating: only a user who holds this (or Administrator, or is the
-/// owner) may see a guild's webhook tokens or manage them, even though the bot
-/// is what actually performs the calls.
+/// `MANAGE_WEBHOOKS` permission bit (`1 << 29`). The Send/Restore webhook picker
+/// mirrors Discord's own gating: only a user who holds this (or Administrator, or
+/// is the owner) may see a guild's webhook tokens or create one, even though the
+/// bot is what actually performs the calls.
 pub const MANAGE_WEBHOOKS: u64 = 0x2000_0000;
 
 pub struct Discord {
@@ -212,8 +212,9 @@ impl UserGuild {
 
     /// Could the user manage this guild's webhooks in Discord itself? Owner,
     /// Administrator, or the explicit `MANAGE_WEBHOOKS` bit. This is the gate
-    /// for the Webhook Manager — the bot does the work, but we only reveal a
-    /// guild's webhook tokens to someone who could already see them in Discord.
+    /// for the Send/Restore webhook picker — the bot does the work, but we only
+    /// reveal a guild's webhook tokens to someone who could already see them in
+    /// Discord.
     pub fn can_manage_webhooks(&self) -> bool {
         if self.owner {
             return true;
@@ -254,12 +255,14 @@ impl Discord {
         self.get_bot(&format!("/guilds/{guild}/emojis")).await
     }
 
-    // ── Webhook management (needs the bot to hold MANAGE_WEBHOOKS) ──────────
+    // ── Webhook auto-detect (needs the bot to hold MANAGE_WEBHOOKS) ─────────
     //
-    // Unlike the reads above these are write-capable, so they thread an optional
-    // audit-log reason and map a 403 to an actionable "re-add the bot" message
-    // (a 403 here means the permission bit isn't on the bot's role yet — the
-    // server hasn't re-invited since the union was bumped).
+    // Enumerate a guild's webhooks (the one call that hard-requires the bit) and
+    // create one in a channel — the feed + fast path behind the Send/Restore
+    // picker. The create is write-capable, so it threads an optional audit-log
+    // reason; a 403 from either maps to an actionable "re-add the bot" message
+    // (the permission bit isn't on the bot's role yet — the server hasn't
+    // re-invited since the union was bumped).
 
     /// Every webhook in a guild, across all its channels. The single Discord
     /// call that genuinely needs `MANAGE_WEBHOOKS`; the response includes each
@@ -286,50 +289,6 @@ impl Discord {
             reqwest::Method::POST,
             &format!("/channels/{channel_id}/webhooks"),
             Value::Object(body),
-            reason,
-        )
-        .await
-    }
-
-    /// Modify a webhook by id. `name` renames; `avatar` is `None` to leave it,
-    /// `Some(Null)` to clear it, or `Some(String)` (a data URI) to set it;
-    /// `channel_id` moves it to another channel.
-    pub async fn modify_webhook(
-        &self,
-        webhook_id: &str,
-        name: Option<&str>,
-        avatar: Option<Value>,
-        channel_id: Option<&str>,
-        reason: Option<&str>,
-    ) -> Result<Webhook, AppError> {
-        let mut body = Map::new();
-        if let Some(n) = name {
-            body.insert("name".into(), Value::String(n.to_string()));
-        }
-        if let Some(a) = avatar {
-            body.insert("avatar".into(), a);
-        }
-        if let Some(c) = channel_id {
-            body.insert("channel_id".into(), Value::String(c.to_string()));
-        }
-        self.send_bot_json(
-            reqwest::Method::PATCH,
-            &format!("/webhooks/{webhook_id}"),
-            Value::Object(body),
-            reason,
-        )
-        .await
-    }
-
-    /// Delete a webhook by id (204 on success).
-    pub async fn delete_webhook(
-        &self,
-        webhook_id: &str,
-        reason: Option<&str>,
-    ) -> Result<(), AppError> {
-        self.send_bot_unit(
-            reqwest::Method::DELETE,
-            &format!("/webhooks/{webhook_id}"),
             reason,
         )
         .await
@@ -558,20 +517,6 @@ impl Discord {
             return resp.json::<T>().await.map_err(|e| {
                 AppError::BadGateway(format!("unexpected response from Discord: {e}"))
             });
-        }
-        Err(webhook_error_from(resp).await)
-    }
-
-    /// Like `send_bot_json` but for calls that answer with no body (DELETE → 204).
-    async fn send_bot_unit(
-        &self,
-        method: reqwest::Method,
-        path: &str,
-        reason: Option<&str>,
-    ) -> Result<(), AppError> {
-        let resp = self.send_bot(method, path, None, reason).await?;
-        if resp.status().is_success() {
-            return Ok(());
         }
         Err(webhook_error_from(resp).await)
     }

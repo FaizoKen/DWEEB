@@ -37,12 +37,17 @@ import {
   classifyWebhookOwner,
   fetchWebhookMessage,
   loadHistory,
+  parseMessageChannelId,
   parseMessageIdInput,
   parseWebhookUrl,
   rememberWebhook,
+  useCanManageGuildWebhooks,
   verifyWebhook,
   webhookAvatarHash,
 } from "@/core/webhook";
+import { useAuthStore } from "@/core/auth/authStore";
+import { useGuildStore } from "@/core/guild/guildStore";
+import { type GuildWebhook } from "@/core/guild/api";
 import { LockIcon } from "@/ui/Icon";
 import { type IncomingWebhook } from "@/core/guild/config";
 import { pushToast } from "@/ui/Toast";
@@ -50,6 +55,7 @@ import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
 import { SendPanel } from "./SendPanel";
 import { WebhookRecents } from "./WebhookRecents";
+import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { Callout } from "./Callout";
 import styles from "./ShareDialog.module.css";
 
@@ -563,6 +569,11 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   const prefill = restoredFrom ?? pendingEditOrigin;
   const [url, setUrl] = useState(() => restoredFrom?.webhookUrl ?? "");
   const [revealUrl, setRevealUrl] = useState(false);
+  // Manual URL entry is the secondary path once the auto-detect picker is
+  // available: the full credential field stays collapsed behind a summary until
+  // the user opts in (or a typed URL needs fixing). `urlInputRef` focuses it.
+  const [pasteMode, setPasteMode] = useState(false);
+  const urlInputRef = useRef<HTMLInputElement>(null);
   const [idInput, setIdInput] = useState(() => prefill?.messageId ?? "");
   const [threadId, setThreadId] = useState(() => prefill?.threadId ?? "");
   const [busy, setBusy] = useState(false);
@@ -590,6 +601,53 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   const messageId = useMemo(() => parseMessageIdInput(idInput), [idInput]);
   const urlInvalid = url.trim().length > 0 && !parsedUrl;
   const idInvalid = idInput.trim().length > 0 && !messageId;
+
+  // Auto-detect picker (the connected guild's webhooks, when the bot + user both
+  // hold Manage Webhooks): pick the webhook that posted the message instead of
+  // pasting its URL. A pasted message *link* carries the channel, so the webhooks
+  // posting there float to the top — tagged "this channel" — and one click fills
+  // the URL.
+  const authGuilds = useAuthStore((s) => s.guilds);
+  const connectedData = useGuildStore((s) => s.data);
+  const pickerActive = useCanManageGuildWebhooks();
+  const matchChannelId = useMemo(() => parseMessageChannelId(idInput), [idInput]);
+
+  // The auto-detect picker is the primary way to choose a webhook for managers;
+  // the raw credential field becomes the secondary "advanced" path, collapsed to
+  // a summary until the user opts in (or a typed URL still needs fixing). With no
+  // picker (non-manager / signed out) the field is the only way in, so it stays
+  // open — preserving the original Restore behaviour.
+  const editingUrl = !pickerActive || pasteMode || (url.trim().length > 0 && !parsedUrl);
+  const openUrlField = () => {
+    setRevealUrl(true);
+    setPasteMode(true);
+    requestAnimationFrame(() => urlInputRef.current?.focus());
+  };
+  const closeUrlField = () => {
+    setPasteMode(false);
+    setRevealUrl(false);
+  };
+
+  const handlePickWebhook = (w: GuildWebhook) => {
+    const parsed = parseWebhookUrl(w.url ?? "");
+    if (!parsed) return;
+    const channelName = w.channel_id ? connectedData?.channelById[w.channel_id]?.name : undefined;
+    const guildName = w.guild_id ? authGuilds.find((g) => g.id === w.guild_id)?.name : undefined;
+    rememberWebhook(parsed.url, {
+      name: w.name ?? undefined,
+      ownerKind: w.application_id ? "bot" : "user",
+      applicationId: w.application_id ?? undefined,
+      avatar: w.avatar,
+      channelId: w.channel_id ?? undefined,
+      guildId: w.guild_id ?? undefined,
+      channelName,
+      guildName,
+    });
+    setUrl(parsed.url);
+    setHistory(loadHistory());
+    closeUrlField();
+    setError(null);
+  };
 
   const handleFetch = async () => {
     setError(null);
@@ -703,52 +761,113 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
         </Callout>
       ) : null}
 
-      <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
-        <strong>Treat the webhook URL like a password.</strong> It's a credential that lets anyone
-        post to your channel — keep it secret and only use webhooks you own.
-      </Callout>
+      {pickerActive ? (
+        <GuildWebhookPicker
+          mode="restore"
+          activeId={parsedUrl?.id ?? null}
+          onPick={handlePickWebhook}
+          matchChannelId={matchChannelId}
+        />
+      ) : null}
 
-      <WebhookRecents
-        history={history}
-        activeId={parsedUrl?.id ?? null}
-        onUse={(entry) => setUrl(entry.url)}
-        onChange={() => setHistory(loadHistory())}
-      />
+      {/* Collapsed summary (picker available, not manually editing): a webhook is
+          set, or a quiet link to paste one by hand. */}
+      {pickerActive && !editingUrl ? (
+        parsedUrl ? (
+          <p className={styles.urlSet}>
+            Webhook set — reading the message from your channel.{" "}
+            <button type="button" className={styles.urlSetLink} onClick={openUrlField}>
+              Edit URL
+            </button>
+          </p>
+        ) : (
+          <button type="button" className={styles.pasteToggle} onClick={openUrlField}>
+            Already have the webhook URL?{" "}
+            <span className={styles.pasteToggleAccent}>Paste it instead</span>
+          </button>
+        )
+      ) : null}
 
-      <Field
-        label="Webhook URL"
-        error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
-      >
-        {(id) => (
-          <div className={styles.urlRow}>
-            <TextInput
-              id={id}
-              masked={!revealUrl}
-              spellCheck={false}
-              value={url}
-              onChange={(e) => setUrl(e.currentTarget.value)}
-              invalid={urlInvalid}
-              placeholder="https://discord.com/api/webhooks/…"
-            />
-            <button
-              type="button"
-              className={styles.revealBtn}
-              onClick={() => setRevealUrl((v) => !v)}
-              aria-pressed={revealUrl}
-            >
-              {revealUrl ? "Hide" : "Show"}
-            </button>
-            <button
-              type="button"
-              className={styles.revealBtn}
-              onClick={handleSaveWebhook}
-              disabled={saving || busy || !parsedUrl}
-            >
-              {saving ? "Checking…" : "Save"}
-            </button>
-          </div>
-        )}
-      </Field>
+      {/* Expanded credential path — the warning, this-browser recents, and the
+          URL field. Always shown when there's no picker (the original flow). */}
+      {editingUrl ? (
+        <div className={styles.pasteSection}>
+          <Callout tone="warning" icon={<LockIcon size={15} />} role="note">
+            <strong>Treat the webhook URL like a password.</strong> It's a credential that lets
+            anyone post to your channel — keep it secret and only use webhooks you own.
+          </Callout>
+
+          <WebhookRecents
+            history={history}
+            activeId={parsedUrl?.id ?? null}
+            onUse={(entry) => {
+              setUrl(entry.url);
+              closeUrlField();
+            }}
+            onChange={() => setHistory(loadHistory())}
+          />
+
+          <Field
+            label="Webhook URL"
+            error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
+            hint={
+              pickerActive ? (
+                parsedUrl ? (
+                  <button type="button" className={styles.pasteBack} onClick={closeUrlField}>
+                    Done — use this webhook
+                  </button>
+                ) : url.trim().length > 0 ? (
+                  <button
+                    type="button"
+                    className={styles.pasteBack}
+                    onClick={() => {
+                      setUrl("");
+                      requestAnimationFrame(() => urlInputRef.current?.focus());
+                    }}
+                  >
+                    Clear
+                  </button>
+                ) : (
+                  <button type="button" className={styles.pasteBack} onClick={closeUrlField}>
+                    Cancel
+                  </button>
+                )
+              ) : undefined
+            }
+          >
+            {(id) => (
+              <div className={styles.urlRow}>
+                <TextInput
+                  ref={urlInputRef}
+                  id={id}
+                  masked={!revealUrl}
+                  spellCheck={false}
+                  value={url}
+                  onChange={(e) => setUrl(e.currentTarget.value)}
+                  invalid={urlInvalid}
+                  placeholder="https://discord.com/api/webhooks/…"
+                />
+                <button
+                  type="button"
+                  className={styles.revealBtn}
+                  onClick={() => setRevealUrl((v) => !v)}
+                  aria-pressed={revealUrl}
+                >
+                  {revealUrl ? "Hide" : "Show"}
+                </button>
+                <button
+                  type="button"
+                  className={styles.revealBtn}
+                  onClick={handleSaveWebhook}
+                  disabled={saving || busy || !parsedUrl}
+                >
+                  {saving ? "Checking…" : "Save"}
+                </button>
+              </div>
+            )}
+          </Field>
+        </div>
+      ) : null}
 
       <Field
         label="Message ID or link"

@@ -147,6 +147,57 @@
   background: var(--app-bg-hover);
 }
 
+/* Collapsed-webhook states for the Restore tab — mirrors SendPanel so a manager
+   who picked a webhook from the auto-detect list sees a one-line summary instead
+   of the full credential field. */
+.urlSet {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+.urlSetLink,
+.pasteBack {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-weight: 500;
+  color: var(--app-accent, #5865f2);
+  cursor: pointer;
+}
+.urlSetLink:hover,
+.pasteBack:hover {
+  text-decoration: underline;
+}
+
+.pasteToggle {
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+.pasteToggle:hover {
+  color: var(--app-text);
+}
+.pasteToggleAccent {
+  font-weight: 500;
+  color: var(--app-accent, #5865f2);
+}
+.pasteToggle:hover .pasteToggleAccent {
+  text-decoration: underline;
+}
+
+.pasteSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .v1Preview {
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);

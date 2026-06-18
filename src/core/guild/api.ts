@@ -455,15 +455,6 @@ export interface GuildWebhooks {
   dweeb_application_id: string;
 }
 
-/** Fields a webhook edit may change. `avatar: null` clears the picture;
- *  `avatar: "data:image/…"` sets it; omitting `avatar` leaves it. `channelId`
- *  moves the webhook to another channel. */
-export interface WebhookEdit {
-  name?: string;
-  avatar?: string | null;
-  channelId?: string;
-}
-
 /** `GET /api/guilds/:id/webhooks` — every webhook in the server, with recover
  *  URLs + creators. Throws `GuildApiError` (403 = the user, or the bot, lacks
  *  Manage Webhooks — the message says which). */
@@ -493,51 +484,6 @@ export async function createGuildWebhook(
     "POST",
     avatar ? { name, avatar } : { name },
   );
-}
-
-/** `PATCH /api/guilds/:id/webhooks/:webhookId` — rename / re-avatar / move.
- *  Sends only the provided fields; `avatar: null` is forwarded verbatim to
- *  clear the picture. */
-export async function modifyGuildWebhook(
-  guildId: string,
-  webhookId: string,
-  changes: WebhookEdit,
-): Promise<GuildWebhook> {
-  const body: Record<string, unknown> = {};
-  if (changes.name !== undefined) body.name = changes.name;
-  if (changes.avatar !== undefined) body.avatar = changes.avatar; // null clears
-  if (changes.channelId !== undefined) body.channel_id = changes.channelId;
-  return writeWebhook(`/api/guilds/${guildId.trim()}/webhooks/${webhookId.trim()}`, "PATCH", body);
-}
-
-/** `POST /api/guilds/:id/webhooks/:webhookId/rotate` — invalidate a leaked URL
- *  by recreating the webhook (new token). Returns the fresh webhook; a
- *  `rotate_warning` rides along if the old one couldn't be deleted. */
-export async function rotateGuildWebhook(
-  guildId: string,
-  webhookId: string,
-): Promise<GuildWebhook> {
-  return writeWebhook(
-    `/api/guilds/${guildId.trim()}/webhooks/${webhookId.trim()}/rotate`,
-    "POST",
-    undefined,
-  );
-}
-
-/** `DELETE /api/guilds/:id/webhooks/:webhookId` — delete a webhook. A 404
- *  (already gone) is treated as success — the goal state is reached either way. */
-export async function deleteGuildWebhook(guildId: string, webhookId: string): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetch(
-      `${PROXY_BASE_URL}/api/guilds/${guildId.trim()}/webhooks/${webhookId.trim()}`,
-      { method: "DELETE", credentials: "include" },
-    );
-  } catch {
-    throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
-  }
-  if (res.status === 404) return;
-  if (!res.ok) throw await toApiError(res);
 }
 
 /** Shared POST/PATCH helper for the webhook writes — credentialed JSON call

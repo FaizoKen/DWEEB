@@ -97,6 +97,7 @@ import {
   rememberWebhook,
   sendToWebhook,
   updateWebhookMessage,
+  useCanManageGuildWebhooks,
   verifyWebhook,
   webhookAvatarHash,
   webhookChannelId,
@@ -117,6 +118,7 @@ import {
   isAuthError,
   removePermanentMessage,
   type CustomBotItem,
+  type GuildWebhook,
   type PermanentSlots,
 } from "@/core/guild/api";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
@@ -135,6 +137,7 @@ import {
 } from "@/core/guild/config";
 import { copyText } from "@/core/serialization/clipboard";
 import { WebhookRecents } from "./WebhookRecents";
+import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
 import type { PermanentStatusProps } from "./PermanentStatus";
@@ -1118,6 +1121,38 @@ export function SendPanel({
     setRevealUrl(false);
   };
 
+  // The auto-detect picker (the connected guild's webhooks, when the bot and the
+  // signed-in user both hold Manage Webhooks) becomes the primary way to choose a
+  // destination — pick an existing webhook or create one inline, no token
+  // copying. The OAuth "create" cards drop to a secondary disclosure: they mint
+  // app-owned webhooks, which is the route plugin components need.
+  const canManageWebhooks = useCanManageGuildWebhooks();
+  const pickerActive = authStatus === "authed" && canManageWebhooks;
+
+  // Choose a webhook the picker surfaced: fill the field from its recover URL and
+  // remember it (name / owner / destination) so the ownership + routing checks
+  // read straight from history, with no extra verify GET.
+  const handlePickGuildWebhook = (w: GuildWebhook) => {
+    const parsed = parseWebhookUrl(w.url ?? "");
+    if (!parsed) return;
+    const channelName = w.channel_id ? connectedData?.channelById[w.channel_id]?.name : undefined;
+    const guildName = w.guild_id ? authGuilds.find((g) => g.id === w.guild_id)?.name : undefined;
+    rememberWebhook(parsed.url, {
+      name: w.name ?? undefined,
+      ownerKind: w.application_id ? "bot" : "user",
+      applicationId: w.application_id ?? undefined,
+      avatar: w.avatar,
+      channelId: w.channel_id ?? undefined,
+      guildId: w.guild_id ?? undefined,
+      channelName,
+      guildName,
+    });
+    setUrl(parsed.url);
+    setHistory(loadHistory());
+    closeUrlField();
+    setState({ kind: "idle" });
+  };
+
   return (
     <>
       <p className={styles.lead}>
@@ -1164,14 +1199,36 @@ export function SendPanel({
           or a registered custom bot create the webhook) is primary; pasting a
           raw URL is the secondary, "advanced" path tucked below. */}
       {proxyOn ? (
-        <section className={styles.destination} aria-label="Create a webhook">
-          <div className={styles.destinationHead}>
-            <span className={styles.destinationTitle}>Create a webhook</span>
-            <span className={styles.destinationSub}>
-              One click — DWEEB sets it up on the channel you pick. No copying tokens around.
-            </span>
-          </div>
-          <CreateWebhookOptions />
+        <section className={styles.destination} aria-label="Choose a webhook">
+          {pickerActive ? (
+            <>
+              <GuildWebhookPicker
+                mode="send"
+                activeId={parsedUrl?.id ?? null}
+                onPick={handlePickGuildWebhook}
+              />
+              <details className={styles.redirectNote}>
+                <summary className={styles.redirectSummary}>Other ways to create a webhook</summary>
+                <div className={styles.redirectBody}>
+                  <span className={styles.destinationSub}>
+                    Create one through Discord so it posts under DWEEB or a custom bot — needed for
+                    buttons &amp; menus to route their clicks back here.
+                  </span>
+                  <CreateWebhookOptions />
+                </div>
+              </details>
+            </>
+          ) : (
+            <>
+              <div className={styles.destinationHead}>
+                <span className={styles.destinationTitle}>Create a webhook</span>
+                <span className={styles.destinationSub}>
+                  One click — DWEEB sets it up on the channel you pick. No copying tokens around.
+                </span>
+              </div>
+              <CreateWebhookOptions />
+            </>
+          )}
         </section>
       ) : null}
 

@@ -278,33 +278,32 @@ time from `vite.config.ts`) allows any `https:` host under `connect-src`, so
 Discord's domains — and a different host, if you fork the app — need no
 allow-list changes.
 
-## Webhook Manager
+## Auto-detect webhooks (Send & Restore)
 
-Servers that grant the DWEEB bot **Manage Webhooks** unlock a webhook dashboard
-(Account menu → **Webhooks**, shown to members who hold Manage Webhooks
-themselves). Listing a server's webhooks is the one Discord call that genuinely
-requires the permission, and the listing carries each incoming webhook's token
-and its creator — so the dashboard becomes a full control panel:
+Servers that grant the DWEEB bot **Manage Webhooks** make the **Send** and
+**Restore** panels effortless: instead of pasting a webhook URL, a manager picks
+one straight from an auto-detected list of the connected server's webhooks.
+Listing a server's webhooks is the one Discord call that genuinely requires the
+permission, and the listing carries each incoming webhook's token — so:
 
-- **Recover a lost URL** — every incoming webhook's execute URL is shown; copy
-  it, or drop it straight into the Send panel.
-- **Create** a webhook in any channel, no OAuth round-trip.
-- **Rename, re-avatar, and move** any webhook — not just ones you hold a token
-  for.
-- **Rotate** a leaked webhook: a fresh URL, the old one deleted.
-- **Audit** hygiene — default names ("Captain Hook"), third-party-app webhooks,
-  duplicates, and channels nearing Discord's 15-per-channel cap — with one-click
-  cleanup.
-- **Brand** a batch of webhooks with one identity, and **export / import** the
-  server's webhook inventory (names + channels; tokens never leave).
+- **Send** — choose an existing webhook in a click (its recover URL is filled
+  for you), or **create a new one** in any channel inline, no OAuth round-trip,
+  no copying tokens. The standard `webhook.incoming` flow stays available under
+  "Other ways to create a webhook" for minting app-owned webhooks (so plugin
+  buttons & menus route their clicks back to DWEEB).
+- **Restore** — pick the webhook that posted a message instead of pasting its
+  URL. Paste a message *link* and the webhooks in that channel float to the top,
+  tagged **"this channel"**, so the right one is obvious.
 
-The builder's per-message **Create a webhook** still defaults to Discord's
-no-permission `webhook.incoming` OAuth flow, so none of this is required just to
-send. Access is gated server-side on *your own* Manage Webhooks permission,
-mirroring Discord: the bot performs the calls, but only reveals a webhook's
-token to someone who could already see it in Server Settings. Adding the bit to
-the shared bot invite means existing servers must re-add the bot (Discord
-replaces a bot's permissions on re-invite) before the dashboard lights up.
+The picker (`src/features/share/GuildWebhookPicker.tsx`, fed by
+`src/core/webhook/guildWebhooks.ts`) only appears for members who hold Manage
+Webhooks themselves: access is gated server-side on *your own* permission,
+mirroring Discord — the bot performs the calls, but only reveals a webhook's
+token to someone who could already see it in Server Settings. None of this is
+required to send (paste a URL, or use the no-permission `webhook.incoming` flow,
+as before). Adding the bit to the shared bot invite means existing servers must
+re-add the bot (Discord replaces a bot's permissions on re-invite) before the
+picker lights up.
 
 ## AI assistant
 

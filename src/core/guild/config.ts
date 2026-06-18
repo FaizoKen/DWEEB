@@ -156,12 +156,14 @@ const SHARED_BOT_PERMISSION_BITS = {
    */
   MANAGE_ROLES: 1n << 28n,
   /**
-   * Webhook Manager — the proxy lists, creates, edits, moves, deletes, and
-   * rotates a server's webhooks through this shared bot. Enumerating a guild's
-   * webhooks (`GET /guilds/{id}/webhooks`) is the one Discord call that hard-
-   * requires it, and the write calls need it too. The builder's per-message
-   * "Create a webhook" still uses the no-permission `webhook.incoming` OAuth
-   * flow by default — this bit powers the separate Webhook Manager dashboard.
+   * Webhook auto-detect — the proxy enumerates a server's webhooks (with each
+   * incoming webhook's recover URL) and creates new ones through this shared
+   * bot. Listing a guild's webhooks (`GET /guilds/{id}/webhooks`) is the one
+   * Discord call that hard-requires it; create needs it too. This powers the
+   * Send/Restore webhook picker, where a manager chooses or creates a webhook in
+   * a click instead of pasting a URL. The no-permission `webhook.incoming` OAuth
+   * flow stays available for minting app-owned webhooks (so plugin components
+   * route their clicks back to DWEEB).
    */
   MANAGE_WEBHOOKS: 1n << 29n,
 } as const;
@@ -178,11 +180,11 @@ export const SHARED_BOT_PERMISSIONS: string = Object.values(SHARED_BOT_PERMISSIO
 /**
  * OAuth URL to add the DWEEB bot to a server, requesting
  * {@link SHARED_BOT_PERMISSIONS} (the full union every invite must carry — see
- * there for why). The builder's per-message webhook creation still defaults to
+ * there for why). The builder's per-message webhook creation still offers
  * Discord's no-permission `webhook.incoming` flow (see `webhookCreateUrl`); the
- * Manage Webhooks bit in the union powers the separate Webhook Manager
- * dashboard. Empty when no client id is configured (the caller hides the CTA in
- * that case).
+ * Manage Webhooks bit in the union powers the Send/Restore webhook picker
+ * (auto-detect existing webhooks + one-click create). Empty when no client id is
+ * configured (the caller hides the CTA in that case).
  *
  * When run in the browser we send the user back to the site after they add the
  * bot (`response_type=code` + `redirect_uri`), so a full reload picks up the

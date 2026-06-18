@@ -28,7 +28,6 @@ import { Menu } from "@/ui/Menu";
 import {
   CheckCircleIcon,
   ClockIcon,
-  LinkIcon,
   LogInIcon,
   PlusIcon,
   RefreshIcon,
@@ -38,7 +37,6 @@ import {
 import { cn } from "@/lib/cn";
 import { ManagedMessagesDialog } from "./ManagedMessagesDialog";
 import { CustomBotDialog } from "./CustomBotDialog";
-import { WebhookManagerDialog } from "./WebhookManagerDialog";
 import styles from "./AccountMenu.module.css";
 
 /** Query keys Discord appends to the redirect after a bot add. */
@@ -125,10 +123,6 @@ export function AccountMenu() {
   // DWEEB dispatcher serves its interactions. Only opened from this menu, so
   // plain local state is enough (no cross-feature opener needed).
   const [customBotGuildId, setCustomBotGuildId] = useState<string | null>(null);
-
-  // The "Webhooks" dialog — the Webhook Manager. Same local-state pattern; the
-  // row only shows for servers where the user holds Manage Webhooks.
-  const [webhookGuildId, setWebhookGuildId] = useState<string | null>(null);
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   // One-shot guard so the post–sign-in auto-select runs once, not on every
@@ -283,10 +277,6 @@ export function AccountMenu() {
               close();
               if (connectedId) setCustomBotGuildId(connectedId);
             }}
-            onManageWebhooks={() => {
-              close();
-              if (connectedId) setWebhookGuildId(connectedId);
-            }}
           />
         )}
       </Menu>
@@ -304,13 +294,6 @@ export function AccountMenu() {
           onClose={() => setCustomBotGuildId(null)}
         />
       ) : null}
-      {webhookGuildId ? (
-        <WebhookManagerDialog
-          guildId={webhookGuildId}
-          guildName={guilds.find((g) => g.id === webhookGuildId)?.name}
-          onClose={() => setWebhookGuildId(null)}
-        />
-      ) : null}
     </>
   );
 }
@@ -319,16 +302,12 @@ function AccountPanel({
   onClose,
   onManageMessages,
   onManageCustomBot,
-  onManageWebhooks,
 }: {
   onClose: () => void;
   /** Opens the connected server's "Managed messages" dialog (closes the menu first). */
   onManageMessages: () => void;
   /** Opens the connected server's "Custom bot" dialog (closes the menu first). */
   onManageCustomBot: () => void;
-  /** Opens the connected server's "Webhooks" (Webhook Manager) dialog. Only
-   *  rendered for servers where the user holds Manage Webhooks. */
-  onManageWebhooks: () => void;
 }) {
   const user = useAuthStore((s) => s.user);
   const guilds = useAuthStore((s) => s.guilds);
@@ -420,18 +399,6 @@ function AccountPanel({
                     <SettingsIcon size={14} />
                     <span>Custom bot</span>
                   </button>
-                  {/* Webhook Manager — only where the user holds Manage Webhooks,
-                      mirroring the server-side gate so the row never dead-ends. */}
-                  {g.can_manage_webhooks ? (
-                    <button
-                      type="button"
-                      className={styles.serverSubRow}
-                      onClick={onManageWebhooks}
-                    >
-                      <LinkIcon size={14} />
-                      <span>Webhooks</span>
-                    </button>
-                  ) : null}
                 </li>
               ) : null}
             </Fragment>

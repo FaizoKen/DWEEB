@@ -61,6 +61,19 @@ export function parseMessageIdInput(input: string): string | null {
   return linkMatch?.[1] ?? null;
 }
 
+/**
+ * Pull the channel snowflake out of a Discord message *link*
+ * (`…/channels/{guild}/{channel}/{message}`). Returns null for a bare message
+ * id (which carries no channel). The Restore panel uses it to auto-pick the
+ * webhook posting to that channel, so a pasted link is all the setup needed.
+ */
+export function parseMessageChannelId(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const m = /discord(?:app)?\.com\/channels\/(?:\d+|@me)\/(\d{15,25})\/\d{15,25}/i.exec(trimmed);
+  return m?.[1] ?? null;
+}
+
 export interface SendOptions {
   /** Optional thread id to post into (forum/thread channels). */
   threadId?: string;
