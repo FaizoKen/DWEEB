@@ -237,6 +237,10 @@ export function SendPanel({
   const [messageIdInput, setMessageIdInput] = useState(() => restoredFrom?.messageId ?? "");
   const [mode, setMode] = useState<"new" | "update">(() => (restoredFrom ? "update" : "new"));
   const [revealUrl, setRevealUrl] = useState(false);
+  // Beginner-friendly default: keep the optional thread setting folded away so
+  // the common path is just "pick a channel → send". Auto-opens whenever a value
+  // is present (prefilled from a restore, or typed in — see the effect below).
+  const [optionalOpen, setOptionalOpen] = useState(() => (restoredFrom?.threadId ?? "").length > 0);
   // Manual URL entry is the secondary path: when a proxy is configured the
   // primary flow is "create a webhook for me", so the paste field stays
   // collapsed behind a toggle until the user opts in (or a URL is already
@@ -308,6 +312,12 @@ export function SendPanel({
     setThreadId(restoredFrom.threadId ?? "");
     setMode("update");
   }, [restoredFrom]);
+
+  // Reveal the optional settings whenever a thread id is present, so it's never
+  // tucked away when it actually matters.
+  useEffect(() => {
+    if (threadId.trim().length > 0) setOptionalOpen(true);
+  }, [threadId]);
 
   const parsedUrl = useMemo(() => parseWebhookUrl(url), [url]);
   const urlInvalid = url.trim().length > 0 && !parsedUrl;
@@ -1156,7 +1166,9 @@ export function SendPanel({
   return (
     <>
       <p className={styles.lead}>
-        Posts straight from your browser to Discord — nothing touches our servers.
+        {mode === "new"
+          ? "Pick a channel below and hit send — your message goes straight from this browser to Discord. We never see or store it."
+          : "Your edit goes straight from this browser to Discord — we never see or store it."}
       </p>
 
       <div className={styles.modeToggle} role="radiogroup" aria-label="Send mode">
@@ -1226,9 +1238,10 @@ export function SendPanel({
           ) : (
             <>
               <div className={styles.destinationHead}>
-                <span className={styles.destinationTitle}>Create a webhook</span>
+                <span className={styles.destinationTitle}>Connect a channel to post in</span>
                 <span className={styles.destinationSub}>
-                  One click — DWEEB sets it up on the channel you pick. No copying tokens around.
+                  One click and you're set — DWEEB does the technical setup on the channel you pick.
+                  Nothing to copy or paste.
                 </span>
               </div>
               <CreateWebhookOptions />
@@ -1244,9 +1257,15 @@ export function SendPanel({
       {proxyOn && !editingUrl ? (
         parsedUrl ? (
           <p className={styles.urlSet}>
-            Webhook URL set — posting straight to your channel.{" "}
+            {knownChannelName ? (
+              <>
+                All set — your message will post to <strong>#{knownChannelName}</strong>.
+              </>
+            ) : (
+              <>All set — posting straight to your channel.</>
+            )}{" "}
             <button type="button" className={styles.urlSetLink} onClick={openUrlField}>
-              Edit URL
+              Change
             </button>
           </p>
         ) : (
@@ -1330,25 +1349,40 @@ export function SendPanel({
         </div>
       ) : null}
 
-      <Field label="Thread ID (optional)" hint="Post into a forum thread or text-channel thread.">
-        {(id) => (
-          <TextInput
-            id={id}
-            value={threadId}
-            onChange={(e) => setThreadId(e.currentTarget.value.replace(/[^\d]/g, ""))}
-            placeholder="e.g. 1185234567890123456"
-            inputMode="numeric"
-          />
-        )}
-      </Field>
+      <details
+        className={styles.optional}
+        open={optionalOpen}
+        onToggle={(e) => setOptionalOpen(e.currentTarget.open)}
+      >
+        <summary className={styles.optionalSummary}>
+          Posting inside a thread or forum post?{" "}
+          <span className={styles.optionalHint}>(optional)</span>
+        </summary>
+        <div className={styles.optionalBody}>
+          <Field
+            label="Thread ID"
+            hint="Most people can skip this. Fill it in only if your message should appear inside a specific thread or forum post — in Discord, right-click the thread → Copy Channel ID (Developer Mode required)."
+          >
+            {(id) => (
+              <TextInput
+                id={id}
+                value={threadId}
+                onChange={(e) => setThreadId(e.currentTarget.value.replace(/[^\d]/g, ""))}
+                placeholder="e.g. 1185234567890123456"
+                inputMode="numeric"
+              />
+            )}
+          </Field>
+        </div>
+      </details>
 
       {mode === "update" ? (
         <Field
-          label="Message ID or link to update"
+          label="Which message should we update?"
           hint={
             restoredFrom
-              ? "Pre-filled from the message you last posted or restored — change it to update a different one."
-              : "A message this webhook posted. In Discord: right-click → Copy Message ID (Developer Mode)."
+              ? "Already filled in from the message you last sent — change it only if you want to edit a different one."
+              : "Open the message in Discord, right-click it, and choose Copy Message Link — then paste it here. (Must be a message this webhook posted.)"
           }
           error={messageIdInvalid ? "Not a valid message ID or link." : undefined}
         >

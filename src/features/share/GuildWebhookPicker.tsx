@@ -577,7 +577,8 @@ export function GuildWebhookPicker({
     <section className={styles.picker} aria-label="Destination">
       {header}
       <p className={styles.note}>
-        Pick a channel — DWEEB sets up the webhook for you. No tokens to copy.
+        Choose where your message should go. DWEEB handles the technical setup behind the scenes —
+        there's nothing to copy or configure.
       </p>
 
       {selectorVisible ? (

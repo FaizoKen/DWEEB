@@ -263,6 +263,30 @@
   text-decoration: underline;
 }
 
+/* Optional, beginner-skippable settings (thread id) folded behind a quiet
+   disclosure so the default path stays "pick a channel → send". */
+.optional {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.optionalSummary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--app-text-subtle);
+  user-select: none;
+}
+.optionalSummary:hover {
+  color: var(--app-text);
+}
+.optionalHint {
+  color: var(--app-text-subtle);
+  font-weight: 400;
+}
+.optionalBody {
+  margin-top: 8px;
+}
+
 /* Validation errors that block a send — rendered inside a danger Callout. */
 .issueList {
   margin: 0;
