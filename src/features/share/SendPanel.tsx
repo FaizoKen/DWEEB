@@ -1211,7 +1211,6 @@ export function SendPanel({
                 mode="send"
                 activeId={parsedUrl?.id ?? null}
                 onPick={handlePickGuildWebhook}
-                interactive={hasInteractiveComponents}
               />
               <details className={styles.redirectNote}>
                 <summary className={styles.redirectSummary}>Other ways to create a webhook</summary>

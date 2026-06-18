@@ -516,18 +516,6 @@
   font-size: 11px;
   color: var(--app-text-muted);
 }
-.channelReady {
-  flex: none;
-  padding: 0 6px;
-  border-radius: 999px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  line-height: 1.7;
-  background: var(--app-success-soft);
-  color: var(--app-success-text);
-}
 
 /* ── Manage-webhooks disclosure (advanced) ──────────────────────────────── */
 .manage {
