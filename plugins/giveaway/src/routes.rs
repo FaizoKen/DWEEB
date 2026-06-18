@@ -5,13 +5,14 @@
 //!
 //! Every member-facing step is pure request/response. The live entrant count
 //! (and, with placeholders, the whole body) is restamped by an `UPDATE_MESSAGE`
-//! reply to each Enter click — no bot token. A *host's* click is the exception:
-//! it replies with the control panel, so the public message is refreshed out of
-//! band instead, via the interaction's own webhook token (`@original`), so a
-//! host-only giveaway still keeps its count / winners / status current. The
-//! winner announcement is the public (non-ephemeral) response to a host's Draw
-//! click; again no token. Winner DMs are the one thing that needs the bot, so
-//! they're spawned best-effort, off the 3s reply path.
+//! reply to each Enter click — no bot token. A *host's* Enter click would
+//! normally spend that one reply on the (ephemeral) control panel and never
+//! touch the message, so instead it puts the `UPDATE_MESSAGE` refresh in the
+//! reply and ships the panel as an ephemeral *followup* (interaction token, no
+//! bot token) — keeping a host-only giveaway's count / winners / status current.
+//! The winner announcement is the public (non-ephemeral) response to a host's
+//! Draw click; again no token. Winner DMs are the one thing that needs the bot,
+//! so they're spawned best-effort, off the 3s reply path.
 
 use std::sync::Arc;
 
@@ -248,14 +249,16 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
     if discord::is_host(interaction.actor_roles(), interaction.actor_permissions(), &g.config.host_roles) {
         let entered = state.store.is_entered(id, uid).unwrap_or(false);
         let count = state.store.count_entries(id).unwrap_or(0);
-        // The panel reply doesn't touch the public message, so it would keep
-        // showing its first-paint count / status forever in a giveaway only a
-        // host ever clicks. Refresh it out of band (best-effort) so each panel
-        // open brings the live count — and, post-draw, the winners + "ended" —
-        // into the message itself.
-        spawn_message_refresh(state, interaction, &g, id, count);
-        return Json(discord::host_panel(id, g.status, entered, count, g.config.winner_count as usize))
-            .into_response();
+        let panel = discord::host_panel(id, g.status, entered, count, g.config.winner_count as usize);
+        // A host's click would otherwise spend its one reply on the (ephemeral)
+        // panel and never touch the public message — so a giveaway only a host
+        // ever clicks keeps its first-paint count / status forever. Instead,
+        // refresh the public message *in* the reply (an `UPDATE_MESSAGE`, the
+        // same edit a member's entry makes) and deliver the panel as a followup,
+        // so the live count — and, post-draw, the winners + "ended" — land on the
+        // message itself. Falls back to the panel as the direct reply when we
+        // can't edit (no interaction token, or nothing editable).
+        return Json(host_enter_response(state, interaction, &g, id, count, panel)).into_response();
     }
 
     let account_ms = discord::snowflake_to_unix_ms(uid);
@@ -539,38 +542,51 @@ fn live_message_data(g: &Giveaway, msg: &discord::MessageRef, id: &str, count: i
     resp.get("data").cloned()
 }
 
-/// Best-effort: refresh the public giveaway message out of band via the
-/// interaction's own webhook token (no bot token). Used after a *host's* Enter
-/// click — which replies with the control panel rather than an `UPDATE_MESSAGE`,
-/// so the message would otherwise keep its first-paint count / status. For a
-/// component click, `@original` is the message the button sits on, i.e. the
-/// giveaway message itself. A missing token / app id (e.g. in tests) or nothing
-/// editable is a silent no-op, and the edit is fired off the reply path.
-fn spawn_message_refresh(
+/// The reply to a *host's* Enter click. When we can edit the public message —
+/// the interaction carries its webhook token and the message has editable
+/// components — refresh it in the reply (`UPDATE_MESSAGE`) and send the control
+/// `panel` as an ephemeral followup off the reply path; this is what keeps a
+/// host-only giveaway's count / winners / status live on the message itself.
+/// Otherwise (no token, e.g. in tests, or nothing editable) just reply with the
+/// panel, exactly as before.
+fn host_enter_response(
     state: &AppState,
     interaction: &discord::Interaction,
     g: &Giveaway,
     id: &str,
     count: i64,
-) {
-    let (Some(app_id), Some(token), Some(msg)) = (
-        interaction.application_id.as_deref(),
-        interaction.token.as_deref(),
-        interaction.message.as_ref(),
-    ) else {
+    panel: Value,
+) -> Value {
+    let refreshed = interaction
+        .application_id
+        .as_deref()
+        .zip(interaction.token.as_deref())
+        .zip(interaction.message.as_ref())
+        .and_then(|((app_id, token), msg)| {
+            let data = live_message_data(g, msg, id, count)?;
+            let panel_data = panel.get("data")?.clone();
+            spawn_followup(state, app_id, token, panel_data);
+            Some(json!({ "type": 7, "data": data }))
+        });
+    refreshed.unwrap_or(panel)
+}
+
+/// Best-effort: post an interaction followup (the host control panel) via the
+/// interaction's own webhook token, off the reply path. Skipped when no async
+/// runtime is present (the lifecycle tests drive the handlers on a bare
+/// executor); in production axum always provides one.
+fn spawn_followup(state: &AppState, app_id: &str, token: &str, data: Value) {
+    if tokio::runtime::Handle::try_current().is_err() {
         return;
-    };
-    let Some(data) = live_message_data(g, msg, id, count) else {
-        return;
-    };
+    }
     let http = state.http.clone();
     let (app_id, token) = (app_id.to_string(), token.to_string());
     tokio::spawn(async move {
-        // A short beat so Discord has registered our (panel) response before we
-        // edit the interaction's original message.
+        // A short beat so Discord has registered our (message-edit) reply before
+        // the followup lands.
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        if !crate::rest::edit_original_message(&http, &app_id, &token, &data).await {
-            tracing::debug!("giveaway message refresh edit didn't land");
+        if !crate::rest::create_followup_message(&http, &app_id, &token, &data).await {
+            tracing::debug!("giveaway host-panel followup didn't land");
         }
     });
 }
@@ -834,16 +850,46 @@ mod tests {
         assert!(s.contains("Enter (1)"), "{s}");
     }
 
+    /// A host's Enter click that carries an interaction token (as Discord always
+    /// sends), so the message is refreshed in the reply.
+    fn host_enter_click(id: &str, components: Value) -> discord::Interaction {
+        serde_json::from_value(json!({
+            "type": 3,
+            "guild_id": "1",
+            "application_id": "999000",
+            "token": "tok_abc",
+            "data": { "custom_id": format!("giveaway:{id}") },
+            "member": { "user": { "id": "1" }, "roles": [], "permissions": MANAGE_GUILD },
+            "message": { "content": "", "components": components, "flags": 32768 }
+        }))
+        .expect("interaction")
+    }
+
     #[test]
-    fn a_host_enter_click_shows_the_panel_not_a_message_edit() {
+    fn a_host_enter_click_refreshes_the_message_in_the_reply() {
         let state = test_state();
         let id = "abc";
         state.store.create(id, &config_with(Some(template(id)))).unwrap();
-        // A manager clicking Enter gets the ephemeral control panel (type 4),
-        // never a message edit. The public message is brought current out of
-        // band instead — skipped here because the test interaction carries no
-        // webhook token (so `spawn_message_refresh` is a no-op, as in prod when
-        // the token is somehow absent).
+        state.store.enter(id, "100").unwrap();
+        // With an interaction token, a manager's Enter click replies with an
+        // UPDATE_MESSAGE that refreshes the public message (live count, status);
+        // the control panel rides an ephemeral followup (skipped here — no async
+        // runtime under the test executor — but the reply is what matters).
+        let resp = body_json(handle_component(&state, &host_enter_click(id, template(id))));
+        assert_eq!(resp["type"], 7);
+        let s = resp.to_string();
+        assert!(s.contains("In: 1"), "{s}");
+        assert!(s.contains("[open]"), "{s}");
+        assert!(s.contains("Enter (1)"), "{s}");
+    }
+
+    #[test]
+    fn a_host_enter_click_without_a_token_falls_back_to_the_panel() {
+        let state = test_state();
+        let id = "abc";
+        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        // No interaction token (so we can't refresh the message) ⇒ reply with the
+        // control panel directly, exactly as before the refresh existed.
         let resp = body_json(handle_component(&state, &enter_click(id, "1", MANAGE_GUILD, template(id))));
         assert_eq!(resp["type"], 4);
         assert!(resp.to_string().contains("Host controls"), "{resp}");

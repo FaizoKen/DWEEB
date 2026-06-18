@@ -35,15 +35,16 @@ entries.
 ### Why there's (almost) no bot token
 
 The giveaway message is posted through a **webhook**, and a bot **cannot edit a
-webhook-authored message**. It's kept current two ways, both **token-free**: an
-`UPDATE_MESSAGE` response to a click *on it* (how a member's Enter click restamps
-the count), and — when a *host* clicks Enter, which replies with the control
-panel rather than editing the message — an out-of-band edit of the interaction's
-`@original` (the clicked message) via the interaction's own webhook token, so a
-host-only giveaway still keeps its count / winners / status live. The winner
-announcement is the public (non-ephemeral) interaction response to the Draw
-click; again, no token. So the whole core — enter, live count, requirements,
-draw, reroll, cancel, announce — runs entirely off interaction responses.
+webhook-authored message**. It's kept current with **no bot token** by replying
+to a click *on it* with an `UPDATE_MESSAGE`: a member's Enter click refreshes the
+message right in its reply. A *host's* Enter click would normally spend that one
+reply on the (ephemeral) control panel, so it instead puts the refresh in the
+reply and ships the panel as an ephemeral **followup** (the interaction's own
+webhook token — still no bot token), keeping a host-only giveaway live too. The
+winner announcement is the public (non-ephemeral) interaction response to the
+Draw click; again, no token. So the whole core — enter, live count,
+requirements, draw, reroll, cancel, announce — runs entirely off interaction
+responses.
 
 The shared bot (`BOT_TOKEN`) is therefore **optional**, used for just two extras:
 
@@ -75,11 +76,11 @@ DWEEB paints the first values when the message is posted (so it never shows raw
 `{tokens}`). After that, the same mechanism that keeps the entrant count current
 re-renders the whole message — so `{entries}` ticks up as people enter, and
 **`{winners}` / `{status}` fill in after you draw** (the public announcement
-still pings the winners instantly). A member's Enter click refreshes it in the
-reply; a host's Enter click refreshes it out of band (the host gets the control
-panel), so even a giveaway only the host ever touches catches up each time the
-panel is opened. The refresh is click-driven rather than a background timer —
-effectively immediate in an active giveaway.
+still pings the winners instantly). Both a member's and a host's Enter click
+refresh the message (the host gets the control panel as a followup), so even a
+giveaway only the host ever touches catches up each time they open the panel. The
+refresh is click-driven rather than a background timer — effectively immediate in
+an active giveaway.
 
 Internally the plugin captures your message (with its raw tokens) as a *template*
 when you save, and re-renders it from that template on each click — see

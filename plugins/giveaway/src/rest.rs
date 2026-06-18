@@ -4,9 +4,10 @@
 //!     can show real role names instead of asking for raw ids (`connect`);
 //!   • draw time — DM each winner so they don't miss the news (`dm_user`),
 //!     fired concurrently and best-effort off the interaction's reply path.
-//! A third call, `edit_original_message`, needs **no bot token at all**: it edits
-//! the clicked message through the interaction's own webhook token, so it works
-//! on every deployment (it's how a host's click still refreshes the message).
+//! A third call, `create_followup_message`, needs **no bot token at all**: it
+//! posts a followup through the interaction's own webhook token, so it works on
+//! every deployment (it carries the host panel when a host's Enter click spends
+//! its single reply refreshing the public message).
 //!
 //! The core giveaway (enter / live count / draw / announce) uses none of the
 //! bot-token calls — it runs entirely on interaction responses. So a deployment
@@ -199,28 +200,25 @@ struct DmChannel {
     id: String,
 }
 
-/// Edit the original message of a component interaction, out of band, using the
-/// interaction's **own webhook token** — no bot token, no `Authorization`
-/// header (the token in the path *is* the credential). For a component click,
-/// `@original` is the message the button sits on, so this edits the giveaway
-/// message itself — the way a *host's* click can still bring the live count /
-/// winners / status current even though it replied with the control panel.
+/// Post a followup message to an interaction, using the interaction's **own
+/// webhook token** — no bot token, no `Authorization` header (the token in the
+/// path *is* the credential). Used to deliver the host control panel *after* the
+/// public giveaway message has been refreshed in the interaction's own
+/// `UPDATE_MESSAGE` reply: a component interaction allows exactly one reply, so
+/// the message edit takes the reply and the (ephemeral) panel rides here.
 ///
-/// `data` is the same message-edit body an `UPDATE_MESSAGE` reply carries
-/// (`components`, `allowed_mentions`, and the V2 `flags`). `with_components=true`
-/// is required for the `components` field to take on this webhook-style endpoint
-/// — without it Discord silently drops them (and our giveaway layout is
-/// Components V2). Best-effort: the interaction token is valid ~15 minutes, and
-/// a failure just leaves the message until the next click refreshes it, so the
-/// result is only logged.
-pub async fn edit_original_message(
+/// `data` is a normal interaction-response `data` body (`content`/`components`/
+/// `flags`); the ephemeral flag in it keeps the panel host-only.
+/// `with_components=true` is required for the panel's buttons to survive on this
+/// webhook-style endpoint — without it Discord silently drops them. Best-effort:
+/// the interaction token is valid ~15 minutes, and a failure just means the host
+/// re-clicks Enter, so the result is only logged.
+pub async fn create_followup_message(
     http: &reqwest::Client,
     application_id: &str,
     token: &str,
     data: &Value,
 ) -> bool {
-    let url = format!(
-        "{API_BASE}/webhooks/{application_id}/{token}/messages/@original?with_components=true"
-    );
-    matches!(http.patch(url).json(data).send().await, Ok(resp) if resp.status().is_success())
+    let url = format!("{API_BASE}/webhooks/{application_id}/{token}?with_components=true");
+    matches!(http.post(url).json(data).send().await, Ok(resp) if resp.status().is_success())
 }

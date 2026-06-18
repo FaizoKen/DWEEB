@@ -126,15 +126,14 @@ pub struct Interaction {
     #[serde(default)]
     pub message: Option<MessageRef>,
     /// This interaction's webhook token. With the `application_id` it addresses
-    /// `/webhooks/{app}/{token}/messages/@original` — the message the component
-    /// sits on — so we can edit that message *out of band* (no bot token), the
-    /// path that refreshes the giveaway after a host's click (which replies with
-    /// the control panel instead of an `UPDATE_MESSAGE`). Valid ~15 minutes.
+    /// `/webhooks/{app}/{token}` — used to post a *followup* (no bot token): when
+    /// a host's Enter click spends its one reply on the `UPDATE_MESSAGE` refresh,
+    /// the control panel rides here. Valid ~15 minutes.
     #[serde(default)]
     pub token: Option<String>,
     /// The application this interaction is for — the first path segment of the
     /// interaction-webhook URL above. (A custom app carries its own id here; the
-    /// edit then runs against that app's interaction, exactly as it should.)
+    /// followup then runs against that app's interaction, exactly as it should.)
     #[serde(default)]
     pub application_id: Option<String>,
 }
