@@ -931,15 +931,22 @@ function ChannelRow({
   selectorVisible: boolean;
   onPick: () => void;
 }) {
-  // A check marks the active channel always; with the "Post as" selector shown
-  // it also marks any channel where an existing webhook will be reused (paired
-  // with the identity chip). Without the selector (no custom bots) only the
-  // active channel checks, matching the original single-identity behaviour.
-  const showCheck = active || (reuse != null && selectorVisible);
+  // What the row's check + highlight mean is relative to the chosen "Post as"
+  // identity. With the selector shown they mark a channel where picking will
+  // *reuse* an existing webhook of THAT identity (paired with the identity
+  // chip) — i.e. `reuse != null`. The active channel (where the loaded webhook
+  // posts) must not leak a check across identities: a #channel holding a DWEEB
+  // webhook is not "ready" while posting as a custom bot, so it offers "create
+  // as …" instead of looking done. Without the selector there's a single
+  // identity, so the loaded webhook's channel is unambiguously the active one
+  // (original single-identity behaviour).
+  const reusableHere = reuse != null;
+  const isActive = selectorVisible ? active && reusableHere : active;
+  const showCheck = selectorVisible ? reusableHere : active;
   return (
     <button
       type="button"
-      className={cn(styles.channelRow, active && styles.rowActive)}
+      className={cn(styles.channelRow, isActive && styles.rowActive)}
       disabled={busy}
       onClick={onPick}
     >
