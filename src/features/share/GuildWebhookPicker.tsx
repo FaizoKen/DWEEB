@@ -17,7 +17,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGuildStore } from "@/core/guild/guildStore";
-import { useGuildWebhooks, useGuildWebhooksStore, webhookAvatarUrl } from "@/core/webhook";
+import {
+  loadHistory,
+  useGuildWebhooks,
+  useGuildWebhooksStore,
+  webhookAvatarUrl,
+} from "@/core/webhook";
 import {
   createCustomBotWebhook,
   createGuildWebhook,
@@ -201,8 +206,23 @@ export function GuildWebhookPicker({
   );
   const editableChannels: EditChannel[] = webhookChannels;
 
+  // Discord hands a webhook's execute token only to the app that OWNS it, so the
+  // shared bot's guild-webhook read returns `url: null` for any webhook created
+  // under a custom bot (or another app). DWEEB *did* hold those tokens at
+  // creation time and saved them to this browser's webhook history, so recover
+  // the execute URL from there by id. Without this, custom-bot webhooks never
+  // pass the `usable` filter below — so they don't show, can't be reused, and
+  // every channel pick mints another OAuth duplicate. Webhooks created in a
+  // different browser stay unrecoverable (their token never reached this device).
+  const recovered = useMemo(() => {
+    const urlById = new Map(loadHistory().map((e) => [e.id, e.url] as const));
+    return webhooks.map((w) =>
+      w.url || !urlById.has(w.id) ? w : { ...w, url: urlById.get(w.id)! },
+    );
+  }, [webhooks]);
+
   // Only webhooks we can actually post through (incoming, token recoverable).
-  const usable = useMemo(() => webhooks.filter((w) => w.type === 1 && !!w.url), [webhooks]);
+  const usable = useMemo(() => recovered.filter((w) => w.type === 1 && !!w.url), [recovered]);
   const dup = useMemo(() => findDuplicates(usable, activeId), [usable, activeId]);
   // Which channel the currently-selected webhook posts to (lights up its row).
   const activeChannelId = useMemo(
