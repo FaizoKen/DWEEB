@@ -43,8 +43,8 @@
  * (custom_ids the dispatcher routes) only respond when that app is DWEEB
  * itself or a custom bot registered for the server. The routing verdict only
  * fires for plugin-bound components — a hand-written custom_id aimed at someone
- * else's bot is a legitimate use and gets only the generic "the bot's backend
- * handles this" info note. So when a plugin-bound component's webhook is owned
+ * else's bot is a legitimate use and stays silent (no callout). So when a
+ * plugin-bound component's webhook is owned
  * by an unrelated app ("foreign"), it is provably dead — pure false traffic —
  * and the Send button is blocked (a banner here with a Remove action, plus a
  * notice in the confirm). A fresh URL, whose owner is only verified
@@ -431,21 +431,18 @@ export function SendPanel({
   // The capability inspector flags interactive components, but what that flag
   // means depends on who owns the webhook:
   //  - person/follower → hard block: Discord rejects the send outright.
-  //  - app/bot         → satisfied: Discord accepts them, so the generic
-  //                      "needs an app-owned webhook" warning is just noise.
-  //                      Swap it for a calmer note explaining that the clicks
-  //                      are actually handled by the bot's own backend.
+  //  - app/bot         → satisfied: Discord accepts them. Only an actual
+  //                      routing problem (foreign owner, or a check we couldn't
+  //                      run) surfaces a callout below; the all-clear cases stay
+  //                      silent to keep the panel short.
+  // The advisory capability notes themselves aren't rendered — they're heads-up
+  // info, not blockers (real blockers live in `blockingIssues`), and they made
+  // the panel too long. `appWebhookNote` is still read for the ownership block
+  // and the permanent-slot logic.
   const appWebhookNote = capabilities.find((c) => c.kind === "app_webhook");
   const ownershipBlocked =
     appWebhookNote != null && (knownOwnerKind === "user" || knownOwnerKind === "follower");
   const ownershipSatisfied = appWebhookNote != null && knownOwnerKind === "bot";
-
-  // Don't say the same thing twice: a dedicated banner (blocked or app-owned)
-  // supersedes the generic capability note.
-  const visibleCapabilities =
-    ownershipBlocked || ownershipSatisfied
-      ? capabilities.filter((c) => c.kind !== "app_webhook")
-      : capabilities;
 
   // Interactive components whose custom_id belongs to a bundled plugin. These
   // only respond when the webhook's owning app routes clicks to the DWEEB
@@ -1545,44 +1542,7 @@ export function SendPanel({
               moreLabel="What this means"
             />
           )
-        ) : componentRouting === "dweeb" || componentRouting === "custom-bot" ? (
-          <Callout
-            tone="info"
-            role="note"
-            title="Plugin components are handled by DWEEB."
-            more={
-              <>
-                “{knownName || "This webhook"}”{" "}
-                {componentRouting === "dweeb"
-                  ? "belongs to DWEEB"
-                  : "is a custom bot registered for this server"}
-                , so clicks go to DWEEB and the attached plugins handle them.
-              </>
-            }
-            moreLabel="What this means"
-          />
-        ) : (
-          <Callout
-            tone="info"
-            role="note"
-            title="Interactive responses are handled by the bot’s server."
-            more={
-              <>
-                “{knownName || "This webhook"}” is app-owned, so the buttons and menus show up fine.
-                Clicks go to that app — its backend has to be running to respond. This builder only
-                posts the message.{" "}
-                <a
-                  href="https://discord.com/developers/docs/interactions/receiving-and-responding"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  How Discord interactions work →
-                </a>
-              </>
-            }
-            moreLabel="What this means"
-          />
-        )
+        ) : null
       ) : null}
 
       {pluginGuildMismatch && !knownGone ? (
@@ -1605,32 +1565,6 @@ export function SendPanel({
           }
           moreLabel="Why"
         />
-      ) : null}
-
-      {visibleCapabilities.length > 0 ? (
-        <section className={styles.capability} aria-label="Pre-send capability check">
-          <header className={styles.capabilityHeader}>
-            <span>Heads up — this message expects…</span>
-          </header>
-          <ul className={styles.capabilityList}>
-            {visibleCapabilities.map((c, i) => (
-              <li key={i} className={styles.capabilityItem}>
-                <span
-                  className={cn(
-                    styles.capabilityBadge,
-                    c.severity === "warning" ? styles.capabilityWarn : styles.capabilityInfo,
-                  )}
-                >
-                  {c.severity === "warning" ? "Needs" : "Note"}
-                </span>
-                <div>
-                  <div className={styles.capabilityTitle}>{c.title}</div>
-                  <div className={styles.capabilityDetail}>{c.detail}</div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
       ) : null}
 
       {blockingIssues.length > 0 ? (
