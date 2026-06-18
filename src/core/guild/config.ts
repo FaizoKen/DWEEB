@@ -192,8 +192,13 @@ export const SHARED_BOT_PERMISSIONS: string = Object.values(SHARED_BOT_PERMISSIO
  * be registered as an OAuth2 redirect URI in the Discord Developer Portal — an
  * unregistered URI makes Discord reject the invite, so we only attach it when an
  * origin is available.
+ *
+ * Pass `guildId` to pre-select that server in Discord's "Add to Server" picker —
+ * used by the re-invite prompts that target the *connected* guild (e.g. granting
+ * the bot Manage Webhooks there). It's a pre-selection, not a lock; the generic
+ * "Add to another server" CTA omits it so the user chooses freely.
  */
-export function botInviteUrl(): string {
+export function botInviteUrl(guildId?: string): string {
   if (!DISCORD_CLIENT_ID) return "";
   const params = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
@@ -205,6 +210,8 @@ export function botInviteUrl(): string {
     params.set("response_type", "code");
     params.set("redirect_uri", origin);
   }
+  const gid = guildId?.trim();
+  if (gid) params.set("guild_id", gid);
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
 }
 

@@ -118,13 +118,17 @@ export const useGuildWebhooksStore = create<GuildWebhooksState>((set, get) => ({
         e && typeof e === "object" && "status" in e ? (e as { status: number }).status : 0;
       const message = e instanceof Error ? e.message : String(e);
       if (status === 403) {
-        // The proxy distinguishes a missing *bot* permission ("re-add the bot")
-        // from the user simply not managing the server.
+        // Distinguish a missing *bot* permission — which re-adding the bot fixes,
+        // so we offer the invite — from the user simply not managing the server.
+        // The bot miss reaches us two ways: the write helpers' actionable
+        // "re-add the bot" message, and the webhook *list* read, which surfaces
+        // Discord's raw "the bot lacks access to this guild (Missing Permissions)"
+        // via the shared guild-read error path. Match both.
         set({
           guildId,
           status: "denied",
           error: message,
-          canReinvite: /re-?add the bot/i.test(message),
+          canReinvite: /re-?add the bot|bot lacks access/i.test(message),
         });
       } else {
         set({ guildId, status: "error", error: message });

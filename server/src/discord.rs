@@ -276,8 +276,27 @@ impl Discord {
     /// Every webhook in a guild, across all its channels. The single Discord
     /// call that genuinely needs `MANAGE_WEBHOOKS`; the response includes each
     /// incoming webhook's token and its creator.
+    ///
+    /// Uses the webhook-flavoured error mapping (not the plain bot-read one):
+    /// unlike roles/channels/emojis, a 403 here is the *bot* missing
+    /// `MANAGE_WEBHOOKS`, which the user fixes by re-adding the bot. Surfacing it
+    /// as an actionable 403 (rather than a generic 502) lets the picker offer the
+    /// re-invite, matching what the create/modify/delete calls already do.
     pub async fn guild_webhooks(&self, guild: &str) -> Result<Vec<Webhook>, AppError> {
-        self.get_bot(&format!("/guilds/{guild}/webhooks")).await
+        let resp = self
+            .send_bot(
+                reqwest::Method::GET,
+                &format!("/guilds/{guild}/webhooks"),
+                None,
+                None,
+            )
+            .await?;
+        if resp.status().is_success() {
+            return resp.json::<Vec<Webhook>>().await.map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
+        }
+        Err(webhook_error_from(resp).await)
     }
 
     /// Create an incoming webhook in a channel. `avatar` is an image data URI

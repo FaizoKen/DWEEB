@@ -331,7 +331,7 @@ export function GuildWebhookPicker({
           {canReinvite ? (
             <a
               className={styles.link}
-              href={botInviteUrl()}
+              href={botInviteUrl(connectedId)}
               target="_blank"
               rel="noopener noreferrer"
             >
