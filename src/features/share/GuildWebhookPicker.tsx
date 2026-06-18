@@ -74,7 +74,7 @@ function isDweebWebhook(w: GuildWebhook, dweebAppId: string): boolean {
 function ownerChip(w: GuildWebhook, dweebAppId: string): { text: string; kind: string } {
   if (isDweebWebhook(w, dweebAppId)) return { text: "DWEEB", kind: "dweeb" };
   if (w.application_id) return { text: "Bot", kind: "bot" };
-  return { text: "User", kind: "user" };
+  return { text: "Others", kind: "user" };
 }
 
 /** Read an image File into a `data:` URI, rejecting oversize / non-images. */
@@ -213,20 +213,27 @@ export function GuildWebhookPicker({
   }
 
   if (status === "denied") {
-    if (!canReinvite) return null;
+    // Don't vanish silently — say why the channel picker is hidden. When the
+    // miss is the *bot's* permission we can offer a one-click re-add; otherwise
+    // it's the server's call, and pasting a webhook URL below still works.
     return (
       <section className={styles.picker} aria-label="Destination">
         {header}
         <p className={styles.note}>
-          The DWEEB bot needs the <strong>Manage Webhooks</strong> permission to set this up.{" "}
-          <a
-            className={styles.link}
-            href={botInviteUrl()}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Re-add the bot ↗
-          </a>
+          Channel picking is hidden here — the DWEEB bot needs the <strong>Manage Webhooks</strong>{" "}
+          permission in this server to set up webhooks for you.{" "}
+          {canReinvite ? (
+            <a
+              className={styles.link}
+              href={botInviteUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Re-add the bot ↗
+            </a>
+          ) : (
+            "Ask a server admin to grant it, or paste a webhook URL below."
+          )}
         </p>
       </section>
     );
@@ -545,10 +552,17 @@ export function GuildWebhookPicker({
             <ul className={styles.list}>
               {usable.map((w) => {
                 const busy = actingId === w.id;
+                const selected = w.id === activeId;
                 return (
                   <li key={w.id} className={styles.rowWrap}>
-                    <div className={styles.row}>
-                      <span className={styles.rowMainStatic}>
+                    <div className={cn(styles.row, selected && styles.rowActive)}>
+                      <button
+                        type="button"
+                        className={styles.rowMain}
+                        onClick={() => onPick(w)}
+                        aria-pressed={selected}
+                        title="Post through this webhook"
+                      >
                         <img
                           className={styles.avatar}
                           src={webhookAvatarUrl(w.id, w.avatar, 40)}
@@ -567,7 +581,8 @@ export function GuildWebhookPicker({
                             {channelName(w.channel_id) ?? w.channel_id ?? "unknown channel"}
                           </span>
                         </span>
-                      </span>
+                        {selected ? <CheckCircleIcon size={16} className={styles.check} /> : null}
+                      </button>
                       <div className={styles.rowActions}>
                         <IconButton
                           size="sm"

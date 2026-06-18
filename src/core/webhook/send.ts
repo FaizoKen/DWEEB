@@ -412,7 +412,7 @@ export interface WebhookOwner {
 
 export const OWNER_COPY: Record<WebhookOwnerKind, { badge: string; label: string }> = {
   bot: { badge: "Bot", label: "Created by a bot / app." },
-  user: { badge: "User", label: "Created by a user in Server Settings." },
+  user: { badge: "Others", label: "Created by a user in Server Settings." },
   follower: { badge: "Follower", label: "Channel-follower webhook (Channel Following)." },
   unknown: { badge: "?", label: "Couldn't determine who created this webhook." },
 };
