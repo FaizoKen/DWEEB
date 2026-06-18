@@ -38,6 +38,7 @@ import {
   type WebhookOwnerKind,
 } from "@/core/webhook";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
+import { useRoleInfo } from "@/core/guild/guildStore";
 import type { PingSummary } from "@/core/schema/mentions";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -155,6 +156,30 @@ function IdChips({ prefix, ids, max = 6 }: { prefix: string; ids: string[]; max?
   );
 }
 
+/**
+ * A single role chip. Resolves `<@&id>` to `@role-name` against the connected
+ * server (mirroring the preview's role mentions); falls back to the raw `@&id`
+ * snowflake when no server is connected or the role is unknown.
+ */
+function RoleChip({ id }: { id: string }) {
+  const role = useRoleInfo(id);
+  return <code className={styles.chip}>{role ? `@${role.name}` : `@&${id}`}</code>;
+}
+
+/** Render a short list of role chips with a "+N more" tail, names resolved. */
+function RoleChips({ ids, max = 6 }: { ids: string[]; max?: number }) {
+  const shown = ids.slice(0, max);
+  const rest = ids.length - shown.length;
+  return (
+    <span className={styles.chips}>
+      {shown.map((id) => (
+        <RoleChip key={id} id={id} />
+      ))}
+      {rest > 0 ? <span className={styles.chipMore}>+{rest} more</span> : null}
+    </span>
+  );
+}
+
 function PingSummaryView({ pings }: { pings: PingSummary }) {
   const { everyone, roleIds, userIds, suppressed } = pings;
   const hasSuppressed =
@@ -185,7 +210,7 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
         {roleIds.length > 0 ? (
           <li>
             {roleIds.length} role{roleIds.length === 1 ? "" : "s"}:{" "}
-            <IdChips prefix="@&" ids={roleIds} />
+            <RoleChips ids={roleIds} />
           </li>
         ) : null}
         {userIds.length > 0 ? (
