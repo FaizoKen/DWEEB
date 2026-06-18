@@ -22,6 +22,7 @@ mod routes;
 mod seal;
 mod session;
 mod shortlink;
+mod singleflight;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -187,6 +188,7 @@ async fn main() {
             config.discord_max_concurrency,
         )),
         cache: Arc::new(cache),
+        flight: Arc::new(crate::singleflight::SingleFlight::new()),
         dispatcher,
         shortlinks,
         key,

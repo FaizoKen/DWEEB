@@ -14,9 +14,10 @@
 //! guild being read.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::http::StatusCode;
-use reqwest::header::AUTHORIZATION;
+use reqwest::header::{AUTHORIZATION, RETRY_AFTER};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,14 @@ use tokio::sync::Semaphore;
 use crate::error::AppError;
 
 const API_BASE: &str = "https://discord.com/api/v10";
+
+/// How many times a `429`'d request is re-issued, and the longest `Retry-After`
+/// we'll wait out before giving up. Discord's per-route limits clear in well
+/// under a second, so a small budget absorbs the common transient case; capping
+/// the wait means a genuine hard limit still surfaces promptly instead of
+/// hanging the caller behind a held concurrency permit.
+const MAX_RETRIES: u32 = 2;
+const MAX_RETRY_WAIT: Duration = Duration::from_secs(4);
 
 /// `MANAGE_GUILD` permission bit — held by admins/owners; our default gate for
 /// "may this user read this server in a webhook-builder tool".
@@ -605,7 +614,7 @@ impl Discord {
         if let Some(body) = body {
             req = req.json(&body);
         }
-        req.send()
+        send_with_retry(req)
             .await
             .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))
     }
@@ -672,11 +681,7 @@ impl Discord {
         bearer: bool,
     ) -> Result<T, AppError> {
         let url = format!("{API_BASE}{path}");
-        let resp = self
-            .http
-            .get(&url)
-            .header(AUTHORIZATION, auth)
-            .send()
+        let resp = send_with_retry(self.http.get(&url).header(AUTHORIZATION, auth))
             .await
             .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
 
@@ -755,6 +760,67 @@ fn command_set() -> Value {
             "contexts": [GUILD_CONTEXT],
         },
     ])
+}
+
+/// Issue a request, transparently retrying when Discord answers `429`: it sleeps
+/// for the `Retry-After` Discord returns (bounded by [`MAX_RETRY_WAIT`], at most
+/// [`MAX_RETRIES`] times), then re-sends. This is precisely the back-off Discord
+/// asks clients to do — without it a brief rate limit (common right after a login
+/// warms several cold caches at once) surfaces straight to the user as "Rate
+/// limited by Discord". A request whose body can't be cloned is sent once,
+/// un-retried. The final response (a success, or the last `429`/error) is returned
+/// for the caller to interpret as before.
+///
+/// Note the caller may hold the bot concurrency permit across this, so a sleep
+/// here also throttles the whole proxy while Discord is asking us to slow down —
+/// the back-pressure that keeps a burst from compounding.
+async fn send_with_retry(req: reqwest::RequestBuilder) -> Result<reqwest::Response, reqwest::Error> {
+    let mut attempt = 0u32;
+    loop {
+        // `try_clone` only fails for a streaming body, which none of our calls
+        // use (JSON or no body); fall back to a single shot if it ever does.
+        let Some(this) = req.try_clone() else {
+            return req.send().await;
+        };
+        let resp = this.send().await?;
+        if resp.status().as_u16() != 429 || attempt >= MAX_RETRIES {
+            return Ok(resp);
+        }
+        match retry_after(&resp) {
+            Some(wait) if wait <= MAX_RETRY_WAIT => {
+                attempt += 1;
+                tracing::warn!(
+                    attempt,
+                    wait_ms = wait.as_millis() as u64,
+                    "Discord rate-limited the request; backing off and retrying"
+                );
+                tokio::time::sleep(wait).await;
+            }
+            // No hint, or a wait longer than we'll hold the caller for: surface
+            // the 429 so it isn't blocked for ages on a hard limit.
+            _ => return Ok(resp),
+        }
+    }
+}
+
+/// The `Retry-After` from a `429` response, if present and well-formed.
+fn retry_after(resp: &reqwest::Response) -> Option<Duration> {
+    resp.headers()
+        .get(RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_retry_after)
+}
+
+/// Parse a `Retry-After` value (seconds, possibly fractional) into a duration,
+/// with a little padding so we don't retry a hair early on rounding or clock
+/// skew. `None` when it's missing, negative, or unparseable.
+fn parse_retry_after(raw: &str) -> Option<Duration> {
+    let secs = raw
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|s| s.is_finite() && *s >= 0.0)?;
+    Some(Duration::from_secs_f64(secs) + Duration::from_millis(50))
 }
 
 /// Translate Discord's status into something useful for the proxy's caller.
@@ -866,4 +932,42 @@ fn audit_reason(raw: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_fractional_retry_after_with_padding() {
+        // Discord's per-route limit hint is sub-second and fractional.
+        let d = parse_retry_after("0.35").expect("parses");
+        assert_eq!(d, Duration::from_millis(350) + Duration::from_millis(50));
+        assert!(d <= MAX_RETRY_WAIT, "a sub-second hint is worth waiting out");
+    }
+
+    #[test]
+    fn parses_integer_and_zero() {
+        assert_eq!(
+            parse_retry_after(" 2 "),
+            Some(Duration::from_secs(2) + Duration::from_millis(50))
+        );
+        assert_eq!(parse_retry_after("0"), Some(Duration::from_millis(50)));
+    }
+
+    #[test]
+    fn rejects_garbage_and_negatives() {
+        assert_eq!(parse_retry_after(""), None);
+        assert_eq!(parse_retry_after("soon"), None);
+        assert_eq!(parse_retry_after("-1"), None);
+        assert_eq!(parse_retry_after("NaN"), None);
+    }
+
+    #[test]
+    fn a_long_hint_exceeds_the_wait_cap() {
+        // A multi-second global limit shouldn't be slept off behind a permit;
+        // the caller surfaces it instead (the `> MAX_RETRY_WAIT` branch).
+        let d = parse_retry_after("30").expect("parses");
+        assert!(d > MAX_RETRY_WAIT);
+    }
 }

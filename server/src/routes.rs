@@ -27,6 +27,7 @@ use crate::discord::Discord;
 use crate::error::AppError;
 use crate::session::{Session, SESSION_COOKIE};
 use crate::shortlink::ShortLinkStore;
+use crate::singleflight::SingleFlight;
 
 /// Client for the interactions dispatcher's internal /permanent API — the
 /// service that owns the per-guild permanent-component slots the dashboard
@@ -43,6 +44,10 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub discord: Arc<Discord>,
     pub cache: Arc<DataCache>,
+    /// Collapses concurrent identical cache-miss fetches into one Discord call
+    /// (see `singleflight`) — the guard against a cold-cache request burst, on a
+    /// reload or right after login, hammering Discord's rate limit.
+    pub flight: Arc<SingleFlight>,
     pub dispatcher: Option<Arc<DispatcherApi>>,
     /// Short-link store (see `shortlink.rs`); None when the feature is off.
     pub shortlinks: Option<Arc<ShortLinkStore>>,
@@ -901,6 +906,18 @@ async fn usable_guilds(
             }
         }
     }
+    // This is `GET /users/@me/guilds` — a tight Discord route — and it runs on
+    // every guild read's authorization. Coalesce concurrent misses (a reload
+    // firing bootstrap + webhooks + the picker at once) so one call serves them
+    // all, re-checking the cache once the gate is held.
+    let _gate = st.flight.acquire(&key).await;
+    if !fresh {
+        if let Some(v) = st.cache.get(&key).await {
+            if let Ok(list) = serde_json::from_value::<Vec<UsableGuild>>((*v).clone()) {
+                return Ok(list);
+            }
+        }
+    }
     let raw = st.discord.current_user_guilds(&session.token).await?;
     let require = st.config.require_manage_guild;
     let list: Vec<UsableGuild> = raw
@@ -930,6 +947,18 @@ async fn bot_guild_set(st: &AppState, fresh: bool) -> HashSet<String> {
             }
         }
     }
+    // A *single global* key paginating the tight `/users/@me/guilds` bot route:
+    // without coalescing, every user whose `botguilds` cache lapsed at once
+    // re-paginates it in parallel — the classic shared-key stampede. The gate
+    // makes the whole fleet of misses share one pagination.
+    let _gate = st.flight.acquire(KEY).await;
+    if !fresh {
+        if let Some(v) = st.cache.get(KEY).await {
+            if let Ok(ids) = serde_json::from_value::<Vec<String>>((*v).clone()) {
+                return ids.into_iter().collect();
+            }
+        }
+    }
     match st.discord.bot_guild_ids().await {
         Ok(ids) => {
             if let Ok(val) = serde_json::to_value(&ids) {
@@ -945,37 +974,49 @@ async fn bot_guild_set(st: &AppState, fresh: bool) -> HashSet<String> {
 
 async fn fetch_roles(st: &AppState, guild: &str, fresh: bool) -> Result<Arc<Value>, AppError> {
     let key = format!("roles:{guild}");
-    if !fresh {
-        if let Some(v) = st.cache.get(&key).await {
-            return Ok(v);
-        }
-    }
-    let value = Arc::new(to_value(st.discord.roles(guild).await?)?);
-    st.cache.put(key, Arc::clone(&value)).await;
-    Ok(value)
+    cached_or_fetch(st, &key, fresh, || st.discord.roles(guild)).await
 }
 
 async fn fetch_channels(st: &AppState, guild: &str, fresh: bool) -> Result<Arc<Value>, AppError> {
     let key = format!("channels:{guild}");
-    if !fresh {
-        if let Some(v) = st.cache.get(&key).await {
-            return Ok(v);
-        }
-    }
-    let value = Arc::new(to_value(st.discord.channels(guild).await?)?);
-    st.cache.put(key, Arc::clone(&value)).await;
-    Ok(value)
+    cached_or_fetch(st, &key, fresh, || st.discord.channels(guild)).await
 }
 
 async fn fetch_emojis(st: &AppState, guild: &str, fresh: bool) -> Result<Arc<Value>, AppError> {
     let key = format!("emojis:{guild}");
+    cached_or_fetch(st, &key, fresh, || st.discord.emojis(guild)).await
+}
+
+/// Serve `key` from cache, or fetch it from Discord once and cache the result —
+/// with the fetch coalesced so a cold-cache burst (a reload, or many users right
+/// after login) makes one Discord call, not one per caller. Flow: cache read
+/// (unless `fresh`) → acquire the per-key gate → re-read the cache (a concurrent
+/// leader may have just filled it) → fetch + cache. `fresh` skips both cache
+/// reads so the manual "Refresh" still pulls live data, while concurrent passive
+/// loads waiting on the same gate get that fresh value for free.
+async fn cached_or_fetch<T, Fut>(
+    st: &AppState,
+    key: &str,
+    fresh: bool,
+    fetch: impl FnOnce() -> Fut,
+) -> Result<Arc<Value>, AppError>
+where
+    T: serde::Serialize,
+    Fut: std::future::Future<Output = Result<T, AppError>>,
+{
     if !fresh {
-        if let Some(v) = st.cache.get(&key).await {
+        if let Some(v) = st.cache.get(key).await {
             return Ok(v);
         }
     }
-    let value = Arc::new(to_value(st.discord.emojis(guild).await?)?);
-    st.cache.put(key, Arc::clone(&value)).await;
+    let _gate = st.flight.acquire(key).await;
+    if !fresh {
+        if let Some(v) = st.cache.get(key).await {
+            return Ok(v);
+        }
+    }
+    let value = Arc::new(to_value(fetch().await?)?);
+    st.cache.put(key.to_string(), Arc::clone(&value)).await;
     Ok(value)
 }
 
