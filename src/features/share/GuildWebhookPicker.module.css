@@ -126,20 +126,26 @@
   border-color: var(--app-accent);
 }
 
-/* Clickable selection area — fills the row, leaving space for the action icons. */
-.rowMain {
+/* A row that is itself the clickable element (Restore selection). */
+.rowSolo {
+  gap: 10px;
+  padding: 8px 10px;
+  padding-right: 10px;
+  text-align: left;
+  color: var(--app-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Static main area inside a managed row (the row itself isn't clickable; the
+   pencil / trash buttons are). */
+.rowMainStatic {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
-  text-align: left;
   padding: 8px 10px;
-  background: none;
-  border: none;
-  color: var(--app-text);
-  font: inherit;
-  cursor: pointer;
 }
 
 .rowActions {
@@ -451,4 +457,92 @@
   width: 100%;
   font-size: 11px;
   color: var(--app-danger, rgb(237, 66, 69));
+}
+
+/* ── Channel-first rows (Send) ──────────────────────────────────────────── */
+.channelRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  color: var(--app-text);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.channelRow:hover {
+  background: var(--app-bg-hover);
+  border-color: var(--app-border-strong);
+}
+.channelRow:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.channelHash {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--app-bg-hover);
+  color: var(--app-text-subtle);
+}
+.channelName {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channelStatus {
+  flex: none;
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+/* ── Manage-webhooks disclosure (advanced) ──────────────────────────────── */
+.manage {
+  margin-top: 2px;
+  border-top: 1px solid var(--app-border);
+  padding-top: 8px;
+}
+.manageSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--app-text-subtle);
+}
+.manageSummary:hover {
+  color: var(--app-text);
+}
+.manageDupTag {
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(240, 178, 50, 0.16);
+  color: rgb(240, 178, 50);
+}
+.manageBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
 }
