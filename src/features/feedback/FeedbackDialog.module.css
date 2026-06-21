@@ -1,0 +1,49 @@
+/* Intro / explanatory copy, matching the Share-dialog panels. */
+.lead {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--app-text-muted);
+}
+.lead a {
+  color: var(--app-accent);
+}
+.lead strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+/* Green confirmation banner on the thank-you view — mirrors SendSuccess. */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: var(--app-radius-sm);
+  background: rgba(35, 165, 89, 0.1);
+  border: 1px solid rgba(35, 165, 89, 0.32);
+}
+
+.check {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  color: rgb(63, 196, 123);
+}
+
+.bannerText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+
+/* Submit failure line under the form. */
+.error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-danger);
+  white-space: pre-wrap;
+}

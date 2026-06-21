@@ -157,7 +157,8 @@
   color: var(--app-text-muted);
 }
 .urlSetLink,
-.pasteBack {
+.pasteBack,
+.linkButton {
   padding: 0;
   background: none;
   border: none;
@@ -167,7 +168,8 @@
   cursor: pointer;
 }
 .urlSetLink:hover,
-.pasteBack:hover {
+.pasteBack:hover,
+.linkButton:hover {
   text-decoration: underline;
 }
 

@@ -23,6 +23,7 @@ import {
   RedoIcon,
   SendIcon,
   ShareIcon,
+  SupportIcon,
   UndoIcon,
   UploadIcon,
 } from "@/ui/Icon";
@@ -31,6 +32,8 @@ import { ComponentTree } from "./components/ComponentTree";
 import { SavedMessagesMenu } from "./components/SavedMessagesMenu";
 import { AccountMenu } from "@/features/guild/AccountMenu";
 import { isProxyConfigured } from "@/core/guild/config";
+import { isFeedbackConfigured } from "@/core/feedback/submit";
+import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import styles from "./Builder.module.css";
 
 interface BuilderProps {
@@ -76,6 +79,8 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
   // when the next post edits in place, "Send" when it posts something new.
   const isUpdate = useMessageStore((s) => s.restoredFrom != null);
   const sendLabel = isUpdate ? "Update" : "Send";
+
+  const openFeedback = useFeedbackStore((s) => s.openFeedback);
 
   const barRef = useRef<HTMLDivElement>(null);
   // The action bar always stays on a single row. As its available width shrinks
@@ -193,6 +198,17 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
               >
                 About
               </MenuItem>
+              {isFeedbackConfigured() ? (
+                <MenuItem
+                  icon={<SupportIcon />}
+                  onSelect={() => {
+                    close();
+                    openFeedback();
+                  }}
+                >
+                  Send feedback
+                </MenuItem>
+              ) : null}
             </>
           )}
         </Menu>

@@ -47,6 +47,8 @@ import {
 } from "@/core/webhook";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { SUPPORT_INVITE_URL, isFeedbackConfigured } from "@/core/feedback/submit";
+import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { type GuildWebhook } from "@/core/guild/api";
 import { LockIcon } from "@/ui/Icon";
 import { type IncomingWebhook } from "@/core/guild/config";
@@ -132,7 +134,7 @@ export function ShareDialog({
         {tab === "share" ? <ShareLinkPanel /> : null}
         {tab === "json" ? <JsonExportPanel /> : null}
         {tab === "import" ? <ImportPanel onDone={onClose} /> : null}
-        {tab === "about" ? <AboutPanel /> : null}
+        {tab === "about" ? <AboutPanel onClose={onClose} /> : null}
       </div>
     </Modal>
   );
@@ -294,7 +296,8 @@ function JsonExportPanel() {
  * legal pages. Lives in the Share dialog so it's reachable from the same
  * place as Import/Export.
  */
-function AboutPanel() {
+function AboutPanel({ onClose }: { onClose: () => void }) {
+  const openFeedback = useFeedbackStore((s) => s.openFeedback);
   return (
     <>
       <p className={styles.lead}>
@@ -330,9 +333,24 @@ function AboutPanel() {
         .
       </p>
       <p className={styles.lead}>
-        Feedback?{" "}
-        <a href="https://discord.gg/2wB7rHRDg2" target="_blank" rel="noopener noreferrer">
-          Join the support server
+        Found a bug or have an idea?{" "}
+        {isFeedbackConfigured() ? (
+          <>
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() => {
+                onClose();
+                openFeedback();
+              }}
+            >
+              Send quick feedback
+            </button>{" "}
+            — or{" "}
+          </>
+        ) : null}
+        <a href={SUPPORT_INVITE_URL} target="_blank" rel="noopener noreferrer">
+          join the support server
         </a>
         .
       </p>

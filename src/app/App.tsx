@@ -49,6 +49,9 @@ const TemplateGallery = lazy(() =>
 const TemplateSetup = lazy(() =>
   import("@/features/templates/TemplateSetup").then((m) => ({ default: m.TemplateSetup })),
 );
+const FeedbackDialog = lazy(() =>
+  import("@/features/feedback/FeedbackDialog").then((m) => ({ default: m.FeedbackDialog })),
+);
 import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
@@ -62,6 +65,7 @@ import { useTemplateGalleryStore } from "@/features/templates/templateGallerySto
 import { shouldAutoOpenGallery, markGalleryAutoOpened } from "@/features/templates/galleryAutoOpen";
 import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
+import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
@@ -268,6 +272,11 @@ export function App() {
   const galleryOpen = useTemplateGalleryStore((s) => s.open);
   const openGallery = useTemplateGalleryStore((s) => s.openGallery);
 
+  // The quick-feedback dialog, summoned from the Builder's "More" menu or the
+  // About panel. Mounted lazily only while open (its in-progress text resets on
+  // close, which is fine for a one-off report).
+  const feedbackOpen = useFeedbackStore((s) => s.open);
+
   // Guided setup for an interactive template the gallery just applied: wires its
   // paired plugin(s), then closes, leaving the editor in front.
   const setupTemplateId = useTemplateSetupStore((s) => s.templateId);
@@ -468,6 +477,11 @@ export function App() {
         {setupTemplateId ? (
           <Suspense fallback={null}>
             <TemplateSetup templateId={setupTemplateId} />
+          </Suspense>
+        ) : null}
+        {feedbackOpen ? (
+          <Suspense fallback={null}>
+            <FeedbackDialog />
           </Suspense>
         ) : null}
         <SendCoachMark />
