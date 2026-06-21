@@ -14,8 +14,13 @@
   background: var(--app-bg-elevated);
   border-bottom: 1px solid var(--app-border);
   z-index: var(--app-z-toolbar);
-  /* Let the bar shrink inside the builder's grid column rather than forcing the
-     whole pane (and the tree below it) wider than the viewport on phones. */
+  /* The bar always stays on a single row. Rather than wrap when space runs out,
+     its controls collapse to icons in stages — measured against the bar's own
+     width in Builder.tsx, which sets `data-compact` (secondary buttons) and
+     hides the Send label. `nowrap` enforces the single row; `min-width: 0` lets
+     the bar shrink inside the builder's grid column rather than forcing the
+     whole pane (and the tree below it) wider than the viewport. */
+  flex-wrap: nowrap;
   min-width: 0;
 }
 
@@ -23,25 +28,29 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  /* A group never splits mid-cluster — the staged collapse keeps the row from
+     ever needing to wrap. */
+  flex-wrap: nowrap;
+}
+
+/* Once the bar has collapsed its labels to icons (`data-compact`, set in
+   Builder.tsx), tighten the spacing too so the single row reclaims every pixel
+   it can — this is what lets the smallest phones keep all controls on one line.
+   Measured live by the collapse pass, so it just makes more labels survive. */
+.actionBar[data-compact] {
+  gap: 6px;
+}
+
+.actionBar[data-compact] .actionGroup {
+  gap: 4px;
 }
 
 @media (max-width: 900px) {
   .actionBar {
-    /* On phones the secondary buttons collapse to icon-only (Button
-       `collapseLabel`); Send keeps its label whenever there's room and adapts
-       per-width in Builder.tsx. `flex-wrap` lets the second control group drop
-       onto its own line rather than overflow the pane and clip a control — it's
-       also what the Send-label measurement watches for. Each group keeps
-       `nowrap` so a group never splits mid-cluster. */
+    /* Tighter chrome on phones. The single-row collapse itself is width-driven
+       (see `data-compact` in Builder.tsx), not tied to this breakpoint. */
     padding: 8px 10px;
     gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .actionGroup {
-    flex-wrap: nowrap;
-    gap: 6px;
   }
 }
 

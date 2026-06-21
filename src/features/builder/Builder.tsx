@@ -78,14 +78,19 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
   const sendLabel = isUpdate ? "Update" : "Send";
 
   const barRef = useRef<HTMLDivElement>(null);
-  // We always *prefer* to show the "Send" label. It only drops to an icon when
-  // keeping the text would push the action bar onto a second row — i.e. on the
-  // narrowest phones where it genuinely can't fit. Unlike a fixed breakpoint,
-  // this shows the label on any viewport (or tablet) that has room for it.
-  const [sendCompact, setSendCompact] = useState(false);
+  // The action bar always stays on a single row. As its available width shrinks
+  // — a narrow builder pane on desktop, or a phone — its controls collapse in
+  // stages rather than wrapping onto a second line:
+  //   0 — every label shown
+  //   1 — secondary buttons (Saved / More / Restore) drop to icons, via the
+  //       `data-compact` flag their CSS keys off
+  //   2 — the primary Send/Update button also drops to its icon
+  // We measure the real control widths instead of guessing a breakpoint, so the
+  // labels survive on any width — viewport *or* pane — that has room for them.
+  const [compact, setCompact] = useState(0);
   // Bumped by the ResizeObserver below whenever the bar's *width* changes; drives
-  // a fresh measurement pass. (Width only — our own collapse changes the bar's
-  // height, and reacting to that would loop.)
+  // a fresh measurement pass. (Width only — collapsing changes the bar's content,
+  // not its width, so this never feeds back on itself.)
   const [barWidth, setBarWidth] = useState(0);
 
   useLayoutEffect(() => {
@@ -96,21 +101,21 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
     return () => ro.disconnect();
   }, []);
 
-  // On every width change — or when the label itself changes ("Send" ↔
-  // "Update", which is wider) — optimistically restore the label…
+  // On every width change — or when the primary label flips ("Send" ↔ "Update",
+  // which is wider) — optimistically restore every label…
   useLayoutEffect(() => {
-    setSendCompact(false);
+    setCompact(0);
   }, [barWidth, isUpdate]);
 
-  // …then, with the label shown, collapse to an icon only if the two control
-  // groups can't sit side by side on one row. Each group keeps its natural width
-  // whether or not the bar has wrapped, so summing them (plus the gap between and
-  // the bar's padding) tells us what a single row needs — more reliable than
-  // `scrollWidth`, which `justify-content: space-between` leaves unchanged when
-  // items overflow. Runs before paint, so the optimistic expand never flashes.
+  // …then collapse one stage at a time until the two control groups fit side by
+  // side on one row. Each group keeps its natural width, so summing them (plus
+  // the gap between and the bar's padding) tells us what a single row needs —
+  // more reliable than `scrollWidth`, which `justify-content: space-between`
+  // leaves unchanged when items overflow. Each pass runs before paint, so the
+  // staged collapse never flashes.
   useLayoutEffect(() => {
     const bar = barRef.current;
-    if (!bar || sendCompact) return;
+    if (!bar || compact >= 2) return;
     const cs = getComputedStyle(bar);
     const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
     const gap = parseFloat(cs.columnGap) || 0;
@@ -119,11 +124,11 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
       groups.reduce((sum, g) => sum + g.getBoundingClientRect().width, 0) +
       gap * Math.max(0, groups.length - 1) +
       padX;
-    if (needed > bar.clientWidth + 1) setSendCompact(true);
-  }, [sendCompact, barWidth, isUpdate]);
+    if (needed > bar.clientWidth + 1) setCompact((c) => c + 1);
+  }, [compact, barWidth, isUpdate]);
 
   return (
-    <div ref={barRef} className={styles.actionBar}>
+    <div ref={barRef} className={styles.actionBar} data-compact={compact >= 1 ? "" : undefined}>
       <div className={styles.actionGroup}>
         {isProxyConfigured() ? <AccountMenu /> : null}
         <SavedMessagesMenu />
@@ -215,8 +220,9 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
               : "Post this message to your Discord webhook"
           }
         >
-          {/* Hidden only when the bar would otherwise wrap (see sendCompact). */}
-          {sendCompact ? null : sendLabel}
+          {/* Dropped last — only once collapsing the secondary labels still
+              isn't enough to keep the bar on one row (see `compact`). */}
+          {compact >= 2 ? null : sendLabel}
         </Button>
       </div>
     </div>

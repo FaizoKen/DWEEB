@@ -90,19 +90,19 @@
   align-items: center;
 }
 
-/* ── Icon-only on mobile ───────────────────────────────────────────────── */
-/* With `collapseLabel`, drop the text on phones and tighten the horizontal
-   padding so the button shrinks to just its icon(s). Callers carry a
-   `title`/`aria-label`, so the control keeps an accessible name once the
-   visible text is gone. */
-@media (max-width: 900px) {
-  .collapseLabel .label {
-    display: none;
-  }
+/* ── Icon-only when the toolbar is tight ───────────────────────────────── */
+/* `collapseLabel` buttons live in the builder's action bar, which flags itself
+   `data-compact` (see Builder.tsx) once its controls would no longer fit on a
+   single row — at a narrow builder pane on desktop, or on a phone. When that
+   flag is set we drop the text and tighten the horizontal padding so the button
+   shrinks to just its icon(s). Callers carry a `title`/`aria-label`, so the
+   control keeps an accessible name once the visible text is gone. */
+[data-compact] .collapseLabel .label {
+  display: none;
+}
 
-  .collapseLabel.size-sm,
-  .collapseLabel.size-md {
-    padding-left: 8px;
-    padding-right: 8px;
-  }
+[data-compact] .collapseLabel.size-sm,
+[data-compact] .collapseLabel.size-md {
+  padding-left: 8px;
+  padding-right: 8px;
 }
