@@ -68,7 +68,11 @@
 }
 
 .body {
-  padding: 20px;
+  /* Exposed so a sticky full-bleed footer inside the body (e.g. the Share
+     dialog's floating action bar) can cancel this padding with negative margins
+     and stay flush as the value changes responsively. */
+  --modal-pad: 20px;
+  padding: var(--modal-pad);
   overflow-y: auto;
   /* Flex children default to min-height: auto, which refuses to shrink below
      their content. Without this the body never gets smaller than its content,
@@ -100,7 +104,8 @@
     padding: 12px 14px;
   }
   .dialog .body {
-    padding: 14px;
+    --modal-pad: 14px;
+    padding: var(--modal-pad);
   }
   .dialog .footer {
     padding: 12px 14px;

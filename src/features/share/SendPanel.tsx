@@ -140,6 +140,7 @@ import {
 import { copyText } from "@/core/serialization/clipboard";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
+import { GuildIdentity } from "./GuildIdentity";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
 import type { PermanentStatusProps } from "./PermanentStatus";
@@ -1617,36 +1618,50 @@ export function SendPanel({
         </div>
       ) : null}
 
-      <div className={styles.actions}>
-        {sending ? (
-          <Button variant="secondary" onClick={handleCancel}>
-            Cancel
+      {/* Floating action bar — pinned to the bottom of the scrolling dialog so
+          the destination server and the Send/Update button stay in view while
+          the channel list scrolls. */}
+      <div className={styles.floatingBar}>
+        <GuildIdentity
+          // The verified/known webhook's server, else — only on the channel-first
+          // path, where the connected server IS the destination — the connected
+          // one. (A pasted webhook for another server shouldn't read as the
+          // connected guild before it's verified.)
+          guildId={knownGuildId ?? (pickerActive ? connectedData?.guildId : undefined)}
+          fallbackName={knownGuildName}
+          label="Posting to"
+        />
+        <div className={styles.floatingActions}>
+          {sending ? (
+            <Button variant="secondary" onClick={handleCancel}>
+              Cancel
+            </Button>
+          ) : null}
+          <Button
+            variant="primary"
+            onClick={handleSend}
+            disabled={
+              sending ||
+              saving ||
+              !parsedUrl ||
+              knownGone ||
+              blockingIssues.length > 0 ||
+              ownershipBlocked ||
+              mustSignInToRouteCheck ||
+              componentRouting === "foreign" ||
+              pluginGuildMismatch != null ||
+              (mode === "update" && !parsedMessageId)
+            }
+          >
+            {sending
+              ? mode === "update"
+                ? "Updating…"
+                : "Sending…"
+              : mode === "update"
+                ? "Update message"
+                : "Send to webhook"}
           </Button>
-        ) : null}
-        <Button
-          variant="primary"
-          onClick={handleSend}
-          disabled={
-            sending ||
-            saving ||
-            !parsedUrl ||
-            knownGone ||
-            blockingIssues.length > 0 ||
-            ownershipBlocked ||
-            mustSignInToRouteCheck ||
-            componentRouting === "foreign" ||
-            pluginGuildMismatch != null ||
-            (mode === "update" && !parsedMessageId)
-          }
-        >
-          {sending
-            ? mode === "update"
-              ? "Updating…"
-              : "Sending…"
-            : mode === "update"
-              ? "Update message"
-              : "Send to webhook"}
-        </Button>
+        </div>
       </div>
 
       <SendConfirm

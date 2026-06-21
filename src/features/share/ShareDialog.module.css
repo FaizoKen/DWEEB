@@ -96,6 +96,34 @@
   justify-content: flex-end;
 }
 
+/* Floating action bar — sticks to the bottom of the scrolling modal body so the
+   Restore button (and the server it reads from) stays visible while the webhook
+   list scrolls. Negative margins bleed it edge-to-edge and cancel the body's
+   padding (tracked via --modal-pad); the elevated background + top border hide
+   the content scrolling beneath. Mirrors SendPanel's bar (kept here so Restore
+   styles without cross-importing a sibling stylesheet). */
+.floatingBar {
+  position: sticky;
+  bottom: calc(-1 * var(--modal-pad, 20px));
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px calc(-1 * var(--modal-pad, 20px)) calc(-1 * var(--modal-pad, 20px));
+  padding: 12px var(--modal-pad, 20px) calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--app-bg-elevated);
+  border-top: 1px solid var(--app-border);
+}
+
+.floatingActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
 /* Opt-in short-link subsection in the Share link tab — divided off from the
  * default (hash) link above it so the "this uploads" tradeoff reads as a
  * distinct, deliberate choice. */

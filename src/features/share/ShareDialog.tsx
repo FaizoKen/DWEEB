@@ -58,6 +58,7 @@ import { cn } from "@/lib/cn";
 import { SendPanel } from "./SendPanel";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
+import { GuildIdentity } from "./GuildIdentity";
 import { Callout } from "./Callout";
 import styles from "./ShareDialog.module.css";
 
@@ -918,14 +919,23 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
 
       {error ? <div className={styles.error}>{error}</div> : null}
 
-      <div className={cn(styles.actions, styles.actionsEnd)}>
-        <Button
-          variant="primary"
-          onClick={handleFetch}
-          disabled={busy || saving || !parsedUrl || !messageId}
-        >
-          {busy ? "Fetching…" : "Restore into editor"}
-        </Button>
+      {/* Floating action bar — pinned to the bottom of the scrolling dialog so
+          the server and the Restore button stay in view while the webhook list
+          scrolls. */}
+      <div className={styles.floatingBar}>
+        <GuildIdentity
+          guildId={pickerActive ? connectedData?.guildId : undefined}
+          label="Server"
+        />
+        <div className={styles.floatingActions}>
+          <Button
+            variant="primary"
+            onClick={handleFetch}
+            disabled={busy || saving || !parsedUrl || !messageId}
+          >
+            {busy ? "Fetching…" : "Restore into editor"}
+          </Button>
+        </div>
       </div>
     </>
   );
