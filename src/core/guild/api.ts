@@ -82,6 +82,19 @@ export function isValidGuildId(id: string): boolean {
   return SNOWFLAKE_RE.test(id.trim());
 }
 
+/**
+ * Absolute Discord CDN URL for a guild's icon, or `null` when the guild has no
+ * custom icon. `icon` is the hash Discord returns on the guild object. Animated
+ * icons (hash prefixed `a_`) are served as `.gif`; everything else as `.webp`.
+ * `size` must be a power of two in 16…4096 — defaults to 256 so the URL is usable
+ * as a webhook avatar or thumbnail, not just a tiny list glyph.
+ */
+export function guildIconUrl(id: string, icon: string | null, size = 256): string | null {
+  if (!icon) return null;
+  const ext = icon.startsWith("a_") ? "gif" : "webp";
+  return `https://cdn.discordapp.com/icons/${id}/${icon}.${ext}?size=${size}`;
+}
+
 /** Append `?fresh=true` when a caller wants to bypass the proxy's short-TTL
  *  cache — used by the manual "Refresh" so it pulls live data straight from
  *  Discord, while every passive load keeps hitting the cache to spare Discord's

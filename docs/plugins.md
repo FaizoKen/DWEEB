@@ -285,12 +285,31 @@ after the draw; the public announcement carries the instant news).
 ### Core (server/channel) tokens are always available
 
 Independent of any plugin, DWEEB offers a built-in **core** set of server/channel
-tokens on every message: `{server}`, `{server_id}`, `{channel}`, `{channel_id}`,
-and `{channel_mention}` (the clickable `<#id>`). Server tokens resolve from the
-connected guild in the preview; channel tokens resolve from the destination
-webhook at send. This namespace is **reserved** — a plugin that declares a token
-with one of those names has it dropped on parse, so `{server}` always means the
-server.
+tokens on every message:
+
+| Token                | Resolves to                                  |
+| -------------------- | -------------------------------------------- |
+| `{server}`           | Server name                                  |
+| `{server_id}`        | Server ID                                    |
+| `{server_icon}`      | Server icon URL (usable as an avatar/image)  |
+| `{channel}`          | Channel name                                 |
+| `{channel_id}`       | Channel ID                                   |
+| `{channel_mention}`  | Clickable `<#id>`                            |
+| `{channel_category}` | Name of the channel's parent category        |
+
+Server tokens resolve from the connected guild in the preview; channel tokens
+resolve from the destination webhook at send. This namespace is **reserved** — a
+plugin that declares a token with one of those names has it dropped on parse, so
+`{server}` always means the server.
+
+These tokens (and a plugin's own) substitute into far more than message text:
+besides Text Display content they fill **button labels and link URLs**, **select
+placeholders**, **string-select option label/value/description**, **thumbnail and
+gallery alt-text and media URLs**, and the message-level **username / avatar URL /
+forum thread name**. A field that's normally format-checked (a URL, a SKU id) is
+**not** flagged for its raw `{token}` shape — the validator recognises the
+placeholder and waits for substitution to produce the real value. Bot-facing
+identifiers (`custom_id`, snowflake lists) are intentionally left alone.
 
 ### More than one provider on a message
 

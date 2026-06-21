@@ -23,6 +23,7 @@
 import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { guildIconUrl } from "@/core/guild/api";
 import { useAuthStore } from "@/core/auth/authStore";
 import { stripEditorFields } from "@/core/serialization/normalize";
 import { getPlugins } from "@/core/plugins/registry";
@@ -63,8 +64,13 @@ interface ResourceContext {
 function authoringContext(): PlaceholderContext {
   const { guildId } = useGuildStore.getState();
   if (!guildId) return {};
-  const name = useAuthStore.getState().guilds.find((g) => g.id === guildId)?.name;
-  return { serverId: guildId, ...(name ? { serverName: name } : {}) };
+  const guild = useAuthStore.getState().guilds.find((g) => g.id === guildId);
+  const icon = guild ? guildIconUrl(guild.id, guild.icon) : null;
+  return {
+    serverId: guildId,
+    ...(guild?.name ? { serverName: guild.name } : {}),
+    ...(icon ? { serverIcon: icon } : {}),
+  };
 }
 
 export function resolvePluginResource(resource: string, ctx: ResourceContext): ResourceResult {

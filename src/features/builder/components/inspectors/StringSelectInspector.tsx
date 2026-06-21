@@ -16,10 +16,11 @@ import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import type { StringSelectComponent, StringSelectOption } from "@/core/schema/types";
 import { useAttachedPlugin } from "@/features/plugins/useAttachedPlugin";
+import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { Field } from "@/ui/Field";
 import { IconButton } from "@/ui/IconButton";
 import { Switch } from "@/ui/Switch";
-import { TextInput } from "@/ui/TextInput";
+import { PlaceholderInput } from "@/ui/PlaceholderInput";
 import { LockIcon, TrashIcon } from "@/ui/Icon";
 import { EmojiField } from "./EmojiField";
 import { SelectBaseFields } from "./SelectShared";
@@ -32,6 +33,7 @@ interface Props {
 export function StringSelectInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
   const advancedMode = useUiPrefs((s) => s.advancedMode);
+  const placeholders = useMessagePlaceholders();
   const attachedPlugin = useAttachedPlugin(node);
 
   // A plugin only owns the option list when it declares `managesSelectOptions`
@@ -123,11 +125,12 @@ export function StringSelectInspector({ node }: Props) {
             </div>
             <Field label="Label">
               {(id) => (
-                <TextInput
+                <PlaceholderInput
                   id={id}
                   value={opt.label}
                   maxLength={LIMITS.SELECT_OPTION_LABEL}
-                  onChange={(e) => updateOption(i, { ...opt, label: e.currentTarget.value })}
+                  placeholders={placeholders}
+                  onChange={(value) => updateOption(i, { ...opt, label: value })}
                 />
               )}
             </Field>
@@ -138,24 +141,26 @@ export function StringSelectInspector({ node }: Props) {
             />
             <Field label="Value" hint="Sent to your bot when the option is picked.">
               {(id) => (
-                <TextInput
+                <PlaceholderInput
                   id={id}
                   value={opt.value}
                   maxLength={LIMITS.SELECT_OPTION_VALUE}
-                  onChange={(e) => updateOption(i, { ...opt, value: e.currentTarget.value })}
+                  placeholders={placeholders}
+                  onChange={(value) => updateOption(i, { ...opt, value })}
                 />
               )}
             </Field>
             <Field label="Description">
               {(id) => (
-                <TextInput
+                <PlaceholderInput
                   id={id}
                   value={opt.description ?? ""}
                   maxLength={LIMITS.SELECT_OPTION_DESCRIPTION}
-                  onChange={(e) =>
+                  placeholders={placeholders}
+                  onChange={(value) =>
                     updateOption(i, {
                       ...opt,
-                      description: e.currentTarget.value || undefined,
+                      description: value || undefined,
                     })
                   }
                   placeholder="Optional"

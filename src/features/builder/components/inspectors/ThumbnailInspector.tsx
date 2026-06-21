@@ -5,6 +5,8 @@ import type { ThumbnailComponent, UnfurledMediaItem } from "@/core/schema/types"
 import { Field } from "@/ui/Field";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
+import { PlaceholderInput } from "@/ui/PlaceholderInput";
+import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { AttachmentPicker } from "./AttachmentPicker";
 
 interface Props {
@@ -14,6 +16,7 @@ interface Props {
 export function ThumbnailInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
   const advancedMode = useUiPrefs((s) => s.advancedMode);
+  const placeholders = useMessagePlaceholders();
 
   const setMedia = (partial: Partial<UnfurledMediaItem>) => {
     patch<ThumbnailComponent>(node._id, {
@@ -41,10 +44,11 @@ export function ThumbnailInspector({ node }: Props) {
         }
       >
         {(id) => (
-          <TextInput
+          <PlaceholderInput
             id={id}
             value={node.media.url ?? ""}
-            onChange={(e) => setMedia({ url: e.currentTarget.value || undefined })}
+            placeholders={placeholders}
+            onChange={(value) => setMedia({ url: value || undefined })}
           />
         )}
       </Field>
@@ -71,13 +75,14 @@ export function ThumbnailInspector({ node }: Props) {
       ) : null}
       <Field label="Alt text">
         {(id) => (
-          <TextInput
+          <PlaceholderInput
             id={id}
             value={node.description ?? ""}
             maxLength={LIMITS.MEDIA_DESCRIPTION}
-            onChange={(e) =>
+            placeholders={placeholders}
+            onChange={(value) =>
               patch<ThumbnailComponent>(node._id, {
-                description: e.currentTarget.value || undefined,
+                description: value || undefined,
               })
             }
           />

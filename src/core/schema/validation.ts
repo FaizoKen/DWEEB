@@ -43,6 +43,7 @@ import {
   type WebhookMessage,
 } from "./types";
 import { getAttachmentFile, parseSessionUrl } from "@/core/state/attachmentStore";
+import { containsPlaceholder } from "@/core/plugins/placeholders";
 
 export type IssueSeverity = "error" | "warning";
 
@@ -117,7 +118,7 @@ export function validateMessage(message: WebhookMessage): ValidationResult {
     issues.push({
       severity: "error",
       code: "USERNAME_RESERVED",
-      message: 'Webhook username can’t contain “clyde” or “discord” — Discord rejects those names.',
+      message: "Webhook username can’t contain “clyde” or “discord” — Discord rejects those names.",
     });
   }
 
@@ -263,7 +264,13 @@ function validateMessageLevel(message: WebhookMessage, issues: ValidationIssue[]
       message: `Avatar URL must be ≤${LIMITS.WEBHOOK_AVATAR_URL} characters.`,
     });
   }
-  if (message.avatar_url && !isValidUrl(message.avatar_url)) {
+  if (
+    message.avatar_url &&
+    !containsPlaceholder(message.avatar_url) &&
+    !isValidUrl(message.avatar_url)
+  ) {
+    // A `{server_icon}` avatar resolves to a real URL only at send, so don't
+    // flag its raw token form here.
     issues.push({
       severity: "warning",
       code: "AVATAR_URL_INVALID",
@@ -466,7 +473,9 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
 
 function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
   if (btn.style === ButtonStyle.Link) {
-    if (!isValidHttpsUrl(btn.url)) {
+    // A URL holding a `{token}` resolves to a real https link only at send, so
+    // skip the format check on its raw form — the length cap still applies.
+    if (!containsPlaceholder(btn.url) && !isValidHttpsUrl(btn.url)) {
       issues.push({
         nodeId: btn._id,
         severity: "error",
@@ -489,7 +498,7 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
         code: "BUTTON_SKU_MISSING",
         message: "Premium button requires a SKU id.",
       });
-    } else if (!SNOWFLAKE_RE.test(btn.sku_id)) {
+    } else if (!containsPlaceholder(btn.sku_id) && !SNOWFLAKE_RE.test(btn.sku_id)) {
       issues.push({
         nodeId: btn._id,
         severity: "error",
@@ -764,7 +773,12 @@ function validateMediaItem(
       message: `${context}: attachment_id must be a Discord snowflake.`,
     });
   }
-  if (hasUrl) {
+  if (hasUrl && containsPlaceholder(media.url!)) {
+    // A `{server_icon}`-style URL resolves to a real link only at send; skip
+    // every format check on its raw token form (there's no session blob to
+    // resolve either). Thumbnail / gallery accept the resolved external URL;
+    // File still won't render one, but that's the user's call once they opt in.
+  } else if (hasUrl) {
     if (!isValidMediaUrl(media.url!)) {
       // A malformed media URL is rejected by Discord (it can't unfurl it), so
       // this blocks send rather than merely warning.

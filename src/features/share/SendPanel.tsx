@@ -116,6 +116,7 @@ import {
   createCustomBotWebhook,
   fetchCustomBots,
   fetchPermanentSlots,
+  guildIconUrl,
   isAuthError,
   removePermanentMessage,
   type GuildWebhook,
@@ -832,13 +833,24 @@ export function SendPanel({
       // destination; plugin tokens from their cached values. Once posted, a plugin
       // re-renders its own template on each interaction — that's where dynamic
       // values like `{winners}` update.
+      const sendGuildId = resolvedGuildId ?? knownGuildId;
+      const sendChannelId = resolvedChannelId ?? knownChannelId;
+      const sendGuild = sendGuildId ? authGuilds.find((g) => g.id === sendGuildId) : undefined;
+      const sendChannel = sendChannelId ? connectedData?.channelById[sendChannelId] : undefined;
+      const sendCategory = sendChannel?.parentId
+        ? connectedData?.channelById[sendChannel.parentId]?.name
+        : undefined;
       const outgoing = substituteMessage(
         message,
         collectMessagePlaceholders(message, getPlugins(), {
-          serverId: resolvedGuildId ?? knownGuildId,
+          serverId: sendGuildId,
           serverName: knownGuildName,
-          channelId: resolvedChannelId ?? knownChannelId,
+          serverIcon: sendGuild
+            ? (guildIconUrl(sendGuild.id, sendGuild.icon) ?? undefined)
+            : undefined,
+          channelId: sendChannelId,
           channelName: knownChannelName,
+          channelCategory: sendCategory,
         }),
       );
 

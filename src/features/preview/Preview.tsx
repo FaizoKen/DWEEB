@@ -18,6 +18,7 @@ import { usePluginRegistry } from "@/core/state/pluginRegistryStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isPluginRegistryConfigured } from "@/core/plugins/registry";
+import { guildIconUrl } from "@/core/guild/api";
 import { collectMessagePlaceholders, substituteMessage } from "@/core/plugins/placeholders";
 import type { WebhookMessage } from "@/core/schema/types";
 import { ComponentRenderer } from "./renderers/ComponentRenderer";
@@ -56,18 +57,23 @@ export function Preview({ onClose, swipeProps, message: messageOverride }: Previ
   const connectedGuildId = useGuildStore((s) => s.guildId);
   const authGuilds = useAuthStore((s) => s.guilds);
   const rendered = useMemo(() => {
-    const serverName = authGuilds.find((g) => g.id === connectedGuildId)?.name;
+    const guild = authGuilds.find((g) => g.id === connectedGuildId);
+    const serverIcon = guild ? guildIconUrl(guild.id, guild.icon) : null;
     return substituteMessage(
       message,
       collectMessagePlaceholders(message, plugins, {
         ...(connectedGuildId ? { serverId: connectedGuildId } : {}),
-        ...(serverName ? { serverName } : {}),
+        ...(guild?.name ? { serverName: guild.name } : {}),
+        ...(serverIcon ? { serverIcon } : {}),
       }),
     );
   }, [message, plugins, connectedGuildId, authGuilds]);
 
-  const displayName = message.username || "Webhook";
-  const avatar = message.avatar_url;
+  // Read the webhook identity off the *substituted* copy so a `{server}` username
+  // or `{server_icon}` avatar shows its resolved value in the preview header,
+  // matching what the send path posts.
+  const displayName = rendered.username || "Webhook";
+  const avatar = rendered.avatar_url;
   // The "sent at" time stands in for when the message would post; it shouldn't
   // tick (and re-run an Intl formatter) on every keystroke, so freeze it at
   // mount. Preview re-renders on every message edit, so this was pure waste.

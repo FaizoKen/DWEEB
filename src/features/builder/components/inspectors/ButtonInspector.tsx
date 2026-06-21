@@ -23,6 +23,8 @@ import { Field } from "@/ui/Field";
 import { Select } from "@/ui/Select";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
+import { PlaceholderInput } from "@/ui/PlaceholderInput";
+import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { CapabilityNote } from "./CapabilityNote";
 import { EmojiField } from "./EmojiField";
 
@@ -43,6 +45,7 @@ export function ButtonInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
   const replace = useMessageStore((s) => s.replaceNode);
   const advancedMode = useUiPrefs((s) => s.advancedMode);
+  const placeholders = useMessagePlaceholders();
 
   const changeStyle = (next: ButtonStyleValue) => {
     if (next === node.style) return;
@@ -86,13 +89,14 @@ export function ButtonInspector({ node }: Props) {
       {node.style !== ButtonStyle.Premium ? (
         <Field label="Label" hint={`Max ${LIMITS.BUTTON_LABEL} characters.`}>
           {(id) => (
-            <TextInput
+            <PlaceholderInput
               id={id}
               maxLength={LIMITS.BUTTON_LABEL}
               value={"label" in node ? (node.label ?? "") : ""}
-              onChange={(e) =>
+              placeholders={placeholders}
+              onChange={(value) =>
                 patch<LinkButtonComponent>(node._id, {
-                  label: e.currentTarget.value || undefined,
+                  label: value || undefined,
                 })
               }
             />
@@ -101,14 +105,15 @@ export function ButtonInspector({ node }: Props) {
       ) : null}
 
       {node.style === ButtonStyle.Link ? (
-        <Field label="URL" hint="Must be https://.">
+        <Field label="URL" hint="Must be https:// (or a placeholder that resolves to one).">
           {(id) => (
-            <TextInput
+            <PlaceholderInput
               id={id}
               type="url"
               maxLength={LIMITS.BUTTON_URL}
               value={node.url}
-              onChange={(e) => patch<LinkButtonComponent>(node._id, { url: e.currentTarget.value })}
+              placeholders={placeholders}
+              onChange={(value) => patch<LinkButtonComponent>(node._id, { url: value })}
             />
           )}
         </Field>

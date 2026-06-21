@@ -47,7 +47,7 @@
  * decay back to a literal `{server}` on the giveaway's lazy refresh.
  */
 
-import { ComponentType, type WebhookMessage } from "@/core/schema/types";
+import { ButtonStyle, ComponentType, type WebhookMessage } from "@/core/schema/types";
 import { getPluginPlaceholderValues } from "@/core/state/pluginSummaryCache";
 import type { PluginManifest } from "./manifest";
 import { pluginBoundComponents } from "./targets";
@@ -77,8 +77,12 @@ export interface PluginPlaceholder {
 export interface PlaceholderContext {
   serverName?: string;
   serverId?: string;
+  /** Absolute CDN URL of the server's icon, when it has one. */
+  serverIcon?: string;
   channelName?: string;
   channelId?: string;
+  /** Name of the channel's parent category, when it lives under one. */
+  channelCategory?: string;
 }
 
 /**
@@ -88,13 +92,20 @@ export interface PlaceholderContext {
  * means the server. `{channel_mention}` renders the clickable `<#id>`; the rest
  * are plain text. Samples stand in until a real value is known (channel tokens
  * have no value until send).
+ *
+ * `{server_icon}` resolves to a URL, so it carries no text sample — left literal
+ * until a connected server (preview) or verified destination (send) supplies the
+ * real CDN link, which keeps it usable as an image/avatar source instead of
+ * rendering a placeholder string into a URL field.
  */
 export const CORE_PLACEHOLDERS: readonly PluginPlaceholder[] = [
   { token: "server", label: "Server name", sample: "this server" },
   { token: "server_id", label: "Server ID", sample: "this server's ID" },
+  { token: "server_icon", label: "Server icon URL" },
   { token: "channel", label: "Channel name", sample: "this channel" },
   { token: "channel_id", label: "Channel ID", sample: "this channel's ID" },
   { token: "channel_mention", label: "Channel link", sample: "this channel" },
+  { token: "channel_category", label: "Channel category", sample: "this category" },
 ];
 
 /** The tokens {@link CORE_PLACEHOLDERS} owns — plugins may not redeclare them. */
@@ -109,11 +120,13 @@ function coreValues(context: PlaceholderContext | undefined): Record<string, str
   if (!context) return v;
   if (context.serverName) v.server = context.serverName;
   if (context.serverId) v.server_id = context.serverId;
+  if (context.serverIcon) v.server_icon = context.serverIcon;
   if (context.channelName) v.channel = context.channelName;
   if (context.channelId) {
     v.channel_id = context.channelId;
     v.channel_mention = `<#${context.channelId}>`;
   }
+  if (context.channelCategory) v.channel_category = context.channelCategory;
   return v;
 }
 
@@ -121,6 +134,20 @@ function coreValues(context: PlaceholderContext | undefined): Record<string, str
 export const PLACEHOLDER_TOKEN_RE = /^[a-z0-9_]{1,32}$/;
 /** Match a `{token}` occurrence in text (the token alone is captured). */
 const TOKEN_IN_TEXT_RE = /\{([a-z0-9_]{1,32})\}/g;
+/** Non-global twin of {@link TOKEN_IN_TEXT_RE} for a stateless presence test. */
+const HAS_TOKEN_RE = /\{[a-z0-9_]{1,32}\}/;
+
+/**
+ * True when `text` carries at least one well-formed `{token}` placeholder. This
+ * is the syntactic "placeholder type" the validator keys off: a format-checked
+ * field (a button URL, a media URL) whose literal value only exists *after*
+ * substitution must not be flagged for its raw `{token}` shape. The token regex
+ * is strict (lowercase id in braces), so ordinary prose like `{ this }` or
+ * `{TODO}` still validates normally.
+ */
+export function containsPlaceholder(text: string): boolean {
+  return text.indexOf("{") !== -1 && HAS_TOKEN_RE.test(text);
+}
 
 const MAX_PLACEHOLDERS = 24;
 const MAX_LABEL = 40;
@@ -207,11 +234,15 @@ export function substituteText(text: string, map: Record<string, string>): strin
 }
 
 /**
- * Return a copy of `message` with every Text Display `content` and button
- * `label` run through {@link substituteText}. The store keeps the raw tokens;
- * this is only for the outgoing send payload and the preview. When `map` is empty
- * the original message is returned untouched (no clone) — the common case where
- * no placeholder-declaring plugin is attached. Pure (never mutates the input).
+ * Return a copy of `message` with every user-facing text and URL field run
+ * through {@link substituteText} — Text Display content, button labels and link
+ * URLs, select placeholders, string-select option label/value/description,
+ * thumbnail & gallery alt-text and media URLs, plus the message-level webhook
+ * overrides (`username`, `avatar_url`, `thread_name`). The store keeps the raw
+ * tokens; this is only for the outgoing send payload and the preview. When `map`
+ * is empty the original message is returned untouched (no clone). Bot-facing
+ * identifiers (`custom_id`, `sku_id`, snowflake lists) are deliberately left
+ * alone. Pure (never mutates the input).
  */
 export function substituteMessage(
   message: WebhookMessage,
@@ -219,13 +250,36 @@ export function substituteMessage(
 ): WebhookMessage {
   if (isEmptyMap(map)) return message;
   const clone = structuredClone(message);
+  const meta = clone as unknown as Record<string, unknown>;
+  // Webhook execution overrides — e.g. `avatar_url: {server_icon}` or a per-send
+  // `username: {server}`. These post alongside the components, so substitute them
+  // too, mirroring the wire fields the executor consumes.
+  subField(meta, "username", map);
+  subField(meta, "avatar_url", map);
+  subField(meta, "thread_name", map);
   for (const top of clone.components) substituteNode(top, map);
   return clone;
 }
 
-/** Recurse the (cloned) component tree, substituting the two user-text fields:
- *  Text Display `content` and interactive/link button `label`. Generic descent
- *  into every nested object/array keeps it correct as the schema grows. */
+/** Substitute a single string property in place when present. */
+function subField(o: Record<string, unknown>, key: string, map: Record<string, string>): void {
+  const v = o[key];
+  if (typeof v === "string") o[key] = substituteText(v, map);
+}
+
+/** Substitute the `url` of an UnfurledMediaItem-shaped object in place. */
+function subMediaUrl(media: unknown, map: Record<string, string>): void {
+  if (media && typeof media === "object") subField(media as Record<string, unknown>, "url", map);
+}
+
+/**
+ * Recurse the (cloned) component tree, substituting each component's user-facing
+ * text and URL fields. A `switch` on the component `type` handles that node's own
+ * fields; the generic descent at the end reaches nested *typed* components
+ * (section/container/row children, a section accessory). Untyped sub-objects —
+ * media items, select options, emoji — carry no `type`, so the switch is the only
+ * thing that touches their fields and the descent never double-substitutes them.
+ */
 function substituteNode(node: unknown, map: Record<string, string>): void {
   if (Array.isArray(node)) {
     for (const child of node) substituteNode(child, map);
@@ -233,11 +287,56 @@ function substituteNode(node: unknown, map: Record<string, string>): void {
   }
   if (!node || typeof node !== "object") return;
   const o = node as Record<string, unknown>;
-  if (o.type === ComponentType.TextDisplay && typeof o.content === "string") {
-    o.content = substituteText(o.content, map);
-  } else if (o.type === ComponentType.Button && typeof o.label === "string") {
-    o.label = substituteText(o.label, map);
+
+  switch (o.type) {
+    case ComponentType.TextDisplay:
+      subField(o, "content", map);
+      break;
+    case ComponentType.Button:
+      subField(o, "label", map);
+      // Only a Link button carries a user-facing URL; an interactive button's
+      // custom_id is bot-facing and never substituted.
+      if (o.style === ButtonStyle.Link) subField(o, "url", map);
+      break;
+    case ComponentType.StringSelect:
+      subField(o, "placeholder", map);
+      if (Array.isArray(o.options)) {
+        for (const opt of o.options) {
+          if (opt && typeof opt === "object") {
+            const op = opt as Record<string, unknown>;
+            subField(op, "label", map);
+            subField(op, "value", map);
+            subField(op, "description", map);
+          }
+        }
+      }
+      break;
+    case ComponentType.UserSelect:
+    case ComponentType.RoleSelect:
+    case ComponentType.MentionableSelect:
+    case ComponentType.ChannelSelect:
+      subField(o, "placeholder", map);
+      break;
+    case ComponentType.Thumbnail:
+      subField(o, "description", map);
+      subMediaUrl(o.media, map);
+      break;
+    case ComponentType.MediaGallery:
+      if (Array.isArray(o.items)) {
+        for (const item of o.items) {
+          if (item && typeof item === "object") {
+            const it = item as Record<string, unknown>;
+            subField(it, "description", map);
+            subMediaUrl(it.media, map);
+          }
+        }
+      }
+      break;
+    // File media must stay an attachment reference, so its URL is never
+    // substituted. Section / Container / ActionRow / Separator have no own text
+    // here — their children are reached by the generic descent below.
   }
+
   for (const value of Object.values(o)) {
     if (value && typeof value === "object") substituteNode(value, map);
   }

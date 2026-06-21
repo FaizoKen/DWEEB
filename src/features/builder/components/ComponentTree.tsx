@@ -63,7 +63,8 @@ import { registerAttachment } from "@/core/state/attachmentStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { IconButton } from "@/ui/IconButton";
-import { TextInput } from "@/ui/TextInput";
+import { PlaceholderInput } from "@/ui/PlaceholderInput";
+import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { AddComponentMenu, type AddMenuNode } from "./AddComponentMenu";
 import { AdvancedMessageOptions } from "./AdvancedMessageOptions";
 import {
@@ -546,6 +547,7 @@ function MetaHeader() {
   const message = useMessageStore((s) => s.message);
   const setUsername = useMessageStore((s) => s.setUsername);
   const setAvatar = useMessageStore((s) => s.setAvatarUrl);
+  const placeholders = useMessagePlaceholders();
 
   const select = useMessageStore((s) => s.select);
 
@@ -580,25 +582,27 @@ function MetaHeader() {
       <div className={styles.row2}>
         <Field label="Username">
           {(id) => (
-            <TextInput
+            <PlaceholderInput
               id={id}
               data-meta-field="username"
               value={username}
               maxLength={LIMITS.WEBHOOK_USERNAME}
-              onChange={(e) => setUsername(e.currentTarget.value)}
+              placeholders={placeholders}
+              onChange={(value) => setUsername(value)}
               placeholder="Leave blank to use the webhook default"
             />
           )}
         </Field>
         <Field label="Avatar URL">
           {(id) => (
-            <TextInput
+            <PlaceholderInput
               id={id}
               data-meta-field="avatar"
               type="url"
               value={avatar}
-              onChange={(e) => setAvatar(e.currentTarget.value)}
-              placeholder="https://…"
+              placeholders={placeholders}
+              onChange={(value) => setAvatar(value)}
+              placeholder="https://… or {server_icon}"
             />
           )}
         </Field>

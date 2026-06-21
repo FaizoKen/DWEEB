@@ -1,6 +1,6 @@
-import { forwardRef, Fragment, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
-import { Menu, MenuDivider, MenuItem, MenuLabel } from "@/ui/Menu";
+import { Menu, MenuDivider, MenuItem } from "@/ui/Menu";
 import {
   BoldIcon,
   BracesIcon,
@@ -45,6 +45,7 @@ import {
   GuildMentionPanel,
 } from "@/features/guild/MentionPicker";
 import type { PlaceholderGroup } from "@/core/plugins/placeholders";
+import { PlaceholderMenuItems } from "./PlaceholderMenu";
 import styles from "./MarkdownToolbar.module.css";
 
 type Transform = (state: EditState) => EditResult;
@@ -323,25 +324,11 @@ export function MarkdownToolbar({ state, onAction, placeholders, disabled }: Mar
             }
           >
             {(close) => (
-              <>
-                {placeholders.map((group, gi) => (
-                  <Fragment key={group.source}>
-                    {gi > 0 ? <MenuDivider /> : null}
-                    <MenuLabel>{group.source}</MenuLabel>
-                    {group.items.map((p) => (
-                      <MenuItem
-                        key={p.token}
-                        onSelect={() => {
-                          onAction((s) => insertSnippet(s, `{${p.token}}`));
-                          close();
-                        }}
-                      >
-                        {`${p.label} — {${p.token}}`}
-                      </MenuItem>
-                    ))}
-                  </Fragment>
-                ))}
-              </>
+              <PlaceholderMenuItems
+                placeholders={placeholders}
+                onInsert={(snippet) => onAction((s) => insertSnippet(s, snippet))}
+                close={close}
+              />
             )}
           </Menu>
         ) : null}

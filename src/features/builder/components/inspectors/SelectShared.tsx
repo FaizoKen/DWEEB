@@ -16,9 +16,11 @@ import { LIMITS } from "@/core/schema/limits";
 import type { ManagedField } from "@/core/plugins/managedFields";
 import type { SelectComponent } from "@/core/schema/types";
 import { useAttachedPlugin } from "@/features/plugins/useAttachedPlugin";
+import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { Field } from "@/ui/Field";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
+import { PlaceholderInput } from "@/ui/PlaceholderInput";
 import { LockIcon } from "@/ui/Icon";
 import styles from "./inspectors.module.css";
 
@@ -28,6 +30,7 @@ interface Props {
 
 export function SelectBaseFields({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
+  const placeholders = useMessagePlaceholders();
   const attachedPlugin = useAttachedPlugin(node);
   const managed = attachedPlugin?.managesFields;
   const owns = (field: ManagedField) => !!managed?.includes(field);
@@ -63,13 +66,14 @@ export function SelectBaseFields({ node }: Props) {
           owns("placeholder") ? (
             <LockedValue id={id} display={node.placeholder || "—"} pluginName={pluginName} />
           ) : (
-            <TextInput
+            <PlaceholderInput
               id={id}
               value={node.placeholder ?? ""}
               maxLength={LIMITS.SELECT_PLACEHOLDER}
-              onChange={(e) =>
+              placeholders={placeholders}
+              onChange={(value) =>
                 patch<SelectComponent>(node._id, {
-                  placeholder: e.currentTarget.value || undefined,
+                  placeholder: value || undefined,
                 })
               }
               placeholder="Optional"

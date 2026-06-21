@@ -13,8 +13,10 @@ import { LIMITS } from "@/core/schema/limits";
 import type { EditorId, MediaGalleryItem } from "@/core/schema/types";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
+import { PlaceholderInput } from "@/ui/PlaceholderInput";
 import { Switch } from "@/ui/Switch";
 import { useNodeIssues } from "@/features/builder/useValidation";
+import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { IssueList } from "../ValidationIssues";
 import { AttachmentPicker } from "./AttachmentPicker";
 import styles from "./inspectors.module.css";
@@ -27,6 +29,7 @@ interface Props {
 export function GalleryItemInspector({ galleryId, item }: Props) {
   const patchItem = useMessageStore((s) => s.patchGalleryItem);
   const advancedMode = useUiPrefs((s) => s.advancedMode);
+  const placeholders = useMessagePlaceholders();
   const issues = useNodeIssues(item._id);
 
   return (
@@ -50,12 +53,13 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
         }
       >
         {(id) => (
-          <TextInput
+          <PlaceholderInput
             id={id}
             value={item.media.url ?? ""}
-            onChange={(e) =>
+            placeholders={placeholders}
+            onChange={(value) =>
               patchItem(galleryId, item._id, {
-                media: { ...item.media, url: e.currentTarget.value || undefined },
+                media: { ...item.media, url: value || undefined },
               })
             }
           />
@@ -87,13 +91,14 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
       ) : null}
       <Field label="Alt text">
         {(id) => (
-          <TextInput
+          <PlaceholderInput
             id={id}
             value={item.description ?? ""}
             maxLength={LIMITS.MEDIA_DESCRIPTION}
-            onChange={(e) =>
+            placeholders={placeholders}
+            onChange={(value) =>
               patchItem(galleryId, item._id, {
-                description: e.currentTarget.value || undefined,
+                description: value || undefined,
               })
             }
           />

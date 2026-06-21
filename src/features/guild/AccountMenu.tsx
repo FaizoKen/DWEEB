@@ -23,7 +23,7 @@ import {
   savePendingGuildId,
 } from "@/core/guild/pendingGuild";
 import { botInviteUrl } from "@/core/guild/config";
-import { isValidGuildId, type AuthUser, type PickerGuild } from "@/core/guild/api";
+import { guildIconUrl, isValidGuildId, type AuthUser, type PickerGuild } from "@/core/guild/api";
 import { Menu } from "@/ui/Menu";
 import {
   CheckCircleIcon,
@@ -461,15 +461,11 @@ function ServerRow({
   );
 }
 
-/** Discord CDN URL for a guild's icon, or null when it has none. */
-function guildIconUrl(guild: PickerGuild): string | null {
-  if (!guild.icon) return null;
-  return `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.webp?size=32`;
-}
-
 function GuildIcon({ guild, className }: { guild: PickerGuild; className?: string }) {
   const cls = className ?? styles.guildIcon;
-  const url = guildIconUrl(guild);
+  // A 32px glyph for the list; the shared helper defaults larger, so ask for the
+  // size this row actually paints.
+  const url = guildIconUrl(guild.id, guild.icon, 32);
   if (url) {
     return <img className={cls} src={url} alt="" loading="lazy" />;
   }
