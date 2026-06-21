@@ -105,23 +105,6 @@
       .callout.warn { border-left-color: var(--yellow); }
       .callout b { color: var(--text); }
 
-      /* Segmented control (private vs public). */
-      .seg { display: flex; gap: 6px; margin-top: 4px; }
-      .seg button { flex: 1; }
-      .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
-
-      /* Ping toggle row. */
-      .toggle {
-        display: flex; align-items: center; gap: 10px;
-        margin-top: 12px; padding: 10px 12px;
-        border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2);
-        cursor: pointer;
-      }
-      .toggle input { flex: none; width: auto; margin: 0; accent-color: var(--accent); }
-      .toggle .t-body { flex: 1; min-width: 0; }
-      .toggle .t-title { color: var(--text); }
-      .toggle .t-sub { font-size: 12px; color: var(--muted); }
-
       /* Token chips. */
       .vars { margin-top: 6px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
       .chip {
@@ -137,20 +120,7 @@
     <h2><span class="step-num">1</span> <span id="introTitle">When someone picks</span></h2>
     <div id="introHint" class="hint"></div>
 
-    <!-- Where the reply goes ----------------------------------------------------->
-    <label class="lbl">Reply visibility</label>
-    <div class="seg" id="visSeg">
-      <button type="button" data-vis="private">🔒 Private (only them)</button>
-      <button type="button" data-vis="public">📣 Public (everyone)</button>
-    </div>
-
-    <label class="toggle" id="pingRow" style="display: none">
-      <input type="checkbox" id="ping" />
-      <span class="t-body">
-        <span class="t-title" id="pingTitle">Ping the people they pick</span>
-        <span class="t-sub" id="pingSub">Off: their names show but no one is notified.</span>
-      </span>
-    </label>
+    <div class="callout">🔒 The reply is <b>private</b> — only the person who used the menu sees it.</div>
 
     <!-- The reply message -------------------------------------------------------->
     <h2><span class="step-num">2</span> The reply</h2>
@@ -193,12 +163,10 @@
       let guildName = "";
 
       // ── Model ───────────────────────────────────────────────────────────
-      let vis = "private"; // "private" | "public"
-      // `ping` lives on the checkbox; title/body on their inputs.
+      // title/body live on their inputs; the reply is always private.
 
       const $ = (id) => document.getElementById(id);
       const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
-      const isChannel = () => target === "channel_select";
       const VALID_TARGETS = ["user_select", "role_select", "mentionable_select", "channel_select"];
 
       // Per-target wording: what the menu picks and what {picks} resolves to.
@@ -206,22 +174,18 @@
         user_select: {
           intro: "Members pick one or more <b>server members</b>. When they do, they get the reply below — with <code>{picks}</code> filled in as @mentions of who they chose.",
           picks: "{picks} → the members they picked, as @mentions.",
-          ping: "Ping the members they pick",
         },
         role_select: {
           intro: "Members pick one or more <b>roles</b>. When they do, they get the reply below — with <code>{picks}</code> filled in as the roles they chose.",
           picks: "{picks} → the roles they picked, as mentions.",
-          ping: "Ping the roles they pick",
         },
         mentionable_select: {
           intro: "Members pick <b>members or roles</b>. When they do, they get the reply below — with <code>{picks}</code> filled in as mentions of who they chose.",
           picks: "{picks} → the members/roles they picked, as mentions.",
-          ping: "Ping the members/roles they pick",
         },
         channel_select: {
           intro: "Members pick one or more <b>channels</b>. When they do, they get the reply below — with <code>{picks}</code> filled in as clickable #channel links.",
           picks: "{picks} → the channels they picked, as #links.",
-          ping: "", // channels can't be pinged
         },
       };
 
@@ -237,28 +201,8 @@
         const c = COPY[target] || COPY.user_select;
         $("introHint").innerHTML = c.intro;
         $("picksHint").textContent = c.picks;
-        // The ping option only makes sense for a public reply that can ping
-        // something — i.e. not a channel select.
-        $("pingTitle").textContent = c.ping || "Ping the picks";
-        paintVisibility();
-      }
-
-      function paintVisibility() {
-        document
-          .querySelectorAll("#visSeg button")
-          .forEach((b) => b.classList.toggle("sel", b.dataset.vis === vis));
-        // Pinging is only meaningful for a public reply, and never for channels.
-        const showPing = vis === "public" && !isChannel();
-        $("pingRow").style.display = showPing ? "" : "none";
         sendResize();
       }
-
-      document.querySelectorAll("#visSeg button").forEach((b) =>
-        b.addEventListener("click", () => {
-          vis = b.dataset.vis;
-          paintVisibility();
-        }),
-      );
 
       // Token chips insert at the caret in the body.
       const body = $("body");
@@ -312,7 +256,6 @@
         }
 
         applyTargetChrome();
-        renderForm();
         sendResize();
       });
 
@@ -350,19 +293,11 @@
           if (VALID_TARGETS.includes(d.target)) target = d.target;
           if (d.guild_id && isSnowflake(d.guild_id)) guildId = d.guild_id;
           if (d.guild_name) guildName = d.guild_name;
-          vis = d.ephemeral === false ? "public" : "private";
-          $("ping").checked = !!d.ping;
           $("title").value = d.title || "";
           $("body").value = typeof d.body === "string" ? d.body : "";
         } catch {
           /* fresh form */
         }
-      }
-
-      // Push the in-memory model into the inputs (used after init/reconfigure).
-      function renderForm() {
-        // title/body are already set from loadInstance or the default seed.
-        paintVisibility();
       }
 
       // ── Save ────────────────────────────────────────────────────────────
@@ -372,15 +307,13 @@
       $("save").addEventListener("click", save);
 
       function summaryDescription() {
-        const where = vis === "public" ? "Public" : "Private";
         const what = {
           user_select: "picks members",
           role_select: "picks roles",
           mentionable_select: "picks members/roles",
           channel_select: "picks channels",
         }[target];
-        const ping = vis === "public" && !isChannel() && $("ping").checked ? " · pings" : "";
-        return `${where} · ${what}${ping}`;
+        return `Private · ${what}`;
       }
 
       async function save() {
@@ -394,9 +327,6 @@
           target,
           guild_id: isSnowflake(guildId) ? guildId : null,
           guild_name: guildName || "",
-          ephemeral: vis !== "public",
-          // Pinging only applies to a public, non-channel reply.
-          ping: vis === "public" && !isChannel() && $("ping").checked,
           title: title || null,
           body: bodyVal,
         };

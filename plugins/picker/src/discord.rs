@@ -316,22 +316,14 @@ pub fn ephemeral_text(content: &str) -> Value {
 
 /// Build the configured reply for one pick — pure. The optional title becomes a
 /// `### heading`; the body follows, both with `{...}` tokens substituted. The
-/// result rides in a Components V2 Container (a tidy card) and is ephemeral or
-/// public per the instance setting.
+/// result rides in a Components V2 Container (a tidy card).
 ///
-/// Mention safety: `parse: []` always neutralises any `@everyone`/`@here` or
-/// stray role mention the template text might carry, and the clicker is the only
-/// id allowed to ping by default (so a `{user}` greeting works). When the reply
-/// is **public** *and* the instance opted into `ping`, the picked users/roles are
-/// added to the allow-list — the one path that turns the menu into a real
-/// notifier. An ephemeral reply never notifies anyone regardless, so its
-/// allow-list stays minimal.
+/// The reply is **always ephemeral** — only the person who used the menu sees
+/// it, a private "here's what you picked" confirmation. An ephemeral reply never
+/// produces a notification, but `allowed_mentions.parse = []` is pinned anyway so
+/// the rendered `{picks}`/template mentions can never ping `@everyone`/`@here` or
+/// a role.
 pub fn build_reply(cfg: &InstanceConfig, ctx: &PickContext) -> Value {
-    let mut flags = FLAG_IS_COMPONENTS_V2;
-    if cfg.ephemeral {
-        flags |= FLAG_EPHEMERAL;
-    }
-
     let mut text = String::new();
     if let Some(title) = cfg.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         text.push_str("### ");
@@ -340,27 +332,11 @@ pub fn build_reply(cfg: &InstanceConfig, ctx: &PickContext) -> Value {
     }
     text.push_str(&substitute(&cfg.body, ctx));
 
-    // Who may be pinged. Always the clicker (for `{user}`); the picks only when a
-    // public reply opted in, and never channels (which can't be pinged anyway).
-    let mut users: Vec<String> = vec![ctx.user_id.clone()];
-    let mut roles: Vec<String> = Vec::new();
-    if cfg.ping && !cfg.ephemeral && !cfg.is_channel() {
-        for pick in &ctx.picks {
-            match pick.kind {
-                PickKind::User => users.push(pick.id.clone()),
-                PickKind::Role => roles.push(pick.id.clone()),
-                PickKind::Channel => {}
-            }
-        }
-    }
-    dedupe(&mut users);
-    dedupe(&mut roles);
-
     json!({
         "type": RESPONSE_CHANNEL_MESSAGE,
         "data": {
-            "flags": flags,
-            "allowed_mentions": { "parse": [], "users": users, "roles": roles },
+            "flags": FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL,
+            "allowed_mentions": { "parse": [] },
             "components": [{
                 "type": COMPONENT_CONTAINER,
                 "components": [{
@@ -370,12 +346,6 @@ pub fn build_reply(cfg: &InstanceConfig, ctx: &PickContext) -> Value {
             }],
         }
     })
-}
-
-/// Drop later duplicates, preserving order.
-fn dedupe(v: &mut Vec<String>) {
-    let mut seen = std::collections::HashSet::new();
-    v.retain(|x| seen.insert(x.clone()));
 }
 
 /// Truncate to at most `max` characters (respecting char boundaries).
@@ -391,15 +361,13 @@ pub fn is_snowflake(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{TARGET_CHANNEL, TARGET_MENTIONABLE, TARGET_ROLE, TARGET_USER};
+    use crate::store::{TARGET_CHANNEL, TARGET_ROLE, TARGET_USER};
 
     fn cfg(target: &str, body: &str) -> InstanceConfig {
         InstanceConfig {
             target: target.into(),
             guild_id: None,
             guild_name: "Cool Server".into(),
-            ephemeral: true,
-            ping: false,
             title: None,
             body: body.into(),
         }
@@ -495,54 +463,30 @@ mod tests {
     }
 
     #[test]
-    fn ephemeral_reply_is_v2_and_pins_mentions_to_the_clicker_only() {
+    fn reply_is_always_ephemeral_v2_and_neutralises_pings() {
         let v = build_reply(&cfg(TARGET_USER, "You selected {picks}"), &ctx(vec![user("1"), user("2")]));
         assert_eq!(v["type"], RESPONSE_CHANNEL_MESSAGE);
-        let flags = v["data"]["flags"].as_u64().unwrap();
-        assert_eq!(flags, FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL);
+        // Every reply is private (ephemeral) + Components V2.
+        assert_eq!(v["data"]["flags"].as_u64().unwrap(), FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL);
         assert_eq!(v["data"]["components"][0]["type"], COMPONENT_CONTAINER);
         assert_eq!(body_text(&v), "You selected <@1> and <@2>");
-        // @everyone/role mentions neutralised; only the clicker may ping.
+        // No mention can ping: parse is empty and there is no allow-list.
         assert_eq!(v["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
-        assert_eq!(v["data"]["allowed_mentions"]["users"][0], "42");
-        assert_eq!(v["data"]["allowed_mentions"]["roles"].as_array().unwrap().len(), 0);
+        assert!(v["data"]["allowed_mentions"].get("users").is_none());
+        assert!(v["data"]["allowed_mentions"].get("roles").is_none());
     }
 
     #[test]
-    fn public_with_ping_allows_pinging_the_picked_users_and_roles() {
-        let mut c = cfg(TARGET_MENTIONABLE, "{user} tagged {picks}");
-        c.ephemeral = false;
-        c.ping = true;
-        let v = build_reply(&c, &ctx(vec![user("1"), role("2")]));
-        // Public: no ephemeral flag.
-        assert_eq!(v["data"]["flags"].as_u64().unwrap(), FLAG_IS_COMPONENTS_V2);
-        // Clicker + picked user in users; picked role in roles.
-        let users: Vec<String> = v["data"]["allowed_mentions"]["users"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
-        assert!(users.contains(&"42".to_string()) && users.contains(&"1".to_string()));
-        assert_eq!(v["data"]["allowed_mentions"]["roles"][0], "2");
-    }
+    fn role_and_channel_picks_render_but_never_ping() {
+        // Roles render as role mentions, channels as channel links — all inert
+        // (ephemeral + parse:[]), whatever the target.
+        let roles_reply = build_reply(&cfg(TARGET_ROLE, "Picked {picks}"), &ctx(vec![role("2"), role("3")]));
+        assert_eq!(body_text(&roles_reply), "Picked <@&2> and <@&3>");
+        assert_eq!(roles_reply["data"]["flags"].as_u64().unwrap(), FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL);
 
-    #[test]
-    fn public_without_ping_does_not_add_picks_to_the_allow_list() {
-        let mut c = cfg(TARGET_ROLE, "Picked {picks}");
-        c.ephemeral = false;
-        c.ping = false;
-        let v = build_reply(&c, &ctx(vec![role("2"), role("3")]));
-        // Roles render in the text but are not allowed to ping.
-        assert_eq!(body_text(&v), "Picked <@&2> and <@&3>");
-        assert_eq!(v["data"]["allowed_mentions"]["roles"].as_array().unwrap().len(), 0);
-    }
-
-    #[test]
-    fn channel_select_never_pings_even_when_ping_and_public() {
-        let mut c = cfg(TARGET_CHANNEL, "Go to {picks}");
-        c.ephemeral = false;
-        c.ping = true;
-        let v = build_reply(&c, &ctx(vec![channel("2")]));
-        assert_eq!(body_text(&v), "Go to <#2>");
-        // Only the clicker is ever in the allow-list; channels can't be pinged.
-        assert_eq!(v["data"]["allowed_mentions"]["users"].as_array().unwrap(), &vec![json!("42")]);
-        assert_eq!(v["data"]["allowed_mentions"]["roles"].as_array().unwrap().len(), 0);
+        let chan_reply = build_reply(&cfg(TARGET_CHANNEL, "Go to {picks}"), &ctx(vec![channel("2")]));
+        assert_eq!(body_text(&chan_reply), "Go to <#2>");
+        assert_eq!(chan_reply["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
     }
 
     #[test]
@@ -552,15 +496,5 @@ mod tests {
         let text = body_text(&build_reply(&c, &ctx(vec![])));
         assert!(text.starts_with("### Your picks\n"));
         assert!(text.contains("the body"));
-    }
-
-    #[test]
-    fn ping_is_ignored_for_an_ephemeral_reply() {
-        let mut c = cfg(TARGET_USER, "{picks}");
-        c.ephemeral = true;
-        c.ping = true;
-        let v = build_reply(&c, &ctx(vec![user("1")]));
-        // Ephemeral never notifies, so the picked user is not added to users.
-        assert_eq!(v["data"]["allowed_mentions"]["users"].as_array().unwrap(), &vec![json!("42")]);
     }
 }

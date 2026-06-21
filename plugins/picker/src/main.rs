@@ -3,10 +3,8 @@
 //! Attach it to one of Discord's **auto-populated** select menus — a **User**,
 //! **Role**, **Mentionable** (user or role) or **Channel** select — and when a
 //! member makes a selection the plugin replies with their picks resolved to
-//! mentions: `You selected @Alice, @Bob and #general.` The reply is either a
-//! private confirmation (ephemeral, the default) or a public announcement that
-//! can optionally **ping** the picked users/roles — turning the menu into a
-//! lightweight "tag the team" / "request a channel" board.
+//! mentions: `You selected @Alice, @Bob and #general.` The reply is always a
+//! **private** confirmation (ephemeral — only the person who picked sees it).
 //!
 //! These four selects are the ones Discord auto-fills from the server (you don't
 //! hand-wire any options), and each one says "needs a bot to handle clicks" in

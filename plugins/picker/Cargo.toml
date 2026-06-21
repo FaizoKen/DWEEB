@@ -2,7 +2,7 @@
 name = "dweeb-picker"
 version = "0.1.0"
 edition = "2021"
-description = "DWEEB plugin: attach to a User / Role / Mentionable / Channel select — a member's picks come back as mentions in a private confirmation or a public announcement, optionally pinging them. No bot token needed."
+description = "DWEEB plugin: attach to a User / Role / Mentionable / Channel select — a member's picks come back as mentions in a private confirmation. No bot token needed."
 
 [dependencies]
 axum = "0.7"

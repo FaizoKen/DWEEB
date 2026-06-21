@@ -58,8 +58,6 @@ mod tests {
             target: target.into(),
             guild_id: None,
             guild_name: String::new(),
-            ephemeral: true,
-            ping: false,
             title: None,
             body: body.into(),
         }

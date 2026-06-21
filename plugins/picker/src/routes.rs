@@ -38,7 +38,7 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "schemaVersion": 1,
             "id": "picker",
             "name": "Picker",
-            "description": "Attach to a User / Role / Mentionable / Channel select — a member's picks come back as mentions in a private confirmation or a public announcement that can ping them. No bot needed.",
+            "description": "Attach to a User / Role / Mentionable / Channel select — a member's picks come back as mentions in a private confirmation. No bot needed.",
             "version": env!("CARGO_PKG_VERSION"),
             "publisher": "DWEEB",
             "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/picker",

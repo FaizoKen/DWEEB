@@ -9,13 +9,13 @@ picks resolved to mentions:
 
 > You selected **@Alice**, **@Bob** and **#general**.
 
-The reply is either a **private confirmation** (ephemeral — only they see it, the
-default) or a **public announcement** in the channel that can optionally **ping**
-the picked users/roles — turning the menu into a lightweight "tag the team",
-"request a reviewer" or "point me to a channel" board.
+The reply is a **private confirmation** — ephemeral, so only the person who used
+the menu sees it. A clean "here's what you picked" acknowledgement that adds no
+channel noise.
 
-Classic uses: a **@mention picker** that pings whoever you choose, a "who do you
-need?" support router, a colour/region *acknowledger*, or a channel quick-jump.
+Classic uses: a private "you selected X" confirmation, a colour/region
+*acknowledger*, or a channel quick-jump the member can click from their own
+ephemeral reply.
 
 > **No bot token. No Discord REST call on the hot path.** A pick is a pure
 > *payload → resolve → reply*, so this is the cheapest plugin in the set to host —
@@ -39,7 +39,7 @@ config**:
    select mixes users and roles, so each id is a role iff Discord listed it under
    the interaction's `resolved.roles`, else a user.
 2. **Render** them as a human list into `{picks}` — *"@Alice, @Bob and #general"*.
-3. **Substitute** the reply's tokens and send it ephemeral or public.
+3. **Substitute** the reply's tokens and send it as a private (ephemeral) reply.
 
 The whole decision (`classify_picks` / `build_reply` in [`discord.rs`](src/discord.rs))
 is one pure, exhaustively-tested function with no I/O.
@@ -58,19 +58,16 @@ Write these in the heading or message and they fill in per pick:
 
 Unknown `{...}` tokens are left verbatim, so literal braces in prose are safe.
 
-## Private vs public, and pinging
+## Always private
 
-| Setting | What it does |
-|---|---|
-| **Private** (default) | Only the picker sees the reply (ephemeral). Notifies no one — a clean "here's what you picked" confirmation. |
-| **Public** | The reply is posted in the channel for everyone. |
-| **Ping the picks** *(public, non-channel only)* | Adds the picked users/roles to `allowed_mentions` so they actually get notified. Off by default: their names still show, but no one is pinged. |
+Every reply is **ephemeral** — only the member who used the menu sees it, and no
+one is notified. It's a private confirmation, so it never adds channel noise and
+can't be used to make the bot ping people on a member's behalf.
 
-**Mention safety, always on.** Every reply sets `allowed_mentions.parse = []`, so
-an `@everyone`/`@here` or stray role mention in your template text can **never**
-ping the channel. Only the clicker (for `{user}`) — and, when you opt into
-*Ping*, the specific ids they picked — are ever allowed to notify. Channels can't
-be pinged, so the *Ping* option is hidden for a Channel select.
+**Mention safety.** Each reply also sets `allowed_mentions.parse = []`, so even
+though the picks render as `<@id>`/`<@&id>` mentions, an `@everyone`/`@here` or
+role mention in your template text can never produce a ping (ephemeral replies
+don't notify regardless — this is belt-and-braces).
 
 ## Component targets
 
@@ -148,4 +145,4 @@ other plugins — see [`docs/plugins.md` §5](../../docs/plugins.md).
 | [`src/discord.rs`](src/discord.rs) | Signature verify, interaction parsing, the **pure** pick-classify/render/build logic. |
 | [`src/validate.rs`](src/validate.rs) | Input validation. |
 | [`src/routes.rs`](src/routes.rs) | HTTP handlers + the interaction flow. |
-| [`static/config.html`](static/config.html) | The config iframe (visibility → ping → reply). |
+| [`static/config.html`](static/config.html) | The config iframe (heading + message with tokens). |

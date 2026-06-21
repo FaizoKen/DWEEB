@@ -36,35 +36,12 @@ pub struct InstanceConfig {
     /// Cached guild name, for `{server}`. Cosmetic.
     #[serde(default)]
     pub guild_name: String,
-    /// Whether the reply is ephemeral (only the picker sees it). Defaults true —
-    /// a private "here's what you picked" confirmation, the safe, low-noise
-    /// choice. Set false to announce the picks publicly in the channel.
-    #[serde(default = "default_true")]
-    pub ephemeral: bool,
-    /// Whether a **public** reply should actually ping the picked users/roles
-    /// (added to `allowed_mentions`). Ignored when [`ephemeral`](Self::ephemeral)
-    /// (ephemeral messages never notify) and for a channel select (channels can't
-    /// be pinged). Defaults false: picks render as names without pinging anyone.
-    #[serde(default)]
-    pub ping: bool,
     /// Optional heading rendered above the body (as a Markdown `### heading`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// The reply text — Markdown plus `{picks}`/`{count}`/`{user}`/`{username}`/
     /// `{server}` tokens, substituted at pick time from the interaction payload.
     pub body: String,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-impl InstanceConfig {
-    /// True when this instance is attached to the Channel select — the one kind
-    /// whose picks (channels) can't be pinged.
-    pub fn is_channel(&self) -> bool {
-        self.target == TARGET_CHANNEL
-    }
 }
 
 /// A read view for the config UI. Carries the instance `id` (which
