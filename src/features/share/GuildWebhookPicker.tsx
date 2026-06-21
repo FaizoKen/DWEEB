@@ -192,6 +192,13 @@ export function GuildWebhookPicker({
   // The channel whose webhook is being resolved/created right now (Send).
   const [resolvingChannel, setResolvingChannel] = useState<string | null>(null);
 
+  // Scroll the already-selected destination into view when the picker opens, so
+  // it's obvious which one is active rather than hidden below the fold (the list
+  // opens scrolled to the top). `listRef` is the scrollable list, `activeRowRef`
+  // the selected row inside it — both wired up in whichever mode renders.
+  const listRef = useRef<HTMLUListElement>(null);
+  const activeRowRef = useRef<HTMLLIElement>(null);
+
   const guildData = useGuildStore((s) => s.data);
   const channelsLoaded = guildData?.guildId === connectedId;
   const channelName = (id: string | null): string | undefined =>
@@ -229,6 +236,24 @@ export function GuildWebhookPicker({
     () => usable.find((w) => w.id === activeId)?.channel_id ?? null,
     [usable, activeId],
   );
+
+  // On open, centre the selected row in its list so the user sees what's already
+  // chosen. Runs once, the moment the active row and its scroll container are
+  // both mounted (channel/webhook data can arrive after mount). Scrolls only the
+  // list itself — never the surrounding dialog.
+  const scrolledToSelectionRef = useRef(false);
+  useEffect(() => {
+    if (scrolledToSelectionRef.current) return;
+    const list = listRef.current;
+    const row = activeRowRef.current;
+    if (!list || !row) return;
+    scrolledToSelectionRef.current = true;
+    const lr = list.getBoundingClientRect();
+    const rr = row.getBoundingClientRect();
+    // Centre the row in the list's viewport; the browser clamps the result, so a
+    // short (non-scrolling) list stays exactly where it is.
+    list.scrollTop += rr.top - lr.top - (lr.height - rr.height) / 2;
+  }, [activeChannelId, activeId, status]);
 
   // Registered custom bots for this server. Their webhooks route components back
   // to DWEEB too, so the user can post under one (the preferred identity) and we
@@ -506,9 +531,9 @@ export function GuildWebhookPicker({
         ) : null}
         {usable.length > SEARCH_THRESHOLD ? <SearchBox value={query} onChange={setQuery} /> : null}
         {list.length > 0 ? (
-          <ul className={styles.list}>
+          <ul className={styles.list} ref={listRef}>
             {list.map((w) => (
-              <li key={w.id}>
+              <li key={w.id} ref={w.id === activeId ? activeRowRef : undefined}>
                 <button
                   type="button"
                   className={cn(styles.row, styles.rowSolo, w.id === activeId && styles.rowActive)}
@@ -607,7 +632,7 @@ export function GuildWebhookPicker({
       {actionError ? <p className={styles.error}>{actionError}</p> : null}
 
       {filteredGroups.length > 0 ? (
-        <ul className={cn(styles.list, styles.channelPanel)}>
+        <ul className={cn(styles.list, styles.channelPanel)} ref={listRef}>
           {filteredGroups.map((g) => {
             const key = groupKey(g.id);
             // Searching force-expands so a match is never hidden in a collapsed
@@ -635,7 +660,7 @@ export function GuildWebhookPicker({
                 {!isCollapsed ? (
                   <ul className={styles.catChannels}>
                     {g.channels.map((c) => (
-                      <li key={c.id}>
+                      <li key={c.id} ref={c.id === activeChannelId ? activeRowRef : undefined}>
                         <ChannelRow
                           channel={c}
                           active={c.id === activeChannelId}
