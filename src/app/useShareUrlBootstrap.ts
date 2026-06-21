@@ -67,6 +67,16 @@ export function useShareUrlBootstrap(): void {
     const origin = readShareOriginFromHash(window.location.hash);
     const guildId = readShareGuildFromHash(window.location.hash);
 
+    // Park the message's server *now*, synchronously — not after the decode.
+    // The `g=` id is in the hash and readable immediately (even for a short
+    // link, whose token still needs a network fetch). The AccountMenu's
+    // auto-connect consumes this the moment login resolves; parking it before
+    // that round-trip guarantees an already-signed-in session connects to the
+    // message's guild instead of racing ahead to the last-used one (which would
+    // latch its one-shot guard and ignore the link's server, leaving the loaded
+    // message's roles/channels/mentions unresolved). See `pendingGuild.ts`.
+    if (guildId && isProxyConfigured()) savePendingGuildId(guildId);
+
     // Load a decoded message into the editor: as an in-place-updatable restore
     // when its webhook is saved here, else as a fresh draft (parking the origin
     // so Restore can finish the link), and line the editor up with its server.
@@ -95,11 +105,9 @@ export function useShareUrlBootstrap(): void {
         replaceMessage(message);
         pushToast("Loaded message from shared link.", "info");
       }
-      // Best effort: line the editor up with the message's server, so its
-      // roles/channels/emojis resolve. Only a signed-in member can authorize
-      // the load, so we park the id and let the account menu's auto-connect
-      // pick it up the moment login resolves (now, if already signed in).
-      if (guildId && isProxyConfigured()) savePendingGuildId(guildId);
+      // The message's server was already parked synchronously above (before the
+      // token fetch) so the account menu's auto-connect lines the editor up with
+      // it regardless of whether the user was already signed in.
     };
 
     // Decode a share token and apply it; toast (and bail) on a bad token.
