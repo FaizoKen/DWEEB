@@ -94,7 +94,7 @@ services:
     restart: unless-stopped
     environment:
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
-      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094", "quickreplies:": "http://quick-replies:8096"}'
+      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094", "quickreplies:": "http://quick-replies:8096", "picker:": "http://picker:8097"}'
       # The /dashboard slash command (answered inline, no plugin) replies with
       # this URL. Register the command once: node scripts/register-commands.mjs
       # NOT derived from DOMAIN — that is the API host, not the dashboard.
@@ -326,6 +326,35 @@ services:
       retries: 3
       start_period: 5s
 
+  # Picker (../plugins/picker): attach to one of Discord's auto-populated selects
+  # — User / Role / Mentionable / Channel — and a member's picks come back as
+  # mentions in a private confirmation or a public announcement that can ping
+  # them. The lightest plugin in the set: a pick is answered straight from the
+  # interaction payload, so there is NO REST call and NO bot token at all. Its
+  # own registry, config UI and config API, backed by one SQLite file. Served at
+  # picker.$PLUGINS_DOMAIN.
+  picker:
+    image: ghcr.io/faizoken/dweeb-picker:${PICKER_TAG:-latest}
+    build: ../plugins/picker
+    restart: unless-stopped
+    environment:
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://picker.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      # Lets the dispatcher vouch for a custom app's verifying key (see the
+      # dispatcher service above). Must match the dispatcher's value.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
+      RUST_LOG: info
+    volumes:
+      # The plugin's only state: the SQLite file with menu configs.
+      - picker_data:/data
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8097 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   # Only started when you opt in with `--profile redis`. Shared cache +
   # rate-limit store for running several `proxy` replicas behind a balancer.
   redis:
@@ -419,6 +448,7 @@ volumes:
   tickets_data:
   giveaway_data:
   quickreplies_data:
+  picker_data:
   beszel_data:
   beszel_agent_data:
   gatus_data:

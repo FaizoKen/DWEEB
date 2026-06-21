@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Picker — configure</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1f22;
+        --panel: #2b2d31;
+        --panel-2: #232428;
+        --border: #3a3c41;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #5865f2;
+        --green: #3ba55d;
+        --yellow: #f0b232;
+        --danger: #da373c;
+        --radius: 8px;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #f2f3f5;
+        --panel-2: #e3e5e8;
+        --border: #d7d9dc;
+        --text: #1e1f22;
+        --muted: #4e5058;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 20px 0 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h2:first-of-type { margin-top: 0; }
+      .step-num {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="text"], textarea {
+        width: 100%;
+        padding: 8px 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+      }
+      textarea { resize: vertical; }
+      input:focus-visible, textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+      .hint code, .callout code { color: var(--accent); }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
+      .bar .grow { flex: 1; }
+      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+      .callout {
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+      .callout.good { border-left-color: var(--green); }
+      .callout.warn { border-left-color: var(--yellow); }
+      .callout b { color: var(--text); }
+
+      /* Segmented control (private vs public). */
+      .seg { display: flex; gap: 6px; margin-top: 4px; }
+      .seg button { flex: 1; }
+      .seg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+      /* Ping toggle row. */
+      .toggle {
+        display: flex; align-items: center; gap: 10px;
+        margin-top: 12px; padding: 10px 12px;
+        border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2);
+        cursor: pointer;
+      }
+      .toggle input { flex: none; width: auto; margin: 0; accent-color: var(--accent); }
+      .toggle .t-body { flex: 1; min-width: 0; }
+      .toggle .t-title { color: var(--text); }
+      .toggle .t-sub { font-size: 12px; color: var(--muted); }
+
+      /* Token chips. */
+      .vars { margin-top: 6px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+      .chip {
+        padding: 2px 8px; font-size: 12px; border-radius: 999px;
+        background: var(--panel-2); border: 1px solid var(--border); color: var(--accent);
+        cursor: pointer; font-family: ui-monospace, monospace;
+      }
+      .chip:hover { border-color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <!-- Intro (varies by target) ----------------------------------------------->
+    <h2><span class="step-num">1</span> <span id="introTitle">When someone picks</span></h2>
+    <div id="introHint" class="hint"></div>
+
+    <!-- Where the reply goes ----------------------------------------------------->
+    <label class="lbl">Reply visibility</label>
+    <div class="seg" id="visSeg">
+      <button type="button" data-vis="private">🔒 Private (only them)</button>
+      <button type="button" data-vis="public">📣 Public (everyone)</button>
+    </div>
+
+    <label class="toggle" id="pingRow" style="display: none">
+      <input type="checkbox" id="ping" />
+      <span class="t-body">
+        <span class="t-title" id="pingTitle">Ping the people they pick</span>
+        <span class="t-sub" id="pingSub">Off: their names show but no one is notified.</span>
+      </span>
+    </label>
+
+    <!-- The reply message -------------------------------------------------------->
+    <h2><span class="step-num">2</span> The reply</h2>
+    <label class="lbl">Heading (optional)</label>
+    <input type="text" id="title" maxlength="200" placeholder="e.g. ✅ Got it" />
+    <label class="lbl">Message</label>
+    <textarea id="body" rows="4" maxlength="1500" placeholder="What should they see when they pick?"></textarea>
+    <div class="vars">
+      <span>Insert:</span>
+      <button type="button" class="chip" data-var="{picks}">{picks}</button>
+      <button type="button" class="chip" data-var="{count}">{count}</button>
+      <button type="button" class="chip" data-var="{user}">{user}</button>
+      <button type="button" class="chip" data-var="{username}">{username}</button>
+      <button type="button" class="chip" data-var="{server}">{server}</button>
+    </div>
+    <div class="hint" id="picksHint"></div>
+
+    <div class="err" id="error"></div>
+
+    <div class="bar">
+      <button id="cancel" type="button">Cancel</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script>
+      "use strict";
+      const PREFIX = "picker:";
+      const MAX_BODY = 1500;
+
+      // ── Session / protocol state ────────────────────────────────────────
+      let nonce = null;
+      let hostOrigin = "*";
+      let instanceId = null; // set when reconfiguring
+      // One of: user_select | role_select | mentionable_select | channel_select
+      let target = "user_select";
+
+      // ── Host context (the server DWEEB is connected to) ─────────────────
+      let guildId = "";
+      let guildName = "";
+
+      // ── Model ───────────────────────────────────────────────────────────
+      let vis = "private"; // "private" | "public"
+      // `ping` lives on the checkbox; title/body on their inputs.
+
+      const $ = (id) => document.getElementById(id);
+      const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
+      const isChannel = () => target === "channel_select";
+      const VALID_TARGETS = ["user_select", "role_select", "mentionable_select", "channel_select"];
+
+      // Per-target wording: what the menu picks and what {picks} resolves to.
+      const COPY = {
+        user_select: {
+          intro: "Members pick one or more <b>server members</b>. When they do, they get the reply below — with <code>{picks}</code> filled in as @mentions of who they chose.",
+          picks: "{picks} → the members they picked, as @mentions.",
+          ping: "Ping the members they pick",
+        },
+        role_select: {
+          intro: "Members pick one or more <b>roles</b>. When they do, they get the reply below — with <code>{picks}</code> filled in as the roles they chose.",
+          picks: "{picks} → the roles they picked, as mentions.",
+          ping: "Ping the roles they pick",
+        },
+        mentionable_select: {
+          intro: "Members pick <b>members or roles</b>. When they do, they get the reply below — with <code>{picks}</code> filled in as mentions of who they chose.",
+          picks: "{picks} → the members/roles they picked, as mentions.",
+          ping: "Ping the members/roles they pick",
+        },
+        channel_select: {
+          intro: "Members pick one or more <b>channels</b>. When they do, they get the reply below — with <code>{picks}</code> filled in as clickable #channel links.",
+          picks: "{picks} → the channels they picked, as #links.",
+          ping: "", // channels can't be pinged
+        },
+      };
+
+      // A friendly default body per target, seeded only for a fresh menu.
+      const DEFAULT_BODY = {
+        user_select: "You selected {picks}.",
+        role_select: "You selected {picks}.",
+        mentionable_select: "You selected {picks}.",
+        channel_select: "Jump to {picks}.",
+      };
+
+      function applyTargetChrome() {
+        const c = COPY[target] || COPY.user_select;
+        $("introHint").innerHTML = c.intro;
+        $("picksHint").textContent = c.picks;
+        // The ping option only makes sense for a public reply that can ping
+        // something — i.e. not a channel select.
+        $("pingTitle").textContent = c.ping || "Ping the picks";
+        paintVisibility();
+      }
+
+      function paintVisibility() {
+        document
+          .querySelectorAll("#visSeg button")
+          .forEach((b) => b.classList.toggle("sel", b.dataset.vis === vis));
+        // Pinging is only meaningful for a public reply, and never for channels.
+        const showPing = vis === "public" && !isChannel();
+        $("pingRow").style.display = showPing ? "" : "none";
+        sendResize();
+      }
+
+      document.querySelectorAll("#visSeg button").forEach((b) =>
+        b.addEventListener("click", () => {
+          vis = b.dataset.vis;
+          paintVisibility();
+        }),
+      );
+
+      // Token chips insert at the caret in the body.
+      const body = $("body");
+      document.querySelectorAll(".chip").forEach((chip) => {
+        chip.addEventListener("click", () => insertAtCaret(body, chip.getAttribute("data-var")));
+      });
+
+      function insertAtCaret(textarea, text) {
+        const start = textarea.selectionStart ?? textarea.value.length;
+        const end = textarea.selectionEnd ?? textarea.value.length;
+        textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+        const pos = start + text.length;
+        textarea.focus();
+        textarea.setSelectionRange(pos, pos);
+      }
+
+      // ── DWEEB protocol ──────────────────────────────────────────────────
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+
+      window.addEventListener("message", async (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          const resolve = pendingReqs.get(msg.requestId);
+          pendingReqs.delete(msg.requestId);
+          resolve(msg.ok ? msg.data : null);
+          return;
+        }
+
+        if (msg.type !== "dweeb:plugin:init") return;
+        nonce = msg.nonce;
+        hostOrigin = event.origin;
+        if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+        if (VALID_TARGETS.includes(msg.target)) target = msg.target;
+
+        // Ask DWEEB which server the editor is connected to — only for {server}.
+        // Absent is fine: the reply still works ("the server" stands in).
+        const guild = await requestResource("guild");
+        if (guild && typeof guild.id === "string" && isSnowflake(guild.id)) {
+          guildId = guild.id;
+          guildName = typeof guild.name === "string" ? guild.name : "";
+        }
+
+        if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
+          instanceId = msg.customId.slice(PREFIX.length);
+          await loadInstance(instanceId);
+        } else {
+          // Fresh menu: seed a friendly starting reply.
+          $("body").value = DEFAULT_BODY[target] || "You selected {picks}.";
+        }
+
+        applyTargetChrome();
+        renderForm();
+        sendResize();
+      });
+
+      // ── Request editor data from DWEEB (one promise per request) ────────
+      const pendingReqs = new Map();
+      function requestResource(resource) {
+        return new Promise((resolve) => {
+          if (nonce == null) return resolve(null);
+          const requestId = "req_" + Math.random().toString(36).slice(2);
+          pendingReqs.set(requestId, resolve);
+          parent.postMessage({ type: "dweeb:plugin:request", nonce, requestId, resource }, hostOrigin);
+          setTimeout(() => {
+            if (pendingReqs.has(requestId)) {
+              pendingReqs.delete(requestId);
+              resolve(null);
+            }
+          }, 4000);
+        });
+      }
+
+      function sendResize() {
+        if (nonce == null) return;
+        parent.postMessage(
+          { type: "dweeb:plugin:resize", nonce, height: document.body.scrollHeight + 24 },
+          hostOrigin,
+        );
+      }
+
+      // ── Reconfigure ─────────────────────────────────────────────────────
+      async function loadInstance(id) {
+        try {
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          if (VALID_TARGETS.includes(d.target)) target = d.target;
+          if (d.guild_id && isSnowflake(d.guild_id)) guildId = d.guild_id;
+          if (d.guild_name) guildName = d.guild_name;
+          vis = d.ephemeral === false ? "public" : "private";
+          $("ping").checked = !!d.ping;
+          $("title").value = d.title || "";
+          $("body").value = typeof d.body === "string" ? d.body : "";
+        } catch {
+          /* fresh form */
+        }
+      }
+
+      // Push the in-memory model into the inputs (used after init/reconfigure).
+      function renderForm() {
+        // title/body are already set from loadInstance or the default seed.
+        paintVisibility();
+      }
+
+      // ── Save ────────────────────────────────────────────────────────────
+      $("cancel").addEventListener("click", () => {
+        parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
+      });
+      $("save").addEventListener("click", save);
+
+      function summaryDescription() {
+        const where = vis === "public" ? "Public" : "Private";
+        const what = {
+          user_select: "picks members",
+          role_select: "picks roles",
+          mentionable_select: "picks members/roles",
+          channel_select: "picks channels",
+        }[target];
+        const ping = vis === "public" && !isChannel() && $("ping").checked ? " · pings" : "";
+        return `${where} · ${what}${ping}`;
+      }
+
+      async function save() {
+        $("error").textContent = "";
+        const title = $("title").value.trim();
+        const bodyVal = $("body").value.replace(/\s+$/g, "");
+        if (!bodyVal) return fail("Write the reply message people should see when they pick.");
+        if (bodyVal.length > MAX_BODY) return fail(`The reply is too long (max ${MAX_BODY} characters).`);
+
+        const payload = {
+          target,
+          guild_id: isSnowflake(guildId) ? guildId : null,
+          guild_name: guildName || "",
+          ephemeral: vis !== "public",
+          // Pinging only applies to a public, non-channel reply.
+          ping: vis === "public" && !isChannel() && $("ping").checked,
+          title: title || null,
+          body: bodyVal,
+        };
+
+        setBusy(true);
+        try {
+          const url = instanceId ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
+          const res = await fetch(url, {
+            method: instanceId ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setBusy(false);
+            return fail(data.error || `Server returned ${res.status}.`);
+          }
+          const id = data.id || instanceId;
+          parent.postMessage(
+            {
+              type: "dweeb:plugin:save",
+              nonce,
+              customId: PREFIX + id,
+              summary: { label: "Picker", description: summaryDescription() },
+            },
+            hostOrigin,
+          );
+        } catch {
+          setBusy(false);
+          fail("Couldn't reach the Picker service.");
+        }
+      }
+
+      function fail(m) {
+        $("error").textContent = m;
+        sendResize();
+      }
+      function setBusy(b) {
+        $("save").disabled = b;
+        $("save").textContent = b ? "Saving…" : "Save";
+      }
+    </script>
+  </body>
+</html>

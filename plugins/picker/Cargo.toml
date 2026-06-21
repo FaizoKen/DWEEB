@@ -1,0 +1,34 @@
+[package]
+name = "dweeb-picker"
+version = "0.1.0"
+edition = "2021"
+description = "DWEEB plugin: attach to a User / Role / Mentionable / Channel select — a member's picks come back as mentions in a private confirmation or a public announcement, optionally pinging them. No bot token needed."
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+# Loads a local `.env` for `cargo run`; a no-op under Docker (which injects env).
+dotenvy = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Verify Discord's Ed25519 interaction signatures.
+ed25519-dalek = "2"
+hex = "0.4"
+# Single-file embedded store — no separate DB server to pay for. `bundled`
+# compiles SQLite from source, so the image needs no system libsqlite.
+rusqlite = { version = "0.31", features = ["bundled"] }
+# CSPRNG for unguessable instance ids (the capability that gates reconfigure).
+getrandom = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Small, low-throughput service — optimise the release binary for size so it
+# fits the cheapest hosting tiers. There is NO outbound HTTP at all: a pick is
+# answered straight from the interaction payload, so this service never calls
+# Discord (no reqwest, no TLS client) — the lightest plugin in the set.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

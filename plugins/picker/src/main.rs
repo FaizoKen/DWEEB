@@ -1,0 +1,102 @@
+//! DWEEB "Picker" plugin.
+//!
+//! Attach it to one of Discord's **auto-populated** select menus — a **User**,
+//! **Role**, **Mentionable** (user or role) or **Channel** select — and when a
+//! member makes a selection the plugin replies with their picks resolved to
+//! mentions: `You selected @Alice, @Bob and #general.` The reply is either a
+//! private confirmation (ephemeral, the default) or a public announcement that
+//! can optionally **ping** the picked users/roles — turning the menu into a
+//! lightweight "tag the team" / "request a channel" board.
+//!
+//! These four selects are the ones Discord auto-fills from the server (you don't
+//! hand-wire any options), and each one says "needs a bot to handle clicks" in
+//! the builder — this is that bot for them. It is the cheapest plugin to host: a
+//! pick is a pure payload → resolve → reply, so there is **no Discord REST call
+//! on the hot path and no bot token required**. One small Rust service that is,
+//! all at once:
+//!   • the plugin **registry** DWEEB reads (`GET /registry.json`),
+//!   • the **config iframe** DWEEB embeds (`GET /config.html`),
+//!   • the config **API** that iframe talks to (`/api/instances`),
+//!   • the Discord **interactions** endpoint (`POST /interactions`).
+//!
+//! State is a single SQLite file (the per-menu reply config); no secret is ever
+//! stored. The instance id inside the component's `custom_id` is the capability
+//! to reconfigure it, so it carries 128 bits of CSPRNG entropy.
+
+mod config;
+mod discord;
+mod routes;
+mod store;
+mod validate;
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use axum::{
+    routing::{get, post},
+    Router,
+};
+use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::EnvFilter;
+
+use crate::config::Config;
+use crate::routes::AppState;
+use crate::store::Store;
+
+#[tokio::main]
+async fn main() {
+    dotenvy::dotenv().ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .init();
+
+    let config = match Config::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("configuration error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let store = Store::open(&config.database_path).expect("failed to open database");
+
+    let port = config.port;
+    let state = AppState {
+        store: Arc::new(store),
+        config: Arc::new(config),
+    };
+
+    let app = Router::new()
+        .route("/health", get(routes::health))
+        .route("/registry.json", get(routes::registry))
+        .route("/config.html", get(routes::config_html))
+        .route("/api/instances", post(routes::create_instance))
+        .route(
+            "/api/instances/:id",
+            get(routes::get_instance).put(routes::update_instance),
+        )
+        .route("/interactions", post(routes::interactions))
+        .with_state(state)
+        // The registry is fetched cross-origin by DWEEB; the config API is hit
+        // by the iframe. Both are public/capability-gated, so a permissive
+        // (credential-less) CORS policy is fine.
+        .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http());
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind");
+    tracing::info!(%addr, "picker plugin listening");
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("server error");
+}
+
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+    tracing::info!("shutting down");
+}

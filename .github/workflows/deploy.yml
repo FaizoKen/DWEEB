@@ -29,6 +29,7 @@ on:
       - Plugin Tickets
       - Plugin Giveaway
       - Plugin Quick Replies
+      - Plugin Picker
     types: [completed]
     branches: [main]
   workflow_dispatch:
