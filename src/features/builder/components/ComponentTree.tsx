@@ -64,7 +64,7 @@ import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { IconButton } from "@/ui/IconButton";
 import { TextInput } from "@/ui/TextInput";
-import { AddComponentMenu } from "./AddComponentMenu";
+import { AddComponentMenu, type AddMenuNode } from "./AddComponentMenu";
 import { AdvancedMessageOptions } from "./AdvancedMessageOptions";
 import {
   AlertCircleIcon,
@@ -96,7 +96,7 @@ import { Inspector } from "./Inspector";
 import { GalleryItemInspector } from "./inspectors/GalleryItemInspector";
 import { IssueDot, IssueList } from "./ValidationIssues";
 import styles from "./ComponentTree.module.css";
-import type { ContainerChildFactoryKey, TopLevelFactoryKey } from "@/core/factory/createComponent";
+import type { ContainerChildFactoryKey } from "@/core/factory/createComponent";
 
 /**
  * Drag-and-drop session shared across every TreeNode. Only one node can be
@@ -307,8 +307,45 @@ function computeAllowedPositions(source: DragSource, target: RowData): DropPosit
 
 export function ComponentTree() {
   const components = useMessageStore((s) => s.message.components);
-  const addTopLevel = useMessageStore((s) => s.addTopLevel);
+  const addTopLevelComponent = useMessageStore((s) => s.addTopLevelComponent);
+  const addTopLevelSection = useMessageStore((s) => s.addTopLevelSection);
   const atLimit = components.length >= LIMITS.TOP_LEVEL_COMPONENTS;
+
+  // Top-level add menu. Most entries add their component directly; "Section" and
+  // "Buttons Row" are expandable parents whose label adds the plain wrapper and
+  // whose children add a specific variant (accessory kind / button or select).
+  const topLevelNodes = useMemo<AddMenuNode[]>(() => {
+    const add = (t: ComponentTypeValue) => addThenScroll(() => addTopLevelComponent(t));
+    return TOP_LEVEL_PICKER.map((t) => {
+      // "Section" and "Buttons Row" are group headers: clicking expands to the
+      // variants below; they add nothing on their own.
+      if (t === ComponentType.Section) {
+        return {
+          type: t,
+          children: [
+            {
+              type: ComponentType.Thumbnail,
+              onPick: () => addThenScroll(() => addTopLevelSection("thumbnail")),
+            },
+            {
+              type: ComponentType.Button,
+              onPick: () => addThenScroll(() => addTopLevelSection("button")),
+            },
+          ],
+        };
+      }
+      if (t === ComponentType.ActionRow) {
+        return {
+          type: t,
+          children: [ComponentType.Button, ...ROW_SELECT_PICKER].map((ct) => ({
+            type: ct,
+            onPick: () => add(ct),
+          })),
+        };
+      }
+      return { type: t, onPick: () => add(t) };
+    });
+  }, [addTopLevelComponent, addTopLevelSection]);
 
   const [drag, setDrag] = useState<DragInfo | null>(null);
   const [ghostStart, setGhostStart] = useState<{ x: number; y: number } | null>(null);
@@ -398,8 +435,7 @@ export function ComponentTree() {
 
           <div className={styles.footer}>
             <AddComponentMenu
-              allowed={TOP_LEVEL_PICKER}
-              onPick={(t) => addThenScroll(() => addTopLevel(t as TopLevelFactoryKey))}
+              nodes={topLevelNodes}
               disabled={atLimit}
               align="top"
               trigger={({ open }) => (
@@ -1022,8 +1058,9 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
   const remove = useMessageStore((s) => s.remove);
   const duplicate = useMessageStore((s) => s.duplicate);
   const addContainerChild = useMessageStore((s) => s.addContainerChild);
+  const addContainerComponent = useMessageStore((s) => s.addContainerComponent);
+  const addContainerSection = useMessageStore((s) => s.addContainerSection);
   const addSectionText = useMessageStore((s) => s.addSectionText);
-  const setSectionAccessoryKind = useMessageStore((s) => s.setSectionAccessoryKind);
   const addRowButton = useMessageStore((s) => s.addRowButton);
   const addRowSelect = useMessageStore((s) => s.addRowSelect);
   const addGalleryItem = useMessageStore((s) => s.addGalleryItem);
@@ -1036,8 +1073,9 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
   const ownChildKind = childParentKind(node);
   const adders = collectAdders(node, {
     addContainerChild,
+    addContainerComponent,
+    addContainerSection,
     addSectionText,
-    setSectionAccessoryKind,
     addRowButton,
     addRowSelect,
     addGalleryItem,
@@ -1449,8 +1487,9 @@ function summarizeGalleryItem(item: MediaGalleryItem): string {
 
 interface AdderHandlers {
   addContainerChild: (id: EditorId, type: ContainerChildFactoryKey) => void;
+  addContainerComponent: (id: EditorId, type: ComponentTypeValue) => void;
+  addContainerSection: (id: EditorId, accessoryKind: "thumbnail" | "button") => void;
   addSectionText: (id: EditorId) => void;
-  setSectionAccessoryKind: (id: EditorId, kind: "button" | "thumbnail") => void;
   addRowButton: (id: EditorId) => void;
   addRowSelect: (id: EditorId, type: SelectComponent["type"]) => void;
   addGalleryItem: (id: EditorId) => void;
@@ -1463,79 +1502,84 @@ function collectAdders(node: AnyComponent, h: AdderHandlers): ReactNode[] {
     out.push(
       <li key="__add_container" className={styles.adderItem}>
         <AddComponentMenu
-          allowed={CONTAINER_PICKER}
+          nodes={CONTAINER_PICKER.map((t): AddMenuNode => {
+            // "Section" and "Buttons Row" are group headers: clicking expands to
+            // their variants; they add nothing on their own.
+            if (t === ComponentType.Section) {
+              return {
+                type: t,
+                children: [
+                  {
+                    type: ComponentType.Thumbnail,
+                    onPick: () => addThenScroll(() => h.addContainerSection(node._id, "thumbnail")),
+                  },
+                  {
+                    type: ComponentType.Button,
+                    onPick: () => addThenScroll(() => h.addContainerSection(node._id, "button")),
+                  },
+                ],
+              };
+            }
+            if (t === ComponentType.ActionRow) {
+              return {
+                type: t,
+                children: [ComponentType.Button, ...ROW_SELECT_PICKER].map((ct) => ({
+                  type: ct,
+                  onPick: () => addThenScroll(() => h.addContainerComponent(node._id, ct)),
+                })),
+              };
+            }
+            return {
+              type: t,
+              onPick: () =>
+                addThenScroll(() => h.addContainerChild(node._id, t as ContainerChildFactoryKey)),
+            };
+          })}
           disabled={node.components.length >= LIMITS.CONTAINER_CHILDREN}
-          onPick={(t) =>
-            addThenScroll(() => h.addContainerChild(node._id, t as ContainerChildFactoryKey))
-          }
           trigger={<AddChildButton label="Add to container" />}
         />
       </li>,
     );
   }
 
-  // Section: one menu offering "Text" (while under the text cap) plus the
-  // single accessory slot. Only the *other* accessory kind is listed — picking
-  // the current kind would silently reset the existing accessory — so the swap
-  // that otherwise hides in the section inspector is now one click from the tree.
-  if (isSection(node)) {
-    const section = node as SectionComponent;
-    const allowed: ComponentTypeValue[] = [];
-    if (section.components.length < LIMITS.SECTION_TEXTS_MAX) {
-      allowed.push(ComponentType.TextDisplay);
-    }
-    const accessoryIsButton = section.accessory.type === ComponentType.Button;
-    allowed.push(accessoryIsButton ? ComponentType.Thumbnail : ComponentType.Button);
+  if (isSection(node) && (node as SectionComponent).components.length < LIMITS.SECTION_TEXTS_MAX) {
     out.push(
-      <li key="__add_section" className={styles.adderItem}>
-        <AddComponentMenu
-          allowed={allowed}
-          onPick={(t) => {
-            if (t === ComponentType.TextDisplay) {
-              addThenScroll(() => h.addSectionText(node._id));
-            } else {
-              h.setSectionAccessoryKind(
-                node._id,
-                t === ComponentType.Button ? "button" : "thumbnail",
-              );
-            }
-          }}
-          trigger={<AddChildButton label="Add to section" />}
+      <li key="__add_section_text" className={styles.adderItem}>
+        <AddChildButton
+          label="Add text"
+          onClick={() => addThenScroll(() => h.addSectionText(node._id))}
         />
       </li>,
     );
   }
 
-  // Buttons Row: a single menu listing every legal child, instead of a plain
-  // "Add button" beside a separate, easily-missed "Add select…" popover. An
-  // empty row can become buttons OR one select; once it holds buttons only more
-  // buttons are offered (up to the cap); a row already holding a select gets no
-  // adder at all.
-  if (isActionRow(node) && !isSelectRow(node)) {
+  if (isActionRow(node)) {
     const row = node;
-    const allowed: ComponentTypeValue[] = [];
-    if (!row.components.some(isSelect) && row.components.length < LIMITS.ACTION_ROW_BUTTONS) {
-      allowed.push(ComponentType.Button);
-    }
-    if (row.components.length === 0) {
-      allowed.push(...ROW_SELECT_PICKER);
-    }
-    if (allowed.length > 0) {
-      out.push(
-        <li key="__add_row" className={styles.adderItem}>
-          <AddComponentMenu
-            allowed={allowed}
-            onPick={(t) => {
-              if (t === ComponentType.Button) {
-                addThenScroll(() => h.addRowButton(node._id));
-              } else {
-                addThenScroll(() => h.addRowSelect(node._id, t as SelectComponent["type"]));
-              }
-            }}
-            trigger={<AddChildButton label="Add to row" />}
-          />
-        </li>,
-      );
+    if (!isSelectRow(row)) {
+      if (row.components.length < LIMITS.ACTION_ROW_BUTTONS && !row.components.some(isSelect)) {
+        out.push(
+          <li key="__add_row_button" className={styles.adderItem}>
+            <AddChildButton
+              label="Add button"
+              onClick={() => addThenScroll(() => h.addRowButton(node._id))}
+            />
+          </li>,
+        );
+      }
+      if (row.components.length === 0) {
+        out.push(
+          <li key="__add_row_select" className={styles.adderItem}>
+            <AddComponentMenu
+              nodes={ROW_SELECT_PICKER.map((t) => ({
+                type: t,
+                onPick: () =>
+                  addThenScroll(() => h.addRowSelect(node._id, t as SelectComponent["type"])),
+              }))}
+              trigger={<AddChildButton label="Add select…" />}
+            />
+          </li>,
+        );
+      }
     }
   }
 

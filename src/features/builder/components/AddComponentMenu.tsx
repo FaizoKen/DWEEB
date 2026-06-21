@@ -20,11 +20,24 @@ import {
 import { createPortal } from "react-dom";
 import { COMPONENT_META } from "@/core/schema/metadata";
 import type { ComponentTypeValue } from "@/core/schema/types";
+import { ChevronDownIcon, ChevronRightIcon } from "@/ui/Icon";
+import { cn } from "@/lib/cn";
 import styles from "./AddComponentMenu.module.css";
 
+/**
+ * One row of the add menu. A leaf (no `children`) runs `onPick` when clicked.
+ * A node with `children` renders as a group header: clicking it just toggles
+ * the indented child rows — it adds nothing itself, so `onPick` is omitted.
+ * `type` drives the glyph / label / description shown (via `COMPONENT_META`).
+ */
+export interface AddMenuNode {
+  type: ComponentTypeValue;
+  onPick?: () => void;
+  children?: AddMenuNode[];
+}
+
 interface AddComponentMenuProps {
-  allowed: ComponentTypeValue[];
-  onPick: (type: ComponentTypeValue) => void;
+  nodes: AddMenuNode[];
   disabled?: boolean;
   align?: "top" | "bottom";
   /**
@@ -42,8 +55,7 @@ interface AnchorPos {
 }
 
 export function AddComponentMenu({
-  allowed,
-  onPick,
+  nodes,
   disabled,
   align = "bottom",
   trigger,
@@ -53,6 +65,9 @@ export function AddComponentMenu({
   const [effectiveAlign, setEffectiveAlign] = useState<"top" | "bottom">(align);
   const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
   const [leftShift, setLeftShift] = useState(0);
+  // Which expandable parent rows are open. Reset each time the menu opens so it
+  // always starts collapsed.
+  const [expanded, setExpanded] = useState<Set<ComponentTypeValue>>(() => new Set());
   const triggerRef = useRef<HTMLElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const innerMenuRef = useRef<HTMLDivElement | null>(null);
@@ -98,7 +113,17 @@ export function AddComponentMenu({
     setEffectiveAlign(align);
     setMaxHeight(undefined);
     setLeftShift(0);
+    setExpanded(new Set());
     setOpen(true);
+  };
+
+  const toggleExpanded = (type: ComponentTypeValue) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
   };
 
   // After the menu mounts, measure it and flip / clamp so it stays inside the
@@ -144,7 +169,7 @@ export function AddComponentMenu({
     if (left + naturalWidth > viewportW - margin) left = viewportW - naturalWidth - margin;
     if (left < margin) left = margin;
     setLeftShift(left - anchor.left);
-  }, [open, anchor, align]);
+  }, [open, anchor, align, expanded]);
 
   const resolvedTrigger = typeof trigger === "function" ? trigger({ open }) : trigger;
   const child = isValidElement(resolvedTrigger)
@@ -171,11 +196,7 @@ export function AddComponentMenu({
       {child}
       {open && anchor
         ? createPortal(
-            <div
-              ref={menuRef}
-              className={styles.positioner}
-              style={placement}
-            >
+            <div ref={menuRef} className={styles.positioner} style={placement}>
               <div
                 ref={innerMenuRef}
                 id={labelId}
@@ -187,25 +208,83 @@ export function AddComponentMenu({
                   ...(maxHeight !== undefined ? { maxHeight, overflowY: "auto" } : {}),
                 }}
               >
-                {allowed.map((t) => {
-                  const meta = COMPONENT_META[t];
+                {nodes.map((node) => {
+                  const meta = COMPONENT_META[node.type];
+
+                  // Leaf: clicking adds the component and closes the menu.
+                  if (!node.children || node.children.length === 0) {
+                    return (
+                      <button
+                        key={node.type}
+                        role="menuitem"
+                        type="button"
+                        className={styles.item}
+                        onClick={() => {
+                          node.onPick?.();
+                          setOpen(false);
+                        }}
+                      >
+                        <span className={styles.itemGlyph}>{meta.glyph}</span>
+                        <span className={styles.itemBody}>
+                          <span className={styles.itemTitle}>{meta.label}</span>
+                          <span className={styles.itemSub}>{meta.description}</span>
+                        </span>
+                      </button>
+                    );
+                  }
+
+                  // Group: the whole row just toggles the child dropdown — it
+                  // adds nothing itself, since its children cover every case.
+                  const isExpanded = expanded.has(node.type);
                   return (
-                    <button
-                      key={t}
-                      role="menuitem"
-                      type="button"
-                      className={styles.item}
-                      onClick={() => {
-                        onPick(t);
-                        setOpen(false);
-                      }}
-                    >
-                      <span className={styles.itemGlyph}>{meta.glyph}</span>
-                      <span className={styles.itemBody}>
-                        <span className={styles.itemTitle}>{meta.label}</span>
-                        <span className={styles.itemSub}>{meta.description}</span>
-                      </span>
-                    </button>
+                    <div key={node.type} className={styles.group}>
+                      <button
+                        role="menuitem"
+                        type="button"
+                        className={cn(styles.item, styles.groupToggle)}
+                        aria-expanded={isExpanded}
+                        aria-label={`${isExpanded ? "Collapse" : "Expand"} ${meta.label} options`}
+                        onClick={() => toggleExpanded(node.type)}
+                      >
+                        <span className={styles.itemGlyph}>{meta.glyph}</span>
+                        <span className={styles.itemBody}>
+                          <span className={styles.itemTitle}>{meta.label}</span>
+                          <span className={styles.itemSub}>{meta.description}</span>
+                        </span>
+                        <span className={styles.groupChevron} aria-hidden="true">
+                          {isExpanded ? (
+                            <ChevronDownIcon size={16} />
+                          ) : (
+                            <ChevronRightIcon size={16} />
+                          )}
+                        </span>
+                      </button>
+                      {isExpanded ? (
+                        <div className={styles.childList}>
+                          {node.children.map((child) => {
+                            const cmeta = COMPONENT_META[child.type];
+                            return (
+                              <button
+                                key={child.type}
+                                role="menuitem"
+                                type="button"
+                                className={cn(styles.item, styles.childItem)}
+                                onClick={() => {
+                                  child.onPick?.();
+                                  setOpen(false);
+                                }}
+                              >
+                                <span className={styles.itemGlyph}>{cmeta.glyph}</span>
+                                <span className={styles.itemBody}>
+                                  <span className={styles.itemTitle}>{cmeta.label}</span>
+                                  <span className={styles.itemSub}>{cmeta.description}</span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>

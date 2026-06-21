@@ -57,13 +57,26 @@ import {
   type WebhookMessage,
 } from "@/core/schema";
 import {
+  createActionRow,
   createGalleryItem,
   createLinkButton,
+  createSection,
   createTextDisplay,
   createThumbnail,
 } from "@/core/factory/createComponent";
 
 const HISTORY_LIMIT = 50;
+
+/** True for the five select component types `createSelect` knows how to build. */
+function isSelectComponentType(t: ComponentTypeValue): t is SelectComponent["type"] {
+  return (
+    t === ComponentType.StringSelect ||
+    t === ComponentType.UserSelect ||
+    t === ComponentType.RoleSelect ||
+    t === ComponentType.MentionableSelect ||
+    t === ComponentType.ChannelSelect
+  );
+}
 
 /**
  * Origin of the active message on Discord — set when it was loaded by
@@ -147,7 +160,33 @@ export interface MessageState {
 
   // Structural ops ------------------------------------------------------
   addTopLevel(type: TopLevelFactoryKey): void;
+  /**
+   * Add a component picked from the top-level "Add component" menu, wrapping the
+   * ones that can't stand alone there: a Button or select becomes a new Buttons
+   * Row, and a Thumbnail becomes a new Section (with the thumbnail as its
+   * accessory). The wrapped inner element is selected so it's ready to edit.
+   * Plain top-level factory types behave exactly like {@link addTopLevel}.
+   */
+  addTopLevelComponent(type: ComponentTypeValue): void;
+  /**
+   * Add a top-level Section whose single accessory is the requested kind — a
+   * Thumbnail or a Button. Backs the Section sub-options in the "Add component"
+   * menu. The accessory is selected so it's ready to edit (image URL / button
+   * label).
+   */
+  addTopLevelSection(accessoryKind: "thumbnail" | "button"): void;
   addContainerChild(containerId: EditorId, type: ContainerChildFactoryKey): void;
+  /**
+   * Container counterpart of {@link addTopLevelComponent}: append a component
+   * chosen from a Container's "Add" menu, wrapping a Button or select in a new
+   * Buttons Row. The wrapped inner element is selected so it's ready to edit.
+   */
+  addContainerComponent(containerId: EditorId, type: ComponentTypeValue): void;
+  /**
+   * Container counterpart of {@link addTopLevelSection}: append a Section whose
+   * accessory is the requested kind, selecting the accessory.
+   */
+  addContainerSection(containerId: EditorId, accessoryKind: "thumbnail" | "button"): void;
   addSectionText(sectionId: EditorId): void;
   addRowButton(rowId: EditorId): void;
   addRowSelect(rowId: EditorId, type: SelectComponent["type"]): void;
@@ -504,6 +543,53 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
   },
 
+  addTopLevelComponent(type) {
+    set((s) => {
+      // Wrap the leaves that can't sit at the top level, otherwise fall back to
+      // the plain factory. `selectId` is the element the user actually wants to
+      // edit — the inner button/select/thumbnail, not its generated wrapper.
+      let node: TopLevelComponent;
+      let selectId: EditorId;
+      if (type === ComponentType.Button) {
+        const btn = createLinkButton();
+        const row: ActionRowComponent = { ...createActionRow(), components: [btn] };
+        node = row;
+        selectId = btn._id;
+      } else if (isSelectComponentType(type)) {
+        const sel = createSelect(type);
+        const row: ActionRowComponent = { ...createActionRow(), components: [sel] };
+        node = row;
+        selectId = sel._id;
+      } else if (type === ComponentType.Thumbnail) {
+        const section = createSection();
+        node = section;
+        selectId = section.accessory._id;
+      } else {
+        node = createTopLevel(type as TopLevelFactoryKey);
+        selectId = node._id;
+      }
+      return {
+        ...pushHistory(s),
+        message: { ...s.message, components: [...s.message.components, node] },
+        selectedId: selectId,
+      };
+    });
+  },
+
+  addTopLevelSection(accessoryKind) {
+    set((s) => {
+      const base = createSection();
+      const accessory = accessoryKind === "button" ? createLinkButton() : base.accessory;
+      const section: SectionComponent = { ...base, accessory };
+      return {
+        ...pushHistory(s),
+        message: { ...s.message, components: [...s.message.components, section] },
+        // Select the accessory so its inspector opens ready to edit.
+        selectedId: section.accessory._id,
+      };
+    });
+  },
+
   addContainerChild(containerId, type) {
     set((s) => {
       const child = createTopLevel(type) as ContainerChild;
@@ -514,6 +600,53 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           components: [...c.components, child],
         })),
         selectedId: child._id,
+      };
+    });
+  },
+
+  addContainerComponent(containerId, type) {
+    set((s) => {
+      // Wrap a Button / select in its own Buttons Row; anything else is a plain
+      // container-child factory. `selectId` targets the inner element to edit.
+      let child: ContainerChild;
+      let selectId: EditorId;
+      if (type === ComponentType.Button) {
+        const btn = createLinkButton();
+        const row: ActionRowComponent = { ...createActionRow(), components: [btn] };
+        child = row;
+        selectId = btn._id;
+      } else if (isSelectComponentType(type)) {
+        const sel = createSelect(type);
+        const row: ActionRowComponent = { ...createActionRow(), components: [sel] };
+        child = row;
+        selectId = sel._id;
+      } else {
+        child = createTopLevel(type as ContainerChildFactoryKey) as ContainerChild;
+        selectId = child._id;
+      }
+      return {
+        ...pushHistory(s),
+        message: updateById<ContainerComponent>(s.message, containerId, (c) => ({
+          ...c,
+          components: [...c.components, child],
+        })),
+        selectedId: selectId,
+      };
+    });
+  },
+
+  addContainerSection(containerId, accessoryKind) {
+    set((s) => {
+      const base = createSection();
+      const accessory = accessoryKind === "button" ? createLinkButton() : base.accessory;
+      const section: SectionComponent = { ...base, accessory };
+      return {
+        ...pushHistory(s),
+        message: updateById<ContainerComponent>(s.message, containerId, (c) => ({
+          ...c,
+          components: [...c.components, section],
+        })),
+        selectedId: section.accessory._id,
       };
     });
   },
