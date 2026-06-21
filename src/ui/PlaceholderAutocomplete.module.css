@@ -1,0 +1,73 @@
+/* Inline `{`-triggered placeholder dropdown. Positioned imperatively (fixed,
+ * portalled to <body>) by usePlaceholderAutocomplete, so it floats over scroll
+ * containers like the Menu panel does. */
+.panel {
+  position: fixed;
+  min-width: 220px;
+  max-width: min(360px, calc(100vw - 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow-lg);
+  padding: 5px;
+  z-index: var(--app-z-tooltip);
+  animation: phRise 100ms ease-out;
+}
+
+.heading {
+  padding: 6px 11px 3px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-text-subtle);
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 11px;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--app-text);
+  text-align: left;
+  font-size: var(--app-text-base);
+  cursor: pointer;
+}
+
+/* Keyboard/hover highlight share one class so arrow keys and the mouse agree. */
+.itemActive {
+  background: var(--app-bg-hover);
+}
+
+.itemLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemToken {
+  flex: 0 0 auto;
+  color: var(--app-text-subtle);
+  font-family: var(--app-font-mono, monospace);
+  font-size: var(--app-text-sm, 12px);
+}
+
+@keyframes phRise {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

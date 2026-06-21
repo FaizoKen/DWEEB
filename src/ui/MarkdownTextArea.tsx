@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { TextArea } from "@/ui/TextArea";
 import { MarkdownToolbar } from "@/ui/MarkdownToolbar";
 import { wrapInline, type EditResult, type EditState } from "@/ui/markdownActions";
+import { usePlaceholderAutocomplete } from "@/ui/usePlaceholderAutocomplete";
 import type { PlaceholderGroup } from "@/core/plugins/placeholders";
 import styles from "./MarkdownTextArea.module.css";
 
@@ -13,7 +14,7 @@ interface MarkdownTextAreaProps {
   rows?: number;
   placeholder?: string;
   invalid?: boolean;
-  /** Placeholders (grouped by provider) offered as a `{}` insert dropdown. */
+  /** Placeholders (grouped by provider) offered inline when the user types `{`. */
   placeholders?: PlaceholderGroup[];
 }
 
@@ -39,6 +40,10 @@ export function MarkdownTextArea({
   // restore branch below.
   const pendingSelection = useRef<[number, number] | null>(null);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
+
+  // Inline `{`-triggered placeholder autocomplete — the same set the single-line
+  // fields offer, no toolbar button needed.
+  const ac = usePlaceholderAutocomplete(ref, value, onChange, placeholders);
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -68,6 +73,8 @@ export function MarkdownTextArea({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // The open autocomplete claims arrows / Enter / Tab / Escape first.
+    if (ac.onKeyDown(e)) return;
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     const key = e.key.toLowerCase();
     const marker = key === "b" ? "**" : key === "i" ? "*" : key === "u" ? "__" : null;
@@ -83,7 +90,6 @@ export function MarkdownTextArea({
       <MarkdownToolbar
         state={{ text: value, selStart: selection.start, selEnd: selection.end }}
         onAction={apply}
-        placeholders={placeholders}
       />
       <TextArea
         ref={ref}
@@ -93,13 +99,27 @@ export function MarkdownTextArea({
         rows={rows}
         placeholder={placeholder}
         invalid={invalid}
-        onChange={(e) => onChange(e.currentTarget.value)}
+        onChange={(e) => {
+          onChange(e.currentTarget.value);
+          ac.onValueChange(
+            e.currentTarget.value,
+            e.currentTarget.selectionStart ?? e.currentTarget.value.length,
+          );
+        }}
         onKeyDown={onKeyDown}
-        onSelect={syncSelection}
+        onSelect={() => {
+          syncSelection();
+          ac.onSelectionChange();
+        }}
         onKeyUp={syncSelection}
-        onClick={syncSelection}
+        onClick={() => {
+          syncSelection();
+          ac.onSelectionChange();
+        }}
         onFocus={syncSelection}
+        onBlur={ac.close}
       />
+      {ac.dropdown}
     </div>
   );
 }
