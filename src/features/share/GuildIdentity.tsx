@@ -32,7 +32,9 @@ export function GuildIdentity({
   const name = guild?.name ?? fallbackName;
   if (!name) return null;
 
-  const iconUrl = guild ? guildIconUrl(guild.id, guild.icon, 36) : null;
+  // Discord's CDN only serves power-of-two sizes — 64 stays crisp on retina for
+  // the 24px chip (36 would 400 as an invalid resource).
+  const iconUrl = guild ? guildIconUrl(guild.id, guild.icon, 64) : null;
   return (
     <div className={styles.identity} title={`${label} ${name}`}>
       {iconUrl ? (
