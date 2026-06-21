@@ -670,6 +670,137 @@ const REACTION_ROLES_MESSAGE: WebhookMessage = {
   ],
 };
 
+// A single message that searches the whole server. It ships ALL FOUR
+// auto-populated selects — channel, role, user, and mentionable — each wired to
+// its own Picker instance, so one post becomes a directory: a member opens a
+// menu, picks what they're after, and gets a private list of clickable mentions
+// back. The four placeholder custom_ids are distinct so the guided setup walks
+// them as four independent Picker slots (see `pluginSlots` below).
+const SERVER_DIRECTORY_MESSAGE: WebhookMessage = {
+  username: "Server Directory",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.teal,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🗂️ Server Directory\nOne message to find anything in **{server}** — channels, roles, and members. Pick from a menu and your results come back **privately**, with clickable mentions to jump straight there.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Large,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "**🧭 Channels** — find a place to read, post, or hop into voice.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.ChannelSelect,
+              custom_id: "directory_channels",
+              placeholder: "Search for a channel…",
+              min_values: 1,
+              max_values: 5,
+            },
+          ],
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "**🎭 Roles** — look up a role and who carries it.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.RoleSelect,
+              custom_id: "directory_roles",
+              placeholder: "Browse roles…",
+              min_values: 1,
+              max_values: 5,
+            },
+          ],
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "**👋 Members** — search for a member or staffer.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.UserSelect,
+              custom_id: "directory_members",
+              placeholder: "Look up a member…",
+              min_values: 1,
+              max_values: 5,
+            },
+          ],
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "**🔎 Find anything** — not sure what it is? Search members and roles together.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.MentionableSelect,
+              custom_id: "directory_anything",
+              placeholder: "Find any member or role…",
+              min_values: 1,
+              max_values: 5,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# Wire each menu to the Picker plugin — every result is private to whoever searched. Pick up to five at a time.",
+    },
+  ],
+};
+
 // ════════════════════════════════════════════════════════════════════════════
 // EVENTS & ENGAGEMENT
 // ════════════════════════════════════════════════════════════════════════════
@@ -1382,6 +1513,36 @@ export const TEMPLATES: MessageTemplate[] = [
     pairsWith: "Self Role",
     pluginSlots: [{ customId: "reaction_roles", pluginId: "self-role" }],
     message: REACTION_ROLES_MESSAGE,
+  },
+  {
+    id: "server-directory",
+    name: "Server directory",
+    description: "One message that finds any channel, role, or member — all select types in one.",
+    emoji: "🗂️",
+    category: "Community",
+    tags: [
+      "directory",
+      "search",
+      "find",
+      "lookup",
+      "channels",
+      "roles",
+      "members",
+      "select",
+      "menu",
+      "picker",
+      "resources",
+    ],
+    accent: ACCENT.teal,
+    requiresBot: true,
+    pairsWith: "Picker",
+    pluginSlots: [
+      { customId: "directory_channels", pluginId: "picker" },
+      { customId: "directory_roles", pluginId: "picker" },
+      { customId: "directory_members", pluginId: "picker" },
+      { customId: "directory_anything", pluginId: "picker" },
+    ],
+    message: SERVER_DIRECTORY_MESSAGE,
   },
   {
     id: "event",
