@@ -500,16 +500,13 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
         .iter()
         .find(|(prefix, _)| custom_id.starts_with(prefix.as_str()))
     else {
-        tracing::warn!(custom_id, "no route for interaction, disabling component");
-        // An unrouted component can never succeed — its plugin isn't
-        // installed — so disable it like an expired one rather than leave it
-        // clickable. Modal submits carry the modal's custom_id, which isn't
-        // on the message, so there is nothing to disable for them.
-        const NOT_WIRED: &str = "This component isn't wired to any installed plugin.";
-        if interaction.get("type").and_then(Value::as_u64) == Some(TYPE_MESSAGE_COMPONENT) {
-            return disable_clicked(&interaction, custom_id, NOT_WIRED);
-        }
-        return ephemeral(NOT_WIRED);
+        tracing::warn!(custom_id, "no route for interaction, answering with notice");
+        // An unrouted component's plugin isn't installed/assigned. Don't
+        // disable the button — that hides the problem and stops it firing.
+        // Answer every click (and modal submit) with an ephemeral note so
+        // whoever clicks, and the message's owner, can see what's wrong and
+        // fix the wiring instead of staring at a silently dead button.
+        return ephemeral("This component isn't wired to any installed plugin.");
     };
 
     // Forward raw body + signature headers so the plugin re-verifies the exact
