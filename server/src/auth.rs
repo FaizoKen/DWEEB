@@ -204,14 +204,30 @@ pub async fn callback(
 ) -> Result<Response, AppError> {
     let cfg = &st.config;
 
-    // User cancelled, or Discord reported an error — just return to the builder.
-    // The custom-app credentials cookie (if this was that flow) is cleared too;
-    // an abandoned flow must not leave a secret parked in the browser.
+    // User cancelled, or Discord reported an error — return to the builder with a
+    // marker so the popup that started this flow can relay the failure and close
+    // in place (rather than booting a whole app inside the popup). Which flow it
+    // was comes from the `state` prefix; Discord usually echoes `state` on a
+    // cancel, but fall back to the cookie we stored at the flow's start in case it
+    // doesn't. The custom-app credentials cookie (if this was that flow) is
+    // cleared too — an abandoned flow must not leave a secret parked in the browser.
     if q.error.is_some() || q.code.is_none() {
+        let flow_state = q
+            .state
+            .clone()
+            .or_else(|| jar.get(STATE_COOKIE).map(|c| c.value().to_string()))
+            .unwrap_or_default();
+        let marker = if flow_state.starts_with(WEBHOOK_STATE_PREFIX)
+            || flow_state.starts_with(CUSTOM_WEBHOOK_STATE_PREFIX)
+        {
+            "dweeb_webhook=error"
+        } else {
+            "dweeb_login=error"
+        };
         let jar = jar
             .add(clear_state_cookie(cfg))
             .add(clear_custom_app_cookie(cfg));
-        return Ok((jar, Redirect::to(&cfg.frontend_url)).into_response());
+        return Ok((jar, Redirect::to(&format!("{}#{marker}", cfg.frontend_url))).into_response());
     }
 
     // CSRF: the round-tripped `state` must equal the one we stored at /login.
@@ -328,7 +344,11 @@ pub async fn callback(
     let jar = jar
         .add(clear_state_cookie(cfg))
         .add(build_session_cookie(cfg, &session));
-    Ok((jar, Redirect::to(&cfg.frontend_url)).into_response())
+    // Marker so the login popup recognises its return, hands "signed in" back to
+    // the opener, and closes — instead of booting the app inside the popup. The
+    // full-page fallback just strips it on the reload (the session cookie drives
+    // auth either way). See `core/oauth/flows` (`loginFlow`).
+    Ok((jar, Redirect::to(&format!("{}#dweeb_login=ok", cfg.frontend_url))).into_response())
 }
 
 /// `POST /auth/logout` — drop the session cookie.

@@ -56,14 +56,15 @@ import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
 import { UpdatePrompt } from "./UpdatePrompt";
+import { type IncomingWebhook, type IncomingWebhookResult } from "@/core/guild/config";
 import {
-  clearWebhookPopupPending,
-  consumeIncomingWebhook,
-  hasIncomingWebhook,
-  onWebhookPopupResult,
-  type IncomingWebhook,
-  type IncomingWebhookResult,
-} from "@/core/guild/config";
+  clearPopupPending,
+  consumeReturn,
+  hasReturn,
+  subscribePopupResult,
+} from "@/core/oauth/popupFlow";
+import { loginFlow, webhookFlow } from "@/core/oauth/flows";
+import { useAuthStore } from "@/core/auth/authStore";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { shouldAutoOpenGallery, markGalleryAutoOpened } from "@/features/templates/galleryAutoOpen";
 import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
@@ -317,7 +318,7 @@ export function App() {
   // Discord returned nothing, so just say so.
   const handledWebhookRef = useRef("");
   const handleIncomingWebhook = (result: IncomingWebhookResult) => {
-    clearWebhookPopupPending(); // a result arrived — no popup is in flight anymore
+    clearPopupPending(webhookFlow); // a result arrived — no popup is in flight anymore
     if ("error" in result) {
       pushToast("No webhook was created. You can try again or paste a URL.", "info");
       return;
@@ -331,7 +332,7 @@ export function App() {
   // Full-page return: the new webhook's URL is in the fragment. Pull it out
   // (clears it from the address bar) and apply it. Runs once on load.
   useEffect(() => {
-    const result = consumeIncomingWebhook();
+    const result = consumeReturn(webhookFlow);
     if (result) handleIncomingWebhook(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -339,7 +340,25 @@ export function App() {
   // Popup return: the flow ran in a popup (so the builder stayed put) and posted
   // its result back over a same-origin channel. Apply it the same way.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => onWebhookPopupResult(handleIncomingWebhook), []);
+  useEffect(() => subscribePopupResult(webhookFlow, handleIncomingWebhook), []);
+
+  // Login popup return: the session cookie is already set (origin-global), so we
+  // just re-read it and flip to "authed". A blocked-popup full-page login is
+  // handled by the reload's `init()` instead — here we only clear the
+  // `#dweeb_login` marker it leaves, and note a cancel.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(
+    () =>
+      subscribePopupResult(loginFlow, (r) => void useAuthStore.getState().completeLogin("ok" in r)),
+    [],
+  );
+  useEffect(() => {
+    const r = consumeReturn(loginFlow);
+    if (r && "error" in r) {
+      pushToast("Sign-in didn’t finish — you can try again.", "info");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Landing screen: auto-open the Template Gallery when it's actually useful —
   // a first visit, or a fresh session where the user isn't mid-edit — instead of
@@ -348,7 +367,7 @@ export function App() {
   // we'd be interrupting a dedicated flow: a share/short link being decoded into
   // the editor, or a webhook redirect about to open the Send panel.
   useEffect(() => {
-    if (hasIncomingWebhook()) return;
+    if (hasReturn(webhookFlow)) return;
     if (readShareTokenFromHash(window.location.hash) || readShortLinkId(window.location.pathname)) {
       return;
     }

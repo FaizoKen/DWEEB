@@ -134,14 +134,12 @@ import { cn } from "@/lib/cn";
 import {
   DISCORD_CLIENT_ID,
   isProxyConfigured,
-  navigateWebhookPopup,
   oauthCallbackUrl,
-  openWebhookPopup,
-  redirectToWebhookOAuth,
-  watchWebhookPopup,
   webhookCreateUrl,
   type IncomingWebhook,
 } from "@/core/guild/config";
+import { navigatePopup, openPopup, redirectFullPage, watchPopup } from "@/core/oauth/popupFlow";
+import { webhookFlow } from "@/core/oauth/flows";
 import { copyText } from "@/core/serialization/clipboard";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
@@ -1801,15 +1799,15 @@ function CreateWebhookOptions() {
                 // blocker doesn't catch it once we await the authorize URL. The
                 // in-progress message survives; only a blocked popup falls back to
                 // leaving the page. Either way Discord's channel picker takes over.
-                const popup = openWebhookPopup();
+                const popup = openPopup(webhookFlow);
                 setStarting(true);
                 createCustomBotWebhook(guildId, bot.application_id)
                   .then((url) => {
                     if (popup) {
-                      navigateWebhookPopup(popup, url);
-                      watchWebhookPopup(popup);
+                      navigatePopup(popup, url);
+                      watchPopup(webhookFlow, popup);
                     } else {
-                      redirectToWebhookOAuth(url);
+                      redirectFullPage(webhookFlow, url);
                     }
                     setStarting(false);
                   })
@@ -1844,12 +1842,12 @@ function CreateWebhookOptions() {
           // webhook lands where the user is already working. Run it in a popup;
           // only a blocked popup falls back to a full-page redirect.
           const url = webhookCreateUrl(useGuildStore.getState().guildId);
-          const popup = openWebhookPopup();
+          const popup = openPopup(webhookFlow);
           if (popup) {
-            navigateWebhookPopup(popup, url);
-            watchWebhookPopup(popup);
+            navigatePopup(popup, url);
+            watchPopup(webhookFlow, popup);
           } else {
-            redirectToWebhookOAuth(url);
+            redirectFullPage(webhookFlow, url);
           }
         }}
       >

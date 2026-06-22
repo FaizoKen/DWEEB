@@ -4,13 +4,18 @@ import { registerSW } from "virtual:pwa-register";
 import { App } from "@/app/App";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { useUpdateStore } from "@/core/state/updateStore";
-import { relayWebhookPopupIfApplicable } from "@/core/guild/config";
+import { relayPopupIfApplicable } from "@/core/oauth/popupFlow";
+import { botAddFlow, loginFlow, webhookFlow } from "@/core/oauth/flows";
 import "@/styles/global.css";
 
-// When we're the `webhook.incoming` OAuth popup, hand the created webhook back
-// to the window that opened us and close — never boot the full app in the
-// popup. The normal boot below is skipped in that case.
-if (!relayWebhookPopupIfApplicable()) {
+// When we're an OAuth popup returning (webhook create / login / add-bot), hand
+// the result back to the window that opened us and close — never boot the full
+// app in the popup. The normal boot below is skipped in that case.
+if (
+  !relayPopupIfApplicable(webhookFlow) &&
+  !relayPopupIfApplicable(loginFlow) &&
+  !relayPopupIfApplicable(botAddFlow)
+) {
   boot();
 }
 

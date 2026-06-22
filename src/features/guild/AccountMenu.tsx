@@ -23,6 +23,8 @@ import {
   savePendingGuildId,
 } from "@/core/guild/pendingGuild";
 import { botInviteUrl } from "@/core/guild/config";
+import { botAddFlow, startBotAddPopup } from "@/core/oauth/flows";
+import { subscribePopupResult } from "@/core/oauth/popupFlow";
 import { guildIconUrl, isValidGuildId, type AuthUser, type PickerGuild } from "@/core/guild/api";
 import { Menu } from "@/ui/Menu";
 import {
@@ -139,6 +141,24 @@ export function AccountMenu() {
   useEffect(() => {
     void initAuth();
   }, [initAuth]);
+
+  // A bot-add popup ("Add to another server" / "Re-add the bot") reports the
+  // chosen server back here over a same-origin channel. Connect to it and refresh
+  // the picker so its data and the new `bot_present` flag fill in — the same
+  // outcome as the old post-add redirect, but without leaving the page. Parked as
+  // a pending id too, so a reload mid-connect still lands on it. Reads the stores
+  // live so the one-shot subscription never goes stale.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(
+    () =>
+      subscribePopupResult(botAddFlow, (r) => {
+        if ("error" in r) return;
+        savePendingGuildId(r.guildId);
+        void useGuildStore.getState().connect(r.guildId);
+        void useAuthStore.getState().loadGuilds(true);
+      }),
+    [],
+  );
 
   // Park the just-added guild id (survives the sign-in redirect) and tidy the
   // redirect params out of the address bar. Runs before the picker logic below.
@@ -408,7 +428,20 @@ function AccountPanel({
 
       <div className={styles.actions}>
         {invite ? (
-          <a className={styles.actionRow} href={invite} target="_blank" rel="noreferrer noopener">
+          <a
+            className={styles.actionRow}
+            href={invite}
+            target="_blank"
+            rel="noreferrer noopener"
+            // Plain click adds the bot in a popup and connects to the chosen
+            // server in place; modified clicks keep their native new-tab behaviour
+            // (Discord then bounces that tab back with the server selected).
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+              e.preventDefault();
+              startBotAddPopup();
+            }}
+          >
             <PlusIcon size={16} />
             <span>Add to another server</span>
           </a>

@@ -34,13 +34,9 @@ import {
   type WebhookEdit,
 } from "@/core/guild/api";
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
-import {
-  botInviteUrl,
-  navigateWebhookPopup,
-  openWebhookPopup,
-  redirectToWebhookOAuth,
-  watchWebhookPopup,
-} from "@/core/guild/config";
+import { botInviteUrl } from "@/core/guild/config";
+import { navigatePopup, openPopup, redirectFullPage, watchPopup } from "@/core/oauth/popupFlow";
+import { startBotAddPopup, webhookFlow } from "@/core/oauth/flows";
 import { useAuthStore } from "@/core/auth/authStore";
 import type { GuildChannel } from "@/core/guild/types";
 import { Button } from "@/ui/Button";
@@ -365,6 +361,13 @@ export function GuildWebhookPicker({
               href={botInviteUrl(connectedId)}
               target="_blank"
               rel="noopener noreferrer"
+              // Plain click re-adds the bot in a popup (this server pre-selected)
+              // and reconnects here; modified clicks keep their native new-tab open.
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                startBotAddPopup(connectedId);
+              }}
             >
               Re-add the bot ↗
             </a>
@@ -443,7 +446,7 @@ export function GuildWebhookPicker({
       if (identity.kind === "bot") {
         // Open the popup synchronously (still inside the click) so the blocker
         // doesn't catch it once we await the proxy for the authorize URL.
-        const popup = openWebhookPopup();
+        const popup = openPopup(webhookFlow);
         let url: string;
         try {
           url = await createCustomBotWebhook(connectedId, identity.applicationId);
@@ -452,10 +455,10 @@ export function GuildWebhookPicker({
           throw e;
         }
         if (popup) {
-          navigateWebhookPopup(popup, url);
-          watchWebhookPopup(popup);
+          navigatePopup(popup, url);
+          watchPopup(webhookFlow, popup);
         } else {
-          redirectToWebhookOAuth(url);
+          redirectFullPage(webhookFlow, url);
         }
         return;
       }

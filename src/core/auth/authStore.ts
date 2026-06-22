@@ -6,10 +6,11 @@
  * cookie); this store is just the browser's view of it, hydrated from
  * `GET /auth/me` on startup.
  *
- * Login is a full-page redirect to the proxy's `/auth/login` (so the OAuth
- * round-trip and cookie set happen at the top level, not via fetch). After
- * Discord bounces the user back to the app, `init()` sees the session and flips
- * to "authed".
+ * Login runs in a popup (see `core/oauth`) so the in-progress message survives.
+ * The proxy sets the session cookie during the OAuth callback (origin-global),
+ * so once the popup reports back we just re-read `/auth/me` and flip to "authed"
+ * via `completeLogin`. A blocked popup falls back to a full-page redirect, in
+ * which case the reload's `init()` picks the session up instead.
  */
 
 import { create } from "zustand";
@@ -21,12 +22,14 @@ import {
   type AuthUser,
   type PickerGuild,
 } from "@/core/guild/api";
-import { isProxyConfigured, loginUrl } from "@/core/guild/config";
+import { isProxyConfigured } from "@/core/guild/config";
+import { startLoginPopup } from "@/core/oauth/flows";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { pushToast } from "@/ui/Toast";
 
-/** Set right before the login redirect so we can greet the user only on the
- *  return from a real sign-in, not on every reload with a live session. */
+/** Set right before a popup-blocked full-page login redirect so we greet the user
+ *  only on the return from a real sign-in, not on every reload with a live
+ *  session. (The popup path greets directly from `completeLogin` instead.) */
 const JUST_LOGGED_IN_KEY = "dweeb.auth.justLoggedIn";
 
 type AuthStatus = "unknown" | "loading" | "authed" | "anon";
@@ -44,8 +47,11 @@ interface AuthState {
   /** (Re)load the user's server list for the picker. Pass `force` on a manual
    *  refresh to bypass the proxy's cache. */
   loadGuilds(force?: boolean): Promise<void>;
-  /** Begin Discord login (full-page redirect). */
+  /** Begin Discord login (in a popup). */
   login(): void;
+  /** Apply the result of the login popup: on success re-read the session and flip
+   *  to "authed"; on failure (cancelled / no interaction) surface a gentle note. */
+  completeLogin(ok: boolean): Promise<void>;
   /** Sign out: clear the proxy session and reset all server state. */
   logout(): Promise<void>;
   /** Flip to signed-out locally — called when a request returns 401. */
@@ -54,30 +60,17 @@ interface AuthState {
 
 let initialised = false;
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  status: "unknown",
-  user: null,
-  guilds: [],
-  guildsStatus: "idle",
-  guildsError: null,
-
-  async init() {
-    if (initialised || !isProxyConfigured()) return;
-    initialised = true;
+export const useAuthStore = create<AuthState>((set, get) => {
+  // Core session hydration, shared by first-load `init` and post-login refresh.
+  // Greets only when asked (right after an actual sign-in), and only once a user
+  // actually comes back.
+  const hydrate = async (greet: boolean): Promise<void> => {
     set({ status: "loading" });
     try {
       const user = await fetchMe();
       if (user) {
         set({ status: "authed", user });
-        // Greet only right after an actual sign-in, not on every reload.
-        try {
-          if (sessionStorage.getItem(JUST_LOGGED_IN_KEY)) {
-            sessionStorage.removeItem(JUST_LOGGED_IN_KEY);
-            pushToast(`Signed in as ${user.name}`, "success");
-          }
-        } catch {
-          // sessionStorage unavailable — skip the greeting, not worth failing over.
-        }
+        if (greet) pushToast(`Signed in as ${user.name}`, "success");
         void get().loadGuilds();
       } else {
         set({ status: "anon", user: null });
@@ -86,49 +79,94 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Network/again-later: treat as signed-out rather than wedging the UI.
       set({ status: "anon", user: null });
     }
-  },
+  };
 
-  async loadGuilds(force = false) {
-    set({ guildsStatus: "loading", guildsError: null });
-    try {
-      const guilds = await fetchUserGuilds(force);
-      set({ guilds, guildsStatus: "ready" });
-    } catch (e) {
-      if (isAuthError(e)) {
-        get().markSignedOut();
+  return {
+    status: "unknown",
+    user: null,
+    guilds: [],
+    guildsStatus: "idle",
+    guildsError: null,
+
+    async init() {
+      if (initialised || !isProxyConfigured()) return;
+      initialised = true;
+      // Greet only right after an actual sign-in via the full-page fallback, not
+      // on every reload with a live session.
+      let greet = false;
+      try {
+        if (sessionStorage.getItem(JUST_LOGGED_IN_KEY)) {
+          sessionStorage.removeItem(JUST_LOGGED_IN_KEY);
+          greet = true;
+        }
+      } catch {
+        // sessionStorage unavailable — skip the greeting, not worth failing over.
+      }
+      await hydrate(greet);
+    },
+
+    async loadGuilds(force = false) {
+      set({ guildsStatus: "loading", guildsError: null });
+      try {
+        const guilds = await fetchUserGuilds(force);
+        set({ guilds, guildsStatus: "ready" });
+      } catch (e) {
+        if (isAuthError(e)) {
+          get().markSignedOut();
+          return;
+        }
+        const message = e instanceof Error ? e.message : "Couldn't load your servers.";
+        set({ guildsStatus: "error", guildsError: message });
+      }
+    },
+
+    login() {
+      if (!isProxyConfigured()) return;
+      // Set the fallback greet flag in case the popup is blocked and we redirect
+      // the whole page (the reload's `init` reads it). The popup path clears it
+      // and greets from `completeLogin` instead.
+      try {
+        sessionStorage.setItem(JUST_LOGGED_IN_KEY, "1");
+      } catch {
+        // No sessionStorage — we just skip the post-login greeting.
+      }
+      startLoginPopup();
+    },
+
+    async completeLogin(ok: boolean) {
+      if (!isProxyConfigured()) return;
+      // The popup path never reloads, so the fallback greet flag would only go
+      // stale — drop it and greet here instead.
+      try {
+        sessionStorage.removeItem(JUST_LOGGED_IN_KEY);
+      } catch {
+        /* ignore */
+      }
+      if (!ok) {
+        pushToast("Sign-in didn’t finish — you can try again.", "info");
         return;
       }
-      const message = e instanceof Error ? e.message : "Couldn't load your servers.";
-      set({ guildsStatus: "error", guildsError: message });
-    }
-  },
+      initialised = true; // a live session exists now; a later `init` is a no-op
+      await hydrate(true);
+    },
 
-  login() {
-    if (!isProxyConfigured()) return;
-    try {
-      sessionStorage.setItem(JUST_LOGGED_IN_KEY, "1");
-    } catch {
-      // No sessionStorage — we just skip the post-login greeting.
-    }
-    window.location.href = loginUrl();
-  },
+    async logout() {
+      await postLogout();
+      useGuildStore.getState().disconnect();
+      set({ status: "anon", user: null, guilds: [], guildsStatus: "idle", guildsError: null });
+      pushToast("Signed out", "info");
+    },
 
-  async logout() {
-    await postLogout();
-    useGuildStore.getState().disconnect();
-    set({ status: "anon", user: null, guilds: [], guildsStatus: "idle", guildsError: null });
-    pushToast("Signed out", "info");
-  },
-
-  markSignedOut() {
-    useGuildStore.getState().disconnect();
-    set({
-      status: "anon",
-      user: null,
-      guilds: [],
-      guildsStatus: "idle",
-      guildsError: null,
-    });
-    pushToast("Your session expired — sign in again.", "info");
-  },
-}));
+    markSignedOut() {
+      useGuildStore.getState().disconnect();
+      set({
+        status: "anon",
+        user: null,
+        guilds: [],
+        guildsStatus: "idle",
+        guildsError: null,
+      });
+      pushToast("Your session expired — sign in again.", "info");
+    },
+  };
+});

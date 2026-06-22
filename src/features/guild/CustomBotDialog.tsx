@@ -28,6 +28,7 @@ import {
   type CustomBots,
 } from "@/core/guild/api";
 import { customBotInviteUrl, interactionsEndpointUrl, oauthCallbackUrl } from "@/core/guild/config";
+import { openExternalPopup } from "@/core/oauth/popupFlow";
 import { copyText } from "@/core/serialization/clipboard";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -381,6 +382,20 @@ export function CustomBotDialog({
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Optional — lists the bot in your server and enables its own commands. Not needed for posting or interactive components."
+                      // Plain click opens a centered popup so this dialog stays
+                      // put underneath (Discord shows its own "Authorized" page,
+                      // so there's nothing to hand back). Modified clicks keep
+                      // their native open-in-new-tab behaviour.
+                      onClick={(e) => {
+                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+                          return;
+                        }
+                        e.preventDefault();
+                        openExternalPopup(
+                          customBotInviteUrl(item.application_id, guildId),
+                          "dweeb_custombot_invite",
+                        );
+                      }}
                     >
                       Add to your server ↗
                     </a>
