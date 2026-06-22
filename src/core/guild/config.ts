@@ -196,10 +196,12 @@ function markWebhookPopupPending(): void {
     /* storage blocked — opener/name detection still covers the common case */
   }
 }
+/** Clear the pending mark only — NOT the result. The result must outlive this so
+ *  the main window's poll / storage listener can still pick it up; the consumer
+ *  ({@link onWebhookPopupResult}) drops the result key once it has applied it. */
 export function clearWebhookPopupPending(): void {
   try {
     localStorage.removeItem(WEBHOOK_PENDING_KEY);
-    localStorage.removeItem(WEBHOOK_RESULT_KEY);
   } catch {
     /* ignore */
   }
@@ -225,7 +227,9 @@ function deliverWebhookResult(result: IncomingWebhookResult): void {
       /* fall through to storage */
     }
   }
-  // localStorage `storage` event (fires in the opener even after a context swap).
+  // Durable handoff: the main window reads this back by POLLING localStorage (and
+  // via the `storage` event where it crosses the swap). Left in place for the
+  // consumer to drop — see {@link onWebhookPopupResult}.
   try {
     localStorage.setItem(WEBHOOK_RESULT_KEY, JSON.stringify({ at: Date.now(), result }));
   } catch {
@@ -317,7 +321,13 @@ export function watchWebhookPopup(popup: Window): void {
  * fragment-consume effect).
  */
 export function redirectToWebhookOAuth(url: string): void {
-  clearWebhookPopupPending(); // no popup is in flight — this tab handles its own return
+  // No popup is in flight — this tab handles its own return; drop any stale state.
+  clearWebhookPopupPending();
+  try {
+    localStorage.removeItem(WEBHOOK_RESULT_KEY);
+  } catch {
+    /* ignore */
+  }
   try {
     sessionStorage.setItem(WEBHOOK_SELF_REDIRECT_KEY, "1");
   } catch {
@@ -377,39 +387,86 @@ export function relayWebhookPopupIfApplicable(): boolean {
 }
 
 /**
- * Subscribe to webhook results posted back from the OAuth popup — over both the
- * BroadcastChannel and the localStorage `storage` event (the latter survives the
- * context-group swap that can break the former's opener). Returns an unsubscribe
- * function. Same-origin by construction.
+ * Subscribe to webhook results posted back from the OAuth popup. Listens on THREE
+ * channels because Discord's context-group swap breaks the obvious ones:
+ *
+ *  - BroadcastChannel — fast, usually works.
+ *  - `storage` event — fast where it crosses the swap.
+ *  - a localStorage POLL — the bulletproof path: localStorage *values* are shared
+ *    across all same-origin contexts regardless of browsing-context group (even
+ *    when the events/opener/handle aren't), so reading the key always sees what
+ *    the popup wrote.
+ *
+ * All three funnel through one `deliver` that dedupes, drops the stored keys, and
+ * ignores anything staler than the pending TTL. Returns an unsubscribe function.
  */
 export function onWebhookPopupResult(handler: (result: IncomingWebhookResult) => void): () => void {
   const cleanups: Array<() => void> = [];
+  let lastUrl = "";
+
+  const deliver = (result: IncomingWebhookResult | null) => {
+    if (!result) return;
+    if (!("error" in result)) {
+      if (result.url === lastUrl) return; // already delivered via another channel
+      lastUrl = result.url;
+    }
+    // Drop the handoff so no channel re-delivers and it can't haunt a later load.
+    try {
+      localStorage.removeItem(WEBHOOK_RESULT_KEY);
+      localStorage.removeItem(WEBHOOK_PENDING_KEY);
+    } catch {
+      /* ignore */
+    }
+    handler(result);
+  };
+
+  // Read a result sitting in localStorage (poll + storage-event path).
+  const consumeStored = () => {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(WEBHOOK_RESULT_KEY);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { at?: number; result?: IncomingWebhookResult };
+      const fresh = !parsed.at || Date.now() - parsed.at < WEBHOOK_PENDING_TTL_MS;
+      if (parsed.result && fresh) {
+        deliver(parsed.result);
+        return;
+      }
+    } catch {
+      /* malformed — drop it below */
+    }
+    try {
+      localStorage.removeItem(WEBHOOK_RESULT_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
 
   if (typeof BroadcastChannel !== "undefined") {
     try {
       const channel = new BroadcastChannel(WEBHOOK_POPUP_NAME);
-      channel.onmessage = (e: MessageEvent) => handler(e.data as IncomingWebhookResult);
+      channel.onmessage = (e: MessageEvent) => deliver(e.data as IncomingWebhookResult);
       cleanups.push(() => channel.close());
     } catch {
-      /* fall back to storage events only */
+      /* the storage channels still deliver */
     }
   }
 
-  const onStorage = (e: StorageEvent) => {
-    if (e.key !== WEBHOOK_RESULT_KEY || !e.newValue) return;
-    let result: IncomingWebhookResult | null = null;
-    try {
-      const parsed = JSON.parse(e.newValue) as { result?: IncomingWebhookResult };
-      result = parsed.result ?? null;
-    } catch {
-      result = null;
-    }
-    if (result) handler(result);
-    clearWebhookPopupPending(); // also drops the result key
-  };
   if (typeof window !== "undefined") {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === WEBHOOK_RESULT_KEY && e.newValue) consumeStored();
+    };
     window.addEventListener("storage", onStorage);
     cleanups.push(() => window.removeEventListener("storage", onStorage));
+
+    const pollId = window.setInterval(consumeStored, 400);
+    cleanups.push(() => clearInterval(pollId));
+
+    consumeStored(); // apply a result that landed before this mount
   }
 
   return () => cleanups.forEach((c) => c());
