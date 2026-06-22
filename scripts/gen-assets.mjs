@@ -9,12 +9,14 @@ import path from "node:path";
 
 const pub = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 
-// A pair of chunky nerd glasses — the literal "dweeb" — built from two
-// rounded-square lenses (which also echo Components V2 "blocks") bridged
-// by a brand-green nose piece, with short white temple stubs and a soft
-// glass glint on each lens. White-on-blurple with a Discord-green accent.
-// Drawn back-to-front: arms + bridge first, lenses over them, glints on top.
-// Authored on a 512 grid.
+// A pair of chunky nerd glasses over two buck teeth — the literal "dweeb"
+// face. The lenses are rounded squares (which also echo Components V2
+// "blocks") bridged by a brand-green nose piece, with short white temple
+// stubs and a soft glass glint on each. Below them sit two front teeth
+// (flat tops, rounded bottoms) for the full goofy-nerd grin.
+// White-on-blurple with a Discord-green accent.
+// Drawn back-to-front: arms + bridge first, lenses over them, glints, then
+// the teeth in the clear blurple below. Authored on a 512 grid.
 const mark = (radius) => `
   <rect width="512" height="512" rx="${radius}" fill="#5865F2"/>
   <rect x="40" y="210" width="52" height="30" rx="15" fill="#fff"/>
@@ -23,41 +25,41 @@ const mark = (radius) => `
   <rect x="78" y="182" width="148" height="148" rx="46" fill="#fff"/>
   <rect x="286" y="182" width="148" height="148" rx="46" fill="#fff"/>
   <rect x="104" y="202" width="20" height="62" rx="10" fill="#5865F2" opacity="0.16" transform="rotate(-26 114 233)"/>
-  <rect x="312" y="202" width="20" height="62" rx="10" fill="#5865F2" opacity="0.16" transform="rotate(-26 322 233)"/>`;
+  <rect x="312" y="202" width="20" height="62" rx="10" fill="#5865F2" opacity="0.16" transform="rotate(-26 322 233)"/>
+  <path d="M218 356 h36 v44 a13 13 0 0 1 -13 13 h-10 a13 13 0 0 1 -13 -13 z" fill="#fff"/>
+  <path d="M258 356 h36 v44 a13 13 0 0 1 -13 13 h-10 a13 13 0 0 1 -13 -13 z" fill="#fff"/>`;
 
 const rounded = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${mark(128)}</svg>`;
 const fullBleed = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${mark(0)}</svg>`;
 
+// The OG banner is a minimalist brand card: a centered icon + wordmark
+// lockup, a short brand-green rule, and two tight lines of type — what it is,
+// then a playful brand-voice kicker. One soft blurple glow behind the mark
+// gives depth without clutter; everything else is negative space. Centered on
+// the 600px axis so the lockup stays perfectly balanced.
 const og = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
-  <rect width="1200" height="630" fill="#1e1f22"/>
-  <rect width="1200" height="630" fill="url(#g)"/>
   <defs>
-    <radialGradient id="g" cx="18%" cy="22%" r="90%">
-      <stop offset="0%" stop-color="#2b2d56"/>
-      <stop offset="55%" stop-color="#1e1f22"/>
+    <radialGradient id="glow" cx="50%" cy="32%" r="64%">
+      <stop offset="0%" stop-color="#2c2f5e"/>
+      <stop offset="62%" stop-color="#1a1b1e" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <!-- brand icon -->
-  <g transform="translate(80,86) scale(0.32)">${mark(128)}</g>
-  <text x="262" y="190" font-family="system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="96" font-weight="800" letter-spacing="2" fill="#ffffff">DWEEB</text>
-  <text x="84" y="286" font-family="system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="35" font-weight="600" fill="#d8dae0">Discord Webhook Embed Builder · Components V2</text>
-  <!-- feature chips -->
-  <g font-family="system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="600">
-    <rect x="84" y="346" width="206" height="56" rx="28" fill="#313338"/>
-    <text x="112" y="383" fill="#b5bac1">No JSON</text>
-    <rect x="306" y="346" width="232" height="56" rx="28" fill="#313338"/>
-    <text x="334" y="383" fill="#b5bac1">No backend</text>
-    <rect x="554" y="346" width="300" height="56" rx="28" fill="#313338"/>
-    <text x="582" y="383" fill="#b5bac1">Shareable URL</text>
-  </g>
-  <!-- mock message card -->
-  <g transform="translate(84,460)">
-    <rect width="1032" height="118" rx="14" fill="#2b2d31" stroke="#3f4248" stroke-width="2"/>
-    <circle cx="46" cy="59" r="26" fill="#5865F2"/>
-    <rect x="92" y="34" width="240" height="20" rx="10" fill="#f2f3f5"/>
-    <rect x="92" y="68" width="520" height="16" rx="8" fill="#b5bac1"/>
-    <rect x="820" y="42" width="170" height="42" rx="8" fill="#57F287"/>
-  </g>
+
+  <rect width="1200" height="630" fill="#1a1b1e"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- centered mark -->
+  <g transform="translate(544,128) scale(0.21875)">${mark(128)}</g>
+
+  <!-- wordmark + brand-green rule -->
+  <text x="600" y="350" text-anchor="middle" font-family="system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="108" font-weight="800" letter-spacing="6" fill="#ffffff">DWEEB</text>
+  <rect x="564" y="380" width="72" height="5" rx="2.5" fill="#57F287"/>
+
+  <!-- what it is -->
+  <text x="600" y="450" text-anchor="middle" font-family="system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="31" font-weight="500" fill="#c7cad1">The visual builder for Discord webhooks &amp; Components V2</text>
+
+  <!-- brand-voice kicker -->
+  <text x="600" y="502" text-anchor="middle" font-family="system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="23" font-weight="600" letter-spacing="0.4" fill="#6f747c">Built by dweebs, for dweebs</text>
 </svg>`;
 
 async function png(svg, size, file) {
