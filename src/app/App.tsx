@@ -57,6 +57,7 @@ import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
 import { UpdatePrompt } from "./UpdatePrompt";
 import {
+  clearWebhookPopupPending,
   consumeIncomingWebhook,
   hasIncomingWebhook,
   onWebhookPopupResult,
@@ -316,6 +317,7 @@ export function App() {
   // Discord returned nothing, so just say so.
   const handledWebhookRef = useRef("");
   const handleIncomingWebhook = (result: IncomingWebhookResult) => {
+    clearWebhookPopupPending(); // a result arrived — no popup is in flight anymore
     if ("error" in result) {
       pushToast("No webhook was created. You can try again or paste a URL.", "info");
       return;

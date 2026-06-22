@@ -132,15 +132,20 @@ export function consumeIncomingWebhook(): IncomingWebhookResult | null {
 // was building until a reload pulled the result out of the fragment. Running it
 // in a popup keeps the builder on screen.
 //
-// Delivery is driven by the MAIN window, which holds the popup handle from
-// `window.open`: it polls the popup and, the moment the popup returns to OUR
-// origin with the webhook in its fragment, reads it straight off `popup.location`
-// (`watchWebhookPopup`). That doesn't depend on the popup running any of our code
-// — so it survives Discord overwriting `window.name`, the opener being severed,
-// or the popup booting its own copy of the app. A same-origin BroadcastChannel
-// is kept as a fast secondary. The popup itself just avoids booting the full app
-// and leaves its fragment intact for the main window to read. Browsers that block
-// the popup fall back to a full-page redirect, so the flow always completes.
+// The hard part is that Discord's `oauth2/authorize` page swaps the popup into a
+// new browsing-context group: that SEVERS the main window's `popup` handle (so
+// polling it is useless — `popup.closed` reads true) AND nulls the popup's
+// `window.opener`, and Discord also rewrites `window.name`. So neither the opener
+// reference nor the handle nor the name can be relied on to recognise or reach
+// the popup once it returns.
+//
+// What *does* survive a context-group swap is per-origin web storage. So we use a
+// localStorage HANDSHAKE: the main window marks "a webhook popup is pending"
+// before opening it; the returning popup recognises itself purely from that flag,
+// and hands the result back over BOTH a BroadcastChannel and a localStorage
+// `storage` event (each origin-global, swap-proof). The opener/name/poll paths
+// are kept as fast best-effort extras. Browsers that block the popup fall back to
+// a full-page redirect, so the flow always completes.
 
 /** Both the BroadcastChannel name and the popup's `window.name`. */
 const WEBHOOK_POPUP_NAME = "dweeb_webhook";
@@ -151,6 +156,21 @@ const WEBHOOK_POPUP_NAME = "dweeb_webhook";
  *  don't mistake yourself for a popup". Scoped to the tab, so a real popup never
  *  sees it. */
 const WEBHOOK_SELF_REDIRECT_KEY = "dweeb_webhook_self_redirect";
+
+/** localStorage handshake: timestamp the main window writes before opening the
+ *  popup. The returning popup recognises itself by this (it survives the
+ *  context-group swap that nulls opener/name). Origin-global, so it's only ever
+ *  set while a popup flow is genuinely in flight, and is cleared promptly. */
+const WEBHOOK_PENDING_KEY = "dweeb_webhook_pending";
+
+/** localStorage delivery channel: the popup writes the result here; the main
+ *  window's `storage` listener fires (storage events only fire in OTHER same-
+ *  origin contexts) and applies it. A swap-proof companion to BroadcastChannel. */
+const WEBHOOK_RESULT_KEY = "dweeb_webhook_result";
+
+/** How long a pending-popup mark stays valid — long enough for a slow OAuth, short
+ *  enough that an abandoned attempt can't haunt a later page load. */
+const WEBHOOK_PENDING_TTL_MS = 10 * 60 * 1000;
 
 /** Parse a webhook result out of a URL fragment string WITHOUT mutating the
  *  current location — used to read a *popup's* fragment from the main window, and
@@ -168,15 +188,48 @@ function parseWebhookHash(hash: string): IncomingWebhookResult | null {
   };
 }
 
-/** Post a webhook result to the app's popup-result listener(s) on this origin. */
-function broadcastWebhookResult(result: IncomingWebhookResult): void {
-  if (typeof BroadcastChannel === "undefined") return;
+/** Mark / unmark / test "a webhook popup is in flight" (the localStorage handshake). */
+function markWebhookPopupPending(): void {
   try {
-    const channel = new BroadcastChannel(WEBHOOK_POPUP_NAME);
-    channel.postMessage(result);
-    setTimeout(() => channel.close(), 1000);
+    localStorage.setItem(WEBHOOK_PENDING_KEY, String(Date.now()));
   } catch {
-    // No channel — the main window's poll path still delivers.
+    /* storage blocked — opener/name detection still covers the common case */
+  }
+}
+export function clearWebhookPopupPending(): void {
+  try {
+    localStorage.removeItem(WEBHOOK_PENDING_KEY);
+    localStorage.removeItem(WEBHOOK_RESULT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+function webhookPopupPending(): boolean {
+  try {
+    const v = localStorage.getItem(WEBHOOK_PENDING_KEY);
+    return v != null && Date.now() - Number(v) < WEBHOOK_PENDING_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** Hand a result back to the main window over every swap-proof channel we have. */
+function deliverWebhookResult(result: IncomingWebhookResult): void {
+  // BroadcastChannel (fast).
+  if (typeof BroadcastChannel !== "undefined") {
+    try {
+      const channel = new BroadcastChannel(WEBHOOK_POPUP_NAME);
+      channel.postMessage(result);
+      setTimeout(() => channel.close(), 1000);
+    } catch {
+      /* fall through to storage */
+    }
+  }
+  // localStorage `storage` event (fires in the opener even after a context swap).
+  try {
+    localStorage.setItem(WEBHOOK_RESULT_KEY, JSON.stringify({ at: Date.now(), result }));
+  } catch {
+    /* ignore */
   }
 }
 
@@ -189,9 +242,7 @@ function broadcastWebhookResult(result: IncomingWebhookResult): void {
  * caller falls back to a full-page redirect.
  */
 export function openWebhookPopup(): Window | null {
-  // Need a real window and BroadcastChannel (how the result reaches the app's
-  // listener). Without it, callers fall back to the full-page redirect.
-  if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return null;
+  if (typeof window === "undefined") return null;
   const w = 520;
   const h = 720;
   const baseLeft = window.screenLeft ?? window.screenX ?? 0;
@@ -205,7 +256,10 @@ export function openWebhookPopup(): Window | null {
     WEBHOOK_POPUP_NAME,
     `popup=yes,width=${w},height=${h},left=${left},top=${top}`,
   );
-  return popup ?? null;
+  if (!popup) return null;
+  // The handshake the returning popup will recognise itself by.
+  markWebhookPopupPending();
+  return popup;
 }
 
 /** Point an already-open popup (from {@link openWebhookPopup}) at the OAuth URL. */
@@ -215,13 +269,11 @@ export function navigateWebhookPopup(popup: Window, url: string): void {
 }
 
 /**
- * Watch a popup we opened and deliver its result. Polls the popup handle: while
- * it's on Discord/the proxy, `popup.location` is cross-origin and throws (we keep
- * waiting); the instant it returns to our origin with the webhook fragment, we
- * read it directly and hand it to the app's listener — then close the popup. This
- * is the reliable path because the main window owns the handle and never depends
- * on the popup executing our code. Stops if the user closes the popup, or after a
- * safety cap.
+ * Best-effort fast path: poll the popup handle and, if it survives the OAuth hop,
+ * read the fragment off `popup.location` the moment it returns to our origin and
+ * close it. Often the handle is severed by Discord's context-group swap (then
+ * `popup.closed` reads true and this just stops) — in which case the popup's own
+ * relay delivers via the storage handshake instead. Harmless either way.
  */
 export function watchWebhookPopup(popup: Window): void {
   if (typeof window === "undefined") return;
@@ -240,21 +292,21 @@ export function watchWebhookPopup(popup: Window): void {
     }
     let hash = "";
     try {
-      hash = popup.location.hash; // throws while the popup is cross-origin
+      hash = popup.location.hash; // throws while cross-origin, or if handle severed
     } catch {
-      return; // still mid-flow on Discord/proxy — keep waiting
+      return;
     }
     const result = parseWebhookHash(hash);
     if (!result) return;
-    broadcastWebhookResult(result); // App's onWebhookPopupResult applies it
+    deliverWebhookResult(result);
+    clearWebhookPopupPending();
     try {
       popup.close();
     } catch {
-      // Couldn't close it (rare) — the user can; the result is already delivered.
+      /* user can close it; result already delivered */
     }
     stop();
   }, 120);
-  // Don't poll forever if the popup wanders off and never comes back.
   const cap = window.setTimeout(stop, 5 * 60 * 1000);
 }
 
@@ -265,6 +317,7 @@ export function watchWebhookPopup(popup: Window): void {
  * fragment-consume effect).
  */
 export function redirectToWebhookOAuth(url: string): void {
+  clearWebhookPopupPending(); // no popup is in flight — this tab handles its own return
   try {
     sessionStorage.setItem(WEBHOOK_SELF_REDIRECT_KEY, "1");
   } catch {
@@ -276,12 +329,12 @@ export function redirectToWebhookOAuth(url: string): void {
 
 /**
  * When this page load is our OAuth popup returning with a webhook in the fragment,
- * keep it from booting the whole app: broadcast the result (a fast path for the
- * opener) but DON'T clear the fragment — the main window reads it off this popup's
- * location ({@link watchWebhookPopup}) and closes us. Returns true when handled
- * (the entry point then skips boot). A self-redirected main tab (blocked-popup
- * fallback) is positively excluded so it's never mistaken for a popup. Call once,
- * before React mounts.
+ * deliver the result to the main window (storage handshake + BroadcastChannel) and
+ * keep from booting the whole app. Returns true when handled (the entry point then
+ * skips boot). Recognised by the localStorage pending-mark — which, unlike
+ * `window.opener`/`window.name`/the popup handle, survives Discord's context-group
+ * swap. A self-redirected main tab is positively excluded so it's never mistaken
+ * for a popup. Call once, before React mounts.
  */
 export function relayWebhookPopupIfApplicable(): boolean {
   if (typeof window === "undefined") return false;
@@ -293,42 +346,73 @@ export function relayWebhookPopupIfApplicable(): boolean {
     selfRedirected = sessionStorage.getItem(WEBHOOK_SELF_REDIRECT_KEY) != null;
     if (selfRedirected) sessionStorage.removeItem(WEBHOOK_SELF_REDIRECT_KEY);
   } catch {
-    // sessionStorage blocked — fall through; the opener check below still gates us.
+    /* sessionStorage blocked — the signals below still gate us */
   }
   if (selfRedirected) return false;
 
+  // The pending-mark is the reliable signal; opener/name are fast extras for the
+  // (lucky) case the swap didn't sever them.
   const isPopup =
-    (!!window.opener && window.opener !== window) || window.name === WEBHOOK_POPUP_NAME;
+    webhookPopupPending() ||
+    (!!window.opener && window.opener !== window) ||
+    window.name === WEBHOOK_POPUP_NAME;
   if (!isPopup) return false;
 
-  // Best-effort fast delivery; the main window's poll is the reliable path, so we
-  // deliberately do NOT clear the fragment here.
   const result = parseWebhookHash(window.location.hash);
-  if (result) broadcastWebhookResult(result);
+  if (result) deliverWebhookResult(result);
+  clearWebhookPopupPending();
   window.name = "";
   if (document.body) {
     document.body.textContent = "Webhook created — you can close this window.";
   }
-  // Last resort: close ourselves if the opener never gets to it.
+  // Close ourselves shortly after delivering (the opener may also close us first).
   window.setTimeout(() => {
     try {
       window.close();
     } catch {
       /* ignore */
     }
-  }, 4000);
+  }, 1200);
   return true;
 }
 
 /**
- * Subscribe to webhook results posted back from the OAuth popup. Returns an
- * unsubscribe function. Same-origin by construction (BroadcastChannel).
+ * Subscribe to webhook results posted back from the OAuth popup — over both the
+ * BroadcastChannel and the localStorage `storage` event (the latter survives the
+ * context-group swap that can break the former's opener). Returns an unsubscribe
+ * function. Same-origin by construction.
  */
 export function onWebhookPopupResult(handler: (result: IncomingWebhookResult) => void): () => void {
-  if (typeof BroadcastChannel === "undefined") return () => {};
-  const channel = new BroadcastChannel(WEBHOOK_POPUP_NAME);
-  channel.onmessage = (e: MessageEvent) => handler(e.data as IncomingWebhookResult);
-  return () => channel.close();
+  const cleanups: Array<() => void> = [];
+
+  if (typeof BroadcastChannel !== "undefined") {
+    try {
+      const channel = new BroadcastChannel(WEBHOOK_POPUP_NAME);
+      channel.onmessage = (e: MessageEvent) => handler(e.data as IncomingWebhookResult);
+      cleanups.push(() => channel.close());
+    } catch {
+      /* fall back to storage events only */
+    }
+  }
+
+  const onStorage = (e: StorageEvent) => {
+    if (e.key !== WEBHOOK_RESULT_KEY || !e.newValue) return;
+    let result: IncomingWebhookResult | null = null;
+    try {
+      const parsed = JSON.parse(e.newValue) as { result?: IncomingWebhookResult };
+      result = parsed.result ?? null;
+    } catch {
+      result = null;
+    }
+    if (result) handler(result);
+    clearWebhookPopupPending(); // also drops the result key
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", onStorage);
+    cleanups.push(() => window.removeEventListener("storage", onStorage));
+  }
+
+  return () => cleanups.forEach((c) => c());
 }
 
 /**
