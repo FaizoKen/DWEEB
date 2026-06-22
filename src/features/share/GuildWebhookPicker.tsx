@@ -39,6 +39,7 @@ import {
   navigateWebhookPopup,
   openWebhookPopup,
   redirectToWebhookOAuth,
+  watchWebhookPopup,
 } from "@/core/guild/config";
 import { useAuthStore } from "@/core/auth/authStore";
 import type { GuildChannel } from "@/core/guild/types";
@@ -450,8 +451,12 @@ export function GuildWebhookPicker({
           popup?.close();
           throw e;
         }
-        if (popup) navigateWebhookPopup(popup, url);
-        else redirectToWebhookOAuth(url);
+        if (popup) {
+          navigateWebhookPopup(popup, url);
+          watchWebhookPopup(popup);
+        } else {
+          redirectToWebhookOAuth(url);
+        }
         return;
       }
       const created = await createGuildWebhook(connectedId, channelId, AUTO_WEBHOOK_NAME);

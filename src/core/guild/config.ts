@@ -130,40 +130,68 @@ export function consumeIncomingWebhook(): IncomingWebhookResult | null {
 // The OAuth webhook-create flow (`webhookCreateUrl` / a custom bot's authorize
 // URL) historically replaced the whole page, throwing away the message the user
 // was building until a reload pulled the result out of the fragment. Running it
-// in a popup keeps the builder on screen: the popup lands back on this origin,
-// hands the created webhook to the main window over a same-origin
-// BroadcastChannel, and closes — the main window applies it exactly like the
-// fragment return. Browsers that block the popup (or lack BroadcastChannel) fall
-// back to the full-page redirect, so the flow always completes.
+// in a popup keeps the builder on screen.
+//
+// Delivery is driven by the MAIN window, which holds the popup handle from
+// `window.open`: it polls the popup and, the moment the popup returns to OUR
+// origin with the webhook in its fragment, reads it straight off `popup.location`
+// (`watchWebhookPopup`). That doesn't depend on the popup running any of our code
+// — so it survives Discord overwriting `window.name`, the opener being severed,
+// or the popup booting its own copy of the app. A same-origin BroadcastChannel
+// is kept as a fast secondary. The popup itself just avoids booting the full app
+// and leaves its fragment intact for the main window to read. Browsers that block
+// the popup fall back to a full-page redirect, so the flow always completes.
 
-/** Both the BroadcastChannel name and the popup's `window.name` (a secondary
- *  recognition hint — Discord's OAuth page can overwrite the name, so the
- *  returning page leans on `window.opener` first). */
+/** Both the BroadcastChannel name and the popup's `window.name`. */
 const WEBHOOK_POPUP_NAME = "dweeb_webhook";
 
 /** sessionStorage flag a tab sets on itself right before a *full-page* fallback
  *  redirect into the OAuth flow (popup blocked). It survives the same-tab
  *  navigation and tells the return "you redirected yourself — handle it in place,
- *  don't mistake yourself for a popup to close" (matters when the main tab itself
- *  has an opener). Scoped to the tab, so a real popup never sees it. */
+ *  don't mistake yourself for a popup". Scoped to the tab, so a real popup never
+ *  sees it. */
 const WEBHOOK_SELF_REDIRECT_KEY = "dweeb_webhook_self_redirect";
 
-/** True when a popup-based webhook flow is viable here — needs a real window and
- *  BroadcastChannel (the result transport). When false, callers do a full-page
- *  redirect instead. */
-function canPopupWebhook(): boolean {
-  return typeof window !== "undefined" && typeof BroadcastChannel !== "undefined";
+/** Parse a webhook result out of a URL fragment string WITHOUT mutating the
+ *  current location — used to read a *popup's* fragment from the main window, and
+ *  by the popup to read its own without clearing it. */
+function parseWebhookHash(hash: string): IncomingWebhookResult | null {
+  if (!hash || !hash.includes(WEBHOOK_HASH_KEY)) return null;
+  const params = new URLSearchParams(hash.replace(/^#/, ""));
+  const raw = params.get(WEBHOOK_HASH_KEY);
+  if (raw === null) return null;
+  if (raw === "error" || raw === "") return { error: true };
+  return {
+    url: raw,
+    channelName: params.get("channel") || undefined,
+    guildName: params.get("guild") || undefined,
+  };
+}
+
+/** Post a webhook result to the app's popup-result listener(s) on this origin. */
+function broadcastWebhookResult(result: IncomingWebhookResult): void {
+  if (typeof BroadcastChannel === "undefined") return;
+  try {
+    const channel = new BroadcastChannel(WEBHOOK_POPUP_NAME);
+    channel.postMessage(result);
+    setTimeout(() => channel.close(), 1000);
+  } catch {
+    // No channel — the main window's poll path still delivers.
+  }
 }
 
 /**
  * Open a blank, centered popup for the webhook OAuth flow — synchronously, so it
  * isn't caught by the popup blocker (the OAuth URL often isn't known until after
  * an `await`, which would break the user-gesture if we opened then). Navigate it
- * with {@link navigateWebhookPopup} once the URL is ready. Returns `null` when
- * unsupported or blocked, so the caller falls back to a full-page redirect.
+ * with {@link navigateWebhookPopup} once the URL is ready, then hand it to
+ * {@link watchWebhookPopup}. Returns `null` when unsupported or blocked, so the
+ * caller falls back to a full-page redirect.
  */
 export function openWebhookPopup(): Window | null {
-  if (!canPopupWebhook()) return null;
+  // Need a real window and BroadcastChannel (how the result reaches the app's
+  // listener). Without it, callers fall back to the full-page redirect.
+  if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return null;
   const w = 520;
   const h = 720;
   const baseLeft = window.screenLeft ?? window.screenX ?? 0;
@@ -187,6 +215,50 @@ export function navigateWebhookPopup(popup: Window, url: string): void {
 }
 
 /**
+ * Watch a popup we opened and deliver its result. Polls the popup handle: while
+ * it's on Discord/the proxy, `popup.location` is cross-origin and throws (we keep
+ * waiting); the instant it returns to our origin with the webhook fragment, we
+ * read it directly and hand it to the app's listener — then close the popup. This
+ * is the reliable path because the main window owns the handle and never depends
+ * on the popup executing our code. Stops if the user closes the popup, or after a
+ * safety cap.
+ */
+export function watchWebhookPopup(popup: Window): void {
+  if (typeof window === "undefined") return;
+  let done = false;
+  const stop = () => {
+    if (done) return;
+    done = true;
+    clearInterval(timer);
+    clearTimeout(cap);
+  };
+  const timer = window.setInterval(() => {
+    if (done) return;
+    if (popup.closed) {
+      stop();
+      return;
+    }
+    let hash = "";
+    try {
+      hash = popup.location.hash; // throws while the popup is cross-origin
+    } catch {
+      return; // still mid-flow on Discord/proxy — keep waiting
+    }
+    const result = parseWebhookHash(hash);
+    if (!result) return;
+    broadcastWebhookResult(result); // App's onWebhookPopupResult applies it
+    try {
+      popup.close();
+    } catch {
+      // Couldn't close it (rare) — the user can; the result is already delivered.
+    }
+    stop();
+  }, 120);
+  // Don't poll forever if the popup wanders off and never comes back.
+  const cap = window.setTimeout(stop, 5 * 60 * 1000);
+}
+
+/**
  * Full-page fallback for when the popup couldn't open (blocked / unsupported):
  * mark this tab so its OAuth return is handled in place, then navigate it into
  * the flow. The result comes back via the fragment on reload (see App's
@@ -203,29 +275,25 @@ export function redirectToWebhookOAuth(url: string): void {
 }
 
 /**
- * When this page load is our OAuth popup returning with a freshly-created webhook
- * in the fragment, broadcast that result to the main window and close — instead
- * of booting the whole app inside the popup. Returns true when it handled (and is
- * closing) the popup, so the entry point skips the normal boot. Call once, before
- * React mounts.
- *
- * Recognising the popup is the whole game: we use `window.opener` (preserved
- * across Discord's OAuth hop in the common case) with the window name as a
- * fallback, and a sessionStorage flag to positively exclude a tab that
- * redirected *itself* — so a main tab is never closed out from under the user.
+ * When this page load is our OAuth popup returning with a webhook in the fragment,
+ * keep it from booting the whole app: broadcast the result (a fast path for the
+ * opener) but DON'T clear the fragment — the main window reads it off this popup's
+ * location ({@link watchWebhookPopup}) and closes us. Returns true when handled
+ * (the entry point then skips boot). A self-redirected main tab (blocked-popup
+ * fallback) is positively excluded so it's never mistaken for a popup. Call once,
+ * before React mounts.
  */
 export function relayWebhookPopupIfApplicable(): boolean {
-  if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return false;
+  if (typeof window === "undefined") return false;
   if (!hasIncomingWebhook()) return false;
 
-  // A tab that redirected itself (blocked-popup fallback) owns its return — even
-  // if it happens to have an opener. Consume the flag and let the app boot.
+  // A tab that redirected itself owns its return — even if it has an opener.
   let selfRedirected = false;
   try {
     selfRedirected = sessionStorage.getItem(WEBHOOK_SELF_REDIRECT_KEY) != null;
     if (selfRedirected) sessionStorage.removeItem(WEBHOOK_SELF_REDIRECT_KEY);
   } catch {
-    // sessionStorage blocked — fall through; the signals below still gate us.
+    // sessionStorage blocked — fall through; the opener check below still gates us.
   }
   if (selfRedirected) return false;
 
@@ -233,24 +301,22 @@ export function relayWebhookPopupIfApplicable(): boolean {
     (!!window.opener && window.opener !== window) || window.name === WEBHOOK_POPUP_NAME;
   if (!isPopup) return false;
 
-  const result = consumeIncomingWebhook();
-  if (!result) return false;
-  try {
-    const channel = new BroadcastChannel(WEBHOOK_POPUP_NAME);
-    channel.postMessage(result);
-    // Give the broadcast a beat to flush to the opener before we tear down.
-    setTimeout(() => {
-      channel.close();
-      window.close();
-    }, 60);
-  } catch {
-    window.close();
-  }
-  window.name = ""; // don't leave the sentinel on a window that might be reused
-  // Self-close is occasionally denied; leave a hint rather than a blank page.
+  // Best-effort fast delivery; the main window's poll is the reliable path, so we
+  // deliberately do NOT clear the fragment here.
+  const result = parseWebhookHash(window.location.hash);
+  if (result) broadcastWebhookResult(result);
+  window.name = "";
   if (document.body) {
     document.body.textContent = "Webhook created — you can close this window.";
   }
+  // Last resort: close ourselves if the opener never gets to it.
+  window.setTimeout(() => {
+    try {
+      window.close();
+    } catch {
+      /* ignore */
+    }
+  }, 4000);
   return true;
 }
 

@@ -137,6 +137,7 @@ import {
   oauthCallbackUrl,
   openWebhookPopup,
   redirectToWebhookOAuth,
+  watchWebhookPopup,
   webhookCreateUrl,
   type IncomingWebhook,
 } from "@/core/guild/config";
@@ -1783,8 +1784,12 @@ function CreateWebhookOptions() {
                 setStarting(true);
                 createCustomBotWebhook(guildId, bot.application_id)
                   .then((url) => {
-                    if (popup) navigateWebhookPopup(popup, url);
-                    else redirectToWebhookOAuth(url);
+                    if (popup) {
+                      navigateWebhookPopup(popup, url);
+                      watchWebhookPopup(popup);
+                    } else {
+                      redirectToWebhookOAuth(url);
+                    }
                     setStarting(false);
                   })
                   .catch((e) => {
@@ -1819,8 +1824,12 @@ function CreateWebhookOptions() {
           // only a blocked popup falls back to a full-page redirect.
           const url = webhookCreateUrl(useGuildStore.getState().guildId);
           const popup = openWebhookPopup();
-          if (popup) navigateWebhookPopup(popup, url);
-          else redirectToWebhookOAuth(url);
+          if (popup) {
+            navigateWebhookPopup(popup, url);
+            watchWebhookPopup(popup);
+          } else {
+            redirectToWebhookOAuth(url);
+          }
         }}
       >
         <span className={styles.createCardIcon} aria-hidden>

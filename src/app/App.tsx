@@ -310,14 +310,18 @@ export function App() {
   };
 
   // Apply a webhook handed back by the `webhook.incoming` flow — whether from the
-  // fragment on a full-page return or a popup's BroadcastChannel — by opening the
-  // Send panel prefilled with it. An `error` marker means the user backed out or
+  // fragment on a full-page return or a popup (which can arrive twice: the popup's
+  // own broadcast and the main window's poll re-broadcast). Dedupe successes by
+  // URL so it only opens once; an `error` marker means the user backed out or
   // Discord returned nothing, so just say so.
+  const handledWebhookRef = useRef("");
   const handleIncomingWebhook = (result: IncomingWebhookResult) => {
     if ("error" in result) {
       pushToast("No webhook was created. You can try again or paste a URL.", "info");
       return;
     }
+    if (handledWebhookRef.current === result.url) return;
+    handledWebhookRef.current = result.url;
     setIncomingWebhook(result);
     openShareDialog("send");
   };
