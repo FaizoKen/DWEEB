@@ -34,7 +34,7 @@ import {
   type WebhookEdit,
 } from "@/core/guild/api";
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
-import { botInviteUrl } from "@/core/guild/config";
+import { botInviteUrl, navigateWebhookPopup, openWebhookPopup } from "@/core/guild/config";
 import { useAuthStore } from "@/core/auth/authStore";
 import type { GuildChannel } from "@/core/guild/types";
 import { Button } from "@/ui/Button";
@@ -421,7 +421,10 @@ export function GuildWebhookPicker({
   // The channel-first action: hand back a webhook for this channel under the
   // chosen identity. Reuse one if it exists; otherwise DWEEB mints one silently
   // (no permission step), while a custom bot routes through Discord's OAuth
-  // webhook flow — which picks the channel itself — so we redirect the page.
+  // webhook flow — which picks the channel itself. That runs in a popup so the
+  // in-progress message survives; its result returns through the app's webhook
+  // handler (App → Send panel), the same path as DWEEB's own OAuth flow. Only a
+  // blocked popup falls back to navigating the page away.
   const onPickChannel = async (channelId: string) => {
     setActionError(null);
     const existing = reusableInChannel(channelId, identity);
@@ -432,8 +435,18 @@ export function GuildWebhookPicker({
     setResolvingChannel(channelId);
     try {
       if (identity.kind === "bot") {
-        const url = await createCustomBotWebhook(connectedId, identity.applicationId);
-        window.location.assign(url);
+        // Open the popup synchronously (still inside the click) so the blocker
+        // doesn't catch it once we await the proxy for the authorize URL.
+        const popup = openWebhookPopup();
+        let url: string;
+        try {
+          url = await createCustomBotWebhook(connectedId, identity.applicationId);
+        } catch (e) {
+          popup?.close();
+          throw e;
+        }
+        if (popup) navigateWebhookPopup(popup, url);
+        else window.location.assign(url);
         return;
       }
       const created = await createGuildWebhook(connectedId, channelId, AUTO_WEBHOOK_NAME);

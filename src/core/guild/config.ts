@@ -125,6 +125,103 @@ export function consumeIncomingWebhook(): IncomingWebhookResult | null {
   return { url: raw, channelName, guildName };
 }
 
+/* ── `webhook.incoming` in a popup (so the builder isn't lost) ─────────────── */
+
+// The OAuth webhook-create flow (`webhookCreateUrl` / a custom bot's authorize
+// URL) historically replaced the whole page, throwing away the message the user
+// was building until a reload pulled the result out of the fragment. Running it
+// in a popup keeps the builder on screen: the popup lands back on this origin,
+// hands the created webhook to the main window over a same-origin
+// BroadcastChannel, and closes — the main window applies it exactly like the
+// fragment return. Browsers that block the popup (or lack BroadcastChannel) fall
+// back to the full-page redirect, so the flow always completes.
+
+/** Both the BroadcastChannel name and the popup's `window.name`. The name is how
+ *  the returning page recognises itself as our popup — it's set when we open the
+ *  window and survives the cross-origin Discord→proxy hop even where COOP would
+ *  sever `window.opener`, and we never give the main window this name, so it's
+ *  also what stops a main-window redirect return from being mistaken for one. */
+const WEBHOOK_POPUP_NAME = "dweeb_webhook";
+
+/** True when a popup-based webhook flow is viable here — needs a real window and
+ *  BroadcastChannel (the result transport). When false, callers do a full-page
+ *  redirect instead. */
+function canPopupWebhook(): boolean {
+  return typeof window !== "undefined" && typeof BroadcastChannel !== "undefined";
+}
+
+/**
+ * Open a blank, centered popup for the webhook OAuth flow — synchronously, so it
+ * isn't caught by the popup blocker (the OAuth URL often isn't known until after
+ * an `await`, which would break the user-gesture if we opened then). Navigate it
+ * with {@link navigateWebhookPopup} once the URL is ready. Returns `null` when
+ * unsupported or blocked, so the caller falls back to a full-page redirect.
+ */
+export function openWebhookPopup(): Window | null {
+  if (!canPopupWebhook()) return null;
+  const w = 520;
+  const h = 720;
+  const baseLeft = window.screenLeft ?? window.screenX ?? 0;
+  const baseTop = window.screenTop ?? window.screenY ?? 0;
+  const vw = window.innerWidth || document.documentElement.clientWidth || w;
+  const vh = window.innerHeight || document.documentElement.clientHeight || h;
+  const left = baseLeft + Math.max(0, (vw - w) / 2);
+  const top = baseTop + Math.max(0, (vh - h) / 2);
+  const popup = window.open(
+    "about:blank",
+    WEBHOOK_POPUP_NAME,
+    `popup=yes,width=${w},height=${h},left=${left},top=${top}`,
+  );
+  return popup ?? null;
+}
+
+/** Point an already-open popup (from {@link openWebhookPopup}) at the OAuth URL. */
+export function navigateWebhookPopup(popup: Window, url: string): void {
+  popup.location.href = url;
+  popup.focus?.();
+}
+
+/**
+ * When this page load is our OAuth popup returning with a freshly-created webhook
+ * in the fragment, broadcast that result to the main window and close — instead
+ * of booting the whole app inside the popup. Returns true when it handled (and is
+ * closing) the popup, so the entry point skips the normal boot. Recognised by the
+ * window name we set at open time, so a main-window redirect return (which keeps
+ * its own name) is never mistaken for a popup. Call once, before React mounts.
+ */
+export function relayWebhookPopupIfApplicable(): boolean {
+  if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return false;
+  if (window.name !== WEBHOOK_POPUP_NAME) return false;
+  if (!hasIncomingWebhook()) return false;
+  const result = consumeIncomingWebhook();
+  if (!result) return false;
+  try {
+    const channel = new BroadcastChannel(WEBHOOK_POPUP_NAME);
+    channel.postMessage(result);
+    channel.close();
+  } catch {
+    // Channel unavailable — nothing to deliver on; just close below.
+  }
+  window.name = ""; // don't leave the sentinel on a window that might be reused
+  window.close();
+  // Self-close is occasionally denied; leave a hint rather than a blank page.
+  if (document.body) {
+    document.body.textContent = "Webhook created — you can close this window.";
+  }
+  return true;
+}
+
+/**
+ * Subscribe to webhook results posted back from the OAuth popup. Returns an
+ * unsubscribe function. Same-origin by construction (BroadcastChannel).
+ */
+export function onWebhookPopupResult(handler: (result: IncomingWebhookResult) => void): () => void {
+  if (typeof BroadcastChannel === "undefined") return () => {};
+  const channel = new BroadcastChannel(WEBHOOK_POPUP_NAME);
+  channel.onmessage = (e: MessageEvent) => handler(e.data as IncomingWebhookResult);
+  return () => channel.close();
+}
+
 /**
  * Permission bits the shared DWEEB bot must request on EVERY invite URL — both
  * here and in each plugin that adds the same bot (e.g. self-role).

@@ -133,7 +133,9 @@ import { cn } from "@/lib/cn";
 import {
   DISCORD_CLIENT_ID,
   isProxyConfigured,
+  navigateWebhookPopup,
   oauthCallbackUrl,
+  openWebhookPopup,
   webhookCreateUrl,
   type IncomingWebhook,
 } from "@/core/guild/config";
@@ -1096,12 +1098,20 @@ export function SendPanel({
   // its name/owner/destination, then remember it — the ownership banners, confirm
   // dialog, and "already verified" send path all read those from history by id,
   // so no extra GET happens at send time.
-  const initialVerifiedRef = useRef(false);
+  // Tracks which incoming URL has been applied, so a *new* one (the popup flow
+  // returns into an already-mounted panel) is picked up, but the same one isn't
+  // re-applied on every render.
+  const appliedWebhookRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!initialWebhook || initialVerifiedRef.current) return;
+    if (!initialWebhook) return;
     const parsed = parseWebhookUrl(initialWebhook.url);
     if (!parsed) return;
-    initialVerifiedRef.current = true;
+    if (appliedWebhookRef.current === parsed.url) return;
+    appliedWebhookRef.current = parsed.url;
+    // Fill the host field. On a full-page return this matches the value `url` was
+    // seeded with at mount (a no-op); on the popup return it's what actually puts
+    // the freshly-created webhook into the already-open panel.
+    setUrl(parsed.url);
     // Save the destination names right away (resolved server-side, present even
     // when signed out) so the recents entry is labelled even if the verify GET
     // below is slow or fails.
@@ -1764,13 +1774,20 @@ function CreateWebhookOptions() {
               className={styles.createCard}
               disabled={starting}
               onClick={() => {
+                // Open the popup synchronously (still inside the click) so the
+                // blocker doesn't catch it once we await the authorize URL. The
+                // in-progress message survives; only a blocked popup falls back to
+                // leaving the page. Either way Discord's channel picker takes over.
+                const popup = openWebhookPopup();
                 setStarting(true);
                 createCustomBotWebhook(guildId, bot.application_id)
                   .then((url) => {
-                    // Leaving the page; Discord's channel picker takes over.
-                    window.location.assign(url);
+                    if (popup) navigateWebhookPopup(popup, url);
+                    else window.location.assign(url);
+                    setStarting(false);
                   })
                   .catch((e) => {
+                    popup?.close();
                     setStarting(false);
                     pushToast(e instanceof Error ? e.message : String(e), "error");
                   });
@@ -1796,9 +1813,13 @@ function CreateWebhookOptions() {
         type="button"
         className={styles.createCard}
         onClick={() => {
-          // Pre-select the server the builder is connected to, if any, so
-          // the webhook lands where the user is already working.
-          window.location.href = webhookCreateUrl(useGuildStore.getState().guildId);
+          // Pre-select the server the builder is connected to, if any, so the
+          // webhook lands where the user is already working. Run it in a popup;
+          // only a blocked popup falls back to a full-page redirect.
+          const url = webhookCreateUrl(useGuildStore.getState().guildId);
+          const popup = openWebhookPopup();
+          if (popup) navigateWebhookPopup(popup, url);
+          else window.location.href = url;
         }}
       >
         <span className={styles.createCardIcon} aria-hidden>

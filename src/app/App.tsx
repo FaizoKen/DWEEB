@@ -59,7 +59,9 @@ import { UpdatePrompt } from "./UpdatePrompt";
 import {
   consumeIncomingWebhook,
   hasIncomingWebhook,
+  onWebhookPopupResult,
   type IncomingWebhook,
+  type IncomingWebhookResult,
 } from "@/core/guild/config";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { shouldAutoOpenGallery, markGalleryAutoOpened } from "@/features/templates/galleryAutoOpen";
@@ -307,21 +309,31 @@ export function App() {
     setShareOpen(true);
   };
 
-  // Returning from Discord's `webhook.incoming` flow: the new webhook's URL is in
-  // the fragment. Pull it out (clears it from the address bar), then open the
+  // Apply a webhook handed back by the `webhook.incoming` flow — whether from the
+  // fragment on a full-page return or a popup's BroadcastChannel — by opening the
   // Send panel prefilled with it. An `error` marker means the user backed out or
-  // Discord returned nothing — just say so. Runs once on load.
-  useEffect(() => {
-    const result = consumeIncomingWebhook();
-    if (!result) return;
+  // Discord returned nothing, so just say so.
+  const handleIncomingWebhook = (result: IncomingWebhookResult) => {
     if ("error" in result) {
       pushToast("No webhook was created. You can try again or paste a URL.", "info");
       return;
     }
     setIncomingWebhook(result);
     openShareDialog("send");
+  };
+
+  // Full-page return: the new webhook's URL is in the fragment. Pull it out
+  // (clears it from the address bar) and apply it. Runs once on load.
+  useEffect(() => {
+    const result = consumeIncomingWebhook();
+    if (result) handleIncomingWebhook(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Popup return: the flow ran in a popup (so the builder stayed put) and posted
+  // its result back over a same-origin channel. Apply it the same way.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => onWebhookPopupResult(handleIncomingWebhook), []);
 
   // Landing screen: auto-open the Template Gallery when it's actually useful —
   // a first visit, or a fresh session where the user isn't mid-edit — instead of
