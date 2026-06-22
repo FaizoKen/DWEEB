@@ -98,6 +98,7 @@ import {
   sendToWebhook,
   updateWebhookMessage,
   useCanManageGuildWebhooks,
+  useGuildWebhooksStore,
   verifyWebhook,
   webhookAvatarHash,
   webhookChannelId,
@@ -1128,17 +1129,37 @@ export function SendPanel({
       if (!result.ok) return; // a bad/expired URL just stays in the field, unsaved
       const remoteName = typeof result.webhook.name === "string" ? result.webhook.name : "";
       const owner = classifyWebhookOwner(result.webhook);
+      const webhookChannel = webhookChannelId(result.webhook);
+      const webhookGuild = webhookGuildId(result.webhook);
       rememberWebhook(parsed.url, {
         name: remoteName,
         ownerKind: owner.kind,
         applicationId: owner.applicationId ?? undefined,
         avatar: webhookAvatarHash(result.webhook),
-        channelId: webhookChannelId(result.webhook) ?? undefined,
-        guildId: webhookGuildId(result.webhook) ?? undefined,
+        channelId: webhookChannel ?? undefined,
+        guildId: webhookGuild ?? undefined,
         channelName: initialWebhook.channelName,
         guildName: initialWebhook.guildName,
       });
       setHistory(loadHistory());
+      // Reflect it in the channel-first picker right away: the OAuth create path
+      // (unlike DWEEB's silent REST create, which upserts the result) otherwise
+      // leaves the guild-webhook store untouched, so the channel keeps reading
+      // "create as …" until a manual refresh. Splice it in when it belongs to the
+      // currently-loaded guild.
+      if (webhookGuild && useGuildWebhooksStore.getState().guildId === webhookGuild) {
+        useGuildWebhooksStore.getState().upsertLocal({
+          id: parsed.id,
+          type: 1,
+          name: remoteName || null,
+          avatar: webhookAvatarHash(result.webhook),
+          channel_id: webhookChannel ?? null,
+          guild_id: webhookGuild,
+          application_id: owner.applicationId ?? null,
+          url: parsed.url,
+          creator: null,
+        });
+      }
       pushToast(
         remoteName
           ? `Webhook “${remoteName}” ready — review and send.`
