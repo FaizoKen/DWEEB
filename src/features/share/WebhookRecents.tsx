@@ -316,7 +316,12 @@ export function WebhookRecents({
   // collapsed "other servers" group; if none match, the primary list is empty
   // and every entry sits behind the toggle, so reaching one from elsewhere takes
   // a deliberate expand.
-  const hasGuild = connectedId !== "";
+  //
+  // Only split while signed in, though: the connected guild id is persisted, so a
+  // signed-out visitor can still carry a stale one that buries every saved
+  // webhook behind the toggle. With no live session to make that "current server"
+  // meaningful, show the whole list directly instead.
+  const hasGuild = authStatus === "authed" && connectedId !== "";
   const primary = hasGuild ? history.filter((e) => e.guildId === connectedId) : history;
   const others = hasGuild ? history.filter((e) => e.guildId !== connectedId) : [];
 
