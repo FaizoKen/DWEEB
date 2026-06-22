@@ -406,16 +406,18 @@ export function onWebhookPopupResult(handler: (result: IncomingWebhookResult) =>
 
   const deliver = (result: IncomingWebhookResult | null) => {
     if (!result) return;
-    if (!("error" in result)) {
-      if (result.url === lastUrl) return; // already delivered via another channel
-      lastUrl = result.url;
-    }
-    // Drop the handoff so no channel re-delivers and it can't haunt a later load.
+    // Drop the handoff FIRST — even for a duplicate — so a redundant write (e.g.
+    // the handle poll re-broadcasting after the channel already delivered) can't
+    // linger in localStorage and re-fire on a later load.
     try {
       localStorage.removeItem(WEBHOOK_RESULT_KEY);
       localStorage.removeItem(WEBHOOK_PENDING_KEY);
     } catch {
       /* ignore */
+    }
+    if (!("error" in result)) {
+      if (result.url === lastUrl) return; // already delivered via another channel
+      lastUrl = result.url;
     }
     handler(result);
   };
