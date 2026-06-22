@@ -3,6 +3,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
+  max-width: 400px;
   min-height: 40px;
   padding: 6px 10px 6px 14px;
   background: var(--discord-bg-tertiary);
