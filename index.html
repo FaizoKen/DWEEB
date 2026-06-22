@@ -25,19 +25,29 @@
     <link rel="dns-prefetch" href="https://www.google-analytics.com" />
     <script defer src="/gtag-init.js"></script>
 
+    <!-- The live preview renders Discord-hosted media (avatars, custom emoji,
+         uploaded images) straight from Discord's CDN. Warm DNS + TCP + TLS to
+         those hosts up front so the first preview images paint without a cold
+         handshake (LCP win). No `crossorigin` — plain <img> loads are not CORS
+         requests, so a credentialed preconnect is the one the browser reuses. -->
+    <link rel="dns-prefetch" href="https://cdn.discordapp.com" />
+    <link rel="preconnect" href="https://cdn.discordapp.com" />
+    <link rel="dns-prefetch" href="https://media.discordapp.net" />
+    <link rel="preconnect" href="https://media.discordapp.net" />
+
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#1e1f22" />
     <meta name="color-scheme" content="dark" />
 
-    <title>DWEEB — Discord Webhook Embed Builder</title>
+    <title>DWEEB — Visual Discord Webhook Builder for Components V2</title>
     <meta
       name="description"
-      content="Build, preview & send Discord webhook messages with Components V2 — containers, sections, buttons, select menus & media. Private by design: runs entirely in your browser, nothing uploaded to our servers. Free for noncommercial use, source-available & built for large communities and teams."
+      content="The visual Discord webhook & embed builder for Components V2 — design, preview, and send rich messages with containers, sections, buttons, select menus, and media, all in a pixel-accurate live Discord preview. Free, no JSON, no account; private by design (runs entirely in your browser, nothing uploaded). Source-available and built for large communities and teams."
     />
     <meta
       name="keywords"
-      content="DWEEB, DWEEB Discord, Discord webhook builder, Discord components builder, Discord message builder, Components V2 editor, Discord embed builder, webhook message editor, Discord webhook generator, Discord embed generator, free Discord webhook tool, send Discord webhook online, Discord webhook message maker, Discord components v2 builder, Discord webhook sender, Discord webhook editor online, private Discord webhook builder, secure Discord webhook tool, source-available Discord webhook builder, browser-based Discord embed builder, Discord webhook builder for large communities, Discord announcement builder, no-upload Discord message builder, Discord Components V2 builder for servers and teams"
+      content="Discord webhook builder, visual Discord webhook builder, best Discord webhook builder, Discord embed builder, Discord embed maker, Discord embed generator, Discord message builder, Components V2 builder, Discord Components V2 builder, Discord Components V2 editor, Discord webhook generator, send Discord webhook online, Discord webhook editor online, Discord webhook message maker, Discord button builder, Discord select menu builder, Discord media gallery message, Discord container & section builder, free Discord webhook tool, private Discord webhook builder, secure Discord webhook tool, source-available Discord webhook builder, browser-based Discord embed builder, no-upload Discord message builder, Discord announcement builder, Discord webhook builder for large communities and teams, DWEEB, DWEEB Discord"
     />
     <meta name="author" content="Faizo" />
     <meta name="publisher" content="Faizo" />
@@ -60,10 +70,10 @@
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="DWEEB" />
-    <meta property="og:title" content="DWEEB — Discord Webhook Embed Builder" />
+    <meta property="og:title" content="DWEEB — Visual Discord Webhook & Embed Builder (Components V2)" />
     <meta
       property="og:description"
-      content="Design Discord Components V2 messages with a pixel-accurate live preview — buttons, sections, media. Private by design: runs entirely in your browser, nothing uploaded to our servers. Free for noncommercial use, source-available, and built for large communities and teams."
+      content="The visual Discord webhook & embed builder for Components V2. Design, preview, and send rich messages — buttons, sections, select menus, media — in a pixel-accurate live preview. Free, private by design, no JSON or account. Built for large communities and teams."
     />
     <meta property="og:url" content="https://dweeb.faizo.net/" />
     <meta property="og:locale" content="en_US" />
@@ -82,10 +92,10 @@
     />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="DWEEB — Discord Webhook Embed Builder" />
+    <meta name="twitter:title" content="DWEEB — Visual Discord Webhook & Embed Builder (Components V2)" />
     <meta
       name="twitter:description"
-      content="Design Discord Components V2 messages with a pixel-accurate live preview — buttons, sections, media. Private by design: runs entirely in your browser, nothing uploaded to our servers. Free for noncommercial use, source-available, and built for large communities and teams."
+      content="The visual Discord webhook & embed builder for Components V2. Design, preview, and send rich messages — buttons, sections, select menus, media — in a pixel-accurate live preview. Free, private by design, no JSON or account. Built for large communities and teams."
     />
     <meta name="twitter:image" content="https://dweeb.faizo.net/og-image.png" />
     <meta
@@ -103,32 +113,33 @@
       {
         "@context": "https://schema.org",
         "@type": "WebApplication",
+        "@id": "https://dweeb.faizo.net/#webapp",
+        "isPartOf": { "@id": "https://dweeb.faizo.net/#website" },
         "name": "DWEEB",
         "alternateName": "Discord Webhook Embed Builder",
         "url": "https://dweeb.faizo.net/",
         "description": "Visually build, preview, and send Discord webhook messages using Components V2 — no JSON, no backend, no account. Private by design: everything runs in your browser and nothing is uploaded to our servers, so it's built for large communities and teams. Free for noncommercial use; source-available under the PolyForm Noncommercial License.",
         "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Discord Webhook & Components V2 Builder",
         "operatingSystem": "Web",
         "browserRequirements": "Requires JavaScript. Requires a modern browser.",
+        "softwareVersion": "0.9.0",
+        "datePublished": "2026-05-25",
+        "dateModified": "2026-06-23",
         "image": "https://dweeb.faizo.net/og-image.png",
+        "screenshot": {
+          "@type": "ImageObject",
+          "url": "https://dweeb.faizo.net/screenshot.png",
+          "width": 1920,
+          "height": 1080,
+          "caption": "Building a Discord Components V2 message in DWEEB with a pixel-accurate live preview"
+        },
         "inLanguage": "en",
         "isAccessibleForFree": true,
         "license": "https://github.com/FaizoKen/DWEEB/blob/main/LICENSE",
         "sameAs": ["https://github.com/FaizoKen/DWEEB"],
-        "author": {
-          "@type": "Organization",
-          "name": "Faizo",
-          "url": "https://faizo.net"
-        },
-        "publisher": {
-          "@type": "Organization",
-          "name": "Faizo",
-          "url": "https://faizo.net",
-          "logo": {
-            "@type": "ImageObject",
-            "url": "https://dweeb.faizo.net/icon-512.png"
-          }
-        },
+        "author": { "@id": "https://faizo.net/#organization" },
+        "publisher": { "@id": "https://faizo.net/#organization" },
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "featureList": [
           "Visual Components V2 editor with containers, sections, buttons and media",
@@ -228,6 +239,78 @@
               "@type": "Answer",
               "text": "DWEEB is source-available rather than OSI open source. The full source is on GitHub and DWEEB is free for noncommercial use under the PolyForm Noncommercial License 1.0.0 — personal, hobby, study, and nonprofit use are all fine. Commercial use is not permitted. You can read the code, file issues, or contribute at https://github.com/FaizoKen/DWEEB."
             }
+          }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "@id": "https://faizo.net/#organization",
+        "name": "Faizo",
+        "url": "https://faizo.net",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://dweeb.faizo.net/icon-512.png",
+          "width": 512,
+          "height": 512
+        },
+        "sameAs": [
+          "https://github.com/FaizoKen",
+          "https://github.com/FaizoKen/DWEEB",
+          "https://discord.gg/2wB7rHRDg2"
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "@id": "https://dweeb.faizo.net/#website",
+        "name": "DWEEB",
+        "alternateName": "Discord Webhook Embed Builder",
+        "url": "https://dweeb.faizo.net/",
+        "description": "The visual Discord webhook & embed builder for Components V2 — design, preview, and send rich messages in a pixel-accurate live preview, entirely in your browser.",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://faizo.net/#organization" }
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "HowTo",
+        "name": "How to build and send a Discord webhook message with Components V2",
+        "description": "Visually design a Discord Components V2 webhook message in DWEEB — add containers, sections, buttons, select menus and media, preview it live, then send it to your webhook. No JSON or account required.",
+        "image": "https://dweeb.faizo.net/og-image.png",
+        "totalTime": "PT2M",
+        "tool": [
+          { "@type": "HowToTool", "name": "A Discord webhook URL (Server Settings → Integrations → Webhooks)" }
+        ],
+        "step": [
+          {
+            "@type": "HowToStep",
+            "position": 1,
+            "name": "Open the builder",
+            "text": "Open DWEEB at dweeb.faizo.net. The editor loads instantly in your browser — no sign-up, no install. Start from a blank message or pick a template."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 2,
+            "name": "Add Components V2 blocks",
+            "text": "Add components — containers, sections, text displays, buttons, string / user / role / mentionable / channel select menus, thumbnails, media galleries, files and separators. DWEEB enforces Discord's limits as you build."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 3,
+            "name": "Style and preview",
+            "text": "Set colors, text, links and media, and watch the pixel-accurate live preview render exactly as Discord will show it."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 4,
+            "name": "Paste your webhook URL and send",
+            "text": "Paste a Discord webhook URL and click Send. The message posts straight from your browser to Discord. You can also Restore a message the webhook already sent and update it in place."
           }
         ]
       }

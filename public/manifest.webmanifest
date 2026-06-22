@@ -1,10 +1,14 @@
 {
+  "id": "/",
   "name": "DWEEB — Discord Webhook Embed Builder",
   "short_name": "DWEEB",
   "description": "DWEEB — visually build, preview, and send Discord webhook & embed messages using Components V2. Private by design: runs entirely in your browser, nothing uploaded. Free for noncommercial use, source-available, and built for large communities and teams.",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#1e1f22",
   "theme_color": "#1e1f22",
   "categories": ["developer", "productivity", "utilities"],
@@ -13,5 +17,14 @@
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Building a Discord Components V2 message in DWEEB with a pixel-accurate live preview"
+    }
   ]
 }

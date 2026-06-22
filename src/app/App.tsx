@@ -411,8 +411,8 @@ export function App() {
         data-ai-open={aiOpen ? "true" : "false"}
       >
         <h1 className="sr-only">
-          DWEEB — the Discord Webhook Embed Builder. Visually build, preview, and share Discord
-          webhook messages with Components V2.
+          DWEEB — the visual Discord webhook and embed builder. Build, preview, and send rich Discord
+          messages with Components V2: containers, sections, buttons, select menus, and media.
         </h1>
         <section
           className="app-shell__pane app-shell__pane--builder"
