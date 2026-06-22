@@ -40,12 +40,20 @@ export type MentionKind = "user" | "role" | "channel" | "everyone" | "here";
 /** Discord's built-in "guild navigation" mentions (`<id:type>`). */
 export type GuildNavType = "customize" | "browse" | "guide" | "linked-roles";
 
+/** One entry in a list, with its own inline content plus any nested sub-lists. */
+export interface ListItem {
+  /** Inline content after the bullet/number. */
+  content: InlineNode[];
+  /** Blocks indented under this item — sub-lists, matching Discord nesting. */
+  children: BlockNode[];
+}
+
 export type BlockNode =
   | { kind: "paragraph"; children: InlineNode[] }
   | { kind: "heading"; level: 1 | 2 | 3; children: InlineNode[] }
   | { kind: "subtext"; children: InlineNode[] }
   | { kind: "quote"; children: BlockNode[] }
-  | { kind: "list"; ordered: boolean; items: InlineNode[][] }
+  | { kind: "list"; ordered: boolean; start?: number; items: ListItem[] }
   | { kind: "codeblock"; lang: string | null; value: string };
 
 export interface MarkdownAst {
@@ -53,7 +61,13 @@ export interface MarkdownAst {
 }
 
 export function parseMarkdown(input: string): MarkdownAst {
-  const lines = input.replace(/\r\n?/g, "\n").split("\n");
+  // Normalize newlines and trim leading/trailing blank lines (Discord does the
+  // same) so a stray blank at either end doesn't render as an empty gap.
+  const lines = input
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "")
+    .split("\n");
   const blocks: BlockNode[] = [];
 
   let i = 0;
@@ -117,42 +131,21 @@ export function parseMarkdown(input: string): MarkdownAst {
       continue;
     }
 
-    // Lists
-    const ul = /^[-*]\s+(.*)$/.exec(line);
-    const ol = /^\d+\.\s+(.*)$/.exec(line);
-    if (ul || ol) {
-      const ordered = !!ol;
-      const items: InlineNode[][] = [];
-      while (i < lines.length) {
-        const m = ordered ? /^\d+\.\s+(.*)$/.exec(lines[i]!) : /^[-*]\s+(.*)$/.exec(lines[i]!);
-        if (!m) break;
-        items.push(parseInline(m[1]!));
-        i++;
-      }
-      blocks.push({ kind: "list", ordered, items });
+    // Lists (bullet or ordered), with indentation-based nesting.
+    if (matchListItem(line)) {
+      const { block, next } = parseList(lines, i);
+      blocks.push(block);
+      i = next;
       continue;
     }
 
-    // Blank line → paragraph break (collapsed by renderer).
-    if (line.trim() === "") {
-      i++;
-      continue;
-    }
-
-    // Paragraph: collect contiguous non-special lines, joined by hard breaks.
+    // Text run: collect contiguous lines up to the next structural line,
+    // *including* blank lines. Discord keeps blank lines as real vertical gaps
+    // rather than collapsing them, so we preserve them here (each newline
+    // becomes a hard break at render time).
     const para: string[] = [line];
     i++;
-    while (
-      i < lines.length &&
-      lines[i]!.trim() !== "" &&
-      !lines[i]!.startsWith("```") &&
-      !/^(#{1,3})\s+/.test(lines[i]!) &&
-      !/^-#\s+/.test(lines[i]!) &&
-      !lines[i]!.startsWith("> ") &&
-      !lines[i]!.startsWith(">>> ") &&
-      !/^[-*]\s+/.test(lines[i]!) &&
-      !/^\d+\.\s+/.test(lines[i]!)
-    ) {
+    while (i < lines.length && !isStructuralStart(lines[i]!)) {
       para.push(lines[i]!);
       i++;
     }
@@ -160,6 +153,82 @@ export function parseMarkdown(input: string): MarkdownAst {
   }
 
   return { blocks };
+}
+
+/** A line that begins its own block — paragraphs stop when they hit one. */
+function isStructuralStart(line: string): boolean {
+  return (
+    line.startsWith("```") ||
+    /^(#{1,3})\s+/.test(line) ||
+    /^-#\s+/.test(line) ||
+    line.startsWith("> ") ||
+    line.startsWith(">>> ") ||
+    matchListItem(line) !== null
+  );
+}
+
+interface ListLine {
+  /** Leading-space count — drives nesting depth. */
+  indent: number;
+  ordered: boolean;
+  /** Parsed number for ordered items (the first item sets the list's start). */
+  num?: number;
+  content: string;
+}
+
+/** Match a single list line (bullet `-`/`*` or ordered `N.`), allowing indent. */
+function matchListItem(line: string): ListLine | null {
+  const m = /^(\s*)(?:[-*]|(\d{1,9})\.)\s+(.*)$/.exec(line);
+  if (!m) return null;
+  return {
+    indent: m[1]!.length,
+    ordered: m[2] !== undefined,
+    num: m[2] !== undefined ? Number.parseInt(m[2]!, 10) : undefined,
+    content: m[3]!,
+  };
+}
+
+type ListBlock = Extract<BlockNode, { kind: "list" }>;
+
+/**
+ * Consume a run of consecutive list lines into a (possibly nested) list block.
+ * Nesting is driven purely by indentation: a deeper-indented item becomes a
+ * sub-list of the previous item, mirroring Discord. Each (sub-)list's `start`
+ * is taken from its first item's number.
+ */
+function parseList(lines: string[], start: number): { block: BlockNode; next: number } {
+  let i = start;
+  const stack: { indent: number; list: ListBlock }[] = [];
+  let root: ListBlock | null = null;
+
+  while (i < lines.length) {
+    const m = matchListItem(lines[i]!);
+    if (!m) break;
+    const item: ListItem = { content: parseInline(m.content), children: [] };
+
+    if (stack.length === 0) {
+      const list: ListBlock = { kind: "list", ordered: m.ordered, start: m.num, items: [item] };
+      stack.push({ indent: m.indent, list });
+      root = list;
+    } else {
+      // Pop out to the shallowest level still at least as deep as this item.
+      while (stack.length > 1 && m.indent < stack[stack.length - 1]!.indent) stack.pop();
+      const top = stack[stack.length - 1]!;
+      if (m.indent > top.indent) {
+        // Deeper → a new sub-list hanging off the previous item at this level.
+        const parentItem = top.list.items[top.list.items.length - 1]!;
+        const list: ListBlock = { kind: "list", ordered: m.ordered, start: m.num, items: [item] };
+        parentItem.children.push(list);
+        stack.push({ indent: m.indent, list });
+      } else {
+        // Same level → append to the current list.
+        top.list.items.push(item);
+      }
+    }
+    i++;
+  }
+
+  return { block: root ?? { kind: "list", ordered: false, items: [] }, next: i };
 }
 
 /**
@@ -182,6 +251,19 @@ export function parseInline(input: string): InlineNode[] {
 
   while (i < input.length) {
     const ch = input[i]!;
+
+    // Backslash escape: a backslash before a punctuation/symbol char emits that
+    // char literally and is itself consumed (so `\*` is a literal `*`, `\\` a
+    // literal `\`). Before a letter/digit/space the backslash stays literal,
+    // matching Discord.
+    if (ch === "\\" && i + 1 < input.length) {
+      const next = input[i + 1]!;
+      if (!/[0-9A-Za-z\s]/.test(next)) {
+        buf += next;
+        i += 2;
+        continue;
+      }
+    }
 
     // Hard line break
     if (ch === "\n") {
@@ -209,6 +291,35 @@ export function parseInline(input: string): InlineNode[] {
         flush();
         out.push({ kind: "spoiler", children: parseInline(input.slice(i + 2, end)) });
         i = end + 2;
+        continue;
+      }
+    }
+
+    // Triple emphasis: `***x***` → bold+italic, `___x___` → underline+italic.
+    // Matched before the double-delimiter rules so the extra marker isn't left
+    // dangling (which would corrupt the rest of the line). Discord nests italic
+    // on the outside (`<em><strong>` / `<em><u>`).
+    if (ch === "*" && input[i + 1] === "*" && input[i + 2] === "*") {
+      const end = input.indexOf("***", i + 3);
+      if (end > i + 2) {
+        flush();
+        out.push({
+          kind: "italic",
+          children: [{ kind: "bold", children: parseInline(input.slice(i + 3, end)) }],
+        });
+        i = end + 3;
+        continue;
+      }
+    }
+    if (ch === "_" && input[i + 1] === "_" && input[i + 2] === "_") {
+      const end = input.indexOf("___", i + 3);
+      if (end > i + 2) {
+        flush();
+        out.push({
+          kind: "italic",
+          children: [{ kind: "underline", children: parseInline(input.slice(i + 3, end)) }],
+        });
+        i = end + 3;
         continue;
       }
     }
@@ -368,6 +479,13 @@ function parseAngleToken(token: string): InlineNode | null {
       unix: Number.parseInt(m[1]!, 10),
       style: m[2] ?? "f",
     };
+  }
+
+  // Angle-bracketed link <https://example.com> — Discord renders the URL as a
+  // link (the brackets only suppress its embed). Kept last so the more specific
+  // tokens above win.
+  if (/^https?:\/\/\S+$/i.test(token)) {
+    return { kind: "link", href: token, children: [{ kind: "text", value: token }] };
   }
 
   return null;

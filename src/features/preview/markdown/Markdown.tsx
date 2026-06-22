@@ -77,23 +77,27 @@ function renderBlock(block: BlockNode, key: number): ReactNode {
           {renderBlocks(block.children)}
         </blockquote>
       );
-    case "list":
+    case "list": {
+      const items = block.items.map((item, j) => (
+        <li key={j}>
+          {renderInline(item.content)}
+          {item.children.length > 0 ? renderBlocks(item.children) : null}
+        </li>
+      ));
       if (block.ordered) {
+        // `start` mirrors Discord, which preserves the first item's number.
         return (
-          <ol key={key} className={styles.list}>
-            {block.items.map((item, j) => (
-              <li key={j}>{renderInline(item)}</li>
-            ))}
+          <ol key={key} className={styles.list} start={block.start}>
+            {items}
           </ol>
         );
       }
       return (
         <ul key={key} className={styles.list}>
-          {block.items.map((item, j) => (
-            <li key={j}>{renderInline(item)}</li>
-          ))}
+          {items}
         </ul>
       );
+    }
     case "codeblock":
       return (
         <pre key={key} className={styles.codeblock} data-lang={block.lang ?? ""}>

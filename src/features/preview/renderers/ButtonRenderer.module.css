@@ -6,7 +6,7 @@
   padding: 4px 14px;
   min-height: 32px;
   max-width: 100%;
-  border-radius: var(--discord-radius-sm);
+  border-radius: var(--discord-radius);
   font-size: 14px;
   font-weight: 500;
   font-family: inherit;

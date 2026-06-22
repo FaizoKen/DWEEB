@@ -12,13 +12,12 @@
 .gallery[data-count="2"] {
   grid-template-columns: 1fr 1fr;
 }
-/* 1.6fr left + two stacked 1fr rows. The 13/10 ratio is chosen so the right
-   column's two cells render square (1fr col ≈ row height); fixed rows keep the
-   left (spanning) image filling via object-fit cover with no leftover gap. */
+/* Discord's 3-image layout: a 2fr left hero spanning two rows beside two stacked
+   1fr cells, with an overall ~12/7 box (left ≈ 2× the right column's width). */
 .gallery[data-count="3"] {
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-columns: 2fr 1fr;
   grid-template-rows: 1fr 1fr;
-  aspect-ratio: 13 / 10;
+  aspect-ratio: 12 / 7;
 }
 .gallery[data-count="4"] {
   grid-template-columns: 1fr 1fr;
@@ -71,7 +70,29 @@
   outline-offset: -2px;
 }
 
+/* A lone image keeps its natural aspect (Discord never crops a single image),
+   capped so a huge or very tall one stays reasonable, and the gallery shrinks to
+   fit it instead of forcing a 16/10 box. */
+.gallery[data-count="1"] {
+  grid-template-columns: auto;
+  width: fit-content;
+  max-width: 100%;
+}
 .gallery[data-count="1"] .item {
+  aspect-ratio: auto;
+}
+.gallery[data-count="1"] .item img,
+.gallery[data-count="1"] .item video {
+  width: auto;
+  height: auto;
+  max-width: min(100%, 550px);
+  max-height: 350px;
+  object-fit: contain;
+}
+/* Keep the upload placeholder a sensible box when there's no image yet. */
+.gallery[data-count="1"] .placeholder {
+  width: 400px;
+  max-width: 100%;
   aspect-ratio: 16 / 10;
 }
 

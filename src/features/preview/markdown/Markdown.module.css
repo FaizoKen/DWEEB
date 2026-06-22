@@ -10,10 +10,17 @@
 .h1,
 .h2,
 .h3 {
-  margin: 8px 0 4px;
+  margin: 16px 0 8px;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.375;
   color: var(--discord-text-normal);
+}
+/* Discord doesn't push the very first block down — drop the leading margin so a
+   message that opens with a heading sits flush at the top. */
+.h1:first-child,
+.h2:first-child,
+.h3:first-child {
+  margin-top: 0;
 }
 .h1 {
   font-size: 24px;
@@ -49,7 +56,8 @@
 
 .subtext {
   margin: 0;
-  font-size: 12px;
+  /* Discord renders -# subtext at 0.875em (14px on a 16px body), muted. */
+  font-size: 14px;
   line-height: 1.375;
   color: var(--discord-text-muted);
   white-space: pre-wrap;
@@ -58,7 +66,8 @@
 
 .quote {
   margin: 4px 0;
-  padding-left: 12px;
+  /* Discord pads both sides (12px past the bar, 8px on the right). */
+  padding: 0 8px 0 12px;
   border-left: 4px solid var(--discord-bg-quote);
   color: var(--discord-text-normal);
 }
@@ -157,9 +166,10 @@
 }
 
 .timestamp {
-  background: var(--discord-bg-quote);
+  /* Discord highlights timestamps with a faint translucent fill at body size —
+     not the solid grey pill we had before. */
+  background: rgba(151, 151, 159, 0.16);
   color: var(--discord-text-normal);
   padding: 0 2px;
   border-radius: 3px;
-  font-size: 0.95em;
 }
