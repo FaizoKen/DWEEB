@@ -93,6 +93,10 @@ pub struct Config {
     /// supply a valid invite for the right app — they can't accidentally make it
     /// request a set that would strip another plugin's grant on re-invite.
     pub bot_invite_url: Option<String>,
+    /// How often (seconds) the temporary-role reaper wakes to take back expired
+    /// roles. Defaults to 30; clamped to a 5s floor. Lower it in dev to watch
+    /// auto-removal happen quickly.
+    pub reaper_interval_secs: u64,
 }
 
 impl Config {
@@ -108,7 +112,9 @@ impl Config {
             .to_string();
 
         let discord_public_key = env::var("DISCORD_PUBLIC_KEY")
-            .map_err(|_| "DISCORD_PUBLIC_KEY is required (your Discord app's public key)".to_string())?
+            .map_err(|_| {
+                "DISCORD_PUBLIC_KEY is required (your Discord app's public key)".to_string()
+            })?
             .trim()
             .to_string();
 
@@ -135,6 +141,11 @@ impl Config {
             .filter(|t| !t.is_empty())
             .map(|raw| normalize_invite_permissions(&raw));
 
+        let reaper_interval_secs = env::var("REAPER_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+
         Ok(Self {
             port,
             public_base_url,
@@ -143,6 +154,7 @@ impl Config {
             database_path,
             default_bot_token,
             bot_invite_url,
+            reaper_interval_secs,
         })
     }
 
@@ -183,17 +195,26 @@ mod tests {
         let url = reqwest::Url::parse(&out).unwrap();
         // client_id / scope preserved verbatim…
         assert_eq!(
-            url.query_pairs().find(|(k, _)| k == "client_id").map(|(_, v)| v.into_owned()),
+            url.query_pairs()
+                .find(|(k, _)| k == "client_id")
+                .map(|(_, v)| v.into_owned()),
             Some("123".to_string())
         );
         assert_eq!(
-            url.query_pairs().find(|(k, _)| k == "scope").map(|(_, v)| v.into_owned()),
+            url.query_pairs()
+                .find(|(k, _)| k == "scope")
+                .map(|(_, v)| v.into_owned()),
             Some("bot".to_string())
         );
         // …and the union is appended.
         assert_eq!(perms_of(&out).as_deref(), Some("805306384"));
         // Exactly one `permissions` param, never duplicated.
-        assert_eq!(url.query_pairs().filter(|(k, _)| k == "permissions").count(), 1);
+        assert_eq!(
+            url.query_pairs()
+                .filter(|(k, _)| k == "permissions")
+                .count(),
+            1
+        );
     }
 
     #[test]

@@ -30,22 +30,55 @@ Discord ─clicks─▶  POST /interactions  ──▶  plan add/remove  ──�
 
 ## How a member's click becomes a role change
 
-The decision is a pure function of four things — the menu's **managed** roles,
-the member's **current** roles, what they **requested** this click, and the
-**mode**:
+The behaviour is **two independent axes**, so the basic case stays a one-tap
+choice and power users get real flexibility:
+
+**Axis 1 — what a click does** (`mode`):
 
 | Mode | What happens | Good for |
 |---|---|---|
 | **Toggle** | Flip each requested role (get it, or lose it if you have it). | The default; grab-bag menus, on/off buttons. |
-| **Pick one (swap)** *(select only)* | Your managed roles become exactly your picks — the others from this menu are removed. | Colours, regions, pronouns. |
 | **Give only** | Only ever adds. | “Verify” / “I agree” / opt-in. |
 | **Take only** | Only ever removes. | Opt-out buttons. |
+
+**Axis 2 — how many they can hold** (`max`, select only):
+
+| `max` | Behaviour |
+|---|---|
+| *(empty)* | No limit — the classic grab-bag. |
+| **1** | **Pick one (swap)** — gaining a role evicts the others from this menu. Colours, regions, pronouns. |
+| **N ≥ 2** | **Cap** — an add past N is refused with a friendly “you can hold at most N — remove one first”; removes always go through. |
+
+`max = 1` subsumes the old `unique` mode (configs that used it migrate
+automatically on read). The decision itself is still one pure, exhaustively
+tested function (`plan_changes`).
 
 A **button** manages exactly one role. A **string select** manages 1–25; the
 member's picked option **values must be the role IDs**. You don't wire those by
 hand — saving the config writes them for you (see below). Either way the plugin
 only ever touches roles in the menu's managed set, so a crafted client can't
 smuggle in `@admin`.
+
+## More power, still optional
+
+Everything below lives behind an **Advanced options** disclosure in the config
+UI — defaults keep the basic flow a three-step affair (roles → behaviour →
+save).
+
+- **Per-role emoji & subtitles** *(select only)* — give each option an emoji
+  (standard or one of your server's custom emoji, fetched through the bot) and a
+  one-line subtitle. DWEEB wires them onto the locked option list.
+- **Who can use it** — gate the whole menu behind a role (any-of / all-of) and/or
+  a **minimum account age**. The check is pure over the interaction payload — no
+  extra Discord call — and a denied click gets a plain-language reason.
+- **Temporary roles** — auto-remove a granted role a set time later (1 minute to
+  1 year). A crash-safe SQLite **grant ledger** plus a background **reaper**
+  (`reaper.rs`) take the role back; the confirmation tells the member when it
+  expires (`<t:…:R>`).
+- **Audit log** — post “@member gained Red” to a Discord webhook on every change
+  (and on auto-expiry). Pick one of your saved webhooks or paste a URL; the URL
+  is SSRF-guarded to genuine Discord webhooks and `allowed_mentions` is emptied
+  so a log line can never ping.
 
 ## Component targets & the option-value contract
 
@@ -81,10 +114,13 @@ any message). See [the placeholder framework](../../docs/plugins.md#placeholders
 | Who can reconfigure an instance | The instance id is 128 bits of CSPRNG entropy, carried inside the Discord `custom_id` (not visible to normal users). Knowing it is the capability; there is no separate account system. |
 | Bot-token leakage | The bot token is never per-instance and never stored: it lives only in the server's `BOT_TOKEN` env, so the browser never receives it and the database holds no secret. |
 | SSRF | The token is only ever sent to `discord.com` (a fixed host) — there is no user-supplied URL to abuse. |
-| Privilege escalation | Only roles in the menu's managed set are ever touched; select values are intersected with that set. The bot can only assign roles **below** its own top role, enforced by Discord. |
-| Reply within Discord's 3s window | Role add/removes fire **concurrently** with a 2.5s client timeout; the reply is sent regardless and reports what (if anything) Discord refused. |
+| Privilege escalation | Only roles in the menu's managed set are ever touched; select values are intersected with that set. The bot can only assign roles **below** its own top role, enforced by Discord. The access gate re-derives the member's roles from the payload — never a client-supplied claim. |
+| SSRF | Role assignment only ever calls `discord.com` (a fixed host). The one user-supplied URL — the optional audit-log webhook — is pinned to genuine Discord webhook hosts/paths (`validate_webhook`), exactly like Modal Form. |
+| Audit-log safety | Posts set `allowed_mentions.parse = []`, so a log line can name roles/users without pinging. The webhook URL is a secret: stored server-side, **masked** (`log_webhook_set: bool`) out of every browser read. |
+| Reply within Discord's 3s window | Role add/removes fire **concurrently** with a 2.5s client timeout; the access gate and limit are pure (no I/O); the audit-log post is fired **detached**. The reply is sent regardless and reports what (if anything) Discord refused. |
 | Hierarchy mistakes | The most common self-role failure. The config picker flags every role the bot **can't** assign *before* you save, and a runtime refusal replies with a plain-language fix. |
-| Resource bounds | 1–25 roles, custom reply ≤ 500 chars, role names clamped. |
+| Temporary-role durability | The grant ledger is SQLite, so the reaper resumes cleanly after a restart. A removal that can never succeed (role gone / now above the bot) is dropped so it can't wedge the queue; a transient failure retries next tick. |
+| Resource bounds | 1–25 roles, ≤ 10 gate roles, account-age ≤ 366 days, expiry 1 min–1 year, custom reply ≤ 500 chars, subtitles ≤ 100 chars, names clamped. |
 
 ## The bot
 
@@ -160,7 +196,7 @@ the DWEEB production stack it's wired exactly like the other plugins — see
 | GET | `/registry.json` | DWEEB plugin registry (one plugin). CORS-open. |
 | GET | `/config.html` | The config iframe DWEEB embeds. |
 | GET | `/api/meta` | Whether a hosted bot exists + its invite URL. |
-| POST | `/api/connect` | Probe a guild with the shared bot → assignable roles for the picker. Stores nothing. |
+| POST | `/api/connect` | Probe a guild with the shared bot → assignable roles **and the server's custom emoji** for the pickers. Stores nothing. |
 | POST | `/api/instances` | Create an instance → `{ id }`. |
 | GET | `/api/instances/:id` | Read an instance. |
 | PUT | `/api/instances/:id` | Replace an instance. |
@@ -173,8 +209,9 @@ the DWEEB production stack it's wired exactly like the other plugins — see
 | [`src/main.rs`](src/main.rs) | Wiring: env, router, listen. |
 | [`src/config.rs`](src/config.rs) | Env parsing (incl. optional shared bot). |
 | [`src/store.rs`](src/store.rs) | SQLite store + config/mask types. |
-| [`src/discord.rs`](src/discord.rs) | Signature verify, interaction parsing, the pure role-diff (`plan_changes`), callbacks. |
-| [`src/rest.rs`](src/rest.rs) | Discord REST: list roles + hierarchy (config), add/remove role (clicks). |
-| [`src/validate.rs`](src/validate.rs) | Input validation. |
+| [`src/discord.rs`](src/discord.rs) | Signature verify, interaction parsing, the pure role-diff (`plan_changes`) + access gate (`check_access`), callbacks. |
+| [`src/rest.rs`](src/rest.rs) | Discord REST: list roles/emoji + hierarchy (config), add/remove role (clicks), audit-log webhook post. |
+| [`src/reaper.rs`](src/reaper.rs) | The background task that takes back expired temporary roles. |
+| [`src/validate.rs`](src/validate.rs) | Input validation + the audit-log webhook SSRF guard. |
 | [`src/routes.rs`](src/routes.rs) | HTTP handlers + the interaction flow. |
-| [`static/config.html`](static/config.html) | The config iframe (connect → roles → mode → wire-up → reply). |
+| [`static/config.html`](static/config.html) | The config iframe (connect → roles → behaviour → customize → advanced → reply). |

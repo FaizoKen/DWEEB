@@ -60,7 +60,7 @@
         font-weight: 700;
       }
       label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
-      input[type="text"], input[type="password"], select, textarea {
+      input[type="text"], input[type="password"], input[type="number"], select, textarea {
         width: 100%;
         padding: 8px 10px;
         background: var(--panel-2);
@@ -116,6 +116,36 @@
       details ol { margin: 8px 0 0; padding-left: 20px; }
       details li { margin: 4px 0; color: var(--muted); }
 
+      /* The "Advanced options" disclosure. */
+      details.adv {
+        margin-top: 18px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel-2);
+      }
+      details.adv > summary {
+        cursor: pointer;
+        padding: 11px 13px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        list-style: none;
+      }
+      details.adv > summary::-webkit-details-marker { display: none; }
+      details.adv > summary::before { content: "▸ "; color: var(--muted); }
+      details.adv[open] > summary::before { content: "▾ "; }
+      details.adv > summary .sub {
+        font-weight: 400;
+        color: var(--muted);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .adv-body { padding: 2px 13px 13px; }
+      .adv-block { padding: 12px 0; border-top: 1px solid var(--border); }
+      .adv-block:first-child { border-top: none; padding-top: 4px; }
+      .adv-title { font-weight: 600; font-size: 13px; }
+      .adv-desc { font-size: 12px; color: var(--muted); margin: 2px 0 8px; }
+
       /* Role list. */
       .roles { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 320px; overflow: auto; }
       .role {
@@ -129,7 +159,7 @@
         cursor: pointer;
       }
       .role:hover { border-color: var(--accent); }
-      .role input { flex: none; margin: 0; accent-color: var(--accent); }
+      .role input { flex: none; margin: 0; width: auto; accent-color: var(--accent); }
       .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
       .role .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .role .warn-tag { flex: none; font-size: 11px; color: var(--yellow); }
@@ -150,25 +180,69 @@
       }
       .mode:hover { border-color: var(--accent); }
       .mode.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); }
-      .mode input { margin: 2px 0 0; accent-color: var(--accent); flex: none; }
+      .mode input { margin: 2px 0 0; width: auto; accent-color: var(--accent); flex: none; }
       .mode .m-title { font-weight: 600; }
       .mode .m-desc { font-size: 12px; color: var(--muted); }
 
-      /* Value-mapping table (string select). */
-      .map { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-      .map-row {
+      /* Per-option editor rows (string select): emoji + role + description. */
+      .opts { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+      .optrow {
         display: flex;
         align-items: center;
         gap: 8px;
         font-size: 13px;
-        padding: 6px 8px;
+        padding: 7px 8px;
         border: 1px solid var(--border);
         border-radius: 6px;
         background: var(--panel-2);
+        flex-wrap: wrap;
       }
-      .map-row .m-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .map-row code { color: var(--accent); }
-      .map-row button { padding: 4px 8px; font-size: 12px; }
+      .optrow .o-name { flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .optrow .o-desc { flex-basis: 100%; }
+      .emoji-btn {
+        flex: none; width: 44px; height: 36px; padding: 0;
+        display: inline-grid; place-items: center;
+        font-size: 20px; line-height: 1;
+      }
+      .emoji-btn.muted { opacity: 0.5; }
+      .emoji-img { width: 22px; height: 22px; object-fit: contain; vertical-align: middle; }
+
+      /* Emoji picker popover (ported from the Quick Replies plugin). */
+      .emoji-pop {
+        position: absolute;
+        z-index: 50;
+        width: 260px;
+        max-height: 320px;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        padding: 8px;
+      }
+      .emoji-pop-search {
+        width: 100%; padding: 6px 8px; margin-bottom: 6px;
+        background: var(--panel-2); border: 1px solid var(--border);
+        border-radius: 6px; color: var(--text); font: inherit;
+      }
+      .emoji-pop-scroll { overflow: auto; }
+      .emoji-group-label {
+        font-size: 11px; color: var(--muted); text-transform: uppercase;
+        letter-spacing: 0.04em; margin: 8px 2px 4px;
+      }
+      .emoji-pop-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+      .emoji-cell {
+        width: 100%; aspect-ratio: 1; padding: 0; border: none; background: none;
+        display: grid; place-items: center; font-size: 18px; line-height: 1;
+        border-radius: 6px; cursor: pointer;
+      }
+      .emoji-cell:hover { background: var(--panel-2); }
+      .emoji-clear {
+        width: 100%; text-align: left; margin-bottom: 4px;
+        color: var(--muted); font-size: 12px;
+      }
+      .emoji-clear:hover { color: var(--danger); border-color: var(--danger); }
 
       .seg { display: flex; gap: 6px; margin-top: 8px; }
       .seg button { flex: 1; }
@@ -189,12 +263,7 @@
         <label class="lbl" for="guildId">Server ID</label>
         <input id="guildId" type="text" inputmode="numeric" autocomplete="off"
           placeholder="e.g. 123456789012345678" />
-        <div class="hint">
-          Turn on <b>Developer Mode</b> (Discord → Settings → Advanced), then
-          right-click your server icon → <b>Copy Server ID</b>.
-        </div>
       </div>
-
       <div class="bar" style="margin-top: 12px">
         <button id="connect" type="button" class="primary">Connect</button>
         <span class="grow"></span>
@@ -218,19 +287,93 @@
       <div id="modes" class="modes"></div>
     </div>
 
-    <!-- Step 4 — wire up the menu (string select only) ------------------------>
-    <div id="mapWrap" style="display: none">
-      <h2><span class="step-num">4</span> Your menu options</h2>
+    <!-- Customize the dropdown (string select only) --------------------------->
+    <div id="optWrap" style="display: none">
+      <h2>Customize the dropdown <span class="count">(optional)</span></h2>
       <div class="callout good">
-        ✓ DWEEB wires these onto your Select Menu for you — one option per role,
-        each one's <code>Value</code> locked to the role's ID. No copy-pasting,
-        and they can't be broken by accident. Just <b>Save</b>.
+        ✓ DWEEB wires one option per role onto your menu — each one's
+        <code>Value</code> locked to the role's ID, so it can't break. Add an
+        emoji or a subtitle below to make the menu look great.
       </div>
-      <div id="map" class="map"></div>
+      <div id="optList" class="opts"></div>
     </div>
 
-    <!-- Step 5 — reply -------------------------------------------------------->
-    <h2><span class="step-num" id="replyStepNum">4</span> Reply to the member</h2>
+    <!-- Advanced options ------------------------------------------------------>
+    <details class="adv" id="advanced">
+      <summary>Advanced options <span class="sub">— limits, access, auto-remove, logging</span></summary>
+      <div class="adv-body">
+        <!-- Max roles (select only). -->
+        <div class="adv-block" id="maxBlock" style="display: none">
+          <div class="adv-title">Limit how many a member can hold</div>
+          <div class="adv-desc">
+            Leave empty for no limit. <b>1</b> turns this into a “pick one” menu —
+            choosing a role swaps out the previous one (great for colours,
+            regions, pronouns).
+          </div>
+          <input id="maxInput" type="number" min="1" step="1" placeholder="No limit"
+            style="max-width: 160px" />
+        </div>
+
+        <!-- Requirement gate. -->
+        <div class="adv-block" id="reqBlock">
+          <div class="adv-title">Who can use this menu</div>
+          <div class="adv-desc">
+            By default anyone can. Optionally require a role and/or a minimum
+            account age — handy for gating colour roles behind “Member”, or
+            blocking brand-new accounts.
+          </div>
+          <div id="reqIntro"></div>
+          <div id="reqRoleSection">
+            <input id="reqSearch" class="role-search" type="text" placeholder="Search roles to require…" />
+            <div id="reqRoles" class="roles" style="max-height: 180px"></div>
+            <div class="seg" id="reqModeSeg">
+              <button type="button" data-req="any" class="sel">Any of them</button>
+              <button type="button" data-req="all">All of them</button>
+            </div>
+          </div>
+          <label class="lbl" for="reqAge">Minimum account age (days) — 0 for none</label>
+          <input id="reqAge" type="number" min="0" max="366" step="1" value="0" style="max-width: 160px" />
+        </div>
+
+        <!-- Temporary roles. -->
+        <div class="adv-block" id="expiryBlock">
+          <div class="adv-title">Auto-remove after a while (temporary roles)</div>
+          <div class="adv-desc">
+            Take the role back automatically a set time after it's granted —
+            perfect for event access or 24-hour pings. Off by default.
+          </div>
+          <div class="row2">
+            <select id="expirySel">
+              <option value="0">Off — keep until removed</option>
+              <option value="3600">1 hour</option>
+              <option value="21600">6 hours</option>
+              <option value="86400">24 hours</option>
+              <option value="259200">3 days</option>
+              <option value="604800">7 days</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <input id="expiryCustom" type="number" min="1" step="1" placeholder="Minutes"
+              style="display: none" />
+          </div>
+        </div>
+
+        <!-- Audit log. -->
+        <div class="adv-block" id="logBlock">
+          <div class="adv-title">Log changes to a channel</div>
+          <div class="adv-desc">
+            Post a private line (“@member gained Red”) to a Discord webhook every
+            time someone uses this menu. Pick one of your saved webhooks or paste
+            a webhook URL.
+          </div>
+          <select id="logSel"></select>
+          <input id="logUrl" type="text" autocomplete="off" placeholder="https://discord.com/api/webhooks/…"
+            style="display: none; margin-top: 8px" />
+        </div>
+      </div>
+    </details>
+
+    <!-- Step 4 — reply -------------------------------------------------------->
+    <h2><span class="step-num">4</span> Reply to the member</h2>
     <div id="replySection" class="locked">
       <div class="seg" id="replySeg">
         <button type="button" data-rmode="summary" class="sel">Automatic summary</button>
@@ -282,13 +425,27 @@
       let rolesLive = false; // true once `roles` holds the live guild list, not just cached saves
       let guildName = "";
       let roles = []; // [{ id, name, color, position, managed, assignable }]
+      let guildEmojis = []; // [{ id, name, animated }] — for the option emoji picker
       let selected = new Set(); // selected role ids
-      let mode = "toggle";
+      let mode = "toggle"; // toggle | add | remove
       let replyMode = "summary";
+
+      // Per-option decorations (string select), keyed by role id.
+      const optMeta = new Map(); // id -> { emoji, emojiId, emojiAnimated, description }
+
+      // Requirement gate.
+      const reqRoles = new Set(); // required role ids
+      const reqNameCache = new Map(); // id -> { name, color } so saved gates render
+      let reqAll = false;
+
+      // Audit-log webhook.
+      let savedWebhooks = []; // [{ id, name, url, channelName?, guildName? }]
+      let logWebhookSet = false; // a webhook is already stored (reconfigure)
 
       const $ = (id) => document.getElementById(id);
       const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
       const isSelect = () => target === "string_select";
+      const addsRoles = () => mode === "toggle" || mode === "add";
       const hexColor = (n) =>
         n && n > 0 ? "#" + n.toString(16).padStart(6, "0") : "#99aab5";
       const escapeHtml = (s) =>
@@ -304,11 +461,6 @@
       const autoMode = () => defaultBot && autoGuild;
 
       // The bot-invite link, pre-targeted at this menu's server when we know it.
-      // Discord's OAuth screen reads `guild_id` to pre-select that server in the
-      // picker — so the admin lands on the exact server this menu assigns roles
-      // in (the bug case: re-authorize *that* server to grant Manage Roles)
-      // without losing the freedom to pick a different one. Falls back to the
-      // bare invite URL when no server is known.
       function botInviteUrl() {
         if (!inviteUrl) return null;
         const gid = ($("guildId").value || "").trim();
@@ -326,8 +478,6 @@
       function renderBotIntro() {
         const intro = $("botIntro");
 
-        // No shared bot configured on this deployment — an operator must set
-        // BOT_TOKEN. Self Role can't assign roles without it.
         if (!defaultBot) {
           $("manualConnect").style.display = "none";
           $("step1Title").textContent = "Bot";
@@ -336,18 +486,12 @@
           return;
         }
 
-        // Fully-automatic: DWEEB told us the server — just a live status line.
         if (autoMode()) {
           $("manualConnect").style.display = "none";
           $("step1Title").textContent = "Bot & server";
-          // The server this menu targets (where roles get assigned). When
-          // reconfiguring that's the saved server; otherwise it's the host's.
           const targetName = guildName || hostGuildName;
           const where = targetName ? `<b>${escapeHtml(targetName)}</b>` : "this server";
           if (autoState === "ok" && guildMismatch) {
-            // Saved server ≠ the builder's current server. Its roles don't exist
-            // here, so editing is locked: offer a one-click retarget, or point
-            // the admin back to DWEEB to reopen this with the original selected.
             const built = guildName ? `<b>${escapeHtml(guildName)}</b>` : "a different server";
             const here = hostGuildName
               ? `<b>${escapeHtml(hostGuildName)}</b>`
@@ -375,12 +519,6 @@
           return;
         }
 
-        // Shared bot exists, but DWEEB didn't hand us a server. Sign-in is now
-        // required in the builder, so this only happens when no server is
-        // connected yet — and a raw Server ID typed here is exactly what causes
-        // "this menu was set up for a different server" later. So we don't ask
-        // for one: point the admin back to the builder to connect their server,
-        // and this menu will target it automatically.
         $("manualConnect").style.display = "none";
         $("step1Title").textContent = "Bot & server";
         const invite = botInviteUrl();
@@ -388,11 +526,6 @@
           ? ` Haven't added the bot? <a href="${invite}" target="_blank" rel="noopener">Add the DWEEB bot</a>.`
           : "";
         if (instanceId) {
-          // Reconfiguring, but DWEEB handed us no current server (logged out,
-          // or none picked). Same locked treatment as a different-server menu:
-          // we can't confirm this menu still targets the right place, so prompt
-          // to connect rather than silently editing it. The saved roles show
-          // read-only below.
           const built = guildName ? `<b>${escapeHtml(guildName)}</b>` : "another server";
           intro.innerHTML = `<div class="callout warn">⚠ This menu assigns roles in ${built}. Connect your server in DWEEB first — sign in and pick the server you're building for, then reopen this menu to edit it.${addBot}</div>`;
         } else {
@@ -409,11 +542,9 @@
         const guildId = $("guildId").value.trim();
         if (!isSnowflake(guildId)) {
           if (auto) return autoFail("No server detected — open this from a connected server.");
-          return connFail("Enter your Server ID (17–20 digits — see the hint above).");
+          return connFail("Enter your Server ID (17–20 digits).");
         }
 
-        // Skip the "Connecting…" flash when we already show a good status and
-        // are just refreshing the live role list (the reconfigure path).
         if (auto && autoState !== "ok") {
           autoState = "connecting";
           autoError = "";
@@ -421,7 +552,6 @@
         }
         setConnecting(true);
         try {
-          // The service always probes with the shared DWEEB bot.
           const res = await fetch("/api/connect", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -435,6 +565,7 @@
           }
           guildName = data.guild_name || hostGuildName || "your server";
           roles = Array.isArray(data.roles) ? data.roles : [];
+          guildEmojis = Array.isArray(data.emojis) ? data.emojis : [];
           // Keep only still-existing selections.
           const ids = new Set(roles.map((r) => r.id));
           selected = new Set([...selected].filter((id) => ids.has(id)));
@@ -442,7 +573,6 @@
           rolesLive = true; // we now hold the live guild role list
           $("connStatus").textContent = `✓ ${guildName} · ${data.bot_name || "DWEEB bot"}`;
           if (!data.bot_can_manage_roles) {
-            // Connected, but the bot lacks the one permission it needs.
             if (auto) {
               autoFail(
                 "The DWEEB bot is in your server but is missing the Manage Roles permission. Give its role Manage Roles in Server Settings → Roles, then try again.",
@@ -458,7 +588,8 @@
           }
           unlock();
           renderRoles();
-          renderMap();
+          renderOptions();
+          renderReqRoles();
           setConnecting(false);
         } catch (e) {
           setConnecting(false);
@@ -467,7 +598,6 @@
         }
       }
 
-      // Surface a failure on the automatic path through the step-1 status line.
       function autoFail(m) {
         autoState = "error";
         autoError = m || "";
@@ -486,8 +616,20 @@
       function unlock() {
         for (const id of ["roleSection", "modeSection", "replySection"])
           $(id).classList.remove("locked");
-        $("mapWrap").style.display = isSelect() ? "" : "none";
-        $("replyStepNum").textContent = isSelect() ? "5" : "4";
+        applyTargetVisibility();
+      }
+
+      // Show/hide the select-only pieces and the behaviour-dependent advanced
+      // blocks. Safe to call any time.
+      function applyTargetVisibility() {
+        $("optWrap").style.display = isSelect() && connected ? "" : "none";
+        $("maxBlock").style.display = isSelect() ? "" : "none";
+        // Limits & temporary roles only make sense when the menu can *add*.
+        $("maxBlock").style.opacity = addsRoles() ? "1" : "0.5";
+        $("maxInput").disabled = !addsRoles();
+        $("expiryBlock").style.opacity = addsRoles() ? "1" : "0.5";
+        $("expirySel").disabled = !addsRoles();
+        $("expiryCustom").disabled = !addsRoles();
       }
 
       // ── Roles ───────────────────────────────────────────────────────────
@@ -512,7 +654,7 @@
             if (input.checked) selected.add(r.id);
             else selected.delete(r.id);
             updateRoleCount();
-            renderMap();
+            renderOptions();
             updateModes();
           });
           const dot = document.createElement("span");
@@ -549,72 +691,249 @@
           : "This button gives one role.";
       }
 
-      // ── Wired-options preview (string select only) ──────────────────────
-      // A read-only confirmation of the option list DWEEB will lock onto the
-      // menu on Save — label = role name, value = role ID. Nothing to copy.
-      function renderMap() {
+      // ── Per-option editor (string select only) ──────────────────────────
+      function ensureMeta(id) {
+        if (!optMeta.has(id))
+          optMeta.set(id, { emoji: "", emojiId: "", emojiAnimated: false, description: "" });
+        return optMeta.get(id);
+      }
+      function renderOptions() {
         if (!isSelect()) return;
-        const map = $("map");
-        map.innerHTML = "";
+        applyTargetVisibility();
+        const list = $("optList");
+        list.innerHTML = "";
         const chosen = roles.filter((r) => selected.has(r.id));
         if (!chosen.length) {
-          map.innerHTML = `<div class="hint">Pick some roles above to preview the options.</div>`;
+          list.innerHTML = `<div class="hint">Pick some roles above to customize them.</div>`;
           sendResize();
           return;
         }
         for (const r of chosen) {
+          const meta = ensureMeta(r.id);
           const row = document.createElement("div");
-          row.className = "map-row";
+          row.className = "optrow";
+
+          const emojiBtn = document.createElement("button");
+          emojiBtn.type = "button";
+          emojiBtn.className = "emoji-btn";
+          emojiBtn.title = "Pick an emoji";
+          paintEmojiButton(meta, emojiBtn);
+          emojiBtn.addEventListener("click", () => openEmojiPicker(meta, emojiBtn));
+
           const dot = document.createElement("span");
           dot.className = "dot";
           dot.style.background = hexColor(r.color);
           const name = document.createElement("span");
-          name.className = "m-name";
+          name.className = "o-name";
           name.textContent = r.name;
-          const code = document.createElement("code");
-          code.textContent = r.id;
-          row.append(dot, name, code);
-          map.appendChild(row);
+
+          const desc = document.createElement("input");
+          desc.type = "text";
+          desc.className = "o-desc";
+          desc.maxLength = 100;
+          desc.placeholder = "Dropdown subtitle (optional)";
+          desc.value = meta.description || "";
+          desc.addEventListener("input", () => { meta.description = desc.value; });
+
+          row.append(emojiBtn, dot, name, desc);
+          list.appendChild(row);
         }
         sendResize();
       }
 
       // The option list DWEEB locks onto the Select Menu on save: label = role
-      // name, value = the role ID (the contract the plugin matches clicks on).
+      // name, value = the role ID, plus the chosen emoji + subtitle.
       function buildOptions() {
         return roles
           .filter((r) => selected.has(r.id))
-          .map((r) => ({ label: (r.name || r.id).slice(0, 100), value: r.id }));
+          .map((r) => {
+            const m = optMeta.get(r.id) || {};
+            const o = { label: (r.name || r.id).slice(0, 100), value: r.id };
+            if (m.description && m.description.trim())
+              o.description = m.description.trim().slice(0, 100);
+            if (m.emojiId) o.emoji = { id: m.emojiId, name: m.emoji || undefined, animated: !!m.emojiAnimated };
+            else if (m.emoji) o.emoji = { name: m.emoji };
+            return o;
+          });
       }
 
-      // ── Modes ───────────────────────────────────────────────────────────
+      // ── Emoji picker (ported from Quick Replies) ────────────────────────
+      const COMMON_EMOJI = (
+        "😀 😄 😁 😂 🤣 😊 😍 😎 🤔 🙃 😅 😇 🥳 😺 👍 👎 👋 🙌 🙏 💪 👀 🧠 " +
+        "✅ ☑️ ❌ ⚠️ ❓ ❗ ➕ ➖ 🔒 🔑 🔔 📌 📍 📎 📝 📋 📁 📂 🗂️ 📅 📊 📈 " +
+        "📜 📖 📚 🔖 🏷️ 💬 💡 🔥 ⭐ 🌟 ✨ 🎉 🎁 🎮 🎵 🎧 🏆 🥇 🚀 🛠️ ⚙️ 🧩 " +
+        "🎨 🌈 🟥 🟧 🟨 🟩 🟦 🟪 ⬛ ⬜ ♀️ ♂️ ⚧️ 🌍 🌎 🌏 🗺️ 🕹️ 🎯 🃏 🐱 🐶 " +
+        "💻 🖥️ 📱 🌐 🔗 📣 📢 💯 ♻️ 🆕 🆗 🆘 ❤️ 🧡 💛 💚 💙 💜 🤍 🖤 🤝 👏"
+      ).split(/\s+/).filter(Boolean);
+
+      let emojiPop = null;
+      function closeEmojiPicker() {
+        if (emojiPop) { emojiPop.remove(); emojiPop = null; }
+        document.removeEventListener("click", onEmojiOutside, true);
+        document.removeEventListener("keydown", onEmojiKey, true);
+        sendResize();
+      }
+      function onEmojiOutside(e) {
+        if (emojiPop && !emojiPop.contains(e.target) && !e.target.closest(".emoji-btn")) closeEmojiPicker();
+      }
+      function onEmojiKey(e) {
+        if (e.key === "Escape") closeEmojiPicker();
+      }
+
+      function paintEmojiButton(card, btn) {
+        btn.innerHTML = "";
+        if (card.emojiId) {
+          const img = document.createElement("img");
+          img.className = "emoji-img";
+          img.src = `https://cdn.discordapp.com/emojis/${card.emojiId}.${card.emojiAnimated ? "gif" : "webp"}?size=32`;
+          img.alt = card.emoji || "emoji";
+          btn.appendChild(img);
+          btn.classList.remove("muted");
+        } else if (card.emoji) {
+          btn.textContent = card.emoji;
+          btn.classList.remove("muted");
+        } else {
+          btn.textContent = "🙂";
+          btn.classList.add("muted");
+        }
+      }
+
+      function setCardEmoji(card, btn, { emoji = "", id = "", animated = false }) {
+        card.emoji = emoji;
+        card.emojiId = id;
+        card.emojiAnimated = animated;
+        paintEmojiButton(card, btn);
+      }
+
+      function openEmojiPicker(card, btn) {
+        if (emojiPop) { closeEmojiPicker(); return; }
+        const pop = document.createElement("div");
+        pop.className = "emoji-pop";
+
+        const search = document.createElement("input");
+        search.type = "text";
+        search.className = "emoji-pop-search";
+        search.placeholder = "Search emoji…";
+        pop.appendChild(search);
+
+        const scroll = document.createElement("div");
+        scroll.className = "emoji-pop-scroll";
+        pop.appendChild(scroll);
+
+        const draw = () => {
+          scroll.innerHTML = "";
+          const q = search.value.trim().toLowerCase();
+
+          const clear = document.createElement("button");
+          clear.type = "button";
+          clear.className = "emoji-clear";
+          clear.textContent = "✕ No emoji";
+          clear.addEventListener("click", () => { setCardEmoji(card, btn, {}); closeEmojiPicker(); });
+          scroll.appendChild(clear);
+
+          const custom = guildEmojis.filter((e) => !q || e.name.toLowerCase().includes(q));
+          if (custom.length) {
+            scroll.appendChild(groupLabelEl(guildName ? `${guildName} emoji` : "Server emoji"));
+            const grid = document.createElement("div");
+            grid.className = "emoji-pop-grid";
+            for (const e of custom.slice(0, 200)) {
+              const cell = document.createElement("button");
+              cell.type = "button";
+              cell.className = "emoji-cell";
+              cell.title = `:${e.name}:`;
+              const img = document.createElement("img");
+              img.className = "emoji-img";
+              img.loading = "lazy";
+              img.src = `https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? "gif" : "webp"}?size=32`;
+              img.alt = `:${e.name}:`;
+              cell.appendChild(img);
+              cell.addEventListener("click", () => {
+                setCardEmoji(card, btn, { emoji: e.name, id: e.id, animated: !!e.animated });
+                closeEmojiPicker();
+              });
+              grid.appendChild(cell);
+            }
+            scroll.appendChild(grid);
+          }
+
+          if (!q) {
+            scroll.appendChild(groupLabelEl("Emoji"));
+            const grid = document.createElement("div");
+            grid.className = "emoji-pop-grid";
+            for (const ch of COMMON_EMOJI) {
+              const cell = document.createElement("button");
+              cell.type = "button";
+              cell.className = "emoji-cell";
+              cell.textContent = ch;
+              cell.addEventListener("click", () => {
+                setCardEmoji(card, btn, { emoji: ch });
+                closeEmojiPicker();
+              });
+              grid.appendChild(cell);
+            }
+            scroll.appendChild(grid);
+          } else if (!custom.length) {
+            const h = document.createElement("div");
+            h.className = "hint";
+            h.textContent = "No custom emoji match. Clear the search to browse standard emoji.";
+            scroll.appendChild(h);
+          }
+        };
+        search.addEventListener("input", draw);
+        draw();
+
+        document.body.appendChild(pop);
+        emojiPop = pop;
+        positionEmojiPop(pop, btn);
+        fitForPopover(pop);
+        setTimeout(() => {
+          document.addEventListener("click", onEmojiOutside, true);
+          document.addEventListener("keydown", onEmojiKey, true);
+          search.focus();
+        }, 0);
+      }
+
+      function fitForPopover(pop) {
+        if (nonce == null) return;
+        const needed = pop.offsetTop + pop.offsetHeight + 16;
+        const height = Math.max(document.body.scrollHeight + 24, needed);
+        parent.postMessage({ type: "dweeb:plugin:resize", nonce, height }, hostOrigin);
+      }
+      function groupLabelEl(text) {
+        const d = document.createElement("div");
+        d.className = "emoji-group-label";
+        d.textContent = text;
+        return d;
+      }
+      function positionEmojiPop(pop, btn) {
+        const r = btn.getBoundingClientRect();
+        const w = pop.offsetWidth || 260;
+        let left = r.left + window.scrollX;
+        left = Math.min(left, window.scrollX + document.documentElement.clientWidth - w - 8);
+        left = Math.max(left, window.scrollX + 8);
+        pop.style.left = left + "px";
+        pop.style.top = r.bottom + window.scrollY + 6 + "px";
+      }
+
+      // ── Modes (the two-axis behaviour: what a click does) ───────────────
       const MODE_DEFS = {
         toggle: {
           title: "Toggle",
           desc: "Click to get the role; click again to remove it. The classic.",
-          selectOnly: false,
-        },
-        unique: {
-          title: "Pick one (swap)",
-          desc: "Picking a role removes the others from this menu. Great for colours, regions, pronouns.",
-          selectOnly: true,
         },
         add: {
           title: "Give only",
           desc: "Only ever adds the role — never removes it. Good for “verify” or “opt in”.",
-          selectOnly: false,
         },
         remove: {
           title: "Take only",
-          desc: "Only ever removes the role.",
-          selectOnly: false,
+          desc: "Only ever removes the role. Good for opt-out buttons.",
         },
       };
       function renderModes() {
         const wrap = $("modes");
         wrap.innerHTML = "";
         for (const [key, def] of Object.entries(MODE_DEFS)) {
-          if (def.selectOnly && !isSelect()) continue;
           const row = document.createElement("label");
           row.className = "mode" + (mode === key ? " sel" : "");
           row.dataset.mode = key;
@@ -634,10 +953,132 @@
         sendResize();
       }
       function updateModes() {
-        // If a select-only mode is active on a button, fall back to toggle.
-        if (MODE_DEFS[mode]?.selectOnly && !isSelect()) mode = "toggle";
+        if (!MODE_DEFS[mode]) mode = "toggle";
         for (const row of $("modes").children)
           row.classList.toggle("sel", row.dataset.mode === mode);
+        applyTargetVisibility();
+      }
+
+      // ── Requirement gate picker ─────────────────────────────────────────
+      $("reqSearch").addEventListener("input", renderReqRoles);
+      for (const btn of $("reqModeSeg").children) {
+        btn.addEventListener("click", () => {
+          reqAll = btn.dataset.req === "all";
+          for (const b of $("reqModeSeg").children) b.classList.toggle("sel", b === btn);
+        });
+      }
+      function renderReqRoles() {
+        const intro = $("reqIntro");
+        const section = $("reqRoleSection");
+        // Gating by role needs the live role list. Without a connection we still
+        // allow the account-age floor, but hide the role picker.
+        if (!connected || !rolesLive) {
+          section.style.display = "none";
+          if (reqRoles.size) {
+            const names = [...reqRoles]
+              .map((id) => reqNameCache.get(id)?.name || `role ${id}`)
+              .join(", ");
+            intro.innerHTML = `<div class="hint">Currently requires: <b>${escapeHtml(names)}</b>. Reconnect to change the role list.</div>`;
+          } else {
+            intro.innerHTML = `<div class="hint">Connect to pick roles to require.</div>`;
+          }
+          return;
+        }
+        intro.innerHTML = "";
+        section.style.display = "";
+        const wrap = $("reqRoles");
+        const q = $("reqSearch").value.trim().toLowerCase();
+        wrap.innerHTML = "";
+        const shown = roles.filter((r) => !q || r.name.toLowerCase().includes(q));
+        if (!shown.length) wrap.innerHTML = `<div class="hint">No roles match.</div>`;
+        for (const r of shown) {
+          const row = document.createElement("label");
+          row.className = "role";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = reqRoles.has(r.id);
+          input.addEventListener("change", () => {
+            if (input.checked) {
+              reqRoles.add(r.id);
+              reqNameCache.set(r.id, { name: r.name, color: r.color || 0 });
+            } else {
+              reqRoles.delete(r.id);
+            }
+          });
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = r.name;
+          row.append(input, dot, name);
+          wrap.appendChild(row);
+        }
+      }
+
+      // ── Temporary-role expiry control ───────────────────────────────────
+      $("expirySel").addEventListener("change", () => {
+        $("expiryCustom").style.display = $("expirySel").value === "custom" ? "" : "none";
+        sendResize();
+      });
+      // Returns the expiry in seconds (0 = off). Only meaningful when the menu adds.
+      function getExpirySecs() {
+        if (!addsRoles()) return 0;
+        const v = $("expirySel").value;
+        if (v === "custom") {
+          const mins = parseInt($("expiryCustom").value, 10);
+          return Number.isFinite(mins) && mins > 0 ? mins * 60 : 0;
+        }
+        return parseInt(v, 10) || 0;
+      }
+      function setExpirySecs(secs) {
+        const presets = ["0", "3600", "21600", "86400", "259200", "604800"];
+        const s = String(secs || 0);
+        if (presets.includes(s)) {
+          $("expirySel").value = s;
+          $("expiryCustom").style.display = "none";
+        } else {
+          $("expirySel").value = "custom";
+          $("expiryCustom").style.display = "";
+          $("expiryCustom").value = Math.round(secs / 60);
+        }
+      }
+
+      // ── Audit-log webhook control ───────────────────────────────────────
+      $("logSel").addEventListener("change", () => {
+        $("logUrl").style.display = $("logSel").value === "__paste__" ? "" : "none";
+        sendResize();
+      });
+      function renderLogOptions() {
+        const sel = $("logSel");
+        sel.innerHTML = "";
+        const opt = (value, label) => {
+          const o = document.createElement("option");
+          o.value = value;
+          o.textContent = label;
+          sel.appendChild(o);
+        };
+        if (logWebhookSet) opt("__keep__", "Keep the current log webhook");
+        opt("", "None — don't log");
+        for (const w of savedWebhooks) {
+          const where = w.channelName ? ` · #${w.channelName}` : "";
+          opt(w.url, `${w.name || "Saved webhook"}${where}`);
+        }
+        opt("__paste__", "Paste a webhook URL…");
+        sel.value = logWebhookSet ? "__keep__" : "";
+        $("logUrl").style.display = "none";
+      }
+      // The value to send for `log_webhook`: "" keeps an existing one, null
+      // clears/none, a URL sets it. (Matches the backend's update contract.)
+      function logWebhookPayload() {
+        const v = $("logSel").value;
+        if (v === "__keep__") return ""; // keep existing (backend: empty = keep)
+        if (v === "__paste__") {
+          const u = $("logUrl").value.trim();
+          return u || null;
+        }
+        if (v === "") return null; // none / remove
+        return v; // a saved webhook URL
       }
 
       // ── Reply ───────────────────────────────────────────────────────────
@@ -658,7 +1099,6 @@
         const msg = event.data;
         if (!msg || typeof msg !== "object") return;
 
-        // Answer to a data request we made (e.g. the current server).
         if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
           const resolve = pendingReqs.get(msg.requestId);
           pendingReqs.delete(msg.requestId);
@@ -675,9 +1115,6 @@
 
         await loadMeta();
 
-        // Ask DWEEB which server the editor is connected to. If it knows, we can
-        // pre-fill the Server ID and (with the hosted bot) auto-connect — so the
-        // admin never has to think about "Connect a bot".
         const guild = await requestResource("guild");
         if (guild && typeof guild.id === "string" && isSnowflake(guild.id)) {
           autoGuild = true;
@@ -686,19 +1123,27 @@
           if (!$("guildId").value) $("guildId").value = guild.id;
         }
 
+        // Saved webhooks power the audit-log picker. Best-effort.
+        const webhooks = await requestResource("savedWebhooks");
+        if (Array.isArray(webhooks)) savedWebhooks = webhooks;
+        renderLogOptions();
+
         if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
           instanceId = msg.customId.slice(PREFIX.length);
           await loadInstance(instanceId);
         }
         renderBotIntro();
         renderModes();
+        updateModes();
         updateRoleCount();
+        renderReqRoles();
+        applyTargetVisibility();
         sendResize();
         maybeAutoConnect();
       });
 
       // ── Request editor data from DWEEB (one promise per request) ────────
-      const pendingReqs = new Map(); // requestId -> resolve
+      const pendingReqs = new Map();
       function requestResource(resource) {
         return new Promise((resolve) => {
           if (nonce == null) return resolve(null);
@@ -708,7 +1153,6 @@
             { type: "dweeb:plugin:request", nonce, requestId, resource },
             hostOrigin,
           );
-          // Never hang if the host is older or refuses the resource.
           setTimeout(() => {
             if (pendingReqs.has(requestId)) {
               pendingReqs.delete(requestId);
@@ -718,25 +1162,14 @@
         });
       }
 
-      // Connect with the hosted DWEEB bot as soon as we know the server, so the
-      // user never touches step 1. No-op unless we're on the automatic path.
       function maybeAutoConnect() {
         if (!autoMode()) return;
-        // Belongs to a different server — never reach out for that server's
-        // roles. The admin must switch to the current server first.
         if (guildMismatch) return;
-        // Already have the live list (a fresh connect) — nothing to do. When
-        // reconfiguring we land here with cached roles and connected=true but
-        // rolesLive=false: fetch the full guild list so the picker shows every
-        // role, not just the handful already saved.
         if (connected && rolesLive) return;
         if (!isSnowflake($("guildId").value.trim())) return;
         connect();
       }
 
-      // Retarget a mismatched menu at the server the builder is connected to
-      // right now. The old selection belongs to a different server, so start
-      // clean and pull this server's live roles.
       function switchToHostGuild() {
         if (!isSnowflake(hostGuildId)) return;
         $("guildId").value = hostGuildId;
@@ -748,7 +1181,8 @@
         roles = [];
         autoState = "connecting";
         renderRoles();
-        renderMap();
+        renderOptions();
+        renderReqRoles();
         connect();
       }
 
@@ -780,26 +1214,14 @@
           if (!res.ok) return;
           const d = await res.json();
           target = d.target === "string_select" ? "string_select" : "button";
-          // The saved server wins; fall back to whatever the host pre-filled.
           const savedGuild = d.guild_id || $("guildId").value;
-          // The menu's target-server display name. Don't fold this into
-          // hostGuildName — that tracks the *current* server, which we compare
-          // against below to spot a mismatch.
           guildName = d.guild_name || (savedGuild === hostGuildId ? hostGuildName : "") || "";
           $("guildId").value = savedGuild;
           if (isSnowflake(savedGuild)) {
-            // Did the admin build this for a different server than the one
-            // they're connected to now? If so, warn instead of silently
-            // retargeting (the menu still assigns roles in its saved server).
-            // We deliberately do NOT flip `autoGuild` on from the saved id:
-            // that flag means "DWEEB handed us a *current* server". Without one
-            // (logged out, or no server picked) we can't confirm this menu
-            // still targets the right place, so we lock it and ask the admin to
-            // connect — exactly the treatment a different-server menu gets.
             guildMismatch = !!hostGuildId && hostGuildId !== savedGuild;
           }
           mode = d.mode || "toggle";
-          // Show the saved roles immediately (cached name/color). "Reconnect"
+          // Show saved roles immediately (cached name/color); "Reconnect"
           // refreshes the live list + assignable flags.
           roles = (d.roles || []).map((r) => ({
             id: r.id,
@@ -808,6 +1230,36 @@
             assignable: undefined,
           }));
           selected = new Set(roles.map((r) => r.id));
+          // Restore per-option emoji/description decorations.
+          optMeta.clear();
+          for (const r of d.roles || []) {
+            optMeta.set(r.id, {
+              emoji: r.emoji || "",
+              emojiId: r.emoji_id || "",
+              emojiAnimated: r.emoji_animated === true,
+              description: r.description || "",
+            });
+          }
+          // Limit.
+          $("maxInput").value = d.max ? String(d.max) : "";
+          // Requirement gate.
+          reqRoles.clear();
+          reqNameCache.clear();
+          const req = d.requirement || {};
+          for (const rr of req.roles || []) {
+            reqRoles.add(rr.id);
+            reqNameCache.set(rr.id, { name: rr.name || `role ${rr.id}`, color: rr.color || 0 });
+          }
+          reqAll = req.require_all === true;
+          for (const b of $("reqModeSeg").children)
+            b.classList.toggle("sel", b.dataset.req === (reqAll ? "all" : "any"));
+          $("reqAge").value = String(req.min_account_age_days || 0);
+          // Temporary roles.
+          setExpirySecs(d.expires_after_secs || 0);
+          // Audit log.
+          logWebhookSet = d.log_webhook_set === true;
+          renderLogOptions();
+          // Reply.
           if (d.response?.mode === "custom") {
             replyMode = "custom";
             $("replyText").value = d.response.text || "";
@@ -816,28 +1268,21 @@
             for (const b of $("replySeg").children)
               b.classList.toggle("sel", b.dataset.rmode === "custom");
           }
-          if (autoMode()) autoState = "ok"; // reconfiguring a hosted-bot menu
+          if (autoMode()) autoState = "ok";
           if (guildMismatch || !autoGuild) {
-            // We can't safely edit here. Either this menu belongs to a
-            // different server than the one being built for (`guildMismatch`),
-            // or DWEEB handed us no current server at all (`!autoGuild` —
-            // logged out, or no server picked). In both cases the saved roles
-            // either don't exist here or can't be verified against the right
-            // server, so don't fetch live roles or unlock editing. Show the
-            // saved roles read-only (the sections stay `.locked`) so the admin
-            // can see what the menu does; step 1 tells them how to proceed —
-            // switch to this server, or connect one in DWEEB.
             connected = false;
             $("connStatus").textContent = "";
             renderRoles();
-            renderMap();
+            renderOptions();
+            renderReqRoles();
             return;
           }
           connected = true;
           $("connStatus").textContent = guildName ? `✓ ${guildName}` : "✓ saved";
           unlock();
           renderRoles();
-          renderMap();
+          renderOptions();
+          renderReqRoles();
         } catch {
           /* fresh form */
         }
@@ -848,6 +1293,21 @@
         parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
       });
       $("save").addEventListener("click", save);
+
+      // Resolve the limit (number ≥1) or null. Only valid on a select that adds.
+      function getMax() {
+        if (!isSelect() || !addsRoles()) return null;
+        const raw = parseInt($("maxInput").value, 10);
+        if (!Number.isFinite(raw) || raw < 1) return null;
+        return Math.min(raw, Math.max(1, selected.size));
+      }
+
+      function selectFields(max) {
+        const count = Math.max(1, selected.size);
+        if (max === 1) return { min_values: 1, max_values: 1 };
+        const mx = max ? Math.min(max, count) : count;
+        return { min_values: 1, max_values: Math.max(1, mx) };
+      }
 
       async function save() {
         $("error").textContent = "";
@@ -868,17 +1328,40 @@
         if (replyMode === "custom" && !replyText)
           return fail("Type your custom reply, or switch to the automatic summary.");
 
+        const max = getMax();
+        const reqAge = Math.max(0, Math.min(366, parseInt($("reqAge").value, 10) || 0));
+        const expirySecs = getExpirySecs();
+
         const chosen = roles.filter((r) => selected.has(r.id));
         const body = {
           target,
           guild_id: guildId,
           guild_name: guildName || "",
-          roles: chosen.map((r) => ({ id: r.id, name: r.name, color: r.color || 0 })),
+          roles: chosen.map((r) => {
+            const m = optMeta.get(r.id) || {};
+            const role = { id: r.id, name: r.name, color: r.color || 0 };
+            if (isSelect()) {
+              if (m.emoji) role.emoji = m.emoji;
+              if (m.emojiId) { role.emoji_id = m.emojiId; role.emoji_animated = !!m.emojiAnimated; }
+              if (m.description && m.description.trim()) role.description = m.description.trim();
+            }
+            return role;
+          }),
           mode,
+          max: max || null,
+          requirement: {
+            roles: [...reqRoles].map((id) => ({
+              id,
+              name: reqNameCache.get(id)?.name || "",
+              color: reqNameCache.get(id)?.color || 0,
+            })),
+            require_all: reqAll,
+            min_account_age_days: reqAge,
+          },
+          expires_after_secs: expirySecs > 0 ? expirySecs : null,
+          log_webhook: logWebhookPayload(),
           response:
-            replyMode === "custom"
-              ? { mode: "custom", text: replyText }
-              : { mode: "summary" },
+            replyMode === "custom" ? { mode: "custom", text: replyText } : { mode: "summary" },
         };
 
         setBusy(true);
@@ -897,47 +1380,36 @@
             return fail(data.error || `Server returned ${res.status}.`);
           }
           const id = data.id || instanceId;
-          const modeLabel = MODE_DEFS[mode]?.title || mode;
-          // The `{roles}` placeholder's value for the host's first paint: the
-          // role *names*, read naturally. Names (not `<@&id>` mentions) so a
-          // self-role post can never ping the whole role on send.
+          const modeLabel =
+            max === 1 ? "Pick one" : MODE_DEFS[mode]?.title || mode;
+          // The `{roles}` placeholder's first-paint value: the role *names*,
+          // read naturally. Names (not mentions) so a self-role post can never
+          // ping a whole role on send.
           const roleNames = chosen.map((r) => r.name || r.id);
           const rolesValue =
             roleNames.length <= 1
               ? roleNames.join("")
               : roleNames.slice(0, -1).join(", ") + " and " + roleNames[roleNames.length - 1];
+          const descBits = [
+            isSelect()
+              ? `${chosen.length} role${chosen.length === 1 ? "" : "s"} · ${modeLabel}`
+              : `${chosen[0]?.name || "1 role"} · ${modeLabel}`,
+          ];
+          if (expirySecs > 0) descBits.push("⏰ temporary");
           parent.postMessage(
             {
               type: "dweeb:plugin:save",
               nonce,
               customId: PREFIX + id,
-              // The server this menu is bound to. DWEEB caches it so it can warn
-              // before the message is posted to a different server (where this
-              // menu would just answer "set up for a different server").
               guildId,
-              summary: {
-                label: "Self Role",
-                description: isSelect()
-                  ? `${chosen.length} role${chosen.length === 1 ? "" : "s"} · ${modeLabel}`
-                  : `${chosen[0]?.name || "1 role"} · ${modeLabel}`,
-              },
-              // Static value for the `{roles}` placeholder in the host's message
-              // text — the role names this menu grants.
+              summary: { label: "Self Role", description: descBits.join(" · ") },
               values: { roles: rolesValue },
               // For a string select, hand DWEEB the option list to wire + lock
-              // onto the menu (one per role, value = role ID). DWEEB ignores
-              // this for buttons. No more hand-mapping each option's value.
-              // Also pin the selection bounds and lock them so the user can't
-              // widen them and break the mode: "pick one (swap)" is exactly one
-              // role; the other modes let a member pick any of the roles at once.
+              // onto the menu (one per role, value = role ID, + emoji/subtitle),
+              // and pin the selection bounds so the user can't widen them and
+              // break the limit. DWEEB ignores these for a button.
               ...(isSelect()
-                ? {
-                    options: buildOptions(),
-                    fields:
-                      mode === "unique"
-                        ? { min_values: 1, max_values: 1 }
-                        : { min_values: 1, max_values: Math.max(1, chosen.length) },
-                  }
+                ? { options: buildOptions(), fields: selectFields(max) }
                 : {}),
             },
             hostOrigin,

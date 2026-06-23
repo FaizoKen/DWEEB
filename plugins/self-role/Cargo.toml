@@ -1,8 +1,8 @@
 [package]
 name = "dweeb-self-role"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "DWEEB plugin: let members self-assign Discord roles from a button or select menu. Toggle / give / take / pick-one modes, per-role config, friendly confirmations."
+description = "DWEEB plugin: let members self-assign Discord roles from a button or select menu. Toggle / give / take behaviours with an optional pick-limit (1 = swap), per-role emoji & subtitles, a role/account-age access gate, auto-expiring temporary roles, and optional audit-log webhook."
 
 [dependencies]
 axum = "0.7"

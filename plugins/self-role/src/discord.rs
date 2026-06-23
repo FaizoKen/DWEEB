@@ -14,11 +14,23 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::store::{InstanceConfig, ManagedRole, ResponseDef};
+use crate::store::{InstanceConfig, ManagedRole, Requirement, ResponseDef};
 
 // Interaction request types.
 pub const TYPE_PING: u8 = 1;
 pub const TYPE_MESSAGE_COMPONENT: u8 = 3;
+
+/// Discord's epoch (2015-01-01) in unix ms — the base for snowflake timestamps.
+const DISCORD_EPOCH_MS: i64 = 1_420_070_400_000;
+const MS_PER_DAY: i64 = 86_400_000;
+
+/// Extract the creation time (unix ms) encoded in a Discord snowflake id. The
+/// top 42 bits are a millisecond timestamp offset from Discord's epoch, so this
+/// needs no API call. `None` if the id isn't a number.
+pub fn snowflake_to_unix_ms(id: &str) -> Option<i64> {
+    let raw: u64 = id.parse().ok()?;
+    Some((raw >> 22) as i64 + DISCORD_EPOCH_MS)
+}
 
 // Interaction callback (response) types.
 const RESPONSE_PONG: u8 = 1;
@@ -41,7 +53,10 @@ pub fn verify_signature(
     timestamp: &str,
     body: &[u8],
 ) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex).ok().and_then(|b| b.try_into().ok()) {
+    let pk: [u8; 32] = match hex::decode(public_key_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -49,7 +64,10 @@ pub fn verify_signature(
         Ok(k) => k,
         Err(_) => return false,
     };
-    let sig: [u8; 64] = match hex::decode(signature_hex).ok().and_then(|b| b.try_into().ok()) {
+    let sig: [u8; 64] = match hex::decode(signature_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -70,7 +88,10 @@ pub fn verify_signature(
 /// bytes Discord signed; the secret only authenticates *which key to use*.
 /// Without a valid secret the header is ignored (None), so a caller reaching
 /// this service directly can never substitute its own key.
-pub fn attested_key<'h>(headers: &'h axum::http::HeaderMap, secret: Option<&str>) -> Option<&'h str> {
+pub fn attested_key<'h>(
+    headers: &'h axum::http::HeaderMap,
+    secret: Option<&str>,
+) -> Option<&'h str> {
     let secret = secret?;
     let supplied = headers.get("x-dweeb-forward-auth")?.to_str().ok()?;
     if !constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
@@ -153,10 +174,7 @@ impl Interaction {
     }
 
     pub fn is_button(&self) -> bool {
-        self.data
-            .as_ref()
-            .and_then(|d| d.component_type)
-            == Some(COMPONENT_TYPE_BUTTON)
+        self.data.as_ref().and_then(|d| d.component_type) == Some(COMPONENT_TYPE_BUTTON)
     }
 
     /// The role ids the member chose this click. For a button that's the whole
@@ -184,16 +202,97 @@ fn display_name(user: &User) -> String {
         .unwrap_or_else(|| user.id.clone())
 }
 
+// ── Access gate (who may use the menu) ───────────────────────────────────────
+
+/// Whether a member is allowed to operate the menu at all — each variant a
+/// distinct, actionable denial. Mirrors the giveaway plugin's `Eligibility`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Access {
+    Ok,
+    /// The member lacks the required role(s).
+    MissingRoles,
+    /// The member's account isn't old enough.
+    AccountTooNew {
+        needed_days: u32,
+    },
+}
+
+/// Decide whether a member may use the menu — pure, no I/O. Every input comes
+/// from the interaction payload (the member's roles, their user-id snowflake)
+/// or stored config, so the gate runs without a single Discord call.
+pub fn check_access(
+    member_roles: &[String],
+    account_created_ms: Option<i64>,
+    now_ms: i64,
+    req: &Requirement,
+) -> Access {
+    if !req.roles.is_empty() {
+        let have: BTreeSet<&str> = member_roles.iter().map(String::as_str).collect();
+        let mut needed = req.roles.iter().map(|r| r.id.as_str());
+        let ok = if req.require_all {
+            needed.all(|r| have.contains(r))
+        } else {
+            needed.any(|r| have.contains(r))
+        };
+        if !ok {
+            return Access::MissingRoles;
+        }
+    }
+    if req.min_account_age_days > 0 {
+        // If the id didn't parse we can't enforce the floor, so we let them in
+        // rather than wall out a real member over a parsing quirk.
+        if let Some(created) = account_created_ms {
+            let age_days = (now_ms.saturating_sub(created)) / MS_PER_DAY;
+            if age_days < req.min_account_age_days as i64 {
+                return Access::AccountTooNew {
+                    needed_days: req.min_account_age_days,
+                };
+            }
+        }
+    }
+    Access::Ok
+}
+
+/// A plain-language reason for a denial, naming required role(s) as mentions
+/// (which render as the role name). Only called for non-`Ok` access.
+pub fn access_denied_message(req: &Requirement, access: &Access) -> String {
+    match access {
+        Access::Ok => String::new(),
+        Access::AccountTooNew { needed_days } => format!(
+            "\u{1F512} Your account is too new to use this — it has to be at least {needed_days} day{} old.",
+            if *needed_days == 1 { "" } else { "s" }
+        ),
+        Access::MissingRoles => {
+            let mentions: Vec<String> =
+                req.roles.iter().map(|r| format!("<@&{}>", r.id)).collect();
+            match (req.require_all, mentions.as_slice()) {
+                (_, [one]) => format!("\u{1F512} You need the {one} role to use this."),
+                (true, many) => {
+                    format!("\u{1F512} You need all of these roles to use this: {}.", many.join(" "))
+                }
+                (false, many) => {
+                    format!("\u{1F512} You need one of these roles to use this: {}.", many.join(" "))
+                }
+            }
+        }
+    }
+}
+
 // ── Pure role-diff planning ──────────────────────────────────────────────────
 
-/// What a click should change. Disjoint sets: a role is never in both.
+/// What a click should change. `add`/`remove` are disjoint. `blocked` are roles
+/// the member asked to gain but a [`max`](InstanceConfig::max) cap refused — they
+/// changed nothing, but the reply explains why (separate from a Discord refusal).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct RoleChanges {
     pub add: Vec<String>,
     pub remove: Vec<String>,
+    pub blocked: Vec<String>,
 }
 
 impl RoleChanges {
+    /// No role actually moved (a cap-blocked click is "empty" in this sense; the
+    /// caller checks `blocked` separately to still explain it).
     pub fn is_empty(&self) -> bool {
         self.add.is_empty() && self.remove.is_empty()
     }
@@ -205,20 +304,29 @@ impl RoleChanges {
 /// * `current`   role ids the member already has (from the interaction).
 /// * `requested` the managed roles they asked for this click (see
 ///   [`Interaction::requested_roles`]).
-/// * `mode`      one of `toggle` / `add` / `remove` / `unique`.
+/// * `mode`      one of `toggle` / `add` / `remove` (what a click *attempts*).
+/// * `max`       the most managed roles the member may hold from this menu:
+///   `None` = unlimited; `Some(1)` = swap/pick-one; `Some(n≥2)` = a cap.
 ///
-/// `toggle`  flip each requested role.
-/// `add`     give each requested role they lack (never removes).
-/// `remove`  take each requested role they have (never adds).
-/// `unique`  their managed roles become exactly `requested` — give the picked
-///           ones they lack, take the managed ones they didn't pick. With a
-///           one-choice select this is "swap to this role"; the natural fit for
-///           colour / region / pronoun pickers.
+/// Behaviour:
+/// * `toggle`  flip each requested role.
+/// * `add`     give each requested role they lack (never removes).
+/// * `remove`  take each requested role they have (never adds).
+///
+/// Then `max` is applied to the *adding* modes (`toggle`/`add`):
+/// * `Some(1)` → **swap**: their managed roles become exactly `requested` —
+///   gaining the pick evicts the other managed roles. With a one-choice select
+///   this is "swap to this role" (colour / region / pronoun pickers). This is
+///   the modern form of the old `unique` mode.
+/// * `Some(n≥2)` → **cap**: if the click would leave them holding more than `n`
+///   managed roles, none of its adds are applied — they land in `blocked` so the
+///   reply can say "you can hold at most n; remove one first". Removes still go.
 pub fn plan_changes(
     managed: &BTreeSet<String>,
     current: &BTreeSet<String>,
     requested: &BTreeSet<String>,
     mode: &str,
+    max: Option<usize>,
 ) -> RoleChanges {
     let mut changes = RoleChanges::default();
     match mode {
@@ -236,18 +344,6 @@ pub fn plan_changes(
                 }
             }
         }
-        "unique" => {
-            for r in requested {
-                if !current.contains(r) {
-                    changes.add.push(r.clone());
-                }
-            }
-            for r in managed.difference(requested) {
-                if current.contains(r) {
-                    changes.remove.push(r.clone());
-                }
-            }
-        }
         // Default: "toggle".
         _ => {
             for r in requested {
@@ -258,6 +354,32 @@ pub fn plan_changes(
                 }
             }
         }
+    }
+
+    // `remove` only ever takes roles away, so a "hold at most n" cap is moot.
+    let adds_allowed = mode != "remove";
+    let held_managed = current.intersection(managed).count();
+    match max {
+        Some(1) if adds_allowed => {
+            // Swap: the managed roles they end up with are exactly `requested`.
+            // Recompute from scratch so re-clicking the held pick is a no-op
+            // (you switch within the menu, you don't fall back to zero).
+            changes.add = requested.difference(current).cloned().collect();
+            changes.remove = current
+                .intersection(managed)
+                .filter(|r| !requested.contains(*r))
+                .cloned()
+                .collect();
+        }
+        Some(n) if n >= 2 && adds_allowed => {
+            let after_removes = held_managed - changes.remove.len();
+            if after_removes + changes.add.len() > n {
+                // Over the cap — refuse every add on this click (we can't pick
+                // which of the already-held roles to evict). Removes still land.
+                changes.blocked = std::mem::take(&mut changes.add);
+            }
+        }
+        _ => {}
     }
     changes
 }
@@ -299,16 +421,20 @@ fn role_label(roles: &[ManagedRole], id: &str) -> String {
 /// Build the ephemeral confirmation after a (possibly partial) change.
 ///
 /// `added`/`removed` are the role ids that actually changed. `denied` are ones
-/// Discord refused (almost always role hierarchy) and `busy` are ones a
-/// transient error (rate-limit / 5xx / network) stopped — each gets its own
-/// plain-language line, because "nothing happened," or the *wrong* reason for
-/// it, is the most confusing outcome for a self-role menu.
+/// Discord refused (almost always role hierarchy), `busy` are ones a transient
+/// error (rate-limit / 5xx / network) stopped, and `blocked` are adds a `max`
+/// cap refused — each gets its own plain-language line, because "nothing
+/// happened," or the *wrong* reason for it, is the most confusing outcome for a
+/// self-role menu. When the menu grants temporary roles, `expires_at_unix` (the
+/// removal time, unix seconds) is appended to the "Added …" line.
 pub fn build_reply(
     cfg: &InstanceConfig,
     added: &[String],
     removed: &[String],
     denied: &[String],
     busy: &[String],
+    blocked: &[String],
+    expires_at_unix: Option<i64>,
 ) -> Value {
     let mut lines: Vec<String> = Vec::new();
 
@@ -319,6 +445,12 @@ pub fn build_reply(
         _ => None,
     };
 
+    // A relative-time suffix ("expires in 2 hours") for granted temporary roles.
+    let expiry_suffix = match expires_at_unix {
+        Some(ts) if !added.is_empty() => format!(" \u{2014} expires <t:{ts}:R>"),
+        _ => String::new(),
+    };
+
     if let Some(text) = custom {
         if !added.is_empty() || !removed.is_empty() {
             lines.push(text.to_string());
@@ -326,12 +458,32 @@ pub fn build_reply(
     } else {
         if !added.is_empty() {
             let names: Vec<String> = added.iter().map(|id| role_label(&cfg.roles, id)).collect();
-            lines.push(format!("\u{2705} Added {}", join_human(&names)));
+            lines.push(format!(
+                "\u{2705} Added {}{}",
+                join_human(&names),
+                expiry_suffix
+            ));
         }
         if !removed.is_empty() {
-            let names: Vec<String> = removed.iter().map(|id| role_label(&cfg.roles, id)).collect();
+            let names: Vec<String> = removed
+                .iter()
+                .map(|id| role_label(&cfg.roles, id))
+                .collect();
             lines.push(format!("\u{274C} Removed {}", join_human(&names)));
         }
+    }
+
+    if !blocked.is_empty() {
+        let names: Vec<String> = blocked
+            .iter()
+            .map(|id| role_label(&cfg.roles, id))
+            .collect();
+        let cap = cfg.max.unwrap_or(0);
+        lines.push(format!(
+            "\u{26A0}\u{FE0F} You can hold at most **{cap}** role{} from this menu, so I didn't add {} — remove one first.",
+            if cap == 1 { "" } else { "s" },
+            join_human(&names)
+        ));
     }
 
     if !denied.is_empty() {
@@ -394,12 +546,55 @@ mod tests {
         v
     }
 
+    fn mrole(id: &str, name: &str) -> ManagedRole {
+        ManagedRole {
+            id: id.into(),
+            name: name.into(),
+            color: 0,
+            emoji: None,
+            emoji_id: None,
+            emoji_animated: false,
+            description: None,
+        }
+    }
+
+    /// A minimal config whose only meaningful field for reply tests is `roles`.
+    fn cfg_with(roles: Vec<ManagedRole>, max: Option<u32>) -> InstanceConfig {
+        InstanceConfig {
+            target: "string_select".into(),
+            guild_id: "1".repeat(18),
+            guild_name: String::new(),
+            roles,
+            mode: "toggle".into(),
+            max,
+            requirement: Requirement::default(),
+            expires_after_secs: None,
+            log_webhook: None,
+            response: ResponseDef::default(),
+        }
+    }
+
+    fn reqs(ids: &[&str], all: bool, age: u32) -> Requirement {
+        Requirement {
+            roles: ids
+                .iter()
+                .map(|id| crate::store::RoleRef {
+                    id: (*id).into(),
+                    name: String::new(),
+                    color: 0,
+                })
+                .collect(),
+            require_all: all,
+            min_account_age_days: age,
+        }
+    }
+
     #[test]
     fn toggle_flips_each_requested_role() {
         let managed = set(&["a", "b", "c"]);
         let current = set(&["a"]); // member already has `a`
         let requested = set(&["a", "b"]); // they clicked a + b
-        let c = plan_changes(&managed, &current, &requested, "toggle");
+        let c = plan_changes(&managed, &current, &requested, "toggle", None);
         assert_eq!(sorted(c.add), vec!["b"]); // didn't have b → add
         assert_eq!(sorted(c.remove), vec!["a"]); // had a → remove
     }
@@ -409,7 +604,7 @@ mod tests {
         let managed = set(&["a", "b"]);
         let current = set(&["a"]);
         let requested = set(&["a", "b"]);
-        let c = plan_changes(&managed, &current, &requested, "add");
+        let c = plan_changes(&managed, &current, &requested, "add", None);
         assert_eq!(sorted(c.add), vec!["b"]);
         assert!(c.remove.is_empty());
     }
@@ -419,29 +614,75 @@ mod tests {
         let managed = set(&["a", "b"]);
         let current = set(&["a"]);
         let requested = set(&["a", "b"]);
-        let c = plan_changes(&managed, &current, &requested, "remove");
+        let c = plan_changes(&managed, &current, &requested, "remove", None);
         assert!(c.add.is_empty());
         assert_eq!(sorted(c.remove), vec!["a"]); // only the one they had
     }
 
     #[test]
-    fn unique_makes_managed_roles_equal_the_picks() {
+    fn max_one_swaps_like_the_old_unique_mode() {
         let managed = set(&["red", "green", "blue"]);
         let current = set(&["red"]); // currently red
         let requested = set(&["blue"]); // picked blue
-        let c = plan_changes(&managed, &current, &requested, "unique");
+        let c = plan_changes(&managed, &current, &requested, "toggle", Some(1));
         assert_eq!(sorted(c.add), vec!["blue"]); // gain the pick
         assert_eq!(sorted(c.remove), vec!["red"]); // drop the other managed role
+        assert!(c.blocked.is_empty());
     }
 
     #[test]
-    fn unique_leaves_unmanaged_roles_untouched() {
+    fn max_one_leaves_unmanaged_roles_untouched() {
         let managed = set(&["red", "green"]);
         let current = set(&["red", "moderator"]); // moderator is NOT managed
         let requested = set(&["green"]);
-        let c = plan_changes(&managed, &current, &requested, "unique");
+        let c = plan_changes(&managed, &current, &requested, "toggle", Some(1));
         assert_eq!(sorted(c.add), vec!["green"]);
         assert_eq!(sorted(c.remove), vec!["red"]); // moderator is never removed
+    }
+
+    #[test]
+    fn max_one_reclicking_the_held_pick_is_a_noop() {
+        // Swap never drops you back to zero — clicking your current pick keeps it.
+        let managed = set(&["red", "green"]);
+        let current = set(&["red"]);
+        let requested = set(&["red"]);
+        let c = plan_changes(&managed, &current, &requested, "toggle", Some(1));
+        assert!(c.is_empty());
+    }
+
+    #[test]
+    fn cap_blocks_an_add_past_the_limit_but_keeps_removes() {
+        // Holding 2 of a max-2 menu; picking a 3rd is refused, not silently
+        // dropped. The 3rd lands in `blocked`; nothing is added.
+        let managed = set(&["a", "b", "c", "d"]);
+        let current = set(&["a", "b"]);
+        let requested = set(&["c"]);
+        let c = plan_changes(&managed, &current, &requested, "add", Some(2));
+        assert!(c.add.is_empty());
+        assert_eq!(c.blocked, vec!["c"]);
+    }
+
+    #[test]
+    fn cap_allows_an_add_that_fits_under_the_limit() {
+        let managed = set(&["a", "b", "c"]);
+        let current = set(&["a"]);
+        let requested = set(&["b"]);
+        let c = plan_changes(&managed, &current, &requested, "add", Some(2));
+        assert_eq!(c.add, vec!["b"]);
+        assert!(c.blocked.is_empty());
+    }
+
+    #[test]
+    fn cap_lets_a_swap_in_one_click_stay_within_the_limit() {
+        // Toggle at the cap: removing one and adding another in the same click
+        // nets to the same count, so it's allowed.
+        let managed = set(&["a", "b", "c"]);
+        let current = set(&["a", "b"]);
+        let requested = set(&["a", "c"]); // drop a, gain c
+        let c = plan_changes(&managed, &current, &requested, "toggle", Some(2));
+        assert_eq!(sorted(c.add), vec!["c"]);
+        assert_eq!(sorted(c.remove), vec!["a"]);
+        assert!(c.blocked.is_empty());
     }
 
     #[test]
@@ -449,31 +690,100 @@ mod tests {
         let managed = set(&["a"]);
         let current = set(&["a"]);
         let requested = set(&["a"]);
-        let c = plan_changes(&managed, &current, &requested, "add");
+        let c = plan_changes(&managed, &current, &requested, "add", None);
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn access_gate_any_vs_all_roles() {
+        let member = ["a".to_string()];
+        // ANY of {a,b}: holding a passes.
+        assert_eq!(
+            check_access(&member, None, 0, &reqs(&["a", "b"], false, 0)),
+            Access::Ok
+        );
+        // ALL of {a,b}: holding only a fails.
+        assert_eq!(
+            check_access(&member, None, 0, &reqs(&["a", "b"], true, 0)),
+            Access::MissingRoles
+        );
+        // No requirement: anyone passes.
+        assert_eq!(
+            check_access(&[], None, 0, &Requirement::default()),
+            Access::Ok
+        );
+    }
+
+    #[test]
+    fn access_gate_account_age_floor() {
+        let now = 100 * MS_PER_DAY;
+        let r = reqs(&[], false, 7);
+        // 3-day-old account is walled out…
+        assert!(matches!(
+            check_access(&[], Some(now - 3 * MS_PER_DAY), now, &r),
+            Access::AccountTooNew { needed_days: 7 }
+        ));
+        // …a 30-day-old one is fine.
+        assert_eq!(
+            check_access(&[], Some(now - 30 * MS_PER_DAY), now, &r),
+            Access::Ok
+        );
+    }
+
+    #[test]
+    fn snowflake_decodes_to_a_creation_time() {
+        assert_eq!(snowflake_to_unix_ms("0"), Some(DISCORD_EPOCH_MS));
+        let id = 175928847299117063u64;
+        assert_eq!(
+            snowflake_to_unix_ms(&id.to_string()),
+            Some((id >> 22) as i64 + DISCORD_EPOCH_MS)
+        );
+        assert_eq!(snowflake_to_unix_ms("not-a-number"), None);
+    }
+
+    fn reply_text(v: &Value) -> String {
+        v["data"]["components"][0]["content"]
+            .as_str()
+            .unwrap()
+            .to_string()
     }
 
     #[test]
     fn reply_separates_denied_from_busy() {
         let id = "1".repeat(18);
-        let cfg = InstanceConfig {
-            target: "button".into(),
-            guild_id: id.clone(),
-            guild_name: String::new(),
-            roles: vec![ManagedRole { id: id.clone(), name: "Red".into(), color: 0 }],
-            mode: "toggle".into(),
-            response: ResponseDef::default(),
-        };
-        let text = |v: &Value| {
-            v["data"]["components"][0]["content"]
-                .as_str()
-                .unwrap()
-                .to_string()
-        };
+        let cfg = cfg_with(vec![mrole(&id, "Red")], None);
         // A refusal blames hierarchy; a transient blip tells them to retry.
-        let denied = build_reply(&cfg, &[], &[], std::slice::from_ref(&id), &[]);
-        assert!(text(&denied).contains("above"));
-        let busy = build_reply(&cfg, &[], &[], &[], std::slice::from_ref(&id));
-        assert!(text(&busy).contains("busy"));
+        let denied = build_reply(&cfg, &[], &[], std::slice::from_ref(&id), &[], &[], None);
+        assert!(reply_text(&denied).contains("above"));
+        let busy = build_reply(&cfg, &[], &[], &[], std::slice::from_ref(&id), &[], None);
+        assert!(reply_text(&busy).contains("busy"));
+    }
+
+    #[test]
+    fn reply_reports_a_cap_block() {
+        let id = "1".repeat(18);
+        let cfg = cfg_with(vec![mrole(&id, "Red")], Some(2));
+        let v = build_reply(&cfg, &[], &[], &[], &[], std::slice::from_ref(&id), None);
+        let t = reply_text(&v);
+        assert!(t.contains("at most"));
+        assert!(t.contains("2"));
+    }
+
+    #[test]
+    fn reply_appends_expiry_to_added_roles() {
+        let id = "1".repeat(18);
+        let cfg = cfg_with(vec![mrole(&id, "Red")], None);
+        let v = build_reply(
+            &cfg,
+            std::slice::from_ref(&id),
+            &[],
+            &[],
+            &[],
+            &[],
+            Some(1_700_000_000),
+        );
+        let t = reply_text(&v);
+        assert!(t.contains("Added"));
+        assert!(t.contains("<t:1700000000:R>"));
     }
 }

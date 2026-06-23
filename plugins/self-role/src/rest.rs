@@ -72,6 +72,14 @@ pub struct RoleView {
     pub assignable: bool,
 }
 
+/// One custom emoji as the config UI's emoji picker needs it.
+#[derive(Debug, Serialize)]
+pub struct EmojiView {
+    pub id: String,
+    pub name: String,
+    pub animated: bool,
+}
+
 /// Everything `POST /api/connect` returns on success.
 #[derive(Debug, Serialize)]
 pub struct ConnectResult {
@@ -84,6 +92,9 @@ pub struct ConnectResult {
     /// banner instead of a warning per role.
     pub bot_can_manage_roles: bool,
     pub roles: Vec<RoleView>,
+    /// The guild's custom emoji, so the select-option emoji picker can offer the
+    /// server's own emoji alongside standard unicode ones.
+    pub emojis: Vec<EmojiView>,
 }
 
 // ── Raw Discord shapes (only the fields we read) ─────────────────────────────
@@ -125,6 +136,24 @@ struct BotMember {
     roles: Vec<String>,
 }
 
+#[derive(Deserialize, Default)]
+struct Emoji {
+    /// Standard (unicode) emoji come back with a null id; we only want custom ones.
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    animated: bool,
+    /// False while an emoji is unusable (e.g. lost to a server's boost downgrade).
+    #[serde(default = "default_true")]
+    available: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 fn auth(token: &str) -> String {
     format!("Bot {token}")
 }
@@ -146,15 +175,28 @@ pub async fn connect(
 ) -> Result<ConnectResult, ConnectError> {
     // Who is the bot? (Used to find its own member + skip self-assignment.)
     let me: SelfUser = get_json(http, token, &format!("{API_BASE}/users/@me")).await?;
-    let bot_name = me.global_name.or(me.username).unwrap_or_else(|| "the bot".into());
+    let bot_name = me
+        .global_name
+        .or(me.username)
+        .unwrap_or_else(|| "the bot".into());
 
     // The guild — also our "is the bot actually in here?" probe. `get_json`
     // already maps a 403/404 here to `BotNotInGuild`, which is what it means.
     let guild: Guild = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}")).await?;
 
-    let roles: Vec<Role> = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/roles")).await?;
-    let bot_member: BotMember =
-        get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/members/{}", me.id)).await?;
+    let roles: Vec<Role> =
+        get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/roles")).await?;
+    let bot_member: BotMember = get_json(
+        http,
+        token,
+        &format!("{API_BASE}/guilds/{guild_id}/members/{}", me.id),
+    )
+    .await?;
+    // Custom emoji feed the option emoji picker. A fetch failure is treated as
+    // "no custom emoji" rather than failing the whole connect — roles still work.
+    let emojis: Vec<Emoji> = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/emojis"))
+        .await
+        .unwrap_or_default();
 
     // The bot's top role, and whether any of its roles grants Manage Roles (or
     // Administrator, which implies it). Discord ranks roles by position and
@@ -210,6 +252,21 @@ pub async fn connect(
             .then_with(|| snowflake(&a.id).cmp(&snowflake(&b.id)))
     });
 
+    // Keep only usable custom emoji (real id, available); standard unicode emoji
+    // (null id) are offered client-side, so we don't echo them here.
+    let emoji_views: Vec<EmojiView> = emojis
+        .into_iter()
+        .filter(|e| e.available)
+        .filter_map(|e| match (e.id, e.name) {
+            (Some(id), Some(name)) if !id.is_empty() && !name.is_empty() => Some(EmojiView {
+                id,
+                name,
+                animated: e.animated,
+            }),
+            _ => None,
+        })
+        .collect();
+
     Ok(ConnectResult {
         guild_id: guild_id.to_string(),
         guild_name: guild.name,
@@ -217,6 +274,7 @@ pub async fn connect(
         bot_name,
         bot_can_manage_roles: can_manage,
         roles: views,
+        emojis: emoji_views,
     })
 }
 
@@ -255,7 +313,12 @@ pub async fn add_role(
     role_id: &str,
     reason: &str,
 ) -> Result<(), RoleError> {
-    role_op(http.put(role_url(guild_id, user_id, role_id)), token, reason).await
+    role_op(
+        http.put(role_url(guild_id, user_id, role_id)),
+        token,
+        reason,
+    )
+    .await
 }
 
 /// Remove one role from a member.
@@ -279,11 +342,7 @@ fn role_url(guild_id: &str, user_id: &str, role_id: &str) -> String {
     format!("{API_BASE}/guilds/{guild_id}/members/{user_id}/roles/{role_id}")
 }
 
-async fn role_op(
-    req: reqwest::RequestBuilder,
-    token: &str,
-    reason: &str,
-) -> Result<(), RoleError> {
+async fn role_op(req: reqwest::RequestBuilder, token: &str, reason: &str) -> Result<(), RoleError> {
     let resp = req
         .header("Authorization", auth(token))
         // Shows up in the server's audit log so admins can see what happened.
@@ -318,4 +377,23 @@ fn clamp_reason(reason: &str) -> String {
         .filter(|c| c.is_ascii_graphic() || *c == ' ')
         .take(400)
         .collect()
+}
+
+/// Best-effort post of one line to an admin-chosen Discord audit-log webhook.
+///
+/// The URL is SSRF-guarded at save (`validate::validate_webhook`), so it can
+/// only be a Discord webhook. `allowed_mentions.parse = []` makes the line inert
+/// — it can name roles/users without pinging anyone. Failure is swallowed (this
+/// is logging, never on the member's reply path); the caller fires it detached
+/// so it can't eat into Discord's interaction window.
+pub async fn post_webhook_log(http: &reqwest::Client, webhook_url: &str, content: &str) {
+    let body = serde_json::json!({
+        "content": content,
+        "allowed_mentions": { "parse": [] },
+    });
+    match http.post(webhook_url).json(&body).send().await {
+        Ok(resp) if resp.status().is_success() => {}
+        Ok(resp) => tracing::warn!(status = %resp.status(), "audit-log webhook rejected"),
+        Err(e) => tracing::warn!(error = %e, "audit-log webhook unreachable"),
+    }
 }

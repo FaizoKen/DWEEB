@@ -18,6 +18,7 @@
 
 mod config;
 mod discord;
+mod reaper;
 mod rest;
 mod routes;
 mod store;
@@ -74,6 +75,17 @@ async fn main() {
         http,
         config: Arc::new(config),
     };
+
+    // Temporary-role reaper: only worth running when a bot token is configured
+    // (without one, nothing can be added in the first place, so nothing expires).
+    if let Some(token) = state.config.default_bot_token.clone() {
+        reaper::spawn(
+            state.store.clone(),
+            state.http.clone(),
+            token,
+            state.config.reaper_interval_secs,
+        );
+    }
 
     let app = Router::new()
         .route("/health", get(routes::health))
