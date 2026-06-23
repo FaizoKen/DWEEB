@@ -18,3 +18,9 @@ package-lock.json
 release/
 # Local backup of the production stack from contabo:/opt/dweeb (contains secrets).
 prod-backup/
+# Runtime SQLite state (the proxy's short links + each plugin's config/ledger).
+# These are created at run time and live on Docker volumes in production — they
+# must never be committed (live data, and they'd ship stale into images).
+*.db
+*.db-wal
+*.db-shm

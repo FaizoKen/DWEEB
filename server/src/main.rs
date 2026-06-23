@@ -47,20 +47,39 @@ use crate::routes::{
 };
 use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // `dweeb-proxy healthcheck` is invoked by the Docker HEALTHCHECK on every
+    // interval. Answer it before building any async runtime — the probe just
+    // confirms the listener accepts connections, so it needs neither Tokio nor
+    // curl/wget, keeping both the image and the per-probe cost tiny.
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        run_healthcheck();
+    }
+
+    // Right-size the async runtime: this proxy is I/O-bound (it mostly awaits
+    // Discord), so the default of one worker per CPU just reserves idle thread
+    // stacks and per-thread allocator arenas. Default to two workers — enough to
+    // overlap the parallel hot-path reads — and let TOKIO_WORKER_THREADS scale
+    // it without a rebuild.
+    let worker_threads = std::env::var("TOKIO_WORKER_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(2);
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .enable_all()
+        .build()
+        .expect("failed to build Tokio runtime")
+        .block_on(run());
+}
+
+async fn run() {
     // Load a local `.env` if present (for `cargo run` / running the binary
     // directly). In Docker the vars come from `env_file`, so there's no `.env`
     // in the image and this is a harmless no-op. Real environment variables
     // always win over `.env` entries.
     let _ = dotenvy::dotenv();
-
-    // `dweeb-proxy healthcheck` is invoked by the Docker HEALTHCHECK. It just
-    // confirms the listener accepts connections, so the runtime image needs no
-    // curl/wget — keeping it tiny.
-    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
-        run_healthcheck();
-    }
 
     tracing_subscriber::fmt()
         .with_env_filter(

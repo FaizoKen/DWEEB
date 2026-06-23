@@ -33,10 +33,31 @@
 #   REDIS_URL=redis://redis:6379
 #   docker compose --profile redis up -d --build
 
+# ── Shared service defaults (YAML merge anchors) ─────────────────────────────
+# Merged into each service with `<<: *svc-base`. Centralises the restart policy
+# and a BOUNDED json-file log driver: without a cap, container logs grow until
+# they fill the VPS disk — which on a small box means an outage or a forced disk
+# upsize. 10 MB × 3 files caps each service's logs at ~30 MB.
+x-svc-base: &svc-base
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# Merged into each Rust service's `environment` with `<<: *rust-env`. Caps
+# glibc's per-thread malloc arenas at 2 so freed memory is returned to the OS
+# instead of being retained in per-CPU arenas — together with the low
+# TOKIO_WORKER_THREADS the binaries default to, this roughly halves idle RSS.
+# Override the worker count per service with TOKIO_WORKER_THREADS to scale up.
+x-rust-env: &rust-env
+  MALLOC_ARENA_MAX: "2"
+
 services:
   caddy:
     image: caddy:2-alpine
-    restart: unless-stopped
+    <<: *svc-base
     ports:
       - "80:80" # ACME HTTP-01 challenge + redirect to https
       - "443:443" # HTTPS (TCP: HTTP/1.1 + HTTP/2)
@@ -58,15 +79,18 @@ services:
     # Default: the image published to GHCR by .github/workflows/docker.yml.
     # Override the tag with TAG=0.7.0 in .env to pin a specific release.
     image: ghcr.io/faizoken/dweeb-proxy:${TAG:-latest}
+    mem_limit: 192m
+    mem_reservation: 48m
     # Local build path, used by `docker compose up -d --build`. The build is
     # tagged with the image name above, so a later plain `up` reuses it.
     build: .
-    restart: unless-stopped
+    <<: *svc-base
     env_file: .env
     environment:
       # Compose-network address of the dispatcher's permanent-slot API (the
       # token for it, DISPATCHER_API_TOKEN, comes from .env). The dashboard's
       # "keep components alive" feature flows browser → proxy → dispatcher.
+      <<: *rust-env
       DISPATCHER_URL: http://dispatcher:8095
       # The short-link SQLite file must live on the proxy_data volume — a
       # short link promises 7 days, so it has to survive a redeploy.
@@ -77,7 +101,7 @@ services:
       - proxy_data:/data
     healthcheck:
       test: ["CMD", "/usr/local/bin/dweeb-proxy", "healthcheck"]
-      interval: 30s
+      interval: 60s
       timeout: 3s
       retries: 3
       start_period: 5s
@@ -90,9 +114,12 @@ services:
   # {"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8090"}
   dispatcher:
     image: ghcr.io/faizoken/dweeb-interactions-dispatcher:${DISPATCHER_TAG:-latest}
+    mem_limit: 128m
+    mem_reservation: 32m
     build: ../plugins/dispatcher
-    restart: unless-stopped
+    <<: *svc-base
     environment:
+      <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094", "quickreplies:": "http://quick-replies:8096", "picker:": "http://picker:8097"}'
       # The /dashboard slash command (answered inline, no plugin) replies with
@@ -128,7 +155,7 @@ services:
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8095 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
-      interval: 30s
+      interval: 60s
       timeout: 3s
       retries: 3
       start_period: 5s
@@ -140,9 +167,12 @@ services:
   # interactions arrive via the dispatcher; publishes no host port itself.
   modal-form:
     image: ghcr.io/faizoken/dweeb-modal-form:${MODALFORM_TAG:-latest}
+    mem_limit: 64m
+    mem_reservation: 16m
     build: ../plugins/modal-form
-    restart: unless-stopped
+    <<: *svc-base
     environment:
+      <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       PUBLIC_BASE_URL: https://modalform.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
       # Lets the dispatcher vouch for a custom app's verifying key (see the
@@ -155,7 +185,7 @@ services:
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8090 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
-      interval: 30s
+      interval: 60s
       timeout: 3s
       retries: 3
       start_period: 5s
@@ -165,9 +195,12 @@ services:
   # custom_id, so there is no volume. Served at pingpong.$PLUGINS_DOMAIN.
   ping-pong:
     image: ghcr.io/faizoken/dweeb-ping-pong:${PINGPONG_TAG:-latest}
+    mem_limit: 48m
+    mem_reservation: 12m
     build: ../plugins/ping-pong
-    restart: unless-stopped
+    <<: *svc-base
     environment:
+      <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       PUBLIC_BASE_URL: https://pingpong.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
       # Lets the dispatcher vouch for a custom app's verifying key (see the
@@ -177,7 +210,7 @@ services:
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8091 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
-      interval: 30s
+      interval: 60s
       timeout: 3s
       retries: 3
       start_period: 5s
@@ -190,9 +223,12 @@ services:
   # API, backed by one SQLite file. Served at selfrole.$PLUGINS_DOMAIN.
   self-role:
     image: ghcr.io/faizoken/dweeb-self-role:${SELFROLE_TAG:-latest}
+    mem_limit: 96m
+    mem_reservation: 24m
     build: ../plugins/self-role
-    restart: unless-stopped
+    <<: *svc-base
     environment:
+      <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       PUBLIC_BASE_URL: https://selfrole.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
       # Lets the dispatcher vouch for a custom app's verifying key (see the
@@ -213,7 +249,7 @@ services:
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8092 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
-      interval: 30s
+      interval: 60s
       timeout: 3s
       retries: 3
       start_period: 5s
@@ -227,9 +263,12 @@ services:
   # at tickets.$PLUGINS_DOMAIN.
   tickets:
     image: ghcr.io/faizoken/dweeb-tickets:${TICKETS_TAG:-latest}
+    mem_limit: 96m
+    mem_reservation: 24m
     build: ../plugins/tickets
-    restart: unless-stopped
+    <<: *svc-base
     environment:
+      <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       PUBLIC_BASE_URL: https://tickets.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
       # Lets the dispatcher vouch for a custom app's verifying key (see the
@@ -251,7 +290,7 @@ services:
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8093 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
-      interval: 30s
+      interval: 60s
       timeout: 3s
       retries: 3
       start_period: 5s
@@ -266,9 +305,12 @@ services:
   # (giveaway configs + the per-user entry ledger). Served at giveaway.$PLUGINS_DOMAIN.
   giveaway:
     image: ghcr.io/faizoken/dweeb-giveaway:${GIVEAWAY_TAG:-latest}
+    mem_limit: 80m
+    mem_reservation: 20m
     build: ../plugins/giveaway
-    restart: unless-stopped
+    <<: *svc-base
     environment:
+      <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       PUBLIC_BASE_URL: https://giveaway.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
       # Lets the dispatcher vouch for a custom app's verifying key (see the
@@ -286,7 +328,7 @@ services:
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8094 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
-      interval: 30s
+      interval: 60s
       timeout: 3s
       retries: 3
       start_period: 5s
@@ -301,9 +343,12 @@ services:
   # and config API, backed by one SQLite file. Served at quickreplies.$PLUGINS_DOMAIN.
   quick-replies:
     image: ghcr.io/faizoken/dweeb-quick-replies:${QUICKREPLIES_TAG:-latest}
+    mem_limit: 64m
+    mem_reservation: 16m
     build: ../plugins/quick-replies
-    restart: unless-stopped
+    <<: *svc-base
     environment:
+      <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       PUBLIC_BASE_URL: https://quickreplies.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
       # Lets the dispatcher vouch for a custom app's verifying key (see the
@@ -321,7 +366,7 @@ services:
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8096 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
-      interval: 30s
+      interval: 60s
       timeout: 3s
       retries: 3
       start_period: 5s
@@ -335,9 +380,12 @@ services:
   # picker.$PLUGINS_DOMAIN.
   picker:
     image: ghcr.io/faizoken/dweeb-picker:${PICKER_TAG:-latest}
+    mem_limit: 64m
+    mem_reservation: 16m
     build: ../plugins/picker
-    restart: unless-stopped
+    <<: *svc-base
     environment:
+      <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
       PUBLIC_BASE_URL: https://picker.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
       # Lets the dispatcher vouch for a custom app's verifying key (see the
@@ -350,7 +398,7 @@ services:
     healthcheck:
       # The image has no curl/wget; bash's /dev/tcp does the probe.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8097 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
-      interval: 30s
+      interval: 60s
       timeout: 3s
       retries: 3
       start_period: 5s
@@ -360,7 +408,7 @@ services:
   redis:
     image: redis:7-alpine
     profiles: ["redis"]
-    restart: unless-stopped
+    <<: *svc-base
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     # Not published to the host — only the proxy talks to it over the compose
     # network. Add a `ports:` mapping only if you need to inspect it directly.
@@ -382,7 +430,7 @@ services:
   # is NOT reachable from the public internet.
   beszel:
     image: henrygd/beszel:latest
-    restart: unless-stopped
+    <<: *svc-base
     ports:
       - "127.0.0.1:8090:8090"
     volumes:
@@ -399,7 +447,7 @@ services:
   beszel-agent:
     image: henrygd/beszel-agent:latest
     profiles: ["beszel-agent"]
-    restart: unless-stopped
+    <<: *svc-base
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -415,7 +463,7 @@ services:
   # env vars below are substituted into it. Served at https://status.$PLUGINS_DOMAIN.
   gatus:
     image: twinproduction/gatus:latest
-    restart: unless-stopped
+    <<: *svc-base
     volumes:
       - ./gatus/config.yaml:/config/config.yaml:ro
       - gatus_data:/data
@@ -430,7 +478,7 @@ services:
   #   ssh -L 8080:localhost:8081 contabo   # then open http://localhost:8080
   dozzle:
     image: amir20/dozzle:latest
-    restart: unless-stopped
+    <<: *svc-base
     ports:
       - "127.0.0.1:8081:8080"
     volumes:

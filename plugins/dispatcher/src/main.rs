@@ -159,8 +159,26 @@ struct App {
     client: reqwest::Client,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Right-size the async runtime: the dispatcher mostly awaits the forward
+    // hop, so the default of one worker per CPU just reserves idle thread stacks
+    // and per-thread allocator arenas. Default to two workers — enough to keep
+    // signature verification off the accept path under a burst — and let
+    // TOKIO_WORKER_THREADS scale it without a rebuild.
+    let worker_threads = std::env::var("TOKIO_WORKER_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(2);
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .enable_all()
+        .build()
+        .expect("failed to build Tokio runtime")
+        .block_on(run());
+}
+
+async fn run() {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(

@@ -41,8 +41,25 @@ use crate::config::Config;
 use crate::routes::AppState;
 use crate::store::Store;
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Right-size the async runtime: this service is I/O-bound and low-QPS, so
+    // the default of one worker per CPU just reserves idle thread stacks and
+    // per-thread allocator arenas. Default to a single worker; set
+    // TOKIO_WORKER_THREADS in the environment to scale up without a rebuild.
+    let worker_threads = std::env::var("TOKIO_WORKER_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(1);
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .enable_all()
+        .build()
+        .expect("failed to build Tokio runtime")
+        .block_on(run());
+}
+
+async fn run() {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
