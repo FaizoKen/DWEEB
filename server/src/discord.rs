@@ -793,7 +793,9 @@ fn command_set() -> Value {
 /// Note the caller may hold the bot concurrency permit across this, so a sleep
 /// here also throttles the whole proxy while Discord is asking us to slow down —
 /// the back-pressure that keeps a burst from compounding.
-async fn send_with_retry(req: reqwest::RequestBuilder) -> Result<reqwest::Response, reqwest::Error> {
+async fn send_with_retry(
+    req: reqwest::RequestBuilder,
+) -> Result<reqwest::Response, reqwest::Error> {
     let mut attempt = 0u32;
     loop {
         // `try_clone` only fails for a streaming body, which none of our calls
@@ -962,7 +964,10 @@ mod tests {
         // Discord's per-route limit hint is sub-second and fractional.
         let d = parse_retry_after("0.35").expect("parses");
         assert_eq!(d, Duration::from_millis(350) + Duration::from_millis(50));
-        assert!(d <= MAX_RETRY_WAIT, "a sub-second hint is worth waiting out");
+        assert!(
+            d <= MAX_RETRY_WAIT,
+            "a sub-second hint is worth waiting out"
+        );
     }
 
     #[test]

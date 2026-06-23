@@ -348,7 +348,11 @@ pub async fn callback(
     // the opener, and closes — instead of booting the app inside the popup. The
     // full-page fallback just strips it on the reload (the session cookie drives
     // auth either way). See `core/oauth/flows` (`loginFlow`).
-    Ok((jar, Redirect::to(&format!("{}#dweeb_login=ok", cfg.frontend_url))).into_response())
+    Ok((
+        jar,
+        Redirect::to(&format!("{}#dweeb_login=ok", cfg.frontend_url)),
+    )
+        .into_response())
 }
 
 /// `POST /auth/logout` — drop the session cookie.
