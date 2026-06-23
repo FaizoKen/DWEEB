@@ -19,7 +19,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use axum_extra::extract::cookie::{Key, PrivateCookieJar};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 use crate::cache::DataCache;
 use crate::config::Config;
@@ -135,15 +135,36 @@ pub async fn bootstrap(
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
     authorize_member(&st, &jar, &guild).await?;
-    let roles = fetch_roles(&st, &guild, q.fresh).await?;
-    let channels = fetch_channels(&st, &guild, q.fresh).await?;
-    let emojis = fetch_emojis(&st, &guild, q.fresh).await?;
+    // The three reads are independent — on a cold cache they'd otherwise be
+    // three sequential Discord round-trips. Fire them concurrently (each still
+    // coalesced + cached by key, and the bot semaphore caps total in-flight
+    // calls), so bootstrap costs one round-trip's latency, not three.
+    let (roles, channels, emojis) = tokio::join!(
+        fetch_roles(&st, &guild, q.fresh),
+        fetch_channels(&st, &guild, q.fresh),
+        fetch_emojis(&st, &guild, q.fresh),
+    );
+    let (roles, channels, emojis) = (roles?, channels?, emojis?);
 
-    let mut obj = Map::new();
-    obj.insert("roles".to_string(), (*roles).clone());
-    obj.insert("channels".to_string(), (*channels).clone());
-    obj.insert("emojis".to_string(), (*emojis).clone());
-    Ok(value_response(&Value::Object(obj)))
+    // Stitch the three cached `Arc<Value>` trees straight into the response
+    // bytes. Serialising each in place avoids deep-cloning every role, channel,
+    // and emoji into an intermediate Map (these arrays can run to hundreds of
+    // entries) on every bootstrap — including cache hits.
+    Ok(bootstrap_response(&roles, &channels, &emojis))
+}
+
+/// Assemble `{ "roles": …, "channels": …, "emojis": … }` by writing each
+/// already-serialised value directly, with no intermediate clone or `Map`.
+fn bootstrap_response(roles: &Value, channels: &Value, emojis: &Value) -> Response {
+    let mut buf = Vec::with_capacity(4096);
+    buf.extend_from_slice(b"{\"roles\":");
+    let _ = serde_json::to_writer(&mut buf, roles);
+    buf.extend_from_slice(b",\"channels\":");
+    let _ = serde_json::to_writer(&mut buf, channels);
+    buf.extend_from_slice(b",\"emojis\":");
+    let _ = serde_json::to_writer(&mut buf, emojis);
+    buf.push(b'}');
+    ([(header::CONTENT_TYPE, "application/json")], buf).into_response()
 }
 
 /// The signed-in user's usable servers, each flagged with whether the DWEEB bot
@@ -154,8 +175,15 @@ pub async fn list_guilds(
     jar: PrivateCookieJar,
 ) -> Result<Response, AppError> {
     let session = require_session(&jar)?;
-    let guilds = usable_guilds(&st, &session, q.fresh).await?;
-    let bot = bot_guild_set(&st, q.fresh).await;
+    // The user's guild list (a Discord call under the user token) and the bot's
+    // guild set (a paginated call under the bot token) are independent — run
+    // them concurrently so the picker's cold-cache load is one round-trip's
+    // latency, not two. Each is still cached + coalesced internally.
+    let (guilds, bot) = tokio::join!(
+        usable_guilds(&st, &session, q.fresh),
+        bot_guild_set(&st, q.fresh),
+    );
+    let guilds = guilds?;
 
     let items: Vec<Value> = guilds
         .iter()

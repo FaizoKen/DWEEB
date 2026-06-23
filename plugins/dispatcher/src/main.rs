@@ -347,11 +347,35 @@ async fn main() {
     tracing::info!(%addr, "interactions dispatcher listening");
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     axum::serve(listener, router)
-        .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c().await.ok();
-        })
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("server");
+}
+
+/// Resolve on Ctrl-C or (on Unix) SIGTERM, so `docker stop` / `compose down`
+/// shuts the dispatcher down cleanly — in-flight interactions finish inside the
+/// grace window instead of being hard-killed. Docker sends SIGTERM, not SIGINT,
+/// so without the SIGTERM arm every redeploy would drop live requests.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            s.recv().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+    tracing::info!("shutdown signal received");
 }
 
 async fn health() -> impl IntoResponse {

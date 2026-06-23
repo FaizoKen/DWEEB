@@ -118,12 +118,33 @@ async fn main() {
     tracing::info!(%addr, "ping-pong plugin listening");
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-            tracing::info!("shutting down");
-        })
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("server error");
+}
+
+/// Resolve on Ctrl-C or (on Unix) SIGTERM. Docker sends SIGTERM on
+/// `stop`/`compose down`, so without the SIGTERM arm a redeploy would hard-kill
+/// this service after the grace timeout instead of letting it drain.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            s.recv().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+    tracing::info!("shutting down");
 }
 
 async fn health() -> &'static str {
