@@ -5,6 +5,6 @@
   <rect x="214" y="200" width="84" height="30" rx="15" fill="#57F287"/>
   <rect x="78" y="182" width="148" height="148" rx="46" fill="#fff"/>
   <rect x="286" y="182" width="148" height="148" rx="46" fill="#fff"/>
-  <path d="M218 356 h36 v44 a13 13 0 0 1 -13 13 h-10 a13 13 0 0 1 -13 -13 z" fill="#fff"/>
-  <path d="M258 356 h36 v44 a13 13 0 0 1 -13 13 h-10 a13 13 0 0 1 -13 -13 z" fill="#fff"/>
+  <path d="M226 360 h28 v24 a12 12 0 0 1 -12 12 h-4 a12 12 0 0 1 -12 -12 z" fill="#fff"/>
+  <path d="M258 360 h28 v24 a12 12 0 0 1 -12 12 h-4 a12 12 0 0 1 -12 -12 z" fill="#fff"/>
 </svg>

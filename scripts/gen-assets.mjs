@@ -26,8 +26,8 @@ const mark = (radius) => `
   <rect x="286" y="182" width="148" height="148" rx="46" fill="#fff"/>
   <rect x="104" y="202" width="20" height="62" rx="10" fill="#5865F2" opacity="0.16" transform="rotate(-26 114 233)"/>
   <rect x="312" y="202" width="20" height="62" rx="10" fill="#5865F2" opacity="0.16" transform="rotate(-26 322 233)"/>
-  <path d="M218 356 h36 v44 a13 13 0 0 1 -13 13 h-10 a13 13 0 0 1 -13 -13 z" fill="#fff"/>
-  <path d="M258 356 h36 v44 a13 13 0 0 1 -13 13 h-10 a13 13 0 0 1 -13 -13 z" fill="#fff"/>`;
+  <path d="M226 360 h28 v24 a12 12 0 0 1 -12 12 h-4 a12 12 0 0 1 -12 -12 z" fill="#fff"/>
+  <path d="M258 360 h28 v24 a12 12 0 0 1 -12 12 h-4 a12 12 0 0 1 -12 -12 z" fill="#fff"/>`;
 
 const rounded = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${mark(128)}</svg>`;
 const fullBleed = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${mark(0)}</svg>`;
