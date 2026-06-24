@@ -259,6 +259,39 @@
   color: var(--app-success-text);
 }
 
+/* ── Selected-webhook card (restore): a chosen webhook not in this server's
+   list — most often because it lives in another server. Pinned above the list
+   so the selection is never lost, with an amber "other server" chip. */
+.selectedGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.groupLabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+/* Static display row (not a button) — keep the active look, drop the click cue.
+   Declared after `.rowSolo` so its cursor wins on equal specificity. */
+.selectedRow {
+  cursor: default;
+}
+.altServerChip {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.7;
+  background: rgba(240, 178, 50, 0.16);
+  color: rgb(240, 178, 50);
+}
+
 /* Create */
 .createToggle {
   align-self: flex-start;

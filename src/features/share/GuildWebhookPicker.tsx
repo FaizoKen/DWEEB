@@ -202,6 +202,9 @@ export function GuildWebhookPicker({
   const activeRowRef = useRef<HTMLLIElement>(null);
 
   const guildData = useGuildStore((s) => s.data);
+  // The user's guild list — names the connected and the selected webhook's
+  // servers in the cross-server "Selected webhook" card (restore mode).
+  const authGuilds = useAuthStore((s) => s.guilds);
   const channelsLoaded = guildData?.guildId === connectedId;
   const channelName = (id: string | null): string | undefined =>
     id && channelsLoaded ? guildData?.channelById[id]?.name : undefined;
@@ -223,12 +226,18 @@ export function GuildWebhookPicker({
   // pass the `usable` filter below — so they don't show, can't be reused, and
   // every channel pick mints another OAuth duplicate. Webhooks created in a
   // different browser stay unrecoverable (their token never reached this device).
+  // Saved webhook entries (this browser). Used both to recover execute URLs
+  // Discord withholds (below) and to describe a *selected* webhook that isn't in
+  // this server's list — restore mode's cross-server "Selected webhook" card.
+  // Re-read when the selection changes so a just-remembered webhook is found.
+  const history = useMemo(() => loadHistory(), [webhooks, activeId]);
+
   const recovered = useMemo(() => {
-    const urlById = new Map(loadHistory().map((e) => [e.id, e.url] as const));
+    const urlById = new Map(history.map((e) => [e.id, e.url] as const));
     return webhooks.map((w) =>
       w.url || !urlById.has(w.id) ? w : { ...w, url: urlById.get(w.id)! },
     );
-  }, [webhooks]);
+  }, [webhooks, history]);
 
   // Only webhooks we can actually post through (incoming, token recoverable).
   const usable = useMemo(() => recovered.filter((w) => w.type === 1 && !!w.url), [recovered]);
@@ -530,6 +539,28 @@ export function GuildWebhookPicker({
 
   /* ── Restore: explicit webhook selection ─────────────────────────────── */
   if (mode === "restore") {
+    // The chosen webhook may not be in *this* server's list — most often because
+    // it posted the message in another server (an update targets the webhook
+    // that posted it, wherever that is). Without a cue the list reads as "nothing
+    // selected" and looks like the only choice, so pin the selection above the
+    // list, named with its server, and explain the list below is the connected
+    // one. Details come from this browser's saved history (selection is always
+    // remembered when picked/sent).
+    const selectedEntry = activeId ? history.find((e) => e.id === activeId) : undefined;
+    const selectedInList = activeId != null && usable.some((w) => w.id === activeId);
+    const showSelectedCard = activeId != null && !selectedInList && selectedEntry != null;
+    const selectedGuildId = selectedEntry?.guildId;
+    const crossServer =
+      selectedGuildId != null && connectedId !== "" && selectedGuildId !== connectedId;
+    const selectedGuildName =
+      selectedEntry?.guildName ??
+      (selectedGuildId ? authGuilds.find((g) => g.id === selectedGuildId)?.name : undefined);
+    const connectedGuildName = authGuilds.find((g) => g.id === connectedId)?.name;
+    const selectedChannelLabel =
+      selectedEntry?.channelName ??
+      channelName(selectedEntry?.channelId ?? null) ??
+      selectedEntry?.channelId;
+
     const list = usable
       .filter((w) => {
         const q = query.trim().toLowerCase();
@@ -551,6 +582,51 @@ export function GuildWebhookPicker({
 
     return (
       <section className={styles.picker} aria-label="Server webhooks">
+        {showSelectedCard ? (
+          <div className={styles.selectedGroup}>
+            <span className={styles.groupLabel}>Selected webhook</span>
+            <div className={cn(styles.row, styles.rowSolo, styles.rowActive, styles.selectedRow)}>
+              <img
+                className={styles.avatar}
+                src={webhookAvatarUrl(selectedEntry.id, selectedEntry.avatar ?? null, 40)}
+                alt=""
+                width={32}
+                height={32}
+                loading="lazy"
+              />
+              <span className={styles.rowText}>
+                <span className={styles.rowName}>
+                  {selectedEntry.name || "(unnamed)"}
+                  {crossServer ? <span className={styles.altServerChip}>other server</span> : null}
+                </span>
+                <span className={styles.rowDest}>
+                  <HashIcon size={11} />
+                  {selectedChannelLabel ?? "unknown channel"}
+                  {selectedGuildName ? <> · {selectedGuildName}</> : null}
+                </span>
+              </span>
+              <CheckCircleIcon size={16} className={styles.check} />
+            </div>
+            <p className={styles.note}>
+              {crossServer ? (
+                <>
+                  This webhook is in <strong>{selectedGuildName ?? "another server"}</strong>, not
+                  the server you’re connected to
+                  {connectedGuildName ? (
+                    <>
+                      {" "}
+                      (<strong>{connectedGuildName}</strong>)
+                    </>
+                  ) : null}
+                  . The list below is your connected server’s — pick one only to switch to a
+                  different message.
+                </>
+              ) : (
+                <>This webhook isn’t in the list below, but your edit still targets it.</>
+              )}
+            </p>
+          </div>
+        ) : null}
         {header}
         {usable.length === 0 ? (
           <p className={styles.note}>No webhooks in this server to restore from.</p>
