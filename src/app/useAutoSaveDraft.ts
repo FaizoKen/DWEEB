@@ -28,17 +28,34 @@ export function useAutoSaveDraft(): void {
     const flush = () => {
       timer = null;
       const state = useMessageStore.getState();
-      saveDraft(state.message);
+      // Persist the update target as a non-credential pointer (message id + home
+      // guild, no webhook token — that's recovered from the posted-messages store
+      // on boot) so a reopened session re-links "Update existing" + the banner.
+      const o = state.restoredFrom;
+      saveDraft(
+        state.message,
+        o
+          ? {
+              messageId: o.messageId,
+              threadId: o.threadId,
+              guildId: o.guildId,
+              guildName: o.guildName,
+            }
+          : undefined,
+      );
       saveHistory(state.past, state.future);
     };
 
     const unsubscribe = useMessageStore.subscribe((state, prev) => {
       // Every edit pushes a history frame and undo/redo swaps the message, so
-      // message and stacks change in lockstep — one flush writes both keys.
+      // message and stacks change in lockstep — one flush writes both keys. The
+      // restore origin can change on its own (a send re-targets the draft at the
+      // now-live message without editing it), so it's watched too.
       if (
         state.message === prev.message &&
         state.past === prev.past &&
-        state.future === prev.future
+        state.future === prev.future &&
+        state.restoredFrom === prev.restoredFrom
       ) {
         return;
       }

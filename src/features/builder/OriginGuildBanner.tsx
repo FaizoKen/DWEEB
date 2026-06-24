@@ -50,7 +50,7 @@ export function OriginGuildBanner() {
               size="sm"
               onClick={() => alignConnectedGuild(originGuildId)}
             >
-              Switch to {originName}
+              Switch server
             </Button>
           ) : undefined
         }

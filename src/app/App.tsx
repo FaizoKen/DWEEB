@@ -73,6 +73,7 @@ import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
+import { useDraftOriginBootstrap } from "./useDraftOriginBootstrap";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAutoSaveDraft } from "./useAutoSaveDraft";
 import { useAttachmentGc } from "./useAttachmentGc";
@@ -217,6 +218,7 @@ function useIsMobileSheet() {
 
 export function App() {
   useShareUrlBootstrap();
+  useDraftOriginBootstrap();
   useTemplateDeepLink();
   useKeyboardShortcuts();
   useAutoSaveDraft();
@@ -417,8 +419,9 @@ export function App() {
         data-ai-open={aiOpen ? "true" : "false"}
       >
         <h1 className="sr-only">
-          DWEEB — the visual Discord webhook and embed builder. Build, preview, and send rich Discord
-          messages with Components V2: containers, sections, buttons, select menus, and media.
+          DWEEB — the visual Discord webhook and embed builder. Build, preview, and send rich
+          Discord messages with Components V2: containers, sections, buttons, select menus, and
+          media.
         </h1>
         <section
           className="app-shell__pane app-shell__pane--builder"

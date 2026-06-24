@@ -1,6 +1,10 @@
 .builder {
   display: grid;
   grid-template-rows: auto 1fr;
+  /* A single column that can shrink to 0 — without this, a wide, unbreakable
+     child (e.g. the origin-guild banner's button) would size the column to its
+     content and push the whole pane past the viewport on a phone. */
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   height: 100%;
 }
@@ -10,6 +14,9 @@
    toolbar stacking so both sit above the scrolling tree below. */
 .header {
   z-index: var(--app-z-toolbar);
+  /* Lets the grid item shrink below its content's intrinsic width so the banner
+     (and the action bar's own collapse) stay inside the pane on narrow screens. */
+  min-width: 0;
 }
 
 .actionBar {
