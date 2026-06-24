@@ -99,7 +99,10 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # The Pages publish step (actions/deploy-pages) regularly takes 5+ minutes,
+    # so a 5-minute cap kept guillotining it mid-deploy and leaving prod on the
+    # previous build. Match deploy-pages' own internal 10-minute timeout.
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write
