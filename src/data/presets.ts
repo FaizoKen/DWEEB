@@ -330,14 +330,14 @@ const VERIFY_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# Wire the button to the Quick Replies plugin to grant a role and reply privately.",
+        "-# Wire the button to the Self Role plugin in give-only mode — one click grants the verified role and unlocks the server.",
     },
   ],
 };
 
-// Onboarding panel that pairs TWO plugins in one message — a verify button
-// (Quick Replies) and a roles menu (Self Role). Drives the multi-plugin path of
-// the guided setup checklist.
+// Onboarding panel that pairs two Self Role instances in one message — a
+// give-only verify button and a multi-pick roles menu. Drives the multi-slot
+// path of the guided setup checklist.
 const WELCOME_HUB_MESSAGE: WebhookMessage = {
   username: "Get Started",
   components: [
@@ -436,7 +436,7 @@ const WELCOME_HUB_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# Wire the button to Quick Replies and the menu to Self Role — the guided setup does both in one go.",
+        "-# Wire both the button and the menu to Self Role — give-only on the verify button, multi-pick on the roles menu. The guided setup does both in one go.",
     },
   ],
 };
@@ -913,59 +913,6 @@ const POLL_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content: "-# One vote per person, please — let's keep it fair. 🙏",
-    },
-  ],
-};
-
-const GIVEAWAY_MESSAGE: WebhookMessage = {
-  username: "Giveaways",
-  components: [
-    {
-      _id: id(),
-      type: ComponentType.Container,
-      accent_color: ACCENT.gold,
-      components: [
-        {
-          _id: id(),
-          type: ComponentType.TextDisplay,
-          content: "# 🎉 GIVEAWAY 🎉",
-        },
-        {
-          _id: id(),
-          type: ComponentType.Section,
-          components: [
-            {
-              _id: id(),
-              type: ComponentType.TextDisplay,
-              content:
-                "### Win a $50 Gift Card!\n**🎁 Prize:** $50 Gift Card\n**🏆 Winners:** 1\n**⏰ Ends:** in 24 hours",
-            },
-          ],
-          accessory: {
-            _id: id(),
-            type: ComponentType.Thumbnail,
-            media: { url: "https://picsum.photos/seed/wb-prize/256/256" },
-            description: "Prize",
-          },
-        },
-        {
-          _id: id(),
-          type: ComponentType.Separator,
-          divider: true,
-          spacing: SeparatorSpacing.Large,
-        },
-        {
-          _id: id(),
-          type: ComponentType.TextDisplay,
-          content:
-            "**How to enter**\n- 🎉 React below to enter\n- ✅ Make sure you're a member of the server\n- ⏳ A winner is drawn automatically when it ends",
-        },
-      ],
-    },
-    {
-      _id: id(),
-      type: ComponentType.TextDisplay,
-      content: "-# Must be 18+ to claim • One entry per person • Good luck! 🍀",
     },
   ],
 };
@@ -1451,8 +1398,8 @@ export const TEMPLATES: MessageTemplate[] = [
     tags: ["verify", "gate", "human", "captcha", "role", "button"],
     accent: ACCENT.green,
     requiresBot: true,
-    pairsWith: "Quick Replies",
-    pluginSlots: [{ customId: "verify_me", pluginId: "quick-replies" }],
+    pairsWith: "Self Role",
+    pluginSlots: [{ customId: "verify_me", pluginId: "self-role" }],
     message: VERIFY_MESSAGE,
   },
   {
@@ -1464,9 +1411,9 @@ export const TEMPLATES: MessageTemplate[] = [
     tags: ["onboarding", "verify", "self role", "roles", "menu", "button", "gate"],
     accent: ACCENT.blurple,
     requiresBot: true,
-    pairsWith: "Quick Replies + Self Role",
+    pairsWith: "Self Role",
     pluginSlots: [
-      { customId: "welcome_verify", pluginId: "quick-replies" },
+      { customId: "welcome_verify", pluginId: "self-role" },
       { customId: "welcome_roles", pluginId: "self-role" },
     ],
     message: WELCOME_HUB_MESSAGE,
@@ -1503,11 +1450,11 @@ export const TEMPLATES: MessageTemplate[] = [
   },
   {
     id: "reaction-roles",
-    name: "Reaction roles",
-    description: "A select menu that grants roles by interest.",
+    name: "Role menu",
+    description: "A select menu members use to self-assign roles by interest.",
     emoji: "🎭",
     category: "Community",
-    tags: ["self role", "menu", "select", "interests", "pings"],
+    tags: ["self role", "reaction roles", "menu", "select", "interests", "pings"],
     accent: ACCENT.blurple,
     requiresBot: true,
     pairsWith: "Self Role",
@@ -1565,22 +1512,12 @@ export const TEMPLATES: MessageTemplate[] = [
     message: POLL_MESSAGE,
   },
   {
-    id: "giveaway",
+    id: "giveaway-button",
     name: "Giveaway",
-    description: "A prize card with entry steps — react to enter.",
+    description: "One-click entry — the prize, live entrant count, and winners fill themselves in.",
     emoji: "🎉",
     category: "Events",
-    tags: ["prize", "raffle", "contest", "react"],
-    accent: ACCENT.gold,
-    message: GIVEAWAY_MESSAGE,
-  },
-  {
-    id: "giveaway-button",
-    name: "Giveaway (button entry)",
-    description: "One-click entry — the prize, live count and winners fill themselves in.",
-    emoji: "🎁",
-    category: "Events",
-    tags: ["prize", "raffle", "contest", "button", "enter"],
+    tags: ["prize", "raffle", "contest", "button", "enter", "winner"],
     accent: ACCENT.gold,
     requiresBot: true,
     pairsWith: "Giveaway",
