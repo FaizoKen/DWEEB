@@ -102,6 +102,22 @@ export interface SendConfirmProps {
     webhookGuildName?: string;
   };
   /**
+   * The preview resolves @mentions / #channels / custom emoji against the
+   * *connected* server, but this message posts to a different one (or none is
+   * connected) — so those names may render as placeholders here. Present only
+   * when the message actually carries such a token and the servers differ;
+   * undefined hides the notice. The post itself is unaffected (it carries the
+   * raw ids regardless of what the preview can resolve).
+   */
+  previewMismatch?: {
+    /** Whether any server is connected at all. */
+    connected: boolean;
+    /** The connected server's name, when known and one is connected. */
+    connectedGuildName?: string;
+    /** The destination server's name, when known. */
+    destinationGuildName?: string;
+  };
+  /**
    * The "Make permanent" control for messages with interactive components.
    * Present only when the Send panel could read the slot state (signed in,
    * slots fetched, expiry on). Undefined hides the row entirely — the
@@ -209,8 +225,7 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
         ) : null}
         {roleIds.length > 0 ? (
           <li>
-            {roleIds.length} role{roleIds.length === 1 ? "" : "s"}:{" "}
-            <RoleChips ids={roleIds} />
+            {roleIds.length} role{roleIds.length === 1 ? "" : "s"}: <RoleChips ids={roleIds} />
           </li>
         ) : null}
         {userIds.length > 0 ? (
@@ -328,6 +343,39 @@ function RoutingNotice({
   return null;
 }
 
+/**
+ * The preview resolves @mentions / #channels / custom emoji to names against
+ * the *connected* server, but this message posts somewhere else (or no server
+ * is connected) — so those names may render as placeholders in the preview.
+ * Cosmetic only: the post carries the raw ids regardless of what's resolved.
+ */
+function PreviewMismatchNotice({
+  connected,
+  connectedGuildName,
+  destinationGuildName,
+}: NonNullable<SendConfirmProps["previewMismatch"]>) {
+  return (
+    <div className={styles.routingNote} role="note">
+      <strong>Preview names may be placeholders.</strong>
+      <p className={styles.pingDetail}>
+        {connected ? (
+          <>
+            You’re connected to <strong>{connectedGuildName ?? "a different server"}</strong>, so
+            the @mentions, #channels and custom emoji in the preview may not match{" "}
+            {destinationGuildName ? <strong>{destinationGuildName}</strong> : "where this posts"}.
+            What posts to Discord is unaffected.
+          </>
+        ) : (
+          <>
+            No server is connected, so the @mentions, #channels and custom emoji in the preview may
+            show placeholder names. What posts to Discord is unaffected.
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
 export function SendConfirm({
   open,
   mode,
@@ -345,6 +393,7 @@ export function SendConfirm({
   componentRouting,
   pluginNames = [],
   pluginGuildMismatch,
+  previewMismatch,
   permanentOption,
   busy = false,
   onConfirm,
@@ -481,6 +530,8 @@ export function SendConfirm({
           </div>
         ) : null}
       </dl>
+
+      {previewMismatch ? <PreviewMismatchNotice {...previewMismatch} /> : null}
 
       {componentRouting ? (
         <RoutingNotice

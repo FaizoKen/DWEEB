@@ -87,7 +87,7 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
 import { validateMessage } from "@/core/schema/validation";
 import { inspectCapabilities } from "@/core/schema/capability";
-import { summarizePings } from "@/core/schema/mentions";
+import { hasNameResolvedRefs, summarizePings } from "@/core/schema/mentions";
 import {
   classifyComponentRouting,
   classifyWebhookOwner,
@@ -434,6 +434,7 @@ export function SendPanel({
   const authStatus = useAuthStore((s) => s.status);
   const login = useAuthStore((s) => s.login);
   const connectedData = useGuildStore((s) => s.data);
+  const connectedGuildId = useGuildStore((s) => s.guildId);
 
   const knownGuildName = useMemo(() => {
     const stored = parsedUrl ? history.find((e) => e.id === parsedUrl.id)?.guildName : undefined;
@@ -1265,6 +1266,28 @@ export function SendPanel({
   // whatever guild is currently connected.
   const updateGuildName = knownGuildName ?? restoredFrom?.guildName;
 
+  // The preview resolves @mentions / #channels / custom emoji to names against
+  // the *connected* server. When this message carries any such token but the
+  // connected server isn't the one this posts to (a pasted webhook for another
+  // server, or no server connected at all), those names render as placeholders
+  // — so the confirm dialog says so *before* the post, not just after (the
+  // builder's OriginGuildBanner only appears once a posted/restored origin is
+  // set). Skipped on the happy path where the connected server IS the
+  // destination, and when there's nothing name-resolved to misrender.
+  // `connectedGuildId` is "" (not null) when no server is connected, so compare
+  // and branch on truthiness throughout.
+  const messageHasNameRefs = useMemo(() => hasNameResolvedRefs(message), [message]);
+  const previewMismatch =
+    isProxyConfigured() && messageHasNameRefs && knownGuildId && knownGuildId !== connectedGuildId
+      ? {
+          connected: Boolean(connectedGuildId),
+          connectedGuildName: connectedGuildId
+            ? authGuilds.find((g) => g.id === connectedGuildId)?.name
+            : undefined,
+          destinationGuildName: knownGuildName,
+        }
+      : undefined;
+
   return (
     <>
       <p className={styles.lead}>
@@ -1845,6 +1868,7 @@ export function SendPanel({
               }
             : undefined
         }
+        previewMismatch={previewMismatch}
         permanentOption={permanentOption}
         busy={confirmBusy}
         onConfirm={handleConfirmedSend}

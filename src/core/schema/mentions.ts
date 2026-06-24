@@ -73,6 +73,28 @@ export function scanMentions(message: WebhookMessage): MentionScan {
   return { everyone, here, roleIds, userIds };
 }
 
+// User/role/channel mention and custom-emoji tokens — the things the preview
+// resolves to *names* against the connected server (and a user lookup). When
+// none of these are present there's nothing that could render as a placeholder,
+// so the cross-server "preview may not match" notice has nothing to flag.
+//   <@id> / <@!id> — user · <@&id> — role · <#id> — channel · <:name:id> /
+//   <a:name:id> — custom (animated) emoji.
+const NAME_REF_RE = /<@[!&]?\d+>|<#\d+>|<a?:\w+:\d+>/;
+
+/**
+ * True when any TextDisplay content carries a token the preview resolves to a
+ * name — a user/role/channel mention or a custom emoji. `@everyone`/`@here` are
+ * excluded: they render as literal text, not a looked-up name, so they never
+ * show a placeholder. Scans the same `content` fields as {@link scanMentions}.
+ */
+export function hasNameResolvedRefs(message: WebhookMessage): boolean {
+  for (const node of walk(message)) {
+    if (!("content" in node) || typeof node.content !== "string") continue;
+    if (NAME_REF_RE.test(node.content)) return true;
+  }
+  return false;
+}
+
 /** What the message will actually ping, after applying `allowed_mentions`. */
 export interface PingSummary {
   /** Any mention at all resolves to a ping. */
