@@ -336,37 +336,57 @@ export function TemplateGallery() {
     if (!filters.includes(filter)) setFilter("All");
   }, [filters, filter]);
 
-  const shown = useMemo(() => {
+  // Result is grouped into sections so a search can keep the user's own
+  // messages on top and the templates ("others") in their own section below. A
+  // section with no `title` renders as a bare grid (the idle / single-category
+  // views, unchanged); titled sections only appear when there's more than one
+  // group to tell apart — i.e. an "All" search that matched both.
+  const sections = useMemo<{ key: string; title?: string; cards: CardData[] }[]>(() => {
     const q = query.trim().toLowerCase();
-    let base: CardData[];
-    if (filter === POSTED_FILTER) {
-      base = postedCards;
-    } else if (filter === SAVED_FILTER) {
-      base = savedCards;
-    } else if (filter === "All") {
-      base = q
-        ? // A search from All spans every starting point — the messages you've
-          // posted and saved included, not just templates — so nothing is hidden
-          // behind a chip or the posted cap.
-          [
-            ...(continueCard ? [continueCard] : []),
-            ...postedCards,
-            ...savedCards,
-            ...templateCards,
-          ]
-        : // Idle: recent activity first — the draft, then a capped slice of posted
-          // messages (so they don't bury the templates) — then the curated
-          // templates. Saved messages keep to their own chip, like a library.
-          [
-            ...(continueCard ? [continueCard] : []),
-            ...postedCards.slice(0, POSTED_IN_ALL),
-            ...templateCards,
-          ];
-    } else {
-      base = templateCards.filter((c) => c.category === filter);
+    const match = (cards: CardData[]) =>
+      q ? cards.filter((c) => haystack(c).includes(q)) : cards;
+
+    if (filter === POSTED_FILTER) return [{ key: "posted", cards: match(postedCards) }];
+    if (filter === SAVED_FILTER) return [{ key: "saved", cards: match(savedCards) }];
+    if (filter !== "All") {
+      return [{ key: filter, cards: match(templateCards.filter((c) => c.category === filter)) }];
     }
-    return q ? base.filter((c) => haystack(c).includes(q)) : base;
+
+    if (q) {
+      // Searching All — split into "your messages" (draft + posted + saved) and
+      // the templates beneath, each labelled, so your own work leads the results
+      // and the curated templates sit clearly apart at the bottom.
+      const mine = match([
+        ...(continueCard ? [continueCard] : []),
+        ...postedCards,
+        ...savedCards,
+      ]);
+      const templates = match(templateCards);
+      const out: { key: string; title?: string; cards: CardData[] }[] = [];
+      if (mine.length) out.push({ key: "mine", title: "Your messages", cards: mine });
+      if (templates.length) out.push({ key: "templates", title: "Templates", cards: templates });
+      return out;
+    }
+
+    // Idle All — one flat, unlabelled grid: recent activity first (draft, then a
+    // capped slice of posted so they don't bury the templates), then templates.
+    // Saved messages keep to their own chip, like a library.
+    return [
+      {
+        key: "all",
+        cards: [
+          ...(continueCard ? [continueCard] : []),
+          ...postedCards.slice(0, POSTED_IN_ALL),
+          ...templateCards,
+        ],
+      },
+    ];
   }, [filter, query, continueCard, postedCards, savedCards, templateCards]);
+
+  const totalShown = useMemo(
+    () => sections.reduce((n, s) => n + s.cards.length, 0),
+    [sections],
+  );
 
   const startBlank = () => {
     clearAll();
@@ -481,7 +501,7 @@ export function TemplateGallery() {
           </header>
 
           <div className={styles.body}>
-            {shown.length === 0 ? (
+            {totalShown === 0 ? (
               <div className={styles.empty}>
                 <SearchIcon size={28} aria-hidden />
                 <p className={styles.emptyTitle}>No matches for “{query.trim()}”.</p>
@@ -497,18 +517,28 @@ export function TemplateGallery() {
                 </button>
               </div>
             ) : (
-              <div className={styles.grid}>
-                {shown.map((c) => (
-                  <GalleryCard key={c.key} card={c} />
-                ))}
-              </div>
+              sections.map((section) => (
+                <section key={section.key} className={styles.section}>
+                  {section.title ? (
+                    <h3 className={styles.sectionTitle}>
+                      {section.title}
+                      <span className={styles.sectionCount}>{section.cards.length}</span>
+                    </h3>
+                  ) : null}
+                  <div className={styles.grid}>
+                    {section.cards.map((c) => (
+                      <GalleryCard key={c.key} card={c} />
+                    ))}
+                  </div>
+                </section>
+              ))
             )}
           </div>
 
           <footer className={styles.footer}>
             <span className={styles.footerHint}>
-              {shown.length} {shown.length === 1 ? "result" : "results"} · reopen this any time from
-              the toolbar
+              {totalShown} {totalShown === 1 ? "result" : "results"} · reopen this any time from the
+              toolbar
             </span>
             <button type="button" className={styles.blankBtn} onClick={startBlank}>
               <PlusIcon size={16} />
