@@ -1,5 +1,5 @@
 /**
- * Posted-message link banner.
+ * Posted-message link indicator.
  *
  * When the editor is linked to a message that's already live on Discord —
  * loaded via Restore, reopened from the "Start a message" gallery, or
@@ -9,22 +9,22 @@
  * invisible: the only signal was the button label, and the only way out was the
  * Send panel's local "Send as new" toggle, which doesn't actually drop the link.
  *
- * This banner makes the link visible and reversible: it shows whenever a link
- * is set and offers **Detach** ({@link clearRestoreOrigin}) so the next post is
- * a fresh send. Detaching loses the stored webhook + message id, so it's a
- * forgiving action — a short Undo window re-links ({@link setRestoreOrigin}) if
- * it was a slip.
+ * It renders as a thin, single-line status strip whenever a link is set, with a
+ * **Detach** action ({@link clearRestoreOrigin}) that flips the toolbar back to
+ * "Send". Detaching loses the stored webhook + message id, so it's forgiving — a
+ * short Undo window re-links ({@link setRestoreOrigin}) if it was a slip.
  *
- * It also absorbs the origin-guild mismatch warning. A reloaded message
+ * The strip also carries the origin-guild mismatch warning. A reloaded message
  * remembers the server it was posted to; when that differs from the editor's
  * connected guild, the preview resolves `<@&role>` / `<#channel>` / `<:emoji:>`
  * against the wrong server and shows placeholder names — so the message looks
  * broken when it isn't. Reloading from the gallery already auto-switches the
  * connected guild when the user belongs to the origin server (see
  * {@link alignConnectedGuild}); this covers what's left (not a member, or
- * manually switched away). On a mismatch the banner escalates to a warning tone,
- * explains it, and offers "Switch server" when possible. The update itself never
- * rides on the connected guild — only on the stored webhook URL.
+ * manually switched away). On a mismatch the strip turns its icon to a warning,
+ * offers "Switch server", and tucks the full explanation behind a "Why?"
+ * disclosure so the row stays one line. The update itself never rides on the
+ * connected guild — only on the stored webhook URL.
  */
 
 import { useEffect, useState } from "react";
@@ -33,8 +33,8 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isProxyConfigured } from "@/core/guild/config";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
-import { Callout } from "@/features/share/Callout";
-import { Button } from "@/ui/Button";
+import { AlertTriangleIcon, ChevronRightIcon, InfoIcon } from "@/ui/Icon";
+import { cn } from "@/lib/cn";
 import styles from "./PostedMessageBanner.module.css";
 
 /** How long the post-detach "Undo" affordance stays up before fading. */
@@ -51,6 +51,8 @@ export function PostedMessageBanner() {
   // an Undo. Auto-clears after the window (and on unmount) so it never lingers
   // into a later, unrelated message.
   const [detached, setDetached] = useState<RestoredOrigin | null>(null);
+  // Whether the mismatch row's "Why?" explanation is expanded.
+  const [showWhy, setShowWhy] = useState(false);
   useEffect(() => {
     if (!detached) return;
     const t = setTimeout(() => setDetached(null), UNDO_WINDOW_MS);
@@ -64,6 +66,7 @@ export function PostedMessageBanner() {
 
   const handleDetach = () => {
     if (!origin) return;
+    setShowWhy(false);
     setDetached(origin);
     clearRestoreOrigin();
   };
@@ -81,99 +84,102 @@ export function PostedMessageBanner() {
     // resolve names at all, and that server differs from the connected one.
     const mismatch =
       originGuildId != null && isProxyConfigured() && originGuildId !== connectedGuildId;
-    const connectedName = authGuilds.find((g) => g.id === connectedGuildId)?.name;
-    // A reactive read of membership — the "Switch" affordance appears once the
-    // guild list loads, even if the banner rendered before it did.
-    const isMember = originGuildId != null && authGuilds.some((g) => g.id === originGuildId);
 
     const detachButton = (
-      <Button
-        variant="secondary"
-        size="sm"
+      <button
+        type="button"
+        className={styles.action}
         onClick={handleDetach}
         title="Stop updating this message — your next post will create a new one"
       >
         Detach
-      </Button>
+      </button>
     );
 
+    // Mismatch — same thin strip, but a warning icon, a "Switch server" fix, and
+    // the placeholder-names explanation folded behind a "Why?" disclosure.
     if (mismatch) {
       const originName = origin.guildName ?? "another server";
+      const connectedName = authGuilds.find((g) => g.id === connectedGuildId)?.name;
+      // A reactive read of membership — the "Switch" affordance appears once the
+      // guild list loads, even if the strip rendered before it did.
+      const isMember = authGuilds.some((g) => g.id === originGuildId);
       return (
-        <div className={styles.wrap}>
-          <Callout
-            tone="warning"
-            role="note"
-            title={<>Updating a message posted to {originName}</>}
-            actions={
-              <>
-                {isMember ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => alignConnectedGuild(originGuildId)}
-                  >
-                    Switch server
-                  </Button>
-                ) : null}
-                {detachButton}
-              </>
-            }
-          >
-            {connectedGuildId ? (
-              <>
-                You&rsquo;re connected to <strong>{connectedName ?? "a different server"}</strong>,
-                so its @mentions, #channels and custom emoji below may show placeholder names.
-              </>
-            ) : (
-              <>
-                No server is connected, so @mentions, #channels and custom emoji below may show
-                placeholder names.
-              </>
-            )}
-            {isMember ? null : " The update still posts to the original message."}
-          </Callout>
+        <div className={styles.group}>
+          <div className={cn(styles.bar, styles.warn)}>
+            <AlertTriangleIcon size={13} className={styles.barIcon} />
+            <span className={styles.barText}>
+              Updating a message posted to <strong>{originName}</strong>
+            </span>
+            <button
+              type="button"
+              className={cn(styles.toggle, showWhy && styles.toggleOpen)}
+              onClick={() => setShowWhy((v) => !v)}
+              aria-expanded={showWhy}
+            >
+              <ChevronRightIcon size={11} className={styles.toggleCaret} />
+              Why?
+            </button>
+            {isMember ? (
+              <button
+                type="button"
+                className={styles.action}
+                onClick={() => alignConnectedGuild(originGuildId)}
+              >
+                Switch server
+              </button>
+            ) : null}
+            {detachButton}
+          </div>
+          {showWhy ? (
+            <p className={styles.note}>
+              {connectedGuildId ? (
+                <>
+                  You&rsquo;re connected to <strong>{connectedName ?? "a different server"}</strong>
+                  , so its @mentions, #channels and custom emoji below may show placeholder names.
+                </>
+              ) : (
+                <>
+                  No server is connected, so @mentions, #channels and custom emoji below may show
+                  placeholder names.
+                </>
+              )}
+              {isMember ? null : " The update still posts to the original message."}
+            </p>
+          ) : null}
         </div>
       );
     }
 
-    // Linked, no mismatch — a calm, neutral indicator plus the way out.
+    // Happy path — a thin, single-line strip plus the way out.
     return (
-      <div className={styles.wrap}>
-        <Callout
-          tone="info"
-          role="note"
-          title={
-            origin.guildName ? (
-              <>Updating a message in {origin.guildName}</>
-            ) : (
-              <>Updating a message</>
-            )
-          }
-          actions={detachButton}
-        >
-          Your next post edits this message in place instead of creating a new one.
-        </Callout>
+      <div className={styles.bar}>
+        <InfoIcon size={13} className={styles.barIcon} />
+        <span className={styles.barText}>
+          Updating a message
+          {origin.guildName ? (
+            <>
+              {" "}
+              in <strong>{origin.guildName}</strong>
+            </>
+          ) : (
+            <> you posted</>
+          )}
+        </span>
+        {detachButton}
       </div>
     );
   }
 
-  // ── Just detached: confirm it and offer a one-click re-link ───────────────
+  // ── Just detached: a thin confirmation with a one-click re-link ───────────
   if (detached) {
     return (
-      <div className={styles.wrap}>
-        <Callout
-          tone="info"
-          role="note"
-          title={<>Detached from the posted message</>}
-          actions={
-            <Button variant="secondary" size="sm" onClick={handleUndo}>
-              Undo
-            </Button>
-          }
-        >
-          Your next post will create a new message.
-        </Callout>
+      <div className={styles.bar}>
+        <InfoIcon size={13} className={styles.barIcon} />
+        <span className={styles.barText}>Detached — your next post creates a new message.</span>
+        <button type="button" className={styles.action} onClick={handleUndo}>
+          Undo
+        </button>
       </div>
     );
   }
