@@ -76,6 +76,7 @@ import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAutoSaveDraft } from "./useAutoSaveDraft";
 import { useAttachmentGc } from "./useAttachmentGc";
+import { useTemplateDeepLink, readTemplateParam } from "./useTemplateDeepLink";
 
 /**
  * Drives the mobile preview sheet's swipe-to-dismiss gesture.
@@ -216,6 +217,7 @@ function useIsMobileSheet() {
 
 export function App() {
   useShareUrlBootstrap();
+  useTemplateDeepLink();
   useKeyboardShortcuts();
   useAutoSaveDraft();
   useAttachmentGc();
@@ -371,6 +373,10 @@ export function App() {
     if (readShareTokenFromHash(window.location.hash) || readShortLinkId(window.location.pathname)) {
       return;
     }
+    // A `?template=` deep link (from a static template page's "Open in DWEEB"
+    // CTA) loads that template straight into the editor — don't shove the
+    // gallery in front of it.
+    if (readTemplateParam(window.location.search)) return;
     if (!shouldAutoOpenGallery()) return;
     markGalleryAutoOpened();
     openGallery();

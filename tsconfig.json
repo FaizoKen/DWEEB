@@ -3,5 +3,17 @@
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }
-  ]
+  ],
+  // Solution-style file: `tsc -b` builds the referenced projects with their own
+  // configs, so these options don't affect the typecheck. They exist purely so
+  // Bun — which resolves `paths` from the nearest tsconfig when running a script
+  // — can follow the `@/…` alias used across `src/` when the build-time SEO
+  // page generator (`scripts/gen-template-pages.ts`) imports the template
+  // catalog. Keep in sync with the alias in `tsconfig.app.json` / `vite.config.ts`.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
 }
