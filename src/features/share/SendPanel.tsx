@@ -1250,6 +1250,12 @@ export function SendPanel({
     setState({ kind: "idle" });
   };
 
+  // The server an update lands in — named from the webhook (its saved
+  // destination) or, before that resolves, the restore origin. Surfaced in
+  // update mode so it's clear the edit goes to the message's *home* server, not
+  // whatever guild is currently connected.
+  const updateGuildName = knownGuildName ?? restoredFrom?.guildName;
+
   return (
     <>
       <p className={styles.lead}>
@@ -1283,8 +1289,11 @@ export function SendPanel({
 
       {/* Browser-saved recents are redundant once the auto-detect picker is
           showing the connected server's webhooks live — hide them there to keep
-          the panel focused on the picker. */}
-      {!pickerActive ? (
+          the panel focused on the picker. In update mode the picker is hidden
+          (an update targets the webhook that posted the message, not a freshly
+          picked channel), so bring recents back when no webhook is set yet, as a
+          way to pick the one that posted it. */}
+      {!pickerActive || (mode === "update" && !parsedUrl) ? (
         <WebhookRecents
           history={history}
           activeId={parsedUrl?.id ?? null}
@@ -1301,8 +1310,11 @@ export function SendPanel({
 
       {/* Destination — how the message reaches Discord. The fast path (let DWEEB
           or a registered custom bot create the webhook) is primary; pasting a
-          raw URL is the secondary, "advanced" path tucked below. */}
-      {proxyOn ? (
+          raw URL is the secondary, "advanced" path tucked below. Only shown when
+          posting a *new* message: an update is already bound to the webhook that
+          posted it, so a connected-guild channel picker here would be irrelevant
+          (and, if clicked, would retarget the edit at the wrong server). */}
+      {proxyOn && mode === "new" ? (
         <section className={styles.destination} aria-label="Choose a webhook">
           {pickerActive ? (
             <>
@@ -1337,12 +1349,43 @@ export function SendPanel({
         </section>
       ) : null}
 
-      {/* Collapsed states (a create flow is available). Either a webhook is set
-          — show a one-line summary with an Edit affordance — or none is, in
-          which case the create cards above are primary and this is just a quiet
-          link to paste an existing URL. */}
+      {/* Collapsed states (a create flow is available). Update mode shows what
+          the edit will change and where it lives (naming the server, since it
+          may differ from the connected one); new mode shows the post destination
+          or a quiet link to paste a URL. */}
       {proxyOn && !editingUrl ? (
-        parsedUrl ? (
+        mode === "update" ? (
+          parsedUrl ? (
+            <p className={styles.urlSet}>
+              {knownChannelName ? (
+                <>
+                  Updating your message in <strong>#{knownChannelName}</strong>
+                  {updateGuildName ? (
+                    <>
+                      {" · "}
+                      <strong>{updateGuildName}</strong>
+                    </>
+                  ) : null}
+                  .
+                </>
+              ) : updateGuildName ? (
+                <>
+                  Updating your message in <strong>{updateGuildName}</strong>.
+                </>
+              ) : (
+                <>Updating the message you posted with this webhook.</>
+              )}{" "}
+              <button type="button" className={styles.urlSetLink} onClick={openUrlField}>
+                Change webhook
+              </button>
+            </p>
+          ) : (
+            <button type="button" className={styles.pasteToggle} onClick={openUrlField}>
+              Which webhook posted this message?{" "}
+              <span className={styles.pasteToggleAccent}>Paste its URL</span>
+            </button>
+          )
+        ) : parsedUrl ? (
           <p className={styles.urlSet}>
             {knownChannelName ? (
               <>
