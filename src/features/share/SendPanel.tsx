@@ -1292,7 +1292,7 @@ export function SendPanel({
   // connected server isn't the one this posts to (a pasted webhook for another
   // server, or no server connected at all), those names render as placeholders
   // — so the confirm dialog says so *before* the post, not just after (the
-  // builder's OriginGuildBanner only appears once a posted/restored origin is
+  // builder's PostedMessageBanner only appears once a posted/restored origin is
   // set). Skipped on the happy path where the connected server IS the
   // destination, and when there's nothing name-resolved to misrender.
   // `connectedGuildId` is "" (not null) when no server is connected, so compare

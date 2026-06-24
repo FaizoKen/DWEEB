@@ -141,7 +141,11 @@ export interface MessageState {
   replaceMessage(next: WebhookMessage): void;
   /** Like `replaceMessage` but records the restore origin for the Send flow. */
   replaceMessageFromRestore(next: WebhookMessage, origin: RestoredOrigin): void;
-  /** Drop the restore origin (e.g. user picks "Send as new" in the Send panel). */
+  /**
+   * Drop the restore origin so the next send posts a new message instead of
+   * updating the linked one. Wired to the editor's "Detach" affordance (see
+   * PostedMessageBanner); pair with {@link setRestoreOrigin} to re-link.
+   */
   clearRestoreOrigin(): void;
   /**
    * Record the origin without touching the message or history — the Send panel

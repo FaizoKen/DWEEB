@@ -29,7 +29,7 @@ import {
 } from "@/ui/Icon";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
-import { OriginGuildBanner } from "./OriginGuildBanner";
+import { PostedMessageBanner } from "./PostedMessageBanner";
 import { SavedMessagesMenu } from "./components/SavedMessagesMenu";
 import { AccountMenu } from "@/features/guild/AccountMenu";
 import { isProxyConfigured } from "@/core/guild/config";
@@ -66,7 +66,7 @@ export function Builder({ onShare, onExport, onImport, onSend, onRestore, onAbou
           onRestore={onRestore}
           onAbout={onAbout}
         />
-        <OriginGuildBanner />
+        <PostedMessageBanner />
       </div>
 
       <ComponentTree />
