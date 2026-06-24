@@ -36,6 +36,10 @@
 //! /permanent API here, which owns the slots in SQLite — or from Discord,
 //! via the toggle button on the "Message Info" context-menu reply
 //! (commands.rs re-checks Manage Server against member.permissions).
+//! Granting a slot also asks the proxy (SERVER_URL, same shared token in
+//! reverse) to switch any TTL-disabled components back on, since the proxy
+//! holds the webhook token needed to edit the posted message and this service
+//! doesn't — see `App::trigger_reenable`.
 //!
 //! Custom apps: a guild may also register its OWN Discord application(s) —
 //! CUSTOM_APPS_PER_GUILD each, default 1 (per-guild plan caps can replace the
@@ -156,6 +160,12 @@ struct App {
     /// Proxy endpoint that mints share short links — the fallback when a
     /// message is too large to embed in a reply link (see `commands::too_large`).
     shortlink_api: String,
+    /// Proxy base URL the dispatcher calls to revive a message's components after
+    /// granting it a never-expire slot (`POST /internal/permanent/reenable`). The
+    /// dispatcher holds no webhook token, so the proxy — which does — performs the
+    /// edit. Defaults to the compose proxy address; the call is best-effort and
+    /// authenticated by the shared [`App::internal_token`].
+    server_url: String,
     client: reqwest::Client,
 }
 
@@ -297,6 +307,15 @@ async fn run() {
         .trim()
         .to_string();
 
+    // Proxy base URL for the never-expire component revival call. Same convention
+    // as SHORTLINK_API — addressed by compose service name, with a graceful no-op
+    // when the proxy isn't reachable (the grant still succeeds, just no revival).
+    let server_url = std::env::var("SERVER_URL")
+        .unwrap_or_else(|_| "http://proxy:8080".into())
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+
     let app = Arc::new(App {
         primary_key,
         primary_key_hex,
@@ -311,6 +330,7 @@ async fn run() {
         internal_token,
         dashboard_url,
         shortlink_api,
+        server_url,
         client: reqwest::Client::builder()
             // Discord gives the whole chain 3s; leave headroom to still send
             // the fallback reply if an upstream stalls.
@@ -430,6 +450,41 @@ impl App {
                 self.custom_verified.write().unwrap().remove(app_id);
             }
         }
+    }
+
+    /// Best-effort: ask the proxy to re-enable any components the TTL gate
+    /// disabled on `message_id`, now that it holds a never-expire slot. The
+    /// dispatcher can't edit the posted message itself — the grant click lands on
+    /// an ephemeral reply and it has no webhook token — so it hands the work to
+    /// the proxy (`POST /internal/permanent/reenable`), which does. Fire-and-forget:
+    /// the grant and its UPDATE_MESSAGE reply never wait on this, and a failure
+    /// only means the buttons stay greyed until the message is re-posted. No-op
+    /// without `internal_token` (the shared secret that authenticates the call).
+    fn trigger_reenable(&self, guild_id: &str, channel_id: &str, message_id: &str) {
+        let Some(token) = self.internal_token.clone() else {
+            return;
+        };
+        let client = self.client.clone();
+        let url = format!("{}/internal/permanent/reenable", self.server_url);
+        let body = json!({
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "message_id": message_id,
+        });
+        let message_id = message_id.to_string();
+        tokio::spawn(async move {
+            match client.post(&url).bearer_auth(&token).json(&body).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!(%message_id, "asked proxy to revive components after never-expire grant")
+                }
+                Ok(resp) => {
+                    tracing::warn!(status = %resp.status(), %message_id, "proxy rejected component revival request")
+                }
+                Err(err) => {
+                    tracing::warn!(%err, %message_id, "couldn't reach proxy to revive components")
+                }
+            }
+        });
     }
 }
 

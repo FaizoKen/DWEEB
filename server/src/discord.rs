@@ -366,6 +366,63 @@ impl Discord {
         .await
     }
 
+    // ── Webhook-message edits (webhook token; NOT the bot token) ────────────
+    //
+    // Editing a message a webhook authored needs only that webhook's own token
+    // (`/webhooks/{id}/{token}/messages/{id}`) — the very credential DWEEB
+    // already uses to *post*, never the bot token. Used to revive the
+    // components the interactions dispatcher's TTL gate disabled, once a message
+    // is granted a never-expire slot (see `routes::permanent_reenable`). No
+    // `bot_sem` permit: a webhook token is a different credential on its own
+    // rate-limit buckets, so it never draws on the shared bot budget.
+
+    /// Fetch a webhook's own message by id, with the webhook token. `Ok(None)`
+    /// when this webhook didn't author it (404) — the signal to try the next
+    /// candidate webhook in the channel; `Ok(Some(message))` on success.
+    pub async fn webhook_message(
+        &self,
+        webhook_id: &str,
+        token: &str,
+        message_id: &str,
+    ) -> Result<Option<Value>, AppError> {
+        let url = format!("{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}");
+        let resp = send_with_retry(self.http.get(&url))
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        if resp.status().is_success() {
+            return resp
+                .json::<Value>()
+                .await
+                .map(Some)
+                .map_err(|e| AppError::BadGateway(format!("unexpected response from Discord: {e}")));
+        }
+        if resp.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
+    /// Edit a webhook's own message by id, with the webhook token. `body` is a
+    /// partial edit (the caller sends `components`, plus `flags` for a V2
+    /// message); fields left out — content, embeds, attachments — are untouched
+    /// by Discord.
+    pub async fn edit_webhook_message(
+        &self,
+        webhook_id: &str,
+        token: &str,
+        message_id: &str,
+        body: Value,
+    ) -> Result<(), AppError> {
+        let url = format!("{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}");
+        let resp = send_with_retry(self.http.patch(&url).json(&body))
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        if resp.status().is_success() {
+            return Ok(());
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
     /// Best-effort channel name for a `webhook.incoming` webhook's channel, so
     /// the builder can label same-named webhooks by destination. Returns None if
     /// the bot can't see the channel (not in that guild) — no login required when

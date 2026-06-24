@@ -427,8 +427,17 @@ fn toggle_permanent(
         added_by,
         app.permanent_slots,
     ) {
-        // `Already` only happens on a toggle race; report it as the success it is.
-        Ok(crate::store::Add::Added) | Ok(crate::store::Add::Already) => {
+        // Newly permanent: revive anything the TTL gate disabled while the
+        // message was expiring. The dispatcher can't edit the posted message
+        // itself, so this hands the job to the proxy (best-effort, off this
+        // response path) — see `App::trigger_reenable`.
+        Ok(crate::store::Add::Added) => {
+            app.trigger_reenable(guild_id, channel_id, message_id);
+            refresh_info_reply(app, interaction, guild_id, message_id)
+        }
+        // `Already` only happens on a toggle race: the message was already
+        // permanent, so it was never disabled — nothing to revive.
+        Ok(crate::store::Add::Already) => {
             refresh_info_reply(app, interaction, guild_id, message_id)
         }
         Ok(crate::store::Add::Full) => ephemeral(&format!(
@@ -633,7 +642,8 @@ fn expiry_line(
                 if now_ms() > sent_ms + ttl_ms {
                     format!(
                         "**Expiry:** \u{231B} interactive components **expired** <t:{expires}:R> \
-                         — each click now just disables its component."
+                         — each click now just disables its component. \
+                         Make it never-expire to switch them back on."
                     )
                 } else {
                     format!(

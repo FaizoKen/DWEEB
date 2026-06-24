@@ -68,9 +68,10 @@ uninstalled plugin stop generating traffic after their first click.
 | `PERMANENT_SLOTS_PER_GUILD` | TTL-exempt messages each guild may hold. Default `2`; `0` stops new grants (existing ones stay honored). |
 | `CUSTOM_APPS_PER_GUILD` | Custom Discord apps each guild may register. Default `1`; `0` stops new registrations (existing ones keep working). |
 | `DISPATCHER_FORWARD_SECRET` | Shared secret with every plugin, vouching for the forwarded verifying-key header. Unset = custom-app clicks fail the plugins' own verification. |
-| `INTERNAL_API_TOKEN` | Bearer token gating the `/permanent` + `/custom-apps` management APIs the proxy calls. Unset = those APIs are disabled. |
+| `INTERNAL_API_TOKEN` | Bearer token gating the `/permanent` + `/custom-apps` management APIs the proxy calls — and, in reverse, the token this service presents to the proxy's `/internal/permanent/reenable`. Unset = those APIs are disabled and no component revival is attempted. |
 | `DATABASE_PATH` | SQLite file for the permanent slots + custom-app registry. Default `./dispatcher.db` (`/data/dispatcher.db` in the image). |
 | `DASHBOARD_URL` | URL `/dashboard` replies with. Default `https://dweeb.faizo.net`. |
+| `SERVER_URL` | Proxy base URL the dispatcher calls to revive a message's TTL-disabled components after a never-expire grant (`POST /internal/permanent/reenable`). Default `http://proxy:8080`; unreachable = the grant still succeeds, just no revival. |
 | `PORT` | Bind port, default `8095`. |
 
 ## Component TTL
@@ -85,6 +86,14 @@ accumulate into unbounded long-tail load.
 
 Modal submits are exempt: opening the modal already passed this gate, so a
 form a user is mid-way through filling in still lands.
+
+Granting a never-expire slot **revives** components disabled this way: the
+dispatcher can't edit the posted message itself (the grant click lands on an
+ephemeral reply, and it holds no webhook token), so it asks the proxy — which
+does hold the webhook token — to clear the `disabled` flags via
+`POST /internal/permanent/reenable` (`SERVER_URL`, authenticated with the same
+`INTERNAL_API_TOKEN` in reverse). Best-effort: a failure just leaves the
+buttons greyed until the message is re-posted from the editor.
 
 ## Permanent slots
 

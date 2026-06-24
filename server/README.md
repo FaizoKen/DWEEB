@@ -55,8 +55,10 @@ be in.
 | POST   | `/api/guilds/:id/custom-apps/:application_id/webhook` | ✓ | `{ url }` — one-click `webhook.incoming` under that bot, using its stored secret |
 | POST   | `/api/shortlink`              | —    | `201 { id, expires_at }` — stores a share token for 7 days |
 | GET    | `/api/shortlink/:id`          | —    | `{ token }`, or 404 once expired/unknown |
+| POST   | `/internal/permanent/reenable` | 🔑  | `{ guild_id, channel_id, message_id }` → `202` — dispatcher-only; revives a never-expired message's TTL-disabled components via the webhook token |
 
 `✓` = requires the session cookie **and** membership of `:id`.
+`🔑` = service-to-service; no user session, gated by the shared `DISPATCHER_API_TOKEN` (`Authorization: Bearer …`). Called by the interactions dispatcher when its "Never expire" button grants a slot; the proxy finds the DWEEB webhook that posted the message and clears the `disabled` flags an expired click stamped on — no bot token, the webhook token does the edit.
 
 ### Short links
 

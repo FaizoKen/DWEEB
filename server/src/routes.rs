@@ -260,7 +260,15 @@ pub async fn permanent_add(
             // Recorded for audit; the session is the source of truth for who.
             "added_by": session.uid,
         }));
-    relay_dispatcher(req).await
+    let resp = relay_dispatcher(req).await?;
+    // Now permanent: revive anything the TTL gate disabled while the message was
+    // expiring (the same favour the Discord-side "Never expire" button gets, see
+    // `permanent_reenable`). Off the response path and best-effort — a failure
+    // only means the buttons stay greyed until the message is re-posted.
+    if resp.status() == StatusCode::OK {
+        spawn_revive(&st, guild.clone(), body.channel_id.clone(), body.message_id.clone());
+    }
+    Ok(resp)
 }
 
 /// `DELETE /api/guilds/:id/permanent/:message_id` — give the slot back.
@@ -542,6 +550,188 @@ async fn relay_dispatcher(req: reqwest::RequestBuilder) -> Result<Response, AppE
             ))
         }
     }
+}
+
+// ── Component revival (dispatcher → proxy, service-to-service) ──────────────
+//
+// When a message is made never-expire — from the dashboard (`permanent_add`)
+// or the Discord-side "Message Info → Never expire" button — its components may
+// already carry the `disabled: true` the interactions dispatcher's TTL gate
+// stamped on each post-expiry click. The dispatcher can't undo that itself: the
+// grant click lands on an ephemeral reply, not the posted message, and it holds
+// no webhook token. So it asks us — we hold the webhook tokens — to PATCH the
+// message back to life via the webhook that authored it (no bot token; the same
+// credential DWEEB posts with). The dashboard path calls `spawn_revive`
+// directly; the Discord-button path comes through `permanent_reenable` below.
+
+#[derive(Deserialize)]
+pub struct ReenableBody {
+    pub guild_id: String,
+    pub channel_id: String,
+    pub message_id: String,
+}
+
+/// `POST /internal/permanent/reenable` — called by the interactions dispatcher
+/// (service-to-service) after its "Never expire" button grants a slot. Re-enables
+/// any component the TTL gate disabled on the posted message. Authenticated by
+/// the shared dispatcher token (the same secret the dashboard relay presents, in
+/// the reverse direction) — there is no user session here. Answers `202` at once
+/// and does the Discord work in the background, so the dispatcher's call (racing
+/// Discord's 3s interaction deadline) never waits on it.
+pub async fn permanent_reenable(
+    State(st): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<ReenableBody>,
+) -> Result<Response, AppError> {
+    // The shared dispatcher token gates this, constant-time compared. Without one
+    // configured the feature is off (so is the dashboard relay that pairs with it).
+    let Some(expected) = st.config.dispatcher_token.as_deref() else {
+        return Err(client_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "This feature isn't enabled on this deployment.",
+        ));
+    };
+    let supplied = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or_default();
+    if !constant_time_eq(supplied.as_bytes(), expected.as_bytes()) {
+        return Err(AppError::Unauthorized("bad dispatcher token".into()));
+    }
+    if !is_snowflake(&body.guild_id)
+        || !is_snowflake(&body.channel_id)
+        || !is_snowflake(&body.message_id)
+    {
+        return Err(client_error(
+            StatusCode::BAD_REQUEST,
+            "guild_id, channel_id and message_id must be Discord ids",
+        ));
+    }
+    spawn_revive(&st, body.guild_id, body.channel_id, body.message_id);
+    Ok((StatusCode::ACCEPTED, Json(json!({ "status": "accepted" }))).into_response())
+}
+
+/// Run [`revive_message_components`] off the request path, logging the outcome.
+/// Shared by both never-expire entry points; a few Discord round-trips must
+/// never make a Discord interaction handler (or the dashboard click) wait.
+fn spawn_revive(st: &AppState, guild: String, channel_id: String, message_id: String) {
+    let st = st.clone();
+    tokio::spawn(async move {
+        match revive_message_components(&st, &guild, &channel_id, &message_id).await {
+            Ok(Revived::Patched) => {
+                tracing::info!(%message_id, "re-enabled expired components after never-expire grant")
+            }
+            Ok(Revived::NothingToDo) => {
+                tracing::debug!(%message_id, "never-expire grant: nothing disabled to revive")
+            }
+            Ok(Revived::WebhookGone) => tracing::warn!(
+                %message_id,
+                %channel_id,
+                "never-expire grant: no DWEEB webhook found to revive the message (deleted, or posted by a third party)"
+            ),
+            Err(err) => tracing::warn!(%err, %message_id, "never-expire grant: re-enable failed"),
+        }
+    });
+}
+
+/// Outcome of a revive attempt — purely for the log line.
+enum Revived {
+    /// The message had disabled components; they were cleared and PATCHed.
+    Patched,
+    /// The authoring webhook was found, but nothing was disabled (the common,
+    /// healthy case) — no PATCH issued.
+    NothingToDo,
+    /// No webhook in the channel could claim the message (all 404'd).
+    WebhookGone,
+}
+
+/// Find the DWEEB webhook that posted `message_id` in `channel_id` of `guild`,
+/// and clear any TTL-disabled components on it via that webhook's token. Tries
+/// each incoming webhook the channel has (usually a single DWEEB hook): only the
+/// authoring webhook's token can GET/PATCH the message, so a 404 just means "not
+/// this one, try the next". The strip is a no-op unless something was actually
+/// disabled, so a healthy message costs only the GET.
+async fn revive_message_components(
+    st: &AppState,
+    guild: &str,
+    channel_id: &str,
+    message_id: &str,
+) -> Result<Revived, AppError> {
+    let hooks = st.discord.guild_webhooks(guild).await?;
+    // Incoming (type-1) webhooks in this channel that handed us a usable token.
+    let candidates = hooks.iter().filter(|w| {
+        w.kind == 1
+            && w.channel_id.as_deref() == Some(channel_id)
+            && w.token.as_deref().is_some_and(|t| !t.is_empty())
+    });
+    for w in candidates {
+        let token = w.token.as_deref().unwrap_or_default();
+        let Some(message) = st.discord.webhook_message(&w.id, token, message_id).await? else {
+            continue; // 404 — a different webhook authored this message
+        };
+        let Some(mut components) = message.get("components").cloned() else {
+            return Ok(Revived::NothingToDo); // owns it, but carries no components
+        };
+        if !clear_disabled(&mut components) {
+            return Ok(Revived::NothingToDo);
+        }
+        let mut body = json!({ "components": components });
+        // A Components-V2 message must keep its IS_COMPONENTS_V2 flag for the
+        // edit to validate the V2 component types (text displays, containers).
+        // Restate the message's exact flags so that bit — and any
+        // suppress-notification/embed bits — survive unchanged; non-V2 messages
+        // are left without a `flags` field so their classic rows validate.
+        const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15;
+        if let Some(flags) = message.get("flags").and_then(Value::as_u64) {
+            if flags & FLAG_IS_COMPONENTS_V2 != 0 {
+                body["flags"] = json!(flags);
+            }
+        }
+        st.discord
+            .edit_webhook_message(&w.id, token, message_id, body)
+            .await?;
+        return Ok(Revived::Patched);
+    }
+    Ok(Revived::WebhookGone)
+}
+
+/// Clear the `disabled` flag from every *interactive* component (one carrying a
+/// `custom_id`) in a Discord component tree, returning whether anything changed.
+/// This precisely reverses the dispatcher's TTL gate, which disables a component
+/// by its `custom_id` (plugins/dispatcher/src/main.rs `disable_component`), and
+/// walks the same Components-V2 nesting: children under `components`, a section's
+/// button under `accessory`. Link/premium buttons (no `custom_id`) are left
+/// alone — only what could have been TTL-disabled is touched.
+fn clear_disabled(node: &mut Value) -> bool {
+    match node {
+        Value::Array(items) => items.iter_mut().fold(false, |c, i| clear_disabled(i) | c),
+        Value::Object(map) => {
+            let interactive = map.get("custom_id").and_then(Value::as_str).is_some();
+            let mut changed = false;
+            if interactive && map.get("disabled").and_then(Value::as_bool) == Some(true) {
+                map.insert("disabled".into(), Value::Bool(false));
+                changed = true;
+            }
+            if let Some(children) = map.get_mut("components") {
+                changed |= clear_disabled(children);
+            }
+            if let Some(accessory) = map.get_mut("accessory") {
+                changed |= clear_disabled(accessory);
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
+/// Byte-wise comparison that doesn't leak the match length through timing — the
+/// same shape the dispatcher uses on the other end of this shared token.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 // ── Webhook management (login + Manage Webhooks gated) ─────────────────────
@@ -1056,4 +1246,73 @@ fn to_value<T: serde::Serialize>(v: T) -> Result<Value, AppError> {
 fn value_response(value: &Value) -> Response {
     let bytes = serde_json::to_vec(value).unwrap_or_else(|_| b"{}".to_vec());
     ([(header::CONTENT_TYPE, "application/json")], bytes).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── clear_disabled (component revival) ───────────────────────────────────
+
+    #[test]
+    fn clear_disabled_reenables_a_nested_v2_button() {
+        // A Components-V2 tree: a container holding a text display + an action
+        // row whose button the TTL gate disabled. The text display must survive.
+        let mut tree = json!([
+            { "type": 17, "components": [
+                { "type": 10, "content": "Pick one" },
+                { "type": 1, "components": [
+                    { "type": 2, "style": 1, "label": "Go", "custom_id": "p:go", "disabled": true }
+                ]}
+            ]}
+        ]);
+        assert!(clear_disabled(&mut tree), "a disabled button is a change");
+        assert_eq!(tree[0]["components"][0]["content"], "Pick one");
+        let btn = &tree[0]["components"][1]["components"][0];
+        assert_eq!(btn["disabled"], false);
+        assert_eq!(btn["custom_id"], "p:go");
+    }
+
+    #[test]
+    fn clear_disabled_handles_section_accessory_and_selects() {
+        // A section's button lives under `accessory`, not `components`; a select
+        // menu is interactive too (it carries a custom_id).
+        let mut tree = json!([
+            { "type": 9, "components": [{ "type": 10, "content": "row" }],
+              "accessory": { "type": 2, "style": 2, "label": "x", "custom_id": "p:a", "disabled": true } },
+            { "type": 1, "components": [
+                { "type": 3, "custom_id": "p:sel", "disabled": true, "options": [] }
+            ]}
+        ]);
+        assert!(clear_disabled(&mut tree));
+        assert_eq!(tree[0]["accessory"]["disabled"], false);
+        assert_eq!(tree[1]["components"][0]["disabled"], false);
+    }
+
+    #[test]
+    fn clear_disabled_leaves_link_buttons_and_intentional_gaps_untouched() {
+        // A link button has no custom_id, so it's never something the TTL gate
+        // disabled — leave its (here absent) state alone. And a tree with nothing
+        // disabled reports no change, so the caller skips the PATCH entirely.
+        let mut tree = json!([
+            { "type": 1, "components": [
+                { "type": 2, "style": 5, "label": "Docs", "url": "https://x", "disabled": true },
+                { "type": 2, "style": 1, "label": "Live", "custom_id": "p:live" }
+            ]}
+        ]);
+        assert!(!clear_disabled(&mut tree), "no interactive disabled component");
+        // The link button keeps its (author-set) disabled; the live one is intact.
+        assert_eq!(tree[0]["components"][0]["disabled"], true);
+        assert_eq!(tree[0]["components"][1]["custom_id"], "p:live");
+    }
+
+    // ── constant_time_eq ─────────────────────────────────────────────────────
+
+    #[test]
+    fn constant_time_eq_matches_only_identical_bytes() {
+        assert!(constant_time_eq(b"s3cret", b"s3cret"));
+        assert!(!constant_time_eq(b"s3cret", b"s3creT"));
+        assert!(!constant_time_eq(b"s3cret", b"s3cre")); // length differs
+        assert!(constant_time_eq(b"", b""));
+    }
 }

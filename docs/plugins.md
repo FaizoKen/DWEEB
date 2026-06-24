@@ -259,7 +259,10 @@ That half lives entirely in your service and is outside DWEEB's scope.
 > **Make permanent** to a signed-in user who manages the server, and the
 > account menu's **Managed messages** dialog lists the occupying
 > messages so slots can be freed (including ones held by deleted
-> messages). See the [dispatcher README](../plugins/dispatcher/README.md).
+> messages). Making a message never-expire also **switches its disabled
+> components back on** — the dispatcher asks the proxy (which holds the
+> webhook token) to clear the flags an expired click stamped on.
+> See the [dispatcher README](../plugins/dispatcher/README.md).
 
 ## Placeholders: message text that follows your values
 

@@ -42,8 +42,8 @@ use crate::discord::Discord;
 use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
 use crate::routes::{
     bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, emojis, health,
-    list_guilds, permanent_add, permanent_list, permanent_remove, roles, webhook_create,
-    webhook_delete, webhook_modify, webhooks_list, AppState, DispatcherApi,
+    list_guilds, permanent_add, permanent_list, permanent_reenable, permanent_remove, roles,
+    webhook_create, webhook_delete, webhook_modify, webhooks_list, AppState, DispatcherApi,
 };
 use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
 
@@ -247,6 +247,11 @@ async fn run() {
             "/api/guilds/:guild_id/permanent/:message_id",
             axum::routing::delete(permanent_remove),
         )
+        // Service-to-service: the interactions dispatcher asks us to revive the
+        // components its TTL gate disabled, once a message is made never-expire
+        // from its "Message Info" button. Gated by the shared dispatcher token,
+        // not a user session (see `permanent_reenable`).
+        .route("/internal/permanent/reenable", post(permanent_reenable))
         // Webhook management (login + Manage Webhooks gated) — powers the
         // Send/Restore picker. Enumerate every webhook in a server (with recover
         // URLs + creators), create one in a channel, and rename / move / delete
