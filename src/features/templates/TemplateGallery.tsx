@@ -44,6 +44,7 @@ import {
   type TemplateCategory,
 } from "@/data/presets";
 import type { WebhookMessage } from "@/core/schema/types";
+import { collectSearchText } from "@/core/schema/traversal";
 import { getPlugins, isPluginRegistryConfigured } from "@/core/plugins/registry";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { Preview } from "@/features/preview/Preview";
@@ -90,11 +91,15 @@ interface CardData {
   onPick: () => void;
   /** Saved only — remove this entry; drives the card's delete affordance. */
   onDelete?: () => void;
+  /** Lowercased text pulled from the message body (content, labels, …) so the
+   *  card is findable by what the message says, not just its name. Precomputed
+   *  when the card is built so search stays cheap per keystroke. */
+  searchText?: string;
 }
 
-/** Lowercased search haystack for one card. */
+/** Lowercased search haystack for one card — its metadata plus the message body. */
 function haystack(c: CardData): string {
-  return [c.name, c.description, c.category, c.pairsWith, c.badge]
+  return [c.name, c.description, c.category, c.pairsWith, c.badge, c.searchText]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -191,6 +196,7 @@ export function TemplateGallery() {
             accent: ACCENT_BLURPLE,
             savedAt: draft.savedAt,
             badge: "Recent",
+            searchText: collectSearchText(draft.message),
             // The editor already holds this draft (store bootstrap) — just close.
             onPick: () => closeGallery(),
           }
@@ -210,6 +216,7 @@ export function TemplateGallery() {
         accent: ACCENT_TEAL,
         savedAt: entry.savedAt,
         badge: "Saved",
+        searchText: collectSearchText(message),
         onPick: () => {
           replaceMessage(message);
           closeGallery();
@@ -254,6 +261,7 @@ export function TemplateGallery() {
           accent: ACCENT_GREEN,
           savedAt: entry.postedAt,
           badge: "Posted",
+          searchText: collectSearchText(message),
           onPick: () => {
             // Restore content *and* origin — the Send panel reads the origin and
             // flips to "Update existing" with the webhook + message id prefilled.
@@ -284,6 +292,7 @@ export function TemplateGallery() {
         category: t.category,
         requiresBot: t.requiresBot,
         pairsWith: t.pairsWith,
+        searchText: collectSearchText(t.message),
         onPick: () => {
           replaceMessage(t.message);
           closeGallery();
@@ -328,25 +337,34 @@ export function TemplateGallery() {
   }, [filters, filter]);
 
   const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
     let base: CardData[];
     if (filter === POSTED_FILTER) {
       base = postedCards;
     } else if (filter === SAVED_FILTER) {
       base = savedCards;
     } else if (filter === "All") {
-      // Recent activity first — the draft, then the messages you've posted (most
-      // useful for a quick re-edit, capped so they don't bury the templates) —
-      // then the curated templates. Saved messages keep to their own chip, like
-      // a library.
-      base = [
-        ...(continueCard ? [continueCard] : []),
-        ...postedCards.slice(0, POSTED_IN_ALL),
-        ...templateCards,
-      ];
+      base = q
+        ? // A search from All spans every starting point — the messages you've
+          // posted and saved included, not just templates — so nothing is hidden
+          // behind a chip or the posted cap.
+          [
+            ...(continueCard ? [continueCard] : []),
+            ...postedCards,
+            ...savedCards,
+            ...templateCards,
+          ]
+        : // Idle: recent activity first — the draft, then a capped slice of posted
+          // messages (so they don't bury the templates) — then the curated
+          // templates. Saved messages keep to their own chip, like a library.
+          [
+            ...(continueCard ? [continueCard] : []),
+            ...postedCards.slice(0, POSTED_IN_ALL),
+            ...templateCards,
+          ];
     } else {
       base = templateCards.filter((c) => c.category === filter);
     }
-    const q = query.trim().toLowerCase();
     return q ? base.filter((c) => haystack(c).includes(q)) : base;
   }, [filter, query, continueCard, postedCards, savedCards, templateCards]);
 
@@ -414,8 +432,12 @@ export function TemplateGallery() {
                   className={styles.searchInput}
                   value={query}
                   onChange={(e) => setQuery(e.currentTarget.value)}
-                  placeholder={`Search ${TEMPLATES.length} templates…`}
-                  aria-label="Search templates"
+                  placeholder={
+                    postedCards.length || savedCards.length || continueCard
+                      ? "Search your messages & templates…"
+                      : `Search ${TEMPLATES.length} templates…`
+                  }
+                  aria-label="Search messages and templates"
                 />
                 {query ? (
                   <button

@@ -92,6 +92,39 @@ export function countCharacters(message: WebhookMessage): number {
 }
 
 /**
+ * Concatenate every human-readable text field in a message into one lowercased
+ * haystack for searching — the same fields {@link countCharacters} totals
+ * (TextDisplay content, button/option labels, descriptions, select
+ * placeholders, username), plus the thread name and media alt text. Lets the
+ * gallery search find a saved/posted message by the words it actually contains,
+ * not just its label.
+ */
+export function collectSearchText(message: WebhookMessage): string {
+  const parts: string[] = [];
+  const add = (v: unknown): void => {
+    if (typeof v === "string" && v.length > 0) parts.push(v);
+  };
+  add(message.username);
+  add(message.thread_name);
+  for (const c of walk(message)) {
+    if ("content" in c) add((c as { content?: unknown }).content);
+    if ("label" in c) add((c as { label?: unknown }).label);
+    if ("description" in c) add((c as { description?: unknown }).description);
+    if ("placeholder" in c) add((c as { placeholder?: unknown }).placeholder);
+    if (isStringSelect(c)) {
+      for (const opt of c.options) {
+        add(opt.label);
+        add(opt.description);
+      }
+    }
+    if (isMediaGallery(c)) {
+      for (const item of c.items) add(item.description);
+    }
+  }
+  return parts.join(" ").toLowerCase();
+}
+
+/**
  * Find a node by id, returning the node plus enough context for an immutable
  * structural edit. Returns `null` when not found.
  */
