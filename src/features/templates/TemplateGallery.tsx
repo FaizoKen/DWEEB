@@ -35,6 +35,7 @@ import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
 import { recordOrigin, usePostedMessagesStore } from "@/core/state/postedMessagesStore";
+import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { loadDraftMessage } from "@/core/state/draftStorage";
 import { attachEditorFields } from "@/core/serialization/normalize";
 import {
@@ -266,11 +267,15 @@ export function TemplateGallery() {
             // Restore content *and* origin — the Send panel reads the origin and
             // flips to "Update existing" with the webhook + message id prefilled.
             replaceMessageFromRestore(message, recordOrigin(entry));
+            // Re-align the connected guild to where this message lives, when the
+            // user belongs to that server, so the preview's mentions/channels/
+            // emoji resolve to the right names instead of placeholders. The
+            // switch is visible (the guild selector updates) and never changes
+            // where an update lands. When they aren't a member, the editor's
+            // mismatch banner explains the placeholder names instead.
+            alignConnectedGuild(entry.guildId);
             closeGallery();
-            pushToast(
-              "Loaded your posted message — edits will update the original.",
-              "success",
-            );
+            pushToast("Loaded your posted message — edits will update the original.", "success");
           },
           onDelete: () =>
             setPendingDelete({ kind: "posted", id: entry.id, name: where ?? "this message" }),
@@ -348,12 +353,7 @@ export function TemplateGallery() {
         ? // A search from All spans every starting point — the messages you've
           // posted and saved included, not just templates — so nothing is hidden
           // behind a chip or the posted cap.
-          [
-            ...(continueCard ? [continueCard] : []),
-            ...postedCards,
-            ...savedCards,
-            ...templateCards,
-          ]
+          [...(continueCard ? [continueCard] : []), ...postedCards, ...savedCards, ...templateCards]
         : // Idle: recent activity first — the draft, then a capped slice of posted
           // messages (so they don't bury the templates) — then the curated
           // templates. Saved messages keep to their own chip, like a library.
@@ -521,7 +521,9 @@ export function TemplateGallery() {
       <Modal
         open={!!pendingDelete}
         onClose={() => setPendingDelete(null)}
-        title={pendingDelete?.kind === "posted" ? "Remove posted message?" : "Delete saved message?"}
+        title={
+          pendingDelete?.kind === "posted" ? "Remove posted message?" : "Delete saved message?"
+        }
         size="sm"
         // The gallery overlay sits at --app-z-tooltip; lift the confirm above it
         // so it (and its scrim) land on top rather than behind the gallery.

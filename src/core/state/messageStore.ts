@@ -96,6 +96,16 @@ export interface RestoredOrigin {
   messageId: string;
   /** Optional thread the message lives in. */
   threadId?: string;
+  /**
+   * The message's *home* server — where it was posted — when known. Used to
+   * re-align the editor's connected guild on reload (so mentions/channels/emoji
+   * resolve to the right names) and to explain a mismatch when they diverge. It
+   * never affects where an update lands — that rides solely on `webhookUrl`.
+   * Absent on origins whose guild we can't determine (Restore tab, deep links).
+   */
+  guildId?: string;
+  /** Resolved name for {@link guildId}, captured for display. */
+  guildName?: string;
 }
 
 /**

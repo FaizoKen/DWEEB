@@ -1,0 +1,9 @@
+.wrap {
+  padding: 8px 14px 0;
+}
+
+@media (max-width: 900px) {
+  .wrap {
+    padding: 8px 10px 0;
+  }
+}

@@ -932,6 +932,8 @@ export function SendPanel({
             webhookUrl: parsedUrl.url,
             messageId: postedMessageId,
             threadId: effThreadId || undefined,
+            guildId: effGuildId,
+            guildName: effGuildName,
           });
           // Persist it to the "Start a message" gallery so it's reloadable in a
           // later session — picking the card restores this same origin, no manual

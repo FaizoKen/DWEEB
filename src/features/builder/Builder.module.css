@@ -5,6 +5,13 @@
   height: 100%;
 }
 
+/* Wraps the action bar and the (optional) origin-guild banner as a single
+   grid row, so the tree keeps the 1fr row regardless of the banner. Carries the
+   toolbar stacking so both sit above the scrolling tree below. */
+.header {
+  z-index: var(--app-z-toolbar);
+}
+
 .actionBar {
   display: flex;
   align-items: center;

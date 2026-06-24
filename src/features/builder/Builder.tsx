@@ -29,6 +29,7 @@ import {
 } from "@/ui/Icon";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
+import { OriginGuildBanner } from "./OriginGuildBanner";
 import { SavedMessagesMenu } from "./components/SavedMessagesMenu";
 import { AccountMenu } from "@/features/guild/AccountMenu";
 import { isProxyConfigured } from "@/core/guild/config";
@@ -54,14 +55,19 @@ interface BuilderProps {
 export function Builder({ onShare, onExport, onImport, onSend, onRestore, onAbout }: BuilderProps) {
   return (
     <div className={styles.builder}>
-      <ActionBar
-        onShare={onShare}
-        onExport={onExport}
-        onImport={onImport}
-        onSend={onSend}
-        onRestore={onRestore}
-        onAbout={onAbout}
-      />
+      {/* ActionBar + banner share the grid's first (auto) row so the tree below
+          keeps the 1fr row whether or not the banner is showing. */}
+      <div className={styles.header}>
+        <ActionBar
+          onShare={onShare}
+          onExport={onExport}
+          onImport={onImport}
+          onSend={onSend}
+          onRestore={onRestore}
+          onAbout={onAbout}
+        />
+        <OriginGuildBanner />
+      </div>
 
       <ComponentTree />
     </div>

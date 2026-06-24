@@ -135,6 +135,10 @@ export function recordOrigin(entry: PostedMessageRecord): RestoredOrigin {
     webhookUrl: entry.webhookUrl,
     messageId: entry.messageId,
     threadId: entry.threadId,
+    // Carry the home server so reloading re-aligns the editor's connected guild
+    // (or explains the mismatch when it can't).
+    guildId: entry.guildId,
+    guildName: entry.guildName,
   };
 }
 
