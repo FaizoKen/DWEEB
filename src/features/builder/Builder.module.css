@@ -9,9 +9,10 @@
   height: 100%;
 }
 
-/* Wraps the action bar and the (optional) origin-guild banner as a single
-   grid row, so the tree keeps the 1fr row regardless of the banner. Carries the
-   toolbar stacking so both sit above the scrolling tree below. */
+/* Wraps the action bar as the grid's first (auto) row. Carries the toolbar
+   stacking so it sits above the scrolling tree below. (The posted-message link
+   indicator lives inside the tree's scroll area, not here, so it scrolls away
+   with the content instead of pinning to the top.) */
 .header {
   z-index: var(--app-z-toolbar);
   /* Lets the grid item shrink below its content's intrinsic width so the banner

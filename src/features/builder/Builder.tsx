@@ -29,7 +29,6 @@ import {
 } from "@/ui/Icon";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
-import { PostedMessageBanner } from "./PostedMessageBanner";
 import { SavedMessagesMenu } from "./components/SavedMessagesMenu";
 import { AccountMenu } from "@/features/guild/AccountMenu";
 import { isProxyConfigured } from "@/core/guild/config";
@@ -55,8 +54,10 @@ interface BuilderProps {
 export function Builder({ onShare, onExport, onImport, onSend, onRestore, onAbout }: BuilderProps) {
   return (
     <div className={styles.builder}>
-      {/* ActionBar + banner share the grid's first (auto) row so the tree below
-          keeps the 1fr row whether or not the banner is showing. */}
+      {/* ActionBar occupies the grid's first (auto) row; the tree fills the 1fr
+          row below. The posted-message link indicator lives inside the tree's
+          scroll area (see ComponentTree) so it scrolls with the content instead
+          of pinning to the top. */}
       <div className={styles.header}>
         <ActionBar
           onShare={onShare}
@@ -66,7 +67,6 @@ export function Builder({ onShare, onExport, onImport, onSend, onRestore, onAbou
           onRestore={onRestore}
           onAbout={onAbout}
         />
-        <PostedMessageBanner />
       </div>
 
       <ComponentTree />

@@ -67,6 +67,7 @@ import { PlaceholderInput } from "@/ui/PlaceholderInput";
 import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { AddComponentMenu, type AddMenuNode } from "./AddComponentMenu";
 import { AdvancedMessageOptions } from "./AdvancedMessageOptions";
+import { PostedMessageBanner } from "../PostedMessageBanner";
 import {
   AlertCircleIcon,
   AlertTriangleIcon,
@@ -411,6 +412,7 @@ export function ComponentTree() {
       <DragContext.Provider value={dragSession}>
         <div className={styles.tree}>
           <div ref={scrollRef} className={styles.scroll}>
+            <PostedMessageBanner />
             <MetaHeader />
             <div ref={metaSentinelRef} aria-hidden className={styles.metaSentinel} />
 

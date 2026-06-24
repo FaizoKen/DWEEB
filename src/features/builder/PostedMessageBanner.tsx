@@ -9,22 +9,22 @@
  * invisible: the only signal was the button label, and the only way out was the
  * Send panel's local "Send as new" toggle, which doesn't actually drop the link.
  *
- * It renders as a thin, single-line status strip whenever a link is set, with a
- * **Detach** action ({@link clearRestoreOrigin}) that flips the toolbar back to
- * "Send". Detaching loses the stored webhook + message id, so it's forgiving — a
- * short Undo window re-links ({@link setRestoreOrigin}) if it was a slip.
+ * This renders a slim bar at the top of the scrolling tree (so it scrolls away
+ * with the content rather than pinning to the top) with a real **Detach** button
+ * ({@link clearRestoreOrigin}) that flips the toolbar back to "Send". Detaching
+ * loses the stored webhook + message id, so it's forgiving — a short Undo window
+ * re-links ({@link setRestoreOrigin}) if it was a slip.
  *
- * The strip also carries the origin-guild mismatch warning. A reloaded message
+ * On an origin-guild mismatch it turns into a warning. A reloaded message
  * remembers the server it was posted to; when that differs from the editor's
  * connected guild, the preview resolves `<@&role>` / `<#channel>` / `<:emoji:>`
  * against the wrong server and shows placeholder names — so the message looks
  * broken when it isn't. Reloading from the gallery already auto-switches the
  * connected guild when the user belongs to the origin server (see
  * {@link alignConnectedGuild}); this covers what's left (not a member, or
- * manually switched away). On a mismatch the strip turns its icon to a warning,
- * offers "Switch server", and tucks the full explanation behind a "Why?"
- * disclosure so the row stays one line. The update itself never rides on the
- * connected guild — only on the stored webhook URL.
+ * manually switched away), turning amber, explaining the mismatch, and offering
+ * "Switch server". The update itself never rides on the connected guild — only
+ * on the stored webhook URL.
  */
 
 import { useEffect, useState } from "react";
@@ -33,7 +33,8 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isProxyConfigured } from "@/core/guild/config";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
-import { AlertTriangleIcon, ChevronRightIcon, InfoIcon } from "@/ui/Icon";
+import { Button } from "@/ui/Button";
+import { AlertTriangleIcon, InfoIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
 import styles from "./PostedMessageBanner.module.css";
 
@@ -51,8 +52,6 @@ export function PostedMessageBanner() {
   // an Undo. Auto-clears after the window (and on unmount) so it never lingers
   // into a later, unrelated message.
   const [detached, setDetached] = useState<RestoredOrigin | null>(null);
-  // Whether the mismatch row's "Why?" explanation is expanded.
-  const [showWhy, setShowWhy] = useState(false);
   useEffect(() => {
     if (!detached) return;
     const t = setTimeout(() => setDetached(null), UNDO_WINDOW_MS);
@@ -66,7 +65,6 @@ export function PostedMessageBanner() {
 
   const handleDetach = () => {
     if (!origin) return;
-    setShowWhy(false);
     setDetached(origin);
     clearRestoreOrigin();
   };
@@ -86,53 +84,29 @@ export function PostedMessageBanner() {
       originGuildId != null && isProxyConfigured() && originGuildId !== connectedGuildId;
 
     const detachButton = (
-      <button
-        type="button"
-        className={styles.action}
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={handleDetach}
         title="Stop updating this message — your next post will create a new one"
       >
         Detach
-      </button>
+      </Button>
     );
 
-    // Mismatch — same thin strip, but a warning icon, a "Switch server" fix, and
-    // the placeholder-names explanation folded behind a "Why?" disclosure.
+    // Mismatch — amber, with the placeholder-names reason inline and a fix.
     if (mismatch) {
       const originName = origin.guildName ?? "another server";
       const connectedName = authGuilds.find((g) => g.id === connectedGuildId)?.name;
       // A reactive read of membership — the "Switch" affordance appears once the
-      // guild list loads, even if the strip rendered before it did.
+      // guild list loads, even if the bar rendered before it did.
       const isMember = authGuilds.some((g) => g.id === originGuildId);
       return (
-        <div className={styles.group}>
-          <div className={cn(styles.bar, styles.warn)}>
-            <AlertTriangleIcon size={13} className={styles.barIcon} />
-            <span className={styles.barText}>
-              Updating a message posted to <strong>{originName}</strong>
-            </span>
-            <button
-              type="button"
-              className={cn(styles.toggle, showWhy && styles.toggleOpen)}
-              onClick={() => setShowWhy((v) => !v)}
-              aria-expanded={showWhy}
-            >
-              <ChevronRightIcon size={11} className={styles.toggleCaret} />
-              Why?
-            </button>
-            {isMember ? (
-              <button
-                type="button"
-                className={styles.action}
-                onClick={() => alignConnectedGuild(originGuildId)}
-              >
-                Switch server
-              </button>
-            ) : null}
-            {detachButton}
-          </div>
-          {showWhy ? (
-            <p className={styles.note}>
+        <div className={cn(styles.bar, styles.warn)} role="note">
+          <AlertTriangleIcon size={16} className={styles.icon} />
+          <div className={styles.text}>
+            <span className={styles.title}>Updating a message posted to {originName}</span>
+            <span className={styles.detail}>
               {connectedGuildId ? (
                 <>
                   You&rsquo;re connected to <strong>{connectedName ?? "a different server"}</strong>
@@ -145,41 +119,47 @@ export function PostedMessageBanner() {
                 </>
               )}
               {isMember ? null : " The update still posts to the original message."}
-            </p>
-          ) : null}
+            </span>
+          </div>
+          <div className={styles.actions}>
+            {isMember ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => alignConnectedGuild(originGuildId)}
+              >
+                Switch server
+              </Button>
+            ) : null}
+            {detachButton}
+          </div>
         </div>
       );
     }
 
-    // Happy path — a thin, single-line strip plus the way out.
+    // Happy path — one comfortable line plus the way out.
     return (
-      <div className={styles.bar}>
-        <InfoIcon size={13} className={styles.barIcon} />
-        <span className={styles.barText}>
-          Updating a message
-          {origin.guildName ? (
-            <>
-              {" "}
-              in <strong>{origin.guildName}</strong>
-            </>
-          ) : (
-            <> you posted</>
-          )}
+      <div className={styles.bar} role="note">
+        <InfoIcon size={16} className={styles.icon} />
+        <span className={styles.title}>
+          Updating a message{origin.guildName ? <> in {origin.guildName}</> : <> you posted</>}
         </span>
-        {detachButton}
+        <div className={styles.actions}>{detachButton}</div>
       </div>
     );
   }
 
-  // ── Just detached: a thin confirmation with a one-click re-link ───────────
+  // ── Just detached: a confirmation with a one-click re-link ────────────────
   if (detached) {
     return (
-      <div className={styles.bar}>
-        <InfoIcon size={13} className={styles.barIcon} />
-        <span className={styles.barText}>Detached — your next post creates a new message.</span>
-        <button type="button" className={styles.action} onClick={handleUndo}>
-          Undo
-        </button>
+      <div className={styles.bar} role="note">
+        <InfoIcon size={16} className={styles.icon} />
+        <span className={styles.title}>Detached — your next post will create a new message.</span>
+        <div className={styles.actions}>
+          <Button variant="secondary" size="sm" onClick={handleUndo}>
+            Undo
+          </Button>
+        </div>
       </div>
     );
   }
