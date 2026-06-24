@@ -8,7 +8,6 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "any",
   "background_color": "#1e1f22",
   "theme_color": "#1e1f22",
   "categories": ["developer", "productivity", "utilities"],
