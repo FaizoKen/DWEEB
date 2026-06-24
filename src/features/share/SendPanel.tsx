@@ -134,6 +134,7 @@ import { ChevronRightIcon, LockIcon, PlusIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
 import {
+  COMPONENT_TTL_DAYS,
   DISCORD_CLIENT_ID,
   isProxyConfigured,
   oauthCallbackUrl,
@@ -647,16 +648,23 @@ export function SendPanel({
       : undefined;
 
   // The signed-out counterpart to the "Never expire" toggle: a message with
-  // interactive components expires a few days after sending unless it holds a
+  // interactive components expires after the deployment TTL unless it holds a
   // slot, but claiming one needs a signed-in session. Surface the heads-up +
   // sign-in nudge in the confirm dialog — the success dialog already says this,
-  // but only *after* the post, where "sign in before sending" is too late.
+  // but only *after* the post, where "sign in before sending" is too late. The
+  // exact day count comes from the build-time COMPONENT_TTL_DAYS (the live
+  // figure lives behind the authed slot fetch these users can't make); null
+  // means expiry is off on this deployment, so there's nothing to warn about.
   // Gated to a definitively signed-out session (not the "unknown"/"loading"
   // window) so it never flashes; signed-out users never fetch slots, so
   // `slotsUnavailable` stays false and `confirmSlots` stays null for them.
   const expiryNudge =
-    hasInteractiveComponents && isProxyConfigured() && !slotsUnavailable && authStatus === "anon"
-      ? { onSignIn: () => login() }
+    hasInteractiveComponents &&
+    isProxyConfigured() &&
+    !slotsUnavailable &&
+    authStatus === "anon" &&
+    COMPONENT_TTL_DAYS != null
+      ? { ttlDays: COMPONENT_TTL_DAYS, onSignIn: () => login() }
       : undefined;
 
   // Synchronous pre-flight. Validate the inputs the same way the send used to,

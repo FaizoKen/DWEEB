@@ -25,6 +25,24 @@ export const PROXY_BASE_URL: string = (import.meta.env.VITE_PROXY_BASE_URL ?? ""
 /** Discord application (client) id — public; used only for the bot-invite link. */
 export const DISCORD_CLIENT_ID: string = (import.meta.env.VITE_DISCORD_CLIENT_ID ?? "").trim();
 
+/**
+ * Days a message's interactive components stay clickable after sending before
+ * the dispatcher stops answering them — unless the message holds a never-expire
+ * slot. Mirrors the dispatcher's `COMPONENT_TTL_DAYS` (default 7; `0` = never
+ * expires). Build-time so a signed-out user — who can't fetch the live slot
+ * state, where the authoritative number comes from — can still be told the
+ * concrete figure before posting. `null` when the deployment disables expiry
+ * (`0`) or the value is unusable; callers then show no expiry copy. Keep
+ * `VITE_COMPONENT_TTL_DAYS` aligned with the dispatcher's setting.
+ */
+export const COMPONENT_TTL_DAYS: number | null = (() => {
+  const raw = (import.meta.env.VITE_COMPONENT_TTL_DAYS ?? "").trim();
+  if (raw === "") return 7; // unset → the dispatcher's own default
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) return 7; // garbage → fall back to default
+  return n === 0 ? null : n; // 0 = never expires on this deployment
+})();
+
 /** True when a proxy base URL is configured — guild features are usable. */
 export function isProxyConfigured(): boolean {
   return PROXY_BASE_URL.length > 0;

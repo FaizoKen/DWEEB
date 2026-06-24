@@ -126,7 +126,11 @@ export interface SendConfirmProps {
    * when there's nothing to expire, the feature is off, or the user is signed
    * in (they get the "Never expire" toggle instead).
    */
-  expiryNudge?: { onSignIn: () => void };
+  expiryNudge?: {
+    /** Days the components stay clickable — the deployment's `COMPONENT_TTL_DAYS`. */
+    ttlDays: number;
+    onSignIn: () => void;
+  };
   /**
    * The "Make permanent" control for messages with interactive components.
    * Present only when the Send panel could read the slot state (signed in,
@@ -393,10 +397,12 @@ function PreviewMismatchNotice({
  * advice is still actionable — the signed-in path gets the {@link PermanentOptIn}
  * toggle instead.
  */
-function ExpiryNudge({ onSignIn }: NonNullable<SendConfirmProps["expiryNudge"]>) {
+function ExpiryNudge({ ttlDays, onSignIn }: NonNullable<SendConfirmProps["expiryNudge"]>) {
   return (
     <div className={styles.routingNote} role="note">
-      <strong>Buttons &amp; selects stop working a few days after sending.</strong>
+      <strong>
+        Buttons &amp; selects stop working {ttlDays} day{ttlDays === 1 ? "" : "s"} after sending.
+      </strong>
       <p className={styles.pingDetail}>
         Sign in before sending to make this message never expire and keep them clickable.
       </p>

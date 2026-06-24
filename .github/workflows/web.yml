@@ -77,6 +77,10 @@ jobs:
           VITE_DISCORD_CLIENT_ID: ${{ vars.VITE_DISCORD_CLIENT_ID }}
           VITE_INTERACTIONS_URL: ${{ vars.VITE_INTERACTIONS_URL }}
           VITE_FEEDBACK_WEBHOOK_URL: ${{ vars.VITE_FEEDBACK_WEBHOOK_URL }}
+          # Mirror of the dispatcher's COMPONENT_TTL_DAYS — drives the exact
+          # expiry figure shown to signed-out users pre-send. Unset → code
+          # default 7 (the dispatcher's own default).
+          VITE_COMPONENT_TTL_DAYS: ${{ vars.VITE_COMPONENT_TTL_DAYS }}
 
       # GitHub Pages has no rewrite rules, so serve the SPA shell as the 404
       # page — deep links (e.g. a stale `/s/<id>` short link) still load the
