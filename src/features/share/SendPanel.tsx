@@ -93,6 +93,7 @@ import {
   classifyWebhookOwner,
   forgetWebhook,
   loadHistory,
+  parseMessageChannelId,
   parseMessageIdInput,
   parseWebhookUrl,
   rememberWebhook,
@@ -339,6 +340,14 @@ export function SendPanel({
   const parsedMessageId = useMemo(() => parseMessageIdInput(messageIdInput), [messageIdInput]);
   const messageIdInvalid =
     mode === "update" && messageIdInput.trim().length > 0 && !parsedMessageId;
+
+  // When the update target was pasted as a full message *link*, it carries the
+  // channel — float that channel's webhooks to the top of the update picker (and
+  // tag them "this channel") so the one that posted the message is obvious.
+  const updateMatchChannelId = useMemo(
+    () => parseMessageChannelId(messageIdInput),
+    [messageIdInput],
+  );
 
   // Validation reads the attachment registry (a missing blob blocks send), so
   // recompute when blobs hydrate from IndexedDB / are added / GC'd — not only
@@ -1289,11 +1298,12 @@ export function SendPanel({
 
       {/* Browser-saved recents are redundant once the auto-detect picker is
           showing the connected server's webhooks live — hide them there to keep
-          the panel focused on the picker. In update mode the picker is hidden
-          (an update targets the webhook that posted the message, not a freshly
-          picked channel), so bring recents back when no webhook is set yet, as a
-          way to pick the one that posted it. */}
-      {!pickerActive || (mode === "update" && !parsedUrl) ? (
+          the panel focused on the picker. Both modes now have a picker (a channel
+          list for new, the server's webhook list for update), so recents only
+          stand in when there's no picker at all (non-manager / signed out). The
+          paste-a-URL fallback still surfaces recents inline for the rare webhook
+          the picker can't enumerate (another server / browser). */}
+      {!pickerActive ? (
         <WebhookRecents
           history={history}
           activeId={parsedUrl?.id ?? null}
@@ -1349,6 +1359,28 @@ export function SendPanel({
         </section>
       ) : null}
 
+      {/* Update mode — an explicit webhook list, NOT a channel picker. A webhook
+          message edit (PATCH) can only be done by the exact webhook that posted
+          it (any other 404s), so the user picks that webhook rather than a
+          channel (which would mint/reuse some other webhook and break the edit).
+          Same constraint Restore has, so it reuses Restore's webhook list; a
+          pasted message *link* floats the posting channel's webhooks to the top.
+          Only for managers who can enumerate the server's webhooks — others fall
+          back to recents + the paste-a-URL field below. */}
+      {mode === "update" && pickerActive ? (
+        <section
+          className={styles.destination}
+          aria-label="Choose the webhook that posted this message"
+        >
+          <GuildWebhookPicker
+            mode="restore"
+            activeId={parsedUrl?.id ?? null}
+            onPick={handlePickGuildWebhook}
+            matchChannelId={updateMatchChannelId}
+          />
+        </section>
+      ) : null}
+
       {/* Collapsed states (a create flow is available). Update mode shows what
           the edit will change and where it lives (naming the server, since it
           may differ from the connected one); new mode shows the post destination
@@ -1376,9 +1408,14 @@ export function SendPanel({
                 <>Updating the message you posted with this webhook.</>
               )}{" "}
               <button type="button" className={styles.urlSetLink} onClick={openUrlField}>
-                Change webhook
+                {pickerActive ? "Paste a URL instead" : "Change webhook"}
               </button>
             </p>
+          ) : pickerActive ? (
+            <button type="button" className={styles.pasteToggle} onClick={openUrlField}>
+              Webhook not in the list?{" "}
+              <span className={styles.pasteToggleAccent}>Paste its URL</span>
+            </button>
           ) : (
             <button type="button" className={styles.pasteToggle} onClick={openUrlField}>
               Which webhook posted this message?{" "}
@@ -1416,6 +1453,22 @@ export function SendPanel({
             <strong>Treat the webhook URL like a password.</strong> It's a credential that lets
             anyone post to your channel — keep it secret and only use webhooks you own.
           </Callout>
+          {/* Updating against a webhook the list can't show (another server, or
+              saved on a different device): surface this browser's recents here so
+              it can still be recovered without re-pasting. New mode keeps the
+              standalone recents above instead, so it's update-only. */}
+          {mode === "update" && pickerActive ? (
+            <WebhookRecents
+              history={history}
+              activeId={parsedUrl?.id ?? null}
+              onUse={(entry) => {
+                setUrl(entry.url);
+                closeUrlField();
+                setState({ kind: "idle" });
+              }}
+              onChange={() => setHistory(loadHistory())}
+            />
+          ) : null}
           <Field
             label="Webhook URL"
             error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
