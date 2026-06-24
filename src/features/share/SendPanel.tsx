@@ -646,6 +646,19 @@ export function SendPanel({
         }
       : undefined;
 
+  // The signed-out counterpart to the "Never expire" toggle: a message with
+  // interactive components expires a few days after sending unless it holds a
+  // slot, but claiming one needs a signed-in session. Surface the heads-up +
+  // sign-in nudge in the confirm dialog — the success dialog already says this,
+  // but only *after* the post, where "sign in before sending" is too late.
+  // Gated to a definitively signed-out session (not the "unknown"/"loading"
+  // window) so it never flashes; signed-out users never fetch slots, so
+  // `slotsUnavailable` stays false and `confirmSlots` stays null for them.
+  const expiryNudge =
+    hasInteractiveComponents && isProxyConfigured() && !slotsUnavailable && authStatus === "anon"
+      ? { onSignIn: () => login() }
+      : undefined;
+
   // Synchronous pre-flight. Validate the inputs the same way the send used to,
   // then open the confirmation dialog instead of posting straight away — the
   // user reviews the target webhook + ping list before anything reaches Discord.
@@ -1869,6 +1882,7 @@ export function SendPanel({
             : undefined
         }
         previewMismatch={previewMismatch}
+        expiryNudge={expiryNudge}
         permanentOption={permanentOption}
         busy={confirmBusy}
         onConfirm={handleConfirmedSend}

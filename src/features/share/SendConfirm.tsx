@@ -118,6 +118,16 @@ export interface SendConfirmProps {
     destinationGuildName?: string;
   };
   /**
+   * The signed-out counterpart to {@link permanentOption}: the message carries
+   * interactive components that expire a few days after sending, the feature is
+   * available, but the user is signed out so they can't claim a never-expire
+   * slot from here. Surfaces the heads-up *before* the post (the advice is
+   * "sign in before sending"); `onSignIn` starts the Discord login. Undefined
+   * when there's nothing to expire, the feature is off, or the user is signed
+   * in (they get the "Never expire" toggle instead).
+   */
+  expiryNudge?: { onSignIn: () => void };
+  /**
    * The "Make permanent" control for messages with interactive components.
    * Present only when the Send panel could read the slot state (signed in,
    * slots fetched, expiry on). Undefined hides the row entirely — the
@@ -376,6 +386,29 @@ function PreviewMismatchNotice({
   );
 }
 
+/**
+ * Signed-out expiry heads-up: this message's interactive components stop working
+ * a few days after sending unless it claims a never-expire slot, which needs a
+ * signed-in session. Shown *before* the post so the "sign in before sending"
+ * advice is still actionable — the signed-in path gets the {@link PermanentOptIn}
+ * toggle instead.
+ */
+function ExpiryNudge({ onSignIn }: NonNullable<SendConfirmProps["expiryNudge"]>) {
+  return (
+    <div className={styles.routingNote} role="note">
+      <strong>Buttons &amp; selects stop working a few days after sending.</strong>
+      <p className={styles.pingDetail}>
+        Sign in before sending to make this message never expire and keep them clickable.
+      </p>
+      <div className={styles.permanentAction}>
+        <Button size="sm" variant="secondary" onClick={onSignIn}>
+          Sign in with Discord
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function SendConfirm({
   open,
   mode,
@@ -394,6 +427,7 @@ export function SendConfirm({
   pluginNames = [],
   pluginGuildMismatch,
   previewMismatch,
+  expiryNudge,
   permanentOption,
   busy = false,
   onConfirm,
@@ -554,6 +588,8 @@ export function SendConfirm({
       ) : null}
 
       {permanentOption ? <PermanentOptIn option={permanentOption} busy={busy} /> : null}
+
+      {expiryNudge ? <ExpiryNudge {...expiryNudge} /> : null}
 
       <PingSummaryView pings={pings} />
     </Modal>
