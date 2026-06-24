@@ -26,7 +26,9 @@ const id = newId;
 const ACCENT_BLURPLE = 0x5865f2;
 
 // Component showcase — striped blurple container, the full kit. Doubles as the
-// first-run default message.
+// first-run default message, so it's the first thing every visitor sees: a
+// guided tour that demonstrates each block (not just names it) while staying
+// webhook-safe — only link buttons and layout, nothing that needs a bot.
 export const SHOWCASE_MESSAGE: WebhookMessage = {
   username: "DWEEB",
   components: [
@@ -39,13 +41,13 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.TextDisplay,
           content:
-            "# 🧩 Components V2 — the full kit\nA quick tour of every block this editor supports. Click any component on the left to edit it.",
+            "# 🧩 The Components V2 starter kit\nA hands-on tour of every block DWEEB gives you — and it's all live. **Click any component on the left to edit it**, watch the preview update instantly, then hit **Send** or **Share** when it looks right.",
         },
         {
           _id: id(),
           type: ComponentType.Separator,
           divider: true,
-          spacing: SeparatorSpacing.Small,
+          spacing: SeparatorSpacing.Large,
         },
         {
           _id: id(),
@@ -55,14 +57,33 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
               _id: id(),
               type: ComponentType.TextDisplay,
               content:
-                "**Sections** pair 1–3 text blocks with a single accessory — either a Thumbnail (like this) or a Button. Great for headshots, product cards, or call-outs.",
+                "**Sections** set a short stack of text beside a single accessory. Pair one with a **thumbnail** — like this — for profile cards, product shots, and tidy call-outs.",
             },
           ],
           accessory: {
             _id: id(),
             type: ComponentType.Thumbnail,
-            media: { url: "https://picsum.photos/seed/wb-thumb/256/256" },
-            description: "Showcase thumbnail",
+            media: { url: "https://picsum.photos/seed/dweeb-card/256/256" },
+            description: "Thumbnail accessory",
+          },
+        },
+        {
+          _id: id(),
+          type: ComponentType.Section,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.TextDisplay,
+              content:
+                "Give a section a **button** instead and the same layout becomes an action card: a headline, a line of detail, and one tappable action docked on the right.",
+            },
+          ],
+          accessory: {
+            _id: id(),
+            type: ComponentType.Button,
+            style: ButtonStyle.Link,
+            label: "Open ↗",
+            url: "https://dweeb.faizo.net",
           },
         },
         {
@@ -71,18 +92,18 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
           items: [
             {
               _id: id(),
-              media: { url: "https://picsum.photos/seed/wb-g1/600/400" },
-              description: "Galleries support up to 10 items",
+              media: { url: "https://picsum.photos/seed/dweeb-g1/800/450" },
+              description: "Media galleries hold up to 10 images or clips",
             },
             {
               _id: id(),
-              media: { url: "https://picsum.photos/seed/wb-g2/600/400" },
-              description: "Each item can have a description",
+              media: { url: "https://picsum.photos/seed/dweeb-g2/800/450" },
+              description: "Give every item its own description…",
             },
             {
               _id: id(),
-              media: { url: "https://picsum.photos/seed/wb-g3/600/400" },
-              description: "Mark individual items as spoilers",
+              media: { url: "https://picsum.photos/seed/dweeb-g3/800/450" },
+              description: "…or mark any one of them as a spoiler",
             },
           ],
         },
@@ -96,7 +117,13 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.TextDisplay,
           content:
-            "**Also in the kit**\n- 📝 Text displays with full markdown (you're reading two)\n- 🪟 Containers with an accent stripe (this one!)\n- 🔗 Link buttons that open URLs (below)",
+            "**Every text block speaks full Discord markdown.**\nBlend **bold**, *italic*, __underline__, ~~strikethrough~~, `inline code`, and ||spoilers|| — each renders exactly as Discord shows it. Drop in [masked links](https://dweeb.faizo.net), lists, and quotes wherever you need them:\n> Good messages look effortless. DWEEB just makes effortless easy.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**There's even more in the box** — dropdown menus, clickable (non-link) buttons, and file uploads are all one tap away in the **Add component** menu.",
         },
         {
           _id: id(),
@@ -106,14 +133,14 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
               _id: id(),
               type: ComponentType.Button,
               style: ButtonStyle.Link,
-              label: "Discord docs",
+              label: "📖 Read the docs",
               url: "https://discord.com/developers/docs/components/reference",
             },
             {
               _id: id(),
               type: ComponentType.Button,
               style: ButtonStyle.Link,
-              label: "Join the Discord",
+              label: "💬 Join the Discord",
               url: "https://discord.gg/2wB7rHRDg2",
             },
           ],
@@ -124,7 +151,7 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# There's more in this editor than the tour shows — dropdown menus, clickable (non-link) buttons, and file uploads all work too. File uploads go through any webhook, but Discord only accepts interactive components (clickable buttons, select menus) when the webhook URL was created by a bot or app — on regular user-created webhooks the message will be rejected. Link buttons and layout-only components are fine on any webhook. Open the **Template Gallery** any time to bring this tour back.",
+        "-# 💡 **Posts through any webhook:** text, layout, media, and link buttons. Interactive pieces — clickable buttons and select menus — need a **bot or app** to own the webhook; a plain user webhook will reject them.\n-# Reopen this tour any time from the **Template Gallery**, or hit **Reset** (top-left) to start fresh.",
     },
   ],
 };
