@@ -13,13 +13,21 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { normalizeSavedMessageName, useSavedMessagesStore } from "@/core/state/savedMessagesStore";
+import { usePostedMessagesStore } from "@/core/state/postedMessagesStore";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { Modal } from "@/ui/Modal";
 import { TextInput } from "@/ui/TextInput";
-import { BookmarkIcon, ChevronDownIcon, SaveIcon, TemplateIcon, TrashIcon } from "@/ui/Icon";
+import {
+  BookmarkIcon,
+  ChevronDownIcon,
+  SaveIcon,
+  SendIcon,
+  TemplateIcon,
+  TrashIcon,
+} from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import styles from "./SavedMessagesMenu.module.css";
 
@@ -29,6 +37,7 @@ export function SavedMessagesMenu() {
 
   const entries = useSavedMessagesStore((s) => s.entries);
   const saveEntry = useSavedMessagesStore((s) => s.save);
+  const postedEntries = usePostedMessagesStore((s) => s.entries);
 
   const openGallery = useTemplateGalleryStore((s) => s.openGallery);
 
@@ -68,6 +77,17 @@ export function SavedMessagesMenu() {
             >
               Save current message…
             </MenuItem>
+            {postedEntries.length > 0 ? (
+              <MenuItem
+                icon={<SendIcon />}
+                onSelect={() => {
+                  close();
+                  openGallery("Posted");
+                }}
+              >
+                Posted messages ({postedEntries.length})
+              </MenuItem>
+            ) : null}
             {entries.length > 0 ? (
               <MenuItem
                 icon={<BookmarkIcon />}

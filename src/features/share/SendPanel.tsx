@@ -81,6 +81,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { usePostedMessagesStore } from "@/core/state/postedMessagesStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
@@ -235,6 +236,9 @@ export function SendPanel({
   const message = useMessageStore((s) => s.message);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
   const setRestoreOrigin = useMessageStore((s) => s.setRestoreOrigin);
+  // Records every successful send so the message reappears on the "Start a
+  // message" gallery, reloadable with its update-in-place origin intact.
+  const recordPosted = usePostedMessagesStore((s) => s.record);
 
   // Prefill from a just-created webhook (the `webhook.incoming` return) first,
   // else the restore origin; otherwise start empty.
@@ -908,6 +912,15 @@ export function SendPanel({
           threadId.trim() ||
           (mode === "new" && message.thread_name ? channelIdFromBody(result.body) : undefined);
 
+        // Resolved destination names (saved on the recents entry at creation, or
+        // looked up live) — reused by the gallery record and the success dialog.
+        const effGuildName =
+          knownGuildName ??
+          (effGuildId ? authGuilds.find((g) => g.id === effGuildId)?.name : undefined);
+        const effChannelName =
+          knownChannelName ??
+          (effChannelId ? connectedData?.channelById[effChannelId]?.name : undefined);
+
         // Point the form at the message that's now live: record it as the
         // restore origin, which flips the panel to "Update existing" with this
         // webhook + message id (+ thread) pre-filled — clicking send again
@@ -919,6 +932,24 @@ export function SendPanel({
             webhookUrl: parsedUrl.url,
             messageId: postedMessageId,
             threadId: effThreadId || undefined,
+          });
+          // Persist it to the "Start a message" gallery so it's reloadable in a
+          // later session — picking the card restores this same origin, no manual
+          // webhook + message-id paste. Stores the editor message (raw
+          // placeholder tokens preserved), keyed by the message id so an update
+          // refreshes the one record instead of adding a duplicate.
+          recordPosted({
+            messageId: postedMessageId,
+            webhookUrl: parsedUrl.url,
+            webhookId: parsedUrl.id,
+            threadId: effThreadId || undefined,
+            guildId: effGuildId,
+            channelId: effChannelId,
+            guildName: effGuildName,
+            channelName: effChannelName,
+            webhookName: resolvedName ?? knownName,
+            webhookAvatar: resolvedAvatar ?? knownAvatar,
+            message,
           });
         }
 
@@ -1003,12 +1034,8 @@ export function SendPanel({
           webhookAvatar: resolvedAvatar ?? knownAvatar,
           guildId: effGuildId,
           channelId: effChannelId,
-          guildName:
-            knownGuildName ??
-            (effGuildId ? authGuilds.find((g) => g.id === effGuildId)?.name : undefined),
-          channelName:
-            knownChannelName ??
-            (effChannelId ? connectedData?.channelById[effChannelId]?.name : undefined),
+          guildName: effGuildName,
+          channelName: effChannelName,
           discordUrl,
           editOnResend: postedMessageId != null,
           messageId: postedMessageId,

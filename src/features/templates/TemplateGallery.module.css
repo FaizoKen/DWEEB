@@ -233,6 +233,24 @@
   color: #fff;
 }
 
+/* The "Posted" pseudo-category points at messages the user has actually sent,
+ * so it carries a green tint (matching the posted cards' accent) — "delivered" —
+ * setting it apart from both the templates and the teal Saved chip. */
+.chipPosted:not(.chipActive) {
+  color: #5ad07f;
+  border-color: color-mix(in srgb, #3ba55d 40%, var(--app-border));
+  background: color-mix(in srgb, #3ba55d 14%, var(--app-bg-input));
+}
+.chipPosted:not(.chipActive):hover {
+  color: #84e0a0;
+  background: color-mix(in srgb, #3ba55d 22%, var(--app-bg-input));
+}
+.chipPosted.chipActive {
+  background: #3ba55d;
+  border-color: #3ba55d;
+  color: #fff;
+}
+
 /* ── Body grid ──────────────────────────────────────────────────────────── */
 .body {
   flex: 1;

@@ -15,9 +15,10 @@
 import { create } from "zustand";
 
 /** Which chip the gallery lands on when opened. Callers that want the user's
- *  saved messages front-and-centre pass "Saved"; everything else defaults to
- *  "All". The gallery reads this once on mount. */
-export type GalleryInitialFilter = "All" | "Saved";
+ *  saved messages front-and-centre pass "Saved", their posted messages pass
+ *  "Posted"; everything else defaults to "All". The gallery reads this once on
+ *  mount. */
+export type GalleryInitialFilter = "All" | "Saved" | "Posted";
 
 interface TemplateGalleryState {
   open: boolean;

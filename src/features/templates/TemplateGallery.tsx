@@ -34,6 +34,7 @@ import {
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
+import { recordOrigin, usePostedMessagesStore } from "@/core/state/postedMessagesStore";
 import { loadDraftMessage } from "@/core/state/draftStorage";
 import { attachEditorFields } from "@/core/serialization/normalize";
 import {
@@ -56,14 +57,22 @@ import styles from "./TemplateGallery.module.css";
 
 /** Pseudo-categories that sit ahead of the template categories in the chip row. */
 const SAVED_FILTER = "Saved" as const;
-type Filter = "All" | typeof SAVED_FILTER | TemplateCategory;
+const POSTED_FILTER = "Posted" as const;
+type Filter = "All" | typeof POSTED_FILTER | typeof SAVED_FILTER | TemplateCategory;
 
 const ACCENT_BLURPLE = 0x5865f2;
 const ACCENT_TEAL = 0x1abc9c;
+const ACCENT_GREEN = 0x3ba55d;
 
-/** One renderable card — a continue draft, a saved message, or a template. */
+/** How many posted cards surface in the "All" view before the rest are left to
+ *  the dedicated "Posted" chip — keeps templates from being buried for someone
+ *  who sends a lot. */
+const POSTED_IN_ALL = 6;
+
+/** One renderable card — a continue draft, a posted message, a saved message,
+ *  or a template. */
 interface CardData {
-  kind: "continue" | "saved" | "template";
+  kind: "continue" | "posted" | "saved" | "template";
   key: string;
   emoji: string;
   name: string;
@@ -105,10 +114,13 @@ function formatRelative(savedAt: number): string {
 
 export function TemplateGallery() {
   const replaceMessage = useMessageStore((s) => s.replaceMessage);
+  const replaceMessageFromRestore = useMessageStore((s) => s.replaceMessageFromRestore);
   const clearAll = useMessageStore((s) => s.clearAll);
   const closeGallery = useTemplateGalleryStore((s) => s.closeGallery);
   const savedEntries = useSavedMessagesStore((s) => s.entries);
   const removeEntry = useSavedMessagesStore((s) => s.remove);
+  const postedEntries = usePostedMessagesStore((s) => s.entries);
+  const removePosted = usePostedMessagesStore((s) => s.remove);
 
   const [query, setQuery] = useState("");
   // Seeded once from the store so callers can deep-link straight to "Saved";
@@ -116,7 +128,11 @@ export function TemplateGallery() {
   const [filter, setFilter] = useState<Filter>(
     () => useTemplateGalleryStore.getState().initialFilter,
   );
-  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    kind: "saved" | "posted";
+    id: string;
+    name: string;
+  } | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   // Focus search on open so a user can start typing immediately.
@@ -199,9 +215,60 @@ export function TemplateGallery() {
           closeGallery();
           pushToast(`Loaded "${entry.name}"`, "success");
         },
-        onDelete: () => setPendingDelete({ id: entry.id, name: entry.name }),
+        onDelete: () => setPendingDelete({ kind: "saved", id: entry.id, name: entry.name }),
       })),
     [savedMessages, replaceMessage, closeGallery],
+  );
+
+  // Posted messages, re-hydrated for their thumbnails (same skip-on-corrupt
+  // guard as saved). Each carries the origin that lets a reload default the Send
+  // panel to "Update existing", so editing then re-sending updates the live
+  // message in place — no manual webhook + message-id paste.
+  const postedMessages = useMemo(
+    () =>
+      postedEntries.flatMap((e) => {
+        try {
+          return [{ entry: e, message: attachEditorFields(e.payload) }];
+        } catch {
+          return [];
+        }
+      }),
+    [postedEntries],
+  );
+
+  const postedCards: CardData[] = useMemo(
+    () =>
+      postedMessages.map(({ entry, message }) => {
+        const where = entry.channelName
+          ? `#${entry.channelName}${entry.guildName ? ` · ${entry.guildName}` : ""}`
+          : entry.guildName;
+        return {
+          kind: "posted",
+          key: entry.id,
+          emoji: "📤",
+          name: entry.channelName ? `#${entry.channelName}` : "Posted message",
+          description: where
+            ? `Posted to ${where}. Reload to edit and update it in place.`
+            : "A message you posted. Reload to edit and update it in place.",
+          message,
+          accent: ACCENT_GREEN,
+          savedAt: entry.postedAt,
+          badge: "Posted",
+          onPick: () => {
+            // Restore content *and* origin — the Send panel reads the origin and
+            // flips to "Update existing" with the webhook + message id prefilled.
+            replaceMessageFromRestore(message, recordOrigin(entry));
+            closeGallery();
+            pushToast(
+              "Loaded your posted message — edits will update the original.",
+              "success",
+            );
+          },
+          onDelete: () =>
+            setPendingDelete({ kind: "posted", id: entry.id, name: where ?? "this message" }),
+        };
+      }),
+    [postedMessages, replaceMessageFromRestore, closeGallery],
   );
 
   const templateCards: CardData[] = useMemo(
@@ -242,15 +309,16 @@ export function TemplateGallery() {
     [replaceMessage, closeGallery],
   );
 
-  // Chip row: All, then Saved (only when there are any), then the template
-  // categories that actually have entries.
+  // Chip row: All, then Posted and Saved (each only when there are any), then
+  // the template categories that actually have entries.
   const filters: Filter[] = useMemo(
     () => [
       "All",
+      ...(postedCards.length ? [POSTED_FILTER] : []),
       ...(savedCards.length ? [SAVED_FILTER] : []),
       ...TEMPLATE_CATEGORIES.filter((c) => templateCards.some((t) => t.category === c)),
     ],
-    [savedCards.length, templateCards],
+    [postedCards.length, savedCards.length, templateCards],
   );
 
   // If the active filter disappears (e.g. last saved message removed), fall back
@@ -261,16 +329,26 @@ export function TemplateGallery() {
 
   const shown = useMemo(() => {
     let base: CardData[];
-    if (filter === SAVED_FILTER) {
+    if (filter === POSTED_FILTER) {
+      base = postedCards;
+    } else if (filter === SAVED_FILTER) {
       base = savedCards;
     } else if (filter === "All") {
-      base = [...(continueCard ? [continueCard] : []), ...templateCards];
+      // Recent activity first — the draft, then the messages you've posted (most
+      // useful for a quick re-edit, capped so they don't bury the templates) —
+      // then the curated templates. Saved messages keep to their own chip, like
+      // a library.
+      base = [
+        ...(continueCard ? [continueCard] : []),
+        ...postedCards.slice(0, POSTED_IN_ALL),
+        ...templateCards,
+      ];
     } else {
       base = templateCards.filter((c) => c.category === filter);
     }
     const q = query.trim().toLowerCase();
     return q ? base.filter((c) => haystack(c).includes(q)) : base;
-  }, [filter, query, continueCard, savedCards, templateCards]);
+  }, [filter, query, continueCard, postedCards, savedCards, templateCards]);
 
   const startBlank = () => {
     clearAll();
@@ -280,8 +358,13 @@ export function TemplateGallery() {
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
-    removeEntry(pendingDelete.id);
-    pushToast(`Deleted "${pendingDelete.name}"`, "info");
+    if (pendingDelete.kind === "posted") {
+      removePosted(pendingDelete.id);
+      pushToast("Removed from your posted messages", "info");
+    } else {
+      removeEntry(pendingDelete.id);
+      pushToast(`Deleted "${pendingDelete.name}"`, "info");
+    }
     setPendingDelete(null);
   };
 
@@ -357,10 +440,11 @@ export function TemplateGallery() {
                     aria-pressed={filter === f}
                     className={[
                       styles.chip,
-                      // The Saved pseudo-category carries its own teal highlight
-                      // so a user's own messages stand out from the curated
-                      // template categories.
+                      // The Saved/Posted pseudo-categories carry their own tints
+                      // (teal / green) so a user's own messages stand out from the
+                      // curated template categories.
                       f === SAVED_FILTER ? styles.chipSaved : "",
+                      f === POSTED_FILTER ? styles.chipPosted : "",
                       filter === f ? styles.chipActive : "",
                     ]
                       .filter(Boolean)
@@ -415,7 +499,7 @@ export function TemplateGallery() {
       <Modal
         open={!!pendingDelete}
         onClose={() => setPendingDelete(null)}
-        title="Delete saved message?"
+        title={pendingDelete?.kind === "posted" ? "Remove posted message?" : "Delete saved message?"}
         size="sm"
         // The gallery overlay sits at --app-z-tooltip; lift the confirm above it
         // so it (and its scrim) land on top rather than behind the gallery.
@@ -423,7 +507,17 @@ export function TemplateGallery() {
       >
         <div className={styles.confirmBody}>
           <p className={styles.confirmText}>
-            Permanently delete <strong>"{pendingDelete?.name}"</strong>? This can't be undone.
+            {pendingDelete?.kind === "posted" ? (
+              <>
+                Remove <strong>{pendingDelete?.name}</strong> from this list? It only forgets the
+                local shortcut — the message stays live on Discord, and you can still edit it via
+                Restore.
+              </>
+            ) : (
+              <>
+                Permanently delete <strong>"{pendingDelete?.name}"</strong>? This can't be undone.
+              </>
+            )}
           </p>
           <div className={styles.confirmActions}>
             <Button variant="ghost" type="button" onClick={() => setPendingDelete(null)}>
@@ -435,7 +529,7 @@ export function TemplateGallery() {
               leadingIcon={<TrashIcon />}
               onClick={confirmDelete}
             >
-              Delete
+              {pendingDelete?.kind === "posted" ? "Remove" : "Delete"}
             </Button>
           </div>
         </div>
@@ -490,8 +584,12 @@ function GalleryCard({ card }: { card: CardData }) {
               e.stopPropagation();
               card.onDelete?.();
             }}
-            aria-label={`Delete saved message "${card.name}"`}
-            title="Delete saved message"
+            aria-label={
+              card.kind === "posted"
+                ? `Remove posted message "${card.name}"`
+                : `Delete saved message "${card.name}"`
+            }
+            title={card.kind === "posted" ? "Remove from posted messages" : "Delete saved message"}
           >
             <TrashIcon size={15} />
           </button>
@@ -508,9 +606,11 @@ function GalleryCard({ card }: { card: CardData }) {
           <span className={styles.useBtn}>
             {card.kind === "continue"
               ? "Continue →"
-              : card.kind === "saved"
-                ? "Load message →"
-                : "Use this template →"}
+              : card.kind === "posted"
+                ? "Edit & update →"
+                : card.kind === "saved"
+                  ? "Load message →"
+                  : "Use this template →"}
           </span>
         </div>
       </div>
