@@ -111,15 +111,36 @@ async fn process(
     // (SESSION_SECRET rotated) or the row was tampered — neither will ever
     // succeed, so it's permanent.
     let Some(url) = seal::open(key, &job.webhook_sealed) else {
-        fail(store, &job.id, now, None, "Couldn't decrypt the stored webhook (was SESSION_SECRET rotated?).").await;
+        fail(
+            store,
+            &job.id,
+            now,
+            None,
+            "Couldn't decrypt the stored webhook (was SESSION_SECRET rotated?).",
+        )
+        .await;
         return;
     };
     if validate_webhook(&url).is_err() {
-        fail(store, &job.id, now, None, "The stored webhook is not a Discord webhook URL.").await;
+        fail(
+            store,
+            &job.id,
+            now,
+            None,
+            "The stored webhook is not a Discord webhook URL.",
+        )
+        .await;
         return;
     }
     let Some(payload_str) = seal::open(key, &job.payload_sealed) else {
-        fail(store, &job.id, now, None, "Couldn't decrypt the stored message.").await;
+        fail(
+            store,
+            &job.id,
+            now,
+            None,
+            "Couldn't decrypt the stored message.",
+        )
+        .await;
         return;
     };
     let Ok(payload) = serde_json::from_str::<Value>(&payload_str) else {
@@ -149,7 +170,15 @@ async fn process(
             } else if code == 429 {
                 // Rate limited — honour Retry-After, treat as transient.
                 let retry_at = now + retry_after_secs(&resp);
-                transient(store, &job, now, retry_at, Some(code as i64), "Rate limited by Discord (429).").await;
+                transient(
+                    store,
+                    &job,
+                    now,
+                    retry_at,
+                    Some(code as i64),
+                    "Rate limited by Discord (429).",
+                )
+                .await;
             } else {
                 let body = resp.text().await.unwrap_or_default();
                 let reason = summarize(code, &body);
@@ -205,10 +234,9 @@ async fn success(
 ) {
     let s = Arc::clone(store);
     let (id, msg) = (id.to_string(), msg_id.map(str::to_string));
-    let res = tokio::task::spawn_blocking(move || {
-        s.record_success(&id, now, msg.as_deref(), code, next)
-    })
-    .await;
+    let res =
+        tokio::task::spawn_blocking(move || s.record_success(&id, now, msg.as_deref(), code, next))
+            .await;
     log_db("record_success", res);
 }
 
@@ -237,13 +265,7 @@ async fn transient(
     log_db("record_transient", res);
 }
 
-async fn fail(
-    store: &Arc<ScheduleStore>,
-    id: &str,
-    now: i64,
-    code: Option<i64>,
-    reason: &str,
-) {
+async fn fail(store: &Arc<ScheduleStore>, id: &str, now: i64, code: Option<i64>, reason: &str) {
     let s = Arc::clone(store);
     let (id, reason) = (id.to_string(), reason.to_string());
     let res =
@@ -265,8 +287,7 @@ fn backoff_secs(attempts: i64) -> i64 {
     let shift = attempts.clamp(0, 16) as u32;
     BACKOFF_BASE_SECS
         .saturating_mul(1i64.checked_shl(shift).unwrap_or(i64::MAX))
-        .min(BACKOFF_CAP_SECS)
-        .max(1)
+        .clamp(1, BACKOFF_CAP_SECS)
 }
 
 /// Seconds to wait after a 429, from the `Retry-After` header (Discord sends

@@ -390,11 +390,9 @@ impl Discord {
             .await
             .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
         if resp.status().is_success() {
-            return resp
-                .json::<Value>()
-                .await
-                .map(Some)
-                .map_err(|e| AppError::BadGateway(format!("unexpected response from Discord: {e}")));
+            return resp.json::<Value>().await.map(Some).map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
         }
         if resp.status() == StatusCode::NOT_FOUND {
             return Ok(None);

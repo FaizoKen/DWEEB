@@ -268,7 +268,12 @@ pub async fn permanent_add(
     // `permanent_reenable`). Off the response path and best-effort — a failure
     // only means the buttons stay greyed until the message is re-posted.
     if resp.status() == StatusCode::OK {
-        spawn_revive(&st, guild.clone(), body.channel_id.clone(), body.message_id.clone());
+        spawn_revive(
+            &st,
+            guild.clone(),
+            body.channel_id.clone(),
+            body.message_id.clone(),
+        );
     }
     Ok(resp)
 }
@@ -1302,7 +1307,10 @@ mod tests {
                 { "type": 2, "style": 1, "label": "Live", "custom_id": "p:live" }
             ]}
         ]);
-        assert!(!clear_disabled(&mut tree), "no interactive disabled component");
+        assert!(
+            !clear_disabled(&mut tree),
+            "no interactive disabled component"
+        );
         // The link button keeps its (author-set) disabled; the live one is intact.
         assert_eq!(tree[0]["components"][0]["disabled"], true);
         assert_eq!(tree[0]["components"][1]["custom_id"], "p:live");

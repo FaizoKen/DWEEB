@@ -299,9 +299,7 @@ impl ScheduleStore {
                  WHERE owner_user_id = ?1 ORDER BY created_at DESC LIMIT ?2"
             ))
             .map_err(e2s)?;
-        let rows = stmt
-            .query_map((uid, limit as i64), row_from)
-            .map_err(e2s)?;
+        let rows = stmt.query_map((uid, limit as i64), row_from).map_err(e2s)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(e2s)
     }
 
@@ -863,11 +861,14 @@ pub async fn schedule_delete(
 /// The store, or a clear "not enabled here" for deployments that turned the
 /// feature off (`SCHEDULES_ENABLED=false`).
 fn store(st: &AppState) -> Result<Arc<ScheduleStore>, AppError> {
-    st.schedules.as_ref().map(Arc::clone).ok_or_else(|| AppError::Status {
-        status: StatusCode::NOT_IMPLEMENTED,
-        message: "Scheduled posts aren't enabled on this deployment.".into(),
-        retry_after: None,
-    })
+    st.schedules
+        .as_ref()
+        .map(Arc::clone)
+        .ok_or_else(|| AppError::Status {
+            status: StatusCode::NOT_IMPLEMENTED,
+            message: "Scheduled posts aren't enabled on this deployment.".into(),
+            retry_after: None,
+        })
 }
 
 async fn load(store: &Arc<ScheduleStore>, id: &str) -> Result<Row, AppError> {
@@ -995,8 +996,8 @@ mod tests {
     use super::*;
 
     fn temp_store(tag: &str) -> (ScheduleStore, std::path::PathBuf) {
-        let path = std::env::temp_dir()
-            .join(format!("dweeb-sched-test-{}-{tag}.db", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("dweeb-sched-test-{}-{tag}.db", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let store = ScheduleStore::open(path.to_str().unwrap(), 1000, 3).unwrap();
         (store, path)
@@ -1038,7 +1039,9 @@ mod tests {
     fn claim_is_exclusive_and_due_filtered() {
         let (store, path) = temp_store("claim");
         store.create(&sample("due", "111", 100)).unwrap();
-        store.create(&sample("future", "222", 9_000_000_000)).unwrap();
+        store
+            .create(&sample("future", "222", 9_000_000_000))
+            .unwrap();
         // now=200 → only the due one is claimed, and flipped to 'sending'.
         let claimed = store.claim_due(200, 120, 10).unwrap();
         assert_eq!(claimed.len(), 1);
@@ -1068,7 +1071,9 @@ mod tests {
         store.create(&sample("rec", "111", 100)).unwrap();
         let _ = store.claim_due(200, 120, 10).unwrap();
         // Recurring → rescheduled, runs_count++, back to active.
-        store.record_success("rec", 250, Some("msg1"), 204, Some(86_500)).unwrap();
+        store
+            .record_success("rec", 250, Some("msg1"), 204, Some(86_500))
+            .unwrap();
         let row = store.get("rec").unwrap().unwrap();
         assert_eq!(row.status, "active");
         assert_eq!(row.next_run_at, 86_500);
@@ -1076,7 +1081,9 @@ mod tests {
         assert_eq!(row.last_message_id.as_deref(), Some("msg1"));
         // No next → done.
         let _ = store.claim_due(86_600, 120, 10).unwrap();
-        store.record_success("rec", 86_700, Some("msg2"), 204, None).unwrap();
+        store
+            .record_success("rec", 86_700, Some("msg2"), 204, None)
+            .unwrap();
         assert_eq!(store.get("rec").unwrap().unwrap().status, "done");
         let _ = std::fs::remove_file(path);
     }
@@ -1086,12 +1093,16 @@ mod tests {
         let (store, path) = temp_store("fail");
         store.create(&sample("j", "111", 100)).unwrap();
         let _ = store.claim_due(200, 120, 10).unwrap();
-        store.record_transient("j", 500, 1, Some(503), "5xx", 250).unwrap();
+        store
+            .record_transient("j", 500, 1, Some(503), "5xx", 250)
+            .unwrap();
         let row = store.get("j").unwrap().unwrap();
         assert_eq!(row.status, "active");
         assert_eq!(row.next_run_at, 500);
         assert_eq!(row.attempts, 1);
-        store.record_permanent_fail("j", 600, Some(404), "webhook gone").unwrap();
+        store
+            .record_permanent_fail("j", 600, Some(404), "webhook gone")
+            .unwrap();
         let row = store.get("j").unwrap().unwrap();
         assert_eq!(row.status, "failed");
         assert_eq!(row.last_error.as_deref(), Some("webhook gone"));

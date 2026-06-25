@@ -113,7 +113,11 @@ pub fn next_after(rec: &Recurrence, tz: Tz, after: i64) -> Option<i64> {
                         }
                     }
                 }
-                (year, month) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+                (year, month) = if month == 12 {
+                    (year + 1, 1)
+                } else {
+                    (year, month + 1)
+                };
             }
             None
         }
@@ -159,7 +163,11 @@ fn clamp_day(year: i32, month: u32, day: u8) -> u32 {
 
 /// Last calendar day of `(year, month)` — the day before the 1st of next month.
 fn last_day_of_month(year: i32, month: u32) -> u32 {
-    let (ny, nm) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+    let (ny, nm) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
     NaiveDate::from_ymd_opt(ny, nm, 1)
         .map(|d| (d - Duration::days(1)).day())
         .unwrap_or(28)
@@ -190,7 +198,10 @@ mod tests {
         let rec = Recurrence::Daily { time: tod(9, 0) };
         // 08:00 on the day → today's 09:00.
         let after = at(UTC, 2026, 6, 25, 8, 0);
-        assert_eq!(next_after(&rec, UTC, after), Some(at(UTC, 2026, 6, 25, 9, 0)));
+        assert_eq!(
+            next_after(&rec, UTC, after),
+            Some(at(UTC, 2026, 6, 25, 9, 0))
+        );
         // 09:00 exactly → strictly-after means tomorrow's 09:00.
         let at9 = at(UTC, 2026, 6, 25, 9, 0);
         assert_eq!(next_after(&rec, UTC, at9), Some(at(UTC, 2026, 6, 26, 9, 0)));
@@ -217,7 +228,10 @@ mod tests {
         };
         let after = at(UTC, 2026, 6, 25, 0, 0);
         // Next Monday is 2026-06-29.
-        assert_eq!(next_after(&rec, UTC, after), Some(at(UTC, 2026, 6, 29, 12, 0)));
+        assert_eq!(
+            next_after(&rec, UTC, after),
+            Some(at(UTC, 2026, 6, 29, 12, 0))
+        );
     }
 
     #[test]
@@ -228,7 +242,10 @@ mod tests {
         };
         // From mid-Feb 2026 (not a leap year) → Feb 28.
         let after = at(UTC, 2026, 2, 10, 0, 0);
-        assert_eq!(next_after(&rec, UTC, after), Some(at(UTC, 2026, 2, 28, 8, 0)));
+        assert_eq!(
+            next_after(&rec, UTC, after),
+            Some(at(UTC, 2026, 2, 28, 8, 0))
+        );
         // 2024 is a leap year → Feb 29.
         let after_leap = at(UTC, 2024, 2, 10, 0, 0);
         assert_eq!(
@@ -245,7 +262,10 @@ mod tests {
         };
         // Already past the 15th at 08:00 → next month's 15th.
         let after = at(UTC, 2026, 6, 20, 0, 0);
-        assert_eq!(next_after(&rec, UTC, after), Some(at(UTC, 2026, 7, 15, 8, 0)));
+        assert_eq!(
+            next_after(&rec, UTC, after),
+            Some(at(UTC, 2026, 7, 15, 8, 0))
+        );
     }
 
     #[test]

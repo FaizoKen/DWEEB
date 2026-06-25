@@ -118,10 +118,7 @@ pub fn validate_payload(payload: &Value) -> Result<(), String> {
     let obj = payload
         .as_object()
         .ok_or("The message payload must be a JSON object.")?;
-    let has_components = obj
-        .get("components")
-        .map(|c| c.is_array())
-        .unwrap_or(false);
+    let has_components = obj.get("components").map(|c| c.is_array()).unwrap_or(false);
     let has_content = obj
         .get("content")
         .map(|c| c.is_string() && !c.as_str().unwrap_or("").trim().is_empty())
@@ -132,14 +129,19 @@ pub fn validate_payload(payload: &Value) -> Result<(), String> {
     // Files can't be carried server-side (the bytes live in the browser), so a
     // payload that references local attachments would post broken. The frontend
     // blocks this, but guard here too.
-    if obj.get("attachments").map(|a| a.is_array()).unwrap_or(false)
+    if obj
+        .get("attachments")
+        .map(|a| a.is_array())
+        .unwrap_or(false)
         && !obj
             .get("attachments")
             .and_then(|a| a.as_array())
             .map(|a| a.is_empty())
             .unwrap_or(true)
     {
-        return Err("Scheduled posts can't include uploaded files — use media URLs instead.".into());
+        return Err(
+            "Scheduled posts can't include uploaded files — use media URLs instead.".into(),
+        );
     }
     let size = serde_json::to_string(payload).map(|s| s.len()).unwrap_or(0);
     if size > MAX_PAYLOAD_BYTES {
@@ -190,7 +192,10 @@ mod tests {
             webhook_id("https://discord.com/api/webhooks/123456789012345678/tok"),
             Some("123456789012345678".to_string())
         );
-        assert_eq!(webhook_id("https://discord.com/api/webhooks/notanid/tok"), None);
+        assert_eq!(
+            webhook_id("https://discord.com/api/webhooks/notanid/tok"),
+            None
+        );
         assert_eq!(webhook_id("https://discord.com/users/@me"), None);
     }
 
@@ -237,6 +242,8 @@ mod tests {
         assert!(validate_payload(&json!({ "components": [], "flags": 32768 })).is_ok());
         assert!(validate_payload(&json!({ "flags": 32768 })).is_err());
         assert!(validate_payload(&json!([1, 2, 3])).is_err());
-        assert!(validate_payload(&json!({ "content": "x", "attachments": [{ "id": 0 }] })).is_err());
+        assert!(
+            validate_payload(&json!({ "content": "x", "attachments": [{ "id": 0 }] })).is_err()
+        );
     }
 }
