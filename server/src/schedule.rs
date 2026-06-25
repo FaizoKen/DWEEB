@@ -900,8 +900,10 @@ pub async fn schedule_list_for_guild(
     crate::routes::authorize_webhooks(&st, &jar, &guild).await?;
     let session = current_session(&jar);
     // The per-server quota travels with the list so the UI can show "used / cap"
-    // (the `used` count is derived client-side from the live rows below).
+    // (the `used` count is derived client-side from the live rows below), and the
+    // retention window so it can note when posted/failed rows auto-clear.
     let quota = store.max_per_guild();
+    let retention_days = st.config.schedule_retention_days;
     let g = guild.clone();
     let rows = tokio::task::spawn_blocking(move || store.list_for_guild(&g, LIST_LIMIT))
         .await
@@ -914,7 +916,7 @@ pub async fn schedule_list_for_guild(
         .collect();
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
-        Json(json!({ "items": items, "quota": quota })),
+        Json(json!({ "items": items, "quota": quota, "retention_days": retention_days })),
     )
         .into_response())
 }

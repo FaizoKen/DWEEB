@@ -73,6 +73,8 @@ export function ScheduledList({
   const replaceMessage = useMessageStore((s) => s.replaceMessage);
   const authStatus = useAuthStore((s) => s.status);
   const [items, setItems] = useState<ScheduleView[]>([]);
+  // Days a posted/failed row is kept before the worker sweeps it (server config).
+  const [retentionDays, setRetentionDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   // Two-step guard for the bulk "Clear" of history (terminal posts).
@@ -83,6 +85,7 @@ export function ScheduledList({
     setLoading(true);
     const byId = new Map<string, ScheduleView>();
     let guildQuota: number | null = null;
+    let guildRetention: number | null = null;
     // Every schedule for the current server, if the user manages it (403 for
     // non-managers is ignored — they still see their own below).
     if (guildId) {
@@ -90,6 +93,7 @@ export function ScheduledList({
       if (guild.ok) {
         for (const s of guild.items) byId.set(s.id, s);
         guildQuota = guild.quota ?? null;
+        guildRetention = guild.retentionDays ?? null;
       }
     }
     if (authStatus === "authed") {
@@ -112,6 +116,7 @@ export function ScheduledList({
       return a.next_run_at - b.next_run_at;
     });
     setItems(list);
+    setRetentionDays(guildRetention);
     onStats?.({
       total: list.length,
       // The per-server quota only counts live schedules *in this guild* — the
@@ -252,6 +257,11 @@ export function ScheduledList({
               </button>
             )}
           </div>
+          <p className={styles.historyNote}>
+            {retentionDays != null
+              ? `Posted & failed posts clear automatically ${retentionDays} day${retentionDays === 1 ? "" : "s"} after they run — “Clear” just removes them now.`
+              : "Posted & failed posts clear automatically after a while — “Clear” just removes them now."}
+          </p>
           <div className={cn(styles.list, history.length > 6 && styles.historyScroll)}>
             {history.map((s) => (
               <ScheduleRow

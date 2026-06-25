@@ -96,7 +96,7 @@ export type ScheduleResult =
   | { ok: false; error: string; status: number };
 
 export type ListResult =
-  | { ok: true; items: ScheduleView[]; quota?: number }
+  | { ok: true; items: ScheduleView[]; quota?: number; retentionDays?: number }
   | { ok: false; error: string; status: number };
 
 export type CancelResult = { ok: true } | { ok: false; error: string; status: number };
@@ -197,8 +197,14 @@ export async function listForGuild(guildId: string): Promise<ListResult> {
   const data = (await res.json().catch(() => null)) as {
     items?: ScheduleView[];
     quota?: number;
+    retention_days?: number;
   } | null;
-  return { ok: true, items: data?.items ?? [], quota: data?.quota };
+  return {
+    ok: true,
+    items: data?.items ?? [],
+    quota: data?.quota,
+    retentionDays: data?.retention_days,
+  };
 }
 
 /** Edit / reschedule / pause / resume a schedule. */

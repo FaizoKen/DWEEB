@@ -85,6 +85,13 @@
   font-size: 12px;
   color: var(--app-text-subtle);
 }
+/* Reassurance that History doesn't grow forever — it's swept server-side. */
+.historyNote {
+  margin: -2px 0 2px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--app-text-subtle);
+}
 
 .item {
   display: flex;
