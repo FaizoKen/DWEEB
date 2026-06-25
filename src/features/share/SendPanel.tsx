@@ -1975,36 +1975,51 @@ export function SendPanel({
           </div>
 
           {when === "later" ? (
-            <>
-              <Field label="Post date &amp; time (your local time)">
-                {(id) => (
-                  <input
-                    id={id}
-                    type="datetime-local"
-                    className={styles.dtInput}
-                    value={scheduleAt}
-                    onChange={(e) => {
-                      setScheduleAt(e.currentTarget.value);
-                      setScheduleError(null);
-                      setScheduleSuccess(null);
-                    }}
-                  />
-                )}
-              </Field>
-              <p className={styles.scheduleNote}>
-                Stored on our server (encrypted) only until it posts, then deleted.
-              </p>
-              {scheduleError ? <div className={styles.error}>{scheduleError}</div> : null}
-              {scheduleSuccess ? <div className={styles.scheduleSuccess}>{scheduleSuccess}</div> : null}
-            </>
+            authStatus === "authed" ? (
+              <>
+                <Field label="Post date &amp; time (your local time)">
+                  {(id) => (
+                    <input
+                      id={id}
+                      type="datetime-local"
+                      className={styles.dtInput}
+                      value={scheduleAt}
+                      onChange={(e) => {
+                        setScheduleAt(e.currentTarget.value);
+                        setScheduleError(null);
+                        setScheduleSuccess(null);
+                      }}
+                    />
+                  )}
+                </Field>
+                <p className={styles.scheduleNote}>
+                  Stored on our server (encrypted) only until it posts, then deleted.
+                </p>
+                {scheduleError ? <div className={styles.error}>{scheduleError}</div> : null}
+                {scheduleSuccess ? (
+                  <div className={styles.scheduleSuccess}>{scheduleSuccess}</div>
+                ) : null}
+              </>
+            ) : (
+              <Callout tone="info" role="note">
+                <strong>Sign in with Discord to schedule a post.</strong> Scheduling keeps your
+                message on our server until it fires, so it needs an account.
+              </Callout>
+            )
           ) : null}
 
-          <p className={styles.scheduleListLabel}>Scheduled posts</p>
-          <ScheduledList
-            reloadToken={scheduleReload}
-            guildId={knownGuildId ?? (connectedGuildId || undefined)}
-            onLoaded={onCloseDialog}
-          />
+          {/* The list only makes sense for a signed-in user (their own + the
+              server's). Signed out, there's nothing to show. */}
+          {authStatus === "authed" ? (
+            <>
+              <p className={styles.scheduleListLabel}>Scheduled posts</p>
+              <ScheduledList
+                reloadToken={scheduleReload}
+                guildId={knownGuildId ?? (connectedGuildId || undefined)}
+                onLoaded={onCloseDialog}
+              />
+            </>
+          ) : null}
         </div>
       ) : null}
 
@@ -2028,24 +2043,32 @@ export function SendPanel({
             </Button>
           ) : null}
           {scheduleMode ? (
-            <Button
-              variant="primary"
-              onClick={handleSchedule}
-              disabled={
-                scheduling ||
-                saving ||
-                !parsedUrl ||
-                knownGone ||
-                blockingIssues.length > 0 ||
-                ownershipBlocked ||
-                mustSignInToRouteCheck ||
-                componentRouting === "foreign" ||
-                pluginGuildMismatch != null ||
-                hasUploads
-              }
-            >
-              {scheduling ? "Scheduling…" : "Schedule post"}
-            </Button>
+            authStatus !== "authed" ? (
+              // Scheduling requires a login (the server holds the post until it
+              // fires) — turn the primary action into a sign-in.
+              <Button variant="primary" onClick={() => login()}>
+                Sign in to schedule
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                onClick={handleSchedule}
+                disabled={
+                  scheduling ||
+                  saving ||
+                  !parsedUrl ||
+                  knownGone ||
+                  blockingIssues.length > 0 ||
+                  ownershipBlocked ||
+                  mustSignInToRouteCheck ||
+                  componentRouting === "foreign" ||
+                  pluginGuildMismatch != null ||
+                  hasUploads
+                }
+              >
+                {scheduling ? "Scheduling…" : "Schedule post"}
+              </Button>
+            )
           ) : (
             <Button
               variant="primary"

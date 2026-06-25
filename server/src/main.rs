@@ -32,7 +32,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::http::{header, HeaderValue, Method};
+use axum::http::{header, HeaderName, HeaderValue, Method};
 use axum::middleware::from_fn_with_state;
 use axum::routing::{get, patch, post};
 use axum::Router;
@@ -219,6 +219,7 @@ async fn run() {
             &config.schedule_db_path,
             config.schedule_max_entries,
             config.schedule_max_per_webhook,
+            config.schedule_max_per_guild,
         ) {
             Ok(store) => {
                 tracing::info!(db = %config.schedule_db_path, "scheduled posts enabled");
@@ -423,7 +424,13 @@ fn build_cors(config: &Config) -> CorsLayer {
 
     CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
-        .allow_headers([header::CONTENT_TYPE])
+        // `x-manage-token` is the per-schedule capability the builder sends when
+        // loading/canceling a scheduled post; without it here the preflight fails
+        // and those calls read as "couldn't reach the service".
+        .allow_headers([
+            header::CONTENT_TYPE,
+            HeaderName::from_static("x-manage-token"),
+        ])
         .allow_credentials(true)
         .allow_origin(origins)
 }

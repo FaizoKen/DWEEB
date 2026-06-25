@@ -95,6 +95,9 @@ pub struct Config {
     pub schedule_max_entries: u64,
     /// Max active/paused schedules per destination webhook (anti-spam).
     pub schedule_max_per_webhook: u64,
+    /// Max active/paused schedules per destination **server** — the user-facing
+    /// quota. Default 5.
+    pub schedule_max_per_guild: u64,
     /// How far ahead a first run may be scheduled (days). Default 366.
     pub schedule_max_horizon_days: u64,
     /// How often the delivery worker wakes to fire due schedules (seconds).
@@ -188,6 +191,7 @@ impl Config {
             opt_env("SCHEDULE_DB_PATH").unwrap_or_else(|| "schedules.db".to_string());
         let schedule_max_entries = parse_or("SCHEDULE_MAX_ENTRIES", 5_000);
         let schedule_max_per_webhook = parse_or("SCHEDULE_MAX_PER_WEBHOOK", 25);
+        let schedule_max_per_guild = parse_or("SCHEDULE_MAX_PER_GUILD", 5);
         let schedule_max_horizon_days = parse_or("SCHEDULE_MAX_HORIZON_DAYS", 366);
         let scheduler_tick_secs = parse_or("SCHEDULER_TICK_SECS", 15);
         let scheduler_lease_secs = parse_or("SCHEDULER_LEASE_SECS", 120);
@@ -223,6 +227,7 @@ impl Config {
             schedule_db_path,
             schedule_max_entries,
             schedule_max_per_webhook,
+            schedule_max_per_guild,
             schedule_max_horizon_days,
             scheduler_tick_secs,
             scheduler_lease_secs,

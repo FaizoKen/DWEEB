@@ -325,10 +325,12 @@ fires**. For the most sensitive announcements, send manually instead.
   atomic claim (no double-sends), exponential-backoff retries on transient
   errors (rate limits, network blips), and a clear stop with the reason recorded
   if the webhook is deleted.
-- **No account needed.** Scheduling returns a secret *manage token* kept in this
-  browser (like your saved webhooks); sign in and your scheduled posts also sync
-  across devices. The card lists them with their time and status — load one back
-  into the editor, or cancel it.
+- **Sign-in required.** Scheduling keeps your post on our server until it fires,
+  so it needs a Discord login (the button becomes *Sign in to schedule* when
+  you're signed out). Each **server is capped at 5 scheduled posts** at a time.
+  The card lists this server's scheduled posts — your own, plus everyone's if you
+  hold Manage Webhooks there — so a manager can load one back into the editor or
+  cancel it.
 - **Limitation.** Messages with *uploaded files* can't be scheduled (the file
   data only lives in your browser) — use image/media URLs instead. The card
   blocks this with a clear note.

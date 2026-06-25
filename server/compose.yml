@@ -100,9 +100,11 @@ services:
       # redeploy. The webhook URL + payload are sealed at rest under
       # SESSION_SECRET and deleted once a schedule completes. A background worker
       # fires due rows on a timer. Set SCHEDULES_ENABLED=false to disable the
-      # feature (the endpoints answer 501); the other SCHEDULE_*/SCHEDULER_* knobs
-      # (max entries, per-webhook cap, horizon, tick, lease, batch, retention)
-      # have sensible defaults — override in .env only to tune.
+      # feature (the endpoints answer 501). Creating a schedule requires a Discord
+      # login, and each server is capped at SCHEDULE_MAX_PER_GUILD active schedules
+      # (default 5). The other SCHEDULE_*/SCHEDULER_* knobs (max entries,
+      # per-webhook cap, horizon, tick, lease, batch, retention) have sensible
+      # defaults — override in .env only to tune.
       SCHEDULE_DB_PATH: ${SCHEDULE_DB_PATH:-/data/schedules.db}
     volumes:
       # The proxy's only state: the SQLite file with the opt-in share short

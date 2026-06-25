@@ -161,6 +161,8 @@ pub enum CreateError {
     Full,
     /// Per-webhook cap reached — answer 409.
     PerWebhookFull,
+    /// Per-server quota reached (carries the limit for the message) — answer 409.
+    PerGuildFull(i64),
     Storage(String),
 }
 
@@ -170,13 +172,20 @@ pub struct ScheduleStore {
     conn: Mutex<Connection>,
     max_entries: i64,
     max_per_webhook: i64,
+    /// Max active schedules per destination server — the user-facing quota.
+    max_per_guild: i64,
     /// Approximate total row count, kept in step with inserts/deletes so the cap
     /// check is a load, not a `COUNT(*)`.
     count: AtomicI64,
 }
 
 impl ScheduleStore {
-    pub fn open(path: &str, max_entries: u64, max_per_webhook: u64) -> Result<Self, String> {
+    pub fn open(
+        path: &str,
+        max_entries: u64,
+        max_per_webhook: u64,
+        max_per_guild: u64,
+    ) -> Result<Self, String> {
         if let Some(parent) = FsPath::new(path).parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
@@ -247,6 +256,7 @@ impl ScheduleStore {
             conn: Mutex::new(conn),
             max_entries: max_entries as i64,
             max_per_webhook: max_per_webhook as i64,
+            max_per_guild: max_per_guild as i64,
             count: AtomicI64::new(count),
         })
     }
@@ -270,6 +280,21 @@ impl ScheduleStore {
             .map_err(|e| CreateError::Storage(e.to_string()))?;
         if active >= self.max_per_webhook {
             return Err(CreateError::PerWebhookFull);
+        }
+        // Per-server quota — the user-facing limit. Only enforceable when the
+        // destination guild is known (the normal picker/verified-webhook flow).
+        if let Some(guild) = &n.guild_id {
+            let in_guild: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM scheduled_posts \
+                     WHERE guild_id = ?1 AND status IN ('active','sending','paused')",
+                    [guild],
+                    |r| r.get(0),
+                )
+                .map_err(|e| CreateError::Storage(e.to_string()))?;
+            if in_guild >= self.max_per_guild {
+                return Err(CreateError::PerGuildFull(self.max_per_guild));
+            }
         }
         conn.execute(
             "INSERT INTO scheduled_posts \
@@ -609,6 +634,12 @@ pub async fn schedule_create(
 ) -> Result<Response, AppError> {
     let store = store(&st)?;
 
+    // Scheduling requires a Discord login: the schedule is owned by the account
+    // (manageable across devices, and counts against the per-server quota under a
+    // real identity). Checked up front so an anonymous request fails fast.
+    let session = current_session(&jar)
+        .ok_or_else(|| AppError::Unauthorized("Sign in with Discord to schedule a post.".into()))?;
+
     validate_webhook(&body.webhook_url).map_err(bad_request_s)?;
     let wid = webhook_id(&body.webhook_url)
         .ok_or_else(|| bad_request("That webhook URL is malformed."))?;
@@ -672,12 +703,11 @@ pub async fn schedule_create(
 
     let token = random_base62(TOKEN_LEN).ok_or_else(|| AppError::Internal("rng".into()))?;
     let id = random_base62(ID_LEN).ok_or_else(|| AppError::Internal("rng".into()))?;
-    let owner = current_session(&jar).map(|s| s.uid);
 
     let new = NewSchedule {
         id: id.clone(),
         manage_token_hash: hash_token(&token),
-        owner_user_id: owner,
+        owner_user_id: Some(session.uid),
         webhook_id: wid,
         webhook_sealed,
         thread_id: body.thread_id.filter(|t| !t.is_empty()),
@@ -718,6 +748,13 @@ pub async fn schedule_create(
             message: format!(
                 "That webhook already has the maximum of {} active schedules.",
                 st.config.schedule_max_per_webhook
+            ),
+            retry_after: None,
+        }),
+        Err(CreateError::PerGuildFull(limit)) => Err(AppError::Status {
+            status: StatusCode::CONFLICT,
+            message: format!(
+                "This server already has the maximum of {limit} scheduled posts — cancel one to add another."
             ),
             retry_after: None,
         }),
@@ -1100,10 +1137,22 @@ mod tests {
     use super::*;
 
     fn temp_store(tag: &str) -> (ScheduleStore, std::path::PathBuf) {
+        // Generous per-guild cap so the shared tests don't trip it; the
+        // per-guild quota has its own dedicated test below.
+        temp_store_caps(tag, 3, 100)
+    }
+
+    fn temp_store_caps(
+        tag: &str,
+        max_per_webhook: u64,
+        max_per_guild: u64,
+    ) -> (ScheduleStore, std::path::PathBuf) {
         let path =
             std::env::temp_dir().join(format!("dweeb-sched-test-{}-{tag}.db", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        let store = ScheduleStore::open(path.to_str().unwrap(), 1000, 3).unwrap();
+        let store =
+            ScheduleStore::open(path.to_str().unwrap(), 1000, max_per_webhook, max_per_guild)
+                .unwrap();
         (store, path)
     }
 
@@ -1230,6 +1279,28 @@ mod tests {
     }
 
     #[test]
+    fn per_guild_quota() {
+        // per-webhook generous, per-guild = 2 — so the quota is what bites.
+        let (store, path) = temp_store_caps("perguild", 100, 2);
+        store.create(&sample("a", "111", 100)).unwrap();
+        store.create(&sample("b", "222", 100)).unwrap();
+        assert!(matches!(
+            store.create(&sample("c", "333", 100)),
+            Err(CreateError::PerGuildFull(2))
+        ));
+        // A different server is unaffected by guild-9's quota.
+        let mut other = sample("d", "444", 100);
+        other.guild_id = Some("guild-other".into());
+        assert!(store.create(&other).is_ok());
+        // A schedule with no guild bypasses the per-guild quota (still bounded by
+        // the per-webhook + global caps).
+        let mut nog = sample("e", "555", 100);
+        nog.guild_id = None;
+        assert!(store.create(&nog).is_ok());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn owner_listing_and_delete() {
         let (store, path) = temp_store("owner");
         store.create(&sample("a", "111", 100)).unwrap();
@@ -1293,7 +1364,7 @@ mod tests {
             .unwrap();
         }
         // Opening migrates (adds guild_id); the legacy row survives with NULL guild.
-        let store = ScheduleStore::open(path.to_str().unwrap(), 1000, 3).unwrap();
+        let store = ScheduleStore::open(path.to_str().unwrap(), 1000, 3, 100).unwrap();
         assert_eq!(store.get("old").unwrap().unwrap().guild_id, None);
         // New rows can set + be listed by guild.
         store.create(&sample("new", "222", 100)).unwrap();

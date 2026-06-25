@@ -106,18 +106,22 @@ Recurring rules are computed with `chrono-tz` (DST-correct), and the *next* run
 is always taken strictly after **now**, so a long outage yields one catch-up
 post, not a burst.
 
-Ownership is hybrid: every row carries an unguessable **manage token** (only its
-SHA-256 is stored) the browser keeps in `localStorage`, so an anonymous creator
-can manage their schedules with no account; when the creator was signed in the
-row is also stamped with their Discord user id for a cross-device list. A row
-also caches its destination `guild_id`, so a **server manager** (Manage Webhooks
-in that guild — same gate as the webhook picker) can list and manage *every*
-schedule for their server via `GET /api/guilds/:id/schedules`. Any of the three —
-manage token, owning account, or guild manager — authorizes a read/edit/cancel. Abuse is bounded by the per-IP rate limiter, a
-per-webhook cap (`SCHEDULE_MAX_PER_WEBHOOK`), a total-row cap
-(`SCHEDULE_MAX_ENTRIES`), a horizon (`SCHEDULE_MAX_HORIZON_DAYS`), and a payload
-size limit. Set `SCHEDULES_ENABLED=false` to disable the feature (the endpoints
-answer 501 and the worker never starts).
+**Creating a schedule requires a Discord login** — the row is owned by the
+account (manageable across devices and counted against the per-server quota under
+a real identity). Each row still gets an unguessable **manage token** (only its
+SHA-256 is stored; the browser keeps it in `localStorage`) for token-based
+management, and caches its destination `guild_id`, so a **server manager**
+(Manage Webhooks in that guild — same gate as the webhook picker) can list and
+manage *every* schedule for their server via `GET /api/guilds/:id/schedules`. Any
+of the three — manage token, owning account, or guild manager — authorizes a
+read/edit/cancel.
+
+The headline limit is a **per-server quota** (`SCHEDULE_MAX_PER_GUILD`, default
+5): a server can hold that many active schedules at once. Further bounded by the
+per-IP rate limiter, a per-webhook cap (`SCHEDULE_MAX_PER_WEBHOOK`), a total-row
+cap (`SCHEDULE_MAX_ENTRIES`), a horizon (`SCHEDULE_MAX_HORIZON_DAYS`), and a
+payload size limit. Set `SCHEDULES_ENABLED=false` to disable the feature (the
+endpoints answer 501 and the worker never starts).
 
 ### Creating a webhook (`webhook.incoming`)
 
