@@ -144,9 +144,11 @@ import {
 import { navigatePopup, openPopup, redirectFullPage, watchPopup } from "@/core/oauth/popupFlow";
 import { webhookFlow } from "@/core/oauth/flows";
 import { copyText } from "@/core/serialization/clipboard";
+import { isScheduleConfigured } from "@/core/schedule/api";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
+import { ScheduleSection } from "./ScheduleSection";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
 import type { PermanentStatusProps } from "./PermanentStatus";
@@ -1816,6 +1818,21 @@ export function SendPanel({
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {/* Schedule for later — reuses the webhook chosen above to post this
+          message once at a future time (no recurrence; that's deliberate). Only
+          offered for a brand-new post (an "update" re-posts, it doesn't edit) and
+          when a proxy is configured to hold + fire it. */}
+      {mode === "new" && isScheduleConfigured() ? (
+        <ScheduleSection
+          webhookUrl={parsedUrl?.url ?? null}
+          guildId={knownGuildId}
+          channelId={knownChannelId}
+          guildName={knownGuildName}
+          channelName={knownChannelName}
+          onLoaded={onCloseDialog}
+        />
       ) : null}
 
       {/* Floating action bar — pinned to the bottom of the scrolling dialog so

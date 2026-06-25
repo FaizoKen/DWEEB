@@ -55,16 +55,14 @@ import { type IncomingWebhook } from "@/core/guild/config";
 import { pushToast } from "@/ui/Toast";
 import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
-import { isScheduleConfigured } from "@/core/schedule/api";
 import { SendPanel } from "./SendPanel";
-import { SchedulePanel } from "./SchedulePanel";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
 import { Callout } from "./Callout";
 import styles from "./ShareDialog.module.css";
 
-type Tab = "send" | "schedule" | "restore" | "share" | "json" | "import" | "about";
+type Tab = "send" | "restore" | "share" | "json" | "import" | "about";
 
 interface ShareDialogProps {
   open: boolean;
@@ -109,11 +107,6 @@ export function ShareDialog({
         <TabButton active={tab === "send"} onClick={() => setTab("send")}>
           Send
         </TabButton>
-        {isScheduleConfigured() ? (
-          <TabButton active={tab === "schedule"} onClick={() => setTab("schedule")}>
-            Schedule
-          </TabButton>
-        ) : null}
         <TabButton active={tab === "restore"} onClick={() => setTab("restore")}>
           Restore
         </TabButton>
@@ -138,7 +131,6 @@ export function ShareDialog({
             onCloseDialog={onClose}
           />
         ) : null}
-        {tab === "schedule" ? <SchedulePanel onCloseDialog={onClose} /> : null}
         {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}
         {tab === "share" ? <ShareLinkPanel /> : null}
         {tab === "json" ? <JsonExportPanel /> : null}
