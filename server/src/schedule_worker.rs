@@ -67,7 +67,9 @@ pub fn spawn(
         let mut last_sweep: i64 = 0;
         loop {
             ticker.tick().await;
-            if let Err(e) = drain_once(&store, &key, &http, dispatcher.as_ref(), lease_secs, batch).await {
+            if let Err(e) =
+                drain_once(&store, &key, &http, dispatcher.as_ref(), lease_secs, batch).await
+            {
                 tracing::warn!(error = %e, "scheduler tick failed");
             }
             let now = unix_now();
@@ -174,9 +176,10 @@ async fn process(
                 let msg_id = body
                     .as_ref()
                     .and_then(|v| v.get("id").and_then(|i| i.as_str().map(str::to_string)));
-                let channel_id = body
-                    .as_ref()
-                    .and_then(|v| v.get("channel_id").and_then(|i| i.as_str().map(str::to_string)));
+                let channel_id = body.as_ref().and_then(|v| {
+                    v.get("channel_id")
+                        .and_then(|i| i.as_str().map(str::to_string))
+                });
                 // Keep the components alive when asked — best-effort, never fails
                 // the post. The outcome rides into the row's run detail as a note.
                 let note = maybe_make_permanent(
@@ -187,8 +190,16 @@ async fn process(
                 )
                 .await;
                 let next = compute_next(&job, now);
-                success(store, &job.id, now, msg_id.as_deref(), code as i64, next, note.as_deref())
-                    .await;
+                success(
+                    store,
+                    &job.id,
+                    now,
+                    msg_id.as_deref(),
+                    code as i64,
+                    next,
+                    note.as_deref(),
+                )
+                .await;
             } else if code == 429 {
                 // Rate limited — honour Retry-After, treat as transient.
                 let retry_at = now + retry_after_secs(&resp);
@@ -257,7 +268,11 @@ async fn success(
     note: Option<&str>,
 ) {
     let s = Arc::clone(store);
-    let (id, msg, note) = (id.to_string(), msg_id.map(str::to_string), note.map(str::to_string));
+    let (id, msg, note) = (
+        id.to_string(),
+        msg_id.map(str::to_string),
+        note.map(str::to_string),
+    );
     let res = tokio::task::spawn_blocking(move || {
         s.record_success(&id, now, msg.as_deref(), code, next, note.as_deref())
     })
@@ -281,10 +296,15 @@ async fn maybe_make_permanent(
     }
     let Some(guild) = job.guild_id.as_deref() else {
         // Shouldn't happen (the API drops the flag without a guild), but be safe.
-        return Some("Couldn't keep the buttons permanent: the destination server wasn't known.".into());
+        return Some(
+            "Couldn't keep the buttons permanent: the destination server wasn't known.".into(),
+        );
     };
     let Some(api) = dispatcher else {
-        return Some("Couldn't keep the buttons permanent: the never-expire service isn't configured.".into());
+        return Some(
+            "Couldn't keep the buttons permanent: the never-expire service isn't configured."
+                .into(),
+        );
     };
     let (Some(message_id), Some(channel_id)) = (message_id, channel_id) else {
         return Some(
