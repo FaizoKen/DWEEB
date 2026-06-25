@@ -229,7 +229,7 @@ export function App() {
   // though they reuse the same dialog.
   const [shareOpen, setShareOpen] = useState(false);
   const [shareInitialTab, setShareInitialTab] = useState<
-    "send" | "share" | "restore" | "json" | "import" | "about"
+    "send" | "update" | "share" | "restore" | "json" | "import" | "about"
   >("send");
   // Latches true on first open so the lazy chunk is fetched once and the dialog
   // stays mounted thereafter (preserving SendPanel's in-progress input).
@@ -432,6 +432,7 @@ export function App() {
             onExport={() => openShareDialog("json")}
             onImport={() => openShareDialog("import")}
             onSend={() => openShareDialog("send")}
+            onUpdate={() => openShareDialog("update")}
             onRestore={() => openShareDialog("restore")}
             onAbout={() => openShareDialog("about")}
           />

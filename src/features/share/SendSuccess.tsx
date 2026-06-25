@@ -201,8 +201,9 @@ export function SendSuccess({
 
       {mode === "new" && editOnResend ? (
         <p className={styles.note}>
-          The Send tab now points at this message — send again to edit it in place, or switch back
-          to <strong>Send as new</strong> to post another.
+          This message is now linked — hit <strong>Update</strong> (the toolbar button, or the{" "}
+          <strong>Update</strong> tab) to edit it in place. Sending from here again posts a new
+          message.
         </p>
       ) : null}
     </Modal>

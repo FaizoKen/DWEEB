@@ -1,7 +1,10 @@
 /**
- * Share dialog — five tabs:
- *  - Send        : POST the current message to a Discord webhook (or PATCH
- *                  the original when the editor holds a restored message).
+ * Share dialog — tabs:
+ *  - Send        : POST the current message to a Discord webhook as a brand-new
+ *                  message (with an optional Send-now / Schedule choice).
+ *  - Update      : PATCH a message this webhook already posted in place — the
+ *                  same Send panel in "update" mode (its own screen rather than
+ *                  an in-panel toggle), prefilled when a message is loaded.
  *  - Restore     : GET a previously-posted webhook message back into the
  *                  editor by webhook URL + message ID/link.
  *  - Share link  : compressed URL containing the entire message state.
@@ -62,7 +65,7 @@ import { GuildIdentity } from "./GuildIdentity";
 import { Callout } from "./Callout";
 import styles from "./ShareDialog.module.css";
 
-type Tab = "send" | "restore" | "share" | "json" | "import" | "about";
+type Tab = "send" | "update" | "restore" | "share" | "json" | "import" | "about";
 
 interface ShareDialogProps {
   open: boolean;
@@ -107,6 +110,9 @@ export function ShareDialog({
         <TabButton active={tab === "send"} onClick={() => setTab("send")}>
           Send
         </TabButton>
+        <TabButton active={tab === "update"} onClick={() => setTab("update")}>
+          Update
+        </TabButton>
         <TabButton active={tab === "restore"} onClick={() => setTab("restore")}>
           Restore
         </TabButton>
@@ -126,8 +132,16 @@ export function ShareDialog({
       <div className={styles.body}>
         {tab === "send" ? (
           <SendPanel
+            mode="new"
             onRequestRemoveInteractive={onRequestRemoveInteractive}
             initialWebhook={initialWebhook}
+            onCloseDialog={onClose}
+          />
+        ) : null}
+        {tab === "update" ? (
+          <SendPanel
+            mode="update"
+            onRequestRemoveInteractive={onRequestRemoveInteractive}
             onCloseDialog={onClose}
           />
         ) : null}
@@ -573,8 +587,9 @@ function V1ConversionPreview({ fields, notes }: { fields: string[]; notes: V1Imp
  * message can read it back — Discord 404s for anything else, even messages
  * from the same channel posted by users or other bots/webhooks.
  *
- * On success we record the origin in the store so the Send panel can offer
- * "Update existing" (PATCH) instead of "Send as new" (POST) by default.
+ * On success we record the origin in the store so the toolbar's primary action
+ * becomes "Update" — opening the Update tab (PATCH) prefilled with this webhook
+ * + message id instead of posting a new message.
  */
 function RestorePanel({ onDone }: { onDone: () => void }) {
   const replaceFromRestore = useMessageStore((s) => s.replaceMessageFromRestore);
@@ -923,10 +938,7 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
           the server and the Restore button stay in view while the webhook list
           scrolls. */}
       <div className={styles.floatingBar}>
-        <GuildIdentity
-          guildId={pickerActive ? connectedData?.guildId : undefined}
-          label="Server"
-        />
+        <GuildIdentity guildId={pickerActive ? connectedData?.guildId : undefined} label="Server" />
         <div className={styles.floatingActions}>
           <Button
             variant="primary"

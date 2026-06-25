@@ -2,20 +2,20 @@
  * "Send" panel — POSTs the current message directly to a Discord webhook,
  * or PATCHes the original when the editor was populated from a restore.
  *
- * Mode logic:
- *  - The "Send as new" / "Update existing" toggle is always available, so a
- *    message this webhook already posted can be edited in place (PATCH) without
- *    restoring it first: pick "Update existing", paste the message ID/link, and
- *    the current editor content replaces the original.
- *  - "Send as new" (default) POSTs a brand-new message.
+ * Mode logic (`mode` prop, driven by the host dialog's tab — Send vs Update —
+ * rather than an in-panel toggle, so each is a dedicated screen):
+ *  - "new" (the Send tab) POSTs a brand-new message, and carries the Send-now /
+ *    Schedule choice at the top.
+ *  - "update" (the Update tab) PATCHes a message this webhook already posted:
+ *    pick the webhook + paste the message ID/link, and the current editor
+ *    content replaces the original — no restore required.
  *  - When the user just restored a message via the Restore tab, the store's
- *    `restoredFrom` field is set, the panel defaults to "Update existing", and
- *    the webhook + message ID are pre-filled from that restore. Switching to
- *    "Send as new" just ignores the restore origin for the next click; it
- *    doesn't clear it (so they can still hit Update later).
+ *    `restoredFrom` field is set: the Update tab pre-fills its webhook +
+ *    message ID from that origin, and the toolbar's primary action becomes
+ *    "Update" (opening the Update tab).
  *  - After a successful send, the posted message is recorded as the restore
- *    origin too, so the panel flips to "Update existing" pre-filled with the
- *    webhook + new message id (+ thread) — clicking send again edits the live
+ *    origin too, so the toolbar flips to "Update" — opening the Update tab
+ *    pre-filled with the webhook + new message id (+ thread) edits the live
  *    message in place instead of posting a duplicate.
  *
  * A webhook PATCH replaces the whole message, so when updating without a
@@ -224,10 +224,20 @@ function defaultScheduleAt(): string {
 }
 
 export function SendPanel({
+  mode = "new",
   onRequestRemoveInteractive,
   initialWebhook,
   onCloseDialog,
 }: {
+  /**
+   * Which webhook-message operation this panel performs — POST a brand-new
+   * message ("new") or PATCH one already posted ("update"). Driven by the host
+   * dialog's tab (Send vs Update) rather than an in-panel toggle, so each is a
+   * dedicated screen. Update mode shows the message-id field + the "which
+   * webhook posted this" picker; new mode shows the channel picker and the
+   * Send-now/Schedule choice.
+   */
+  mode?: "new" | "update";
   /**
    * Asked when the user clicks "Remove them" on the app-owned-webhook block.
    * The App closes the dialog and pops a confirmation over the editor.
@@ -259,7 +269,6 @@ export function SendPanel({
   const [url, setUrl] = useState(() => initialWebhook?.url ?? restoredFrom?.webhookUrl ?? "");
   const [threadId, setThreadId] = useState(() => restoredFrom?.threadId ?? "");
   const [messageIdInput, setMessageIdInput] = useState(() => restoredFrom?.messageId ?? "");
-  const [mode, setMode] = useState<"new" | "update">(() => (restoredFrom ? "update" : "new"));
   const [revealUrl, setRevealUrl] = useState(false);
   // Beginner-friendly default: keep the optional thread setting folded away so
   // the common path is just "pick a channel → send". Auto-opens whenever a value
@@ -332,17 +341,17 @@ export function SendPanel({
     [],
   );
 
-  // Mirror the store's origin into the form whenever it changes: a restore
-  // made while the panel is open (user switched to the Restore tab, fetched,
-  // and came back), or this panel's own successful send re-targeting the form
-  // at the message that's now live.
+  // Mirror the store's origin into the update form whenever it changes: a
+  // restore made while the panel is open (Restore tab → fetch → back), or this
+  // panel's own successful update re-targeting the form at the live message.
+  // Update-only: the Send (new) tab keeps whatever the user picked — its own
+  // mount-time initializer already prefilled the last webhook for convenience.
   useEffect(() => {
-    if (!restoredFrom) return;
+    if (mode !== "update" || !restoredFrom) return;
     setUrl(restoredFrom.webhookUrl);
     setMessageIdInput(restoredFrom.messageId);
     setThreadId(restoredFrom.threadId ?? "");
-    setMode("update");
-  }, [restoredFrom]);
+  }, [restoredFrom, mode]);
 
   // Reveal the optional settings whenever a thread id is present, so it's never
   // tucked away when it actually matters.
@@ -1071,11 +1080,11 @@ export function SendPanel({
           (effChannelId ? connectedData?.channelById[effChannelId]?.name : undefined);
 
         // Point the form at the message that's now live: record it as the
-        // restore origin, which flips the panel to "Update existing" with this
-        // webhook + message id (+ thread) pre-filled — clicking send again
-        // edits the message in place instead of posting a duplicate. Lives on
-        // the message store (like a restore) so it survives closing and
-        // reopening the dialog.
+        // restore origin, which flips the toolbar's primary action to "Update"
+        // — opening the Update tab pre-filled with this webhook + message id (+
+        // thread) edits the message in place instead of posting a duplicate.
+        // Lives on the message store (like a restore) so it survives closing
+        // and reopening the dialog.
         if (postedMessageId) {
           setRestoreOrigin({
             webhookUrl: parsedUrl.url,
@@ -1435,28 +1444,92 @@ export function SendPanel({
           : "Your edit goes straight from this browser to Discord — we never see or store it."}
       </p>
 
-      <div className={styles.modeToggle} role="radiogroup" aria-label="Send mode">
-        <button
-          type="button"
-          role="radio"
-          aria-checked={mode === "new"}
-          className={cn(styles.modeOption, mode === "new" && styles.modeOptionActive)}
-          onClick={() => setMode("new")}
-        >
-          <strong>Send as new</strong>
-          <span>Post a brand-new message.</span>
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={mode === "update"}
-          className={cn(styles.modeOption, mode === "update" && styles.modeOptionActive)}
-          onClick={() => setMode("update")}
-        >
-          <strong>Update existing</strong>
-          <span>Edit a message you already posted.</span>
-        </button>
-      </div>
+      {/* Send now vs. schedule for later — pinned to the top of the Send screen
+          so the timing choice is the first thing set. Picks a future time to
+          post this message once (one-time only, deliberately). Only for a
+          brand-new post (an "update" re-posts, it doesn't edit) and when a proxy
+          is configured to hold + fire it. */}
+      {mode === "new" && isScheduleConfigured() ? (
+        <div className={styles.scheduleArea}>
+          <div className={styles.modeToggle} role="radiogroup" aria-label="When to post">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={when === "now"}
+              className={cn(styles.modeOption, when === "now" && styles.modeOptionActive)}
+              onClick={() => setWhen("now")}
+            >
+              <strong>Send now</strong>
+              <span>Post immediately.</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={when === "later"}
+              className={cn(styles.modeOption, when === "later" && styles.modeOptionActive)}
+              onClick={() => {
+                setWhen("later");
+                setScheduleError(null);
+                setScheduleSuccess(null);
+              }}
+            >
+              <strong>Schedule</strong>
+              <span>Post at a set date &amp; time.</span>
+            </button>
+          </div>
+
+          {when === "later" ? (
+            authStatus === "authed" ? (
+              <>
+                <Field label="Post date &amp; time (your local time)">
+                  {(id) => (
+                    <input
+                      id={id}
+                      type="datetime-local"
+                      className={styles.dtInput}
+                      value={scheduleAt}
+                      onChange={(e) => {
+                        setScheduleAt(e.currentTarget.value);
+                        setScheduleError(null);
+                        setScheduleSuccess(null);
+                      }}
+                    />
+                  )}
+                </Field>
+                <p className={styles.scheduleNote}>
+                  Stored on our server (encrypted) only until it posts, then deleted.
+                </p>
+                {scheduleError ? <div className={styles.error}>{scheduleError}</div> : null}
+                {scheduleSuccess ? (
+                  <div className={styles.scheduleSuccess}>{scheduleSuccess}</div>
+                ) : null}
+              </>
+            ) : (
+              <Callout tone="info" role="note">
+                <strong>Sign in with Discord to schedule a post.</strong> Scheduling keeps your
+                message on our server until it fires, so it needs an account.
+              </Callout>
+            )
+          ) : null}
+
+          {/* The list of scheduled posts lives in "Managed messages" (account
+              menu), not here — this keeps the Send screen short. Link to it. */}
+          {authStatus === "authed" && (knownGuildId ?? (connectedGuildId || undefined)) ? (
+            <button
+              type="button"
+              className={styles.scheduleManageLink}
+              onClick={() => {
+                const gid = knownGuildId ?? (connectedGuildId || undefined);
+                if (!gid) return;
+                useManagedMessagesStore.getState().open(gid, knownGuildName);
+                onCloseDialog?.();
+              }}
+            >
+              View &amp; manage scheduled posts →
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Browser-saved recents are redundant once the auto-detect picker is
           showing the connected server's webhooks live — hide them there to keep
@@ -1932,93 +2005,6 @@ export function SendPanel({
                 <pre className={styles.errorRawBody}>{formatRawBody(state.body)}</pre>
               ) : null}
             </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Send now vs. schedule for later — reuses the webhook chosen above to
-          post this message once at a future time (one-time only, deliberately).
-          Only for a brand-new post (an "update" re-posts, it doesn't edit) and
-          when a proxy is configured to hold + fire it. Below the choice sits the
-          list of scheduled posts for this server (everyone's, if you manage it). */}
-      {mode === "new" && isScheduleConfigured() ? (
-        <div className={styles.scheduleArea}>
-          <div className={styles.modeToggle} role="radiogroup" aria-label="When to post">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={when === "now"}
-              className={cn(styles.modeOption, when === "now" && styles.modeOptionActive)}
-              onClick={() => setWhen("now")}
-            >
-              <strong>Send now</strong>
-              <span>Post immediately.</span>
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={when === "later"}
-              className={cn(styles.modeOption, when === "later" && styles.modeOptionActive)}
-              onClick={() => {
-                setWhen("later");
-                setScheduleError(null);
-                setScheduleSuccess(null);
-              }}
-            >
-              <strong>Schedule</strong>
-              <span>Post at a set date &amp; time.</span>
-            </button>
-          </div>
-
-          {when === "later" ? (
-            authStatus === "authed" ? (
-              <>
-                <Field label="Post date &amp; time (your local time)">
-                  {(id) => (
-                    <input
-                      id={id}
-                      type="datetime-local"
-                      className={styles.dtInput}
-                      value={scheduleAt}
-                      onChange={(e) => {
-                        setScheduleAt(e.currentTarget.value);
-                        setScheduleError(null);
-                        setScheduleSuccess(null);
-                      }}
-                    />
-                  )}
-                </Field>
-                <p className={styles.scheduleNote}>
-                  Stored on our server (encrypted) only until it posts, then deleted.
-                </p>
-                {scheduleError ? <div className={styles.error}>{scheduleError}</div> : null}
-                {scheduleSuccess ? (
-                  <div className={styles.scheduleSuccess}>{scheduleSuccess}</div>
-                ) : null}
-              </>
-            ) : (
-              <Callout tone="info" role="note">
-                <strong>Sign in with Discord to schedule a post.</strong> Scheduling keeps your
-                message on our server until it fires, so it needs an account.
-              </Callout>
-            )
-          ) : null}
-
-          {/* The list of scheduled posts lives in "Managed messages" (account
-              menu), not here — this keeps the Send screen short. Link to it. */}
-          {authStatus === "authed" && (knownGuildId ?? (connectedGuildId || undefined)) ? (
-            <button
-              type="button"
-              className={styles.scheduleManageLink}
-              onClick={() => {
-                const gid = knownGuildId ?? (connectedGuildId || undefined);
-                if (!gid) return;
-                useManagedMessagesStore.getState().open(gid, knownGuildName);
-                onCloseDialog?.();
-              }}
-            >
-              View &amp; manage scheduled posts →
-            </button>
           ) : null}
         </div>
       ) : null}

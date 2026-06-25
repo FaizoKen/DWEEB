@@ -6,8 +6,8 @@
  * re-targeted right after a successful send — the toolbar's primary action
  * becomes "Update" and the next post PATCHes that message in place instead of
  * posting a new one (see {@link RestoredOrigin}). That binding is otherwise
- * invisible: the only signal was the button label, and the only way out was the
- * Send panel's local "Send as new" toggle, which doesn't actually drop the link.
+ * invisible — the only signal is the button label — and there's no in-editor
+ * way to drop it (the Send and Update screens are now separate dialog tabs).
  *
  * This renders a slim bar at the top of the scrolling tree (so it scrolls away
  * with the content rather than pinning to the top) with a real **Detach** button

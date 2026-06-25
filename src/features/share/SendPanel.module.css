@@ -499,13 +499,12 @@
 }
 
 /* ── Schedule for later ─────────────────────────────────────────────────── */
+/* Sits at the top of the Send screen (the "Send now / Schedule" choice), so no
+   divider — the dialog body's flex gap handles its spacing. */
 .scheduleArea {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-top: 4px;
-  margin-top: 2px;
-  border-top: 1px solid var(--app-border);
 }
 
 .dtInput {

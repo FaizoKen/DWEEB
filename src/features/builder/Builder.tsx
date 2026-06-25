@@ -43,15 +43,25 @@ interface BuilderProps {
   onExport: () => void;
   /** Opens the Share / Export dialog on the Import tab. */
   onImport: () => void;
-  /** Opens the Share / Export dialog focused on the Send panel. */
+  /** Opens the Share / Export dialog focused on the Send panel (post as new). */
   onSend: () => void;
+  /** Opens the Share / Export dialog on the Update tab (edit in place). */
+  onUpdate: () => void;
   /** Opens the Share / Export dialog focused on the Restore panel. */
   onRestore: () => void;
   /** Opens the Share / Export dialog focused on the About panel. */
   onAbout: () => void;
 }
 
-export function Builder({ onShare, onExport, onImport, onSend, onRestore, onAbout }: BuilderProps) {
+export function Builder({
+  onShare,
+  onExport,
+  onImport,
+  onSend,
+  onUpdate,
+  onRestore,
+  onAbout,
+}: BuilderProps) {
   return (
     <div className={styles.builder}>
       {/* ActionBar occupies the grid's first (auto) row; the tree fills the 1fr
@@ -64,6 +74,7 @@ export function Builder({ onShare, onExport, onImport, onSend, onRestore, onAbou
           onExport={onExport}
           onImport={onImport}
           onSend={onSend}
+          onUpdate={onUpdate}
           onRestore={onRestore}
           onAbout={onAbout}
         />
@@ -74,15 +85,23 @@ export function Builder({ onShare, onExport, onImport, onSend, onRestore, onAbou
   );
 }
 
-function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: BuilderProps) {
+function ActionBar({
+  onShare,
+  onExport,
+  onImport,
+  onSend,
+  onUpdate,
+  onRestore,
+  onAbout,
+}: BuilderProps) {
   const undo = useMessageStore((s) => s.undo);
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
   const canRedo = useMessageStore((s) => s.future.length > 0);
-  // The Send panel defaults to "Update existing" whenever a restore origin is
-  // set — after restoring a message, or after a successful send re-targets the
-  // form at the now-live message. Mirror that here so the action reads "Update"
-  // when the next post edits in place, "Send" when it posts something new.
+  // A restore origin is set after restoring a message, or after a successful
+  // send re-targets the form at the now-live message. The primary action then
+  // reads "Update" and opens the dedicated Update tab (edit in place); with no
+  // origin it reads "Send" and opens the Send tab (post as new).
   const isUpdate = useMessageStore((s) => s.restoredFrom != null);
   const sendLabel = isUpdate ? "Update" : "Send";
 
@@ -234,7 +253,7 @@ function ActionBar({ onShare, onExport, onImport, onSend, onRestore, onAbout }: 
           variant="primary"
           size="sm"
           leadingIcon={isUpdate ? <PencilIcon /> : <SendIcon />}
-          onClick={onSend}
+          onClick={isUpdate ? onUpdate : onSend}
           aria-label={sendLabel}
           title={
             isUpdate
