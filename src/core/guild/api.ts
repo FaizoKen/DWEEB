@@ -278,8 +278,8 @@ export async function removePermanentMessage(
 // A server may register its own Discord application so the DWEEB interactions
 // dispatcher serves it too: components on messages sent by *their* bot then
 // work through DWEEB's plugins. Each server gets a quota of registrations
-// (default 1; plan-based extensions later — the `cap` in every response is
-// the source of truth, never hardcode it).
+// (default 1 — the `cap` in every response is the source of truth, never
+// hardcode it).
 
 /** One registered custom app. */
 export interface CustomBotItem {
@@ -300,7 +300,7 @@ export interface CustomBotItem {
 
 /** A server's custom-bot state, as every custom-bot endpoint returns it. */
 export interface CustomBots {
-  /** Registrations the server may hold (per-guild plans may raise this later). */
+  /** Registrations the server may hold. */
   cap: number;
   used: number;
   items: CustomBotItem[];

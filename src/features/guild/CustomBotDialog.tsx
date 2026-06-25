@@ -5,8 +5,7 @@
  * their app) then work through DWEEB's plugins, under the bot's own identity.
  *
  * Each server gets a quota of registrations (default 1). The `cap` in the API
- * response is the source of truth — per-server plans may raise it later, so
- * nothing here hardcodes the number. Once the quota is spent the blank form
+ * response is the source of truth, so nothing here hardcodes the number. Once the quota is spent the blank form
  * disappears; a registered app's "Update" action reopens it with the
  * Application ID locked, for replacing a reset key/secret in place.
  *
@@ -521,7 +520,7 @@ export function CustomBotDialog({
             <p className={styles.note}>
               {bots.items.length === 0
                 ? "Registrations are closed on this deployment."
-                : "Quota in use — higher limits arrive with server plans."}
+                : "Quota in use."}
             </p>
             <details className={styles.setup}>
               <summary>Developer Portal URLs</summary>
