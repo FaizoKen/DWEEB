@@ -285,6 +285,27 @@
   border-bottom: 1px solid var(--app-border);
 }
 
+/* The server's Discord icon (or a coloured initial when the user isn't in that
+ * server / it has no custom icon). Rounded like Discord's own guild glyphs. */
+.sectionIcon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--app-bg-input);
+}
+
+.sectionIconFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-text-muted);
+  border: 1px solid var(--app-border);
+}
+
 .sectionName {
   font-size: var(--app-text-base);
   font-weight: 650;

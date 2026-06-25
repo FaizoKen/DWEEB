@@ -35,6 +35,8 @@ import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
 import { recordOrigin, usePostedMessagesStore } from "@/core/state/postedMessagesStore";
+import { useAuthStore } from "@/core/auth/authStore";
+import { guildIconUrl } from "@/core/guild/api";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { loadDraftMessage } from "@/core/state/draftStorage";
 import { attachEditorFields } from "@/core/serialization/normalize";
@@ -132,6 +134,15 @@ export function TemplateGallery() {
   const removeEntry = useSavedMessagesStore((s) => s.remove);
   const postedEntries = usePostedMessagesStore((s) => s.entries);
   const removePosted = usePostedMessagesStore((s) => s.remove);
+  // The signed-in user's servers carry the icon hash the posted records don't
+  // store, so the Posted-tab section headers can show a real server glyph. Keyed
+  // by id for a cheap per-section lookup; absent when the user isn't a member.
+  const authGuilds = useAuthStore((s) => s.guilds);
+  const guildIconById = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const g of authGuilds) map.set(g.id, g.icon);
+    return map;
+  }, [authGuilds]);
 
   const [query, setQuery] = useState("");
   // Seeded once from the store so callers can deep-link straight to "Saved";
@@ -384,12 +395,15 @@ export function TemplateGallery() {
   // already newest-first), matching the flat view's ordering.
   const postedSections = useMemo(() => {
     if (filter !== POSTED_FILTER || query.trim()) return null;
-    const groups = new Map<string, { key: string; name: string; cards: CardData[] }>();
+    const groups = new Map<
+      string,
+      { key: string; guildId?: string; name: string; cards: CardData[] }
+    >();
     for (const c of shown) {
       const key = c.guildId ?? c.guildName ?? "__unknown";
       let group = groups.get(key);
       if (!group) {
-        group = { key, name: c.guildName ?? "Other servers", cards: [] };
+        group = { key, guildId: c.guildId, name: c.guildName ?? "Other servers", cards: [] };
         groups.set(key, group);
       }
       group.cards.push(c);
@@ -531,6 +545,11 @@ export function TemplateGallery() {
                 {postedSections.map((section) => (
                   <section key={section.key} className={styles.section}>
                     <div className={styles.sectionHeader}>
+                      <ServerIcon
+                        guildId={section.guildId}
+                        name={section.name}
+                        iconHash={section.guildId ? guildIconById.get(section.guildId) : undefined}
+                      />
                       <span className={styles.sectionName}>{section.name}</span>
                       <span className={styles.sectionCount}>{section.cards.length}</span>
                     </div>
@@ -606,6 +625,31 @@ export function TemplateGallery() {
       </Modal>
     </>,
     document.body,
+  );
+}
+
+/** Small server glyph for a Posted-tab section header. Uses the real Discord
+ *  icon when the user belongs to that server (so its icon hash is known via the
+ *  auth guild list), otherwise a coloured initial — the same fallback the
+ *  account menu's server rows use. The "Other servers" bucket has no id, so it
+ *  too lands on the initial of its label. */
+function ServerIcon({
+  guildId,
+  name,
+  iconHash,
+}: {
+  guildId?: string;
+  name: string;
+  iconHash?: string | null;
+}) {
+  const url = guildId && iconHash ? guildIconUrl(guildId, iconHash, 32) : null;
+  if (url) {
+    return <img className={styles.sectionIcon} src={url} alt="" loading="lazy" />;
+  }
+  return (
+    <span className={`${styles.sectionIcon} ${styles.sectionIconFallback}`} aria-hidden>
+      {name.slice(0, 1).toUpperCase()}
+    </span>
   );
 }
 
