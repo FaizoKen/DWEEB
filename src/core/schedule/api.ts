@@ -40,6 +40,8 @@ export interface ScheduleView {
   end_at?: number | null;
   max_runs?: number | null;
   created_at: number;
+  /** Whether the worker will keep the posted message's components permanent. */
+  make_permanent?: boolean;
   owned: boolean;
   /** Present only on a single-schedule GET — the decrypted message payload. */
   payload?: unknown;
@@ -59,6 +61,12 @@ export interface CreateScheduleInput {
   dest_label?: string;
   /** Destination guild, so a server manager can list it later. */
   guild_id?: string;
+  /**
+   * Keep this post's interactive components from expiring: the worker spends one
+   * of the guild's never-expire slots on the message once it fires. Only honoured
+   * server-side when `guild_id` is set (no guild → nowhere to spend a slot).
+   */
+  make_permanent?: boolean;
 }
 
 export interface ScheduleUpdateInput {
@@ -125,7 +133,11 @@ export async function createSchedule(input: CreateScheduleInput): Promise<Create
     error?: string;
   } | null;
   if (!res.ok || !data?.id || !data.manage_token) {
-    return { ok: false, error: data?.error ?? `Server returned ${res.status}.`, status: res.status };
+    return {
+      ok: false,
+      error: data?.error ?? `Server returned ${res.status}.`,
+      status: res.status,
+    };
   }
   return {
     ok: true,

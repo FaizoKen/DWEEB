@@ -263,8 +263,10 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
   );
 }
 
-/** The "Make permanent" row: title + state sub-line + the switch. */
-function PermanentOptIn({
+/** The "Make permanent" row: title + state sub-line + the switch. Exported so
+ *  the Schedule panel can offer the same never-expire opt-in before a later post
+ *  (the slot is spent server-side when the worker fires it). */
+export function PermanentOptIn({
   option,
   busy,
 }: {

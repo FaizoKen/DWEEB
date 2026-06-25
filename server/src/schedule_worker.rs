@@ -24,6 +24,7 @@ use std::time::Duration;
 use axum_extra::extract::cookie::Key;
 use serde_json::Value;
 
+use crate::routes::DispatcherApi;
 use crate::schedule::{unix_now, ClaimedJob, ScheduleStore};
 use crate::schedule_rule::{next_after, Recurrence};
 use crate::schedule_validate::validate_webhook;
@@ -43,11 +44,15 @@ const SWEEP_INTERVAL_SECS: i64 = 3600;
 
 /// Spawn the worker loop. `http` should carry a modest timeout (the worker is
 /// off the 3s interaction budget, but a hung POST shouldn't hold a lease).
+/// `dispatcher` is the permanent-slot relay, used to keep a posted message's
+/// components alive when the schedule asked for it — `None` on deployments
+/// without the dispatcher, where `make_permanent` schedules simply post normally.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
     store: Arc<ScheduleStore>,
     key: Key,
     http: reqwest::Client,
+    dispatcher: Option<Arc<DispatcherApi>>,
     tick_secs: u64,
     lease_secs: i64,
     batch: usize,
@@ -62,7 +67,7 @@ pub fn spawn(
         let mut last_sweep: i64 = 0;
         loop {
             ticker.tick().await;
-            if let Err(e) = drain_once(&store, &key, &http, lease_secs, batch).await {
+            if let Err(e) = drain_once(&store, &key, &http, dispatcher.as_ref(), lease_secs, batch).await {
                 tracing::warn!(error = %e, "scheduler tick failed");
             }
             let now = unix_now();
@@ -85,6 +90,7 @@ async fn drain_once(
     store: &Arc<ScheduleStore>,
     key: &Key,
     http: &reqwest::Client,
+    dispatcher: Option<&Arc<DispatcherApi>>,
     lease_secs: i64,
     batch: usize,
 ) -> Result<(), String> {
@@ -94,7 +100,7 @@ async fn drain_once(
         .await
         .map_err(|e| e.to_string())??;
     for job in jobs {
-        process(store, key, http, job, now).await;
+        process(store, key, http, dispatcher, job, now).await;
     }
     Ok(())
 }
@@ -104,6 +110,7 @@ async fn process(
     store: &Arc<ScheduleStore>,
     key: &Key,
     http: &reqwest::Client,
+    dispatcher: Option<&Arc<DispatcherApi>>,
     job: ClaimedJob,
     now: i64,
 ) {
@@ -160,13 +167,28 @@ async fn process(
         Ok(resp) => {
             let code = resp.status().as_u16();
             if resp.status().is_success() {
-                let msg_id = resp
-                    .json::<Value>()
-                    .await
-                    .ok()
+                // Discord echoes the created message (wait=true): both its id and
+                // channel_id come from this body — the channel is what a slot
+                // claim needs, and for a forum/thread post it's the thread id.
+                let body = resp.json::<Value>().await.ok();
+                let msg_id = body
+                    .as_ref()
                     .and_then(|v| v.get("id").and_then(|i| i.as_str().map(str::to_string)));
+                let channel_id = body
+                    .as_ref()
+                    .and_then(|v| v.get("channel_id").and_then(|i| i.as_str().map(str::to_string)));
+                // Keep the components alive when asked — best-effort, never fails
+                // the post. The outcome rides into the row's run detail as a note.
+                let note = maybe_make_permanent(
+                    dispatcher,
+                    &job,
+                    msg_id.as_deref(),
+                    channel_id.as_deref(),
+                )
+                .await;
                 let next = compute_next(&job, now);
-                success(store, &job.id, now, msg_id.as_deref(), code as i64, next).await;
+                success(store, &job.id, now, msg_id.as_deref(), code as i64, next, note.as_deref())
+                    .await;
             } else if code == 429 {
                 // Rate limited — honour Retry-After, treat as transient.
                 let retry_at = now + retry_after_secs(&resp);
@@ -224,6 +246,7 @@ fn compute_next(job: &ClaimedJob, now: i64) -> Option<i64> {
     Some(next)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn success(
     store: &Arc<ScheduleStore>,
     id: &str,
@@ -231,13 +254,72 @@ async fn success(
     msg_id: Option<&str>,
     code: i64,
     next: Option<i64>,
+    note: Option<&str>,
 ) {
     let s = Arc::clone(store);
-    let (id, msg) = (id.to_string(), msg_id.map(str::to_string));
-    let res =
-        tokio::task::spawn_blocking(move || s.record_success(&id, now, msg.as_deref(), code, next))
-            .await;
+    let (id, msg, note) = (id.to_string(), msg_id.map(str::to_string), note.map(str::to_string));
+    let res = tokio::task::spawn_blocking(move || {
+        s.record_success(&id, now, msg.as_deref(), code, next, note.as_deref())
+    })
+    .await;
     log_db("record_success", res);
+}
+
+/// Spend a never-expire slot on the freshly-posted message when the schedule
+/// asked for it. Best-effort: the post already succeeded, so every outcome here
+/// is informational. Returns `Some(note)` to record when the message will *not*
+/// stay permanent (so the owner can see why), or `None` when there was nothing
+/// to do or the slot was claimed cleanly.
+async fn maybe_make_permanent(
+    dispatcher: Option<&Arc<DispatcherApi>>,
+    job: &ClaimedJob,
+    message_id: Option<&str>,
+    channel_id: Option<&str>,
+) -> Option<String> {
+    if !job.make_permanent {
+        return None;
+    }
+    let Some(guild) = job.guild_id.as_deref() else {
+        // Shouldn't happen (the API drops the flag without a guild), but be safe.
+        return Some("Couldn't keep the buttons permanent: the destination server wasn't known.".into());
+    };
+    let Some(api) = dispatcher else {
+        return Some("Couldn't keep the buttons permanent: the never-expire service isn't configured.".into());
+    };
+    let (Some(message_id), Some(channel_id)) = (message_id, channel_id) else {
+        return Some(
+            "Posted, but couldn't keep the buttons permanent: Discord didn't echo the message id."
+                .into(),
+        );
+    };
+    let req = api
+        .http
+        .post(format!("{}/permanent/{guild}", api.base))
+        .bearer_auth(&api.token)
+        .json(&serde_json::json!({
+            "message_id": message_id,
+            "channel_id": channel_id,
+            // The signed-in creator, recorded for the slot's audit row.
+            "added_by": job.owner_user_id.as_deref().unwrap_or("scheduler"),
+        }));
+    match req.send().await {
+        Ok(resp) if resp.status().is_success() => {
+            tracing::info!(%message_id, %guild, "scheduled post claimed a never-expire slot");
+            None
+        }
+        Ok(resp) if resp.status() == reqwest::StatusCode::CONFLICT => Some(
+            "Posted, but the buttons will expire: all never-expire slots were in use when it fired."
+                .into(),
+        ),
+        Ok(resp) => {
+            tracing::warn!(status = resp.status().as_u16(), %message_id, "never-expire claim rejected");
+            Some("Posted, but couldn't keep the buttons permanent (the never-expire service errored).".into())
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, %message_id, "never-expire claim failed to send");
+            Some("Posted, but couldn't keep the buttons permanent (couldn't reach the never-expire service).".into())
+        }
+    }
 }
 
 /// A transient failure: bump `attempts`, retry at `retry_at` — unless the retry
@@ -341,6 +423,9 @@ mod tests {
             max_runs: None,
             runs_count: 0,
             attempts: 0,
+            guild_id: None,
+            make_permanent: false,
+            owner_user_id: None,
         };
         assert_eq!(compute_next(&once, 1000), None);
 

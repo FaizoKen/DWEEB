@@ -249,6 +249,9 @@ async fn run() {
             Arc::clone(store),
             key.clone(),
             http,
+            // The permanent-slot relay, so a `make_permanent` schedule can keep
+            // its components alive when it fires (None → it just posts normally).
+            dispatcher.clone(),
             config.scheduler_tick_secs,
             config.scheduler_lease_secs,
             config.scheduler_batch,

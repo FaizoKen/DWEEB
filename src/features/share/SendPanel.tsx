@@ -151,7 +151,7 @@ import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
-import { SendConfirm } from "./SendConfirm";
+import { SendConfirm, PermanentOptIn } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
 import type { PermanentStatusProps } from "./PermanentStatus";
 import { Callout } from "./Callout";
@@ -606,15 +606,20 @@ export function SendPanel({
   // dead whenever it posts).
   const scheduleMode = mode === "new" && when === "later" && isScheduleConfigured();
 
-  // Fetch slot state for the confirm dialog's "Make permanent" control. Only
-  // worth a request when the message actually carries interactive components
-  // and the user could act on it (signed in, proxy, guild known). Errors
-  // (403 non-manager, network) just leave the control hidden — the success
-  // dialog then shows a generic expiry note instead of a concrete state.
+  // Fetch slot state for the "Make permanent" / "Never expire" control. Needed
+  // in two places: the confirm dialog (send now) and the Schedule panel (send
+  // later) — both let a signed-in manager keep an interactive message's
+  // components alive. Only worth a request when the message actually carries
+  // interactive components and the user could act (signed in, proxy, guild
+  // known). Errors (403 non-manager, network) just leave the control hidden —
+  // the confirm/success path then shows a generic expiry note instead.
   const hasInteractiveComponents = appWebhookNote != null;
   const updateTargetId = mode === "update" ? (parsedMessageId ?? undefined) : undefined;
+  // The schedule panel needs the same slots, but only for a brand-new post with
+  // "later" picked (scheduling never updates an existing message).
+  const slotsContextActive = confirmOpen || (mode === "new" && when === "later");
   useEffect(() => {
-    if (!confirmOpen) return;
+    if (!slotsContextActive) return;
     setConfirmSlots(null);
     setMakePermanent(false);
     setSlotsUnavailable(false);
@@ -643,7 +648,7 @@ export function SendPanel({
         }
       });
     return () => ac.abort();
-  }, [confirmOpen, hasInteractiveComponents, authStatus, knownGuildId, updateTargetId]);
+  }, [slotsContextActive, hasInteractiveComponents, authStatus, knownGuildId, updateTargetId]);
 
   // What the confirm dialog renders. Hidden when expiry is off on this
   // deployment (nothing to decide) or the slot state never loaded; when every
@@ -833,6 +838,10 @@ export function SendPanel({
       start_at: Math.floor(at / 1000),
       guild_id: knownGuildId,
       dest_label: destLabel,
+      // Keep interactive components alive when the user opted in — the worker
+      // spends a never-expire slot on the message once it fires. Gated on the
+      // message actually having components and a known guild to spend against.
+      make_permanent: hasInteractiveComponents && makePermanent && !!knownGuildId,
     });
     setScheduling(false);
     if (!res.ok) {
@@ -847,7 +856,11 @@ export function SendPanel({
     });
     rememberWebhook(parsedUrl.url);
     setHistory(loadHistory());
-    setScheduleSuccess(`Scheduled for ${formatInstant(res.next_run_at, browserTimezone())}.`);
+    const keepsPermanent = hasInteractiveComponents && makePermanent && !!knownGuildId;
+    setScheduleSuccess(
+      `Scheduled for ${formatInstant(res.next_run_at, browserTimezone())}.` +
+        (keepsPermanent ? " Its buttons & selects will be kept from expiring." : ""),
+    );
     pushToast("Post scheduled.", "success");
   };
 
@@ -1499,6 +1512,23 @@ export function SendPanel({
                 <p className={styles.scheduleNote}>
                   Stored on our server (encrypted) only until it posts, then deleted.
                 </p>
+                {/* Never-expire opt-in for a scheduled interactive message: the
+                    decision is made now, but the slot is spent server-side when
+                    the worker posts it (the message id only exists then). Shows
+                    the live toggle when slots could be read; a passive heads-up
+                    while they load or when the viewer can't claim (non-manager). */}
+                {hasInteractiveComponents ? (
+                  permanentOption ? (
+                    <PermanentOptIn option={permanentOption} busy={scheduling} />
+                  ) : confirmSlots == null && !slotsUnavailable && COMPONENT_TTL_DAYS != null ? (
+                    <Callout tone="info" role="note">
+                      Buttons &amp; selects stop working {COMPONENT_TTL_DAYS} day
+                      {COMPONENT_TTL_DAYS === 1 ? "" : "s"} after this posts. Make it never-expire
+                      from <strong>Managed messages</strong> once it&apos;s live to keep them
+                      clickable.
+                    </Callout>
+                  ) : null
+                ) : null}
                 {scheduleError ? <div className={styles.error}>{scheduleError}</div> : null}
                 {scheduleSuccess ? (
                   <div className={styles.scheduleSuccess}>{scheduleSuccess}</div>

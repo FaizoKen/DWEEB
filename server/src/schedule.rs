@@ -56,7 +56,7 @@ const LIST_LIMIT: usize = 200;
 const COLS: &str = "id, manage_token_hash, owner_user_id, webhook_id, webhook_sealed, thread_id, \
      payload_sealed, title, dest_label, tz, recurrence_json, next_run_at, status, lease_until, \
      attempts, last_status, last_error, last_run_at, last_message_id, runs_count, end_at, \
-     max_runs, created_at, updated_at, guild_id";
+     max_runs, created_at, updated_at, guild_id, make_permanent";
 
 // ── Row model ────────────────────────────────────────────────────────────────
 
@@ -88,6 +88,11 @@ pub struct Row {
     /// Destination guild, cached at creation so a server manager can list every
     /// schedule for their server. None when the webhook's guild wasn't known.
     pub guild_id: Option<String>,
+    /// The message carries interactive components and the creator asked to keep
+    /// them from expiring: when it fires, the worker spends one of the guild's
+    /// never-expire slots on the freshly-posted message (see `schedule_worker`).
+    /// Only honourable when `guild_id` is known and the dispatcher is configured.
+    pub make_permanent: bool,
 }
 
 fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
@@ -117,6 +122,7 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         created_at: r.get(22)?,
         // 23 = updated_at — not needed in memory.
         guild_id: r.get(24)?,
+        make_permanent: r.get::<_, i64>(25)? != 0,
     })
 }
 
@@ -133,6 +139,13 @@ pub struct ClaimedJob {
     pub max_runs: Option<i64>,
     pub runs_count: i64,
     pub attempts: i64,
+    /// Destination guild, needed to spend a never-expire slot after posting.
+    pub guild_id: Option<String>,
+    /// Whether to make the posted message permanent (claim a slot). Honoured
+    /// only when `guild_id` is set and the dispatcher is configured.
+    pub make_permanent: bool,
+    /// The signed-in creator, recorded as `added_by` on the slot grant (audit).
+    pub owner_user_id: Option<String>,
 }
 
 /// Everything `create` needs (secrets already sealed by the handler).
@@ -153,6 +166,7 @@ pub struct NewSchedule {
     pub max_runs: Option<i64>,
     pub created_at: i64,
     pub guild_id: Option<String>,
+    pub make_permanent: bool,
 }
 
 #[derive(Debug)]
@@ -225,7 +239,8 @@ impl ScheduleStore {
                  max_runs          INTEGER,
                  created_at        INTEGER NOT NULL,
                  updated_at        INTEGER NOT NULL,
-                 guild_id          TEXT
+                 guild_id          TEXT,
+                 make_permanent    INTEGER NOT NULL DEFAULT 0
              );
              CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_posts(status, next_run_at);
              CREATE INDEX IF NOT EXISTS idx_sched_owner ON scheduled_posts(owner_user_id);
@@ -249,6 +264,21 @@ impl ScheduleStore {
             "CREATE INDEX IF NOT EXISTS idx_sched_guild ON scheduled_posts(guild_id);",
         )
         .map_err(|e| format!("index guild_id: {e}"))?;
+        // Migrate DBs created before the `make_permanent` column existed.
+        let has_perm: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('scheduled_posts') \
+                 WHERE name = 'make_permanent'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_perm == 0 {
+            conn.execute_batch(
+                "ALTER TABLE scheduled_posts ADD COLUMN make_permanent INTEGER NOT NULL DEFAULT 0;",
+            )
+            .map_err(|e| format!("migrate make_permanent: {e}"))?;
+        }
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM scheduled_posts", [], |r| r.get(0))
             .map_err(|e| format!("count: {e}"))?;
@@ -300,8 +330,9 @@ impl ScheduleStore {
             "INSERT INTO scheduled_posts \
              (id, manage_token_hash, owner_user_id, webhook_id, webhook_sealed, thread_id, \
               payload_sealed, title, dest_label, tz, recurrence_json, next_run_at, status, \
-              attempts, runs_count, end_at, max_runs, created_at, updated_at, guild_id) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active',0,0,?13,?14,?15,?15,?16)",
+              attempts, runs_count, end_at, max_runs, created_at, updated_at, guild_id, \
+              make_permanent) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active',0,0,?13,?14,?15,?15,?16,?17)",
             params![
                 n.id,
                 n.manage_token_hash,
@@ -319,6 +350,7 @@ impl ScheduleStore {
                 n.max_runs,
                 n.created_at,
                 n.guild_id,
+                n.make_permanent as i64,
             ],
         )
         .map_err(|e| CreateError::Storage(e.to_string()))?;
@@ -454,7 +486,8 @@ impl ScheduleStore {
             let job = tx
                 .query_row(
                     "SELECT id, webhook_id, webhook_sealed, thread_id, payload_sealed, tz, \
-                     recurrence_json, end_at, max_runs, runs_count, attempts \
+                     recurrence_json, end_at, max_runs, runs_count, attempts, guild_id, \
+                     make_permanent, owner_user_id \
                      FROM scheduled_posts WHERE id=?1",
                     [id],
                     |r| {
@@ -470,6 +503,9 @@ impl ScheduleStore {
                             max_runs: r.get(8)?,
                             runs_count: r.get(9)?,
                             attempts: r.get(10)?,
+                            guild_id: r.get(11)?,
+                            make_permanent: r.get::<_, i64>(12)? != 0,
+                            owner_user_id: r.get(13)?,
                         })
                     },
                 )
@@ -481,7 +517,9 @@ impl ScheduleStore {
     }
 
     /// Record a successful send. `next_run_at = Some` reschedules a recurring
-    /// series; `None` marks it `done`.
+    /// series; `None` marks it `done`. `note` is a non-fatal info line stored in
+    /// `last_error` (the run-detail field the UI surfaces) — e.g. "posted, but
+    /// the never-expire slot couldn't be claimed". `None` clears it.
     pub fn record_success(
         &self,
         id: &str,
@@ -489,20 +527,21 @@ impl ScheduleStore {
         message_id: Option<&str>,
         http_status: i64,
         next_run_at: Option<i64>,
+        note: Option<&str>,
     ) -> Result<(), String> {
         let conn = self.lock();
         match next_run_at {
             Some(next) => conn.execute(
                 "UPDATE scheduled_posts SET status='active', next_run_at=?2, lease_until=NULL, \
-                 attempts=0, last_status=?3, last_error=NULL, last_run_at=?4, last_message_id=?5, \
+                 attempts=0, last_status=?3, last_error=?6, last_run_at=?4, last_message_id=?5, \
                  runs_count=runs_count+1, updated_at=?4 WHERE id=?1",
-                params![id, next, http_status, now, message_id],
+                params![id, next, http_status, now, message_id, note],
             ),
             None => conn.execute(
                 "UPDATE scheduled_posts SET status='done', lease_until=NULL, attempts=0, \
-                 last_status=?2, last_error=NULL, last_run_at=?3, last_message_id=?4, \
+                 last_status=?2, last_error=?5, last_run_at=?3, last_message_id=?4, \
                  runs_count=runs_count+1, updated_at=?3 WHERE id=?1",
-                params![id, http_status, now, message_id],
+                params![id, http_status, now, message_id, note],
             ),
         }
         .map_err(e2s)?;
@@ -589,6 +628,11 @@ pub struct CreateBody {
     /// the owner; never trusted for auth (the manage token / owner is).
     #[serde(default)]
     pub guild_id: Option<String>,
+    /// Keep this post's interactive components from expiring: the worker spends
+    /// one of the guild's never-expire slots on the message once it's posted.
+    /// Only honoured when `guild_id` is set (no guild → nowhere to spend a slot).
+    #[serde(default)]
+    pub make_permanent: bool,
 }
 
 #[derive(Deserialize)]
@@ -704,6 +748,12 @@ pub async fn schedule_create(
     let token = random_base62(TOKEN_LEN).ok_or_else(|| AppError::Internal("rng".into()))?;
     let id = random_base62(ID_LEN).ok_or_else(|| AppError::Internal("rng".into()))?;
 
+    let guild_id = body.guild_id.filter(|g| !g.is_empty());
+    // A never-expire slot can only be spent against a known guild — drop the flag
+    // when the destination guild is unknown so the worker never tries, and the
+    // row honestly records that it won't keep the message permanent.
+    let make_permanent = body.make_permanent && guild_id.is_some();
+
     let new = NewSchedule {
         id: id.clone(),
         manage_token_hash: hash_token(&token),
@@ -720,7 +770,8 @@ pub async fn schedule_create(
         end_at: body.end_at.filter(|e| *e > 0),
         max_runs: body.max_runs,
         created_at: now,
-        guild_id: body.guild_id.filter(|g| !g.is_empty()),
+        guild_id,
+        make_permanent,
     };
 
     let res = tokio::task::spawn_blocking(move || store.create(&new))
@@ -1070,6 +1121,7 @@ fn view(row: &Row, owned: bool) -> Value {
         "end_at": row.end_at,
         "max_runs": row.max_runs,
         "created_at": row.created_at,
+        "make_permanent": row.make_permanent,
         "owned": owned,
     })
 }
@@ -1174,6 +1226,7 @@ mod tests {
             max_runs: None,
             created_at: 1000,
             guild_id: Some("guild-9".into()),
+            make_permanent: false,
         }
     }
 
@@ -1226,7 +1279,7 @@ mod tests {
         let _ = store.claim_due(200, 120, 10).unwrap();
         // Recurring → rescheduled, runs_count++, back to active.
         store
-            .record_success("rec", 250, Some("msg1"), 204, Some(86_500))
+            .record_success("rec", 250, Some("msg1"), 204, Some(86_500), None)
             .unwrap();
         let row = store.get("rec").unwrap().unwrap();
         assert_eq!(row.status, "active");
@@ -1236,7 +1289,7 @@ mod tests {
         // No next → done.
         let _ = store.claim_due(86_600, 120, 10).unwrap();
         store
-            .record_success("rec", 86_700, Some("msg2"), 204, None)
+            .record_success("rec", 86_700, Some("msg2"), 204, None, None)
             .unwrap();
         assert_eq!(store.get("rec").unwrap().unwrap().status, "done");
         let _ = std::fs::remove_file(path);
