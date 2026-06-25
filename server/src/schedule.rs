@@ -56,7 +56,7 @@ const LIST_LIMIT: usize = 200;
 const COLS: &str = "id, manage_token_hash, owner_user_id, webhook_id, webhook_sealed, thread_id, \
      payload_sealed, title, dest_label, tz, recurrence_json, next_run_at, status, lease_until, \
      attempts, last_status, last_error, last_run_at, last_message_id, runs_count, end_at, \
-     max_runs, created_at, updated_at, guild_id, make_permanent";
+     max_runs, created_at, updated_at, guild_id, make_permanent, last_channel_id";
 
 // ── Row model ────────────────────────────────────────────────────────────────
 
@@ -81,6 +81,9 @@ pub struct Row {
     pub last_error: Option<String>,
     pub last_run_at: Option<i64>,
     pub last_message_id: Option<String>,
+    /// The channel (or thread) the last run posted into — paired with
+    /// `last_message_id` it forms a direct Discord link in the management UI.
+    pub last_channel_id: Option<String>,
     pub runs_count: i64,
     pub end_at: Option<i64>,
     pub max_runs: Option<i64>,
@@ -123,6 +126,7 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         // 23 = updated_at — not needed in memory.
         guild_id: r.get(24)?,
         make_permanent: r.get::<_, i64>(25)? != 0,
+        last_channel_id: r.get(26)?,
     })
 }
 
@@ -240,7 +244,8 @@ impl ScheduleStore {
                  created_at        INTEGER NOT NULL,
                  updated_at        INTEGER NOT NULL,
                  guild_id          TEXT,
-                 make_permanent    INTEGER NOT NULL DEFAULT 0
+                 make_permanent    INTEGER NOT NULL DEFAULT 0,
+                 last_channel_id   TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_posts(status, next_run_at);
              CREATE INDEX IF NOT EXISTS idx_sched_owner ON scheduled_posts(owner_user_id);
@@ -278,6 +283,20 @@ impl ScheduleStore {
                 "ALTER TABLE scheduled_posts ADD COLUMN make_permanent INTEGER NOT NULL DEFAULT 0;",
             )
             .map_err(|e| format!("migrate make_permanent: {e}"))?;
+        }
+        // Migrate DBs created before `last_channel_id` (powers the direct
+        // "View on Discord" link for posted schedules).
+        let has_channel: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('scheduled_posts') \
+                 WHERE name = 'last_channel_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_channel == 0 {
+            conn.execute_batch("ALTER TABLE scheduled_posts ADD COLUMN last_channel_id TEXT;")
+                .map_err(|e| format!("migrate last_channel_id: {e}"))?;
         }
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM scheduled_posts", [], |r| r.get(0))
@@ -526,11 +545,13 @@ impl ScheduleStore {
     /// series; `None` marks it `done`. `note` is a non-fatal info line stored in
     /// `last_error` (the run-detail field the UI surfaces) — e.g. "posted, but
     /// the never-expire slot couldn't be claimed". `None` clears it.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_success(
         &self,
         id: &str,
         now: i64,
         message_id: Option<&str>,
+        channel_id: Option<&str>,
         http_status: i64,
         next_run_at: Option<i64>,
         note: Option<&str>,
@@ -540,14 +561,14 @@ impl ScheduleStore {
             Some(next) => conn.execute(
                 "UPDATE scheduled_posts SET status='active', next_run_at=?2, lease_until=NULL, \
                  attempts=0, last_status=?3, last_error=?6, last_run_at=?4, last_message_id=?5, \
-                 runs_count=runs_count+1, updated_at=?4 WHERE id=?1",
-                params![id, next, http_status, now, message_id, note],
+                 last_channel_id=?7, runs_count=runs_count+1, updated_at=?4 WHERE id=?1",
+                params![id, next, http_status, now, message_id, note, channel_id],
             ),
             None => conn.execute(
                 "UPDATE scheduled_posts SET status='done', lease_until=NULL, attempts=0, \
                  last_status=?2, last_error=?5, last_run_at=?3, last_message_id=?4, \
-                 runs_count=runs_count+1, updated_at=?3 WHERE id=?1",
-                params![id, http_status, now, message_id, note],
+                 last_channel_id=?6, runs_count=runs_count+1, updated_at=?3 WHERE id=?1",
+                params![id, http_status, now, message_id, note, channel_id],
             ),
         }
         .map_err(e2s)?;
@@ -1126,6 +1147,7 @@ fn view(row: &Row, owned: bool) -> Value {
         "last_error": row.last_error,
         "last_run_at": row.last_run_at,
         "last_message_id": row.last_message_id,
+        "last_channel_id": row.last_channel_id,
         "runs_count": row.runs_count,
         "end_at": row.end_at,
         "max_runs": row.max_runs,
@@ -1288,17 +1310,18 @@ mod tests {
         let _ = store.claim_due(200, 120, 10).unwrap();
         // Recurring → rescheduled, runs_count++, back to active.
         store
-            .record_success("rec", 250, Some("msg1"), 204, Some(86_500), None)
+            .record_success("rec", 250, Some("msg1"), Some("chan1"), 204, Some(86_500), None)
             .unwrap();
         let row = store.get("rec").unwrap().unwrap();
         assert_eq!(row.status, "active");
         assert_eq!(row.next_run_at, 86_500);
         assert_eq!(row.runs_count, 1);
         assert_eq!(row.last_message_id.as_deref(), Some("msg1"));
+        assert_eq!(row.last_channel_id.as_deref(), Some("chan1"));
         // No next → done.
         let _ = store.claim_due(86_600, 120, 10).unwrap();
         store
-            .record_success("rec", 86_700, Some("msg2"), 204, None, None)
+            .record_success("rec", 86_700, Some("msg2"), Some("chan2"), 204, None, None)
             .unwrap();
         assert_eq!(store.get("rec").unwrap().unwrap().status, "done");
         let _ = std::fs::remove_file(path);

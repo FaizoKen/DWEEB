@@ -152,6 +152,16 @@
 .smallBtnDanger:hover {
   color: rgb(255, 130, 130);
 }
+/* The "View on Discord" link wears the button shape; kill anchor underline and
+   center its label like the sibling buttons. */
+.viewBtn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+.viewBtn:hover {
+  color: var(--app-accent-text);
+}
 
 .badge {
   font-size: 10px;

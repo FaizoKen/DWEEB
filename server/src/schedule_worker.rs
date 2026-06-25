@@ -195,6 +195,7 @@ async fn process(
                     &job.id,
                     now,
                     msg_id.as_deref(),
+                    channel_id.as_deref(),
                     code as i64,
                     next,
                     note.as_deref(),
@@ -263,18 +264,20 @@ async fn success(
     id: &str,
     now: i64,
     msg_id: Option<&str>,
+    channel_id: Option<&str>,
     code: i64,
     next: Option<i64>,
     note: Option<&str>,
 ) {
     let s = Arc::clone(store);
-    let (id, msg, note) = (
+    let (id, msg, chan, note) = (
         id.to_string(),
         msg_id.map(str::to_string),
+        channel_id.map(str::to_string),
         note.map(str::to_string),
     );
     let res = tokio::task::spawn_blocking(move || {
-        s.record_success(&id, now, msg.as_deref(), code, next, note.as_deref())
+        s.record_success(&id, now, msg.as_deref(), chan.as_deref(), code, next, note.as_deref())
     })
     .await;
     log_db("record_success", res);

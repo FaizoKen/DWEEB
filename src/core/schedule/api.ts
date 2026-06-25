@@ -36,6 +36,8 @@ export interface ScheduleView {
   last_error?: string | null;
   last_run_at?: number | null;
   last_message_id?: string | null;
+  /** Channel/thread the last run posted into — with the message id, a direct link. */
+  last_channel_id?: string | null;
   runs_count: number;
   end_at?: number | null;
   max_runs?: number | null;

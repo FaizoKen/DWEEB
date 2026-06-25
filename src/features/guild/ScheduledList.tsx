@@ -17,6 +17,7 @@ import { decodeJson } from "@/core/serialization";
 import { validateMessage } from "@/core/schema/validation";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
+import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import {
   cancelSchedule,
   getSchedule,
@@ -301,6 +302,12 @@ function ScheduleRow({
 }) {
   const live = s.status === "active" || s.status === "sending" || s.status === "paused";
   const when = live ? s.next_run_at : (s.last_run_at ?? s.next_run_at);
+  // A direct jump to the message the last run posted — only once we have all
+  // three id parts (guild + channel/thread + message), captured at fire time.
+  const postedUrl =
+    s.guild_id && s.last_channel_id && s.last_message_id
+      ? `https://discord.com/channels/${s.guild_id}/${s.last_channel_id}/${s.last_message_id}`
+      : null;
   const lead =
     s.status === "done"
       ? "Posted"
@@ -333,9 +340,25 @@ function ScheduleRow({
         <div className={styles.itemError}>⚠ {s.last_error}</div>
       ) : null}
       <div className={styles.itemActions}>
-        <button type="button" className={styles.smallBtn} onClick={onLoad} disabled={busy}>
-          Load message
-        </button>
+        {postedUrl ? (
+          // Once posted, jump to the real message instead of reloading it into
+          // the editor. Plain click opens the desktop app (falls back to web);
+          // modified clicks keep their native open-in-new-tab behaviour.
+          <a
+            className={cn(styles.smallBtn, styles.viewBtn)}
+            href={postedUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(ev) => handleDiscordLinkClick(ev, postedUrl)}
+          >
+            View on Discord ↗
+          </a>
+        ) : (
+          // Not posted yet (or no link captured) — offer the message back.
+          <button type="button" className={styles.smallBtn} onClick={onLoad} disabled={busy}>
+            Load message
+          </button>
+        )}
         <button
           type="button"
           className={cn(styles.smallBtn, styles.smallBtnDanger)}
