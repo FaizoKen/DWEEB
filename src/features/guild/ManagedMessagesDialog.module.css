@@ -92,6 +92,13 @@
   white-space: nowrap;
 }
 
+/* Scheduled-posts block — its own section below the never-expire slots. */
+.scheduledSection {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--app-border);
+}
+
 /* "Where this data lives" — the storage-model explainer, collapsed by default. */
 .storage {
   margin: 14px 0 0;

@@ -32,8 +32,10 @@ import {
   type PermanentSlots,
 } from "@/core/guild/api";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
+import { isScheduleConfigured } from "@/core/schedule/api";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
+import { ScheduledList } from "./ScheduledList";
 import styles from "./ManagedMessagesDialog.module.css";
 
 type SlotsState =
@@ -212,6 +214,19 @@ export function ManagedMessagesDialog({
       }
     >
       {body}
+
+      {/* Scheduled posts for this server — independent of the permanent-slot
+          feature above, so it shows even when that's unavailable. Lists this
+          server's one-time scheduled posts (the user's, plus everyone's if they
+          manage the server); load one back into the editor or cancel it. */}
+      {isScheduleConfigured() ? (
+        <section className={styles.scheduledSection}>
+          <div className={styles.sectionHead}>
+            <h3 className={styles.sectionTitle}>Scheduled posts</h3>
+          </div>
+          <ScheduledList guildId={guildId} reloadToken={0} onLoaded={onClose} />
+        </section>
+      ) : null}
     </Modal>
   );
 }

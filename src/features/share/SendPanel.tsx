@@ -151,7 +151,6 @@ import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
-import { ScheduledList } from "./ScheduledList";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
 import type { PermanentStatusProps } from "./PermanentStatus";
@@ -301,8 +300,6 @@ export function SendPanel({
   const [scheduling, setScheduling] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleSuccess, setScheduleSuccess] = useState<string | null>(null);
-  // Bumped after creating a schedule so the inline list refetches.
-  const [scheduleReload, setScheduleReload] = useState(0);
   // True while a confirmed send is in flight. Keeps the confirm dialog open with
   // a loading button instead of closing it the instant "Post" is clicked.
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -842,7 +839,6 @@ export function SendPanel({
     rememberWebhook(parsedUrl.url);
     setHistory(loadHistory());
     setScheduleSuccess(`Scheduled for ${formatInstant(res.next_run_at, browserTimezone())}.`);
-    setScheduleReload((t) => t + 1);
     pushToast("Post scheduled.", "success");
   };
 
@@ -2008,17 +2004,21 @@ export function SendPanel({
             )
           ) : null}
 
-          {/* The list only makes sense for a signed-in user (their own + the
-              server's). Signed out, there's nothing to show. */}
-          {authStatus === "authed" ? (
-            <>
-              <p className={styles.scheduleListLabel}>Scheduled posts</p>
-              <ScheduledList
-                reloadToken={scheduleReload}
-                guildId={knownGuildId ?? (connectedGuildId || undefined)}
-                onLoaded={onCloseDialog}
-              />
-            </>
+          {/* The list of scheduled posts lives in "Managed messages" (account
+              menu), not here — this keeps the Send screen short. Link to it. */}
+          {authStatus === "authed" && (knownGuildId ?? (connectedGuildId || undefined)) ? (
+            <button
+              type="button"
+              className={styles.scheduleManageLink}
+              onClick={() => {
+                const gid = knownGuildId ?? (connectedGuildId || undefined);
+                if (!gid) return;
+                useManagedMessagesStore.getState().open(gid, knownGuildName);
+                onCloseDialog?.();
+              }}
+            >
+              View &amp; manage scheduled posts →
+            </button>
           ) : null}
         </div>
       ) : null}
