@@ -77,6 +77,15 @@ export interface SendConfirmProps {
   threadId?: string;
   /** Message id being overwritten, in update mode. */
   messageId?: string;
+  /**
+   * Present when confirming a SCHEDULED post rather than an immediate send:
+   * carries the human-readable local fire time. Flips the dialog's title and
+   * confirm button to schedule wording and adds a "When" row. Everything else
+   * (webhook/destination facts, ping summary, the never-expire toggle) is shared
+   * with the send confirm unchanged — so a scheduled interactive message decides
+   * permanence in exactly the same place a sent one does.
+   */
+  schedule?: { at: string };
   /** Who the message will ping, after `allowed_mentions`. */
   pings: PingSummary;
   /**
@@ -263,10 +272,8 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
   );
 }
 
-/** The "Make permanent" row: title + state sub-line + the switch. Exported so
- *  the Schedule panel can offer the same never-expire opt-in before a later post
- *  (the slot is spent server-side when the worker fires it). */
-export function PermanentOptIn({
+/** The "Make permanent" row: title + state sub-line + the switch. */
+function PermanentOptIn({
   option,
   busy,
 }: {
@@ -430,6 +437,7 @@ export function SendConfirm({
   channelName,
   threadId,
   messageId,
+  schedule,
   pings,
   componentRouting,
   pluginNames = [],
@@ -449,7 +457,13 @@ export function SendConfirm({
       open={open}
       onClose={onCancel}
       size="sm"
-      title={mode === "update" ? "Update this message?" : "Post this message?"}
+      title={
+        schedule
+          ? "Schedule this message?"
+          : mode === "update"
+            ? "Update this message?"
+            : "Post this message?"
+      }
       footer={
         <>
           <Button variant="secondary" onClick={onCancel}>
@@ -462,12 +476,16 @@ export function SendConfirm({
             leadingIcon={busy ? <span className={styles.spinner} aria-hidden="true" /> : undefined}
           >
             {busy
-              ? mode === "update"
-                ? "Updating…"
-                : "Posting…"
-              : mode === "update"
-                ? "Update message"
-                : "Post message"}
+              ? schedule
+                ? "Scheduling…"
+                : mode === "update"
+                  ? "Updating…"
+                  : "Posting…"
+              : schedule
+                ? "Schedule post"
+                : mode === "update"
+                  ? "Update message"
+                  : "Post message"}
           </Button>
         </>
       }
@@ -475,8 +493,22 @@ export function SendConfirm({
       <dl className={styles.facts}>
         <div className={styles.fact}>
           <dt>Action</dt>
-          <dd>{mode === "update" ? "Edit a message you already posted" : "Post a new message"}</dd>
+          <dd>
+            {schedule
+              ? "Schedule this message to post later"
+              : mode === "update"
+                ? "Edit a message you already posted"
+                : "Post a new message"}
+          </dd>
         </div>
+        {schedule ? (
+          <div className={styles.fact}>
+            <dt>When</dt>
+            <dd>
+              <span className={styles.destName}>{schedule.at}</span>
+            </dd>
+          </div>
+        ) : null}
         <div className={styles.fact}>
           <dt>Webhook</dt>
           <dd>

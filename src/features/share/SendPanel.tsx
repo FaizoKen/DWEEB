@@ -151,7 +151,7 @@ import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
-import { SendConfirm, PermanentOptIn } from "./SendConfirm";
+import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
 import type { PermanentStatusProps } from "./PermanentStatus";
 import { Callout } from "./Callout";
@@ -606,20 +606,17 @@ export function SendPanel({
   // dead whenever it posts).
   const scheduleMode = mode === "new" && when === "later" && isScheduleConfigured();
 
-  // Fetch slot state for the "Make permanent" / "Never expire" control. Needed
-  // in two places: the confirm dialog (send now) and the Schedule panel (send
-  // later) — both let a signed-in manager keep an interactive message's
-  // components alive. Only worth a request when the message actually carries
-  // interactive components and the user could act (signed in, proxy, guild
-  // known). Errors (403 non-manager, network) just leave the control hidden —
-  // the confirm/success path then shows a generic expiry note instead.
+  // Fetch slot state for the confirm dialog's "Never expire" control. The
+  // dialog is the one place permanence is decided — for an immediate send and
+  // now for a scheduled post alike — so the fetch is gated on it being open.
+  // Only worth a request when the message actually carries interactive
+  // components and the user could act (signed in, proxy, guild known). Errors
+  // (403 non-manager, network) just leave the control hidden — the confirm/
+  // success path then shows a generic expiry note instead of a concrete state.
   const hasInteractiveComponents = appWebhookNote != null;
   const updateTargetId = mode === "update" ? (parsedMessageId ?? undefined) : undefined;
-  // The schedule panel needs the same slots, but only for a brand-new post with
-  // "later" picked (scheduling never updates an existing message).
-  const slotsContextActive = confirmOpen || (mode === "new" && when === "later");
   useEffect(() => {
-    if (!slotsContextActive) return;
+    if (!confirmOpen) return;
     setConfirmSlots(null);
     setMakePermanent(false);
     setSlotsUnavailable(false);
@@ -648,7 +645,7 @@ export function SendPanel({
         }
       });
     return () => ac.abort();
-  }, [slotsContextActive, hasInteractiveComponents, authStatus, knownGuildId, updateTargetId]);
+  }, [confirmOpen, hasInteractiveComponents, authStatus, knownGuildId, updateTargetId]);
 
   // What the confirm dialog renders. Hidden when expiry is off on this
   // deployment (nothing to decide) or the slot state never loaded; when every
@@ -764,10 +761,13 @@ export function SendPanel({
     setConfirmOpen(true);
   };
 
-  // Create a one-time scheduled post instead of sending now. Shares the Send
-  // pre-flight (valid webhook, no blocking issues, ownership/routing not dead)
-  // plus a future time and no local uploads (those can't leave the browser).
-  const handleSchedule = async () => {
+  // Schedule pre-flight. Mirrors `handleSend`: validate the same way a send
+  // does (valid webhook, no blocking issues, ownership/routing not dead) plus
+  // a future time and no local uploads (those can't leave the browser), then
+  // open the confirm dialog instead of creating straight away — the user
+  // reviews the destination, the fire time, and the never-expire choice before
+  // anything is stored server-side. The create runs in `handleScheduleConfirmed`.
+  const handleScheduleClick = () => {
     setScheduleError(null);
     setScheduleSuccess(null);
     if (!parsedUrl) {
@@ -803,6 +803,16 @@ export function SendPanel({
       setScheduleError("That time is in the past — pick a future time.");
       return;
     }
+    setConfirmOpen(true);
+  };
+
+  // Create the one-time scheduled post, run from the confirm dialog's "Schedule
+  // post" button (the schedule counterpart to `handleConfirmedSend`). Inputs
+  // were validated in `handleScheduleClick`; re-guard for type-narrowing.
+  const handleScheduleConfirmed = async () => {
+    if (!parsedUrl) return;
+    const at = Date.parse(scheduleAt);
+    if (Number.isNaN(at)) return;
 
     // Render core placeholders from the chosen destination, then encode the wire
     // body (flags included, session refs stripped) — the same path JSON export
@@ -844,6 +854,9 @@ export function SendPanel({
       make_permanent: hasInteractiveComponents && makePermanent && !!knownGuildId,
     });
     setScheduling(false);
+    // Close the confirm either way — the panel surfaces the success line or the
+    // error inline (mirroring the send flow's hand-back).
+    setConfirmOpen(false);
     if (!res.ok) {
       setScheduleError(res.error);
       return;
@@ -1512,23 +1525,6 @@ export function SendPanel({
                 <p className={styles.scheduleNote}>
                   Stored on our server (encrypted) only until it posts, then deleted.
                 </p>
-                {/* Never-expire opt-in for a scheduled interactive message: the
-                    decision is made now, but the slot is spent server-side when
-                    the worker posts it (the message id only exists then). Shows
-                    the live toggle when slots could be read; a passive heads-up
-                    while they load or when the viewer can't claim (non-manager). */}
-                {hasInteractiveComponents ? (
-                  permanentOption ? (
-                    <PermanentOptIn option={permanentOption} busy={scheduling} />
-                  ) : confirmSlots == null && !slotsUnavailable && COMPONENT_TTL_DAYS != null ? (
-                    <Callout tone="info" role="note">
-                      Buttons &amp; selects stop working {COMPONENT_TTL_DAYS} day
-                      {COMPONENT_TTL_DAYS === 1 ? "" : "s"} after this posts. Make it never-expire
-                      from <strong>Managed messages</strong> once it&apos;s live to keep them
-                      clickable.
-                    </Callout>
-                  ) : null
-                ) : null}
                 {scheduleError ? <div className={styles.error}>{scheduleError}</div> : null}
                 {scheduleSuccess ? (
                   <div className={styles.scheduleSuccess}>{scheduleSuccess}</div>
@@ -2070,7 +2066,7 @@ export function SendPanel({
             ) : (
               <Button
                 variant="primary"
-                onClick={handleSchedule}
+                onClick={handleScheduleClick}
                 disabled={
                   scheduling ||
                   saving ||
@@ -2129,6 +2125,15 @@ export function SendPanel({
         channelName={knownChannelName}
         threadId={threadId.trim() || undefined}
         messageId={mode === "update" ? (parsedMessageId ?? undefined) : undefined}
+        schedule={
+          scheduleMode
+            ? {
+                at: Number.isNaN(Date.parse(scheduleAt))
+                  ? scheduleAt
+                  : formatInstant(Math.floor(Date.parse(scheduleAt) / 1000), browserTimezone()),
+              }
+            : undefined
+        }
         pings={pings}
         componentRouting={componentRouting}
         pluginNames={pluginNames}
@@ -2144,8 +2149,8 @@ export function SendPanel({
         previewMismatch={previewMismatch}
         expiryNudge={expiryNudge}
         permanentOption={permanentOption}
-        busy={confirmBusy}
-        onConfirm={handleConfirmedSend}
+        busy={scheduleMode ? scheduling : confirmBusy}
+        onConfirm={scheduleMode ? handleScheduleConfirmed : handleConfirmedSend}
         onCancel={handleConfirmCancel}
       />
 
