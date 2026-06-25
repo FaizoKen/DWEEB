@@ -1,8 +1,85 @@
-/* Styles for the inline list of scheduled posts (rendered in the Send panel). */
-.list {
+/* Styles for the list of scheduled posts (rendered in "Managed messages"). */
+
+/* The Upcoming / History groups, stacked. */
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.group {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.groupLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--app-text-subtle);
+}
+.groupCount {
+  min-width: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  color: var(--app-text-subtle);
+  background: var(--app-bg-hover);
+}
+
+/* "Clear" / inline confirm for the History group, pushed to the right edge. */
+.clearAction {
+  margin-left: auto;
+}
+.clearConfirm {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.linkBtn {
+  font-size: 11px;
+  color: var(--app-text-subtle);
+  background: none;
+  border: none;
+  padding: 2px 2px;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+.linkBtn:hover:not(:disabled) {
+  color: var(--app-text);
+}
+.linkBtnDanger:hover:not(:disabled) {
+  color: rgb(255, 130, 130);
+}
+.linkBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Cards flow into as many columns as the dialog width allows (one on mobile,
+   two+ on desktop) so a long list spreads sideways instead of growing tall. */
+.list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+  align-items: start;
+  gap: 6px;
+}
+/* Long history scrolls within its own region so Upcoming + the dialog's
+   controls stay reachable; contained so the scroll doesn't chain to the modal. */
+.historyScroll {
+  max-height: 248px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
 }
 .empty {
   font-size: 12px;
@@ -17,6 +94,15 @@
   background: var(--app-bg);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
+}
+/* Posted rows recede; full opacity returns on hover for a clean read. */
+.itemDim {
+  opacity: 0.66;
+  transition: opacity 120ms ease;
+}
+.itemDim:hover,
+.itemDim:focus-within {
+  opacity: 1;
 }
 .itemHead {
   display: flex;
@@ -84,11 +170,20 @@
   background: rgba(240, 178, 50, 0.18);
   color: rgb(240, 200, 120);
 }
+/* "done" is the common terminal state; a neutral chip keeps a list of posted
+   items calm instead of a wall of loud green. */
 .badgeDone {
-  background: rgba(87, 242, 135, 0.16);
-  color: rgb(120, 230, 160);
+  background: var(--app-bg-hover);
+  color: var(--app-text-subtle);
 }
 .badgeFailed {
   background: rgba(237, 66, 69, 0.16);
   color: rgb(255, 130, 130);
+}
+/* Posted but its components have lapsed — outlined so it reads as "spent",
+   distinct from the still-live "done" chip. */
+.badgeExpired {
+  background: transparent;
+  color: var(--app-text-subtle);
+  box-shadow: inset 0 0 0 1px var(--app-border);
 }

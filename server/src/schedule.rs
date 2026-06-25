@@ -295,6 +295,12 @@ impl ScheduleStore {
         self.conn.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// The per-server active-schedule quota, surfaced so the management UI can
+    /// show "used / cap" the way the create path enforces it.
+    pub fn max_per_guild(&self) -> i64 {
+        self.max_per_guild
+    }
+
     pub fn create(&self, n: &NewSchedule) -> Result<(), CreateError> {
         if self.count.load(Ordering::Relaxed) >= self.max_entries {
             return Err(CreateError::Full);
@@ -872,6 +878,9 @@ pub async fn schedule_list_for_guild(
     // Authorize first (a Discord-gated membership + Manage-Webhooks check).
     crate::routes::authorize_webhooks(&st, &jar, &guild).await?;
     let session = current_session(&jar);
+    // The per-server quota travels with the list so the UI can show "used / cap"
+    // (the `used` count is derived client-side from the live rows below).
+    let quota = store.max_per_guild();
     let g = guild.clone();
     let rows = tokio::task::spawn_blocking(move || store.list_for_guild(&g, LIST_LIMIT))
         .await
@@ -884,7 +893,7 @@ pub async fn schedule_list_for_guild(
         .collect();
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
-        Json(json!({ "items": items })),
+        Json(json!({ "items": items, "quota": quota })),
     )
         .into_response())
 }

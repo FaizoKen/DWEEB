@@ -35,7 +35,7 @@ import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import { isScheduleConfigured } from "@/core/schedule/api";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
-import { ScheduledList } from "./ScheduledList";
+import { ScheduledList, type ScheduleStats } from "./ScheduledList";
 import styles from "./ManagedMessagesDialog.module.css";
 
 type SlotsState =
@@ -57,6 +57,8 @@ export function ManagedMessagesDialog({
   const [state, setState] = useState<SlotsState>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Counts + per-server quota, reported up by the list for the header counter.
+  const [scheduleStats, setScheduleStats] = useState<ScheduleStats | null>(null);
   // Bumped by "Retry" to re-run the fetch effect after an error.
   const [fetchKey, setFetchKey] = useState(0);
 
@@ -103,6 +105,10 @@ export function ManagedMessagesDialog({
     }
   };
 
+  // Deployment TTL, when the slots fetch resolved — lets posted schedules below
+  // show an "Expired" badge once their components have lapsed.
+  const ttlDays = state.kind === "ready" ? state.slots.ttl_days : null;
+
   let body: ReactNode;
   if (state.kind === "loading") {
     body = <p className={styles.note}>Checking this server’s managed messages…</p>;
@@ -137,7 +143,7 @@ export function ManagedMessagesDialog({
       <>
         <p className={styles.lead}>
           Buttons &amp; selects stop working <strong>{ttlDays} days</strong> after sending — unless
-          the message is one of {guildName ?? "this server"}’s {slots.cap} set to never expire.
+          they’re one of {guildName ?? "this server"}’s {slots.cap} never-expire messages.
         </p>
 
         <div className={styles.sectionHead}>
@@ -205,7 +211,7 @@ export function ManagedMessagesDialog({
     <Modal
       open
       onClose={onClose}
-      size="sm"
+      size="md"
       title="Managed messages"
       footer={
         <Button variant="secondary" onClick={onClose}>
@@ -223,8 +229,21 @@ export function ManagedMessagesDialog({
         <section className={styles.scheduledSection}>
           <div className={styles.sectionHead}>
             <h3 className={styles.sectionTitle}>Scheduled posts</h3>
+            {scheduleStats && scheduleStats.total > 0 ? (
+              <span className={styles.usage}>
+                {scheduleStats.quota != null
+                  ? `${scheduleStats.active}/${scheduleStats.quota} used`
+                  : scheduleStats.total}
+              </span>
+            ) : null}
           </div>
-          <ScheduledList guildId={guildId} reloadToken={0} onLoaded={onClose} />
+          <ScheduledList
+            guildId={guildId}
+            reloadToken={0}
+            ttlDays={ttlDays}
+            onLoaded={onClose}
+            onStats={setScheduleStats}
+          />
         </section>
       ) : null}
     </Modal>

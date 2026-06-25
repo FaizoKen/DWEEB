@@ -94,7 +94,7 @@ export type ScheduleResult =
   | { ok: false; error: string; status: number };
 
 export type ListResult =
-  | { ok: true; items: ScheduleView[] }
+  | { ok: true; items: ScheduleView[]; quota?: number }
   | { ok: false; error: string; status: number };
 
 export type CancelResult = { ok: true } | { ok: false; error: string; status: number };
@@ -192,8 +192,11 @@ export async function listForGuild(guildId: string): Promise<ListResult> {
     return { ok: false, error: "Couldn't reach the scheduling service.", status: 0 };
   }
   if (!res.ok) return { ok: false, error: await readError(res), status: res.status };
-  const data = (await res.json().catch(() => null)) as { items?: ScheduleView[] } | null;
-  return { ok: true, items: data?.items ?? [] };
+  const data = (await res.json().catch(() => null)) as {
+    items?: ScheduleView[];
+    quota?: number;
+  } | null;
+  return { ok: true, items: data?.items ?? [], quota: data?.quota };
 }
 
 /** Edit / reschedule / pause / resume a schedule. */

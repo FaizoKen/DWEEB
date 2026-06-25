@@ -1,6 +1,8 @@
 /**
- * Compact list of the user's scheduled (one-time) posts, shown inside the Send
- * panel's "Schedule for later" card.
+ * List of the user's scheduled (one-time) posts, shown in the "Managed
+ * messages" dialog. Split into two groups: Upcoming (still going to fire) and
+ * History (posted/failed) — the latter de-emphasised and bulk-clearable, since
+ * it otherwise piles up as a wall of identical "done" rows.
  *
  * Sources are merged: every schedule this browser created (from the local
  * manage-token registry) plus, when signed in, the account's schedules across
@@ -35,35 +37,59 @@ const STATUS_ORDER: Record<string, number> = {
   done: 3,
 };
 
+/** Statuses that are still going to fire — everything else is terminal history. */
+const UPCOMING = new Set(["active", "sending", "paused"]);
+
+/** What the parent header needs to render the "used / cap" counter. */
+export interface ScheduleStats {
+  /** All schedules in the list. */
+  total: number;
+  /** Live ones (active/sending/paused) — what the per-server quota counts. */
+  active: number;
+  /** Per-server active-schedule cap, when the server list exposed it. */
+  quota: number | null;
+}
+
 export function ScheduledList({
   reloadToken,
   guildId,
+  ttlDays,
   onLoaded,
-  onCount,
+  onStats,
 }: {
   /** Bumped by the section after a create, to refetch. */
   reloadToken: number;
   /** When set and the user manages it, also list EVERY schedule for that server. */
   guildId?: string;
+  /** Component TTL (days) for this deployment — lets posted rows show "Expired"
+   *  once their buttons/selects have lapsed. Null/undefined = never expires. */
+  ttlDays?: number | null;
   /** Called after a schedule's message is loaded into the editor (e.g. to close). */
   onLoaded?: () => void;
-  /** Reports how many schedules exist, so the card can show a count. */
-  onCount?: (n: number) => void;
+  /** Reports counts + quota, so the header can show "used / cap". */
+  onStats?: (s: ScheduleStats) => void;
 }) {
   const replaceMessage = useMessageStore((s) => s.replaceMessage);
   const authStatus = useAuthStore((s) => s.status);
   const [items, setItems] = useState<ScheduleView[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Two-step guard for the bulk "Clear" of history (terminal posts).
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     const byId = new Map<string, ScheduleView>();
+    let guildQuota: number | null = null;
     // Every schedule for the current server, if the user manages it (403 for
     // non-managers is ignored — they still see their own below).
     if (guildId) {
       const guild = await listForGuild(guildId);
-      if (guild.ok) for (const s of guild.items) byId.set(s.id, s);
+      if (guild.ok) {
+        for (const s of guild.items) byId.set(s.id, s);
+        guildQuota = guild.quota ?? null;
+      }
     }
     if (authStatus === "authed") {
       const mine = await listMine();
@@ -85,9 +111,16 @@ export function ScheduledList({
       return a.next_run_at - b.next_run_at;
     });
     setItems(list);
-    onCount?.(list.length);
+    onStats?.({
+      total: list.length,
+      // The per-server quota only counts live schedules *in this guild* — the
+      // merged list can also carry the user's schedules from other servers.
+      active: list.filter((s) => UPCOMING.has(s.status) && (!guildId || s.guild_id === guildId))
+        .length,
+      quota: guildQuota,
+    });
     setLoading(false);
-  }, [authStatus, guildId, onCount]);
+  }, [authStatus, guildId, onStats]);
 
   useEffect(() => {
     void load();
@@ -130,6 +163,26 @@ export function ScheduledList({
     onLoaded?.();
   };
 
+  // Remove every terminal (posted/failed) schedule in one go — pure history
+  // cleanup, since these will never fire again. Reuses the per-row delete path.
+  const handleClearHistory = async (history: ScheduleView[]) => {
+    setClearing(true);
+    const results = await Promise.all(
+      history.map((s) => cancelSchedule(s.id, getManageToken(s.id))),
+    );
+    for (const s of history) forgetSchedule(s.id);
+    setClearing(false);
+    setConfirmingClear(false);
+    const failed = results.filter((r) => !r.ok).length;
+    pushToast(
+      failed === 0
+        ? "Cleared posted & failed schedules."
+        : `Cleared ${results.length - failed}; ${failed} couldn't be removed.`,
+      failed === 0 ? "success" : "info",
+    );
+    void load();
+  };
+
   if (items.length === 0) {
     return (
       <p className={styles.empty}>
@@ -138,29 +191,111 @@ export function ScheduledList({
     );
   }
 
+  const upcoming = items.filter((s) => UPCOMING.has(s.status));
+  const history = items.filter((s) => !UPCOMING.has(s.status));
+
   return (
-    <div className={styles.list}>
-      {items.map((s) => (
-        <ScheduleRow
-          key={s.id}
-          schedule={s}
-          busy={busyId === s.id}
-          onCancel={() => handleCancel(s)}
-          onLoad={() => handleLoad(s)}
-        />
-      ))}
+    <div className={styles.groups}>
+      {upcoming.length > 0 ? (
+        <div className={styles.group}>
+          <div className={styles.groupHead}>
+            <span className={styles.groupLabel}>Upcoming</span>
+            <span className={styles.groupCount}>{upcoming.length}</span>
+          </div>
+          <div className={styles.list}>
+            {upcoming.map((s) => (
+              <ScheduleRow
+                key={s.id}
+                schedule={s}
+                busy={busyId === s.id}
+                onCancel={() => handleCancel(s)}
+                onLoad={() => handleLoad(s)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {history.length > 0 ? (
+        <div className={styles.group}>
+          <div className={styles.groupHead}>
+            <span className={styles.groupLabel}>History</span>
+            <span className={styles.groupCount}>{history.length}</span>
+            {confirmingClear ? (
+              <span className={styles.clearConfirm}>
+                <button
+                  type="button"
+                  className={cn(styles.linkBtn, styles.linkBtnDanger)}
+                  onClick={() => void handleClearHistory(history)}
+                  disabled={clearing}
+                >
+                  {clearing ? "Clearing…" : `Clear ${history.length}?`}
+                </button>
+                <button
+                  type="button"
+                  className={styles.linkBtn}
+                  onClick={() => setConfirmingClear(false)}
+                  disabled={clearing}
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className={cn(styles.linkBtn, styles.clearAction)}
+                onClick={() => setConfirmingClear(true)}
+                title="Remove these posted & failed schedules from the list"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className={cn(styles.list, history.length > 6 && styles.historyScroll)}>
+            {history.map((s) => (
+              <ScheduleRow
+                key={s.id}
+                schedule={s}
+                busy={busyId === s.id}
+                dimmed={s.status === "done"}
+                expired={isExpired(s, ttlDays)}
+                onCancel={() => handleCancel(s)}
+                onLoad={() => handleLoad(s)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * A posted message's interactive components are dead once the deployment's TTL
+ * has elapsed since it fired — unless it claimed a never-expire slot. We can
+ * only say so when the TTL is known (the never-expire fetch succeeded).
+ */
+function isExpired(s: ScheduleView, ttlDays: number | null | undefined): boolean {
+  if (ttlDays == null || s.status !== "done" || s.make_permanent) return false;
+  const posted = s.last_run_at;
+  if (posted == null) return false;
+  return Date.now() / 1000 > posted + ttlDays * 86_400;
 }
 
 function ScheduleRow({
   schedule: s,
   busy,
+  dimmed = false,
+  expired = false,
   onCancel,
   onLoad,
 }: {
   schedule: ScheduleView;
   busy: boolean;
+  /** Posted rows are de-emphasised so the actionable ones read first. */
+  dimmed?: boolean;
+  /** Done, but its buttons/selects have lapsed past the deployment TTL. */
+  expired?: boolean;
   onCancel: () => void;
   onLoad: () => void;
 }) {
@@ -175,12 +310,21 @@ function ScheduleRow({
           ? "Paused — was"
           : "Posts";
   return (
-    <div className={styles.item}>
+    <div className={cn(styles.item, dimmed && styles.itemDim)}>
       <div className={styles.itemHead}>
         <span className={styles.itemTitle}>
           {s.title || s.dest_label || `Webhook ${s.webhook_id}`}
         </span>
-        <span className={cn(styles.badge, badgeClass(s.status))}>{s.status}</span>
+        {expired ? (
+          <span
+            className={cn(styles.badge, styles.badgeExpired)}
+            title="This post's buttons & selects have stopped working"
+          >
+            expired
+          </span>
+        ) : (
+          <span className={cn(styles.badge, badgeClass(s.status))}>{s.status}</span>
+        )}
       </div>
       <div className={styles.itemMeta}>
         {lead} {formatInstant(when, s.tz)}
