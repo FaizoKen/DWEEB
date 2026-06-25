@@ -561,26 +561,26 @@
 
       const PRESETS_BUTTON = [
         {
-          name: "Server rules", icon: "📜", hint: "Show your rules on click",
+          id: "qr-rules", name: "Server rules", icon: "📜", hint: "Show your rules on click",
           card: { title: "📜 Server Rules", body: "**Welcome, {user}!** Please follow these rules:\n\n1. Be respectful — no harassment or hate.\n2. No spam, self-promo, or NSFW.\n3. Keep posts in the right channels.\n4. Listen to staff.\n\nBreaking the rules may lead to a warning, mute, kick, or ban." },
         },
         {
-          name: "How to get roles", icon: "🙋", hint: "Point members at the role menu",
+          id: "qr-roles", name: "How to get roles", icon: "🙋", hint: "Point members at the role menu",
           card: { title: "🙋 Getting Roles", body: "Hey {user}! Head to the **#roles** channel and pick the roles you want from the menus there — colors, pings, and more. They're all self-serve." },
         },
         {
-          name: "Get support", icon: "🎫", hint: "Explain how to reach staff",
+          id: "qr-support", name: "Get support", icon: "🎫", hint: "Explain how to reach staff",
           card: { title: "🎫 Need Help?", body: "Hi {user}! To get help in **{server}**:\n\n• Check **#faq** first — your answer may already be there.\n• Still stuck? Open a ticket in **#support** and a staff member will assist you." },
         },
         {
-          name: "Welcome", icon: "👋", hint: "A friendly start-here message",
+          id: "qr-welcome", name: "Welcome", icon: "👋", hint: "A friendly start-here message",
           card: { title: "👋 Welcome!", body: "Welcome to **{server}**, {user}! 🎉\n\n• Read the rules in **#rules**.\n• Grab your roles in **#roles**.\n• Say hi in **#general**.\n\nGlad to have you here!" },
         },
       ];
 
       const PRESETS_SELECT = [
         {
-          name: "Support FAQ", icon: "❓", hint: "A self-serve help menu",
+          id: "qr-faq", name: "Support FAQ", icon: "❓", hint: "A self-serve help menu",
           cards: [
             { emoji: "📜", label: "Server rules", description: "Read our community rules", title: "📜 Server Rules", body: "1. Be respectful.\n2. No spam or self-promo.\n3. Keep posts on-topic.\n4. Listen to staff." },
             { emoji: "🙋", label: "How do I get roles?", description: "Self-assign your roles", title: "🙋 Getting Roles", body: "Head to **#roles** and pick the roles you want, {user} — colors, pings, and more." },
@@ -589,7 +589,7 @@
           ],
         },
         {
-          name: "Server info", icon: "📌", hint: "Key channels & info",
+          id: "qr-server-info", name: "Server info", icon: "📌", hint: "Key channels & info",
           cards: [
             { emoji: "📣", label: "Announcements", description: "Where we post updates", title: "📣 Announcements", body: "We post all updates in **#announcements**. Grab the notify role in **#roles** so you never miss one!" },
             { emoji: "🗺️", label: "Channel guide", description: "What goes where", title: "🗺️ Channel Guide", body: "• **#general** — chat\n• **#help** — questions\n• **#media** — share clips & art\n• **#off-topic** — anything else" },
@@ -597,7 +597,7 @@
           ],
         },
         {
-          name: "Events & community", icon: "🎮", hint: "For game / event servers",
+          id: "qr-events", name: "Events & community", icon: "🎮", hint: "For game / event servers",
           cards: [
             { emoji: "📅", label: "Upcoming events", description: "What's happening soon", title: "📅 Events", body: "See everything scheduled in **#events**. React to an event to get a reminder!" },
             { emoji: "👥", label: "Find teammates", description: "Look for a group", title: "👥 Find Teammates", body: "Looking for people to play with, {user}? Post in **#lfg** with your game, rank, and region." },
@@ -987,7 +987,16 @@
         }
 
         applyTargetChrome();
-        if (!instanceId) renderPresets(); // starter templates on a fresh attach only
+        if (!instanceId) {
+          renderPresets(); // starter templates on a fresh attach only
+          // The host (plugin library / a template) may name a preset to open
+          // pre-filled. Apply it once; an unknown id leaves the sample content.
+          if (typeof msg.preset === "string") {
+            const list = isSelect() ? PRESETS_SELECT : PRESETS_BUTTON;
+            const seed = list.find((p) => p.id === msg.preset);
+            if (seed) applyPreset(seed);
+          }
+        }
         renderCards();
         maybeConnect();
       });

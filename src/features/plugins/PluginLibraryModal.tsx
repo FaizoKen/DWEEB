@@ -1,66 +1,137 @@
 /**
- * Plugin library — browse the plugins available for a component type.
+ * Plugin library — browse the plugins available for a component type, and their
+ * ready-made presets.
  *
- * Opened from the inspector's compact Plugin panel. Picking a plugin hands its
- * manifest back to the caller (which then opens the config modal); the library
- * itself attaches nothing. Built to stay usable as the registry grows: the
- * list lives in a modal with its own search filter instead of inlining every
- * plugin in the inspector.
+ * Opened from the inspector's compact Plugin panel. Each plugin shows as a group:
+ * the plugin's own row (a blank setup) plus, nested under it, one row per preset
+ * the plugin declares for this target (the "Staff Application" form, the "Support
+ * FAQ" menu…). Picking the plugin hands its manifest back; picking a preset hands
+ * the manifest *and* the preset id, which the caller passes to the config UI so it
+ * opens pre-filled. The library itself attaches nothing.
+ *
+ * Built to stay usable as the registry grows: the list lives in a modal with its
+ * own search filter (matching plugin and preset names) instead of inlining
+ * everything in the inspector.
  */
 
 import { useMemo, useState } from "react";
 import { Modal } from "@/ui/Modal";
 import { TextInput } from "@/ui/TextInput";
-import type { PluginManifest } from "@/core/plugins/manifest";
+import type { PluginManifest, PluginPreset } from "@/core/plugins/manifest";
+import { presetsForTarget, type PluginTarget } from "@/core/plugins/targets";
 import { PluginIcon } from "./PluginIcon";
 import styles from "./PluginLibraryModal.module.css";
 
 interface Props {
   /** Plugins already filtered to the current component's target type. */
   plugins: PluginManifest[];
-  onPick: (manifest: PluginManifest) => void;
+  /** The component kind being configured — scopes which presets apply. */
+  target: PluginTarget;
+  /** Pick a plugin (blank) or a plugin + one of its presets to pre-apply. */
+  onPick: (manifest: PluginManifest, presetId?: string) => void;
   onClose: () => void;
 }
 
-export function PluginLibraryModal({ plugins, onPick, onClose }: Props) {
+/** A plugin with the presets that apply to the current target (may be empty). */
+interface Group {
+  manifest: PluginManifest;
+  presets: PluginPreset[];
+}
+
+const matches = (q: string, ...fields: (string | undefined)[]) =>
+  fields.some((s) => s?.toLowerCase().includes(q));
+
+export function PluginLibraryModal({ plugins, target, onPick, onClose }: Props) {
   const [query, setQuery] = useState("");
 
-  const shown = useMemo(() => {
+  // Total preset count, for the search placeholder ("Search N plugins…").
+  const presetCount = useMemo(
+    () => plugins.reduce((n, p) => n + presetsForTarget(p, target).length, 0),
+    [plugins, target],
+  );
+
+  // Build a group per plugin, then filter by the query. A query keeps a plugin
+  // when it matches the plugin itself (all presets shown) or only some presets
+  // (just those shown) — so searching "ticket" surfaces the right rows either way.
+  const groups = useMemo<Group[]>(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return plugins;
-    return plugins.filter((p) => [p.name, p.description].some((s) => s?.toLowerCase().includes(q)));
-  }, [plugins, query]);
+    const out: Group[] = [];
+    for (const manifest of plugins) {
+      const presets = presetsForTarget(manifest, target);
+      if (!q) {
+        out.push({ manifest, presets });
+        continue;
+      }
+      const pluginHit = matches(q, manifest.name, manifest.description);
+      const presetHits = presets.filter((p) => matches(q, p.name, p.description));
+      if (pluginHit) out.push({ manifest, presets });
+      else if (presetHits.length) out.push({ manifest, presets: presetHits });
+    }
+    return out;
+  }, [plugins, target, query]);
 
   return (
     <Modal open title="Plugin library" onClose={onClose}>
       <TextInput
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder={`Search ${plugins.length} plugin${plugins.length === 1 ? "" : "s"}…`}
+        placeholder={
+          presetCount > 0
+            ? `Search ${plugins.length} plugin${plugins.length === 1 ? "" : "s"} & ${presetCount} templates…`
+            : `Search ${plugins.length} plugin${plugins.length === 1 ? "" : "s"}…`
+        }
         aria-label="Search plugins"
         autoFocus
       />
 
-      {shown.length === 0 ? (
+      {groups.length === 0 ? (
         <p className={styles.empty}>No plugins match “{query.trim()}”.</p>
       ) : (
         <ul className={styles.list}>
-          {shown.map((p) => (
-            <li key={p.id}>
-              <button type="button" className={styles.row} onClick={() => onPick(p)}>
-                <PluginIcon manifest={p} />
+          {groups.map(({ manifest, presets }) => (
+            <li key={manifest.id} className={styles.group}>
+              <button type="button" className={styles.row} onClick={() => onPick(manifest)}>
+                <PluginIcon manifest={manifest} />
                 <span className={styles.rowText}>
-                  <span className={styles.rowName}>{p.name}</span>
-                  {p.description ? <span className={styles.rowDesc}>{p.description}</span> : null}
+                  <span className={styles.rowName}>{manifest.name}</span>
+                  {manifest.description ? (
+                    <span className={styles.rowDesc}>{manifest.description}</span>
+                  ) : null}
                 </span>
+                {presets.length ? <span className={styles.blankTag}>Start blank</span> : null}
               </button>
+
+              {presets.length ? (
+                <ul className={styles.presetList}>
+                  {presets.map((preset) => (
+                    <li key={preset.id}>
+                      <button
+                        type="button"
+                        className={styles.presetRow}
+                        onClick={() => onPick(manifest, preset.id)}
+                      >
+                        <span className={styles.presetEmoji} aria-hidden>
+                          {preset.emoji ?? "⚡"}
+                        </span>
+                        <span className={styles.rowText}>
+                          <span className={styles.presetName}>{preset.name}</span>
+                          {preset.description ? (
+                            <span className={styles.presetDesc}>{preset.description}</span>
+                          ) : null}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </li>
           ))}
         </ul>
       )}
 
       <p className={styles.note}>
-        Actions are handled by external services — picking a plugin opens its setup.
+        Pick a plugin to start blank, or a template to open it pre-filled — then customize. Actions
+        are handled by external services.
       </p>
     </Modal>
   );

@@ -87,6 +87,38 @@ export interface PluginManifest {
    * Absent for a plugin that doesn't drive any message text. See `placeholders.ts`.
    */
   placeholders?: PluginPlaceholder[];
+  /**
+   * Ready-made configurations this plugin ships — the "Staff Application" form,
+   * the "Support FAQ" menu, and so on. They surface as their own entries in the
+   * plugin library and as a fast path on a template, and pre-fill the plugin's
+   * own config UI so a beginner customizes a working setup instead of starting
+   * blank. DWEEB only knows each preset's display info and its stable `id`; the
+   * actual field data lives in the plugin's config iframe, which applies the
+   * preset by id when the host names it in `init` (see `protocol.ts`). Absent
+   * for a plugin with no presets. See {@link PluginPreset}.
+   */
+  presets?: PluginPreset[];
+}
+
+/**
+ * One ready-made plugin configuration, declared in the manifest for the library
+ * + template UIs. The host shows `name`/`description`/`emoji` and, on pick,
+ * passes `id` to the config iframe — which owns the real field data and applies
+ * it. `targets` optionally restricts a preset to certain component kinds (a
+ * Quick Replies "Support FAQ" menu makes sense only on a select); absent means
+ * it applies to every target the plugin supports.
+ */
+export interface PluginPreset {
+  /** Stable id, unique within the plugin. The contract the iframe applies by. */
+  id: string;
+  /** Display name shown in the library / template setup (e.g. "Staff Application"). */
+  name: string;
+  /** One-line description of the use case. */
+  description?: string;
+  /** Short leading glyph for the row (a unicode emoji, not a URL). */
+  emoji?: string;
+  /** Restrict to these component kinds; absent = all of the plugin's targets. */
+  targets?: PluginTarget[];
 }
 
 /** Shape the registry endpoint returns. */
@@ -135,6 +167,7 @@ export function parseManifest(raw: unknown): PluginManifest | null {
 
   const managesFields = parseManagedFields(o.managesFields);
   const placeholders = parsePlaceholders(o.placeholders);
+  const presets = parsePresets(o.presets, targets);
 
   const manifest: PluginManifest = {
     schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
@@ -152,8 +185,44 @@ export function parseManifest(raw: unknown): PluginManifest | null {
     ...(o.managesSelectOptions === true ? { managesSelectOptions: true } : {}),
     ...(managesFields ? { managesFields } : {}),
     ...(placeholders ? { placeholders } : {}),
+    ...(presets ? { presets } : {}),
   };
   return manifest;
+}
+
+/**
+ * Validate-and-drop parse of a manifest's `presets`. Keeps only entries with an
+ * `id` + `name`, dedupes by id, clamps display strings, and intersects each
+ * preset's optional `targets` with the plugin's own targets (a preset can't
+ * apply to a kind the plugin doesn't support). Returns `undefined` when nothing
+ * usable survives so callers can treat "no presets" uniformly.
+ */
+function parsePresets(raw: unknown, pluginTargets: PluginTarget[]): PluginPreset[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: PluginPreset[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const o = entry as Record<string, unknown>;
+    if (!isNonEmptyString(o.id) || !isNonEmptyString(o.name)) continue;
+    if (seen.has(o.id)) continue;
+    seen.add(o.id);
+    const targets = Array.isArray(o.targets)
+      ? (o.targets.filter(
+          (t): t is PluginTarget =>
+            ALL_PLUGIN_TARGETS.includes(t as PluginTarget) &&
+            pluginTargets.includes(t as PluginTarget),
+        ) as PluginTarget[])
+      : undefined;
+    out.push({
+      id: o.id,
+      name: o.name.slice(0, 80),
+      ...(isNonEmptyString(o.description) ? { description: o.description.slice(0, 200) } : {}),
+      ...(isNonEmptyString(o.emoji) ? { emoji: o.emoji.slice(0, 8) } : {}),
+      ...(targets && targets.length ? { targets } : {}),
+    });
+  }
+  return out.length ? out : undefined;
 }
 
 /** Parse a full registry payload into the valid manifests it contains. */

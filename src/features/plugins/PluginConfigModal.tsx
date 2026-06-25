@@ -20,6 +20,8 @@ interface Props {
   target: PluginTarget;
   /** Current custom_id when reconfiguring; undefined when attaching fresh. */
   customId?: string;
+  /** A manifest preset id to pre-apply on a fresh attach (library/template pick). */
+  preset?: string;
   onSave: (result: PluginSaveResult) => void;
   onClose: () => void;
 }
@@ -34,11 +36,12 @@ function resolveTheme(): PluginTheme {
 
 const DEFAULT_HEIGHT = 440;
 
-export function PluginConfigModal({ manifest, target, customId, onSave, onClose }: Props) {
+export function PluginConfigModal({ manifest, target, customId, preset, onSave, onClose }: Props) {
   const { iframeRef, height } = usePluginConfig({
     manifest,
     target,
     customId,
+    preset,
     theme: resolveTheme(),
     onSave,
     onCancel: onClose,

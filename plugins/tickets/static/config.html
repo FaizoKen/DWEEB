@@ -720,14 +720,14 @@
       // dropdown sets also seed a topic menu. Everything stays editable.
       const PRESETS_BUTTON = [
         {
-          name: "General support", icon: "🎫", hint: "A simple help desk",
+          id: "ticket-general", name: "General support", icon: "🎫", hint: "A simple help desk",
           welcome: "Thanks for opening a ticket, {user}! 🎫\n\nPlease describe your issue below and a member of {staff} will be with you as soon as possible.",
           intake: [
             { label: "What do you need help with?", style: "paragraph", required: true, placeholder: "Describe your issue in as much detail as you can." },
           ],
         },
         {
-          name: "Player report", icon: "🚨", hint: "Private reports about a user",
+          id: "ticket-report", name: "Player report", icon: "🚨", hint: "Private reports about a user",
           welcome: "Thanks for your report, {user}. The team will review it privately in {ticket}. Add any extra details below.",
           intake: [
             { label: "Who are you reporting?", style: "short", required: true, placeholder: "Username or user ID" },
@@ -736,7 +736,7 @@
           ],
         },
         {
-          name: "Staff application", icon: "📋", hint: "Recruit moderators or helpers",
+          id: "ticket-staff-app", name: "Staff application", icon: "📋", hint: "Recruit moderators or helpers",
           welcome: "Thanks for applying, {user}! 📋\n\n{staff} will review your application here in {ticket}. Feel free to add anything else below.",
           intake: [
             { label: "Your age", style: "short", required: true },
@@ -746,7 +746,7 @@
           ],
         },
         {
-          name: "Store / billing", icon: "🛒", hint: "Purchases and payments",
+          id: "ticket-store", name: "Store / billing", icon: "🛒", hint: "Purchases and payments",
           welcome: "Thanks for reaching out, {user}! 🛒\n\nShare your order details below and {staff} will help sort it out.",
           intake: [
             { label: "Order ID or product", style: "short", required: true },
@@ -757,7 +757,7 @@
 
       const PRESETS_SELECT = [
         {
-          name: "Support menu", icon: "🎫", hint: "One menu, several help topics",
+          id: "ticket-support-menu", name: "Support menu", icon: "🎫", hint: "One menu, several help topics",
           welcome: "Thanks for opening a **{topic}** ticket, {user}! 🎫\n\nA member of {staff} will be with you shortly. Add any details below.",
           topics: [
             { label: "General help", emoji: "❓", description: "Questions and general support" },
@@ -770,7 +770,7 @@
           ],
         },
         {
-          name: "Community menu", icon: "🌐", hint: "Partnerships, staff, suggestions",
+          id: "ticket-community-menu", name: "Community menu", icon: "🌐", hint: "Partnerships, staff, suggestions",
           welcome: "Thanks for opening a **{topic}** ticket, {user}! 🌐\n\n{staff} will get back to you here in {ticket}.",
           topics: [
             { label: "Partnership", emoji: "🤝", description: "Partner with our server" },
@@ -923,7 +923,16 @@
         renderBotIntro();
         renderTopics();
         renderIntake();
-        if (!instanceId) renderPresets(); // starter templates on a fresh attach only
+        if (!instanceId) {
+          renderPresets(); // starter templates on a fresh attach only
+          // The host (plugin library / a template) may name a preset to open
+          // pre-filled. Apply it once; an unknown id leaves the blank form.
+          if (typeof msg.preset === "string") {
+            const list = isSelect() ? PRESETS_SELECT : PRESETS_BUTTON;
+            const seed = list.find((p) => p.id === msg.preset);
+            if (seed) applyPreset(seed);
+          }
+        }
         updateStaffCount();
         sendResize();
         maybeAutoConnect();

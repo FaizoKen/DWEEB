@@ -68,6 +68,12 @@ interface Args {
   target: PluginTarget;
   /** Current custom_id when editing an existing binding; undefined when fresh. */
   customId?: string;
+  /**
+   * A manifest preset id to pre-apply on a fresh attach (the user picked it in
+   * the library or a template carried it). Ignored when reconfiguring an
+   * existing binding (`customId` set) — the saved config wins.
+   */
+  preset?: string;
   theme: PluginTheme;
   onSave: (result: PluginSaveResult) => void;
   onCancel: () => void;
@@ -98,6 +104,7 @@ export function usePluginConfig({
   manifest,
   target,
   customId,
+  preset,
   theme,
   onSave,
   onCancel,
@@ -133,6 +140,8 @@ export function usePluginConfig({
           apiVersion: PLUGIN_API_VERSION,
           target,
           ...(customId ? { customId } : {}),
+          // A preset only seeds a fresh attach; never override a saved binding.
+          ...(!customId && preset ? { preset } : {}),
           theme,
           locale: typeof navigator !== "undefined" ? navigator.language : "en",
         };
@@ -204,8 +213,8 @@ export function usePluginConfig({
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-    // manifest.id keys the session; target/customId/theme are part of init.
-  }, [manifest, target, customId, theme]);
+    // manifest.id keys the session; target/customId/preset/theme are part of init.
+  }, [manifest, target, customId, preset, theme]);
 
   return { iframeRef, height };
 }

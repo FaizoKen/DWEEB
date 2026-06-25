@@ -67,6 +67,14 @@ export interface TemplatePluginSlot {
   customId: string;
   /** Registry id of the plugin to wire it to (e.g. `"tickets"`). */
   pluginId: string;
+  /**
+   * Optional manifest preset id to pre-apply when the user sets this slot up, so
+   * the plugin's config opens already matching the template's message (a Tickets
+   * template can carry `"ticket-general"`, a Giveaway one `"gw-nitro"`). Must be a
+   * preset the plugin declares for this component's target; an unknown id is
+   * ignored and the config just opens blank. See {@link PluginPreset}.
+   */
+  preset?: string;
 }
 
 /** A named, pickable starting message shown in the Template Gallery. */
@@ -1521,7 +1529,7 @@ export const TEMPLATES: MessageTemplate[] = [
     accent: ACCENT.gold,
     requiresBot: true,
     pairsWith: "Giveaway",
-    pluginSlots: [{ customId: "giveaway_enter", pluginId: "giveaway" }],
+    pluginSlots: [{ customId: "giveaway_enter", pluginId: "giveaway", preset: "gw-nitro" }],
     message: GIVEAWAY_BUTTON_MESSAGE,
   },
   {
@@ -1534,7 +1542,7 @@ export const TEMPLATES: MessageTemplate[] = [
     accent: ACCENT.blue,
     requiresBot: true,
     pairsWith: "Tickets",
-    pluginSlots: [{ customId: "ticket_open", pluginId: "tickets" }],
+    pluginSlots: [{ customId: "ticket_open", pluginId: "tickets", preset: "ticket-general" }],
     message: SUPPORT_MESSAGE,
   },
   {

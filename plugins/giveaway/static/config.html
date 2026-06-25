@@ -467,27 +467,27 @@
       // details — all still editable, and the server/roles stay your own.
       const PRESETS = [
         {
-          name: "Nitro", icon: "💎", hint: "1 month of Discord Nitro",
+          id: "gw-nitro", name: "Nitro", icon: "💎", hint: "1 month of Discord Nitro",
           prize: "1 month of Discord Nitro", winners: 1, durValue: 24, durUnit: "hours",
           description: "Win a month of Nitro! 🎉 Click the button below to enter.",
         },
         {
-          name: "Custom role", icon: "🎨", hint: "An exclusive personal role",
+          id: "gw-custom-role", name: "Custom role", icon: "🎨", hint: "An exclusive personal role",
           prize: "an exclusive custom role (your name + color)", winners: 1, durValue: 48, durUnit: "hours",
           description: "One lucky winner gets their very own custom role — pick the name and color!",
         },
         {
-          name: "Game key", icon: "🎮", hint: "A Steam game of their choice",
+          id: "gw-game-key", name: "Game key", icon: "🎮", hint: "A Steam game of their choice",
           prize: "a Steam game key (winner's choice, up to $20)", winners: 1, durValue: 24, durUnit: "hours",
           description: "Pick any game up to $20 on Steam and it's yours. Good luck!",
         },
         {
-          name: "Gift card", icon: "🎁", hint: "A digital gift card",
+          id: "gw-gift-card", name: "Gift card", icon: "🎁", hint: "A digital gift card",
           prize: "a $10 gift card", winners: 1, durValue: 3, durUnit: "days",
           description: "Enter for a chance to win a $10 gift card. Winner drawn after the deadline.",
         },
         {
-          name: "Supporter perks", icon: "⭐", hint: "Role + server perks",
+          id: "gw-supporter", name: "Supporter perks", icon: "⭐", hint: "Role + server perks",
           prize: "a supporter role with special perks", winners: 3, durValue: 7, durUnit: "days",
           description: "Three winners get a supporter role plus perks across the server. Thanks for being here!",
         },
@@ -565,7 +565,15 @@
           await loadInstance(instanceId);
         }
 
-        if (!instanceId) renderPresets(); // starter templates on a fresh attach only
+        if (!instanceId) {
+          renderPresets(); // starter templates on a fresh attach only
+          // The host (plugin library / a template) may name a preset to open
+          // pre-filled. Apply it once; an unknown id leaves the blank form.
+          if (typeof msg.preset === "string") {
+            const seed = PRESETS.find((p) => p.id === msg.preset);
+            if (seed) applyPreset(seed);
+          }
+        }
         renderServerIntro();
         renderDeadlinePreview();
         renderDmHint();

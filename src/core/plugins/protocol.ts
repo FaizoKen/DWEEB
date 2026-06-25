@@ -157,6 +157,14 @@ export interface PluginInitMessage {
    * config. Absent / empty when attaching fresh.
    */
   customId?: string;
+  /**
+   * A manifest preset id the host wants pre-applied (the user picked it in the
+   * plugin library or a template carried it). The plugin looks the id up in its
+   * own preset table and fills its config form, so the user customizes a working
+   * setup instead of a blank one. Only ever sent on a fresh attach (no
+   * `customId`); an unknown id is ignored. See {@link PluginManifest.presets}.
+   */
+  preset?: string;
   theme: PluginTheme;
   /** BCP-47 language tag of the editor UI, best-effort. */
   locale: string;

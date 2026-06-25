@@ -11,7 +11,15 @@
       "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/modal-form",
       "targets": ["button"],
       "configUrl": "https://modalform.dweeb.faizo.net/config.html",
-      "customIdPrefix": "modalform:"
+      "customIdPrefix": "modalform:",
+      "presets": [
+        { "id": "staff-application", "name": "Staff Application", "description": "Recruit moderators or helpers — name, timezone, availability, experience.", "emoji": "📋" },
+        { "id": "suggestion", "name": "Suggestion Box", "description": "Collect ideas from members.", "emoji": "💡" },
+        { "id": "bug-report", "name": "Bug Report", "description": "Let members report problems with steps to reproduce.", "emoji": "🐛" },
+        { "id": "member-report", "name": "Member Report", "description": "Private reports about a user, with evidence.", "emoji": "🚨" },
+        { "id": "ban-appeal", "name": "Ban Appeal", "description": "Let banned users appeal — one response per person.", "emoji": "⚖️" },
+        { "id": "contact", "name": "Contact Us", "description": "A simple get-in-touch form.", "emoji": "✉️" }
+      ]
     },
     {
       "schemaVersion": 1,
@@ -52,7 +60,15 @@
       "configUrl": "https://tickets.dweeb.faizo.net/config.html",
       "customIdPrefix": "tickets:",
       "managesSelectOptions": true,
-      "managesFields": ["min_values", "max_values"]
+      "managesFields": ["min_values", "max_values"],
+      "presets": [
+        { "id": "ticket-general", "name": "General Support panel", "description": "A simple help desk — one intake question.", "emoji": "🎫", "targets": ["button"] },
+        { "id": "ticket-report", "name": "Player Report panel", "description": "Private reports about a user, with evidence.", "emoji": "🚨", "targets": ["button"] },
+        { "id": "ticket-staff-app", "name": "Staff Application panel", "description": "Recruit moderators or helpers.", "emoji": "📋", "targets": ["button"] },
+        { "id": "ticket-store", "name": "Store / Billing panel", "description": "Purchases and payments.", "emoji": "🛒", "targets": ["button"] },
+        { "id": "ticket-support-menu", "name": "Support topic menu", "description": "One menu, several help topics.", "emoji": "🎫", "targets": ["string_select"] },
+        { "id": "ticket-community-menu", "name": "Community topic menu", "description": "Partnerships, staff and suggestions.", "emoji": "🌐", "targets": ["string_select"] }
+      ]
     },
     {
       "schemaVersion": 1,
@@ -72,6 +88,13 @@
         { "token": "winner_count", "label": "Number of winners", "sample": "1" },
         { "token": "host", "label": "Host", "sample": "the host" },
         { "token": "status", "label": "Status", "sample": "open" }
+      ],
+      "presets": [
+        { "id": "gw-nitro", "name": "Nitro giveaway", "description": "1 month of Discord Nitro, drawn in 24h.", "emoji": "💎" },
+        { "id": "gw-custom-role", "name": "Custom Role giveaway", "description": "An exclusive personal role, drawn in 48h.", "emoji": "🎨" },
+        { "id": "gw-game-key", "name": "Game Key giveaway", "description": "A Steam game of the winner's choice.", "emoji": "🎮" },
+        { "id": "gw-gift-card", "name": "Gift Card giveaway", "description": "A digital gift card, drawn in 3 days.", "emoji": "🎁" },
+        { "id": "gw-supporter", "name": "Supporter Perks giveaway", "description": "Role + server perks for 3 winners.", "emoji": "⭐" }
       ]
     },
     {
@@ -86,7 +109,16 @@
       "configUrl": "https://quickreplies.dweeb.faizo.net/config.html",
       "customIdPrefix": "quickreplies:",
       "managesSelectOptions": true,
-      "managesFields": ["min_values", "max_values"]
+      "managesFields": ["min_values", "max_values"],
+      "presets": [
+        { "id": "qr-rules", "name": "Server Rules reply", "description": "Show your rules when the button is clicked.", "emoji": "📜", "targets": ["button"] },
+        { "id": "qr-roles", "name": "Getting Roles reply", "description": "Point members at the role menu.", "emoji": "🙋", "targets": ["button"] },
+        { "id": "qr-support", "name": "Get Support reply", "description": "Explain how to reach staff.", "emoji": "🎫", "targets": ["button"] },
+        { "id": "qr-welcome", "name": "Welcome reply", "description": "A friendly start-here message.", "emoji": "👋", "targets": ["button"] },
+        { "id": "qr-faq", "name": "Support FAQ menu", "description": "A self-serve help menu of common answers.", "emoji": "❓", "targets": ["string_select"] },
+        { "id": "qr-server-info", "name": "Server Info menu", "description": "Key channels, announcements and partners.", "emoji": "📌", "targets": ["string_select"] },
+        { "id": "qr-events", "name": "Events & Community menu", "description": "For game / event servers.", "emoji": "🎮", "targets": ["string_select"] }
+      ]
     },
     {
       "schemaVersion": 1,

@@ -77,6 +77,7 @@ renders nothing). `configUrl` (and any `icon`/`homepage`) must be `https://`, or
 | `apiVersion`     | no       | Highest protocol version you speak. Defaults to `1`. |
 | `managesSelectOptions` | no | `string_select` plugins only. Set `true` to own the menu's option list: your `save` may return `options`, and DWEEB **wires them onto the select and locks the options editor** (see §3). Omit for a select plugin that leaves options to the user. |
 | `managesFields`  | no       | Component fields you own beyond `custom_id`/options, as a string array. Each named field is set from your `save` payload's `fields` and **locked** in the inspector, so the user can't edit it and break your binding — e.g. a menu that grants exactly one role declares `["min_values", "max_values"]` and saves `fields: { min_values: 1, max_values: 1 }`. Lockable today: `min_values`, `max_values`, `placeholder`, `disabled`. Unknown names are dropped. |
+| `presets`        | no       | Ready-made configurations of your plugin shown as their own entries in the plugin library (and pickable on a template). Each is `{ id, name, description?, emoji?, targets? }`. DWEEB shows the display fields and, when the user picks one, passes the `id` to your iframe in `init.preset` — your iframe owns the actual field data and applies it (see §3). `targets` restricts a preset to certain component kinds (a topic-menu preset only on `string_select`); omit to apply to all your targets. Unknown/duplicate ids are dropped. |
 
 A manifest that fails validation is silently dropped — it just won't appear in
 the picker.
@@ -123,7 +124,7 @@ so an external link (e.g. an OAuth invite) can open in a new tab via
 
 ```
 your iframe → DWEEB : "dweeb:plugin:ready"    { apiVersion? }
-DWEEB → your iframe : "dweeb:plugin:init"     { nonce, apiVersion, target, customId?, theme, locale }
+DWEEB → your iframe : "dweeb:plugin:init"     { nonce, apiVersion, target, customId?, preset?, theme, locale }
 your iframe → DWEEB : "dweeb:plugin:save"     { nonce, customId, summary?, options?, fields?, guildId? }  // adopt id (+ wire options/fields)
 your iframe → DWEEB : "dweeb:plugin:cancel"   { nonce }                       // user backed out
 your iframe → DWEEB : "dweeb:plugin:resize"   { nonce, height }              // optional auto-height
@@ -138,6 +139,11 @@ Rules:
   any message without the current nonce, or from the wrong origin.
 - Use `init.customId` (when present) to load the instance being edited; absent
   means the user is attaching fresh.
+- `init.preset` (optional, only on a fresh attach) is one of your manifest
+  `presets` ids the user picked in the library or a template carried. Look it up
+  in your own preset table and pre-fill the config form, so the user customizes a
+  working setup instead of a blank one. An id you don't recognize: ignore it and
+  open blank.
 - On `save`, DWEEB validates `customId` (prefix + length) before adopting it. A
   mismatch is rejected and the modal stays open.
 - `summary` is optional: `{ label, description?, icon? }` for a nicer chip.

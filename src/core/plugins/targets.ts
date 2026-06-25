@@ -83,6 +83,16 @@ export function pluginsForTarget(
 }
 
 /**
+ * The plugin's ready-made presets that apply to a given component target. A
+ * preset with no `targets` applies to every kind the plugin supports; one that
+ * lists targets is shown only for those (e.g. a Quick Replies topic-menu preset
+ * surfaces on a select, not a button). Empty when the plugin ships no presets.
+ */
+export function presetsForTarget(manifest: PluginManifest, target: PluginTarget) {
+  return (manifest.presets ?? []).filter((p) => !p.targets || p.targets.includes(target));
+}
+
+/**
  * The plugin that owns a given `custom_id`, by prefix match, or `null`. This is
  * how a draft or share link re-binds to a plugin on reload without DWEEB
  * storing anything beyond the `custom_id` itself. The longest matching prefix

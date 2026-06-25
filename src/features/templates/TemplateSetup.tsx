@@ -59,6 +59,8 @@ interface Slot {
   manifest: PluginManifest;
   nodeId: EditorId;
   target: PluginTarget;
+  /** Manifest preset id to pre-apply when setting this slot up fresh, if any. */
+  preset?: string;
 }
 
 export function TemplateSetup({ templateId }: { templateId: string }) {
@@ -82,7 +84,14 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
       if (!manifest) return [];
       const found = targetableNodeByCustomId(msg, slot.customId);
       if (!found) return [];
-      return [{ manifest, nodeId: found.nodeId, target: found.target }];
+      return [
+        {
+          manifest,
+          nodeId: found.nodeId,
+          target: found.target,
+          ...(slot.preset ? { preset: slot.preset } : {}),
+        },
+      ];
     });
   }, [template]);
 
@@ -161,11 +170,15 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
   if (configuring !== null) {
     const slot = slots[configuring];
     if (!slot) return null;
+    const ready = isReady(configuring);
     return (
       <PluginConfigModal
         manifest={slot.manifest}
         target={slot.target}
-        customId={isReady(configuring) ? currentIdFor(configuring) : undefined}
+        customId={ready ? currentIdFor(configuring) : undefined}
+        // Pre-fill from the template's preset only on a fresh setup; a reconfigure
+        // loads the saved binding instead.
+        preset={ready ? undefined : slot.preset}
         onSave={handleSave(configuring)}
         onClose={() => setConfiguring(null)}
       />

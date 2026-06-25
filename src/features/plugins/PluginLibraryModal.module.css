@@ -48,6 +48,74 @@
   color: var(--app-text-muted);
 }
 
+/* A plugin and its presets, grouped. */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* The plugin's own row reads as the group header; its presets nest under it. */
+.presetList {
+  list-style: none;
+  margin: 0 0 0 14px;
+  padding-left: 14px;
+  border-left: 1px solid var(--app-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.presetRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.presetRow:hover {
+  background: var(--app-bg-hover);
+  border-color: var(--app-border);
+}
+.presetRow:focus-visible {
+  outline: none;
+  border-color: var(--app-border-focus);
+  box-shadow: var(--app-focus-ring);
+}
+
+.presetEmoji {
+  flex: none;
+  width: 22px;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1;
+}
+.presetName {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.presetDesc {
+  font-size: 11.5px;
+  color: var(--app-text-muted);
+}
+
+/* The "blank" affordance on the plugin row. */
+.blankTag {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
 .empty {
   margin: 0;
   font-size: 13px;

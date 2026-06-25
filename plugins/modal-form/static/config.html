@@ -336,6 +336,7 @@
       // the webhook destination is always the user's own.
       const PRESETS = [
         {
+          id: "staff-application",
           name: "Staff application",
           icon: "📋",
           hint: "Recruit moderators or helpers",
@@ -352,6 +353,7 @@
           ],
         },
         {
+          id: "suggestion",
           name: "Suggestion",
           icon: "💡",
           hint: "Collect ideas from members",
@@ -363,6 +365,7 @@
           ],
         },
         {
+          id: "bug-report",
           name: "Bug report",
           icon: "🐛",
           hint: "Let members report problems",
@@ -375,6 +378,7 @@
           ],
         },
         {
+          id: "member-report",
           name: "Member report",
           icon: "🚨",
           hint: "Private reports about a user",
@@ -388,6 +392,7 @@
           ],
         },
         {
+          id: "ban-appeal",
           name: "Ban appeal",
           icon: "⚖️",
           hint: "Let banned users appeal",
@@ -401,6 +406,7 @@
           ],
         },
         {
+          id: "contact",
           name: "Contact us",
           icon: "✉️",
           hint: "A simple get-in-touch form",
@@ -500,6 +506,12 @@
             // Fresh attach — offer the starter templates above the empty form.
             fields = [newField({ label: "Your answer", style: "paragraph", required: true })];
             renderPresets();
+            // The host (plugin library / a template) may name a preset to open
+            // pre-filled. Apply it once; an unknown id just leaves the blank form.
+            if (typeof msg.preset === "string") {
+              const seed = PRESETS.find((p) => p.id === msg.preset);
+              if (seed) applyPreset(seed);
+            }
           }
           renderFields();
           requestResource("savedWebhooks");

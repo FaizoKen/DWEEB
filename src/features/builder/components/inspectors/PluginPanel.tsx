@@ -82,10 +82,12 @@ export function PluginPanel({ node }: Props) {
   const load = usePluginRegistry((s) => s.load);
   const reload = usePluginRegistry((s) => s.reload);
 
-  // Which plugin's config iframe is open, plus the id we're editing (if any).
+  // Which plugin's config iframe is open, plus the id we're editing (if any) and
+  // the preset to pre-apply on a fresh attach (when picked from the library).
   const [configuring, setConfiguring] = useState<{
     manifest: PluginManifest;
     customId?: string;
+    preset?: string;
   } | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
 
@@ -220,9 +222,10 @@ export function PluginPanel({ node }: Props) {
       {libraryOpen ? (
         <PluginLibraryModal
           plugins={available}
-          onPick={(manifest) => {
+          target={target}
+          onPick={(manifest, preset) => {
             setLibraryOpen(false);
-            setConfiguring({ manifest });
+            setConfiguring({ manifest, preset });
           }}
           onClose={() => setLibraryOpen(false)}
         />
@@ -230,10 +233,11 @@ export function PluginPanel({ node }: Props) {
 
       {configuring ? (
         <PluginConfigModal
-          key={`${configuring.manifest.id}:${configuring.customId ?? "new"}`}
+          key={`${configuring.manifest.id}:${configuring.customId ?? configuring.preset ?? "new"}`}
           manifest={configuring.manifest}
           target={target}
           customId={configuring.customId}
+          preset={configuring.preset}
           onSave={handleSave(configuring.manifest)}
           onClose={() => setConfiguring(null)}
         />
