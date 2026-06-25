@@ -228,6 +228,9 @@
       }
       .preset:hover { border-color: var(--accent); }
       .preset .ico { font-size: 15px; line-height: 1; }
+      /* The applied template reads as selected. */
+      .preset.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .preset.active .chk { margin-left: 1px; font-weight: 700; }
     </style>
   </head>
   <body>
@@ -558,6 +561,12 @@
       // starts from a blank menu. The button sets seed a single reply; the
       // dropdown sets seed a whole list of topics. Everything stays editable.
       let userEdited = false; // any typed change → confirm before a preset wipes it
+      let activePreset = null; // id of the applied template (drives the highlight)
+      // Any genuine user input counts as an edit. Programmatic value changes
+      // (applyPreset, reload) don't fire input/change, so this only trips on real
+      // typing/toggling. Capture so it sees events from every field.
+      document.addEventListener("input", () => { userEdited = true; }, true);
+      document.addEventListener("change", () => { userEdited = true; }, true);
 
       const PRESETS_BUTTON = [
         {
@@ -616,30 +625,40 @@
         list.forEach((p) => {
           const b = document.createElement("button");
           b.type = "button";
-          b.className = "preset";
+          b.className = "preset" + (p.id === activePreset ? " active" : "");
           b.title = p.hint || "";
+          b.setAttribute("aria-pressed", p.id === activePreset ? "true" : "false");
           const ico = document.createElement("span");
           ico.className = "ico";
           ico.textContent = p.icon;
           const nm = document.createElement("span");
           nm.textContent = p.name;
           b.append(ico, nm);
+          if (p.id === activePreset) {
+            const chk = document.createElement("span");
+            chk.className = "chk";
+            chk.textContent = "✓";
+            b.appendChild(chk);
+          }
           b.addEventListener("click", () => applyPreset(p));
           row.appendChild(b);
         });
         $("presets").hidden = false;
       }
 
-      // Replace the current reply/menu with a template. Confirms first only if
-      // the user has already typed something, so a stray click never wipes work.
+      // Replace the current reply/menu with a template and mark it selected.
+      // Switching between untouched templates is free; once the user has typed
+      // something we confirm before replacing that work.
       function applyPreset(p) {
         if (userEdited && !confirm(`Replace your current ${isSelect() ? "menu" : "reply"} with the “${p.name}” template?`))
           return;
         const seeds = isSelect() ? p.cards : [p.card];
         cards = seeds.map(newCard);
+        activePreset = p.id;
         userEdited = false;
         $("error").textContent = "";
         renderCards();
+        renderPresets();
       }
 
       function updateCount() {

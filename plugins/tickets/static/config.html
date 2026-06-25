@@ -187,6 +187,9 @@
       }
       .preset:hover { border-color: var(--accent); }
       .preset .ico { font-size: 15px; line-height: 1; }
+      /* The applied template reads as selected. */
+      .preset.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .preset.active .chk { margin-left: 1px; font-weight: 700; }
     </style>
   </head>
   <body>
@@ -784,6 +787,17 @@
         },
       ];
 
+      // Selected-template state: which preset is applied (drives the highlight)
+      // and whether the user has hand-edited since — so switching between
+      // untouched templates is instant, but real edits are protected.
+      let activePreset = null;
+      let editedSincePreset = false;
+      // Any genuine user input counts as an edit. Programmatic value changes
+      // (applyPreset, reload) don't fire input/change, so this only trips on real
+      // typing/toggling. Capture so it sees events from every field.
+      document.addEventListener("input", () => { editedSincePreset = true; }, true);
+      document.addEventListener("change", () => { editedSincePreset = true; }, true);
+
       function renderPresets() {
         const list = isSelect() ? PRESETS_SELECT : PRESETS_BUTTON;
         $("presetsSub").textContent = isSelect()
@@ -794,29 +808,32 @@
         list.forEach((p) => {
           const b = document.createElement("button");
           b.type = "button";
-          b.className = "preset";
+          b.className = "preset" + (p.id === activePreset ? " active" : "");
           b.title = p.hint || "";
+          b.setAttribute("aria-pressed", p.id === activePreset ? "true" : "false");
           const ico = document.createElement("span");
           ico.className = "ico";
           ico.textContent = p.icon;
           const nm = document.createElement("span");
           nm.textContent = p.name;
           b.append(ico, nm);
+          if (p.id === activePreset) {
+            const chk = document.createElement("span");
+            chk.className = "chk";
+            chk.textContent = "✓";
+            b.appendChild(chk);
+          }
           b.addEventListener("click", () => applyPreset(p));
           row.appendChild(b);
         });
         $("presets").hidden = false;
       }
 
-      // Fill the welcome + questions (+ topics for a menu) from a template.
-      // Confirms first only if the user has already changed something, so a
-      // stray click never wipes real work.
+      // Fill the welcome + questions (+ topics for a menu) from a template and
+      // mark it selected. Switching between untouched templates is free; once the
+      // form's been edited we confirm before replacing that work.
       function applyPreset(p) {
-        const dirty =
-          intake.length > 0 ||
-          (isSelect() && topics.length > 0) ||
-          welcome.trim() !== DEFAULT_WELCOME.trim();
-        if (dirty && !confirm(`Replace the current welcome and questions with the “${p.name}” template?`))
+        if (editedSincePreset && !confirm(`Replace the current welcome and questions with the “${p.name}” template?`))
           return;
         welcome = p.welcome;
         $("welcome").value = welcome;
@@ -834,8 +851,11 @@
             emoji: t.emoji || "",
             description: t.description || "",
           }));
+        activePreset = p.id;
+        editedSincePreset = false;
         renderTopics();
         renderIntake();
+        renderPresets();
         // The intake form lives behind the "Advanced options" disclosure; open it
         // so the freshly-added questions are visible, not silently tucked away.
         if (intake.length) {

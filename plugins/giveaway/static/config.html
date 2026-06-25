@@ -161,6 +161,9 @@
       }
       .preset:hover { border-color: var(--accent); }
       .preset .ico { font-size: 15px; line-height: 1; }
+      /* The applied template reads as selected. */
+      .preset.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .preset.active .chk { margin-left: 1px; font-weight: 700; }
     </style>
   </head>
   <body>
@@ -493,30 +496,49 @@
         },
       ];
 
+      // Selected-template state: which preset is applied (drives the highlight)
+      // and whether the user has hand-edited since — so switching between
+      // untouched templates is instant, but real edits are protected.
+      let activePreset = null;
+      let editedSincePreset = false;
+      // Any genuine user input counts as an edit. Programmatic value changes
+      // (applyPreset, reload) don't fire input/change, so this only trips on real
+      // typing/toggling. Capture so it sees events from every field.
+      document.addEventListener("input", () => { editedSincePreset = true; }, true);
+      document.addEventListener("change", () => { editedSincePreset = true; }, true);
+
       function renderPresets() {
         const row = $("presetRow");
         row.innerHTML = "";
         PRESETS.forEach((p) => {
           const b = document.createElement("button");
           b.type = "button";
-          b.className = "preset";
+          b.className = "preset" + (p.id === activePreset ? " active" : "");
           b.title = p.hint || "";
+          b.setAttribute("aria-pressed", p.id === activePreset ? "true" : "false");
           const ico = document.createElement("span");
           ico.className = "ico";
           ico.textContent = p.icon;
           const nm = document.createElement("span");
           nm.textContent = p.name;
           b.append(ico, nm);
+          if (p.id === activePreset) {
+            const chk = document.createElement("span");
+            chk.className = "chk";
+            chk.textContent = "✓";
+            b.appendChild(chk);
+          }
           b.addEventListener("click", () => applyPreset(p));
           row.appendChild(b);
         });
         $("presets").hidden = false;
       }
 
-      // Fill the prize + deadline from a template. Confirms first only if a
-      // prize is already typed, so a stray click never wipes real work.
+      // Fill the prize + deadline from a template and mark it selected. Switching
+      // between untouched templates is free; once the form's been edited we
+      // confirm before replacing that work.
       function applyPreset(p) {
-        if ($("prize").value.trim() && !confirm(`Replace the current giveaway with the “${p.name}” template?`))
+        if (editedSincePreset && !confirm(`Replace the current giveaway with the “${p.name}” template?`))
           return;
         $("prize").value = p.prize;
         $("winners").value = String(p.winners || 1);
@@ -527,9 +549,11 @@
         // countdown is visible rather than silently tucked away.
         const adv = $("advanced");
         if (adv && p.durValue) adv.open = true;
+        activePreset = p.id;
+        editedSincePreset = false;
         renderDeadlinePreview();
+        renderPresets();
         $("error").textContent = "";
-        $("prize").focus();
       }
 
       // ── DWEEB protocol ──────────────────────────────────────────────────
