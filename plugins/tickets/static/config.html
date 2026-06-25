@@ -162,9 +162,43 @@
       .miniseg button { padding: 6px 8px; font-size: 12px; }
       .miniseg button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
       .add { margin-top: 8px; }
+
+      /* Quick-start templates. */
+      .presets {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius, 8px);
+        padding: 12px;
+        margin-bottom: 18px;
+      }
+      .presets-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .presets-head strong { font-size: 13px; }
+      .presets-sub { font-size: 12px; color: var(--muted); }
+      .presets-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+      .preset {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 7px 11px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        color: var(--text);
+        font: inherit; font-size: 13px;
+        cursor: pointer;
+      }
+      .preset:hover { border-color: var(--accent); }
+      .preset .ico { font-size: 15px; line-height: 1; }
     </style>
   </head>
   <body>
+    <!-- Quick start — prefill a ready-made ticket panel --------------------- -->
+    <div class="presets" id="presets" hidden>
+      <div class="presets-head">
+        <strong>⚡ Quick start</strong>
+        <span class="presets-sub" id="presetsSub">Pick a template to prefill the welcome and questions, then edit anything. Optional.</span>
+      </div>
+      <div class="presets-row" id="presetRow"></div>
+    </div>
+
     <!-- Step 1 — the shared DWEEB bot --------------------------------------->
     <h2><span class="step-num">1</span> <span id="step1Title">Bot &amp; server</span></h2>
     <div id="botIntro"></div>
@@ -679,6 +713,139 @@
         sendResize();
       }
 
+      // ── Starter templates ───────────────────────────────────────────────
+      // Ready-made ticket panels for the most common use cases, so a beginner
+      // never starts from a blank welcome + intake. Each fills the wording and
+      // questions only — the bot, staff roles and channels stay your own. The
+      // dropdown sets also seed a topic menu. Everything stays editable.
+      const PRESETS_BUTTON = [
+        {
+          name: "General support", icon: "🎫", hint: "A simple help desk",
+          welcome: "Thanks for opening a ticket, {user}! 🎫\n\nPlease describe your issue below and a member of {staff} will be with you as soon as possible.",
+          intake: [
+            { label: "What do you need help with?", style: "paragraph", required: true, placeholder: "Describe your issue in as much detail as you can." },
+          ],
+        },
+        {
+          name: "Player report", icon: "🚨", hint: "Private reports about a user",
+          welcome: "Thanks for your report, {user}. The team will review it privately in {ticket}. Add any extra details below.",
+          intake: [
+            { label: "Who are you reporting?", style: "short", required: true, placeholder: "Username or user ID" },
+            { label: "What did they do?", style: "paragraph", required: true },
+            { label: "Evidence (links / screenshots)", style: "paragraph", required: false, placeholder: "Paste links to messages or screenshots" },
+          ],
+        },
+        {
+          name: "Staff application", icon: "📋", hint: "Recruit moderators or helpers",
+          welcome: "Thanks for applying, {user}! 📋\n\n{staff} will review your application here in {ticket}. Feel free to add anything else below.",
+          intake: [
+            { label: "Your age", style: "short", required: true },
+            { label: "Your timezone", style: "short", required: true, placeholder: "e.g. GMT, EST, PST" },
+            { label: "Why do you want to join the team?", style: "paragraph", required: true },
+            { label: "Any past experience?", style: "paragraph", required: false },
+          ],
+        },
+        {
+          name: "Store / billing", icon: "🛒", hint: "Purchases and payments",
+          welcome: "Thanks for reaching out, {user}! 🛒\n\nShare your order details below and {staff} will help sort it out.",
+          intake: [
+            { label: "Order ID or product", style: "short", required: true },
+            { label: "What's the problem?", style: "paragraph", required: true },
+          ],
+        },
+      ];
+
+      const PRESETS_SELECT = [
+        {
+          name: "Support menu", icon: "🎫", hint: "One menu, several help topics",
+          welcome: "Thanks for opening a **{topic}** ticket, {user}! 🎫\n\nA member of {staff} will be with you shortly. Add any details below.",
+          topics: [
+            { label: "General help", emoji: "❓", description: "Questions and general support" },
+            { label: "Report a player", emoji: "🚨", description: "Report rule-breaking" },
+            { label: "Billing / store", emoji: "🛒", description: "Purchases and payments" },
+            { label: "Something else", emoji: "💬", description: "Anything not listed" },
+          ],
+          intake: [
+            { label: "Briefly, what do you need?", style: "paragraph", required: true },
+          ],
+        },
+        {
+          name: "Community menu", icon: "🌐", hint: "Partnerships, staff, suggestions",
+          welcome: "Thanks for opening a **{topic}** ticket, {user}! 🌐\n\n{staff} will get back to you here in {ticket}.",
+          topics: [
+            { label: "Partnership", emoji: "🤝", description: "Partner with our server" },
+            { label: "Apply for staff", emoji: "📋", description: "Join the team" },
+            { label: "Suggestion", emoji: "💡", description: "Share an idea" },
+            { label: "Report a problem", emoji: "🚨", description: "Flag something wrong" },
+          ],
+          intake: [
+            { label: "Tell us a bit more", style: "paragraph", required: true },
+          ],
+        },
+      ];
+
+      function renderPresets() {
+        const list = isSelect() ? PRESETS_SELECT : PRESETS_BUTTON;
+        $("presetsSub").textContent = isSelect()
+          ? "Pick a ready-made topic menu, then edit anything. Optional."
+          : "Pick a ready-made panel, then edit the welcome and questions. Optional.";
+        const row = $("presetRow");
+        row.innerHTML = "";
+        list.forEach((p) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "preset";
+          b.title = p.hint || "";
+          const ico = document.createElement("span");
+          ico.className = "ico";
+          ico.textContent = p.icon;
+          const nm = document.createElement("span");
+          nm.textContent = p.name;
+          b.append(ico, nm);
+          b.addEventListener("click", () => applyPreset(p));
+          row.appendChild(b);
+        });
+        $("presets").hidden = false;
+      }
+
+      // Fill the welcome + questions (+ topics for a menu) from a template.
+      // Confirms first only if the user has already changed something, so a
+      // stray click never wipes real work.
+      function applyPreset(p) {
+        const dirty =
+          intake.length > 0 ||
+          (isSelect() && topics.length > 0) ||
+          welcome.trim() !== DEFAULT_WELCOME.trim();
+        if (dirty && !confirm(`Replace the current welcome and questions with the “${p.name}” template?`))
+          return;
+        welcome = p.welcome;
+        $("welcome").value = welcome;
+        intake = (p.intake || []).map((f) => ({
+          id: genId(),
+          label: f.label || "",
+          style: f.style === "paragraph" ? "paragraph" : "short",
+          required: !!f.required,
+          placeholder: f.placeholder || "",
+        }));
+        if (isSelect())
+          topics = (p.topics || []).map((t) => ({
+            id: genId(),
+            label: t.label || "",
+            emoji: t.emoji || "",
+            description: t.description || "",
+          }));
+        renderTopics();
+        renderIntake();
+        // The intake form lives behind the "Advanced options" disclosure; open it
+        // so the freshly-added questions are visible, not silently tucked away.
+        if (intake.length) {
+          const adv = document.querySelector("details.adv");
+          if (adv) adv.open = true;
+        }
+        $("error").textContent = "";
+        sendResize();
+      }
+
       // ── Segmented controls ─────────────────────────────────────────────────
       function wireSeg(segId, onPick) {
         for (const btn of $(segId).children) {
@@ -756,6 +923,7 @@
         renderBotIntro();
         renderTopics();
         renderIntake();
+        if (!instanceId) renderPresets(); // starter templates on a fresh attach only
         updateStaffCount();
         sendResize();
         maybeAutoConnect();

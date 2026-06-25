@@ -203,9 +203,43 @@
         color: var(--muted); font-size: 12px;
       }
       .emoji-clear:hover { color: var(--danger); border-color: var(--danger); }
+
+      /* Quick-start templates. */
+      .presets {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px;
+        margin-bottom: 16px;
+      }
+      .presets-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .presets-head strong { font-size: 13px; }
+      .presets-sub { font-size: 12px; color: var(--muted); }
+      .presets-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+      .preset {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 7px 11px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        color: var(--text);
+        font: inherit; font-size: 13px;
+        cursor: pointer;
+      }
+      .preset:hover { border-color: var(--accent); }
+      .preset .ico { font-size: 15px; line-height: 1; }
     </style>
   </head>
   <body>
+    <!-- Quick start — prefill a ready-made reply / menu --------------------- -->
+    <div class="presets" id="presets" hidden>
+      <div class="presets-head">
+        <strong>⚡ Quick start</strong>
+        <span class="presets-sub" id="presetsSub">Pick a template to prefill, then edit anything. Optional.</span>
+      </div>
+      <div class="presets-row" id="presetRow"></div>
+    </div>
+
     <!-- Intro (varies by target) ----------------------------------------------->
     <h2><span class="step-num">1</span> <span id="introTitle">Your reply</span>
       <span class="count" id="cardCount"></span></h2>
@@ -381,6 +415,7 @@
           const k = input.getAttribute("data-k");
           input.addEventListener("input", () => {
             card[k] = input.value;
+            userEdited = true;
             if (k === "body" || k === "label") updateCount();
           });
         });
@@ -517,6 +552,95 @@
         cards.push(newCard());
         renderCards();
       });
+
+      // ── Starter templates ───────────────────────────────────────────────
+      // Ready-made replies for the most common use cases, so a beginner never
+      // starts from a blank menu. The button sets seed a single reply; the
+      // dropdown sets seed a whole list of topics. Everything stays editable.
+      let userEdited = false; // any typed change → confirm before a preset wipes it
+
+      const PRESETS_BUTTON = [
+        {
+          name: "Server rules", icon: "📜", hint: "Show your rules on click",
+          card: { title: "📜 Server Rules", body: "**Welcome, {user}!** Please follow these rules:\n\n1. Be respectful — no harassment or hate.\n2. No spam, self-promo, or NSFW.\n3. Keep posts in the right channels.\n4. Listen to staff.\n\nBreaking the rules may lead to a warning, mute, kick, or ban." },
+        },
+        {
+          name: "How to get roles", icon: "🙋", hint: "Point members at the role menu",
+          card: { title: "🙋 Getting Roles", body: "Hey {user}! Head to the **#roles** channel and pick the roles you want from the menus there — colors, pings, and more. They're all self-serve." },
+        },
+        {
+          name: "Get support", icon: "🎫", hint: "Explain how to reach staff",
+          card: { title: "🎫 Need Help?", body: "Hi {user}! To get help in **{server}**:\n\n• Check **#faq** first — your answer may already be there.\n• Still stuck? Open a ticket in **#support** and a staff member will assist you." },
+        },
+        {
+          name: "Welcome", icon: "👋", hint: "A friendly start-here message",
+          card: { title: "👋 Welcome!", body: "Welcome to **{server}**, {user}! 🎉\n\n• Read the rules in **#rules**.\n• Grab your roles in **#roles**.\n• Say hi in **#general**.\n\nGlad to have you here!" },
+        },
+      ];
+
+      const PRESETS_SELECT = [
+        {
+          name: "Support FAQ", icon: "❓", hint: "A self-serve help menu",
+          cards: [
+            { emoji: "📜", label: "Server rules", description: "Read our community rules", title: "📜 Server Rules", body: "1. Be respectful.\n2. No spam or self-promo.\n3. Keep posts on-topic.\n4. Listen to staff." },
+            { emoji: "🙋", label: "How do I get roles?", description: "Self-assign your roles", title: "🙋 Getting Roles", body: "Head to **#roles** and pick the roles you want, {user} — colors, pings, and more." },
+            { emoji: "🎫", label: "How do I get help?", description: "Reach the staff team", title: "🎫 Getting Help", body: "Open a ticket in **#support** and a staff member will help you out." },
+            { emoji: "🔗", label: "Useful links", description: "Important links & socials", title: "🔗 Links", body: "• Website: https://example.com\n• Socials: https://example.com\n• Store: https://example.com" },
+          ],
+        },
+        {
+          name: "Server info", icon: "📌", hint: "Key channels & info",
+          cards: [
+            { emoji: "📣", label: "Announcements", description: "Where we post updates", title: "📣 Announcements", body: "We post all updates in **#announcements**. Grab the notify role in **#roles** so you never miss one!" },
+            { emoji: "🗺️", label: "Channel guide", description: "What goes where", title: "🗺️ Channel Guide", body: "• **#general** — chat\n• **#help** — questions\n• **#media** — share clips & art\n• **#off-topic** — anything else" },
+            { emoji: "🤝", label: "Partners", description: "Our partnered servers", title: "🤝 Partners", body: "Check out our partnered communities in **#partners**!" },
+          ],
+        },
+        {
+          name: "Events & community", icon: "🎮", hint: "For game / event servers",
+          cards: [
+            { emoji: "📅", label: "Upcoming events", description: "What's happening soon", title: "📅 Events", body: "See everything scheduled in **#events**. React to an event to get a reminder!" },
+            { emoji: "👥", label: "Find teammates", description: "Look for a group", title: "👥 Find Teammates", body: "Looking for people to play with, {user}? Post in **#lfg** with your game, rank, and region." },
+            { emoji: "🚨", label: "Report a player", description: "Flag bad behavior", title: "🚨 Report a Player", body: "To report rule-breaking, open a ticket in **#support** with the player's name and any evidence." },
+          ],
+        },
+      ];
+
+      function renderPresets() {
+        const list = isSelect() ? PRESETS_SELECT : PRESETS_BUTTON;
+        $("presetsSub").textContent = isSelect()
+          ? "Pick a ready-made menu, then edit any topic. Optional."
+          : "Pick a ready-made reply, then edit it. Optional.";
+        const row = $("presetRow");
+        row.innerHTML = "";
+        list.forEach((p) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "preset";
+          b.title = p.hint || "";
+          const ico = document.createElement("span");
+          ico.className = "ico";
+          ico.textContent = p.icon;
+          const nm = document.createElement("span");
+          nm.textContent = p.name;
+          b.append(ico, nm);
+          b.addEventListener("click", () => applyPreset(p));
+          row.appendChild(b);
+        });
+        $("presets").hidden = false;
+      }
+
+      // Replace the current reply/menu with a template. Confirms first only if
+      // the user has already typed something, so a stray click never wipes work.
+      function applyPreset(p) {
+        if (userEdited && !confirm(`Replace your current ${isSelect() ? "menu" : "reply"} with the “${p.name}” template?`))
+          return;
+        const seeds = isSelect() ? p.cards : [p.card];
+        cards = seeds.map(newCard);
+        userEdited = false;
+        $("error").textContent = "";
+        renderCards();
+      }
 
       function updateCount() {
         $("cardCount").textContent = isSelect() ? `(${cards.length}/${MAX_CARDS} topics)` : "";
@@ -863,6 +987,7 @@
         }
 
         applyTargetChrome();
+        if (!instanceId) renderPresets(); // starter templates on a fresh attach only
         renderCards();
         maybeConnect();
       });

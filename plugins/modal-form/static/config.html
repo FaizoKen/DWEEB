@@ -122,9 +122,43 @@
       .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
       .check input { flex: none; accent-color: var(--accent); margin: 0; }
       .adv summary { color: var(--muted); }
+
+      /* Quick-start templates. */
+      .presets {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px;
+        margin-bottom: 4px;
+      }
+      .presets-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .presets-head strong { font-size: 13px; }
+      .presets-sub { font-size: 12px; color: var(--muted); }
+      .presets-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+      .preset {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 7px 11px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        color: var(--text);
+        font: inherit; font-size: 13px;
+        cursor: pointer;
+      }
+      .preset:hover { border-color: var(--accent); }
+      .preset .ico { font-size: 15px; line-height: 1; }
     </style>
   </head>
   <body>
+    <!-- Quick start — prefill a ready-made form ----------------------------- -->
+    <div class="presets" id="presets" hidden>
+      <div class="presets-head">
+        <strong>⚡ Quick start</strong>
+        <span class="presets-sub">Pick a template to prefill the form, then edit anything. Optional.</span>
+      </div>
+      <div class="presets-row" id="presetRow"></div>
+    </div>
+
     <!-- Step 1 — build the form -------------------------------------------- -->
     <h2><span class="step-num">1</span> Build your form</h2>
     <label class="lbl" for="title">Form title</label>
@@ -295,6 +329,125 @@
         renderFields();
       });
 
+      // ── Starter templates ───────────────────────────────────────────────
+      // Ready-made forms for the most common use cases. Picking one fills the
+      // builder above so a beginner never starts from a blank form; everything
+      // stays fully editable before saving. Only the modal itself is seeded —
+      // the webhook destination is always the user's own.
+      const PRESETS = [
+        {
+          name: "Staff application",
+          icon: "📋",
+          hint: "Recruit moderators or helpers",
+          title: "Staff Application",
+          reply: "Thanks for applying! Our team will review your application and get back to you soon.",
+          includeSubmitter: true,
+          limitOne: true,
+          fields: [
+            { label: "Your name & age", style: "short", required: true, placeholder: "e.g. Alex, 17" },
+            { label: "What timezone are you in?", style: "short", required: true, placeholder: "e.g. GMT, EST, PST" },
+            { label: "How much time can you give each week?", style: "short", required: true, placeholder: "e.g. about 10 hours" },
+            { label: "Any past moderation experience?", style: "paragraph", required: false, placeholder: "Which servers, and what did you do?" },
+            { label: "Why do you want to join the team?", style: "paragraph", required: true },
+          ],
+        },
+        {
+          name: "Suggestion",
+          icon: "💡",
+          hint: "Collect ideas from members",
+          title: "Submit a Suggestion",
+          reply: "Thanks for your suggestion! We'll take a look.",
+          fields: [
+            { label: "Your suggestion", style: "paragraph", required: true, placeholder: "What should we add or change?" },
+            { label: "Why would this help?", style: "paragraph", required: false },
+          ],
+        },
+        {
+          name: "Bug report",
+          icon: "🐛",
+          hint: "Let members report problems",
+          title: "Report a Bug",
+          reply: "Thanks for the report! We'll look into it.",
+          fields: [
+            { label: "What went wrong?", style: "paragraph", required: true },
+            { label: "Steps to reproduce", style: "paragraph", required: true, placeholder: "e.g. 1) open X  2) click Y  3) see the error" },
+            { label: "What did you expect to happen?", style: "short", required: false },
+          ],
+        },
+        {
+          name: "Member report",
+          icon: "🚨",
+          hint: "Private reports about a user",
+          title: "Report a Member",
+          reply: "Thanks — our moderators will review this privately.",
+          includeSubmitter: true,
+          fields: [
+            { label: "Who are you reporting?", style: "short", required: true, placeholder: "Username or user ID" },
+            { label: "What happened?", style: "paragraph", required: true },
+            { label: "Evidence (links / screenshots)", style: "paragraph", required: false, placeholder: "Paste links to messages or screenshots" },
+          ],
+        },
+        {
+          name: "Ban appeal",
+          icon: "⚖️",
+          hint: "Let banned users appeal",
+          title: "Ban Appeal",
+          reply: "Your appeal has been submitted. Staff will review it and respond.",
+          limitOne: true,
+          fields: [
+            { label: "Your username & user ID", style: "short", required: true },
+            { label: "Why were you banned?", style: "paragraph", required: true },
+            { label: "Why should we unban you?", style: "paragraph", required: true },
+          ],
+        },
+        {
+          name: "Contact us",
+          icon: "✉️",
+          hint: "A simple get-in-touch form",
+          title: "Contact Us",
+          reply: "Thanks for reaching out! We'll get back to you soon.",
+          fields: [
+            { label: "Subject", style: "short", required: true },
+            { label: "How can we help?", style: "paragraph", required: true },
+          ],
+        },
+      ];
+
+      function renderPresets() {
+        const row = $("presetRow");
+        row.innerHTML = "";
+        PRESETS.forEach((p) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "preset";
+          b.title = p.hint || "";
+          const ico = document.createElement("span");
+          ico.className = "ico";
+          ico.textContent = p.icon;
+          const nm = document.createElement("span");
+          nm.textContent = p.name;
+          b.append(ico, nm);
+          b.addEventListener("click", () => applyPreset(p));
+          row.appendChild(b);
+        });
+        $("presets").hidden = false;
+      }
+
+      // Fill the builder from a template. Confirms first if the user has already
+      // started typing a title, so a stray click never wipes real work.
+      function applyPreset(p) {
+        if ($("title").value.trim() && !confirm(`Replace the current form with the “${p.name}” template?`))
+          return;
+        $("title").value = p.title;
+        fields = p.fields.map(newField);
+        if (typeof p.reply === "string") $("replyText").value = p.reply;
+        if (typeof p.includeSubmitter === "boolean") $("includeSubmitter").checked = p.includeSubmitter;
+        $("limitOne").checked = p.limitOne === true;
+        renderFields();
+        $("error").textContent = "";
+        $("title").focus();
+      }
+
       // ── Saved-webhook picker ────────────────────────────────────────────
       // Picking one just fills the URL field above (the single source of truth
       // on save), then resets the select so it reads as an action, not a state.
@@ -344,7 +497,9 @@
             instanceId = msg.customId.slice(PREFIX.length);
             await loadInstance(instanceId);
           } else {
+            // Fresh attach — offer the starter templates above the empty form.
             fields = [newField({ label: "Your answer", style: "paragraph", required: true })];
+            renderPresets();
           }
           renderFields();
           requestResource("savedWebhooks");

@@ -136,9 +136,43 @@
       .role-search { margin-top: 8px; }
       .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
       .locked { opacity: 0.5; pointer-events: none; }
+
+      /* Quick-start templates. */
+      .presets {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 18px;
+      }
+      .presets-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .presets-head strong { font-size: 13px; }
+      .presets-sub { font-size: 12px; color: var(--muted); }
+      .presets-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+      .preset {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 7px 11px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        color: var(--text);
+        font: inherit; font-size: 13px;
+        cursor: pointer;
+      }
+      .preset:hover { border-color: var(--accent); }
+      .preset .ico { font-size: 15px; line-height: 1; }
     </style>
   </head>
   <body>
+    <!-- Quick start — prefill a common giveaway ----------------------------- -->
+    <div class="presets" id="presets" hidden>
+      <div class="presets-head">
+        <strong>⚡ Quick start</strong>
+        <span class="presets-sub">Pick a template to prefill the prize and deadline, then edit anything. Optional.</span>
+      </div>
+      <div class="presets-row" id="presetRow"></div>
+    </div>
+
     <!-- Step 1 — server status ----------------------------------------------->
     <h2><span class="step-num">1</span> Server</h2>
     <div id="serverIntro"></div>
@@ -427,6 +461,77 @@
         sendResize();
       }
 
+      // ── Starter templates ───────────────────────────────────────────────
+      // Ready-made giveaways for the most common prizes, so a beginner can
+      // launch one in a click. Each fills the prize, winner count, deadline and
+      // details — all still editable, and the server/roles stay your own.
+      const PRESETS = [
+        {
+          name: "Nitro", icon: "💎", hint: "1 month of Discord Nitro",
+          prize: "1 month of Discord Nitro", winners: 1, durValue: 24, durUnit: "hours",
+          description: "Win a month of Nitro! 🎉 Click the button below to enter.",
+        },
+        {
+          name: "Custom role", icon: "🎨", hint: "An exclusive personal role",
+          prize: "an exclusive custom role (your name + color)", winners: 1, durValue: 48, durUnit: "hours",
+          description: "One lucky winner gets their very own custom role — pick the name and color!",
+        },
+        {
+          name: "Game key", icon: "🎮", hint: "A Steam game of their choice",
+          prize: "a Steam game key (winner's choice, up to $20)", winners: 1, durValue: 24, durUnit: "hours",
+          description: "Pick any game up to $20 on Steam and it's yours. Good luck!",
+        },
+        {
+          name: "Gift card", icon: "🎁", hint: "A digital gift card",
+          prize: "a $10 gift card", winners: 1, durValue: 3, durUnit: "days",
+          description: "Enter for a chance to win a $10 gift card. Winner drawn after the deadline.",
+        },
+        {
+          name: "Supporter perks", icon: "⭐", hint: "Role + server perks",
+          prize: "a supporter role with special perks", winners: 3, durValue: 7, durUnit: "days",
+          description: "Three winners get a supporter role plus perks across the server. Thanks for being here!",
+        },
+      ];
+
+      function renderPresets() {
+        const row = $("presetRow");
+        row.innerHTML = "";
+        PRESETS.forEach((p) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "preset";
+          b.title = p.hint || "";
+          const ico = document.createElement("span");
+          ico.className = "ico";
+          ico.textContent = p.icon;
+          const nm = document.createElement("span");
+          nm.textContent = p.name;
+          b.append(ico, nm);
+          b.addEventListener("click", () => applyPreset(p));
+          row.appendChild(b);
+        });
+        $("presets").hidden = false;
+      }
+
+      // Fill the prize + deadline from a template. Confirms first only if a
+      // prize is already typed, so a stray click never wipes real work.
+      function applyPreset(p) {
+        if ($("prize").value.trim() && !confirm(`Replace the current giveaway with the “${p.name}” template?`))
+          return;
+        $("prize").value = p.prize;
+        $("winners").value = String(p.winners || 1);
+        $("description").value = p.description || "";
+        $("durValue").value = p.durValue ? String(p.durValue) : "";
+        if (p.durUnit) $("durUnit").value = p.durUnit;
+        // The deadline lives behind "Advanced options" — open it so the seeded
+        // countdown is visible rather than silently tucked away.
+        const adv = $("advanced");
+        if (adv && p.durValue) adv.open = true;
+        renderDeadlinePreview();
+        $("error").textContent = "";
+        $("prize").focus();
+      }
+
       // ── DWEEB protocol ──────────────────────────────────────────────────
       parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
 
@@ -460,6 +565,7 @@
           await loadInstance(instanceId);
         }
 
+        if (!instanceId) renderPresets(); // starter templates on a fresh attach only
         renderServerIntro();
         renderDeadlinePreview();
         renderDmHint();
