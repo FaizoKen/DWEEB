@@ -277,7 +277,15 @@ async fn success(
         note.map(str::to_string),
     );
     let res = tokio::task::spawn_blocking(move || {
-        s.record_success(&id, now, msg.as_deref(), chan.as_deref(), code, next, note.as_deref())
+        s.record_success(
+            &id,
+            now,
+            msg.as_deref(),
+            chan.as_deref(),
+            code,
+            next,
+            note.as_deref(),
+        )
     })
     .await;
     log_db("record_success", res);

@@ -1310,7 +1310,15 @@ mod tests {
         let _ = store.claim_due(200, 120, 10).unwrap();
         // Recurring → rescheduled, runs_count++, back to active.
         store
-            .record_success("rec", 250, Some("msg1"), Some("chan1"), 204, Some(86_500), None)
+            .record_success(
+                "rec",
+                250,
+                Some("msg1"),
+                Some("chan1"),
+                204,
+                Some(86_500),
+                None,
+            )
             .unwrap();
         let row = store.get("rec").unwrap().unwrap();
         assert_eq!(row.status, "active");
