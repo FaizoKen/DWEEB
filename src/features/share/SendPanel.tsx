@@ -1514,7 +1514,9 @@ export function SendPanel({
 
           {/* The list of scheduled posts lives in "Managed messages" (account
               menu), not here — this keeps the Send screen short. Link to it. */}
-          {authStatus === "authed" && (knownGuildId ?? (connectedGuildId || undefined)) ? (
+          {when === "later" &&
+          authStatus === "authed" &&
+          (knownGuildId ?? (connectedGuildId || undefined)) ? (
             <button
               type="button"
               className={styles.scheduleManageLink}
