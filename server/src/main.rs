@@ -50,7 +50,8 @@ use crate::routes::{
     webhook_create, webhook_delete, webhook_modify, webhooks_list, AppState, DispatcherApi,
 };
 use crate::schedule::{
-    schedule_create, schedule_delete, schedule_get, schedule_list, schedule_patch, ScheduleStore,
+    schedule_create, schedule_delete, schedule_get, schedule_list, schedule_list_for_guild,
+    schedule_patch, ScheduleStore,
 };
 use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
 
@@ -302,6 +303,12 @@ async fn run() {
                 .patch(schedule_patch)
                 .delete(schedule_delete)
                 .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
+        // Every schedule for a server (login + Manage Webhooks gated) — the
+        // "view all scheduled posts for this server" list.
+        .route(
+            "/api/guilds/:guild_id/schedules",
+            get(schedule_list_for_guild),
         )
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))

@@ -56,7 +56,7 @@ const LIST_LIMIT: usize = 200;
 const COLS: &str = "id, manage_token_hash, owner_user_id, webhook_id, webhook_sealed, thread_id, \
      payload_sealed, title, dest_label, tz, recurrence_json, next_run_at, status, lease_until, \
      attempts, last_status, last_error, last_run_at, last_message_id, runs_count, end_at, \
-     max_runs, created_at, updated_at";
+     max_runs, created_at, updated_at, guild_id";
 
 // ── Row model ────────────────────────────────────────────────────────────────
 
@@ -85,6 +85,9 @@ pub struct Row {
     pub end_at: Option<i64>,
     pub max_runs: Option<i64>,
     pub created_at: i64,
+    /// Destination guild, cached at creation so a server manager can list every
+    /// schedule for their server. None when the webhook's guild wasn't known.
+    pub guild_id: Option<String>,
 }
 
 fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
@@ -113,6 +116,7 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         max_runs: r.get(21)?,
         created_at: r.get(22)?,
         // 23 = updated_at — not needed in memory.
+        guild_id: r.get(24)?,
     })
 }
 
@@ -148,6 +152,7 @@ pub struct NewSchedule {
     pub end_at: Option<i64>,
     pub max_runs: Option<i64>,
     pub created_at: i64,
+    pub guild_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -210,13 +215,31 @@ impl ScheduleStore {
                  end_at            INTEGER,
                  max_runs          INTEGER,
                  created_at        INTEGER NOT NULL,
-                 updated_at        INTEGER NOT NULL
+                 updated_at        INTEGER NOT NULL,
+                 guild_id          TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_posts(status, next_run_at);
              CREATE INDEX IF NOT EXISTS idx_sched_owner ON scheduled_posts(owner_user_id);
              CREATE INDEX IF NOT EXISTS idx_sched_webhook ON scheduled_posts(webhook_id);",
         )
         .map_err(|e| format!("schema: {e}"))?;
+        // Migrate DBs created before the `guild_id` column existed (SQLite has no
+        // ADD COLUMN IF NOT EXISTS), then index it for the per-server list.
+        let has_guild: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('scheduled_posts') WHERE name = 'guild_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_guild == 0 {
+            conn.execute_batch("ALTER TABLE scheduled_posts ADD COLUMN guild_id TEXT;")
+                .map_err(|e| format!("migrate guild_id: {e}"))?;
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_sched_guild ON scheduled_posts(guild_id);",
+        )
+        .map_err(|e| format!("index guild_id: {e}"))?;
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM scheduled_posts", [], |r| r.get(0))
             .map_err(|e| format!("count: {e}"))?;
@@ -252,8 +275,8 @@ impl ScheduleStore {
             "INSERT INTO scheduled_posts \
              (id, manage_token_hash, owner_user_id, webhook_id, webhook_sealed, thread_id, \
               payload_sealed, title, dest_label, tz, recurrence_json, next_run_at, status, \
-              attempts, runs_count, end_at, max_runs, created_at, updated_at) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active',0,0,?13,?14,?15,?15)",
+              attempts, runs_count, end_at, max_runs, created_at, updated_at, guild_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active',0,0,?13,?14,?15,?15,?16)",
             params![
                 n.id,
                 n.manage_token_hash,
@@ -270,6 +293,7 @@ impl ScheduleStore {
                 n.end_at,
                 n.max_runs,
                 n.created_at,
+                n.guild_id,
             ],
         )
         .map_err(|e| CreateError::Storage(e.to_string()))?;
@@ -300,6 +324,22 @@ impl ScheduleStore {
             ))
             .map_err(e2s)?;
         let rows = stmt.query_map((uid, limit as i64), row_from).map_err(e2s)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(e2s)
+    }
+
+    /// Every schedule whose destination is `guild_id` — the per-server list. The
+    /// HTTP layer gates this on the caller holding Manage Webhooks in that guild.
+    pub fn list_for_guild(&self, guild_id: &str, limit: usize) -> Result<Vec<Row>, String> {
+        let conn = self.lock();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {COLS} FROM scheduled_posts \
+                 WHERE guild_id = ?1 ORDER BY next_run_at ASC LIMIT ?2"
+            ))
+            .map_err(e2s)?;
+        let rows = stmt
+            .query_map((guild_id, limit as i64), row_from)
+            .map_err(e2s)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(e2s)
     }
 
@@ -520,6 +560,10 @@ pub struct CreateBody {
     pub title: Option<String>,
     #[serde(default)]
     pub dest_label: Option<String>,
+    /// Destination guild, so a server manager can list it later. Cosmetic for
+    /// the owner; never trusted for auth (the manage token / owner is).
+    #[serde(default)]
+    pub guild_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -582,6 +626,11 @@ pub async fn schedule_create(
     if let Some(l) = &body.dest_label {
         validate_dest_label(l).map_err(bad_request_s)?;
     }
+    if let Some(g) = &body.guild_id {
+        if !g.is_empty() && !is_snowflake(g) {
+            return Err(bad_request("That server ID looks wrong."));
+        }
+    }
     if let Some(m) = body.max_runs {
         if m < 1 {
             return Err(bad_request("Max runs must be at least 1."));
@@ -641,6 +690,7 @@ pub async fn schedule_create(
         end_at: body.end_at.filter(|e| *e > 0),
         max_runs: body.max_runs,
         created_at: now,
+        guild_id: body.guild_id.filter(|g| !g.is_empty()),
     };
 
     let res = tokio::task::spawn_blocking(move || store.create(&new))
@@ -687,7 +737,7 @@ pub async fn schedule_get(
     let store = store(&st)?;
     let row = load(&store, &id).await?;
     let token = manage_token_from(&headers).or(q.token);
-    if !is_authorized(&jar, token.as_deref(), &row) {
+    if !authorize_row(&st, &jar, token.as_deref(), &row).await {
         return Err(forbidden());
     }
     let owned = is_owner(&jar, &row);
@@ -722,6 +772,35 @@ pub async fn schedule_list(
         .into_response())
 }
 
+/// `GET /api/guilds/:guild_id/schedules` → every schedule for that server.
+/// Gated like the webhook picker: the caller must hold Manage Webhooks in the
+/// guild (the bot does too). Masked — no webhook URLs/tokens, no payloads.
+pub async fn schedule_list_for_guild(
+    State(st): State<AppState>,
+    Path(guild): Path<String>,
+    jar: PrivateCookieJar,
+) -> Result<Response, AppError> {
+    let store = store(&st)?;
+    // Authorize first (a Discord-gated membership + Manage-Webhooks check).
+    crate::routes::authorize_webhooks(&st, &jar, &guild).await?;
+    let session = current_session(&jar);
+    let g = guild.clone();
+    let rows = tokio::task::spawn_blocking(move || store.list_for_guild(&g, LIST_LIMIT))
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .map_err(AppError::Internal)?;
+    let me = session.as_ref().map(|s| s.uid.as_str());
+    let items: Vec<Value> = rows
+        .iter()
+        .map(|r| view(r, r.owner_user_id.as_deref() == me))
+        .collect();
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({ "items": items })),
+    )
+        .into_response())
+}
+
 /// `PATCH /api/schedules/:id` — edit / reschedule / pause / resume / cancel-end.
 pub async fn schedule_patch(
     State(st): State<AppState>,
@@ -733,7 +812,7 @@ pub async fn schedule_patch(
     let store = store(&st)?;
     let mut row = load(&store, &id).await?;
     let token = manage_token_from(&headers);
-    if !is_authorized(&jar, token.as_deref(), &row) {
+    if !authorize_row(&st, &jar, token.as_deref(), &row).await {
         return Err(forbidden());
     }
 
@@ -846,7 +925,7 @@ pub async fn schedule_delete(
     let store = store(&st)?;
     let row = load(&store, &id).await?;
     let token = manage_token_from(&headers);
-    if !is_authorized(&jar, token.as_deref(), &row) {
+    if !authorize_row(&st, &jar, token.as_deref(), &row).await {
         return Err(forbidden());
     }
     tokio::task::spawn_blocking(move || store.delete(&id))
@@ -892,6 +971,30 @@ fn is_authorized(jar: &PrivateCookieJar, token: Option<&str>, row: &Row) -> bool
     is_owner(jar, row)
 }
 
+/// Like [`is_authorized`], plus: a server manager (Manage Webhooks in the row's
+/// destination guild) may manage any schedule for their server — mirroring the
+/// per-server list. The guild check is a Discord-gated call, so it's only made
+/// when the cheap token/owner check fails.
+async fn authorize_row(
+    st: &AppState,
+    jar: &PrivateCookieJar,
+    token: Option<&str>,
+    row: &Row,
+) -> bool {
+    if is_authorized(jar, token, row) {
+        return true;
+    }
+    if let Some(guild) = &row.guild_id {
+        if crate::routes::authorize_webhooks(st, jar, guild)
+            .await
+            .is_ok()
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn is_owner(jar: &PrivateCookieJar, row: &Row) -> bool {
     match (current_session(jar), row.owner_user_id.as_deref()) {
         (Some(s), Some(owner)) => s.uid == owner,
@@ -914,6 +1017,7 @@ fn view(row: &Row, owned: bool) -> Value {
         "id": row.id,
         "title": row.title,
         "webhook_id": row.webhook_id,
+        "guild_id": row.guild_id,
         "dest_label": row.dest_label,
         "thread_id": row.thread_id,
         "tz": row.tz,
@@ -1020,6 +1124,7 @@ mod tests {
             end_at: None,
             max_runs: None,
             created_at: 1000,
+            guild_id: Some("guild-9".into()),
         }
     }
 
@@ -1133,6 +1238,66 @@ mod tests {
         assert_eq!(store.list_for_owner("nobody", 100).unwrap().len(), 0);
         assert!(store.delete("a").unwrap());
         assert_eq!(store.list_for_owner("user-1", 100).unwrap().len(), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn guild_listing() {
+        let (store, path) = temp_store("guild");
+        // Two in guild-9, one in another guild.
+        store.create(&sample("a", "111", 100)).unwrap();
+        store.create(&sample("b", "222", 200)).unwrap();
+        let mut other = sample("c", "333", 100);
+        other.guild_id = Some("guild-other".into());
+        store.create(&other).unwrap();
+        let rows = store.list_for_guild("guild-9", 100).unwrap();
+        assert_eq!(rows.len(), 2);
+        // Ordered by next_run_at ASC.
+        assert_eq!(rows[0].id, "a");
+        assert!(rows
+            .iter()
+            .all(|r| r.guild_id.as_deref() == Some("guild-9")));
+        assert_eq!(store.list_for_guild("guild-other", 100).unwrap().len(), 1);
+        assert_eq!(store.list_for_guild("nope", 100).unwrap().len(), 0);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn migrates_db_without_guild_id_column() {
+        // Simulate a DB created before `guild_id` existed (the prod case), then
+        // open it through the store — the migration must add the column so the
+        // server-scoped list works, without losing existing rows.
+        let path = std::env::temp_dir().join(format!(
+            "dweeb-sched-test-{}-migrate.db",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE scheduled_posts (
+                     id TEXT PRIMARY KEY, manage_token_hash TEXT NOT NULL, owner_user_id TEXT,
+                     webhook_id TEXT NOT NULL, webhook_sealed TEXT NOT NULL, thread_id TEXT,
+                     payload_sealed TEXT NOT NULL, title TEXT, dest_label TEXT, tz TEXT NOT NULL,
+                     recurrence_json TEXT NOT NULL, next_run_at INTEGER NOT NULL, status TEXT NOT NULL,
+                     lease_until INTEGER, attempts INTEGER NOT NULL DEFAULT 0, last_status INTEGER,
+                     last_error TEXT, last_run_at INTEGER, last_message_id TEXT,
+                     runs_count INTEGER NOT NULL DEFAULT 0, end_at INTEGER, max_runs INTEGER,
+                     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+                 );
+                 INSERT INTO scheduled_posts
+                   (id, manage_token_hash, webhook_id, webhook_sealed, payload_sealed, tz,
+                    recurrence_json, next_run_at, status, created_at, updated_at)
+                 VALUES ('old','h','111','w','p','UTC','{\"kind\":\"once\"}',100,'active',1,1);",
+            )
+            .unwrap();
+        }
+        // Opening migrates (adds guild_id); the legacy row survives with NULL guild.
+        let store = ScheduleStore::open(path.to_str().unwrap(), 1000, 3).unwrap();
+        assert_eq!(store.get("old").unwrap().unwrap().guild_id, None);
+        // New rows can set + be listed by guild.
+        store.create(&sample("new", "222", 100)).unwrap();
+        assert_eq!(store.list_for_guild("guild-9", 100).unwrap().len(), 1);
         let _ = std::fs::remove_file(path);
     }
 

@@ -24,6 +24,7 @@ export interface ScheduleView {
   id: string;
   title?: string | null;
   webhook_id: string;
+  guild_id?: string | null;
   dest_label?: string | null;
   thread_id?: string | null;
   tz: string;
@@ -56,6 +57,8 @@ export interface CreateScheduleInput {
   max_runs?: number;
   title?: string;
   dest_label?: string;
+  /** Destination guild, so a server manager can list it later. */
+  guild_id?: string;
 }
 
 export interface ScheduleUpdateInput {
@@ -154,6 +157,25 @@ export async function listMine(): Promise<ListResult> {
   let res: Response;
   try {
     res = await fetch(`${PROXY_BASE_URL}/api/schedules`, { credentials: "include" });
+  } catch {
+    return { ok: false, error: "Couldn't reach the scheduling service.", status: 0 };
+  }
+  if (!res.ok) return { ok: false, error: await readError(res), status: res.status };
+  const data = (await res.json().catch(() => null)) as { items?: ScheduleView[] } | null;
+  return { ok: true, items: data?.items ?? [] };
+}
+
+/**
+ * List every schedule for a server. Server-side this needs Manage Webhooks in
+ * the guild (same gate as the webhook picker); a non-manager gets 403, which the
+ * caller treats as "just show my own".
+ */
+export async function listForGuild(guildId: string): Promise<ListResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${PROXY_BASE_URL}/api/guilds/${encodeURIComponent(guildId)}/schedules`, {
+      credentials: "include",
+    });
   } catch {
     return { ok: false, error: "Couldn't reach the scheduling service.", status: 0 };
   }

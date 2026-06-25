@@ -307,10 +307,13 @@ picker lights up.
 
 ## Scheduling messages
 
-The **Send** tab has a **Schedule for later** card (when a proxy is configured):
-pick a date and time and the current message posts **once** at that moment,
-through the same webhook you'd send to now. It's deliberately simple — one-time
-only, right next to Send, no separate screen.
+The **Send** tab lets you choose **Send now** or **Schedule** (when a proxy is
+configured): flip to *Schedule*, pick a date and time, and the **Send** button
+becomes **Schedule post** — the current message posts **once** at that moment
+through the same webhook. It's deliberately simple: one-time only, right on the
+Send screen, no separate setup. Below the choice is the list of **scheduled posts
+for the current server** — your own always, and (if you hold Manage Webhooks
+there) everyone's — so a manager can see and cancel what's queued.
 
 Scheduling is the one feature that *can't* be browser-only: your browser is
 closed when the post needs to fire, so the proxy has to hold the destination

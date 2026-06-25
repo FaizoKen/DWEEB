@@ -144,11 +144,14 @@ import {
 import { navigatePopup, openPopup, redirectFullPage, watchPopup } from "@/core/oauth/popupFlow";
 import { webhookFlow } from "@/core/oauth/flows";
 import { copyText } from "@/core/serialization/clipboard";
-import { isScheduleConfigured } from "@/core/schedule/api";
+import { encodeJson } from "@/core/serialization";
+import { createSchedule, isScheduleConfigured } from "@/core/schedule/api";
+import { rememberSchedule } from "@/core/schedule/localStore";
+import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
-import { ScheduleSection } from "./ScheduleSection";
+import { ScheduledList } from "./ScheduledList";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
 import type { PermanentStatusProps } from "./PermanentStatus";
@@ -211,6 +214,14 @@ function formatRawBody(body: unknown): string {
   } catch {
     return String(body);
   }
+}
+
+/** Default the schedule picker to the next whole hour, in local wall-clock. */
+function defaultScheduleAt(): string {
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  d.setMinutes(0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function SendPanel({
@@ -283,6 +294,15 @@ export function SendPanel({
   // Post-send result dialog — confirms delivery and offers a deep link straight
   // to the message in Discord. Null when closed.
   const [success, setSuccess] = useState<SendSuccessInfo | null>(null);
+  // Send-now vs schedule-for-later. The primary button converts to "Schedule
+  // post" while "later" is picked. Only meaningful for a brand-new post.
+  const [when, setWhen] = useState<"now" | "later">("now");
+  const [scheduleAt, setScheduleAt] = useState<string>(defaultScheduleAt);
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleSuccess, setScheduleSuccess] = useState<string | null>(null);
+  // Bumped after creating a schedule so the inline list refetches.
+  const [scheduleReload, setScheduleReload] = useState(0);
   // True while a confirmed send is in flight. Keeps the confirm dialog open with
   // a loading button instead of closing it the instant "Post" is clicked.
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -362,6 +382,9 @@ export function SendPanel({
   );
   const validation = useMemo(() => validateMessage(message), [message, attachmentsVersion]);
   const blockingIssues = validation.issues.filter((i) => i.severity === "error");
+  // Local uploads (session:// blobs) live only in this browser, so they can't be
+  // carried to the server for a scheduled (later) post — that path is blocked.
+  const hasUploads = useMemo(() => JSON.stringify(message).includes("session://"), [message]);
 
   // Who the message will actually ping, after applying allowed_mentions. Shown
   // in the confirmation dialog so the blast radius is visible before sending.
@@ -572,6 +595,10 @@ export function SendPanel({
     : undefined;
 
   const sending = state.kind === "sending";
+  // The primary button schedules (rather than sends) when a brand-new post has
+  // "later" picked. The Send-mode hard blocks still apply (a dead component is
+  // dead whenever it posts).
+  const scheduleMode = mode === "new" && when === "later" && isScheduleConfigured();
 
   // Fetch slot state for the confirm dialog's "Make permanent" control. Only
   // worth a request when the message actually carries interactive components
@@ -724,6 +751,99 @@ export function SendPanel({
     }
     setState({ kind: "idle" });
     setConfirmOpen(true);
+  };
+
+  // Create a one-time scheduled post instead of sending now. Shares the Send
+  // pre-flight (valid webhook, no blocking issues, ownership/routing not dead)
+  // plus a future time and no local uploads (those can't leave the browser).
+  const handleSchedule = async () => {
+    setScheduleError(null);
+    setScheduleSuccess(null);
+    if (!parsedUrl) {
+      setScheduleError("Choose or paste a webhook above first.");
+      return;
+    }
+    if (hasUploads) {
+      setScheduleError("Uploaded files can't be scheduled — use image/media URLs instead.");
+      return;
+    }
+    if (blockingIssues.length > 0) {
+      setScheduleError(
+        `${blockingIssues.length} validation error${blockingIssues.length === 1 ? "" : "s"} — fix them before scheduling.`,
+      );
+      return;
+    }
+    if (
+      knownGone ||
+      ownershipBlocked ||
+      mustSignInToRouteCheck ||
+      componentRouting === "foreign" ||
+      pluginGuildMismatch != null
+    ) {
+      setScheduleError("Resolve the warning above before scheduling.");
+      return;
+    }
+    const at = Date.parse(scheduleAt);
+    if (Number.isNaN(at)) {
+      setScheduleError("Pick a date and time.");
+      return;
+    }
+    if (at < Date.now() - 60_000) {
+      setScheduleError("That time is in the past — pick a future time.");
+      return;
+    }
+
+    // Render core placeholders from the chosen destination, then encode the wire
+    // body (flags included, session refs stripped) — the same path JSON export
+    // uses, so what's stored is exactly what Discord will accept.
+    const outgoing = substituteMessage(
+      message,
+      collectMessagePlaceholders(message, getPlugins(), {
+        serverId: knownGuildId,
+        serverName: knownGuildName,
+        channelId: knownChannelId,
+        channelName: knownChannelName,
+      }),
+    );
+    let payload: unknown;
+    try {
+      payload = JSON.parse(encodeJson(outgoing));
+    } catch {
+      setScheduleError("Couldn't encode the message.");
+      return;
+    }
+    const destLabel =
+      knownChannelName && knownGuildName
+        ? `#${knownChannelName} · ${knownGuildName}`
+        : (knownGuildName ?? undefined);
+
+    setScheduling(true);
+    const res = await createSchedule({
+      webhook_url: parsedUrl.url,
+      thread_id: threadId.trim() || undefined,
+      payload,
+      tz: browserTimezone(),
+      recurrence: { kind: "once" },
+      start_at: Math.floor(at / 1000),
+      guild_id: knownGuildId,
+      dest_label: destLabel,
+    });
+    setScheduling(false);
+    if (!res.ok) {
+      setScheduleError(res.error);
+      return;
+    }
+    rememberSchedule({
+      id: res.id,
+      manageToken: res.manage_token,
+      webhookId: parsedUrl.id,
+      createdAt: Date.now(),
+    });
+    rememberWebhook(parsedUrl.url);
+    setHistory(loadHistory());
+    setScheduleSuccess(`Scheduled for ${formatInstant(res.next_run_at, browserTimezone())}.`);
+    setScheduleReload((t) => t + 1);
+    pushToast("Post scheduled.", "success");
   };
 
   const handleConfirmedSend = async () => {
@@ -1820,19 +1940,72 @@ export function SendPanel({
         </div>
       ) : null}
 
-      {/* Schedule for later — reuses the webhook chosen above to post this
-          message once at a future time (no recurrence; that's deliberate). Only
-          offered for a brand-new post (an "update" re-posts, it doesn't edit) and
-          when a proxy is configured to hold + fire it. */}
+      {/* Send now vs. schedule for later — reuses the webhook chosen above to
+          post this message once at a future time (one-time only, deliberately).
+          Only for a brand-new post (an "update" re-posts, it doesn't edit) and
+          when a proxy is configured to hold + fire it. Below the choice sits the
+          list of scheduled posts for this server (everyone's, if you manage it). */}
       {mode === "new" && isScheduleConfigured() ? (
-        <ScheduleSection
-          webhookUrl={parsedUrl?.url ?? null}
-          guildId={knownGuildId}
-          channelId={knownChannelId}
-          guildName={knownGuildName}
-          channelName={knownChannelName}
-          onLoaded={onCloseDialog}
-        />
+        <div className={styles.scheduleArea}>
+          <div className={styles.modeToggle} role="radiogroup" aria-label="When to post">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={when === "now"}
+              className={cn(styles.modeOption, when === "now" && styles.modeOptionActive)}
+              onClick={() => setWhen("now")}
+            >
+              <strong>Send now</strong>
+              <span>Post immediately.</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={when === "later"}
+              className={cn(styles.modeOption, when === "later" && styles.modeOptionActive)}
+              onClick={() => {
+                setWhen("later");
+                setScheduleError(null);
+                setScheduleSuccess(null);
+              }}
+            >
+              <strong>Schedule</strong>
+              <span>Post at a set date &amp; time.</span>
+            </button>
+          </div>
+
+          {when === "later" ? (
+            <>
+              <Field label="Post date &amp; time (your local time)">
+                {(id) => (
+                  <input
+                    id={id}
+                    type="datetime-local"
+                    className={styles.dtInput}
+                    value={scheduleAt}
+                    onChange={(e) => {
+                      setScheduleAt(e.currentTarget.value);
+                      setScheduleError(null);
+                      setScheduleSuccess(null);
+                    }}
+                  />
+                )}
+              </Field>
+              <p className={styles.scheduleNote}>
+                Stored on our server (encrypted) only until it posts, then deleted.
+              </p>
+              {scheduleError ? <div className={styles.error}>{scheduleError}</div> : null}
+              {scheduleSuccess ? <div className={styles.scheduleSuccess}>{scheduleSuccess}</div> : null}
+            </>
+          ) : null}
+
+          <p className={styles.scheduleListLabel}>Scheduled posts</p>
+          <ScheduledList
+            reloadToken={scheduleReload}
+            guildId={knownGuildId ?? (connectedGuildId || undefined)}
+            onLoaded={onCloseDialog}
+          />
+        </div>
       ) : null}
 
       {/* Floating action bar — pinned to the bottom of the scrolling dialog so
@@ -1854,30 +2027,51 @@ export function SendPanel({
               Cancel
             </Button>
           ) : null}
-          <Button
-            variant="primary"
-            onClick={handleSend}
-            disabled={
-              sending ||
-              saving ||
-              !parsedUrl ||
-              knownGone ||
-              blockingIssues.length > 0 ||
-              ownershipBlocked ||
-              mustSignInToRouteCheck ||
-              componentRouting === "foreign" ||
-              pluginGuildMismatch != null ||
-              (mode === "update" && !parsedMessageId)
-            }
-          >
-            {sending
-              ? mode === "update"
-                ? "Updating…"
-                : "Sending…"
-              : mode === "update"
-                ? "Update message"
-                : "Send to webhook"}
-          </Button>
+          {scheduleMode ? (
+            <Button
+              variant="primary"
+              onClick={handleSchedule}
+              disabled={
+                scheduling ||
+                saving ||
+                !parsedUrl ||
+                knownGone ||
+                blockingIssues.length > 0 ||
+                ownershipBlocked ||
+                mustSignInToRouteCheck ||
+                componentRouting === "foreign" ||
+                pluginGuildMismatch != null ||
+                hasUploads
+              }
+            >
+              {scheduling ? "Scheduling…" : "Schedule post"}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              onClick={handleSend}
+              disabled={
+                sending ||
+                saving ||
+                !parsedUrl ||
+                knownGone ||
+                blockingIssues.length > 0 ||
+                ownershipBlocked ||
+                mustSignInToRouteCheck ||
+                componentRouting === "foreign" ||
+                pluginGuildMismatch != null ||
+                (mode === "update" && !parsedMessageId)
+              }
+            >
+              {sending
+                ? mode === "update"
+                  ? "Updating…"
+                  : "Sending…"
+                : mode === "update"
+                  ? "Update message"
+                  : "Send to webhook"}
+            </Button>
+          )}
         </div>
       </div>
 

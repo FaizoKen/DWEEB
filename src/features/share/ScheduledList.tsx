@@ -15,10 +15,16 @@ import { decodeJson } from "@/core/serialization";
 import { validateMessage } from "@/core/schema/validation";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
-import { cancelSchedule, getSchedule, listMine, type ScheduleView } from "@/core/schedule/api";
+import {
+  cancelSchedule,
+  getSchedule,
+  listForGuild,
+  listMine,
+  type ScheduleView,
+} from "@/core/schedule/api";
 import { forgetSchedule, getManageToken, loadLocalSchedules } from "@/core/schedule/localStore";
 import { formatInstant } from "@/core/schedule/recurrence";
-import styles from "./ScheduleSection.module.css";
+import styles from "./ScheduledList.module.css";
 
 /** Live (still going to post) first, then posted/failed by recency. */
 const STATUS_ORDER: Record<string, number> = {
@@ -31,11 +37,14 @@ const STATUS_ORDER: Record<string, number> = {
 
 export function ScheduledList({
   reloadToken,
+  guildId,
   onLoaded,
   onCount,
 }: {
   /** Bumped by the section after a create, to refetch. */
   reloadToken: number;
+  /** When set and the user manages it, also list EVERY schedule for that server. */
+  guildId?: string;
   /** Called after a schedule's message is loaded into the editor (e.g. to close). */
   onLoaded?: () => void;
   /** Reports how many schedules exist, so the card can show a count. */
@@ -50,6 +59,12 @@ export function ScheduledList({
   const load = useCallback(async () => {
     setLoading(true);
     const byId = new Map<string, ScheduleView>();
+    // Every schedule for the current server, if the user manages it (403 for
+    // non-managers is ignored — they still see their own below).
+    if (guildId) {
+      const guild = await listForGuild(guildId);
+      if (guild.ok) for (const s of guild.items) byId.set(s.id, s);
+    }
     if (authStatus === "authed") {
       const mine = await listMine();
       if (mine.ok) for (const s of mine.items) byId.set(s.id, s);
@@ -72,7 +87,7 @@ export function ScheduledList({
     setItems(list);
     onCount?.(list.length);
     setLoading(false);
-  }, [authStatus, onCount]);
+  }, [authStatus, guildId, onCount]);
 
   useEffect(() => {
     void load();
