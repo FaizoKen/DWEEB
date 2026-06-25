@@ -266,6 +266,49 @@
   gap: 18px;
 }
 
+/* ── Posted, grouped by server ──────────────────────────────────────────────
+ * The Posted tab buckets cards under per-server headers. Each section is a
+ * header row plus its own grid, with generous spacing between sections so the
+ * server boundaries read clearly. */
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.sectionName {
+  font-size: var(--app-text-base);
+  font-weight: 650;
+  color: var(--app-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Count pill — how many posted messages live in this server. Green to echo the
+ * Posted chip / card accent. */
+.sectionCount {
+  flex-shrink: 0;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  color: #5ad07f;
+  background: color-mix(in srgb, #3ba55d 16%, var(--app-bg-input));
+  border: 1px solid color-mix(in srgb, #3ba55d 38%, var(--app-border));
+}
+
 /* ── Card ───────────────────────────────────────────────────────────────── */
 .card {
   position: relative;

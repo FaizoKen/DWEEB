@@ -89,6 +89,11 @@ interface CardData {
   savedAt?: number;
   /** Continue / saved only — the small pill shown in place of a category. */
   badge?: string;
+  /** Posted only — the home server, used to bucket posted cards under per-server
+   *  section headers. `guildId` is the stable group key; `guildName` is the
+   *  label. Either can be absent on older records / non-guild webhooks. */
+  guildId?: string;
+  guildName?: string;
   onPick: () => void;
   /** Saved only — remove this entry; drives the card's delete affordance. */
   onDelete?: () => void;
@@ -262,6 +267,8 @@ export function TemplateGallery() {
           accent: ACCENT_GREEN,
           savedAt: entry.postedAt,
           badge: "Posted",
+          guildId: entry.guildId,
+          guildName: entry.guildName,
           searchText: collectSearchText(message),
           onPick: () => {
             // Restore content *and* origin — the Send panel reads the origin and
@@ -367,6 +374,29 @@ export function TemplateGallery() {
     }
     return q ? base.filter((c) => haystack(c).includes(q)) : base;
   }, [filter, query, continueCard, postedCards, savedCards, templateCards]);
+
+  // On the dedicated Posted tab (idle, not searching), bucket the cards under
+  // per-server headers — "where did I post this" is how sent messages are
+  // actually remembered. Only when 2+ distinct servers are present; a single
+  // header would just be noise, so we fall back to the flat grid. Records with
+  // no resolved server collect under one "Other servers" bucket rather than
+  // vanishing. Map insertion order keeps sections newest-post-first (shown is
+  // already newest-first), matching the flat view's ordering.
+  const postedSections = useMemo(() => {
+    if (filter !== POSTED_FILTER || query.trim()) return null;
+    const groups = new Map<string, { key: string; name: string; cards: CardData[] }>();
+    for (const c of shown) {
+      const key = c.guildId ?? c.guildName ?? "__unknown";
+      let group = groups.get(key);
+      if (!group) {
+        group = { key, name: c.guildName ?? "Other servers", cards: [] };
+        groups.set(key, group);
+      }
+      group.cards.push(c);
+    }
+    if (groups.size < 2) return null;
+    return [...groups.values()];
+  }, [filter, query, shown]);
 
   const startBlank = () => {
     clearAll();
@@ -495,6 +525,22 @@ export function TemplateGallery() {
                 >
                   Clear filters
                 </button>
+              </div>
+            ) : postedSections ? (
+              <div className={styles.sections}>
+                {postedSections.map((section) => (
+                  <section key={section.key} className={styles.section}>
+                    <div className={styles.sectionHeader}>
+                      <span className={styles.sectionName}>{section.name}</span>
+                      <span className={styles.sectionCount}>{section.cards.length}</span>
+                    </div>
+                    <div className={styles.grid}>
+                      {section.cards.map((c) => (
+                        <GalleryCard key={c.key} card={c} />
+                      ))}
+                    </div>
+                  </section>
+                ))}
               </div>
             ) : (
               <div className={styles.grid}>
