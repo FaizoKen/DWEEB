@@ -82,6 +82,33 @@ pub struct Config {
     /// keep resolving); bounds worst-case disk usage under abuse.
     pub shortlink_max_entries: u64,
 
+    // ── Scheduled posts ────────────────────────────────────────────────────
+    /// Master switch for scheduled posts. False ⇒ the `/api/schedules`
+    /// endpoints answer 501 and the worker never starts (the builder hides the
+    /// tab). Default on — the feature needs no secret beyond SESSION_SECRET,
+    /// which is already required for sealing.
+    pub schedules_enabled: bool,
+    /// SQLite file the scheduled posts live in. Must sit on persistent storage —
+    /// a schedule is a promise to post later, so it has to survive a redeploy.
+    pub schedule_db_path: String,
+    /// Creation answers 503 once this many schedules are stored; bounds disk use.
+    pub schedule_max_entries: u64,
+    /// Max active/paused schedules per destination webhook (anti-spam).
+    pub schedule_max_per_webhook: u64,
+    /// How far ahead a first run may be scheduled (days). Default 366.
+    pub schedule_max_horizon_days: u64,
+    /// How often the delivery worker wakes to fire due schedules (seconds).
+    pub scheduler_tick_secs: u64,
+    /// How long a claimed (`sending`) row is leased before a crashed worker's
+    /// claim is reclaimed and retried (seconds).
+    pub scheduler_lease_secs: i64,
+    /// Max schedules fired per worker tick — bounds the Discord call rate after
+    /// a backlog.
+    pub scheduler_batch: usize,
+    /// Days a completed/failed schedule is kept (for the management list) before
+    /// the worker sweeps it.
+    pub schedule_retention_days: i64,
+
     // ── Permanent component slots ──────────────────────────────────────────
     /// Base URL of the interactions dispatcher's internal API (compose-network
     /// address, e.g. `http://dispatcher:8095`). Together with
@@ -156,6 +183,17 @@ impl Config {
             opt_env("SHORTLINK_DB_PATH").unwrap_or_else(|| "shortlinks.db".to_string());
         let shortlink_max_entries = parse_or("SHORTLINK_MAX_ENTRIES", 50_000);
 
+        let schedules_enabled = parse_bool("SCHEDULES_ENABLED", true);
+        let schedule_db_path =
+            opt_env("SCHEDULE_DB_PATH").unwrap_or_else(|| "schedules.db".to_string());
+        let schedule_max_entries = parse_or("SCHEDULE_MAX_ENTRIES", 5_000);
+        let schedule_max_per_webhook = parse_or("SCHEDULE_MAX_PER_WEBHOOK", 25);
+        let schedule_max_horizon_days = parse_or("SCHEDULE_MAX_HORIZON_DAYS", 366);
+        let scheduler_tick_secs = parse_or("SCHEDULER_TICK_SECS", 15);
+        let scheduler_lease_secs = parse_or("SCHEDULER_LEASE_SECS", 120);
+        let scheduler_batch = parse_or("SCHEDULER_BATCH", 25);
+        let schedule_retention_days = parse_or("SCHEDULE_RETENTION_DAYS", 7);
+
         let dispatcher_url = opt_env("DISPATCHER_URL").map(|u| u.trim_end_matches('/').to_string());
         let dispatcher_token = opt_env("DISPATCHER_API_TOKEN");
 
@@ -181,6 +219,15 @@ impl Config {
             shortlink_ttl_days,
             shortlink_db_path,
             shortlink_max_entries,
+            schedules_enabled,
+            schedule_db_path,
+            schedule_max_entries,
+            schedule_max_per_webhook,
+            schedule_max_horizon_days,
+            scheduler_tick_secs,
+            scheduler_lease_secs,
+            scheduler_batch,
+            schedule_retention_days,
             dispatcher_url,
             dispatcher_token,
         })

@@ -95,6 +95,15 @@ services:
       # The short-link SQLite file must live on the proxy_data volume — a
       # short link promises 7 days, so it has to survive a redeploy.
       SHORTLINK_DB_PATH: ${SHORTLINK_DB_PATH:-/data/shortlinks.db}
+      # Scheduled posts live in their OWN SQLite file on the SAME proxy_data
+      # volume — a schedule is a promise to post later, so it must outlive a
+      # redeploy. The webhook URL + payload are sealed at rest under
+      # SESSION_SECRET and deleted once a schedule completes. A background worker
+      # fires due rows on a timer. Set SCHEDULES_ENABLED=false to disable the
+      # feature (the endpoints answer 501); the other SCHEDULE_*/SCHEDULER_* knobs
+      # (max entries, per-webhook cap, horizon, tick, lease, batch, retention)
+      # have sensible defaults — override in .env only to tune.
+      SCHEDULE_DB_PATH: ${SCHEDULE_DB_PATH:-/data/schedules.db}
     volumes:
       # The proxy's only state: the SQLite file with the opt-in share short
       # links (auto-expiring, default 7 days).

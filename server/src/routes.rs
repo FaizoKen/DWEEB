@@ -51,6 +51,8 @@ pub struct AppState {
     pub dispatcher: Option<Arc<DispatcherApi>>,
     /// Short-link store (see `shortlink.rs`); None when the feature is off.
     pub shortlinks: Option<Arc<ShortLinkStore>>,
+    /// Scheduled-post store (see `schedule.rs`); None when the feature is off.
+    pub schedules: Option<Arc<crate::schedule::ScheduleStore>>,
     /// Master key for encrypting/decrypting cookies.
     pub key: Key,
 }

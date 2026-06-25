@@ -19,6 +19,10 @@ mod discord;
 mod error;
 mod ratelimit;
 mod routes;
+mod schedule;
+mod schedule_rule;
+mod schedule_validate;
+mod schedule_worker;
 mod seal;
 mod session;
 mod shortlink;
@@ -44,6 +48,9 @@ use crate::routes::{
     bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, emojis, health,
     list_guilds, permanent_add, permanent_list, permanent_reenable, permanent_remove, roles,
     webhook_create, webhook_delete, webhook_modify, webhooks_list, AppState, DispatcherApi,
+};
+use crate::schedule::{
+    schedule_create, schedule_delete, schedule_get, schedule_list, schedule_patch, ScheduleStore,
 };
 use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
 
@@ -201,6 +208,52 @@ async fn run() {
         });
     }
 
+    // Scheduled posts: a small SQLite file on the same persistent volume as the
+    // short links (a schedule is a promise to post later, so it must outlive a
+    // redeploy). Boot fails loudly if it can't be opened — a deployment that
+    // accepts schedules has to be able to keep them. When the store is present a
+    // delivery worker drains due rows on a timer (mirrors the self-role reaper).
+    let schedules = if config.schedules_enabled {
+        match ScheduleStore::open(
+            &config.schedule_db_path,
+            config.schedule_max_entries,
+            config.schedule_max_per_webhook,
+        ) {
+            Ok(store) => {
+                tracing::info!(db = %config.schedule_db_path, "scheduled posts enabled");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                eprintln!("schedule store error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(store) = &schedules {
+        // A dedicated client with a modest timeout: the worker is off the 3s
+        // interaction budget, but a hung POST mustn't hold a row's lease.
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .user_agent(concat!(
+                "dweeb-proxy-scheduler/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://github.com/FaizoKen/DWEEB)"
+            ))
+            .build()
+            .expect("failed to build scheduler HTTP client");
+        schedule_worker::spawn(
+            Arc::clone(store),
+            key.clone(),
+            http,
+            config.scheduler_tick_secs,
+            config.scheduler_lease_secs,
+            config.scheduler_batch,
+            config.schedule_retention_days,
+        );
+    }
+
     let state = AppState {
         discord: Arc::new(Discord::new(
             config.bot_token.clone(),
@@ -210,6 +263,7 @@ async fn run() {
         flight: Arc::new(crate::singleflight::SingleFlight::new()),
         dispatcher,
         shortlinks,
+        schedules,
         key,
         config: Arc::new(config),
     };
@@ -231,6 +285,24 @@ async fn run() {
             post(shortlink_create).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route("/api/shortlink/:id", get(shortlink_resolve))
+        // Scheduled posts (opt-in; webhook + payload sealed at rest, fired by a
+        // background worker). Create/list need only an optional session; per-row
+        // management is authorized by a manage token or the owning account. The
+        // body limit keeps the create/patch endpoints bounded well before JSON
+        // parsing (a maxed-out message plus envelope fits comfortably).
+        .route(
+            "/api/schedules",
+            get(schedule_list)
+                .post(schedule_create)
+                .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
+        .route(
+            "/api/schedules/:id",
+            get(schedule_get)
+                .patch(schedule_patch)
+                .delete(schedule_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))
         .route("/api/guilds/:guild_id/roles", get(roles))

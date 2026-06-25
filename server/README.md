@@ -55,9 +55,15 @@ be in.
 | POST   | `/api/guilds/:id/custom-apps/:application_id/webhook` | ✓ | `{ url }` — one-click `webhook.incoming` under that bot, using its stored secret |
 | POST   | `/api/shortlink`              | —    | `201 { id, expires_at }` — stores a share token for 7 days |
 | GET    | `/api/shortlink/:id`          | —    | `{ token }`, or 404 once expired/unknown |
+| POST   | `/api/schedules`              | opt. | `201 { id, manage_token, next_run_at }` — schedule a post (manage token returned once) |
+| GET    | `/api/schedules`              | ✓    | the signed-in user's schedules (cross-device) |
+| GET    | `/api/schedules/:id`          | 🎟/✓ | one schedule (masked + decrypted payload) |
+| PATCH  | `/api/schedules/:id`          | 🎟/✓ | edit / reschedule / pause / resume |
+| DELETE | `/api/schedules/:id`          | 🎟/✓ | cancel (hard-delete) |
 | POST   | `/internal/permanent/reenable` | 🔑  | `{ guild_id, channel_id, message_id }` → `202` — dispatcher-only; revives a never-expired message's TTL-disabled components via the webhook token |
 
 `✓` = requires the session cookie **and** membership of `:id`.
+`🎟` = a per-schedule **manage token** (`X-Manage-Token` header), OR the signed-in account that created it. `opt.` = an optional session stamps the owner for cross-device listing.
 `🔑` = service-to-service; no user session, gated by the shared `DISPATCHER_API_TOKEN` (`Authorization: Bearer …`). Called by the interactions dispatcher when its "Never expire" button grants a slot; the proxy finds the DWEEB webhook that posted the message and clears the `disabled` flags an expired click stamped on — no bot token, the webhook token does the edit.
 
 ### Short links
@@ -76,6 +82,38 @@ require a login — so it's guarded by the per-IP rate limiter, a strict
 share-token shape + size check (this can't be used as a general blob store),
 and a total-row cap (`SHORTLINK_MAX_ENTRIES`). Set `SHORTLINK_TTL_DAYS=0` to
 disable the feature (the endpoints answer 501).
+
+### Scheduled posts
+
+The opt-in **schedule** lets the builder post a message later — once, or on a
+recurring wall-clock cadence (daily / weekly / monthly at a fixed local time in a
+chosen IANA timezone). A scheduler can't live in the browser (it's closed when
+the post must fire), so the proxy holds the destination **webhook URL and the
+message payload** in its own SQLite file (`SCHEDULE_DB_PATH`, on the `proxy_data`
+volume — a schedule must survive a redeploy). Both are **sealed at rest**
+(AES-256-GCM under `SESSION_SECRET`, the same `seal.rs` used for custom-bot
+secrets), so a leak of this file alone yields neither a usable webhook nor the
+message. Completed/failed rows are swept after `SCHEDULE_RETENTION_DAYS`.
+
+A background **worker** (`schedule_worker.rs`) drains due rows on a timer
+(`SCHEDULER_TICK_SECS`), modelled on the self-role temporary-role reaper: a
+bounded batch per tick, an atomic `active → sending` claim under a lease so a
+crashed worker's rows are reclaimed (delivery is **at-least-once**), and a
+transient-vs-permanent failure split — 429/5xx/network back off and retry; a 4xx
+(deleted webhook, invalid body) stops the series with the reason recorded.
+Recurring rules are computed with `chrono-tz` (DST-correct), and the *next* run
+is always taken strictly after **now**, so a long outage yields one catch-up
+post, not a burst.
+
+Ownership is hybrid: every row carries an unguessable **manage token** (only its
+SHA-256 is stored) the browser keeps in `localStorage`, so an anonymous creator
+can manage their schedules with no account; when the creator was signed in the
+row is also stamped with their Discord user id for a cross-device list. Either
+authorizes a read/edit/cancel. Abuse is bounded by the per-IP rate limiter, a
+per-webhook cap (`SCHEDULE_MAX_PER_WEBHOOK`), a total-row cap
+(`SCHEDULE_MAX_ENTRIES`), a horizon (`SCHEDULE_MAX_HORIZON_DAYS`), and a payload
+size limit. Set `SCHEDULES_ENABLED=false` to disable the feature (the endpoints
+answer 501 and the worker never starts).
 
 ### Creating a webhook (`webhook.incoming`)
 

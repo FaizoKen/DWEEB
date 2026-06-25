@@ -305,6 +305,39 @@ as before). Adding the bit to the shared bot invite means existing servers must
 re-add the bot (Discord replaces a bot's permissions on re-invite) before the
 picker lights up.
 
+## Scheduling messages
+
+The **Schedule** tab (in *Share / Send / Export*, when a proxy is configured)
+posts the current message **later** — one time, or on a repeating wall-clock
+schedule: daily, on chosen weekdays, or on a day of the month, at a fixed time in
+an IANA timezone you pick. Because the schedule is computed in that timezone, a
+"9:00 AM" post stays at 9:00 across daylight-saving changes.
+
+Scheduling is the one feature that *can't* be browser-only: your browser is
+closed when the post needs to fire, so the proxy has to hold the destination
+webhook URL and the message until then. It's opt-in and treated accordingly —
+both are **sealed at rest** (AES-256-GCM) and the schedule is **deleted once it
+finishes**. For the most sensitive announcements, send manually instead.
+
+- **Reliable delivery.** A background worker fires due posts on a timer with an
+  atomic claim (no double-sends), exponential-backoff retries on transient
+  errors (rate limits, network blips), and a clear stop with the reason recorded
+  if the webhook is deleted. A long outage produces a single catch-up post, never
+  a flood.
+- **Hybrid ownership.** No account needed: creating a schedule returns a secret
+  *manage token* kept in this browser (like your saved webhooks). Sign in and
+  your schedules also sync across devices.
+- **Manage them inline.** The same tab lists your schedules with their next run,
+  status, and any last error — pause/resume, cancel, or load a scheduled message
+  back into the editor.
+- **Limitation.** Messages with *uploaded files* can't be scheduled (the file
+  data only lives in your browser) — use image/media URLs instead. The panel
+  blocks this with a clear note.
+
+Self-hosters: see [`server/README.md`](server/README.md#scheduled-posts) for the
+worker, the at-rest sealing, and the `SCHEDULE_*` knobs (`SCHEDULES_ENABLED=false`
+turns it off).
+
 ## AI assistant
 
 The **AI** panel lets you describe a message in plain language and have a

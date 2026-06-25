@@ -30,6 +30,14 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # `Duration` for cookie max-age. Pinned to the same 0.3 line the `cookie` crate
 # (via axum-extra) uses, so the types unify to one version.
 time = { version = "0.3", default-features = false }
+# Wall-clock recurrence for scheduled posts. `chrono` does the calendar maths;
+# `chrono-tz` carries the IANA tz database so "every weekday at 9am New York"
+# stays correct across DST. `clock`/`std` only — no `wasmbind`/`oldtime`.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
+# SHA-256 of a schedule's manage token, so the DB stores only a hash (a leak of
+# the file never yields a usable bearer capability).
+sha2 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Optional shared cache + rate-limit backend for multi-instance deployments.
 # Minimal feature set: an async (tokio) connection manager with auto-reconnect.
