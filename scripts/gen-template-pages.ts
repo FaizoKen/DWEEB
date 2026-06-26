@@ -24,6 +24,8 @@ import { TEMPLATES } from "@/data/presets";
 import { renderMessageHtml } from "./seo/render-message";
 import { resolveSeo, SITE, TEMPLATES_LASTMOD, type ResolvedSeo } from "./seo/content";
 import { renderIndexPage, renderTemplatePage } from "./seo/layout";
+import { resolveAllFeatures, FEATURES_LASTMOD } from "./seo/features";
+import { renderFeaturePage, renderFeaturesIndexPage } from "./seo/features-layout";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
@@ -112,6 +114,23 @@ async function main(): Promise<void> {
   // /templates index.
   await writePage(join("templates", "index.html"), renderIndexPage(all));
 
+  // ── Feature pages (/features/<slug>/ + /features index) ──────────────────
+  const seoById = new Map(all.map((s) => [s.id, s]));
+  const features = resolveAllFeatures();
+  for (const feature of features) {
+    const previewTpl = feature.previewTemplateId ? byId.get(feature.previewTemplateId) : undefined;
+    const previewHtml = previewTpl ? renderMessageHtml(previewTpl.message) : null;
+    // Templates wired to this plugin (via pluginSlots) cross-link both ways.
+    const related = feature.pluginId
+      ? TEMPLATES.filter((t) => t.pluginSlots?.some((slot) => slot.pluginId === feature.pluginId))
+          .map((t) => seoById.get(t.id))
+          .filter((s): s is ResolvedSeo => !!s)
+      : [];
+    const html = renderFeaturePage(feature, previewHtml, related);
+    await writePage(join("features", feature.slug, "index.html"), html);
+  }
+  await writePage(join("features", "index.html"), renderFeaturesIndexPage(features));
+
   // Full sitemap: home + legal + templates index + every template page.
   const sitemap = buildSitemap([
     {
@@ -134,6 +153,18 @@ async function main(): Promise<void> {
       priority: "0.7",
     })),
     {
+      loc: `${SITE.origin}/features/`,
+      lastmod: FEATURES_LASTMOD,
+      changefreq: "weekly",
+      priority: "0.9",
+    },
+    ...features.map((f) => ({
+      loc: f.url,
+      lastmod: FEATURES_LASTMOD,
+      changefreq: "monthly",
+      priority: "0.7",
+    })),
+    {
       loc: `${SITE.origin}/privacy`,
       lastmod: LEGAL_LASTMOD,
       changefreq: "yearly",
@@ -149,7 +180,8 @@ async function main(): Promise<void> {
   await writeFile(join(DIST, "sitemap.xml"), sitemap, "utf8");
 
   console.log(
-    `[seo] generated ${all.length} template pages + /templates index + sitemap.xml (${all.length + 4} urls)`,
+    `[seo] generated ${all.length} template pages + ${features.length} feature pages ` +
+      `+ /templates & /features indexes + sitemap.xml (${all.length + features.length + 5} urls)`,
   );
 }
 

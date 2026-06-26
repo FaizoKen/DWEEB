@@ -20,26 +20,29 @@ import sharp from "sharp";
 
 import { TEMPLATES } from "@/data/presets";
 import { resolveSeo } from "./seo/content";
+import { resolveAllFeatures } from "./seo/features";
 import { ogCardSvg, type OgCardData } from "./seo/og-card";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT_DIR = join(ROOT, "public", "templates-og");
+const OUT_TEMPLATES = join(ROOT, "public", "templates-og");
+const OUT_FEATURES = join(ROOT, "public", "features-og");
 const ACCENT_BLURPLE = 0x5865f2;
 
-async function writeCard(slug: string, card: OgCardData): Promise<void> {
+async function writeCard(dir: string, slug: string, card: OgCardData): Promise<void> {
   const png = await sharp(Buffer.from(ogCardSvg(card)), { density: 384 })
     .resize(1200, 630)
     .png({ compressionLevel: 9 })
     .toBuffer();
-  await writeFile(join(OUT_DIR, `${slug}.png`), png);
+  await writeFile(join(dir, `${slug}.png`), png);
 }
 
 async function main(): Promise<void> {
-  await mkdir(OUT_DIR, { recursive: true });
+  await mkdir(OUT_TEMPLATES, { recursive: true });
+  await mkdir(OUT_FEATURES, { recursive: true });
 
   for (const template of TEMPLATES) {
     const seo = resolveSeo(template);
-    await writeCard(seo.slug, {
+    await writeCard(OUT_TEMPLATES, seo.slug, {
       title: seo.h1,
       category: template.category,
       accent: template.accent ?? ACCENT_BLURPLE,
@@ -47,14 +50,32 @@ async function main(): Promise<void> {
   }
 
   // The /templates index card.
-  await writeCard("templates", {
+  await writeCard(OUT_TEMPLATES, "templates", {
     title: "Discord Message Templates",
     category: `${TEMPLATES.length} free templates`,
     accent: ACCENT_BLURPLE,
     kicker: "Welcome · Rules · Announcements · Giveaways · Tickets & more",
   });
 
-  console.log(`[seo] wrote ${TEMPLATES.length + 1} OG cards to public/templates-og/`);
+  // Per-feature cards + the /features index card.
+  const features = resolveAllFeatures();
+  for (const feature of features) {
+    await writeCard(OUT_FEATURES, feature.slug, {
+      title: feature.h1,
+      category: feature.category,
+      accent: feature.accent,
+    });
+  }
+  await writeCard(OUT_FEATURES, "features", {
+    title: "DWEEB Features",
+    category: `${features.length} ways to do more`,
+    accent: ACCENT_BLURPLE,
+    kicker: "Self roles · Tickets · Giveaways · Forms · Scheduled posts & more",
+  });
+
+  console.log(
+    `[seo] wrote ${TEMPLATES.length + 1} template + ${features.length + 1} feature OG cards`,
+  );
 }
 
 await main();

@@ -22,12 +22,12 @@ const TEMPLATES_INDEX_PATH = "/templates/";
 const TEMPLATES_INDEX_URL = `${SITE.origin}${TEMPLATES_INDEX_PATH}`;
 
 /** Escape for an HTML attribute value (double-quoted). */
-function attr(s: string): string {
+export function attr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 }
 
 /** Serialize a JSON-LD object, neutralising any `</script>` break-out. */
-function jsonLd(data: unknown): string {
+export function jsonLd(data: unknown): string {
   const json = JSON.stringify(data).replace(/</g, "\\u003c");
   return `<script type="application/ld+json">${json}</script>`;
 }
@@ -55,7 +55,7 @@ const HOWTO_STEPS = [
  * Wrap a head/body in the shared document shell: meta, canonical, OG/Twitter,
  * favicons, CSP, and the inlined stylesheet.
  */
-function htmlDocument(opts: {
+export function htmlDocument(opts: {
   title: string;
   description: string;
   canonical: string;
@@ -113,7 +113,8 @@ function htmlDocument(opts: {
     <header class="site">
       <a class="brand" href="/" aria-label="DWEEB home">DWEEB</a>
       <nav class="site-nav">
-        <a href="${TEMPLATES_INDEX_PATH}">All templates</a>
+        <a href="/features/">Features</a>
+        <a href="${TEMPLATES_INDEX_PATH}">Templates</a>
         <a class="nav-cta" href="/">Open the builder</a>
       </nav>
     </header>
@@ -125,6 +126,7 @@ function htmlDocument(opts: {
       </p>
       <p class="muted">
         <a href="/">Open the builder</a> ·
+        <a href="/features/">Features</a> ·
         <a href="${TEMPLATES_INDEX_PATH}">All templates</a> ·
         <a href="/privacy">Privacy</a> ·
         <a href="/terms">Terms</a> ·
@@ -135,7 +137,7 @@ function htmlDocument(opts: {
 </html>`;
 }
 
-function breadcrumbLd(trail: { name: string; url: string }[]): object {
+export function breadcrumbLd(trail: { name: string; url: string }[]): object {
   return {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
@@ -148,7 +150,7 @@ function breadcrumbLd(trail: { name: string; url: string }[]): object {
   };
 }
 
-function breadcrumbNav(trail: { name: string; url?: string }[]): string {
+export function breadcrumbNav(trail: { name: string; url?: string }[]): string {
   const parts = trail.map((t, i) => {
     const last = i === trail.length - 1;
     const label = escapeHtml(t.name);
@@ -158,7 +160,7 @@ function breadcrumbNav(trail: { name: string; url?: string }[]): string {
   return `<nav class="crumbs" aria-label="Breadcrumb">${parts.join('<span class="crumb-sep" aria-hidden="true">›</span>')}</nav>`;
 }
 
-function faqSection(faq: FaqEntry[]): string {
+export function faqSection(faq: FaqEntry[]): string {
   const items = faq
     .map(
       (f) =>
@@ -168,7 +170,7 @@ function faqSection(faq: FaqEntry[]): string {
   return `<section class="block"><h2>Frequently asked questions</h2>${items}</section>`;
 }
 
-function faqLd(faq: FaqEntry[]): object {
+export function faqLd(faq: FaqEntry[]): object {
   return {
     "@context": "https://schema.org",
     "@type": "FAQPage",
