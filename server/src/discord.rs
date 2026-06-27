@@ -441,10 +441,9 @@ impl Discord {
             .await
             .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
         if resp.status().is_success() {
-            return resp
-                .json::<Value>()
-                .await
-                .map_err(|e| AppError::BadGateway(format!("unexpected response from Discord: {e}")));
+            return resp.json::<Value>().await.map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
         }
         Err(webhook_error_from(resp).await)
     }

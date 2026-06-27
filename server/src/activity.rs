@@ -241,14 +241,17 @@ pub async fn activity_post(
                 .discord
                 .create_webhook(&channel_id, "DWEEB", None, Some(&reason))
                 .await?;
-            let token = w
-                .token
-                .ok_or_else(|| AppError::BadGateway("Discord created a webhook without a token.".into()))?;
+            let token = w.token.ok_or_else(|| {
+                AppError::BadGateway("Discord created a webhook without a token.".into())
+            })?;
             (w.id, token)
         }
     };
 
-    let created = st.discord.execute_webhook(&webhook_id, &token, &body.message).await?;
+    let created = st
+        .discord
+        .execute_webhook(&webhook_id, &token, &body.message)
+        .await?;
     let message_id = created
         .get("id")
         .and_then(Value::as_str)
@@ -320,10 +323,12 @@ impl ActivityRooms {
         if !map.contains_key(instance) && map.len() >= MAX_ROOMS {
             return None;
         }
-        let room = map.entry(instance.to_string()).or_insert_with(|| RoomState {
-            tx: broadcast::channel(BROADCAST_CAP).0,
-            members: HashMap::new(),
-        });
+        let room = map
+            .entry(instance.to_string())
+            .or_insert_with(|| RoomState {
+                tx: broadcast::channel(BROADCAST_CAP).0,
+                members: HashMap::new(),
+            });
         let rx = room.tx.subscribe();
         let entry = room.members.entry(me.id.clone()).or_insert((me.clone(), 0));
         entry.1 += 1;
@@ -397,7 +402,9 @@ pub async fn activity_room(
         return Err(bad_request("invalid instance id"));
     }
     if q.token.trim().is_empty() || !is_snowflake(&q.guild) {
-        return Err(AppError::Unauthorized("missing activity credentials".into()));
+        return Err(AppError::Unauthorized(
+            "missing activity credentials".into(),
+        ));
     }
     let session = resolve_bearer(&st, q.token.trim()).await?;
     authorize_member_session(&st, session.clone(), &q.guild).await?;
