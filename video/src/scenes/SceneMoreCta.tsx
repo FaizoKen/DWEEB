@@ -16,7 +16,7 @@ import { Mascot } from "../components/Mascot";
 import { Wordmark } from "../components/Wordmark";
 import { COLORS } from "../theme";
 import { INTER } from "../fonts";
-import { TICK } from "../timeline";
+import { TICK, RISER, IMPACT } from "../timeline";
 
 const CTA_AT = 104;
 const TYPE_FROM = 176;
@@ -68,14 +68,15 @@ const SUB = { x: 960, y: 818 };
 
 export const SceneMoreCta: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
+  const vertical = height > width;
 
   const moreOut = interpolate(frame, [CTA_AT - 16, CTA_AT], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   const ctaIn = interpolate(frame, [CTA_AT - 4, CTA_AT + 12], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
 
   // Camera: drift+push through the feature chips, then settle on the lockup, then
   // push into the Google search bar as the query types, then ease back to rest.
-  const shots: Shot[] = [
+  const shotsH: Shot[] = [
     { f: 0, x: 960, y: 500, s: 0.95 },
     { f: CTA_AT - 6, x: 960, y: 480, s: 1.0 },
     { f: CTA_AT + 14, x: 960, y: 470, s: 0.95, ease: Easing.bezier(0.4, 0, 0.1, 1) },
@@ -84,15 +85,30 @@ export const SceneMoreCta: React.FC = () => {
     { f: 250, x: 960, y: 590, s: 0.9, ease: Easing.bezier(0.4, 0, 0.1, 1) },
     { f: 294, x: 960, y: 590, s: 0.9 },
   ];
+  // Portrait: both beats are centred vertical stacks, so just frame them upright
+  // and push into the search bar for the CTA.
+  const shotsV: Shot[] = [
+    { f: 0, x: 960, y: 520, s: 1.0 },
+    { f: CTA_AT - 6, x: 960, y: 520, s: 1.04 },
+    { f: CTA_AT + 14, x: 960, y: 540, s: 0.92, ease: Easing.bezier(0.4, 0, 0.1, 1) },
+    { f: TYPE_FROM - 10, x: 960, y: 560, s: 0.95 },
+    { f: TYPE_FROM + 18, x: 960, y: 716, s: 1.25 },
+    { f: 250, x: 960, y: 600, s: 0.95, ease: Easing.bezier(0.4, 0, 0.1, 1) },
+    { f: 294, x: 960, y: 600, s: 0.95 },
+  ];
+  const shots = vertical ? shotsV : shotsH;
 
   return (
     <AbsoluteFill>
       <Background glow="dual" />
 
       <Camera shots={shots} drift={2} blur={1}>
-        {/* Beat A — "it's a whole toolkit" */}
+        {/* Beat A — "it's a whole toolkit". Anchored to the fixed 1920×1080 world
+            box (NOT inset:0 / the composition size) so its flex-centred content
+            lands at world (960,540) in both the 16:9 and 9:16 cuts — otherwise the
+            portrait comp centres it at x≈540 and the camera (aimed at x960) clips it. */}
         {frame < CTA_AT + 4 && (
-          <div style={{ position: "absolute", inset: 0, opacity: moreOut, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 44 }}>
+          <div style={{ position: "absolute", left: 0, top: 0, width: 1920, height: 1080, opacity: moreOut, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 44 }}>
             {(() => {
               const head = spring({ frame: frame - 2, fps, config: { damping: 18, mass: 0.7 } });
               return (
@@ -107,7 +123,7 @@ export const SceneMoreCta: React.FC = () => {
               );
             })()}
 
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 15, maxWidth: 1280 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 15, maxWidth: vertical ? 960 : 1280 }}>
               {FEATURES.map((f, i) => {
                 const p = spring({ frame: frame - 16 - i * 3.5, fps, config: { damping: 14, mass: 0.6, stiffness: 130 } });
                 const float = Math.sin((frame + i * 30) / 26) * 4;
@@ -145,6 +161,29 @@ export const SceneMoreCta: React.FC = () => {
         {/* Beat B — CTA */}
         {frame >= CTA_AT - 6 && <Cta opacity={ctaIn} />}
       </Camera>
+
+      {/* Impact bloom — a quick blurple flash on the CTA hit (screen level, full
+          frame) that decays in ~half a second; reinforces the audio impact. */}
+      {frame >= CTA_AT && frame < CTA_AT + 16 && (
+        <AbsoluteFill
+          style={{
+            background: `radial-gradient(70% 60% at 50% 46%, ${COLORS.blurple}, transparent 70%)`,
+            opacity: interpolate(frame, [CTA_AT, CTA_AT + 3, CTA_AT + 16], [0, 0.5, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }),
+            mixBlendMode: "screen",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
+      {/* Riser sweeps up over the feature chips and resolves exactly on the CTA
+          reveal; the impact then lands the climax (the music bed has no built-in
+          hit, so this is what makes the ending actually punch). */}
+      <Sequence from={CTA_AT - 36} durationInFrames={36}>
+        <Audio src={staticFile(RISER)} volume={0.26} />
+      </Sequence>
+      <Sequence from={CTA_AT} durationInFrames={45}>
+        <Audio src={staticFile(IMPACT)} volume={0.34} />
+      </Sequence>
 
       {/* type ticks */}
       {QUERY.split("").map((_, i) => (

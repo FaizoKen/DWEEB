@@ -59,7 +59,10 @@ export const SceneChannel: React.FC = () => {
   // Camera: push in on the bot's identity → reframe to the channel header → ease
   // back for the whole message → track the cursor to the button and punch in on
   // the click + the reply that appears.
-  const shots: Shot[] = [
+  const { width, height } = useVideoConfig();
+  const vertical = height > width;
+
+  const shotsH: Shot[] = [
     { f: 0, x: 960, y: 470, s: 0.92 },
     { f: 24, x: 900, y: 300, s: 1.12 },
     { f: 95, x: 960, y: 250, s: 1.06 },
@@ -68,6 +71,19 @@ export const SceneChannel: React.FC = () => {
     { f: CLICK_AT + 26, x: 900, y: 480, s: 1.08 },
     { f: 259, x: 900, y: 480, s: 1.08 },
   ];
+  // Portrait: the message card is ~1200 wide, so it fits the width nicely. Push
+  // onto the bot identity, up to the channel header, back to the whole card,
+  // then punch in on the button + the reply.
+  const shotsV: Shot[] = [
+    { f: 0, x: 860, y: 390, s: 0.84 },
+    { f: 24, x: 640, y: 330, s: 1.1 },
+    { f: 95, x: 720, y: 300, s: 1.02 },
+    { f: 140, x: 780, y: 410, s: 0.98, ease: Easing.bezier(0.4, 0, 0.1, 1) },
+    { f: CLICK_AT, x: 600, y: 440, s: 1.12 },
+    { f: CLICK_AT + 26, x: 760, y: 500, s: 1.0 },
+    { f: 259, x: 760, y: 500, s: 1.0 },
+  ];
+  const shots = vertical ? shotsV : shotsH;
 
   return (
     <AbsoluteFill>

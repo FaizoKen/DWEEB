@@ -21,6 +21,8 @@ export const POP = "audio/pop.wav";
 export const CLICK = "audio/click.wav";
 export const TICK = "audio/tick.wav";
 export const CHIME = "audio/chime.wav";
+export const RISER = "audio/riser.wav";
+export const IMPACT = "audio/impact.wav";
 
 // Each scene leads its VO line by a few frames, then runs until the next line
 // leads in. Derived from the manifest so re-recording the VO re-syncs the cuts.

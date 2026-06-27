@@ -19,7 +19,8 @@ export const Caption: React.FC<{
   accent?: string;
 }> = ({ parts, delay = 0, out, accent = COLORS.green }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
+  const vertical = height > width;
 
   const words: Word[] = [];
   for (const p of parts) {
@@ -47,12 +48,14 @@ export const Caption: React.FC<{
     <div
       style={{
         position: "absolute",
-        bottom: 84,
+        // Raise off the very bottom in portrait so the caption sits in the safe
+        // zone above platform UI (Reels/Shorts/TikTok chrome).
+        bottom: vertical ? 300 : 84,
         left: 0,
         right: 0,
         display: "flex",
         justifyContent: "center",
-        padding: "0 160px",
+        padding: vertical ? "0 40px" : "0 160px",
         opacity,
         transform: `translateY(${interpolate(box, [0, 1], [40, 0])}px)`,
         zIndex: 40,
@@ -63,14 +66,17 @@ export const Caption: React.FC<{
           display: "flex",
           alignItems: "center",
           gap: 18,
-          background: "rgba(10,11,15,0.72)",
+          // Solid-enough fill to carry contrast on its own: Remotion's headless
+          // ANGLE renderer can silently drop backdrop-filter, so the readability
+          // must not depend on the blur — the blur is a bonus when supported.
+          background: "rgba(10,11,15,0.88)",
           backdropFilter: "blur(10px)",
           WebkitBackdropFilter: "blur(10px)",
           border: `1px solid ${COLORS.border}`,
           borderRadius: 18,
           padding: "16px 30px 16px 26px",
           boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
-          maxWidth: 1480,
+          maxWidth: vertical ? 1000 : 1480,
         }}
       >
         <div
@@ -87,7 +93,7 @@ export const Caption: React.FC<{
           style={{
             fontFamily: INTER,
             fontWeight: 600,
-            fontSize: 38,
+            fontSize: vertical ? 34 : 38,
             lineHeight: 1.3,
             color: COLORS.text,
             display: "flex",

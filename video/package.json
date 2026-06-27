@@ -5,9 +5,12 @@
   "description": "Production promo video for DWEEB, built with Remotion.",
   "scripts": {
     "audio": "node scripts/generate-audio.mjs",
+    "sfx": "node scripts/generate-sfx.mjs",
     "studio": "remotion studio src/index.ts",
     "render": "remotion render src/index.ts DweebPromo out/dweeb-promo.mp4 --concurrency 4",
-    "still": "remotion still src/index.ts DweebPromo out/cover.png --frame 200"
+    "render:vertical": "remotion render src/index.ts DweebPromoVertical out/dweeb-promo-vertical.mp4 --concurrency 4",
+    "still": "remotion still src/index.ts DweebPromo out/cover.png --frame 1050",
+    "still:vertical": "remotion still src/index.ts DweebPromoVertical out/cover-vertical.png --frame 1050"
   },
   "dependencies": {
     "@remotion/cli": "4.0.290",

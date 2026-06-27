@@ -33,15 +33,27 @@ export const SceneOpening: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
+  const { width, height } = useVideoConfig();
+  const vertical = height > width;
+
   const mascot = spring({ frame: frame - 2, fps, config: { damping: 12, mass: 0.8 } });
   const line = spring({ frame: frame - 64, fps, config: { damping: 18, mass: 0.7 } });
 
-  const shots: Shot[] = [
+  const shotsH: Shot[] = [
     { f: 0, x: MASCOT.x, y: MASCOT.y, s: 1.22 },
     { f: 28, x: 960, y: 520, s: 1.0, ease: Easing.bezier(0.2, 0, 0.1, 1) },
     { f: 80, x: 960, y: 540, s: 1.03 },
     { f: 128, x: 960, y: 548, s: 1.05 },
   ];
+  // Portrait: the lockup is already a vertical stack, so we just push in tighter
+  // and centre on it.
+  const shotsV: Shot[] = [
+    { f: 0, x: MASCOT.x, y: MASCOT.y, s: 1.5 },
+    { f: 28, x: 960, y: 560, s: 1.0, ease: Easing.bezier(0.2, 0, 0.1, 1) },
+    { f: 80, x: 960, y: 575, s: 1.03 },
+    { f: 128, x: 960, y: 585, s: 1.05 },
+  ];
+  const shots = vertical ? shotsV : shotsH;
 
   return (
     <AbsoluteFill>

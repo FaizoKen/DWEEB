@@ -58,7 +58,10 @@ export const SceneBuild: React.FC = () => {
   // Camera: establish → push to favour the editor as it builds (app still fills
   // the frame, so the live preview is always reacting on the right) → glide to
   // the preview and punch in → ease back to show both halves in sync.
-  const shots: Shot[] = [
+  const { width, height } = useVideoConfig();
+  const vertical = height > width;
+
+  const shotsH: Shot[] = [
     { f: 0, x: 960, y: 540, s: 0.95 },
     { f: 36, x: 880, y: 560, s: 1.12 },
     { f: 120, x: 880, y: 640, s: 1.12 },
@@ -67,6 +70,19 @@ export const SceneBuild: React.FC = () => {
     { f: 255, x: 960, y: 540, s: 1.0 },
     { f: 300, x: 960, y: 540, s: 1.0 },
   ];
+  // Portrait: the app is wide and short, so we can't show both halves legibly.
+  // Establish the whole app filling the width, push onto the editor pane as the
+  // tree builds, glide to the live preview, then pull back.
+  const shotsV: Shot[] = [
+    { f: 0, x: 960, y: 540, s: 0.6 },
+    { f: 36, x: 380, y: 540, s: 1.42 },
+    { f: 120, x: 380, y: 640, s: 1.42 },
+    { f: 150, x: 1245, y: 540, s: 1.4, ease: Easing.bezier(0.5, 0, 0.1, 1) },
+    { f: 215, x: 1245, y: 560, s: 1.42 },
+    { f: 255, x: 960, y: 540, s: 0.6 },
+    { f: 300, x: 960, y: 540, s: 0.6 },
+  ];
+  const shots = vertical ? shotsV : shotsH;
 
   return (
     <AbsoluteFill>

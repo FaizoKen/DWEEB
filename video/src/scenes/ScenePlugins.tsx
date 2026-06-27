@@ -22,26 +22,24 @@ import { CLICK } from "../timeline";
 
 const SELECT_AT = 150; // when the "Tickets" plugin gets chosen
 
-// App + grid geometry in world space.
-const APP = { x: 110, y: 90, w: 1700, h: 900 };
+// App + grid geometry in world space. The app hugs the content (2 rows + a
+// full-width banner) so the pulled-back shot frames it without dead space.
+const APP = { x: 110, y: 150, w: 1700, h: 620 };
 // Tickets tile (col 1, row 1) centre — derived from the layout below.
-const TICKETS = { x: 410, y: 300 };
+const TICKETS = { x: 410, y: 314 };
 
 type P = { name: string; desc: string; icon: keyof typeof ICONS; accent: string; more?: boolean };
 
+// Only plugins that actually ship today — no aspirational/vaporware tiles. The
+// "…and many more" banner carries the "growing library" promise honestly.
 const PLUGINS: P[] = [
   { name: "Tickets", desc: "Private support threads", icon: "tag", accent: COLORS.warning },
   { name: "Giveaways", desc: "Button-entry draws", icon: "gift", accent: COLORS.green },
-  { name: "Reaction roles", desc: "Roles from reactions", icon: "emoji", accent: COLORS.green },
   { name: "Self-roles", desc: "Click to get a role", icon: "grid", accent: COLORS.blurple },
-  { name: "Verification", desc: "One-tap member verify", icon: "shield", accent: COLORS.green },
-  { name: "Welcome", desc: "Greet every new member", icon: "wave", accent: COLORS.warning },
   { name: "Polls", desc: "Live vote tallies", icon: "bars", accent: COLORS.blurple },
-  { name: "Suggestions", desc: "Collect & upvote ideas", icon: "bulb", accent: COLORS.warning },
-  { name: "Applications", desc: "Staff & role forms", icon: "form", accent: COLORS.green },
+  { name: "Forms", desc: "Modal application forms", icon: "form", accent: COLORS.green },
   { name: "Quick replies", desc: "Canned button answers", icon: "chat", accent: COLORS.blurple },
-  { name: "Announcements", desc: "Rich, pingable embeds", icon: "megaphone", accent: COLORS.blurple },
-  { name: "…and many more", desc: "A growing library", icon: "plus", accent: COLORS.textSubtle, more: true },
+  { name: "…and many more", desc: "A growing library, one click away", icon: "plus", accent: COLORS.textSubtle, more: true },
 ];
 
 export const ScenePlugins: React.FC = () => {
@@ -55,14 +53,28 @@ export const ScenePlugins: React.FC = () => {
 
   // Camera: establish the library → push toward Tickets as it's named → punch in
   // on the click → ease back out to reveal the whole library ("…and many more").
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 500, s: 0.93 },
-    { f: 44, x: 820, y: 380, s: 1.08 },
-    { f: SELECT_AT, x: 810, y: 350, s: 1.14 },
-    { f: SELECT_AT + 32, x: 810, y: 350, s: 1.14 },
-    { f: SELECT_AT + 80, x: 980, y: 540, s: 0.92, ease: Easing.bezier(0.4, 0, 0.1, 1) },
-    { f: 260, x: 980, y: 540, s: 0.92 },
+  const { width, height } = useVideoConfig();
+  const vertical = height > width;
+
+  const shotsH: Shot[] = [
+    { f: 0, x: 960, y: 460, s: 0.95 },
+    { f: 44, x: 760, y: 360, s: 1.12 },
+    { f: SELECT_AT, x: 720, y: 330, s: 1.2 },
+    { f: SELECT_AT + 32, x: 720, y: 330, s: 1.2 },
+    { f: SELECT_AT + 80, x: 960, y: 460, s: 0.95, ease: Easing.bezier(0.4, 0, 0.1, 1) },
+    { f: 260, x: 960, y: 460, s: 0.95 },
   ];
+  // Portrait: fit the grid to width, push onto the Tickets tile as it's named,
+  // then pull back to reveal the whole library + the "…and many more" banner.
+  const shotsV: Shot[] = [
+    { f: 0, x: 960, y: 460, s: 0.6 },
+    { f: 44, x: 600, y: 340, s: 1.05 },
+    { f: SELECT_AT, x: 520, y: 320, s: 1.28 },
+    { f: SELECT_AT + 32, x: 520, y: 320, s: 1.28 },
+    { f: SELECT_AT + 80, x: 960, y: 460, s: 0.6, ease: Easing.bezier(0.4, 0, 0.1, 1) },
+    { f: 260, x: 960, y: 460, s: 0.6 },
+  ];
+  const shots = vertical ? shotsV : shotsH;
 
   return (
     <AbsoluteFill>
@@ -127,6 +139,43 @@ const PluginTile: React.FC<{ p: P; index: number; selected: boolean }> = ({ p, i
   const { fps } = useVideoConfig();
   const pop = spring({ frame: frame - 2 - index * 4, fps, config: { damping: 14, mass: 0.6, stiffness: 130 } });
   const selPop = spring({ frame: frame - SELECT_AT, fps, config: { damping: 12 } });
+
+  // Full-width "…and many more" banner spanning the whole row.
+  if (p.more) {
+    return (
+      <div
+        style={{
+          gridColumn: "1 / -1",
+          transform: `translateY(${interpolate(pop, [0, 1], [40, 0])}px) scale(${interpolate(pop, [0, 1], [0.92, 1])})`,
+          opacity: pop * 0.92,
+          background: "transparent",
+          border: `1px dashed ${COLORS.borderStrong}`,
+          borderRadius: 16,
+          padding: "16px 24px",
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+        }}
+      >
+        <div
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            border: `1px dashed ${COLORS.borderStrong}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          {ICONS.plus(COLORS.textMuted)}
+        </div>
+        <span style={{ fontFamily: INTER, fontWeight: 800, fontSize: 22, color: COLORS.textMuted }}>{p.name}</span>
+        <span style={{ fontFamily: INTER, fontSize: 16, color: COLORS.textSubtle }}>{p.desc}</span>
+      </div>
+    );
+  }
 
   return (
     <div

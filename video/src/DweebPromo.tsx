@@ -66,12 +66,17 @@ export const DweebPromo: React.FC = () => {
         </Sequence>
       ))}
 
-      {/* Transition whooshes at each cut (skip the first scene) */}
-      {defs.slice(1).map(({ key, start }) => (
-        <Sequence key={`w-${key}`} from={start - T} durationInFrames={22}>
-          <Audio src={staticFile(WHOOSH)} volume={0.5} />
-        </Sequence>
-      ))}
+      {/* Transition whooshes at each cut (skip the first scene). Volume tracks
+          the transition energy so kinetic "whip" cuts hit harder than gentle
+          "dissolve" settles — keeps the repeated swoosh from feeling flat. */}
+      {defs.slice(1).map(({ key, start, type }) => {
+        const vol = type === "whip" ? 0.6 : type === "push" ? 0.45 : 0.3;
+        return (
+          <Sequence key={`w-${key}`} from={start - T} durationInFrames={22}>
+            <Audio src={staticFile(WHOOSH)} volume={vol} />
+          </Sequence>
+        );
+      })}
 
       {/* Scenes overlap by T frames so the incoming scene's transition plays
           over the outgoing one. */}
