@@ -58,6 +58,7 @@ import {
 } from "@/core/schema";
 import {
   createActionRow,
+  createButton,
   createGalleryItem,
   createLinkButton,
   createSection,
@@ -565,7 +566,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       let node: TopLevelComponent;
       let selectId: EditorId;
       if (type === ComponentType.Button) {
-        const btn = createLinkButton();
+        const btn = createButton();
         const row: ActionRowComponent = { ...createActionRow(), components: [btn] };
         node = row;
         selectId = btn._id;
@@ -593,7 +594,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   addTopLevelSection(accessoryKind) {
     set((s) => {
       const base = createSection();
-      const accessory = accessoryKind === "button" ? createLinkButton() : base.accessory;
+      const accessory = accessoryKind === "button" ? createButton() : base.accessory;
       const section: SectionComponent = { ...base, accessory };
       return {
         ...pushHistory(s),
@@ -625,7 +626,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       let child: ContainerChild;
       let selectId: EditorId;
       if (type === ComponentType.Button) {
-        const btn = createLinkButton();
+        const btn = createButton();
         const row: ActionRowComponent = { ...createActionRow(), components: [btn] };
         child = row;
         selectId = btn._id;
@@ -652,7 +653,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   addContainerSection(containerId, accessoryKind) {
     set((s) => {
       const base = createSection();
-      const accessory = accessoryKind === "button" ? createLinkButton() : base.accessory;
+      const accessory = accessoryKind === "button" ? createButton() : base.accessory;
       const section: SectionComponent = { ...base, accessory };
       return {
         ...pushHistory(s),
@@ -681,7 +682,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   addRowButton(rowId) {
     set((s) => {
-      const btn = createLinkButton();
+      const btn = createButton();
       let nextSelection: EditorId | null = null;
       const message = updateById<ActionRowComponent>(s.message, rowId, (row) => {
         // Refuse if the row already holds a select — buttons and selects can't mix.
@@ -924,7 +925,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       ...pushHistory(s),
       message: updateById<SectionComponent>(s.message, sectionId, (sec) => {
         const accessory: SectionAccessory =
-          kind === "button" ? createLinkButton() : createThumbnail();
+          kind === "button" ? createButton() : createThumbnail();
         return { ...sec, accessory };
       }),
     }));

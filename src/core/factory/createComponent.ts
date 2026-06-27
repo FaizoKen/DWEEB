@@ -16,6 +16,7 @@ import {
   type ChannelSelectComponent,
   type ContainerComponent,
   type FileComponent,
+  type InteractiveButtonComponent,
   type LinkButtonComponent,
   type MediaGalleryComponent,
   type MediaGalleryItem,
@@ -41,6 +42,21 @@ export function createSeparator(): SeparatorComponent {
     type: ComponentType.Separator,
     divider: true,
     spacing: SeparatorSpacing.Small,
+  };
+}
+
+/**
+ * Default button when the user adds one: a blurple Primary button, matching
+ * Discord's own default. It's interactive (carries a `custom_id`) so it's ready
+ * to wire up to a plugin action — switch it to a Link in the inspector for a URL.
+ */
+export function createButton(): InteractiveButtonComponent {
+  return {
+    _id: newId(),
+    type: ComponentType.Button,
+    style: ButtonStyle.Primary,
+    label: "Click me",
+    custom_id: "btn_action",
   };
 }
 

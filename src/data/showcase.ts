@@ -82,7 +82,7 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
             _id: id(),
             type: ComponentType.Button,
             style: ButtonStyle.Link,
-            label: "Open ↗",
+            label: "Open",
             url: "https://dweeb.faizo.net",
           },
         },
