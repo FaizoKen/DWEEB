@@ -330,6 +330,22 @@
   border: 1px solid color-mix(in srgb, #3ba55d 38%, var(--app-border));
 }
 
+/* Plain emoji glyph for the All tab's "Your messages" / "Templates" section
+ * headers — these groups aren't server-scoped, so they skip the server icon. */
+.sectionLabelIcon {
+  flex-shrink: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* Neutral count pill for the All tab's section headers — the green sectionCount
+ * tint is tied to the Posted grouping, so override it back to neutral here. */
+.sectionCountNeutral {
+  color: var(--app-text-muted);
+  background: var(--app-bg-input);
+  border-color: var(--app-border);
+}
+
 /* ── Card ───────────────────────────────────────────────────────────────── */
 .card {
   position: relative;

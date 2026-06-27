@@ -41,7 +41,6 @@ import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { loadDraftMessage } from "@/core/state/draftStorage";
 import { attachEditorFields } from "@/core/serialization/normalize";
 import {
-  TEMPLATE_CATEGORIES,
   TEMPLATES,
   type MessageTemplate,
   type TemplateCategory,
@@ -59,10 +58,13 @@ import { useTemplateGalleryStore } from "./templateGalleryStore";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateGallery.module.css";
 
-/** Pseudo-categories that sit ahead of the template categories in the chip row. */
+/** The chip row's four buckets: everything, then the user's own posted/saved
+ *  messages, then all curated templates collapsed into one. Templates keep their
+ *  per-card category label, but the chips no longer split by category. */
 const SAVED_FILTER = "Saved" as const;
 const POSTED_FILTER = "Posted" as const;
-type Filter = "All" | typeof POSTED_FILTER | typeof SAVED_FILTER | TemplateCategory;
+const TEMPLATE_FILTER = "Template" as const;
+type Filter = "All" | typeof POSTED_FILTER | typeof SAVED_FILTER | typeof TEMPLATE_FILTER;
 
 const ACCENT_BLURPLE = 0x5865f2;
 const ACCENT_TEAL = 0x1abc9c;
@@ -72,6 +74,11 @@ const ACCENT_GREEN = 0x3ba55d;
  *  the dedicated "Posted" chip — keeps templates from being buried for someone
  *  who sends a lot. */
 const POSTED_IN_ALL = 6;
+
+/** How many saved cards surface in the "All" view before the rest are left to
+ *  the dedicated "Saved" chip — same buries-the-templates guard as posted, for
+ *  someone with a large library. */
+const SAVED_IN_ALL = 6;
 
 /** One renderable card — a continue draft, a posted message, a saved message,
  *  or a template. */
@@ -341,16 +348,16 @@ export function TemplateGallery() {
     [replaceMessage, closeGallery],
   );
 
-  // Chip row: All, then Posted and Saved (each only when there are any), then
-  // the template categories that actually have entries.
+  // Chip row: All, then Posted and Saved (each only when there are any), then a
+  // single Template chip for the whole curated set (categories no longer split).
   const filters: Filter[] = useMemo(
     () => [
       "All",
       ...(postedCards.length ? [POSTED_FILTER] : []),
       ...(savedCards.length ? [SAVED_FILTER] : []),
-      ...TEMPLATE_CATEGORIES.filter((c) => templateCards.some((t) => t.category === c)),
+      ...(templateCards.length ? [TEMPLATE_FILTER] : []),
     ],
-    [postedCards.length, savedCards.length, templateCards],
+    [postedCards.length, savedCards.length, templateCards.length],
   );
 
   // If the active filter disappears (e.g. last saved message removed), fall back
@@ -372,16 +379,19 @@ export function TemplateGallery() {
           // posted and saved included, not just templates — so nothing is hidden
           // behind a chip or the posted cap.
           [...(continueCard ? [continueCard] : []), ...postedCards, ...savedCards, ...templateCards]
-        : // Idle: recent activity first — the draft, then a capped slice of posted
-          // messages (so they don't bury the templates) — then the curated
-          // templates. Saved messages keep to their own chip, like a library.
+        : // Idle: recent activity first — the draft, then a capped slice of the
+          // user's own messages (posted, then saved) so they're reachable from
+          // All without burying the curated templates that follow. Each kind
+          // keeps its own chip for the full, uncapped list.
           [
             ...(continueCard ? [continueCard] : []),
             ...postedCards.slice(0, POSTED_IN_ALL),
+            ...savedCards.slice(0, SAVED_IN_ALL),
             ...templateCards,
           ];
     } else {
-      base = templateCards.filter((c) => c.category === filter);
+      // TEMPLATE_FILTER — the whole curated set, no per-category split.
+      base = templateCards;
     }
     return q ? base.filter((c) => haystack(c).includes(q)) : base;
   }, [filter, query, continueCard, postedCards, savedCards, templateCards]);
@@ -410,6 +420,26 @@ export function TemplateGallery() {
     }
     if (groups.size < 2) return null;
     return [...groups.values()];
+  }, [filter, query, shown]);
+
+  // On the All tab (idle, not searching), split the flat list into two labelled
+  // groups: the user's own work ("Your messages" — the draft, posted, and saved
+  // cards) above the curated set ("Templates"). Makes the divide between "pick up
+  // your own message" and "start from a DWEEB template" explicit. Only when the
+  // user actually has messages of their own; on a first visit (templates only) a
+  // lone "Templates" header would be noise, so we fall back to the flat grid.
+  const allSections = useMemo(() => {
+    if (filter !== "All" || query.trim()) return null;
+    const mine = shown.filter((c) => c.kind !== "template");
+    if (!mine.length) return null;
+    const templates = shown.filter((c) => c.kind === "template");
+    const sections: { key: string; icon: string; name: string; cards: CardData[] }[] = [
+      { key: "mine", icon: "🗂️", name: "Your messages", cards: mine },
+    ];
+    if (templates.length) {
+      sections.push({ key: "templates", icon: "✨", name: "Templates", cards: templates });
+    }
+    return sections;
   }, [filter, query, shown]);
 
   const startBlank = () => {
@@ -552,6 +582,27 @@ export function TemplateGallery() {
                       />
                       <span className={styles.sectionName}>{section.name}</span>
                       <span className={styles.sectionCount}>{section.cards.length}</span>
+                    </div>
+                    <div className={styles.grid}>
+                      {section.cards.map((c) => (
+                        <GalleryCard key={c.key} card={c} />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            ) : allSections ? (
+              <div className={styles.sections}>
+                {allSections.map((section) => (
+                  <section key={section.key} className={styles.section}>
+                    <div className={styles.sectionHeader}>
+                      <span className={styles.sectionLabelIcon} aria-hidden>
+                        {section.icon}
+                      </span>
+                      <span className={styles.sectionName}>{section.name}</span>
+                      <span className={`${styles.sectionCount} ${styles.sectionCountNeutral}`}>
+                        {section.cards.length}
+                      </span>
                     </div>
                     <div className={styles.grid}>
                       {section.cards.map((c) => (
