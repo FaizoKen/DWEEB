@@ -70,36 +70,18 @@ export function PluginLibraryModal({ plugins, target, onPick, onClose }: Props) 
     return out;
   }, [plugins, target, query]);
 
-  // Split the (already-filtered) groups by whether the plugin needs the shared
-  // DWEEB bot in the server. The no-bot plugins lead — they're the lower-friction
-  // path — and registry order is preserved within each section. Empty sections
-  // (e.g. a search that only hits one side) drop out.
-  const sections = useMemo(() => {
-    const noBot: Group[] = [];
-    const needsBot: Group[] = [];
-    for (const g of groups) (g.manifest.requiresBot ? needsBot : noBot).push(g);
-    return [
-      {
-        key: "no-bot",
-        title: "No bot needed",
-        caption: "Runs over webhooks — nothing to add to your server.",
-        groups: noBot,
-      },
-      {
-        key: "needs-bot",
-        title: "Needs the DWEEB bot in your server",
-        caption: "Invite the shared bot once so it can manage roles or channels.",
-        groups: needsBot,
-      },
-    ].filter((s) => s.groups.length > 0);
-  }, [groups]);
-
   const renderGroup = ({ manifest, presets }: Group) => (
     <li key={manifest.id} className={styles.group}>
       <button type="button" className={styles.row} onClick={() => onPick(manifest)}>
         <PluginIcon manifest={manifest} />
         <span className={styles.rowText}>
-          <span className={styles.rowName}>{manifest.name}</span>
+          <span className={styles.rowNameLine}>
+            <span className={styles.rowName}>{manifest.name}</span>
+            {/* Flags the plugins that drive the shared DWEEB bot — the user has
+                to log in and invite it before the setup works. The rest run over
+                webhooks and carry no tag. */}
+            {manifest.requiresBot ? <span className={styles.loginTag}>Needs login</span> : null}
+          </span>
           {manifest.description ? (
             <span className={styles.rowDesc}>{manifest.description}</span>
           ) : null}
@@ -150,15 +132,7 @@ export function PluginLibraryModal({ plugins, target, onPick, onClose }: Props) 
       {groups.length === 0 ? (
         <p className={styles.empty}>No plugins match “{query.trim()}”.</p>
       ) : (
-        sections.map((section) => (
-          <section key={section.key} className={styles.section}>
-            <div className={styles.sectionHead}>
-              <h3 className={styles.sectionTitle}>{section.title}</h3>
-              <p className={styles.sectionCaption}>{section.caption}</p>
-            </div>
-            <ul className={styles.list}>{section.groups.map(renderGroup)}</ul>
-          </section>
-        ))
+        <ul className={styles.list}>{groups.map(renderGroup)}</ul>
       )}
 
       <p className={styles.note}>
