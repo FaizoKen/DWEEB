@@ -12,6 +12,7 @@
 //! on calls made under the shared bot token, short-TTL caching, and encrypted
 //! (HttpOnly) session cookies.
 
+mod activity;
 mod auth;
 mod cache;
 mod config;
@@ -269,6 +270,7 @@ async fn run() {
         dispatcher,
         shortlinks,
         schedules,
+        activity_rooms: Arc::new(crate::activity::ActivityRooms::new()),
         key,
         config: Arc::new(config),
     };
@@ -314,6 +316,18 @@ async fn run() {
             "/api/guilds/:guild_id/schedules",
             get(schedule_list_for_guild),
         )
+        // Embedded Discord Activity: SDK token exchange, server-side publish,
+        // and the real-time collaboration room (see `activity.rs`). The token +
+        // post bodies are bounded well before JSON parsing; the room is a WS.
+        .route(
+            "/api/activity/token",
+            post(activity::activity_token).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
+        .route(
+            "/api/activity/post",
+            post(activity::activity_post).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
+        .route("/api/activity/room/:instance", get(activity::activity_room))
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))
         .route("/api/guilds/:guild_id/roles", get(roles))
@@ -432,6 +446,10 @@ fn build_cors(config: &Config) -> CorsLayer {
         // and those calls read as "couldn't reach the service".
         .allow_headers([
             header::CONTENT_TYPE,
+            // The embedded Activity authenticates with a bearer token rather than
+            // the session cookie (its iframe is third-party), so direct
+            // cross-origin calls must be allowed to send it.
+            header::AUTHORIZATION,
             HeaderName::from_static("x-manage-token"),
         ])
         .allow_credentials(true)

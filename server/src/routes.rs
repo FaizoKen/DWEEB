@@ -53,6 +53,9 @@ pub struct AppState {
     pub shortlinks: Option<Arc<ShortLinkStore>>,
     /// Scheduled-post store (see `schedule.rs`); None when the feature is off.
     pub schedules: Option<Arc<crate::schedule::ScheduleStore>>,
+    /// Live collaboration rooms for the embedded Activity (see `activity.rs`).
+    /// Ephemeral + in-memory, so it's always present (cheap when unused).
+    pub activity_rooms: Arc<crate::activity::ActivityRooms>,
     /// Master key for encrypting/decrypting cookies.
     pub key: Key,
 }
@@ -134,9 +137,14 @@ pub async fn bootstrap(
     State(st): State<AppState>,
     Query(q): Query<ReadQuery>,
     jar: PrivateCookieJar,
+    headers: axum::http::HeaderMap,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
-    authorize_member(&st, &jar, &guild).await?;
+    // The embedded Activity authenticates with a bearer token (its third-party
+    // iframe gets no session cookie), so this — the one read the Activity's
+    // preview needs to resolve mentions — accepts either credential.
+    let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
+    authorize_member_session(&st, session, &guild).await?;
     // The three reads are independent — on a cold cache they'd otherwise be
     // three sequential Discord round-trips. Fire them concurrently (each still
     // coalesced + cached by key, and the bot semaphore caps total in-flight
@@ -1016,7 +1024,7 @@ fn ids_from_array(v: &Value) -> HashSet<String> {
 /// Ensure `channel_id` is a channel of `guild` before we point the bot token at
 /// it. Tries the cache first, then a live read (so a just-created channel isn't
 /// a false negative); only then does it refuse.
-async fn ensure_channel_in_guild(
+pub(crate) async fn ensure_channel_in_guild(
     st: &AppState,
     guild: &str,
     channel_id: &str,
@@ -1079,9 +1087,20 @@ pub(crate) async fn authorize_member(
     guild: &str,
 ) -> Result<Session, AppError> {
     let session = require_session(jar)?;
-    // Membership is a gate, not user-facing data — always serve it from cache so
-    // a forced data refresh doesn't also force an extra `current_user_guilds`
-    // round-trip on every guild read.
+    authorize_member_session(st, session, guild).await
+}
+
+/// Membership gate for an already-resolved session — shared by the cookie path
+/// ([`authorize_member`]) and the embedded Activity's bearer path
+/// (`activity::resolve_identity` builds the same `Session` from a Discord access
+/// token). Always serves the user's guild list from cache: membership is a gate,
+/// not user-facing data, so a forced data refresh shouldn't also force an extra
+/// `current_user_guilds` round-trip on every guild read.
+pub(crate) async fn authorize_member_session(
+    st: &AppState,
+    session: Session,
+    guild: &str,
+) -> Result<Session, AppError> {
     let guilds = usable_guilds(st, &session, false).await?;
     if guilds.iter().any(|g| g.id == guild) {
         Ok(session)
@@ -1104,6 +1123,18 @@ pub(crate) async fn authorize_webhooks(
     guild: &str,
 ) -> Result<Session, AppError> {
     let session = require_session(jar)?;
+    authorize_webhooks_session(st, session, guild).await
+}
+
+/// Manage-Webhooks gate for an already-resolved session — the bearer-path twin
+/// of [`authorize_webhooks`], used by the embedded Activity's publish handler so
+/// posting into a channel needs the same permission the web builder's webhook
+/// features do.
+pub(crate) async fn authorize_webhooks_session(
+    st: &AppState,
+    session: Session,
+    guild: &str,
+) -> Result<Session, AppError> {
     let guilds = usable_guilds(st, &session, false).await?;
     match guilds.iter().find(|g| g.id == guild) {
         Some(g) if g.can_manage_webhooks => Ok(session),

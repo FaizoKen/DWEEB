@@ -49,6 +49,14 @@ pub struct Config {
     /// shared across the builder + api subdomains. None ⇒ host-only cookie.
     pub cookie_domain: Option<String>,
 
+    // ── Discord Activities (embedded app) ──────────────────────────────────
+    /// Master switch for the embedded Activity endpoints (`/api/activity/*`):
+    /// the SDK token exchange, server-side publish, and the collaboration room
+    /// WebSocket. Default on — they reuse the OAuth client + bot token the proxy
+    /// already holds, so no extra secret is needed. Set false to refuse them
+    /// (501) on a deployment that doesn't register an Activity.
+    pub activities_enabled: bool,
+
     // ── Authorization policy ───────────────────────────────────────────────
     /// When true, a user may only read servers where they own or hold
     /// `MANAGE_GUILD` — appropriate for a webhook-builder tool. When false, any
@@ -173,6 +181,8 @@ impl Config {
         };
         let cookie_domain = opt_env("COOKIE_DOMAIN");
 
+        let activities_enabled = parse_bool("ACTIVITIES_ENABLED", true);
+
         let require_manage_guild = parse_bool("REQUIRE_MANAGE_GUILD", true);
 
         let rate_limit_per_min = parse_or("RATE_LIMIT_PER_MIN", 60);
@@ -210,6 +220,7 @@ impl Config {
             client_secret,
             oauth_redirect_url,
             frontend_url,
+            activities_enabled,
             session_secret,
             session_ttl,
             cookie_secure,

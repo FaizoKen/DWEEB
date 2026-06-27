@@ -1,0 +1,112 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-3);
+  padding: var(--app-space-2) var(--app-space-3);
+  background: var(--app-bg-elevated);
+  border-bottom: 1px solid var(--app-border);
+  min-height: 48px;
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-2);
+  min-width: 0;
+}
+
+.channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--app-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.channel svg {
+  color: var(--app-text-subtle);
+  flex: none;
+}
+
+/* Live-sync indicator: green when the collaboration socket is connected, amber
+   (pulsing) while reconnecting. */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--app-warning);
+  flex: none;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.dot[data-on] {
+  background: var(--app-success);
+  animation: none;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.center {
+  flex: 1 1 auto;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-2);
+  margin-left: auto;
+}
+
+/* Presence ------------------------------------------------------------ */
+
+.presence {
+  display: flex;
+  align-items: center;
+}
+
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  border: 2px solid var(--app-bg-elevated);
+  margin-left: -6px;
+  text-transform: uppercase;
+}
+
+.avatar:first-child {
+  margin-left: 0;
+}
+
+.more {
+  margin-left: 4px;
+  font-size: var(--app-text-xs);
+  color: var(--app-text-subtle);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+}

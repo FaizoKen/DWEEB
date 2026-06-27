@@ -1,0 +1,92 @@
+.app {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--app-bg);
+  color: var(--app-text);
+  overflow: hidden;
+}
+
+.panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.editor,
+.preview {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor {
+  border-right: 1px solid var(--app-border);
+}
+
+/* On a narrow Activity window (mobile, or a small picture-in-picture) stack the
+   editor over the preview rather than squeezing two columns. */
+@media (max-width: 720px) {
+  .panes {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .editor {
+    border-right: none;
+    border-bottom: 1px solid var(--app-border);
+  }
+}
+
+/* Splash / loading / error -------------------------------------------- */
+
+.splash {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--app-space-4);
+  padding: var(--app-space-5);
+  text-align: center;
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+.wordmark {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--app-accent-text);
+}
+
+.splashMsg {
+  max-width: 32ch;
+  font-size: var(--app-text-base);
+  color: var(--app-text-muted);
+  line-height: 1.5;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--app-border-strong);
+  border-top-color: var(--app-accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}

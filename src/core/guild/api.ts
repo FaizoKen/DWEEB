@@ -9,6 +9,7 @@
  */
 
 import { PROXY_BASE_URL } from "./config";
+import { proxyFetch } from "@/core/net/proxyFetch";
 import type { GuildRole } from "./types";
 
 /** Discord snowflakes are 17–20 digits today; accept a small range with slack. */
@@ -104,15 +105,13 @@ function withFresh(path: string, force: boolean): string {
   return force ? `${path}?fresh=true` : path;
 }
 
-/** GET helper: credentialed fetch + normalised errors. `signal` is optional. */
+/** GET helper: credentialed fetch + normalised errors. `signal` is optional.
+ *  Routes through `proxyFetch` so the embedded Activity's bearer token is
+ *  attached automatically (the web app keeps using its session cookie). */
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${PROXY_BASE_URL}${path}`, {
-      method: "GET",
-      credentials: "include",
-      signal,
-    });
+    res = await proxyFetch(path, { method: "GET", signal });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);

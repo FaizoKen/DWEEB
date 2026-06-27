@@ -340,6 +340,21 @@ worker, the at-rest sealing, and the `SCHEDULE_*` knobs (`SCHEDULES_ENABLED=fals
 turns it off). The proxy can also express recurring rules; the web UI just
 doesn't surface them.
 
+## Discord Activity (embedded app)
+
+DWEEB also runs **inside Discord** as an Activity: the same builder, launched in
+a server, scoped to the current channel, with **real-time co-editing** and
+**one-click publishing** — build an announcement together with your mods and post
+it without ever leaving Discord. It reuses the editor and the pixel-accurate
+preview; only auth (a bearer token instead of the session cookie), publishing
+(the proxy posts on the iframe's behalf), and a collaboration WebSocket differ.
+
+The same site detects the in-Discord launch (`?frame_id=…`) and boots the
+embedded surface, dynamically importing it so the Embedded App SDK never loads on
+the public site. Setup is a couple of Developer Portal URL mappings plus
+`ACTIVITIES_ENABLED` on the proxy; the full guide, including how the in-Discord
+URL remapping works, is in [`docs/activity.md`](docs/activity.md).
+
 ## AI assistant
 
 The **AI** panel lets you describe a message in plain language and have a

@@ -421,6 +421,34 @@ impl Discord {
         Err(webhook_error_from(resp).await)
     }
 
+    /// Post a message **through** an incoming webhook, with the webhook's own
+    /// token (never the bot token — the same credential the browser posts with,
+    /// on its own rate-limit buckets, so no `bot_sem` permit). `payload` is the
+    /// full wire body the builder built (components + flags + username/avatar_url
+    /// …). `?wait=true` makes Discord echo the created message back, so the caller
+    /// can hand the browser a jump link. Used by the embedded Activity, which —
+    /// unlike the web builder — can't POST to discord.com directly from inside
+    /// Discord's sandboxed iframe, so the proxy posts on its behalf.
+    pub async fn execute_webhook(
+        &self,
+        webhook_id: &str,
+        token: &str,
+        payload: &Value,
+    ) -> Result<Value, AppError> {
+        let url =
+            format!("{API_BASE}/webhooks/{webhook_id}/{token}?wait=true&with_components=true");
+        let resp = send_with_retry(self.http.post(&url).json(payload))
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        if resp.status().is_success() {
+            return resp
+                .json::<Value>()
+                .await
+                .map_err(|e| AppError::BadGateway(format!("unexpected response from Discord: {e}")));
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
     /// Best-effort channel name for a `webhook.incoming` webhook's channel, so
     /// the builder can label same-named webhooks by destination. Returns None if
     /// the bot can't see the channel (not in that guild) — no login required when
@@ -726,6 +754,41 @@ impl Discord {
         // A bad/expired code is the caller's problem, not ours.
         Err(AppError::Unauthorized(
             "Discord rejected the login (the code may have expired). Try again.".into(),
+        ))
+    }
+
+    /// Exchange an embedded-Activity authorization `code` for a user access
+    /// token. Identical to [`exchange_code`] but omits `redirect_uri`: the
+    /// Embedded App SDK's `authorize` command issues the code over RPC, not a
+    /// browser redirect, so Discord neither expects nor accepts one here.
+    pub async fn exchange_code_embedded(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        code: &str,
+    ) -> Result<TokenResponse, AppError> {
+        let resp = self
+            .http
+            .post(format!("{API_BASE}/oauth2/token"))
+            .form(&[
+                ("client_id", client_id),
+                ("client_secret", client_secret),
+                ("grant_type", "authorization_code"),
+                ("code", code),
+            ])
+            .send()
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+
+        if resp.status().is_success() {
+            return resp
+                .json::<TokenResponse>()
+                .await
+                .map_err(|e| AppError::BadGateway(format!("bad token response: {e}")));
+        }
+        Err(AppError::Unauthorized(
+            "Discord rejected the activity authorization (the code may have expired). Try again."
+                .into(),
         ))
     }
 

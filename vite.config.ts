@@ -29,7 +29,10 @@ function buildCsp(inlineScriptHashes: readonly string[]): string {
     "img-src 'self' https: data: blob:",
     "media-src 'self' https: blob:",
     "font-src 'self' data:",
-    "connect-src 'self' https:",
+    // `wss:` covers the embedded Activity's collaboration WebSocket (rewritten to
+    // a same-origin `/.proxy` socket inside Discord, but allowed broadly so a
+    // self-hosted proxy on any host works too).
+    "connect-src 'self' https: wss:",
     // Plugins render their config UI in iframes under *.dweeb.faizo.net.
     "frame-src 'self' https://*.dweeb.faizo.net",
     "base-uri 'self'",
@@ -180,6 +183,16 @@ export default defineConfig({
           // the Share dialog), so keep it in its own chunk instead of letting it
           // ride along in the always-loaded vendor chunk.
           if (id.includes("lz-string")) return "serializer";
+          // The Embedded App SDK (+ its only consumers, eventemitter3 / zod) load
+          // exclusively on the Activity entry. Splitting them out keeps the web
+          // app's vendor chunk — and so the public site's first paint — untouched
+          // by code that never runs there.
+          if (
+            id.includes("@discord/embedded-app-sdk") ||
+            id.includes("eventemitter3") ||
+            id.includes("/zod/")
+          )
+            return "activity-sdk";
           // Everything else from node_modules (React, ReactDOM, scheduler,
           // zustand, nanoid) is on the critical path. Group it into one vendor
           // chunk that only changes when dependencies do — so app-code edits
