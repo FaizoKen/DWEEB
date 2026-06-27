@@ -46,6 +46,16 @@ export interface PluginManifest {
   publisher?: string;
   /** Which interactive component kinds this plugin can attach to. */
   targets: PluginTarget[];
+  /**
+   * Whether this plugin needs the shared DWEEB bot invited to the server to
+   * work. True for the plugins that make authenticated Discord REST calls —
+   * Self Role (assigns roles) and Tickets (creates channels) — which require
+   * the bot and its permissions in the guild. Absent/false for the stateless,
+   * webhook-only plugins that need nothing added to the server. Surfaced in the
+   * plugin library so a user can tell, before picking, whether a setup involves
+   * inviting the bot.
+   */
+  requiresBot?: boolean;
   /** https URL of the configuration iframe DWEEB embeds. */
   configUrl: string;
   /**
@@ -178,6 +188,7 @@ export function parseManifest(raw: unknown): PluginManifest | null {
     targets,
     configUrl: o.configUrl,
     customIdPrefix: o.customIdPrefix,
+    ...(o.requiresBot === true ? { requiresBot: true } : {}),
     ...(isAllowedUrl(o.icon) ? { icon: o.icon } : {}),
     ...(isAllowedUrl(o.homepage) ? { homepage: o.homepage } : {}),
     ...(isNonEmptyString(o.publisher) ? { publisher: o.publisher } : {}),

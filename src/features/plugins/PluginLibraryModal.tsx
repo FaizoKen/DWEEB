@@ -70,6 +70,69 @@ export function PluginLibraryModal({ plugins, target, onPick, onClose }: Props) 
     return out;
   }, [plugins, target, query]);
 
+  // Split the (already-filtered) groups by whether the plugin needs the shared
+  // DWEEB bot in the server. The no-bot plugins lead — they're the lower-friction
+  // path — and registry order is preserved within each section. Empty sections
+  // (e.g. a search that only hits one side) drop out.
+  const sections = useMemo(() => {
+    const noBot: Group[] = [];
+    const needsBot: Group[] = [];
+    for (const g of groups) (g.manifest.requiresBot ? needsBot : noBot).push(g);
+    return [
+      {
+        key: "no-bot",
+        title: "No bot needed",
+        caption: "Runs over webhooks — nothing to add to your server.",
+        groups: noBot,
+      },
+      {
+        key: "needs-bot",
+        title: "Needs the DWEEB bot in your server",
+        caption: "Invite the shared bot once so it can manage roles or channels.",
+        groups: needsBot,
+      },
+    ].filter((s) => s.groups.length > 0);
+  }, [groups]);
+
+  const renderGroup = ({ manifest, presets }: Group) => (
+    <li key={manifest.id} className={styles.group}>
+      <button type="button" className={styles.row} onClick={() => onPick(manifest)}>
+        <PluginIcon manifest={manifest} />
+        <span className={styles.rowText}>
+          <span className={styles.rowName}>{manifest.name}</span>
+          {manifest.description ? (
+            <span className={styles.rowDesc}>{manifest.description}</span>
+          ) : null}
+        </span>
+        {presets.length ? <span className={styles.blankTag}>Start blank</span> : null}
+      </button>
+
+      {presets.length ? (
+        <ul className={styles.presetList}>
+          {presets.map((preset) => (
+            <li key={preset.id}>
+              <button
+                type="button"
+                className={styles.presetRow}
+                onClick={() => onPick(manifest, preset.id)}
+              >
+                <span className={styles.presetEmoji} aria-hidden>
+                  {preset.emoji ?? "⚡"}
+                </span>
+                <span className={styles.rowText}>
+                  <span className={styles.presetName}>{preset.name}</span>
+                  {preset.description ? (
+                    <span className={styles.presetDesc}>{preset.description}</span>
+                  ) : null}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+
   return (
     <Modal open title="Plugin library" onClose={onClose}>
       <TextInput
@@ -87,46 +150,15 @@ export function PluginLibraryModal({ plugins, target, onPick, onClose }: Props) 
       {groups.length === 0 ? (
         <p className={styles.empty}>No plugins match “{query.trim()}”.</p>
       ) : (
-        <ul className={styles.list}>
-          {groups.map(({ manifest, presets }) => (
-            <li key={manifest.id} className={styles.group}>
-              <button type="button" className={styles.row} onClick={() => onPick(manifest)}>
-                <PluginIcon manifest={manifest} />
-                <span className={styles.rowText}>
-                  <span className={styles.rowName}>{manifest.name}</span>
-                  {manifest.description ? (
-                    <span className={styles.rowDesc}>{manifest.description}</span>
-                  ) : null}
-                </span>
-                {presets.length ? <span className={styles.blankTag}>Start blank</span> : null}
-              </button>
-
-              {presets.length ? (
-                <ul className={styles.presetList}>
-                  {presets.map((preset) => (
-                    <li key={preset.id}>
-                      <button
-                        type="button"
-                        className={styles.presetRow}
-                        onClick={() => onPick(manifest, preset.id)}
-                      >
-                        <span className={styles.presetEmoji} aria-hidden>
-                          {preset.emoji ?? "⚡"}
-                        </span>
-                        <span className={styles.rowText}>
-                          <span className={styles.presetName}>{preset.name}</span>
-                          {preset.description ? (
-                            <span className={styles.presetDesc}>{preset.description}</span>
-                          ) : null}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        sections.map((section) => (
+          <section key={section.key} className={styles.section}>
+            <div className={styles.sectionHead}>
+              <h3 className={styles.sectionTitle}>{section.title}</h3>
+              <p className={styles.sectionCaption}>{section.caption}</p>
+            </div>
+            <ul className={styles.list}>{section.groups.map(renderGroup)}</ul>
+          </section>
+        ))
       )}
 
       <p className={styles.note}>
