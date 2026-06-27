@@ -123,15 +123,23 @@
   display: flex;
   align-items: baseline;
   gap: 6px;
+  min-width: 0;
+}
+
+/* The component's own identity (its placeholder/label) — the line that tells
+   one Picker row from the next. Truncates so a long placeholder can't push the
+   kind qualifier off the row. */
+.slotTitle {
   font-size: 14px;
   font-weight: 600;
   color: var(--app-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
-/* Which component this slot wires — a quiet qualifier after the plugin name. */
+/* Plugin + which control this slot wires — a quiet qualifier after the title. */
 .slotNoun {
   flex: none;
   font-size: 12px;

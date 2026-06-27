@@ -36,8 +36,10 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { getPluginSummary, setPluginSummary } from "@/core/state/pluginSummaryCache";
 import { getPlugins } from "@/core/plugins/registry";
 import {
+  componentIdentity,
   interactiveComponents,
   targetableNodeByCustomId,
+  targetNoun,
   type PluginTarget,
 } from "@/core/plugins/targets";
 import { TEMPLATES } from "@/data/presets";
@@ -53,6 +55,9 @@ import { CheckCircleIcon, ChevronRightIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateSetup.module.css";
+
+/** Sentence-case a noun for use as a row title fallback ("channel menu" → "Channel menu"). */
+const capitalize = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
 
 /** One resolved slot: a live component paired with the plugin to wire it to. */
 interface Slot {
@@ -260,17 +265,28 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
         {slots.map((slot, i) => {
           const ready = isReady(i);
           const cached = ready ? getPluginSummary(currentIdFor(i)) : undefined;
-          const noun = slot.target === "button" ? "button" : "menu";
+          const noun = targetNoun(slot.target);
+          // The component's own identity — its visible placeholder/label and the
+          // heading above it — is what tells four "Picker" rows apart: it names
+          // which part of the message this slot wires, in the user's own words.
+          const ident = componentIdentity(message, slot.nodeId);
+          const title = ident.label ?? (multi ? `${capitalize(noun)} ${i + 1}` : capitalize(noun));
+          // Description: where in the message it sits (or the plugin's purpose)
+          // until wired; what it'll do once connected.
           const desc = ready
             ? (cached?.summary.description ?? `Connected to this ${noun}.`)
-            : slot.manifest.description;
+            : (ident.context ?? slot.manifest.description);
           return (
             <li key={i} className={styles.slotRow} data-ready={ready ? "true" : undefined}>
               <PluginIcon manifest={slot.manifest} summaryIcon={cached?.summary.icon} />
               <div className={styles.slotText}>
                 <span className={styles.slotName}>
-                  {cached?.summary.label ?? slot.manifest.name}
-                  <span className={styles.slotNoun}>· {noun}</span>
+                  <span className={styles.slotTitle}>{title}</span>
+                  {/* Keep the plugin + kind visible — the icon shows which plugin,
+                      this names the exact control it binds. */}
+                  <span className={styles.slotNoun}>
+                    · {slot.manifest.name} {noun}
+                  </span>
                 </span>
                 {desc ? <span className={styles.slotDesc}>{desc}</span> : null}
               </div>

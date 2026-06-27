@@ -13,7 +13,14 @@
  * interaction a microservice can handle.
  */
 
-import { isActionRow, isButton, isContainer, isSection, isSelect } from "@/core/schema/guards";
+import {
+  isActionRow,
+  isButton,
+  isContainer,
+  isSection,
+  isSelect,
+  isTextDisplay,
+} from "@/core/schema/guards";
 import {
   ButtonStyle,
   ComponentType,
@@ -72,6 +79,29 @@ export function targetOf(node: AnyComponent): PluginTarget | null {
 /** True when a plugin can be attached to this node. */
 export function isPluginTarget(node: AnyComponent): boolean {
   return targetOf(node) !== null;
+}
+
+/**
+ * A specific, human noun for a component target — for UI that must tell several
+ * otherwise-identical plugin slots apart (e.g. the four Picker menus in the
+ * Server Directory template). The generic "menu"/"button" can't distinguish a
+ * channel menu from a role menu; these can.
+ */
+export function targetNoun(target: PluginTarget): string {
+  switch (target) {
+    case "button":
+      return "button";
+    case "string_select":
+      return "options menu";
+    case "user_select":
+      return "member menu";
+    case "role_select":
+      return "role menu";
+    case "mentionable_select":
+      return "member / role menu";
+    case "channel_select":
+      return "channel menu";
+  }
 }
 
 /** Plugins from a list that declare support for `target`. */
@@ -183,6 +213,74 @@ export function targetableNodeByCustomId(
     }
   }
   return null;
+}
+
+/**
+ * How a single interactive component reads to a member, for UI that lists
+ * several of them at once and must say which is which. `label` is the control's
+ * own visible text (a button's label or a select's placeholder); `context` is
+ * the nearest line of message text *before* it — typically the section heading
+ * above a menu — with light markdown stripped. Together they answer "which part
+ * of the message is this, and for what". Either may be absent.
+ */
+export interface ComponentIdentity {
+  label?: string;
+  context?: string;
+}
+
+/**
+ * Resolve the {@link ComponentIdentity} of the interactive component with the
+ * given editor id. Walks the message in document order, remembering the last
+ * text block seen, so when the target is reached its preceding heading is in
+ * hand. Returns an empty object when the node isn't found.
+ */
+export function componentIdentity(message: WebhookMessage, nodeId: EditorId): ComponentIdentity {
+  let lastText: string | undefined;
+  let result: ComponentIdentity | undefined;
+  const visit = (node: AnyComponent): void => {
+    if (result) return;
+    if (isTextDisplay(node)) {
+      lastText = node.content;
+      return;
+    }
+    if (node._id === nodeId) {
+      const own =
+        isButton(node) && "label" in node
+          ? node.label
+          : isSelect(node)
+            ? node.placeholder
+            : undefined;
+      result = {
+        ...(own ? { label: own } : {}),
+        ...(lastText ? { context: plainText(lastText) } : {}),
+      };
+      return;
+    }
+    if (isContainer(node)) for (const child of node.components) visit(child);
+    else if (isSection(node)) {
+      for (const t of node.components) visit(t);
+      visit(node.accessory);
+    } else if (isActionRow(node)) for (const child of node.components) visit(child);
+  };
+  for (const top of message.components) {
+    visit(top);
+    if (result) break;
+  }
+  return result ?? {};
+}
+
+/**
+ * First non-empty line of message text with light markdown stripped — enough to
+ * read a heading like "**🧭 Channels** — find a place…" as plain
+ * "🧭 Channels — find a place…" for a one-line label.
+ */
+function plainText(content: string): string {
+  const firstLine = content.split("\n").find((l) => l.trim().length > 0) ?? content;
+  return firstLine
+    .replace(/^#{1,6}\s+/, "") // heading markers
+    .replace(/[*_~`]/g, "") // emphasis / inline code
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Yields every node (top-level + nested), mirroring the capability walker. */
