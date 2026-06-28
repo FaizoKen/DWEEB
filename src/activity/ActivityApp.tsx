@@ -124,6 +124,11 @@ function Splash({
       {status === "error" ? (
         <>
           <p className={styles.splashMsg}>{error ?? "Something went wrong starting DWEEB."}</p>
+          {/* Name the stage we stalled on, for errors whose message doesn't (a
+              non-timeout SDK failure). Hidden once the handshake had finished. */}
+          {step !== "done" ? (
+            <p className={styles.splashStep}>Stalled while {STEP_LABELS[step]}.</p>
+          ) : null}
           <Button variant="primary" size="sm" onClick={() => window.location.reload()}>
             Try again
           </Button>
@@ -131,12 +136,33 @@ function Splash({
       ) : (
         <>
           <div className={styles.spinner} aria-hidden="true" />
-          <p className={styles.splashMsg}>Connecting to Discord…</p>
-          {/* Dev-only handshake progress, so a stalled local launch shows *where*
-              it stalled (the in-Discord iframe has no reachable console). */}
-          {import.meta.env.DEV ? <p className={styles.splashMsg}>step: {step}</p> : null}
+          {/* Surface the live handshake stage in *every* build, not just dev: a
+              real in-Discord launch has no reachable console, so this on-screen
+              label is the only way to see where a stalled launch got stuck. Each
+              stage is also timeout-bounded (see activityStore), so a hang resolves
+              to a labelled error rather than spinning here forever. */}
+          <p className={styles.splashMsg}>{capitalize(STEP_LABELS[step])}…</p>
+          {import.meta.env.DEV ? <p className={styles.splashStep}>step: {step}</p> : null}
         </>
       )}
     </div>
   );
+}
+
+/** Friendly, lower-cased label for each handshake stage, shown on the splash in
+ *  every build (a real in-Discord launch has no console) so progress is visible
+ *  and a stall names its stage. Phrased to read after "Stalled while …" too;
+ *  `capitalize` fixes the leading letter where it heads a line. A total record so
+ *  every `ActivityStep` is covered. */
+const STEP_LABELS: Record<ActivityStep, string> = {
+  starting: "starting up",
+  "sdk-ready": "connecting to Discord",
+  authorizing: "authorizing",
+  "exchanging-token": "signing in",
+  authenticating: "finishing sign-in",
+  done: "ready",
+};
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

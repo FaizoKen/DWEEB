@@ -98,6 +98,21 @@ interface ActivityState {
   setTargetGuild(guildId: string): void;
 }
 
+/**
+ * Per-stage handshake timeouts. Each step of `init()` awaits either the Discord
+ * client (an SDK RPC) or the proxy; without a cap, any one of them hanging leaves
+ * the splash spinning on "Connecting to Discord…" forever, with no way to tell
+ * *which* stage stalled — a real in-Discord launch has no reachable console (see
+ * the prod-launch hang in `docs/activity.md`). A timeout turns that silent hang
+ * into a labelled, retryable error that names the stage. These are "something is
+ * wrong" thresholds, not performance targets: generous enough not to trip on a
+ * slow mobile client, short enough to fail fast.
+ */
+const READY_TIMEOUT_MS = 25_000;
+const AUTHORIZE_TIMEOUT_MS = 25_000;
+const EXCHANGE_TIMEOUT_MS = 20_000;
+const AUTHENTICATE_TIMEOUT_MS = 20_000;
+
 let initialised = false;
 
 export const useActivityStore = create<ActivityState>((set, get) => ({
@@ -155,7 +170,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       configureUrlMappings();
 
       const sdk = getSdk();
-      await sdk.ready();
+      await withTimeout(sdk.ready(), READY_TIMEOUT_MS, "connecting to Discord");
       // Which client we're on, so the UI can apply the mobile-only safe-area
       // fallback (the native top bar's inset isn't populated until the first
       // layout change — see ActivityApp). `sdk.platform` is "mobile"/"desktop".
@@ -171,21 +186,33 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       const instanceId = sdk.instanceId;
 
       set({ step: "authorizing" });
-      const { code } = await sdk.commands.authorize({
-        client_id: DISCORD_CLIENT_ID,
-        response_type: "code",
-        state: cryptoState(),
-        prompt: "none",
-        // identify → who's editing (presence); guilds → membership/permission gate.
-        scope: ["identify", "guilds"] as ("identify" | "guilds")[],
-      });
+      const { code } = await withTimeout(
+        sdk.commands.authorize({
+          client_id: DISCORD_CLIENT_ID,
+          response_type: "code",
+          state: cryptoState(),
+          prompt: "none",
+          // identify → who's editing (presence); guilds → membership/permission gate.
+          scope: ["identify", "guilds"] as ("identify" | "guilds")[],
+        }),
+        AUTHORIZE_TIMEOUT_MS,
+        "authorizing with Discord",
+      );
 
       set({ step: "exchanging-token" });
-      const accessToken = await exchangeCode(code);
+      const accessToken = await withTimeout(
+        exchangeCode(code),
+        EXCHANGE_TIMEOUT_MS,
+        "exchanging the login code",
+      );
       setActivityToken(accessToken);
 
       set({ step: "authenticating" });
-      const auth = await sdk.commands.authenticate({ access_token: accessToken });
+      const auth = await withTimeout(
+        sdk.commands.authenticate({ access_token: accessToken }),
+        AUTHENTICATE_TIMEOUT_MS,
+        "finishing sign-in",
+      );
       const user: ActivityUser = {
         id: auth.user.id,
         name: auth.user.global_name || auth.user.username,
@@ -312,6 +339,31 @@ function devOverrideSession(): {
     // the override can exercise the mobile layout from a desktop browser too.
     platform: q.get("platform") === "mobile" ? "mobile" : "desktop",
   };
+}
+
+/**
+ * Reject if `p` doesn't settle within `ms`, with a message naming the `stage` so
+ * a stalled launch reports *where* it stuck instead of spinning forever. Used to
+ * bound every step of the SDK handshake — see the timeout constants above and the
+ * prod-launch hang in `docs/activity.md`.
+ */
+function withTimeout<T>(p: Promise<T>, ms: number, stage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Timed out while ${stage}. Try relaunching DWEEB.`)),
+      ms,
+    );
+    p.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  });
 }
 
 /** A throwaway CSRF `state` for the authorize call. */
