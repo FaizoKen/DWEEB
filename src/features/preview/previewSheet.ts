@@ -143,9 +143,29 @@ export function useIsMobileSheet() {
   );
   useEffect(() => {
     const mql = window.matchMedia(MOBILE_SHEET_QUERY);
-    const onChange = () => setIsMobile(mql.matches);
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
+    const sync = () => setIsMobile(mql.matches);
+
+    // Re-read once, now: the viewport can change between the initial render (the
+    // `useState` initializer above) and this effect attaching the listener. In
+    // the Discord Activity that's the common case — the iframe is often narrow
+    // during the splash/handshake and only resized to its real (often desktop)
+    // size a moment later. If that resize lands in this gap the `change` event
+    // fires with no listener attached, is lost, and the size then stays stable,
+    // leaving us stuck on the stale initial value — desktop layout but with the
+    // mobile mini-preview showing and the side preview unmounted. Syncing here
+    // closes the gap.
+    sync();
+
+    mql.addEventListener("change", sync);
+    // Belt-and-suspenders for the embedded iframe: some webview/resize paths
+    // resize the viewport without reliably emitting a `change` on the MQL, so
+    // also re-check on plain resize (cheap — React bails out when the boolean
+    // is unchanged).
+    window.addEventListener("resize", sync);
+    return () => {
+      mql.removeEventListener("change", sync);
+      window.removeEventListener("resize", sync);
+    };
   }, []);
   return isMobile;
 }
