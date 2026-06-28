@@ -34,6 +34,7 @@ import {
 } from "@/core/plugins/protocol";
 import { sanitizePlaceholderValues } from "@/core/plugins/placeholders";
 import type { PluginTarget } from "@/core/plugins/targets";
+import { isActivityProxiedPlugins } from "@/core/activity/runtime";
 import { resolvePluginResource } from "./pluginData";
 
 export interface PluginSaveResult {
@@ -122,7 +123,13 @@ export function usePluginConfig({
   onCancelRef.current = onCancel;
 
   useEffect(() => {
-    const origin = pluginOrigin(manifest);
+    // Inside a real Activity the plugin is served same-origin through the proxy
+    // and sandboxed to an opaque origin, so its messages arrive as origin
+    // `"null"` and we must target it with `"*"`. The `event.source` check below is
+    // then the real gate. Everywhere else the frame is the plugin's own origin.
+    const proxied = isActivityProxiedPlugins();
+    const origin = proxied ? "null" : pluginOrigin(manifest);
+    const postTarget = proxied ? "*" : origin;
     const nonce = nonceRef.current;
 
     const handler = (event: MessageEvent) => {
@@ -145,7 +152,7 @@ export function usePluginConfig({
           theme,
           locale: typeof navigator !== "undefined" ? navigator.language : "en",
         };
-        iframeRef.current?.contentWindow?.postMessage(init, origin);
+        iframeRef.current?.contentWindow?.postMessage(init, postTarget);
         return;
       }
 
@@ -206,7 +213,7 @@ export function usePluginConfig({
           resource: data.resource,
           ...(result.ok ? { ok: true, data: result.data } : { ok: false, error: result.error }),
         };
-        iframeRef.current?.contentWindow?.postMessage(response, origin);
+        iframeRef.current?.contentWindow?.postMessage(response, postTarget);
         return;
       }
     };

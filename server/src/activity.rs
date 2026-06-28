@@ -31,10 +31,10 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use axum_extra::extract::cookie::PrivateCookieJar;
@@ -521,6 +521,254 @@ fn ip_is_public(ip: IpAddr) -> bool {
     }
 }
 
+// ── Plugin config proxy (GET /api/activity/plugin, * /api/activity/plugin-fetch) ─
+
+/// Hard bounds for the plugin proxy, mirroring the image proxy: a short fetch
+/// timeout, the largest config page we'll relay, and the largest single API
+/// response we'll relay back to the iframe.
+const MAX_PLUGIN_HTML_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PLUGIN_RESP_BYTES: usize = 1024 * 1024;
+
+#[derive(Deserialize)]
+pub struct PluginUrlQuery {
+    #[serde(default)]
+    url: String,
+}
+
+/// Whether a plugin host is on the configured allow-list — it equals an entry or
+/// is a sub-domain of one (`quickreplies.dweeb.faizo.net` ⊂ `dweeb.faizo.net`).
+/// This is what keeps the plugin proxy from being a general open relay.
+fn plugin_host_allowed(host: &str, allow: &[String]) -> bool {
+    let h = host.trim_end_matches('.').to_ascii_lowercase();
+    allow.iter().any(|entry| {
+        let e = entry
+            .trim()
+            .trim_start_matches('.')
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        !e.is_empty() && (h == e || h.ends_with(&format!(".{e}")))
+    })
+}
+
+/// Parse + vet a plugin URL: absolute https, host on the allow-list, and (SSRF)
+/// resolving only to public addresses. Returns the parsed `Url` on success.
+async fn ensure_plugin_target(raw: &str, allow: &[String]) -> Result<Url, AppError> {
+    let parsed = Url::parse(raw).map_err(|_| bad_request("url must be an absolute URL"))?;
+    if parsed.scheme() != "https" {
+        return Err(bad_request("plugin url must be https"));
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| bad_request("plugin url has no host"))?;
+    if !plugin_host_allowed(host, allow) {
+        return Err(AppError::Forbidden("that plugin host isn't allowed".into()));
+    }
+    ensure_public_host(&parsed).await?;
+    Ok(parsed)
+}
+
+/// `GET /api/activity/plugin?url=<encoded https config URL>` — serve a plugin's
+/// configuration page *through* the proxy so it loads same-origin inside Discord.
+///
+/// A plugin's config iframe lives on its own `*.dweeb.faizo.net` host. On the web
+/// app the editor's CSP whitelists those origins, but the embedded Activity runs
+/// in a sandboxed `…discordsays.com` iframe whose CSP only allows Discord's own
+/// origins and our URL-mapped host — so the cross-origin plugin frame is blocked
+/// and renders blank. We fetch the page here and return it from the proxy (which
+/// the iframe reaches over the same `/proxy` mapping as everything else), making
+/// it same-origin and CSP-allowed. A small shim is injected so the page's own
+/// absolute `/api/*` calls are re-routed back through [`activity_plugin_fetch`]
+/// (the iframe is sandboxed to an opaque origin, so it can't reach the plugin
+/// host directly either). No per-plugin changes are needed.
+pub async fn activity_plugin_frame(
+    State(st): State<AppState>,
+    Query(q): Query<PluginUrlQuery>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let raw = q.url.trim();
+    if raw.is_empty() {
+        return Err(bad_request("url is required"));
+    }
+    let target = ensure_plugin_target(raw, &st.config.activity_plugin_hosts).await?;
+    let upstream_origin = target.origin().ascii_serialization();
+
+    let mut resp = image_client()
+        .get(target)
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't load the plugin: {e}")))?;
+    if let Some(addr) = resp.remote_addr() {
+        if !ip_is_public(addr.ip()) {
+            return Err(blocked_host());
+        }
+    }
+    if !resp.status().is_success() {
+        return Err(AppError::BadGateway(format!(
+            "plugin returned {}",
+            resp.status().as_u16()
+        )));
+    }
+    let content_type = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !content_type.contains("text/html") {
+        return Err(bad_request("plugin config URL didn't return HTML"));
+    }
+
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't read the plugin: {e}")))?
+    {
+        if buf.len() + chunk.len() > MAX_PLUGIN_HTML_BYTES {
+            return Err(bad_request("plugin config page is too large"));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+
+    let html = String::from_utf8_lossy(&buf);
+    let injected = inject_plugin_shim(&html, &upstream_origin);
+
+    let mut out = Response::new(Body::from(injected));
+    out.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    // The page is re-derived from `?url` each load and carries a baked shim, so
+    // don't let it sit in a cache; `nosniff` keeps the relayed bytes typed as set.
+    out.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    out.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    Ok(out)
+}
+
+/// `(GET|POST|PUT|PATCH|DELETE) /api/activity/plugin-fetch?url=<encoded>` — relay
+/// a single plugin API call on the sandboxed iframe's behalf.
+///
+/// The page served by [`activity_plugin_frame`] is sandboxed to an opaque origin,
+/// so its own `fetch("/api/…")` calls can't reach the plugin host. The injected
+/// shim rewrites them to this endpoint, which forwards the method + JSON body to
+/// the real plugin host and relays the response. Same allow-list + SSRF + size
+/// bounds as the page loader. Cookies and the Activity bearer are deliberately
+/// **not** forwarded — these plugin endpoints are unauthenticated, and we never
+/// hand a plugin the user's Discord token.
+pub async fn activity_plugin_fetch(
+    State(st): State<AppState>,
+    method: Method,
+    Query(q): Query<PluginUrlQuery>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    // The CORS layer answers the preflight; only real verbs reach the handler.
+    if !matches!(
+        method,
+        Method::GET | Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    ) {
+        return Err(bad_request("unsupported method"));
+    }
+    let raw = q.url.trim();
+    if raw.is_empty() {
+        return Err(bad_request("url is required"));
+    }
+    let target = ensure_plugin_target(raw, &st.config.activity_plugin_hosts).await?;
+
+    let mut req = image_client().request(method, target);
+    // Forward only the content type — never cookies or the Activity bearer.
+    if let Some(ct) = headers.get(header::CONTENT_TYPE) {
+        req = req.header(header::CONTENT_TYPE, ct);
+    }
+    if !body.is_empty() {
+        req = req.body(body.to_vec());
+    }
+
+    let mut resp = req
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't reach the plugin: {e}")))?;
+    if let Some(addr) = resp.remote_addr() {
+        if !ip_is_public(addr.ip()) {
+            return Err(blocked_host());
+        }
+    }
+    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let content_type = resp.headers().get(header::CONTENT_TYPE).cloned();
+
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't read the plugin response: {e}")))?
+    {
+        if buf.len() + chunk.len() > MAX_PLUGIN_RESP_BYTES {
+            return Err(bad_request("plugin response is too large"));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+
+    let mut out = Response::new(Body::from(buf));
+    *out.status_mut() = status;
+    if let Some(ct) = content_type {
+        out.headers_mut().insert(header::CONTENT_TYPE, ct);
+    }
+    out.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(out)
+}
+
+/// Insert the fetch-rewriting shim at the top of the page's `<head>` so it runs
+/// before the plugin's own (end-of-`<body>`) script makes any call.
+fn inject_plugin_shim(html: &str, upstream_origin: &str) -> String {
+    // `upstream_origin` is a URL origin (scheme://host[:port]) — no quotes or
+    // control chars are possible — but JSON-encode it anyway so it's an unarguably
+    // safe JS string literal.
+    let up = serde_json::to_string(upstream_origin).unwrap_or_else(|_| "\"\"".to_string());
+    let shim = format!("<script>{}</script>", plugin_shim_js(&up));
+    match find_head_insert(html) {
+        Some(idx) => {
+            let mut s = String::with_capacity(html.len() + shim.len());
+            s.push_str(&html[..idx]);
+            s.push_str(&shim);
+            s.push_str(&html[idx..]);
+            s
+        }
+        None => format!("{shim}{html}"),
+    }
+}
+
+/// Byte offset just after the opening `<head …>` tag, case-insensitively; `None`
+/// if the page has no head (then the shim is prepended to the whole document).
+fn find_head_insert(html: &str) -> Option<usize> {
+    let lower = html.to_ascii_lowercase();
+    let head = lower.find("<head")?;
+    let gt = lower[head..].find('>')? + head;
+    Some(gt + 1)
+}
+
+/// The injected shim. Wraps `fetch`/`XMLHttpRequest.open` so the plugin page's
+/// same-origin absolute calls (`/api/meta`, `/api/instances/…`) are re-pointed at
+/// our [`activity_plugin_fetch`] relay. It derives the proxy mount prefix from its
+/// own document path, so it tracks whatever prefix the host mapped us under, and
+/// leaves cross-origin requests (e.g. Discord's CDN) and already-proxied paths
+/// untouched. `UP` is the plugin's real origin, baked in by the loader.
+fn plugin_shim_js(upstream_js: &str) -> String {
+    format!(
+        r#"(function(){{"use strict";var UP={up};var L=location;var B=L.pathname.replace(/\/api\/activity\/plugin$/,"");var F=B+"/api/activity/plugin-fetch";function rw(u){{try{{var a=new URL(u,L.href);if(a.origin!==L.origin)return u;if(a.pathname.indexOf(B+"/api/activity/")===0)return u;return F+"?url="+encodeURIComponent(UP+a.pathname+a.search);}}catch(e){{return u;}}}}var of=window.fetch;if(of){{window.fetch=function(i,n){{try{{if(typeof i==="string"){{i=rw(i);}}else if(i&&i.url){{i=new Request(rw(i.url),i);}}}}catch(e){{}}return of.call(this,i,n);}};}}var oo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){{try{{arguments[1]=rw(u);}}catch(e){{}}return oo.apply(this,arguments);}};}})();"#,
+        up = upstream_js
+    )
+}
+
 // ── Collaboration rooms (WS /api/activity/room/:instance) ────────────────────
 
 /// One participant in a collaboration room, as broadcast in the roster.
@@ -789,6 +1037,45 @@ mod tests {
         for h in ["picsum.photos", "cdn.example.com", "i.imgur.com"] {
             assert!(!host_name_is_internal(h), "{h} should be external");
         }
+    }
+
+    #[test]
+    fn plugin_host_allowed_matches_domain_and_subdomains() {
+        let allow = vec!["dweeb.faizo.net".to_string()];
+        assert!(plugin_host_allowed("dweeb.faizo.net", &allow));
+        assert!(plugin_host_allowed("quickreplies.dweeb.faizo.net", &allow));
+        assert!(plugin_host_allowed("QuickReplies.Dweeb.Faizo.Net", &allow)); // case-insensitive
+        assert!(plugin_host_allowed("quickreplies.dweeb.faizo.net.", &allow)); // trailing dot
+                                                                               // Not a sub-domain — a look-alike suffix must not slip through.
+        assert!(!plugin_host_allowed("evil-dweeb.faizo.net", &allow));
+        assert!(!plugin_host_allowed("dweeb.faizo.net.evil.com", &allow));
+        assert!(!plugin_host_allowed("notdweeb.faizo.net", &allow));
+        assert!(!plugin_host_allowed("example.com", &allow));
+    }
+
+    #[test]
+    fn shim_injects_after_head_and_routes_calls() {
+        let html = "<!doctype html><html><head><title>x</title></head><body></body></html>";
+        let out = inject_plugin_shim(html, "https://quickreplies.dweeb.faizo.net");
+        // Shim lands immediately after the opening <head> tag, before its content.
+        let head = out.find("<head>").unwrap();
+        let script = out.find("<script>").unwrap();
+        let title = out.find("<title>").unwrap();
+        assert!(
+            head < script && script < title,
+            "shim must sit at the top of <head>"
+        );
+        assert!(out.contains("plugin-fetch"));
+        // The upstream origin is baked in as a JS string literal.
+        assert!(out.contains("\"https://quickreplies.dweeb.faizo.net\""));
+    }
+
+    #[test]
+    fn shim_prepends_when_no_head() {
+        let html = "<div>no head here</div>";
+        let out = inject_plugin_shim(html, "https://x.dweeb.faizo.net");
+        assert!(out.starts_with("<script>"));
+        assert!(out.ends_with("<div>no head here</div>"));
     }
 
     #[test]

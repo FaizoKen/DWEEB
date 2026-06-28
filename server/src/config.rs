@@ -56,6 +56,14 @@ pub struct Config {
     /// already holds, so no extra secret is needed. Set false to refuse them
     /// (501) on a deployment that doesn't register an Activity.
     pub activities_enabled: bool,
+    /// Host allow-list (bare domains) the Activity *plugin proxy* may load a
+    /// config page from — and forward its API calls to. Inside Discord a plugin's
+    /// own `*.dweeb.faizo.net` config iframe is blocked by the sandbox CSP, so the
+    /// proxy serves it same-origin instead (`/api/activity/plugin*`); this list is
+    /// what stops that path from becoming an open proxy. A host matches when it
+    /// equals an entry or is a sub-domain of one. From `ACTIVITY_PLUGIN_HOSTS`
+    /// (comma-separated); defaults to the DWEEB plugin domain.
+    pub activity_plugin_hosts: Vec<String>,
 
     // ── Authorization policy ───────────────────────────────────────────────
     /// When true, a user may only read servers where they own or hold
@@ -182,6 +190,10 @@ impl Config {
         let cookie_domain = opt_env("COOKIE_DOMAIN");
 
         let activities_enabled = parse_bool("ACTIVITIES_ENABLED", true);
+        let activity_plugin_hosts = opt_env("ACTIVITY_PLUGIN_HOSTS")
+            .map(|s| split_list(&s))
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| vec!["dweeb.faizo.net".to_string()]);
 
         let require_manage_guild = parse_bool("REQUIRE_MANAGE_GUILD", true);
 
@@ -221,6 +233,7 @@ impl Config {
             oauth_redirect_url,
             frontend_url,
             activities_enabled,
+            activity_plugin_hosts,
             session_secret,
             session_ttl,
             cookie_secure,

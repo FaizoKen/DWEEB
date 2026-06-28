@@ -35,10 +35,10 @@ use std::time::Duration;
 
 use axum::http::{header, HeaderName, HeaderValue, Method};
 use axum::middleware::from_fn_with_state;
-use axum::routing::{get, patch, post};
+use axum::routing::{any, get, patch, post};
 use axum::Router;
 use axum_extra::extract::cookie::Key;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::cache::{DataCache, TtlCache};
@@ -384,6 +384,13 @@ async fn run() {
             post(auth::custom_bot_webhook_start),
         )
         .layer(cors)
+        // The Activity plugin proxy is merged *after* the credentialed CORS layer
+        // so it isn't wrapped by it: the sandboxed plugin iframe calls it from an
+        // opaque ("null") origin with no cookies, which a credentialed allow-list
+        // can't permit. It carries its own permissive, credential-free CORS
+        // instead (see `activity_plugin_routes`). Rate-limit + tracing below still
+        // wrap it.
+        .merge(activity_plugin_routes())
         // Rate limiting runs outermost so rejected requests never touch a handler.
         .layer(from_fn_with_state(limiter, rate_limit))
         .layer(TraceLayer::new_for_http())
@@ -432,6 +439,30 @@ async fn connect_redis(url: &str) -> Result<redis::aio::ConnectionManager, Strin
         Ok(res) => res,
         Err(_) => Err("timed out connecting to Redis (is REDIS_URL reachable?)".to_string()),
     }
+}
+
+/// Routes for the Activity plugin proxy, with their own permissive (credential-
+/// free) CORS so the sandboxed, opaque-origin plugin iframe can call them.
+///
+/// The page loader (`/api/activity/plugin`) is fetched as the iframe's `src` and
+/// the relay (`/api/activity/plugin-fetch`) by the page's rewritten `fetch`/XHR —
+/// both from an opaque origin that sends `Origin: null` and no cookies, which the
+/// main credentialed CORS allow-list can't accept. `Any` origin/methods/headers
+/// answers the JSON preflight and returns `Access-Control-Allow-Origin: *` (valid
+/// for these non-credentialed calls). Auth/SSRF/size bounds live in the handlers.
+fn activity_plugin_routes() -> Router<AppState> {
+    let cors = CorsLayer::new()
+        .allow_methods(Any)
+        .allow_headers(Any)
+        .allow_origin(Any);
+    Router::new()
+        .route("/api/activity/plugin", get(activity::activity_plugin_frame))
+        .route(
+            "/api/activity/plugin-fetch",
+            any(activity::activity_plugin_fetch)
+                .layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
+        )
+        .layer(cors)
 }
 
 /// Build the CORS layer: explicit origins (credentialed requests forbid `*`),

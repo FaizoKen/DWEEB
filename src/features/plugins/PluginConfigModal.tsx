@@ -9,7 +9,12 @@
 
 import { useEffect } from "react";
 import { Modal } from "@/ui/Modal";
-import { PLUGIN_IFRAME_SANDBOX, type PluginTheme } from "@/core/plugins/protocol";
+import {
+  PLUGIN_IFRAME_SANDBOX,
+  PLUGIN_IFRAME_SANDBOX_PROXIED,
+  type PluginTheme,
+} from "@/core/plugins/protocol";
+import { isActivityProxiedPlugins, proxiedPluginConfigUrl } from "@/core/activity/runtime";
 import type { PluginManifest } from "@/core/plugins/manifest";
 import type { PluginTarget } from "@/core/plugins/targets";
 import { usePluginConfig, type PluginSaveResult } from "./usePluginConfig";
@@ -55,14 +60,19 @@ export function PluginConfigModal({ manifest, target, customId, preset, onSave, 
     return () => clearTimeout(t);
   }, [iframeRef]);
 
+  // Inside a real Discord Activity the cross-origin plugin frame is CSP-blocked
+  // (renders blank), so load it through the proxy — same-origin, hence the
+  // opaque-origin sandbox (see the constants). Everywhere else: load it directly.
+  const proxied = isActivityProxiedPlugins();
+
   return (
     <Modal open title={`Configure ${manifest.name}`} onClose={onClose}>
       <div className={styles.frameWrap}>
         <iframe
           ref={iframeRef}
           className={styles.frame}
-          src={manifest.configUrl}
-          sandbox={PLUGIN_IFRAME_SANDBOX}
+          src={proxiedPluginConfigUrl(manifest.configUrl)}
+          sandbox={proxied ? PLUGIN_IFRAME_SANDBOX_PROXIED : PLUGIN_IFRAME_SANDBOX}
           title={`${manifest.name} configuration`}
           style={{ height: height ?? DEFAULT_HEIGHT }}
           // The plugin owns everything inside; it cannot reach the parent except

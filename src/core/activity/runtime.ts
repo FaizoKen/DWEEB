@@ -76,6 +76,34 @@ function isDiscordCdnUrl(url: string): boolean {
   }
 }
 
+/**
+ * True when a plugin config iframe must be loaded *through* the proxy rather than
+ * straight from its own origin — i.e. a real, production Activity. Inside Discord
+ * the sandboxed `…discordsays.com` iframe's CSP blocks the cross-origin plugin
+ * frame (it renders blank), so we route it via the proxy's `/api/activity/plugin`
+ * loader instead. The web app and the dev URL-override both load plugins directly
+ * (no CSP / proxied calls 404 under the faux ticket), so this is PROD-Activity only.
+ */
+export function isActivityProxiedPlugins(): boolean {
+  return isActivityMode() && import.meta.env.PROD;
+}
+
+/**
+ * Rewrite a plugin's config-iframe URL so it loads inside a production Activity.
+ *
+ * Returns the proxy's same-origin loader path (`/proxy/api/activity/plugin?url=…`,
+ * reached over the same URL mapping as every other proxy call) when we're in a
+ * real Activity; the original URL everywhere else. The proxy fetches the page and
+ * injects a shim that re-routes the plugin's own `/api/*` calls back through the
+ * proxy — see `server/src/activity.rs`. The frame is then same-origin to the host,
+ * so it's sandboxed to an opaque origin and its messages arrive as origin `"null"`
+ * (see `features/plugins/usePluginConfig.ts`).
+ */
+export function proxiedPluginConfigUrl(configUrl: string): string {
+  if (!isActivityProxiedPlugins()) return configUrl;
+  return `${PROXY_MAPPING_PREFIX}/api/activity/plugin?url=${encodeURIComponent(configUrl)}`;
+}
+
 let accessToken: string | null = null;
 
 /** Store (or clear) the Discord access token the proxy bearer-authenticates with.

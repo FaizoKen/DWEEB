@@ -312,3 +312,16 @@ export function newNonce(): string {
  *  are granted. */
 export const PLUGIN_IFRAME_SANDBOX =
   "allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox";
+
+/** Sandbox flags for the plugin iframe **inside a Discord Activity**, where the
+ *  frame is served same-origin through the proxy (see `proxiedPluginConfigUrl`).
+ *  `allow-same-origin` is deliberately DROPPED here: on the web app the plugin is
+ *  a *different* origin than the editor (so it's isolated even with that flag),
+ *  but proxied it shares the host's origin — keeping `allow-same-origin` would let
+ *  the untrusted plugin reach into the host's DOM/storage. Without it the frame
+ *  gets an opaque origin, restoring the isolation; its `postMessage`s then arrive
+ *  with origin `"null"` and the `event.source` check becomes the gate (see
+ *  `usePluginConfig.ts`). The proxied page makes no cross-origin/cookie calls (its
+ *  API is relayed by the proxy), so nothing of value is lost. */
+export const PLUGIN_IFRAME_SANDBOX_PROXIED =
+  "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox";

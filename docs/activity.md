@@ -82,6 +82,19 @@ webhook feature.
    (`cdn.discordapp.com` / `media.discordapp.net`, e.g. custom emoji) is already
    CSP-allowed and loads natively.
 
+   **Plugin config UIs** work the same way, also without an extra mapping. A
+   plugin's configuration iframe normally loads straight from its own
+   `*.dweeb.faizo.net` host, but that cross-origin frame is CSP-blocked inside the
+   Activity (it renders blank). So in a real Activity the editor points the frame
+   at the proxy's `GET /api/activity/plugin?url=…` loader (over the same `/proxy`
+   mapping): the proxy fetches the page and injects a tiny shim that re-routes the
+   plugin's own `/api/*` calls through `/api/activity/plugin-fetch`. The frame is
+   then same-origin, so it's sandboxed to an **opaque** origin (no `allow-same-origin`)
+   to keep the untrusted plugin out of the host — its `postMessage`s arrive as
+   origin `"null"` and the `event.source` check is the gate. Both endpoints are
+   allow-listed by `ACTIVITY_PLUGIN_HOSTS` (default `dweeb.faizo.net`) so they
+   can't be abused as an open proxy. See `server/src/activity.rs`.
+
 3. **OAuth2 → Scopes** used by the SDK handshake: `identify` (who's editing) and
    `guilds` (membership + permission gate). No redirect URI is needed for the
    embedded flow — the code comes over RPC, not a browser redirect.
