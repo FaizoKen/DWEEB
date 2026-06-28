@@ -10,13 +10,22 @@
  * The Activity-specific bar sits as a header on the editor pane only — matching
  * the web app, where the action bar tops the builder column and the preview is
  * left uncluttered — rather than spanning the full width across both panes.
+ *
+ * Layout mirrors the web app at every width (see `app/App`): two side-by-side
+ * panes on desktop, and on a narrow window (mobile, or a small picture-in-
+ * picture) the editor goes full-width while the preview becomes a bottom sheet
+ * raised by a floating button + live mini preview. On the mobile client we also
+ * inset the whole surface for Discord's native top bar / home indicator.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ComponentTree } from "@/features/builder/components/ComponentTree";
 import { Preview } from "@/features/preview/Preview";
+import { MiniPreview } from "@/features/preview/MiniPreview";
+import { usePreviewSwipeToClose, useIsMobileSheet } from "@/features/preview/previewSheet";
 import { ToastViewport } from "@/ui/Toast";
 import { Button } from "@/ui/Button";
+import { EyeIcon } from "@/ui/Icon";
 import {
   useActivityStore,
   type ActivityStatus,
@@ -29,7 +38,29 @@ export function ActivityApp() {
   const status = useActivityStore((s) => s.status);
   const step = useActivityStore((s) => s.step);
   const error = useActivityStore((s) => s.error);
+  const platform = useActivityStore((s) => s.platform);
   const init = useActivityStore((s) => s.init);
+
+  // The preview is a side column on desktop and a bottom sheet on mobile; this
+  // only matters in the sheet layout, where the CSS keeps it slid away until
+  // opened. Mounting mirrors the web app: keep the (off-screen) sheet preview
+  // out of the tree while closed so we don't double the per-keystroke render —
+  // a second live <Preview> already runs inside the mini preview — lingering
+  // briefly past close so it animates out with its content intact.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewMounted, setPreviewMounted] = useState(false);
+  useEffect(() => {
+    if (previewOpen) {
+      setPreviewMounted(true);
+      return;
+    }
+    const t = window.setTimeout(() => setPreviewMounted(false), 300);
+    return () => window.clearTimeout(t);
+  }, [previewOpen]);
+
+  const isMobileSheet = useIsMobileSheet();
+  const closePreview = () => setPreviewOpen(false);
+  const { sheetRef, swipeProps } = usePreviewSwipeToClose(closePreview);
 
   useEffect(() => {
     void init();
@@ -40,16 +71,52 @@ export function ActivityApp() {
   }
 
   return (
-    <div className={styles.app}>
+    <div
+      className={styles.app}
+      data-platform={platform ?? undefined}
+      data-preview-open={previewOpen ? "true" : "false"}
+    >
       <div className={styles.panes}>
         <section className={styles.editor} aria-label="Component builder">
           <ActivityBar />
           <ComponentTree />
         </section>
-        <section className={styles.preview} aria-label="Message preview">
-          <Preview />
+        {/* Dismiss scrim for the mobile preview sheet — catches taps on the
+            builder peeking above the sheet so they close it. Inert on desktop,
+            where the preview is a permanent side column. */}
+        <div className={styles.scrim} aria-hidden="true" onClick={closePreview} />
+        <section
+          ref={sheetRef}
+          className={styles.preview}
+          aria-label="Message preview"
+          aria-hidden={isMobileSheet && !previewOpen ? "true" : undefined}
+        >
+          {!isMobileSheet || previewMounted ? (
+            <Preview onClose={closePreview} swipeProps={swipeProps} />
+          ) : null}
         </section>
       </div>
+
+      {/* Mobile-only: a live mini preview thumbnail stacked over a "Preview"
+          button, both opening the full sheet — the same affordance the web app
+          floats in the bottom-right corner. */}
+      {isMobileSheet && !previewOpen ? (
+        <div className="fab-stack">
+          <MiniPreview onOpen={() => setPreviewOpen(true)} />
+          <div className="fab-row">
+            <button
+              type="button"
+              className="preview-fab"
+              onClick={() => setPreviewOpen(true)}
+              aria-label="Show preview"
+            >
+              <EyeIcon size={18} />
+              <span>Preview</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <ToastViewport />
     </div>
   );

@@ -6,12 +6,38 @@
   background: var(--app-bg);
   color: var(--app-text);
   overflow: hidden;
+
+  /* Discord's mobile client overlays a native top bar (the activity switcher +
+     Leave button) and a home indicator at the bottom; keep our chrome clear of
+     both. Discord exposes the insets as `--discord-safe-area-inset-*`; `env()`
+     is the iOS + web/dev fallback. On desktop there's no in-iframe chrome, so
+     these all resolve to 0 and the layout is unchanged. */
+  --sait: var(--discord-safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --saib: var(--discord-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --sail: var(--discord-safe-area-inset-left, env(safe-area-inset-left, 0px));
+  --sair: var(--discord-safe-area-inset-right, env(safe-area-inset-right, 0px));
+  padding: var(--sait) var(--sair) var(--saib) var(--sail);
+}
+
+/* The mobile client doesn't populate `--discord-safe-area-inset-*` until the
+   first layout-mode/orientation change, so on first paint the native top bar
+   would still cover our header. Floor the top inset at the bar's known height
+   (48px) on mobile only — `max()` lets the real value win once Discord sets it. */
+.app[data-platform="mobile"] {
+  padding-top: max(var(--sait), 48px);
 }
 
 .panes {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   min-height: 0;
+}
+
+/* Dismiss scrim for the mobile preview sheet — only shown in the sheet layout
+   (the media query below). On desktop the preview is a permanent side column
+   with nothing to dismiss. */
+.scrim {
+  display: none;
 }
 
 .editor,
@@ -36,16 +62,57 @@
   flex-direction: column;
 }
 
-/* On a narrow Activity window (mobile, or a small picture-in-picture) stack the
-   editor over the preview rather than squeezing two columns. */
-@media (max-width: 720px) {
+/* On a narrow Activity window (mobile, or a small picture-in-picture) the editor
+   goes full-width and the preview becomes a bottom sheet — exactly how the web
+   app behaves at this breakpoint (see global.css). The sheet is raised by the
+   floating Preview button / mini preview rendered in ActivityApp. The 900px
+   breakpoint must match `MOBILE_SHEET_QUERY` so the JS (which mounts the sheet
+   preview only while open) and the CSS agree on when it's a sheet. */
+@media (max-width: 900px) {
   .panes {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: 1fr;
   }
   .editor {
     border-right: none;
-    border-bottom: 1px solid var(--app-border);
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .preview {
+    position: fixed;
+    inset: auto 0 0 0;
+    height: 85dvh;
+    z-index: calc(var(--app-z-modal) - 1);
+    transform: translateY(100%);
+    transition: transform 260ms cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--app-shadow-lg);
+    border-radius: 16px 16px 0 0;
+    will-change: transform;
+  }
+
+  .app[data-preview-open="true"] .preview {
+    transform: none;
+  }
+
+  /* Scrim sits one layer under the sheet (which is `--app-z-modal - 1`), so it
+     covers the editor peeking above the 85dvh sheet while leaving the sheet
+     itself tappable. Fades in step with the sheet's slide; `pointer-events`
+     gates it so it never swallows editor taps while the preview is closed. */
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--app-z-modal) - 2);
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 260ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .app[data-preview-open="true"] .scrim {
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 

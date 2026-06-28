@@ -50,12 +50,19 @@ export interface ActivityUser {
   avatar: string | null;
 }
 
+/** Which Discord client the Activity launched on, read off `sdk.platform`.
+ *  Drives the mobile-only safe-area fallback (see `ActivityApp`): the mobile
+ *  client overlays a native top bar whose inset isn't populated until the first
+ *  layout change. Null until the handshake resolves. */
+export type ActivityPlatform = "mobile" | "desktop";
+
 interface ActivityState {
   status: ActivityStatus;
   step: ActivityStep;
   error: string | null;
   context: ActivityContext | null;
   user: ActivityUser | null;
+  platform: ActivityPlatform | null;
   participants: CollabParticipant[];
   collabConnected: boolean;
   publishing: boolean;
@@ -75,6 +82,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   error: null,
   context: null,
   user: null,
+  platform: null,
   participants: [],
   collabConnected: false,
   publishing: false,
@@ -98,7 +106,13 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     // carries a real ticket and the handshake below runs normally.
     const mock = devOverrideSession();
     if (mock) {
-      set({ status: "ready", step: "done", context: mock.context, user: mock.user });
+      set({
+        status: "ready",
+        step: "done",
+        context: mock.context,
+        user: mock.user,
+        platform: mock.platform,
+      });
       return;
     }
 
@@ -108,7 +122,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
       const sdk = getSdk();
       await sdk.ready();
-      set({ step: "sdk-ready" });
+      // Which client we're on, so the UI can apply the mobile-only safe-area
+      // fallback (the native top bar's inset isn't populated until the first
+      // layout change — see ActivityApp). `sdk.platform` is "mobile"/"desktop".
+      set({ step: "sdk-ready", platform: sdk.platform === "mobile" ? "mobile" : "desktop" });
 
       const guildId = sdk.guildId;
       const channelId = sdk.channelId;
@@ -190,7 +207,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
  * `instance_id` are all present), or null otherwise. See the call site in
  * `init()` for why proxied calls can't work under the override.
  */
-function devOverrideSession(): { context: ActivityContext; user: ActivityUser } | null {
+function devOverrideSession(): {
+  context: ActivityContext;
+  user: ActivityUser;
+  platform: ActivityPlatform;
+} | null {
   if (!import.meta.env.DEV) return null;
   const q = new URLSearchParams(window.location.search);
   if (q.get("discord_proxy_ticket") !== "faux-proxy-ticket") return null;
@@ -203,6 +224,9 @@ function devOverrideSession(): { context: ActivityContext; user: ActivityUser } 
       instanceId: q.get("instance_id") ?? "dev-override",
     },
     user: { id: "dev-override", name: "Dev (override)", avatar: null },
+    // Discord appends `platform=mobile|desktop` to the launch URL; honour it so
+    // the override can exercise the mobile layout from a desktop browser too.
+    platform: q.get("platform") === "mobile" ? "mobile" : "desktop",
   };
 }
 
