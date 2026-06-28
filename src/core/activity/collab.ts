@@ -1,27 +1,33 @@
 /**
  * Real-time collaboration over the Activity room WebSocket.
  *
- * Everyone in the same Activity instance shares one editor. The model is
- * deliberately simple — **last-write-wins on the whole message**:
+ * Everyone in the same Activity instance shares one editor. Sync is **granular,
+ * last-write-wins per node** (see `collabPatch.ts`):
  *
- *  - Local edits to the message store are debounced and broadcast as a `draft`
- *    frame tagged with this connection's id (`cid`).
- *  - Incoming `draft` frames from *other* connections are applied straight to the
- *    store (bypassing history/id-reassignment) so the tree stays identical across
- *    peers and the editor doesn't fight the typist.
+ *  - Local edits are debounced, then diffed against the last state we synced.
+ *    The diff is broadcast as a `patch` frame (a handful of per-node ops) tagged
+ *    with this connection's id (`cid`) — or, when the top-level component list
+ *    changed shape, as a whole-message `draft` frame.
+ *  - Incoming `patch`/`draft` frames from *other* connections are applied
+ *    straight to the store (bypassing history/id-reassignment) so the tree stays
+ *    identical across peers and the editor doesn't fight the typist. Applying a
+ *    patch touches only the named nodes, so two people editing *different* parts
+ *    no longer clobber each other.
  *  - A joiner announces itself with `hello`; existing peers reply with their
- *    current draft, so a latecomer inherits the in-progress message without
+ *    full current draft, so a latecomer inherits the in-progress message without
  *    clobbering anyone (a newcomer never broadcasts its own default on open).
  *  - `roster` frames (server-authored) drive the presence list.
  *
- * It's intentionally not a CRDT: concurrent edits to the same field resolve to
- * whoever typed last. That's the honest, robust v1 for a small group co-writing
- * one announcement.
+ * The server relays every frame opaquely, so this protocol is entirely
+ * client-side. It's intentionally not a CRDT: concurrent edits to the *same*
+ * node resolve to whoever typed last — the honest, robust tradeoff for a small
+ * group co-writing one announcement.
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
 import type { WebhookMessage } from "@/core/schema/types";
 import { PROXY_BASE_URL } from "@/core/guild/config";
+import { applyOps, diffMessage, type CollabOp } from "./collabPatch";
 
 /** One participant, as the server's `roster` frame lists them. */
 export interface CollabParticipant {
@@ -52,9 +58,16 @@ let reconnectAttempts = 0;
 let stopped = false;
 /** Unique per connection so we can ignore the echo of our own frames. */
 let cid = "";
-/** Set while applying a remote draft, so the store subscription doesn't
+/** Set while applying a remote frame, so the store subscription doesn't
  *  re-broadcast it back out as a "local" edit. */
 let applyingRemote = false;
+/**
+ * The last message state we've synced with the room — the baseline every local
+ * diff is computed against. It tracks *what peers know*, so it advances on each
+ * send and, on receiving a remote patch, by replaying that patch (NOT by reading
+ * the store, which may also hold our own not-yet-broadcast edits).
+ */
+let lastSent: WebhookMessage | null = null;
 let opts: StartOptions | null = null;
 
 /** Open the room socket and start syncing the message store. Idempotent-ish:
@@ -64,6 +77,8 @@ export function startCollab(options: StartOptions): void {
   stopped = false;
   opts = options;
   cid = randomId();
+  // Baseline for the first diff — peers reconcile via the hello/draft exchange.
+  lastSent = useMessageStore.getState().message;
   subscribeStore();
   connect();
 }
@@ -77,6 +92,7 @@ export function stopCollab(): void {
   reconnectTimer = null;
   unsubStore?.();
   unsubStore = null;
+  lastSent = null;
   if (socket) {
     socket.onclose = null;
     try {
@@ -149,44 +165,88 @@ function handleFrame(frame: Record<string, unknown>): void {
   // Ignore the echo of our own frames.
   if (frame.cid === cid) return;
   if (type === "hello") {
-    // A peer just joined — hand them our current draft.
-    sendDraft(useMessageStore.getState().message);
+    // A peer just joined — hand them our full current draft (a latecomer can't
+    // replay patch history, so it needs the whole state).
+    sendSnapshot(useMessageStore.getState().message);
     return;
   }
   if (type === "draft" && frame.message && typeof frame.message === "object") {
-    applyRemote(frame.message as WebhookMessage);
+    applyFull(frame.message as WebhookMessage);
+    return;
+  }
+  if (type === "patch" && Array.isArray(frame.ops)) {
+    applyPatch(frame.ops as CollabOp[]);
   }
 }
 
-/** Apply a peer's draft without pushing history or reassigning editor ids, so
- *  the component tree (and thus selection by id) stays consistent across peers
- *  and the apply doesn't echo back out as a local edit. */
-function applyRemote(message: WebhookMessage): void {
+/** Replace the whole message with a peer's snapshot (latecomer sync or a
+ *  top-level structural change). Bypasses history/id-reassignment so the tree
+ *  stays identical across peers. */
+function applyFull(message: WebhookMessage): void {
   applyingRemote = true;
   try {
     useMessageStore.setState({ message });
   } finally {
     applyingRemote = false;
   }
+  // Our baseline is now exactly the peer's state. A full snapshot supersedes any
+  // un-sent local edit — the accepted edge of last-write-wins, and only sent for
+  // a latecomer or a top-level structural change.
+  lastSent = message;
+}
+
+/** Apply a peer's per-node ops, touching only the named nodes so a concurrent
+ *  local edit elsewhere is preserved. */
+function applyPatch(ops: CollabOp[]): void {
+  applyingRemote = true;
+  try {
+    useMessageStore.setState((s) => ({ message: applyOps(s.message, ops) }));
+  } finally {
+    applyingRemote = false;
+  }
+  // Advance the baseline by the SAME ops rather than reading the store: the
+  // store may also hold our own not-yet-broadcast edits, which must remain a
+  // diff to send on the next sync.
+  if (lastSent) lastSent = applyOps(lastSent, ops);
 }
 
 function subscribeStore(): void {
   unsubStore = useMessageStore.subscribe((state, prev) => {
     if (applyingRemote) return;
     if (state.message === prev.message) return; // selection-only change, etc.
-    scheduleSend(state.message);
+    scheduleSync();
   });
 }
 
-function scheduleSend(message: WebhookMessage): void {
+function scheduleSync(): void {
   if (sendTimer) clearTimeout(sendTimer);
   sendTimer = setTimeout(() => {
     sendTimer = null;
-    sendDraft(message);
+    syncNow();
   }, SEND_DEBOUNCE_MS);
 }
 
-function sendDraft(message: WebhookMessage): void {
+/** Diff the current message against our last synced baseline and broadcast the
+ *  change — a granular `patch`, or a full `draft` when the diff isn't expressible
+ *  in place (top-level structure changed, or there's no baseline yet). */
+function syncNow(): void {
+  const current = useMessageStore.getState().message;
+  const base = lastSent;
+  lastSent = current;
+  if (!base) {
+    sendSnapshot(current);
+    return;
+  }
+  const ops = diffMessage(base, current);
+  if (ops === null) {
+    sendSnapshot(current);
+    return;
+  }
+  if (ops.length === 0) return; // nothing semantic changed
+  send({ type: "patch", cid, ops });
+}
+
+function sendSnapshot(message: WebhookMessage): void {
   send({ type: "draft", cid, message });
 }
 

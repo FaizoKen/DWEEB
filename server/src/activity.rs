@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -64,6 +64,14 @@ const BEARER_TTL_SECS: i64 = 600;
 const MAX_ROOMS: usize = 5_000;
 const BROADCAST_CAP: usize = 64;
 const MAX_RELAY_BYTES: usize = 256 * 1024;
+
+/// Keepalive for a room socket: how often the server pings (so an idle proxy/CDN
+/// doesn't silently drop the connection, and a dead peer surfaces as a failed
+/// send), and how long without *any* inbound frame — not even a pong — before we
+/// reap a half-open/zombie connection. The timeout sits well over a couple of
+/// ping intervals so a momentarily slow client isn't dropped.
+const ROOM_PING_INTERVAL_SECS: u64 = 30;
+const ROOM_IDLE_TIMEOUT_SECS: u64 = 90;
 
 // ── Identity (cookie OR bearer) ─────────────────────────────────────────────
 
@@ -939,16 +947,28 @@ async fn room_socket(st: AppState, instance: String, me: Participant, mut socket
         let _ = socket.send(Message::Close(None)).await;
         return;
     };
+    // Keepalive: ping on a fixed interval so an idle intermediary doesn't drop
+    // the socket, and reap a peer we've heard nothing from. Browsers answer our
+    // ping with a pong automatically, which refreshes `last_seen`.
+    let mut ping = tokio::time::interval(Duration::from_secs(ROOM_PING_INTERVAL_SECS));
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let idle_timeout = Duration::from_secs(ROOM_IDLE_TIMEOUT_SECS);
+    let mut last_seen = Instant::now();
     loop {
         tokio::select! {
             inbound = socket.recv() => match inbound {
                 Some(Ok(Message::Text(t))) => {
+                    last_seen = Instant::now();
                     if t.len() <= MAX_RELAY_BYTES {
                         let _ = tx.send(t);
                     }
                 }
+                // A pong (or a client-sent ping) proves the peer is still alive.
+                Some(Ok(Message::Pong(_))) | Some(Ok(Message::Ping(_))) => {
+                    last_seen = Instant::now();
+                }
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
-                Some(Ok(_)) => {} // ignore binary / ping / pong
+                Some(Ok(_)) => {} // ignore binary
             },
             outbound = rx.recv() => match outbound {
                 Ok(s) => {
@@ -958,6 +978,16 @@ async fn room_socket(st: AppState, instance: String, me: Participant, mut socket
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(broadcast::error::RecvError::Closed) => break,
+            },
+            _ = ping.tick() => {
+                // Drop a zombie that's gone quiet (no pong, no frame), else ping —
+                // a send error means the socket is already gone.
+                if last_seen.elapsed() > idle_timeout {
+                    break;
+                }
+                if socket.send(Message::Ping(Vec::new())).await.is_err() {
+                    break;
+                }
             },
         }
     }
