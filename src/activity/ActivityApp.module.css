@@ -146,6 +146,16 @@
   line-height: 1.5;
 }
 
+/* The live handshake stage shown under the splash message (and the stalled-stage
+   hint on error) — quieter than the message so it reads as secondary detail. */
+.splashStep {
+  max-width: 32ch;
+  margin-top: calc(var(--app-space-4) * -0.5);
+  font-size: var(--app-text-sm);
+  color: var(--app-text-subtle);
+  line-height: 1.4;
+}
+
 .spinner {
   width: 28px;
   height: 28px;
