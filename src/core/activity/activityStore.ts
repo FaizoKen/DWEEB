@@ -20,8 +20,14 @@ import { fetchUserGuilds, type PickerGuild } from "@/core/guild/api";
 import { useMessageStore } from "@/core/state/messageStore";
 import { buildWirePayload } from "@/core/webhook/send";
 import { pushToast } from "@/ui/Toast";
-import { configureUrlMappings, getSdk } from "./sdk";
-import { exchangeCode, publishToChannel, type ActivityPostResult } from "./api";
+import {
+  configureUrlMappings,
+  getSdk,
+  openExternalLink,
+  openInviteDialog,
+  setActivityPresence,
+} from "./sdk";
+import { editPostedMessage, exchangeCode, publishToChannel, type ActivityPostResult } from "./api";
 import { startCollab, stopCollab, type CollabParticipant } from "./collab";
 import { setActivityToken } from "./runtime";
 
@@ -89,8 +95,17 @@ interface ActivityState {
 
   /** Run the SDK handshake and start the session. Safe to call once. */
   init(): Promise<void>;
-  /** Post the current message into the chosen channel. */
+  /** Post the current message into the chosen channel as a NEW message. */
   publish(): Promise<void>;
+  /** PATCH the message last posted from this Activity with the current draft.
+   *  Only meaningful while {@link lastPost} matches the chosen destination. */
+  update(): Promise<void>;
+  /** Open the last posted message in Discord (the sandboxed iframe can't
+   *  navigate to discord.com itself, so this goes through the SDK). */
+  openLastPost(): Promise<void>;
+  /** Open Discord's invite dialog so others can join this Activity. No-op in a
+   *  DM / group-DM launch or without invite permission. */
+  invite(): Promise<void>;
   /** Re-point `publish()` at a different channel in the target guild. */
   setTargetChannel(channelId: string): void;
   /** Pick the destination server (DM launch): loads its channels + preview data
@@ -230,6 +245,13 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         targetChannelId: guildId ? channelId : null,
       });
 
+      // Best-effort rich presence — friends see "Building a message in DWEEB" on
+      // the user's profile. This command needs the `rpc.activities.write` scope,
+      // which we deliberately don't request (a new authorize scope would perturb
+      // the fragile handshake), so it silently no-ops without it and lights up
+      // automatically if the scope is ever granted.
+      void setActivityPresence("Building a message").catch(() => {});
+
       if (guildId) {
         // Server launch: load the launching server's data so the preview
         // resolves mentions/emoji and the channel picker is populated.
@@ -279,6 +301,58 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       pushToast(e instanceof Error ? e.message : "Couldn't post the message.", "error");
     } finally {
       set({ publishing: false });
+    }
+  },
+
+  async update() {
+    const last = get().lastPost;
+    if (!last) {
+      pushToast("Post the message first, then you can update it.", "error");
+      return;
+    }
+    if (get().publishing) return;
+    set({ publishing: true });
+    try {
+      const payload = buildWirePayload(useMessageStore.getState().message);
+      const result = await editPostedMessage(
+        last.guild_id,
+        last.channel_id,
+        last.message_id,
+        last.webhook_id ?? "",
+        payload,
+      );
+      set({ lastPost: result });
+      pushToast("Updated the message ✓", "success");
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : "Couldn't update the message.", "error");
+    } finally {
+      set({ publishing: false });
+    }
+  },
+
+  async openLastPost() {
+    const url = get().lastPost?.url;
+    if (!url) return;
+    try {
+      await openExternalLink(url);
+    } catch {
+      // The web app / dev URL-override aren't sandboxed, so a plain open works
+      // there when the SDK path can't (a real in-Discord Activity needs the SDK).
+      try {
+        window.open(url, "_blank", "noopener");
+      } catch {
+        /* nothing more we can do */
+      }
+    }
+  },
+
+  async invite() {
+    try {
+      await openInviteDialog();
+    } catch {
+      // Thrown in a DM / group-DM or without invite permission. The button is
+      // only shown for server launches, so this is the missing-permission case.
+      pushToast("You need permission to create invites in this server.", "error");
     }
   },
 

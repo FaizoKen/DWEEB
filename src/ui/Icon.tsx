@@ -85,6 +85,14 @@ export const SendIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const ExternalLinkIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M15 3h6v6" />
+    <path d="M10 14L21 3" />
+    <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+  </svg>
+);
+
 export const UndoIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M3 7v6h6" />

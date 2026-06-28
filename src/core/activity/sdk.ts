@@ -47,3 +47,34 @@ export function configureUrlMappings(): void {
     patchXhr: true,
   });
 }
+
+/**
+ * Open a discord.com (or any external) URL from inside the Activity. A sandboxed
+ * `…discordsays.com` iframe can't navigate to discord.com itself, so the SDK
+ * hands the link to the host client to open — used by "View message" after a post.
+ */
+export async function openExternalLink(url: string): Promise<void> {
+  await getSdk().commands.openExternalLink({ url });
+}
+
+/**
+ * Open Discord's invite dialog so the launcher can pull friends into this
+ * Activity instance (they join the same collaboration room). Throws in a DM /
+ * group-DM context or without the invite permission — callers should gate on a
+ * server launch and treat a rejection as a no-op.
+ */
+export async function openInviteDialog(): Promise<void> {
+  await getSdk().commands.openInviteDialog();
+}
+
+/**
+ * Set the user's rich presence so friends see "Building a message in DWEEB".
+ * Best-effort: this command needs the `rpc.activities.write` scope, which we
+ * deliberately don't request (a new scope would perturb the authorize handshake),
+ * so callers should swallow a rejection — it lights up only if the scope is held.
+ */
+export async function setActivityPresence(details: string, state?: string): Promise<void> {
+  await getSdk().commands.setActivity({
+    activity: { type: 0, details, state, timestamps: { start: Date.now() } },
+  });
+}

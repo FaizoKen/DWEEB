@@ -411,7 +411,12 @@ impl Discord {
         message_id: &str,
         body: Value,
     ) -> Result<(), AppError> {
-        let url = format!("{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}");
+        // `with_components=true` mirrors the execute path: it tells Discord to
+        // process the `components` array in the edit (required for V2 component
+        // edits, harmless for the re-enable path that only toggles `disabled`).
+        let url = format!(
+            "{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}?with_components=true"
+        );
         let resp = send_with_retry(self.http.patch(&url).json(&body))
             .await
             .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
