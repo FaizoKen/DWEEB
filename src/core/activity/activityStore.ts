@@ -26,6 +26,16 @@ import { setActivityToken } from "./runtime";
 
 export type ActivityStatus = "idle" | "connecting" | "ready" | "error";
 
+/** Fine-grained handshake progress, surfaced on the splash so a stalled launch
+ *  shows *where* it stalled (the in-Discord iframe has no reachable console). */
+export type ActivityStep =
+  | "starting"
+  | "sdk-ready"
+  | "authorizing"
+  | "exchanging-token"
+  | "authenticating"
+  | "done";
+
 /** The launching context, read off the SDK once ready. */
 export interface ActivityContext {
   guildId: string;
@@ -42,6 +52,7 @@ export interface ActivityUser {
 
 interface ActivityState {
   status: ActivityStatus;
+  step: ActivityStep;
   error: string | null;
   context: ActivityContext | null;
   user: ActivityUser | null;
@@ -60,6 +71,7 @@ let initialised = false;
 
 export const useActivityStore = create<ActivityState>((set, get) => ({
   status: "idle",
+  step: "starting",
   error: null,
   context: null,
   user: null,
@@ -71,13 +83,32 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   async init() {
     if (initialised) return;
     initialised = true;
-    set({ status: "connecting", error: null });
+    set({ status: "connecting", step: "starting", error: null });
+
+    // Dev-only escape hatch for Discord's "Use Activity URL Override".
+    //
+    // The override (developer shelf) launches the Activity with a *faux* proxy
+    // ticket (`discord_proxy_ticket=faux-proxy-ticket`), and Discord's edge does
+    // NOT forward `/.proxy/…` requests for such launches — so every proxied call
+    // (token exchange, guild bootstrap, publish, collab WS) 404s and the real
+    // handshake can't complete. To still iterate the embedded UI locally, when we
+    // detect that exact case we skip the proxy-bound handshake and seed a stub
+    // session from the launch params so the builder renders. This NEVER runs in a
+    // production build (`import.meta.env.DEV` is false), where the real launch
+    // carries a real ticket and the handshake below runs normally.
+    const mock = devOverrideSession();
+    if (mock) {
+      set({ status: "ready", step: "done", context: mock.context, user: mock.user });
+      return;
+    }
+
     try {
       // Must precede any proxy call so requests are routed through the sandbox.
       configureUrlMappings();
 
       const sdk = getSdk();
       await sdk.ready();
+      set({ step: "sdk-ready" });
 
       const guildId = sdk.guildId;
       const channelId = sdk.channelId;
@@ -88,6 +119,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         );
       }
 
+      set({ step: "authorizing" });
       const { code } = await sdk.commands.authorize({
         client_id: DISCORD_CLIENT_ID,
         response_type: "code",
@@ -97,9 +129,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         scope: ["identify", "guilds"] as ("identify" | "guilds")[],
       });
 
+      set({ step: "exchanging-token" });
       const accessToken = await exchangeCode(code);
       setActivityToken(accessToken);
 
+      set({ step: "authenticating" });
       const auth = await sdk.commands.authenticate({ access_token: accessToken });
       const user: ActivityUser = {
         id: auth.user.id,
@@ -107,7 +141,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         avatar: auth.user.avatar ?? null,
       };
 
-      set({ status: "ready", context: { guildId, channelId, instanceId }, user });
+      set({ status: "ready", step: "done", context: { guildId, channelId, instanceId }, user });
 
       // Load the launching server's data so the preview resolves mentions/emoji.
       void useGuildStore.getState().connect(guildId);
@@ -149,6 +183,28 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 }));
+
+/**
+ * When running a dev build inside Discord's URL-Override launch, return a stub
+ * session built from the launch query params (`guild_id`, `channel_id`,
+ * `instance_id` are all present), or null otherwise. See the call site in
+ * `init()` for why proxied calls can't work under the override.
+ */
+function devOverrideSession(): { context: ActivityContext; user: ActivityUser } | null {
+  if (!import.meta.env.DEV) return null;
+  const q = new URLSearchParams(window.location.search);
+  if (q.get("discord_proxy_ticket") !== "faux-proxy-ticket") return null;
+  const guildId = q.get("guild_id");
+  if (!guildId) return null;
+  return {
+    context: {
+      guildId,
+      channelId: q.get("channel_id"),
+      instanceId: q.get("instance_id") ?? "dev-override",
+    },
+    user: { id: "dev-override", name: "Dev (override)", avatar: null },
+  };
+}
 
 /** A throwaway CSRF `state` for the authorize call. */
 function cryptoState(): string {

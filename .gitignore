@@ -24,3 +24,6 @@ prod-backup/
 *.db
 *.db-wal
 *.db-shm
+
+# Local mkcert dev certificates for HTTPS (Discord Activity local dev)
+certs/

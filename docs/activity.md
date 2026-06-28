@@ -106,6 +106,73 @@ mappings. Launch it from a server channel — DWEEB reads `guildId`/`channelId`
 off the SDK, loads that server's data, and opens the shared room. Open it from a
 second account in the same channel to see live co-editing.
 
+### Local dev with the URL Override
+
+For iterating on the **frontend** (the embedded surface, editor, preview) the
+fastest loop is Discord's **URL Override**: in the activity launch dialog, tick
+**Use Activity URL Override** and point it at your local dev server.
+
+**HTTPS is required.** Discord's client embeds the Activity in an iframe whose
+`frame-src` CSP only whitelists `https://localhost:*` — a plain
+`http://localhost` override is blocked outright (the iframe renders "This content
+is blocked"). A self-signed cert won't do either: its warning can't be
+click-accepted inside an iframe. So serve the dev server over a **locally-trusted**
+cert with [mkcert](https://github.com/FiloSottile/mkcert):
+
+```bash
+mkcert -install                                              # once: trust a local CA
+mkdir -p certs && cd certs
+mkcert -cert-file localhost.pem -key-file localhost-key.pem localhost 127.0.0.1 ::1
+```
+
+`vite.config.ts` auto-detects `certs/localhost*.pem` and serves HTTPS when
+present (absent the files it stays on HTTP, so the normal web-app dev loop and CI
+are untouched). The `certs/` folder is gitignored. Then:
+
+```bash
+bun run dev                       # now https://localhost:5173
+```
+
+Set the override to `https://localhost:5173`. Launch from a server channel —
+Discord appends `?frame_id=…`, so `main.tsx` boots `ActivityApp` and HMR reloads
+as you edit.
+
+#### The override can't do proxied backend calls — and how dev works anyway
+
+The override **only** swaps the Root Mapping (where the HTML/JS/CSS loads), and
+launches via the **developer shelf** carry a *faux* proxy ticket
+(`discord_proxy_ticket=faux-proxy-ticket` in the iframe URL). Discord's edge does
+**not** forward `/.proxy/…` requests for such launches, so every proxied backend
+call — token exchange, guild bootstrap, publish, the collaboration WS — returns
+**404**. The real SDK handshake therefore can't complete under the override.
+
+To still iterate the **frontend** end-to-end, the app has a **dev-only bypass**
+(`devOverrideSession()` in `core/activity/activityStore.ts`): when a *development*
+build detects the faux ticket, it skips the proxy-bound handshake and seeds a stub
+session from the launch query params (`guild_id`/`channel_id`/`instance_id`), so
+the builder renders immediately. This never runs in a production build. Point the
+dev build at the deployed app/proxy so the rest matches the launching app — create
+a gitignored **`.env.local`**:
+
+```bash
+# .env.local — local Activity dev against the deployed (prod) app + proxy
+VITE_DISCORD_CLIENT_ID=<prod app id, the one the override launches under>
+VITE_PROXY_BASE_URL=https://api.dweeb.example.com
+```
+
+(The default `.env` points at a local proxy + the DWEEB DEV app, which is for the
+local-proxy + tunnel setup below — not the override.)
+
+What works under the override: the full editor, preview, and `ActivityBar`
+chrome, with HMR. What doesn't: publish, live collaboration, and guild-resolved
+mentions/emoji in the preview (all need the proxy). For those, use a **real**
+launch — a deployed build, or the Developer Portal's "Launch in a channel" test
+mode — not the override.
+
+To iterate on the **backend** (`server/src/activity.rs`) locally, run the proxy,
+expose it over a tunnel, and repoint the `/proxy` URL Mapping at the tunnel (this
+dialog can't change that mapping).
+
 ## Limitations (v1)
 
 - **Last-write-wins.** Concurrent edits to the same field resolve to whoever

@@ -1,8 +1,26 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin, type ServerOptions } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { VitePWA } from "vite-plugin-pwa";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
+
+// Serve the dev server over HTTPS when a locally-trusted cert is present.
+//
+// The Discord client embeds an Activity in an iframe whose `frame-src` CSP only
+// whitelists `https://localhost:*` — a plain `http://localhost` override is
+// blocked outright, and a self-signed cert's warning can't be click-accepted
+// inside an iframe. So local Activity dev needs a *trusted* cert. Generate one
+// with mkcert (`mkcert -install` once, then `mkcert -cert-file certs/localhost.pem
+// -key-file certs/localhost-key.pem localhost 127.0.0.1 ::1`) and Vite picks it
+// up here. Absent the files we stay on plain HTTP, so the web app's normal dev
+// loop and CI are untouched. See docs/activity.md.
+function devHttps(): ServerOptions["https"] {
+  const cert = path.resolve(__dirname, "certs/localhost.pem");
+  const key = path.resolve(__dirname, "certs/localhost-key.pem");
+  if (!fs.existsSync(cert) || !fs.existsSync(key)) return undefined;
+  return { cert: fs.readFileSync(cert), key: fs.readFileSync(key) };
+}
 
 // Security policy for the deployed site. GitHub Pages cannot attach response
 // headers, so the policy ships as a <meta> tag injected into the built
@@ -205,6 +223,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: false,
+    // HTTPS only when the mkcert files exist (see `devHttps`) — needed for the
+    // embedded Activity, harmless for everything else.
+    https: devHttps(),
   },
   preview: {
     port: 4173,

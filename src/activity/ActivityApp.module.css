@@ -2,7 +2,7 @@
   position: fixed;
   inset: 0;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: minmax(0, 1fr);
   background: var(--app-bg);
   color: var(--app-text);
   overflow: hidden;
@@ -19,12 +19,21 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
+/* The editor carries the Activity bar as its first (auto) row, with the tree
+   filling the 1fr row below — the same shape the web app's builder column uses,
+   so the header tops the editor only and the preview pane stays uncluttered. */
 .editor {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: minmax(0, 1fr);
   border-right: 1px solid var(--app-border);
+}
+
+.preview {
+  display: flex;
+  flex-direction: column;
 }
 
 /* On a narrow Activity window (mobile, or a small picture-in-picture) stack the
