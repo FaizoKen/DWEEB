@@ -13,7 +13,7 @@ import { useActivityStore } from "@/core/activity/activityStore";
 import type { CollabParticipant } from "@/core/activity/collab";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
-import { RedoIcon, SendIcon, UndoIcon } from "@/ui/Icon";
+import { ExternalLinkIcon, RedoIcon, RefreshIcon, SendIcon, ShareIcon, UndoIcon } from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
 import { GuildPicker } from "./GuildPicker";
 import styles from "./ActivityBar.module.css";
@@ -28,16 +28,30 @@ export function ActivityBar() {
   const publishing = useActivityStore((s) => s.publishing);
   const collabConnected = useActivityStore((s) => s.collabConnected);
   const publish = useActivityStore((s) => s.publish);
+  const update = useActivityStore((s) => s.update);
+  const openLastPost = useActivityStore((s) => s.openLastPost);
+  const invite = useActivityStore((s) => s.invite);
+  const lastPost = useActivityStore((s) => s.lastPost);
   const targetChannelId = useActivityStore((s) => s.targetChannelId);
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
 
   // A DM / group-DM launch has no guild of its own, so the user first picks a
   // destination *server* (DMs can't receive a webhook post), then a channel.
   const isDm = useActivityStore((s) => s.context != null && s.context.guildId == null);
+  // Discord's invite dialog only works in a server context (it throws in DMs).
+  const canInvite = useActivityStore((s) => s.context?.guildId != null);
   const guilds = useActivityStore((s) => s.guilds);
   const guildsLoading = useActivityStore((s) => s.guildsLoading);
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
   const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
+
+  const noDestination = !targetGuildId || !targetChannelId;
+  // "Update" applies only while the chosen destination still matches where we
+  // last posted; re-point the channel/server and the primary reverts to "Post".
+  const canUpdate =
+    lastPost != null &&
+    lastPost.guild_id === targetGuildId &&
+    lastPost.channel_id === targetChannelId;
 
   return (
     <div className={styles.bar}>
@@ -68,6 +82,11 @@ export function ActivityBar() {
 
       <div className={styles.center}>
         <Presence participants={participants} />
+        {canInvite ? (
+          <IconButton label="Invite people to edit together" onClick={() => void invite()}>
+            <ShareIcon />
+          </IconButton>
+        ) : null}
       </div>
 
       <div className={styles.right}>
@@ -77,16 +96,48 @@ export function ActivityBar() {
         <IconButton label="Redo" onClick={redo} disabled={!canRedo}>
           <RedoIcon />
         </IconButton>
-        <Button
-          variant="primary"
-          size="sm"
-          leadingIcon={<SendIcon />}
-          onClick={() => void publish()}
-          disabled={publishing || !targetGuildId || !targetChannelId}
-          title="Post this message into the selected channel"
-        >
-          {publishing ? "Posting…" : "Post"}
-        </Button>
+
+        {canUpdate ? (
+          <>
+            {/* The iframe can't open discord.com itself; openLastPost routes
+                through the SDK (see activityStore). */}
+            <IconButton label="View the posted message" onClick={() => void openLastPost()}>
+              <ExternalLinkIcon />
+            </IconButton>
+            <Button
+              variant="secondary"
+              size="sm"
+              leadingIcon={<SendIcon />}
+              collapseLabel
+              onClick={() => void publish()}
+              disabled={publishing || noDestination}
+              title="Post a separate new copy into the channel"
+            >
+              New
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              leadingIcon={<RefreshIcon />}
+              onClick={() => void update()}
+              disabled={publishing || noDestination}
+              title="Update the message you posted with the current draft"
+            >
+              {publishing ? "Updating…" : "Update"}
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="primary"
+            size="sm"
+            leadingIcon={<SendIcon />}
+            onClick={() => void publish()}
+            disabled={publishing || noDestination}
+            title="Post this message into the selected channel"
+          >
+            {publishing ? "Posting…" : "Post"}
+          </Button>
+        )}
       </div>
     </div>
   );

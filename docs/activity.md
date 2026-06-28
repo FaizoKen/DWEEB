@@ -45,6 +45,7 @@ destination differs:
         ├── POST /api/activity/token   code → access_token   (proxy holds the secret)
         ├── GET  /api/guilds/:id/bootstrap   roles/channels/emoji  (Bearer)
         ├── POST /api/activity/post    message → posted to the chosen channel via a DWEEB webhook (Bearer)
+        ├── POST /api/activity/edit    message → PATCH a message already posted, via the same webhook (Bearer)
         └── WS   /api/activity/room/:instance   draft + presence relay
 ```
 
@@ -53,6 +54,26 @@ Inside Discord every request must go through the client's proxy. The SDK's
 a same-origin `/.proxy/<prefix>/…` path, which Discord forwards to the real host.
 So the existing `core/guild` client works unchanged — it just gains a bearer
 header (`core/net/proxyFetch`) and a URL remap.
+
+### After you post: update, view, invite
+
+The bar's primary action is **Post** — a new message via a DWEEB-owned webhook.
+Once you've posted to the chosen destination it flips to **Update**: the current
+draft PATCHes the message you just posted (`POST /api/activity/edit`, through the
+*same* webhook), with **New** alongside to post a separate copy and a **↗** to open
+the posted message. The sandboxed iframe can't navigate to discord.com itself, so
+the ↗ opens it through the SDK's `openExternalLink`. Re-point the channel and the
+primary reverts to **Post** (a fresh post into the new destination).
+
+On a server launch the bar also offers **Invite** (`openInviteDialog`), so the
+launcher can pull friends straight into the same collaboration room instead of
+everyone launching separately. Discord's invite dialog is server-only — it throws
+in a DM / group DM — so the button is hidden there.
+
+The Activity also sets a best-effort **rich presence** ("Building a message") via
+`setActivity`. That command needs the `rpc.activities.write` scope, which the
+handshake deliberately does **not** request (a new scope risks breaking the
+`prompt:"none"` authorize), so it silently no-ops unless the scope is granted.
 
 ## One-time setup
 

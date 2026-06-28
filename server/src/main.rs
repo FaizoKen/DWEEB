@@ -327,6 +327,10 @@ async fn run() {
             "/api/activity/post",
             post(activity::activity_post).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
         )
+        .route(
+            "/api/activity/edit",
+            post(activity::activity_edit).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
         .route("/api/activity/room/:instance", get(activity::activity_room))
         // Image proxy: fetches an external image/video so the sandboxed Activity
         // iframe (whose CSP blocks arbitrary `<img>`/`<video>` hosts) can render

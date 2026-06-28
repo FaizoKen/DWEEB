@@ -43,7 +43,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
-use crate::discord::DiscordUser;
+use crate::discord::{DiscordUser, Webhook};
 use crate::error::AppError;
 use crate::routes::{
     authorize_member_session, authorize_webhooks_session, current_session, ensure_channel_in_guild,
@@ -235,18 +235,12 @@ pub async fn activity_post(
     authorize_webhooks_session(&st, session.clone(), &guild).await?;
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
 
-    // Prefer reusing a DWEEB-owned incoming webhook already in the channel (so we
-    // don't spawn duplicates, and never hijack a third party's hook); otherwise
-    // mint one. Either way the post carries DWEEB's component routing.
-    let hooks = st.discord.guild_webhooks(&guild).await?;
-    let reuse = hooks.into_iter().find(|w| {
-        w.kind == 1
-            && w.channel_id.as_deref() == Some(channel_id.as_str())
-            && w.token.as_deref().is_some_and(|t| !t.is_empty())
-            && w.application_id.as_deref() == Some(st.config.client_id.as_str())
-    });
-    let (webhook_id, token) = match reuse {
-        Some(w) => (w.id, w.token.unwrap_or_default()),
+    // Reuse a DWEEB-owned incoming webhook already in the channel (so we don't
+    // spawn duplicates, and never hijack a third party's hook); otherwise mint
+    // one. Either way the post carries DWEEB's component routing.
+    let (webhook_id, token) = match dweeb_webhook_in_channel(&st, &guild, &channel_id, None).await?
+    {
+        Some(found) => found,
         None => {
             let reason = format!("Created via DWEEB Activity by {}", session.uid);
             let w = st
@@ -281,6 +275,120 @@ pub async fn activity_post(
         "channel_id": channel_id,
         "guild_id": guild,
         "url": jump,
+        // The webhook that authored the message — the FE passes it back to
+        // `activity_edit` so an update targets exactly this one.
+        "webhook_id": webhook_id,
+    }))
+    .into_response())
+}
+
+/// Find a DWEEB-owned incoming webhook in `channel_id` whose token we can post
+/// through. `prefer` names a specific webhook id to use when it's still valid
+/// (an edit naming the webhook that authored the message) — otherwise any
+/// DWEEB-owned hook in the channel. `None` when there's no usable DWEEB webhook.
+async fn dweeb_webhook_in_channel(
+    st: &AppState,
+    guild: &str,
+    channel_id: &str,
+    prefer: Option<&str>,
+) -> Result<Option<(String, String)>, AppError> {
+    let hooks = st.discord.guild_webhooks(guild).await?;
+    let client_id = st.config.client_id.as_str();
+    let chosen = prefer
+        .and_then(|id| {
+            hooks
+                .iter()
+                .find(|&w| w.id == id && webhook_is_ours(w, channel_id, client_id))
+        })
+        .or_else(|| {
+            hooks
+                .iter()
+                .find(|&w| webhook_is_ours(w, channel_id, client_id))
+        });
+    Ok(chosen.map(|w| (w.id.clone(), w.token.clone().unwrap_or_default())))
+}
+
+/// Whether `w` is a DWEEB-owned incoming webhook in `channel_id` with a usable
+/// token — the gate for reusing (or editing through) it.
+fn webhook_is_ours(w: &Webhook, channel_id: &str, client_id: &str) -> bool {
+    w.kind == 1
+        && w.channel_id.as_deref() == Some(channel_id)
+        && w.token.as_deref().is_some_and(|t| !t.is_empty())
+        && w.application_id.as_deref() == Some(client_id)
+}
+
+// ── Edit a posted message (POST /api/activity/edit) ──────────────────────────
+
+#[derive(Deserialize)]
+pub struct EditBody {
+    #[serde(default)]
+    guild_id: String,
+    #[serde(default)]
+    channel_id: String,
+    #[serde(default)]
+    message_id: String,
+    /// The webhook that authored the message (from the post response). Optional —
+    /// we fall back to any DWEEB-owned hook in the channel — but re-verified
+    /// server-side before use, so a forged id can't redirect the edit.
+    #[serde(default)]
+    webhook_id: String,
+    /// The wire payload the browser rebuilt (components + flags + username/avatar).
+    message: Value,
+}
+
+/// `POST /api/activity/edit` `{ guild_id, channel_id, message_id, webhook_id,
+/// message }` — PATCH a message previously posted from this Activity, through the
+/// same DWEEB-owned webhook. Gated identically to `activity_post` (the user must
+/// hold Manage Webhooks in the guild), and the webhook is re-verified to be
+/// DWEEB-owned in the target channel before the edit — Discord additionally only
+/// lets a webhook edit a message it authored, so a valid `message_id` for another
+/// author just fails. Returns the message id + jump link.
+pub async fn activity_edit(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Json(body): Json<EditBody>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let guild = body.guild_id.trim().to_string();
+    let channel_id = body.channel_id.trim().to_string();
+    let message_id = body.message_id.trim().to_string();
+    if !is_snowflake(&guild) || !is_snowflake(&channel_id) || !is_snowflake(&message_id) {
+        return Err(bad_request(
+            "guild_id, channel_id and message_id must be Discord ids",
+        ));
+    }
+    if !body.message.is_object() {
+        return Err(bad_request("message must be a JSON object"));
+    }
+    let prefer = match body.webhook_id.trim() {
+        "" => None,
+        id if is_snowflake(id) => Some(id),
+        _ => return Err(bad_request("webhook_id must be a Discord id")),
+    };
+
+    authorize_webhooks_session(&st, session.clone(), &guild).await?;
+    ensure_channel_in_guild(&st, &guild, &channel_id).await?;
+
+    let (webhook_id, token) = dweeb_webhook_in_channel(&st, &guild, &channel_id, prefer)
+        .await?
+        .ok_or_else(|| {
+            bad_request("Couldn't find the DWEEB webhook that posted this message — post it again.")
+        })?;
+
+    st.discord
+        .edit_webhook_message(&webhook_id, &token, &message_id, body.message)
+        .await?;
+
+    Ok(Json(json!({
+        "message_id": message_id,
+        "channel_id": channel_id,
+        "guild_id": guild,
+        "url": format!("https://discord.com/channels/{guild}/{channel_id}/{message_id}"),
+        "webhook_id": webhook_id,
     }))
     .into_response())
 }
@@ -1006,6 +1114,50 @@ fn valid_instance(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn webhook_is_ours_gate() {
+        let mk = |kind: i64, channel: &str, app: &str, token: Option<&str>| Webhook {
+            id: "1".into(),
+            kind,
+            name: None,
+            avatar: None,
+            channel_id: Some(channel.into()),
+            guild_id: None,
+            application_id: Some(app.into()),
+            token: token.map(str::to_string),
+            user: None,
+        };
+        let (cid, app) = ("100", "app-123");
+        // DWEEB-owned (type-1) incoming webhook in the channel, with a token.
+        assert!(webhook_is_ours(
+            &mk(1, "100", "app-123", Some("t")),
+            cid,
+            app
+        ));
+        // Rejected: wrong type, wrong channel, another app's hook, or no token.
+        assert!(!webhook_is_ours(
+            &mk(2, "100", "app-123", Some("t")),
+            cid,
+            app
+        ));
+        assert!(!webhook_is_ours(
+            &mk(1, "999", "app-123", Some("t")),
+            cid,
+            app
+        ));
+        assert!(!webhook_is_ours(
+            &mk(1, "100", "other", Some("t")),
+            cid,
+            app
+        ));
+        assert!(!webhook_is_ours(&mk(1, "100", "app-123", None), cid, app));
+        assert!(!webhook_is_ours(
+            &mk(1, "100", "app-123", Some("")),
+            cid,
+            app
+        ));
+    }
 
     #[test]
     fn valid_instance_accepts_slugs_and_rejects_paths() {

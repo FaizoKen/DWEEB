@@ -38,12 +38,15 @@ export async function exchangeCode(code: string): Promise<string> {
   return body.access_token;
 }
 
-/** Result of a successful publish: the new message + a jump link. */
+/** Result of a successful publish/update: the message + a jump link. `webhook_id`
+ *  identifies the DWEEB webhook that posted it, so a later edit targets exactly
+ *  that one (see {@link editPostedMessage}). */
 export interface ActivityPostResult {
   message_id: string;
   channel_id: string;
   guild_id: string;
   url: string | null;
+  webhook_id?: string;
 }
 
 /** `POST /api/activity/post` — post the built message into the channel through a
@@ -59,6 +62,37 @@ export async function publishToChannel(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ guild_id: guildId, channel_id: channelId, message }),
+    });
+  } catch {
+    throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
+  }
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return (await res.json()) as ActivityPostResult;
+}
+
+/** `POST /api/activity/edit` — PATCH a message previously posted from this
+ *  Activity, through the same DWEEB-owned webhook. `webhookId` names the exact
+ *  webhook to edit through (from the original post); the proxy still re-verifies
+ *  it's DWEEB-owned in the channel before editing. */
+export async function editPostedMessage(
+  guildId: string,
+  channelId: string,
+  messageId: string,
+  webhookId: string,
+  message: unknown,
+): Promise<ActivityPostResult> {
+  let res: Response;
+  try {
+    res = await proxyFetch("/api/activity/edit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: guildId,
+        channel_id: channelId,
+        message_id: messageId,
+        webhook_id: webhookId,
+        message,
+      }),
     });
   } catch {
     throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
