@@ -19,6 +19,7 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isPluginRegistryConfigured } from "@/core/plugins/registry";
 import { guildIconUrl } from "@/core/guild/api";
+import { proxiedMediaUrl } from "@/core/activity/runtime";
 import { collectMessagePlaceholders, substituteMessage } from "@/core/plugins/placeholders";
 import type { WebhookMessage } from "@/core/schema/types";
 import { ComponentRenderer } from "./renderers/ComponentRenderer";
@@ -73,7 +74,9 @@ export function Preview({ onClose, swipeProps, message: messageOverride }: Previ
   // or `{server_icon}` avatar shows its resolved value in the preview header,
   // matching what the send path posts.
   const displayName = rendered.username || "Webhook";
-  const avatar = rendered.avatar_url;
+  // A custom avatar URL is loaded as an <img>, so inside a Discord Activity it
+  // must go through the proxy too (the sandbox CSP blocks arbitrary hosts).
+  const avatar = proxiedMediaUrl(rendered.avatar_url ?? "");
   // The "sent at" time stands in for when the message would post; it shouldn't
   // tick (and re-run an Intl formatter) on every keystroke, so freeze it at
   // mount. Preview re-renders on every message edit, so this was pure waste.

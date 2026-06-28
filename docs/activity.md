@@ -73,12 +73,14 @@ webhook feature.
    loads on the public site. So no separate page or entry-point URL is needed.
 
    The `/proxy` prefix **must** match `PROXY_MAPPING_PREFIX` in
-   `src/core/activity/sdk.ts`. The target is the host of `VITE_PROXY_BASE_URL`.
-
-   > Optional polish: add mappings for `cdn.discordapp.com` /
-   > `media.discordapp.net` if you want avatar/emoji **images** to render in the
-   > preview. Mentions, names, and message text resolve from the bootstrap data
-   > and work without them.
+   `src/core/activity/runtime.ts`. The target is the host of
+   `VITE_PROXY_BASE_URL`. These two mappings are all you need — the preview's
+   **images** render without any extra mappings: external/user-pasted media is
+   fetched on the browser's behalf by the proxy (`GET /api/activity/image`,
+   reached over the same `/proxy` mapping), since the iframe's CSP blocks loading
+   arbitrary hosts as `<img>`/`<video>` directly. Discord's own CDN media
+   (`cdn.discordapp.com` / `media.discordapp.net`, e.g. custom emoji) is already
+   CSP-allowed and loads natively.
 
 3. **OAuth2 → Scopes** used by the SDK handshake: `identify` (who's editing) and
    `guilds` (membership + permission gate). No redirect URI is needed for the

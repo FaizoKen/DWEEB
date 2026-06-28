@@ -14,10 +14,7 @@
 
 import { DiscordSDK, patchUrlMappings } from "@discord/embedded-app-sdk";
 import { DISCORD_CLIENT_ID, PROXY_BASE_URL } from "@/core/guild/config";
-
-/** Path prefix the proxy is mapped under inside Discord's sandbox. Must match
- *  the PREFIX of the Developer Portal URL mapping that targets the proxy host. */
-export const PROXY_MAPPING_PREFIX = "/proxy";
+import { PROXY_MAPPING_PREFIX } from "./runtime";
 
 let sdk: DiscordSDK | null = null;
 

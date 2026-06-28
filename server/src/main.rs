@@ -328,6 +328,11 @@ async fn run() {
             post(activity::activity_post).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
         )
         .route("/api/activity/room/:instance", get(activity::activity_room))
+        // Image proxy: fetches an external image/video so the sandboxed Activity
+        // iframe (whose CSP blocks arbitrary `<img>`/`<video>` hosts) can render
+        // it. Unauthenticated by necessity — an `<img>` can't carry a bearer — but
+        // bounded hard (public hosts only, size + time caps) in the handler.
+        .route("/api/activity/image", get(activity::activity_image))
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))
         .route("/api/guilds/:guild_id/roles", get(roles))

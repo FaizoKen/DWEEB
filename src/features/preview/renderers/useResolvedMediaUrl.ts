@@ -6,10 +6,14 @@
  *    the blob has been GC'd (so callers can show a placeholder).
  *  - `attachment://<filename>` → null (no preview source available — the file
  *    only exists on Discord's CDN once the message is posted).
+ *  - an external http(s) URL → itself, except inside a Discord Activity where the
+ *    sandbox CSP blocks arbitrary `<img>`/`<video>` hosts, so it's routed through
+ *    the proxy (see {@link proxiedMediaUrl}).
  *  - everything else → returned unchanged.
  */
 
 import { useSyncExternalStore } from "react";
+import { proxiedMediaUrl } from "@/core/activity/runtime";
 import {
   getAttachmentObjectUrl,
   getAttachmentSnapshot,
@@ -22,5 +26,5 @@ export function useResolvedMediaUrl(url: string): string | null {
   const session = parseSessionUrl(url);
   if (session) return getAttachmentObjectUrl(session.blobId);
   if (url.startsWith("attachment://")) return null;
-  return url;
+  return proxiedMediaUrl(url);
 }

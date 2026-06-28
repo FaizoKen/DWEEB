@@ -27,14 +27,18 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
+use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use axum_extra::extract::cookie::PrivateCookieJar;
+use reqwest::Url;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
@@ -273,6 +277,250 @@ pub async fn activity_post(
     .into_response())
 }
 
+// ── Image proxy (GET /api/activity/image?url=…) ──────────────────────────────
+
+/// Hard bounds for the image proxy, so it can't be turned into a probe or an
+/// open bandwidth relay: how long a fetch may take, the largest body we'll relay,
+/// and how many redirect hops we'll follow.
+const IMAGE_FETCH_TIMEOUT_SECS: u64 = 10;
+const MAX_IMAGE_BYTES: usize = 12 * 1024 * 1024; // comfortably over Discord's media sizes
+const MAX_IMAGE_REDIRECTS: usize = 4;
+
+#[derive(Deserialize)]
+pub struct ImageQuery {
+    #[serde(default)]
+    url: String,
+}
+
+/// Lazily-built HTTP client for the image proxy. It needs its own redirect policy
+/// (validate every hop's host so a 3xx can't bounce us onto a private address)
+/// and a short timeout, so it's separate from the Discord client. Built once.
+fn image_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(IMAGE_FETCH_TIMEOUT_SECS))
+            .user_agent(concat!("dweeb-proxy-img/", env!("CARGO_PKG_VERSION")))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= MAX_IMAGE_REDIRECTS {
+                    return attempt.error("too many redirects");
+                }
+                // Block redirects onto IP-literals / obvious internal names. A
+                // hostname that *resolves* to a private IP is caught after the
+                // fact via the response's remote address (see below).
+                if redirect_host_blocked(attempt.url()) {
+                    attempt.error("redirect to a non-public host")
+                } else {
+                    attempt.follow()
+                }
+            }))
+            .build()
+            .expect("failed to build image proxy HTTP client")
+    })
+}
+
+/// `GET /api/activity/image?url=<encoded http(s) URL>` — fetch an external image
+/// or video on the browser's behalf and relay the bytes.
+///
+/// The embedded Activity runs in a sandboxed `…discordsays.com` iframe whose CSP
+/// only allows media from Discord's own origins (and the hosts we URL-map). The
+/// arbitrary image/video URLs people paste into the builder are therefore blocked
+/// when loaded as `<img>`/`<video>` — and, unlike `fetch`/XHR, those element
+/// loads aren't rewritten by the SDK. The FE routes them here; this endpoint runs
+/// same-origin to the iframe (via Discord's `/proxy` mapping), so the bytes
+/// render.
+///
+/// No auth — an `<img>` can't send a bearer — so it's bounded hard instead:
+/// http(s) only, public hosts only (SSRF defence), a short timeout, a size cap,
+/// and only `image/*`/`video/*` content is relayed.
+pub async fn activity_image(
+    State(st): State<AppState>,
+    Query(q): Query<ImageQuery>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let target = q.url.trim();
+    if target.is_empty() {
+        return Err(bad_request("url is required"));
+    }
+    let parsed = Url::parse(target).map_err(|_| bad_request("url must be an absolute URL"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(bad_request("url must be http(s)"));
+    }
+    // SSRF: resolve the host and refuse if any address is non-public, before we
+    // connect. (Redirect hops are vetted by the client's redirect policy, and the
+    // final connection is re-checked below to catch DNS rebinding.)
+    ensure_public_host(&parsed).await?;
+
+    let mut resp = image_client()
+        .get(parsed)
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't fetch the image: {e}")))?;
+
+    // Drop a response served from a private address even if the hostname looked
+    // public (DNS rebinding) — before relaying any bytes.
+    if let Some(addr) = resp.remote_addr() {
+        if !ip_is_public(addr.ip()) {
+            return Err(blocked_host());
+        }
+    }
+    if !resp.status().is_success() {
+        return Err(AppError::BadGateway(format!(
+            "upstream returned {}",
+            resp.status().as_u16()
+        )));
+    }
+
+    let content_type = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    // Only relay actual media — never HTML/JSON/etc. Defence in depth: keeps the
+    // proxy from echoing an internal service's response if one ever slipped past
+    // the host checks.
+    let kind = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if !(kind.starts_with("image/") || kind.starts_with("video/")) {
+        return Err(bad_request("that URL isn't an image or video"));
+    }
+
+    // Reject up front when the server declares an oversize length…
+    if let Some(len) = resp.content_length() {
+        if len > MAX_IMAGE_BYTES as u64 {
+            return Err(bad_request("image is too large"));
+        }
+    }
+    // …and bound the actual read, so a missing or lying Content-Length can't blow
+    // past the cap (or exhaust memory). `chunk()` is available without reqwest's
+    // `stream` feature, so we accumulate by hand.
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't read the image: {e}")))?
+    {
+        if buf.len() + chunk.len() > MAX_IMAGE_BYTES {
+            return Err(bad_request("image is too large"));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+
+    let mut out = Response::new(Body::from(buf));
+    if let Ok(v) = HeaderValue::from_str(&content_type) {
+        out.headers_mut().insert(header::CONTENT_TYPE, v);
+    }
+    // Cache hard at the browser + Discord's edge: a given URL renders the same
+    // bytes for our purposes, so caching keeps repeat previews off our bandwidth.
+    out.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"),
+    );
+    Ok(out)
+}
+
+/// Refuse a fetch target whose host is plainly internal: an IP-literal in a
+/// private/reserved range, an internal-looking name, or a hostname that *resolves*
+/// only/partly to non-public addresses.
+async fn ensure_public_host(url: &Url) -> Result<(), AppError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| bad_request("url has no host"))?;
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return if ip_is_public(ip) {
+            Ok(())
+        } else {
+            Err(blocked_host())
+        };
+    }
+    if host_name_is_internal(host) {
+        return Err(blocked_host());
+    }
+    let port = url.port_or_known_default().unwrap_or(443);
+    let mut resolved = false;
+    for addr in tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| AppError::BadGateway("couldn't resolve the image host".into()))?
+    {
+        resolved = true;
+        if !ip_is_public(addr.ip()) {
+            return Err(blocked_host());
+        }
+    }
+    if !resolved {
+        return Err(AppError::BadGateway(
+            "couldn't resolve the image host".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn blocked_host() -> AppError {
+    AppError::Forbidden("that host isn't allowed".into())
+}
+
+/// Hostnames that can't be a public site: localhost, the non-routable suffixes
+/// used for internal/service discovery, and bare single-label names.
+fn host_name_is_internal(host: &str) -> bool {
+    let h = host.trim_end_matches('.').to_ascii_lowercase();
+    h == "localhost"
+        || h.ends_with(".localhost")
+        || h.ends_with(".local")
+        || h.ends_with(".internal")
+        || h.ends_with(".intranet")
+        || !h.contains('.') // single-label → an internal/service name, never a public host
+}
+
+/// Sync host check for the redirect policy (no DNS): block IP-literals in a
+/// non-public range and obviously-internal names.
+fn redirect_host_blocked(url: &Url) -> bool {
+    match url.host_str() {
+        None => true,
+        Some(host) => match host.parse::<IpAddr>() {
+            Ok(ip) => !ip_is_public(ip),
+            Err(_) => host_name_is_internal(host),
+        },
+    }
+}
+
+/// Whether an address is a public, routable unicast address — the allowlist for
+/// the image proxy. Everything private/reserved (loopback, RFC1918, link-local
+/// incl. cloud metadata `169.254.169.254`, CGNAT, ULA, …) is refused.
+fn ip_is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_unspecified()
+                || o[0] == 0
+                || (o[0] == 100 && (o[1] & 0xc0) == 64) // 100.64.0.0/10 CGNAT
+                || o[0] >= 240) // 240.0.0.0/4 reserved
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return ip_is_public(IpAddr::V4(v4));
+            }
+            let seg = v6.segments();
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (seg[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
+                || (seg[0] & 0xffc0) == 0xfe80) // fe80::/10 link-local
+        }
+    }
+}
+
 // ── Collaboration rooms (WS /api/activity/room/:instance) ────────────────────
 
 /// One participant in a collaboration room, as broadcast in the roster.
@@ -499,5 +747,63 @@ mod tests {
     fn fingerprint_is_stable_and_token_specific() {
         assert_eq!(fingerprint("tok-abc"), fingerprint("tok-abc"));
         assert_ne!(fingerprint("tok-abc"), fingerprint("tok-xyz"));
+    }
+
+    #[test]
+    fn ip_is_public_blocks_private_and_reserved() {
+        let blocked = [
+            "127.0.0.1",       // loopback
+            "10.0.0.5",        // RFC1918
+            "172.16.1.1",      // RFC1918
+            "192.168.1.1",     // RFC1918
+            "169.254.169.254", // link-local / cloud metadata
+            "100.64.0.1",      // CGNAT
+            "0.0.0.0",         // unspecified
+            "255.255.255.255", // broadcast
+            "240.0.0.1",       // reserved
+            "::1",             // v6 loopback
+            "fc00::1",         // v6 ULA
+            "fe80::1",         // v6 link-local
+            "::ffff:10.0.0.1", // v4-mapped private
+        ];
+        for ip in blocked {
+            assert!(!ip_is_public(ip.parse().unwrap()), "{ip} should be blocked");
+        }
+        let allowed = ["1.1.1.1", "8.8.8.8", "151.101.0.1", "2606:4700::1111"];
+        for ip in allowed {
+            assert!(ip_is_public(ip.parse().unwrap()), "{ip} should be allowed");
+        }
+    }
+
+    #[test]
+    fn internal_host_names_are_rejected() {
+        for h in [
+            "localhost",
+            "db.internal",
+            "router.local",
+            "redis",
+            "svc.intranet",
+        ] {
+            assert!(host_name_is_internal(h), "{h} should be internal");
+        }
+        for h in ["picsum.photos", "cdn.example.com", "i.imgur.com"] {
+            assert!(!host_name_is_internal(h), "{h} should be external");
+        }
+    }
+
+    #[test]
+    fn redirect_policy_blocks_internal_targets() {
+        assert!(redirect_host_blocked(
+            &Url::parse("http://169.254.169.254/latest").unwrap()
+        ));
+        assert!(redirect_host_blocked(
+            &Url::parse("http://10.0.0.1/x").unwrap()
+        ));
+        assert!(redirect_host_blocked(
+            &Url::parse("http://localhost/x").unwrap()
+        ));
+        assert!(!redirect_host_blocked(
+            &Url::parse("https://fastly.picsum.photos/x").unwrap()
+        ));
     }
 }
