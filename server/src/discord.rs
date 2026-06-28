@@ -856,7 +856,10 @@ impl Discord {
 /// `/dashboard` slash command plus the right-click context-menu commands the
 /// dispatcher answers inline (plugins/dispatcher/src/commands.rs). Mirrors
 /// `scripts/register-commands.mjs` — the canonical copy, used for the main
-/// app — change both together.
+/// app — change both together. Intentional divergence: the main app's
+/// `/dashboard` is user-installable and DM-usable; custom apps keep it
+/// guild-only here, since user-install needs each app's own portal opt-in and
+/// a rejected registration would drop all their commands.
 fn command_set() -> Value {
     const CHAT_INPUT: u8 = 1;
     const USER: u8 = 2;
