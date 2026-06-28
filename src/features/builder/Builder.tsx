@@ -26,12 +26,13 @@ import {
   SupportIcon,
   UndoIcon,
   UploadIcon,
+  UsersIcon,
 } from "@/ui/Icon";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
 import { SavedMessagesMenu } from "./components/SavedMessagesMenu";
 import { AccountMenu } from "@/features/guild/AccountMenu";
-import { isProxyConfigured } from "@/core/guild/config";
+import { activityLaunchUrl, isProxyConfigured } from "@/core/guild/config";
 import { isFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import styles from "./Builder.module.css";
@@ -106,6 +107,11 @@ function ActionBar({
   const sendLabel = isUpdate ? "Update" : "Send";
 
   const openFeedback = useFeedbackStore((s) => s.openFeedback);
+
+  // Real-time co-editing lives only in the embedded Discord Activity; offer a
+  // hand-off to it when a backend + app id are configured (both are required for
+  // the Activity to function). Empty string ⇒ the entry point is hidden.
+  const collaborateUrl = isProxyConfigured() ? activityLaunchUrl() : "";
 
   const barRef = useRef<HTMLDivElement>(null);
   // The action bar always stays on a single row. As its available width shrinks
@@ -196,6 +202,20 @@ function ActionBar({
               >
                 Share link
               </MenuItem>
+              {collaborateUrl ? (
+                <MenuItem
+                  icon={<UsersIcon />}
+                  onSelect={() => {
+                    close();
+                    // Opens Discord's Activity launcher for DWEEB, where the
+                    // shared room + live presence live. The draft isn't carried
+                    // (the launch link takes no payload); use Share link for that.
+                    window.open(collaborateUrl, "_blank", "noopener,noreferrer");
+                  }}
+                >
+                  Collaborate in Discord
+                </MenuItem>
+              ) : null}
               <MenuItem
                 icon={<DownloadIcon />}
                 onSelect={() => {

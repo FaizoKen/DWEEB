@@ -59,6 +59,20 @@ export function isProxyConfigured(): boolean {
   return PROXY_BASE_URL.length > 0;
 }
 
+/**
+ * Shareable link that opens Discord's "launch an Activity" flow for the DWEEB
+ * app — the web app's "Collaborate in Discord" hand-off. Real-time co-editing
+ * (a shared room + live presence) lives only in the embedded Activity, which the
+ * public web app has no equivalent for; this points users at it. They pick a
+ * server/voice channel (or DM) to launch into. The current draft is *not*
+ * carried: Discord's launch link takes no payload and Activity rooms start
+ * fresh (use Share link / Open-on-web for the draft-carrying direction). Empty
+ * when no client id is configured, so callers can hide the entry point.
+ */
+export function activityLaunchUrl(): string {
+  return DISCORD_CLIENT_ID ? `https://discord.com/activities/${DISCORD_CLIENT_ID}` : "";
+}
+
 /** Where the browser is sent to begin the Discord login flow. */
 export function loginUrl(): string {
   return isProxyConfigured() ? `${PROXY_BASE_URL}/auth/login` : "";
