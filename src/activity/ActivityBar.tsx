@@ -10,11 +10,11 @@
 
 import { useMessageStore } from "@/core/state/messageStore";
 import { useActivityStore } from "@/core/activity/activityStore";
-import { useChannelInfo } from "@/core/guild/guildStore";
 import type { CollabParticipant } from "@/core/activity/collab";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
-import { HashIcon, RedoIcon, SendIcon, UndoIcon } from "@/ui/Icon";
+import { RedoIcon, SendIcon, UndoIcon } from "@/ui/Icon";
+import { ChannelPicker } from "./ChannelPicker";
 import styles from "./ActivityBar.module.css";
 
 export function ActivityBar() {
@@ -23,22 +23,17 @@ export function ActivityBar() {
   const canUndo = useMessageStore((s) => s.past.length > 0);
   const canRedo = useMessageStore((s) => s.future.length > 0);
 
-  const context = useActivityStore((s) => s.context);
   const participants = useActivityStore((s) => s.participants);
   const publishing = useActivityStore((s) => s.publishing);
   const collabConnected = useActivityStore((s) => s.collabConnected);
   const publish = useActivityStore((s) => s.publish);
-
-  const channel = useChannelInfo(context?.channelId ?? "");
-  const channelName = channel?.name ?? (context?.channelId ? "this channel" : "no channel");
+  const targetChannelId = useActivityStore((s) => s.targetChannelId);
+  const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
 
   return (
     <div className={styles.bar}>
       <div className={styles.left}>
-        <span className={styles.channel} title={`Posting to #${channelName}`}>
-          <HashIcon size={16} />
-          {channelName}
-        </span>
+        <ChannelPicker selectedId={targetChannelId} onSelect={setTargetChannel} />
         <span
           className={styles.dot}
           data-on={collabConnected ? "" : undefined}
@@ -66,8 +61,8 @@ export function ActivityBar() {
           size="sm"
           leadingIcon={<SendIcon />}
           onClick={() => void publish()}
-          disabled={publishing || !context?.channelId}
-          title="Post this message into the channel"
+          disabled={publishing || !targetChannelId}
+          title="Post this message into the selected channel"
         >
           {publishing ? "Posting…" : "Post"}
         </Button>

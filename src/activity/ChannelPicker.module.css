@@ -1,0 +1,169 @@
+.wrapper {
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* The channel chip, now a button that opens the picker. Mirrors the old static
+   `.channel` look from ActivityBar so the bar reads the same — just clickable. */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--app-text);
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  background: var(--app-bg-subtle);
+  border-color: var(--app-border);
+}
+
+.trigger > svg:first-child {
+  color: var(--app-text-subtle);
+  flex: none;
+}
+
+.triggerName {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  color: var(--app-text-subtle);
+  flex: none;
+}
+
+/* Floating panel (portalled to <body>, positioned in JS) ----------------- */
+
+.panel {
+  z-index: var(--app-z-modal);
+  max-height: min(60vh, 420px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow-lg);
+}
+
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: var(--app-space-2);
+  border-bottom: 1px solid var(--app-border);
+}
+
+.searchIcon {
+  position: absolute;
+  left: calc(var(--app-space-2) + 8px);
+  color: var(--app-text-subtle);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 6px 8px 6px 28px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-size: var(--app-text-sm);
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--app-accent);
+}
+
+.note {
+  padding: var(--app-space-3);
+  margin: 0;
+  font-size: var(--app-text-sm);
+  color: var(--app-text-muted);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: var(--app-space-1);
+  overflow-y: auto;
+}
+
+.group {
+  list-style: none;
+}
+
+.groupName {
+  padding: var(--app-space-2) var(--app-space-2) 4px;
+  font-size: var(--app-text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-text-subtle);
+}
+
+.groupChannels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--app-text);
+  font-size: var(--app-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--app-bg-subtle);
+}
+
+.row[data-active] {
+  background: var(--app-accent-soft);
+  color: var(--app-accent-text);
+  font-weight: 600;
+}
+
+.rowHash {
+  color: var(--app-text-subtle);
+  flex: none;
+}
+
+.row[data-active] .rowHash {
+  color: var(--app-accent-text);
+}
+
+.rowName {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.check {
+  color: var(--app-accent-text);
+  flex: none;
+}

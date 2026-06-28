@@ -15,24 +15,6 @@
   min-width: 0;
 }
 
-.channel {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--app-text-sm);
-  font-weight: 600;
-  color: var(--app-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 220px;
-}
-
-.channel svg {
-  color: var(--app-text-subtle);
-  flex: none;
-}
-
 /* Live-sync indicator: green when the collaboration socket is connected, amber
    (pulsing) while reconnecting. */
 .dot {

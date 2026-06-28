@@ -24,7 +24,7 @@ live in `server/src/activity.rs` and `src/core/activity/`:
         │
         ├── POST /api/activity/token   code → access_token   (proxy holds the secret)
         ├── GET  /api/guilds/:id/bootstrap   roles/channels/emoji  (Bearer)
-        ├── POST /api/activity/post    message → posted via a DWEEB webhook (Bearer)
+        ├── POST /api/activity/post    message → posted to the chosen channel via a DWEEB webhook (Bearer)
         └── WS   /api/activity/room/:instance   draft + presence relay
 ```
 
@@ -51,7 +51,9 @@ ACTIVITIES_ENABLED=true   # default; set false to disable /api/activity/*
 
 Publishing reuses (or mints) a DWEEB-owned webhook in the target channel, so the
 posting user must hold **Manage Webhooks** there — exactly like every other
-webhook feature.
+webhook feature. The bar's channel picker defaults to the launching channel but
+can re-point a post at any webhook-hostable channel in the same server (the
+proxy validates the channel belongs to the guild before posting).
 
 ### 2. Developer Portal → your DWEEB application
 

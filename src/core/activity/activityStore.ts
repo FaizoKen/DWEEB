@@ -67,11 +67,18 @@ interface ActivityState {
   collabConnected: boolean;
   publishing: boolean;
   lastPost: ActivityPostResult | null;
+  /** Where the next post goes. Seeded to the launching channel once the
+   *  handshake resolves, but re-pointable at any channel in the guild through
+   *  the bar's picker. Null only before the session is ready (or a rare launch
+   *  with no channel), in which case the user must pick one before posting. */
+  targetChannelId: string | null;
 
   /** Run the SDK handshake and start the session. Safe to call once. */
   init(): Promise<void>;
-  /** Post the current message into the Activity's channel. */
+  /** Post the current message into the chosen channel. */
   publish(): Promise<void>;
+  /** Re-point `publish()` at a different channel in the guild. */
+  setTargetChannel(channelId: string): void;
 }
 
 let initialised = false;
@@ -87,6 +94,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   collabConnected: false,
   publishing: false,
   lastPost: null,
+  targetChannelId: null,
 
   async init() {
     if (initialised) return;
@@ -112,6 +120,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         context: mock.context,
         user: mock.user,
         platform: mock.platform,
+        targetChannelId: mock.context.channelId,
       });
       return;
     }
@@ -158,7 +167,13 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         avatar: auth.user.avatar ?? null,
       };
 
-      set({ status: "ready", step: "done", context: { guildId, channelId, instanceId }, user });
+      set({
+        status: "ready",
+        step: "done",
+        context: { guildId, channelId, instanceId },
+        user,
+        targetChannelId: channelId,
+      });
 
       // Load the launching server's data so the preview resolves mentions/emoji.
       void useGuildStore.getState().connect(guildId);
@@ -182,15 +197,18 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   async publish() {
     const ctx = get().context;
     if (!ctx) return;
-    if (!ctx.channelId) {
-      pushToast("No channel to post to — launch DWEEB from a text or voice channel.", "error");
+    // Post to the chosen channel, falling back to the launching one. Both are
+    // null only on the rare channel-less launch — then there's nothing to post to.
+    const channelId = get().targetChannelId ?? ctx.channelId;
+    if (!channelId) {
+      pushToast("Pick a channel to post to first.", "error");
       return;
     }
     if (get().publishing) return;
     set({ publishing: true });
     try {
       const payload = buildWirePayload(useMessageStore.getState().message);
-      const result = await publishToChannel(ctx.guildId, ctx.channelId, payload);
+      const result = await publishToChannel(ctx.guildId, channelId, payload);
       set({ lastPost: result });
       pushToast("Posted to the channel ✓", "success");
     } catch (e) {
@@ -198,6 +216,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     } finally {
       set({ publishing: false });
     }
+  },
+
+  setTargetChannel(channelId) {
+    set({ targetChannelId: channelId });
   },
 }));
 
