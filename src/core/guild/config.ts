@@ -26,6 +26,17 @@ export const PROXY_BASE_URL: string = (import.meta.env.VITE_PROXY_BASE_URL ?? ""
 export const DISCORD_CLIENT_ID: string = (import.meta.env.VITE_DISCORD_CLIENT_ID ?? "").trim();
 
 /**
+ * Canonical public URL of the DWEEB web app (no trailing slash). Used by the
+ * embedded Activity's "Open on web" hand-off, which must point at the real site:
+ * inside Discord `window.location.origin` is the sandboxed `…discordsays.com`
+ * proxy origin, not the site itself. Overridable per deployment via
+ * `VITE_WEB_APP_URL`; defaults to the production domain.
+ */
+export const WEB_APP_BASE_URL: string = (
+  (import.meta.env.VITE_WEB_APP_URL ?? "").trim() || "https://dweeb.faizo.net"
+).replace(/\/+$/, "");
+
+/**
  * Days a message's interactive components stay clickable after sending before
  * the dispatcher stops answering them — unless the message holds a never-expire
  * slot. Mirrors the dispatcher's `COMPONENT_TTL_DAYS` (default 7; `0` = never

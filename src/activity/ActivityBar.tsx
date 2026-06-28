@@ -13,7 +13,15 @@ import { useActivityStore } from "@/core/activity/activityStore";
 import type { CollabParticipant } from "@/core/activity/collab";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
-import { ExternalLinkIcon, RedoIcon, RefreshIcon, SendIcon, ShareIcon, UndoIcon } from "@/ui/Icon";
+import {
+  ExternalLinkIcon,
+  GlobeIcon,
+  RedoIcon,
+  RefreshIcon,
+  SendIcon,
+  ShareIcon,
+  UndoIcon,
+} from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
 import { GuildPicker } from "./GuildPicker";
 import styles from "./ActivityBar.module.css";
@@ -31,6 +39,7 @@ export function ActivityBar() {
   const update = useActivityStore((s) => s.update);
   const openLastPost = useActivityStore((s) => s.openLastPost);
   const invite = useActivityStore((s) => s.invite);
+  const openOnWeb = useActivityStore((s) => s.openOnWeb);
   const lastPost = useActivityStore((s) => s.lastPost);
   const targetChannelId = useActivityStore((s) => s.targetChannelId);
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
@@ -87,6 +96,12 @@ export function ActivityBar() {
             <ShareIcon />
           </IconButton>
         ) : null}
+        {/* The embedded surface is a focused "edit together, then post" view;
+            this hands the current draft off to the full web app (scheduling,
+            saved messages, account, restore) for anything it omits. */}
+        <IconButton label="Open on web for full features" onClick={() => void openOnWeb()}>
+          <GlobeIcon />
+        </IconButton>
       </div>
 
       <div className={styles.right}>

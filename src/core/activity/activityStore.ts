@@ -14,10 +14,11 @@
  */
 
 import { create } from "zustand";
-import { DISCORD_CLIENT_ID } from "@/core/guild/config";
+import { DISCORD_CLIENT_ID, WEB_APP_BASE_URL } from "@/core/guild/config";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { fetchUserGuilds, type PickerGuild } from "@/core/guild/api";
 import { useMessageStore } from "@/core/state/messageStore";
+import { encodeShare, createShortLink, isShortLinkConfigured } from "@/core/serialization";
 import { buildWirePayload } from "@/core/webhook/send";
 import { pushToast } from "@/ui/Toast";
 import {
@@ -106,6 +107,10 @@ interface ActivityState {
   /** Open Discord's invite dialog so others can join this Activity. No-op in a
    *  DM / group-DM launch or without invite permission. */
   invite(): Promise<void>;
+  /** Hand off the current draft to the full web app (account menu, scheduling,
+   *  saved messages, restore — the features the embedded surface omits). Opens
+   *  the public site with the draft carried in a share link. */
+  openOnWeb(): Promise<void>;
   /** Re-point `publish()` at a different channel in the target guild. */
   setTargetChannel(channelId: string): void;
   /** Pick the destination server (DM launch): loads its channels + preview data
@@ -127,6 +132,11 @@ const READY_TIMEOUT_MS = 25_000;
 const AUTHORIZE_TIMEOUT_MS = 25_000;
 const EXCHANGE_TIMEOUT_MS = 20_000;
 const AUTHENTICATE_TIMEOUT_MS = 20_000;
+
+/** Above this hash-URL length the "Open on web" hand-off uploads the draft as a
+ *  short link instead, so the host's external-link open never chokes on a huge
+ *  URL. Small drafts stay fully client-side in the hash (nothing uploaded). */
+const WEB_HANDOFF_MAX_URL = 8_000;
 
 let initialised = false;
 
@@ -353,6 +363,35 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       // Thrown in a DM / group-DM or without invite permission. The button is
       // only shown for server launches, so this is the missing-permission case.
       pushToast("You need permission to create invites in this server.", "error");
+    }
+  },
+
+  async openOnWeb() {
+    const token = encodeShare(useMessageStore.getState().message);
+    // Carry the draft in the share hash so the web app opens with it loaded —
+    // and the contents stay client-side (the hash never reaches our server).
+    const hashUrl = `${WEB_APP_BASE_URL}/#s=${token}`;
+    let url = hashUrl;
+    // A very large draft makes that hash URL too long for the host to open
+    // reliably; fall back to an opt-in short link (uploads the snapshot, auto-
+    // deletes server-side after 7 days) built against the *site* origin — the
+    // short-link client's own builder would use the sandbox origin instead.
+    if (hashUrl.length > WEB_HANDOFF_MAX_URL && isShortLinkConfigured()) {
+      const short = await createShortLink(token);
+      if (short.ok) url = `${WEB_APP_BASE_URL}/s/${short.id}`;
+    }
+    try {
+      // The sandboxed iframe can't navigate to the site itself — hand the link
+      // to the host client (same path as "View posted message").
+      await openExternalLink(url);
+    } catch {
+      // The web app / dev URL-override aren't sandboxed, so a plain open works
+      // there when the SDK path can't (a real in-Discord Activity needs the SDK).
+      try {
+        window.open(url, "_blank", "noopener");
+      } catch {
+        /* nothing more we can do */
+      }
     }
   },
 

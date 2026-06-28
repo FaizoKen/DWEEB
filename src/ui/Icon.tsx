@@ -93,6 +93,14 @@ export const ExternalLinkIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const GlobeIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z" />
+  </svg>
+);
+
 export const UndoIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M3 7v6h6" />
