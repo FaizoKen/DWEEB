@@ -14,7 +14,7 @@
  * Layout mirrors the web app at every width (see `app/App`): two side-by-side
  * panes on desktop, and on a narrow window (mobile, or a small picture-in-
  * picture) the editor goes full-width while the preview becomes a bottom sheet
- * raised by a floating button + live mini preview. On the mobile client we also
+ * raised by tapping the floating live mini preview. On the mobile client we also
  * inset the whole surface for Discord's native top bar / home indicator.
  */
 
@@ -25,7 +25,6 @@ import { MiniPreview } from "@/features/preview/MiniPreview";
 import { usePreviewSwipeToClose, useIsMobileSheet } from "@/features/preview/previewSheet";
 import { ToastViewport } from "@/ui/Toast";
 import { Button } from "@/ui/Button";
-import { EyeIcon } from "@/ui/Icon";
 import {
   useActivityStore,
   type ActivityStatus,
@@ -97,23 +96,11 @@ export function ActivityApp() {
         </section>
       </div>
 
-      {/* Mobile-only: a live mini preview thumbnail stacked over a "Preview"
-          button, both opening the full sheet — the same affordance the web app
-          floats in the bottom-right corner. */}
+      {/* Mobile-only: a live mini preview thumbnail that opens the full sheet on
+          tap — floated in the bottom-right corner like the web app. */}
       {isMobileSheet && !previewOpen ? (
         <div className="fab-stack">
           <MiniPreview onOpen={() => setPreviewOpen(true)} />
-          <div className="fab-row">
-            <button
-              type="button"
-              className="preview-fab"
-              onClick={() => setPreviewOpen(true)}
-              aria-label="Show preview"
-            >
-              <EyeIcon size={18} />
-              <span>Preview</span>
-            </button>
-          </div>
         </div>
       ) : null}
 
