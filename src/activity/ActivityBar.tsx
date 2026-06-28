@@ -87,10 +87,10 @@ export function ActivityBar() {
               : "Reconnecting to the shared session…"
           }
         />
+        <Presence participants={participants} />
       </div>
 
-      <div className={styles.center}>
-        <Presence participants={participants} />
+      <div className={styles.right}>
         {canInvite ? (
           <IconButton label="Invite people to edit together" onClick={() => void invite()}>
             <ShareIcon />
@@ -102,15 +102,17 @@ export function ActivityBar() {
         <IconButton label="Open on web for full features" onClick={() => void openOnWeb()}>
           <GlobeIcon />
         </IconButton>
-      </div>
 
-      <div className={styles.right}>
+        <span className={styles.sep} aria-hidden="true" />
+
         <IconButton label="Undo" onClick={undo} disabled={!canUndo}>
           <UndoIcon />
         </IconButton>
         <IconButton label="Redo" onClick={redo} disabled={!canRedo}>
           <RedoIcon />
         </IconButton>
+
+        <span className={styles.sep} aria-hidden="true" />
 
         {canUpdate ? (
           <>

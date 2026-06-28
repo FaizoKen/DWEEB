@@ -1,11 +1,12 @@
 .bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--app-space-3);
-  padding: var(--app-space-2) var(--app-space-3);
+  padding: var(--app-space-1) var(--app-space-3);
   background: var(--app-bg-elevated);
   border-bottom: 1px solid var(--app-border);
-  min-height: 48px;
+  min-height: 44px;
 }
 
 .left {
@@ -41,20 +42,21 @@
   }
 }
 
-.center {
-  flex: 1 1 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--app-space-2);
-  min-width: 0;
-}
-
 .right {
   display: flex;
   align-items: center;
-  gap: var(--app-space-2);
-  margin-left: auto;
+  gap: var(--app-space-1);
+  flex: none;
+}
+
+/* Hairline divider that separates the icon clusters in the right group
+   (secondary actions · history · primary) without adding visual weight. */
+.sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--app-space-1) var(--app-space-1);
+  background: var(--app-border);
+  flex: none;
 }
 
 /* Presence ------------------------------------------------------------ */
@@ -62,6 +64,7 @@
 .presence {
   display: flex;
   align-items: center;
+  margin-left: var(--app-space-1);
 }
 
 .avatar {
