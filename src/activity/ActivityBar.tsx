@@ -15,6 +15,7 @@ import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
 import { RedoIcon, SendIcon, UndoIcon } from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
+import { GuildPicker } from "./GuildPicker";
 import styles from "./ActivityBar.module.css";
 
 export function ActivityBar() {
@@ -30,10 +31,30 @@ export function ActivityBar() {
   const targetChannelId = useActivityStore((s) => s.targetChannelId);
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
 
+  // A DM / group-DM launch has no guild of its own, so the user first picks a
+  // destination *server* (DMs can't receive a webhook post), then a channel.
+  const isDm = useActivityStore((s) => s.context != null && s.context.guildId == null);
+  const guilds = useActivityStore((s) => s.guilds);
+  const guildsLoading = useActivityStore((s) => s.guildsLoading);
+  const targetGuildId = useActivityStore((s) => s.targetGuildId);
+  const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
+
   return (
     <div className={styles.bar}>
       <div className={styles.left}>
-        <ChannelPicker selectedId={targetChannelId} onSelect={setTargetChannel} />
+        {isDm ? (
+          <GuildPicker
+            guilds={guilds}
+            loading={guildsLoading}
+            selectedId={targetGuildId}
+            onSelect={setTargetGuild}
+          />
+        ) : null}
+        <ChannelPicker
+          selectedId={targetChannelId}
+          onSelect={setTargetChannel}
+          disabled={isDm && !targetGuildId}
+        />
         <span
           className={styles.dot}
           data-on={collabConnected ? "" : undefined}
@@ -61,7 +82,7 @@ export function ActivityBar() {
           size="sm"
           leadingIcon={<SendIcon />}
           onClick={() => void publish()}
-          disabled={publishing || !targetChannelId}
+          disabled={publishing || !targetGuildId || !targetChannelId}
           title="Post this message into the selected channel"
         >
           {publishing ? "Posting…" : "Post"}

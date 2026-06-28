@@ -1,0 +1,21 @@
+/* Server glyphs for the destination picker (DM launch). The dropdown chrome
+   itself is shared with ChannelPicker.module.css — only the leading icon /
+   initial bubble is bespoke here. */
+
+.icon {
+  flex: none;
+  border-radius: var(--app-radius-sm);
+  object-fit: cover;
+}
+
+.initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: var(--app-radius-sm);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}

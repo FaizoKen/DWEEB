@@ -65,11 +65,18 @@ function groupChannels(
 export function ChannelPicker({
   selectedId,
   onSelect,
+  disabled = false,
+  disabledLabel = "Pick a server first",
 }: {
   /** The channel the next post goes to, or null when none is chosen yet. */
   selectedId: string | null;
   /** A channel was picked — close the panel and re-point publishing at it. */
   onSelect: (channelId: string) => void;
+  /** Greyed out and non-opening — used on a DM launch before a destination
+   *  server is chosen, when there are no channels to offer yet. */
+  disabled?: boolean;
+  /** Trigger text while `disabled`. */
+  disabledLabel?: string;
 }) {
   const data = useGuildStore((s) => s.data);
   const loading = useGuildStore((s) => s.status === "loading" && !s.data);
@@ -83,7 +90,9 @@ export function ChannelPicker({
   const searchRef = useRef<HTMLInputElement>(null);
 
   const selected = selectedId ? data?.channelById[selectedId] : undefined;
-  const label = selected?.name ?? (selectedId ? "this channel" : "Pick a channel");
+  const label = disabled
+    ? disabledLabel
+    : (selected?.name ?? (selectedId ? "this channel" : "Pick a channel"));
 
   // Webhook-hostable channels, plus the current selection even if its type isn't
   // normally listed (e.g. launched from a voice channel) so the default never
@@ -155,10 +164,17 @@ export function ChannelPicker({
       <button
         type="button"
         className={styles.trigger}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={selected ? `Posting to #${label} — click to change` : "Choose a channel to post to"}
+        title={
+          disabled
+            ? disabledLabel
+            : selected
+              ? `Posting to #${label} — click to change`
+              : "Choose a channel to post to"
+        }
       >
         <HashIcon size={16} />
         <span className={styles.triggerName}>{label}</span>

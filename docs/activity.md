@@ -1,9 +1,10 @@
 # DWEEB as a Discord Activity
 
 DWEEB also runs **inside Discord** as an [Activity](https://discord.com/developers/docs/activities/overview):
-the same visual builder, launched in a server, scoped to the current channel,
-with **real-time co-editing** and **one-click publishing** — no tab-switching,
-no re-auth, no "which server am I in again".
+the same visual builder, launched from a server channel (scoped to it) or from a
+DM (publishing to a server you manage), with **real-time co-editing** and
+**one-click publishing** — no tab-switching, no re-auth, no "which server am I in
+again".
 
 This is the embedded counterpart to the web app. It reuses the editor, the
 pixel-accurate preview, and the proxy; only three things differ, and all of them
@@ -14,6 +15,25 @@ live in `server/src/activity.rs` and `src/core/activity/`:
 | **Auth** | session cookie | `Authorization: Bearer <Discord token>` (the iframe gets no cookie) |
 | **Publishing** | browser → webhook | proxy posts on the browser's behalf (a sandboxed iframe can't reach discord.com directly) |
 | **Collaboration** | n/a | a WebSocket room per Activity instance (last-write-wins draft sync + presence) |
+
+### Server launch vs. DM launch
+
+An Activity can be launched **from a server channel** or **from a DM / group DM**.
+The builder, preview, and collaboration are identical; only the publish
+destination differs:
+
+- **Server launch.** The launching guild + channel are the default destination
+  (re-pointable to any channel in that server). The preview resolves the
+  server's mentions and emoji immediately.
+- **DM launch.** A DM has no guild, and DMs **can't host webhooks** — so there's
+  nothing to post into the DM itself. Instead the bar shows a **server picker**:
+  the user chooses one of the servers they manage (the DWEEB bot is present and
+  they hold Manage Webhooks — the same gate the post enforces), then a channel
+  in it. Picking a server also loads its data, so the preview resolves against
+  the chosen destination. Publishing then goes through the exact same
+  `POST /api/activity/post` path. The collaboration room still works (handy in a
+  group DM) — it's keyed by Discord's unguessable, ephemeral instance id rather
+  than a guild, since there's no membership to gate on.
 
 ## How it works
 
@@ -60,6 +80,13 @@ proxy validates the channel belongs to the guild before posting).
 1. **Activities → Settings → Enable Activities.** Set Supported Platforms to at
    least **Web** (covers desktop + browser). There's no separate "entry point"
    field — the Root Mapping below is the entry point.
+
+   To offer **Launch in DM** (the second button on the launch card), the app must
+   be launchable in a private channel. Enable **Installation → Installation
+   Contexts → User Install** (in addition to Guild Install) so DWEEB can be used
+   in DMs and group DMs; the OAuth2 scopes below already cover the handshake. The
+   app handles a guild-less launch gracefully (see *Server launch vs. DM launch*
+   above) — without User Install, only the in-server **Launch** button shows.
 
 2. **Activities → URL Mappings.** Two mappings:
 

@@ -16,6 +16,7 @@
 import { create } from "zustand";
 import { DISCORD_CLIENT_ID } from "@/core/guild/config";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { fetchUserGuilds, type PickerGuild } from "@/core/guild/api";
 import { useMessageStore } from "@/core/state/messageStore";
 import { buildWirePayload } from "@/core/webhook/send";
 import { pushToast } from "@/ui/Toast";
@@ -38,8 +39,12 @@ export type ActivityStep =
 
 /** The launching context, read off the SDK once ready. */
 export interface ActivityContext {
-  guildId: string;
-  /** Null when the Activity wasn't launched from a channel (e.g. a DM). */
+  /** Null when launched from a DM / group DM, which has no guild. In that case
+   *  there's nothing to post *into* (DMs can't host webhooks), so the user picks
+   *  a server they manage as the destination instead — see `targetGuildId`. */
+  guildId: string | null;
+  /** The launching channel. Null when the Activity wasn't launched from a guild
+   *  channel; in a DM it's the DM channel, which can't receive a webhook post. */
   channelId: string | null;
   instanceId: string;
 }
@@ -67,18 +72,30 @@ interface ActivityState {
   collabConnected: boolean;
   publishing: boolean;
   lastPost: ActivityPostResult | null;
-  /** Where the next post goes. Seeded to the launching channel once the
-   *  handshake resolves, but re-pointable at any channel in the guild through
-   *  the bar's picker. Null only before the session is ready (or a rare launch
-   *  with no channel), in which case the user must pick one before posting. */
+  /** The guild the next post goes to. In a server launch this is the launching
+   *  guild; in a DM launch it's null until the user picks a destination server
+   *  they manage (from `guilds`) — DMs have no guild of their own to post into. */
+  targetGuildId: string | null;
+  /** Where the next post goes. Seeded to the launching channel in a server
+   *  launch, but re-pointable at any channel in `targetGuildId` through the bar's
+   *  picker. Null before a channel is chosen (always so on a DM launch, until a
+   *  destination server *and* channel are picked). */
   targetChannelId: string | null;
+  /** The user's postable servers — only loaded on a DM launch, where a
+   *  destination must be chosen. Empty in a server launch (the guild is fixed). */
+  guilds: PickerGuild[];
+  /** True while the DM-launch server list is loading. */
+  guildsLoading: boolean;
 
   /** Run the SDK handshake and start the session. Safe to call once. */
   init(): Promise<void>;
   /** Post the current message into the chosen channel. */
   publish(): Promise<void>;
-  /** Re-point `publish()` at a different channel in the guild. */
+  /** Re-point `publish()` at a different channel in the target guild. */
   setTargetChannel(channelId: string): void;
+  /** Pick the destination server (DM launch): loads its channels + preview data
+   *  and resets the channel selection. */
+  setTargetGuild(guildId: string): void;
 }
 
 let initialised = false;
@@ -94,7 +111,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   collabConnected: false,
   publishing: false,
   lastPost: null,
+  targetGuildId: null,
   targetChannelId: null,
+  guilds: [],
+  guildsLoading: false,
 
   async init() {
     if (initialised) return;
@@ -120,8 +140,13 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         context: mock.context,
         user: mock.user,
         platform: mock.platform,
-        targetChannelId: mock.context.channelId,
+        targetGuildId: mock.context.guildId,
+        // Only a server launch can seed a postable channel; a DM stub has none.
+        targetChannelId: mock.context.guildId ? mock.context.channelId : null,
       });
+      // The override can't reach the proxy (its faux ticket 404s every proxied
+      // call), so don't try to load a DM launch's server list here — the picker
+      // just shows empty under the override. A real launch loads it below.
       return;
     }
 
@@ -136,14 +161,14 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       // layout change — see ActivityApp). `sdk.platform` is "mobile"/"desktop".
       set({ step: "sdk-ready", platform: sdk.platform === "mobile" ? "mobile" : "desktop" });
 
-      const guildId = sdk.guildId;
+      // A DM / group-DM launch has no guild (`sdk.guildId` is null). We still
+      // run the full handshake — the difference is only where the post goes:
+      // a server launch posts into its own channel; a DM launch lets the user
+      // pick a server they manage (DMs can't host webhooks, so there's nothing
+      // to post into the DM itself).
+      const guildId = sdk.guildId || null;
       const channelId = sdk.channelId;
       const instanceId = sdk.instanceId;
-      if (!guildId) {
-        throw new Error(
-          "Launch DWEEB from a server channel — it needs a server to build messages for.",
-        );
-      }
 
       set({ step: "authorizing" });
       const { code } = await sdk.commands.authorize({
@@ -172,13 +197,24 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         step: "done",
         context: { guildId, channelId, instanceId },
         user,
-        targetChannelId: channelId,
+        targetGuildId: guildId,
+        // A server launch can post into its own channel straight away; a DM
+        // launch has no postable channel until a destination server is chosen.
+        targetChannelId: guildId ? channelId : null,
       });
 
-      // Load the launching server's data so the preview resolves mentions/emoji.
-      void useGuildStore.getState().connect(guildId);
+      if (guildId) {
+        // Server launch: load the launching server's data so the preview
+        // resolves mentions/emoji and the channel picker is populated.
+        void useGuildStore.getState().connect(guildId);
+      } else {
+        // DM launch: load the servers the user can post to, so they can pick a
+        // destination. The preview resolves against whichever they choose.
+        void loadPostableGuilds(set);
+      }
 
-      // Open the shared editing room.
+      // Open the shared editing room. A DM launch passes no guild — the room is
+      // keyed by the unguessable instance id instead (see `server/activity.rs`).
       startCollab({
         instanceId,
         guildId,
@@ -195,11 +231,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   },
 
   async publish() {
-    const ctx = get().context;
-    if (!ctx) return;
-    // Post to the chosen channel, falling back to the launching one. Both are
-    // null only on the rare channel-less launch — then there's nothing to post to.
-    const channelId = get().targetChannelId ?? ctx.channelId;
+    const guildId = get().targetGuildId;
+    if (!guildId) {
+      pushToast("Pick a server to post to first.", "error");
+      return;
+    }
+    const channelId = get().targetChannelId;
     if (!channelId) {
       pushToast("Pick a channel to post to first.", "error");
       return;
@@ -208,7 +245,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ publishing: true });
     try {
       const payload = buildWirePayload(useMessageStore.getState().message);
-      const result = await publishToChannel(ctx.guildId, channelId, payload);
+      const result = await publishToChannel(guildId, channelId, payload);
       set({ lastPost: result });
       pushToast("Posted to the channel ✓", "success");
     } catch (e) {
@@ -221,7 +258,31 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   setTargetChannel(channelId) {
     set({ targetChannelId: channelId });
   },
+
+  setTargetGuild(guildId) {
+    if (get().targetGuildId === guildId) return;
+    // Switching destination drops the old channel pick and loads the new
+    // server's channels + mapping data (which also re-resolves the preview).
+    set({ targetGuildId: guildId, targetChannelId: null });
+    void useGuildStore.getState().connect(guildId);
+  },
 }));
+
+/** Load the user's postable servers for a DM launch — those where the DWEEB bot
+ *  is present and the user holds Manage Webhooks (the gate the post enforces).
+ *  Failures are non-fatal: the picker just shows its empty state. */
+async function loadPostableGuilds(set: (partial: Partial<ActivityState>) => void): Promise<void> {
+  set({ guildsLoading: true });
+  try {
+    const all = await fetchUserGuilds();
+    const postable = all.filter((g) => g.bot_present && g.can_manage_webhooks);
+    set({ guilds: postable });
+  } catch {
+    set({ guilds: [] });
+  } finally {
+    set({ guildsLoading: false });
+  }
+}
 
 /**
  * When running a dev build inside Discord's URL-Override launch, return a stub
@@ -237,11 +298,12 @@ function devOverrideSession(): {
   if (!import.meta.env.DEV) return null;
   const q = new URLSearchParams(window.location.search);
   if (q.get("discord_proxy_ticket") !== "faux-proxy-ticket") return null;
-  const guildId = q.get("guild_id");
-  if (!guildId) return null;
+  // `guild_id` is absent on a DM launch — seed a guild-less (DM) stub then, so
+  // the embedded builder still renders for UI iteration (the server picker stays
+  // empty, since its list needs the proxy the override can't reach).
   return {
     context: {
-      guildId,
+      guildId: q.get("guild_id"),
       channelId: q.get("channel_id"),
       instanceId: q.get("instance_id") ?? "dev-override",
     },

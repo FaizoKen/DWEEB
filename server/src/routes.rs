@@ -183,8 +183,13 @@ pub async fn list_guilds(
     State(st): State<AppState>,
     Query(q): Query<ReadQuery>,
     jar: PrivateCookieJar,
+    headers: axum::http::HeaderMap,
 ) -> Result<Response, AppError> {
-    let session = require_session(&jar)?;
+    // The embedded Activity authenticates with a bearer token (its third-party
+    // iframe gets no session cookie). A DM-launched Activity has no guild of its
+    // own, so it lists the user's servers here to pick a publish destination —
+    // hence this accepts either credential, like the guild reads.
+    let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
     // The user's guild list (a Discord call under the user token) and the bot's
     // guild set (a paginated call under the bot token) are independent — run
     // them concurrently so the picker's cold-cache load is one round-trip's

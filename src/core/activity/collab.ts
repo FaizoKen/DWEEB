@@ -32,7 +32,9 @@ export interface CollabParticipant {
 
 interface StartOptions {
   instanceId: string;
-  guildId: string;
+  /** The launching guild, or null on a DM / group-DM launch (no guild to gate
+   *  the room on — the unguessable instance id keys it instead). */
+  guildId: string | null;
   token: string;
   onRoster: (participants: CollabParticipant[]) => void;
   onConnectedChange?: (connected: boolean) => void;
@@ -88,7 +90,10 @@ export function stopCollab(): void {
 
 function roomUrl(o: StartOptions): string {
   const wsBase = PROXY_BASE_URL.replace(/^http/i, "ws");
-  const q = new URLSearchParams({ token: o.token, guild: o.guildId });
+  const q = new URLSearchParams({ token: o.token });
+  // Sent only for a server launch — the proxy gates the room on guild membership
+  // when present, and skips that gate for a DM launch (no guild).
+  if (o.guildId) q.set("guild", o.guildId);
   return `${wsBase}/api/activity/room/${encodeURIComponent(o.instanceId)}?${q.toString()}`;
 }
 

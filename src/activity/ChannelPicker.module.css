@@ -23,10 +23,15 @@
     border-color 120ms ease;
 }
 
-.trigger:hover,
+.trigger:hover:not(:disabled),
 .trigger[aria-expanded="true"] {
   background: var(--app-bg-subtle);
   border-color: var(--app-border);
+}
+
+.trigger:disabled {
+  color: var(--app-text-subtle);
+  cursor: default;
 }
 
 .trigger > svg:first-child {

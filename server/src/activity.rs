@@ -878,13 +878,22 @@ pub struct RoomQuery {
     #[serde(default)]
     token: String,
     /// The Activity's guild, gated exactly like every other guild feature.
+    /// Empty for a DM / group-DM launch, which has no guild — see [`activity_room`].
     #[serde(default)]
     guild: String,
 }
 
 /// `GET /api/activity/room/:instance` (WebSocket) — join the collaboration room
-/// for an Activity instance. Authenticated by the bearer token in the query and
-/// the same guild-membership gate the rest of the proxy enforces.
+/// for an Activity instance. Authenticated by the bearer token in the query.
+///
+/// When the launch carries a `guild` (server channel), we also enforce the same
+/// membership gate the rest of the proxy uses. A DM / group-DM launch has no
+/// guild, so there's nothing to gate on — the room is keyed by Discord's
+/// per-launch `instance` id, which is unguessable and ephemeral, and that id is
+/// the capability: a peer can only join the same room by being in the same DM and
+/// launching the same Activity. (Omitting `guild` can't be used to bypass a *guild*
+/// room's membership check either, since reaching that room still requires its
+/// unguessable instance id.)
 pub async fn activity_room(
     State(st): State<AppState>,
     Path(instance): Path<String>,
@@ -897,13 +906,19 @@ pub async fn activity_room(
     if !valid_instance(&instance) {
         return Err(bad_request("invalid instance id"));
     }
-    if q.token.trim().is_empty() || !is_snowflake(&q.guild) {
+    if q.token.trim().is_empty() {
         return Err(AppError::Unauthorized(
             "missing activity credentials".into(),
         ));
     }
     let session = resolve_bearer(&st, q.token.trim()).await?;
-    authorize_member_session(&st, session.clone(), &q.guild).await?;
+    let guild = q.guild.trim();
+    if !guild.is_empty() {
+        if !is_snowflake(guild) {
+            return Err(bad_request("invalid guild id"));
+        }
+        authorize_member_session(&st, session.clone(), guild).await?;
+    }
     let me = Participant {
         id: session.uid,
         name: session.name,
