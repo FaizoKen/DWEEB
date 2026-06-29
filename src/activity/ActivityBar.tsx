@@ -4,18 +4,30 @@
  * and the primary **Post** action. Presence and inviting live in the bottom
  * `PresenceDock` instead.
  *
- * The web app's action bar (account menu, share links, restore, scheduling) is
- * deliberately absent: inside Discord the context is fixed and publishing is one
- * server-side call, so this stays focused on "edit together, then post".
+ * The web app's action bar (account menu, share links, scheduling) is mostly
+ * absent: inside Discord the context is fixed and publishing is one server-side
+ * call, so this stays focused on "edit together, then post". Restore is the one
+ * import it keeps — pulling a message DWEEB posted here back into the editor is
+ * just as useful in the room, and the proxy makes it a one-field action.
  */
 
+import { useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
-import { ExternalLinkIcon, GlobeIcon, RedoIcon, RefreshIcon, SendIcon, UndoIcon } from "@/ui/Icon";
+import {
+  ExternalLinkIcon,
+  GlobeIcon,
+  HistoryIcon,
+  RedoIcon,
+  RefreshIcon,
+  SendIcon,
+  UndoIcon,
+} from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
 import { GuildPicker } from "./GuildPicker";
+import { RestoreDialog } from "./RestoreDialog";
 import styles from "./ActivityBar.module.css";
 
 export function ActivityBar() {
@@ -40,6 +52,8 @@ export function ActivityBar() {
   const guildsLoading = useActivityStore((s) => s.guildsLoading);
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
   const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
+
+  const [restoreOpen, setRestoreOpen] = useState(false);
 
   const noDestination = !targetGuildId || !targetChannelId;
   // "Update" applies only while the chosen destination still matches where we
@@ -68,9 +82,20 @@ export function ActivityBar() {
       </div>
 
       <div className={styles.right}>
+        {/* Restore: pull a message DWEEB posted in this channel back into the
+            editor. Needs a destination channel (the webhook lives there), so it's
+            disabled until one is picked — same gate as Post. */}
+        <IconButton
+          label="Restore a message DWEEB posted"
+          onClick={() => setRestoreOpen(true)}
+          disabled={noDestination}
+        >
+          <HistoryIcon />
+        </IconButton>
+
         {/* The embedded surface is a focused "edit together, then post" view;
             this hands the current draft off to the full web app (scheduling,
-            saved messages, account, restore) for anything it omits. */}
+            saved messages, account) for anything it omits. */}
         <IconButton label="Open on web for full features" onClick={() => void openOnWeb()}>
           <GlobeIcon />
         </IconButton>
@@ -128,6 +153,8 @@ export function ActivityBar() {
           </Button>
         )}
       </div>
+
+      <RestoreDialog open={restoreOpen} onClose={() => setRestoreOpen(false)} />
     </div>
   );
 }

@@ -70,6 +70,37 @@ export async function publishToChannel(
   return (await res.json()) as ActivityPostResult;
 }
 
+/** Result of a successful restore: the raw Discord message to decode into the
+ *  editor, plus the same identifiers a {@link ActivityPostResult} carries so a
+ *  follow-up edit can target the restored message in place. */
+export interface ActivityRestoreResult extends ActivityPostResult {
+  /** The raw Discord message object — decode it with `attachEditorFields`. */
+  message: unknown;
+}
+
+/** `POST /api/activity/restore` — pull a message DWEEB posted in the channel back
+ *  out of Discord. Unlike the web app's Restore, no webhook URL is needed: the
+ *  proxy resolves the DWEEB-owned webhook from the channel, so the caller supplies
+ *  only a message id. A 404 means the id isn't a message DWEEB posted here. */
+export async function restorePostedMessage(
+  guildId: string,
+  channelId: string,
+  messageId: string,
+): Promise<ActivityRestoreResult> {
+  let res: Response;
+  try {
+    res = await proxyFetch("/api/activity/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guild_id: guildId, channel_id: channelId, message_id: messageId }),
+    });
+  } catch {
+    throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
+  }
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return (await res.json()) as ActivityRestoreResult;
+}
+
 /** `POST /api/activity/edit` — PATCH a message previously posted from this
  *  Activity, through the same DWEEB-owned webhook. `webhookId` names the exact
  *  webhook to edit through (from the original post); the proxy still re-verifies

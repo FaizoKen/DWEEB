@@ -1,0 +1,23 @@
+.lead {
+  margin: 0 0 var(--app-space-4);
+  color: var(--app-text-muted);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+}
+
+.lead strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.hint {
+  margin: var(--app-space-3) 0 0;
+  color: var(--app-text-subtle);
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+}
+
+.hint strong {
+  color: var(--app-text-muted);
+  font-weight: 600;
+}

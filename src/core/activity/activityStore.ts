@@ -18,8 +18,15 @@ import { DISCORD_CLIENT_ID, WEB_APP_BASE_URL } from "@/core/guild/config";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { fetchUserGuilds, type PickerGuild } from "@/core/guild/api";
 import { useMessageStore } from "@/core/state/messageStore";
-import { encodeShare, createShortLink, isShortLinkConfigured } from "@/core/serialization";
-import { buildWirePayload } from "@/core/webhook/send";
+import type { WebhookMessage } from "@/core/schema/types";
+import {
+  encodeShare,
+  createShortLink,
+  isShortLinkConfigured,
+  attachEditorFields,
+} from "@/core/serialization";
+import { buildWirePayload, parseMessageIdInput } from "@/core/webhook/send";
+import { validateMessage } from "@/core/schema/validation";
 import { pushToast } from "@/ui/Toast";
 import {
   configureUrlMappings,
@@ -28,7 +35,13 @@ import {
   openInviteDialog,
   setActivityPresence,
 } from "./sdk";
-import { editPostedMessage, exchangeCode, publishToChannel, type ActivityPostResult } from "./api";
+import {
+  editPostedMessage,
+  exchangeCode,
+  publishToChannel,
+  restorePostedMessage,
+  type ActivityPostResult,
+} from "./api";
 import { startCollab, stopCollab, type CollabParticipant } from "./collab";
 import { setActivityToken } from "./runtime";
 
@@ -78,6 +91,8 @@ interface ActivityState {
   participants: CollabParticipant[];
   collabConnected: boolean;
   publishing: boolean;
+  /** True while a restore is fetching a message back from Discord. */
+  restoring: boolean;
   lastPost: ActivityPostResult | null;
   /** The guild the next post goes to. In a server launch this is the launching
    *  guild; in a DM launch it's null until the user picks a destination server
@@ -101,6 +116,12 @@ interface ActivityState {
   /** PATCH the message last posted from this Activity with the current draft.
    *  Only meaningful while {@link lastPost} matches the chosen destination. */
   update(): Promise<void>;
+  /** Pull a message DWEEB posted in the target channel back into the shared
+   *  editor (`input` is a message id or a Discord message link). The proxy
+   *  resolves the webhook, so — unlike the web app — no URL is needed. On success
+   *  the editor is wired to update that message in place ({@link lastPost}).
+   *  Throws with a user-facing message on failure so the caller can surface it. */
+  restore(input: string): Promise<void>;
   /** Open the last posted message in Discord (the sandboxed iframe can't
    *  navigate to discord.com itself, so this goes through the SDK). */
   openLastPost(): Promise<void>;
@@ -108,8 +129,8 @@ interface ActivityState {
    *  DM / group-DM launch or without invite permission. */
   invite(): Promise<void>;
   /** Hand off the current draft to the full web app (account menu, scheduling,
-   *  saved messages, restore — the features the embedded surface omits). Opens
-   *  the public site with the draft carried in a share link. */
+   *  saved messages — the features the embedded surface omits). Opens the public
+   *  site with the draft carried in a share link. */
   openOnWeb(): Promise<void>;
   /** Re-point `publish()` at a different channel in the target guild. */
   setTargetChannel(channelId: string): void;
@@ -150,6 +171,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   participants: [],
   collabConnected: false,
   publishing: false,
+  restoring: false,
   lastPost: null,
   targetGuildId: null,
   targetChannelId: null,
@@ -340,6 +362,52 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 
+  async restore(input) {
+    const guildId = get().targetGuildId;
+    const channelId = get().targetChannelId;
+    if (!guildId || !channelId) {
+      throw new Error("Pick a channel to restore from first.");
+    }
+    // Accept a bare snowflake or a full message link (the channel is fixed to the
+    // target, so the link's channel part is ignored — only the message id matters).
+    const messageId = parseMessageIdInput(input);
+    if (!messageId) {
+      throw new Error("Enter a message ID or a Discord message link.");
+    }
+    if (get().restoring) return;
+    set({ restoring: true });
+    try {
+      const result = await restorePostedMessage(guildId, channelId, messageId);
+      const decoded = decodeRestored(result.message);
+      // Load it into the shared editor — collab broadcasts the new draft to
+      // everyone in the room (a top-level structural change, so a full snapshot).
+      useMessageStore.getState().replaceMessage(decoded);
+      // Wire the toolbar to update THIS message: `lastPost` carries the webhook
+      // that authored it, so the next edit PATCHes it in place instead of posting
+      // a copy (same affordance a fresh post leaves behind).
+      set({
+        lastPost: {
+          message_id: result.message_id,
+          channel_id: result.channel_id,
+          guild_id: result.guild_id,
+          url: result.url,
+          webhook_id: result.webhook_id,
+        },
+      });
+      const validation = validateMessage(decoded);
+      pushToast(
+        validation.ok
+          ? "Restored. Edits will update this message ✓"
+          : `Restored with ${validation.issues.length} validation issue${
+              validation.issues.length === 1 ? "" : "s"
+            }.`,
+        validation.ok ? "success" : "info",
+      );
+    } finally {
+      set({ restoring: false });
+    }
+  },
+
   async openLastPost() {
     const url = get().lastPost?.url;
     if (!url) return;
@@ -477,6 +545,17 @@ function withTimeout<T>(p: Promise<T>, ms: number, stage: string): Promise<T> {
       },
     );
   });
+}
+
+/** Decode a raw restored Discord message into the editor's shape, turning the
+ *  rare "this isn't a Components V2 payload" parse failure into a friendly error.
+ *  (DWEEB only posts V2 messages, so this only trips on something genuinely odd.) */
+function decodeRestored(raw: unknown): WebhookMessage {
+  try {
+    return attachEditorFields(raw);
+  } catch {
+    throw new Error("That message can't be opened in the editor — it isn't a DWEEB message.");
+  }
 }
 
 /** A throwaway CSRF `state` for the authorize call. */

@@ -46,6 +46,7 @@ destination differs:
         ├── GET  /api/guilds/:id/bootstrap   roles/channels/emoji  (Bearer)
         ├── POST /api/activity/post    message → posted to the chosen channel via a DWEEB webhook (Bearer)
         ├── POST /api/activity/edit    message → PATCH a message already posted, via the same webhook (Bearer)
+        ├── POST /api/activity/restore message id → the message DWEEB posted, read back via the same webhook (Bearer)
         └── WS   /api/activity/room/:instance   draft + presence relay
 ```
 
@@ -64,6 +65,23 @@ draft PATCHes the message you just posted (`POST /api/activity/edit`, through th
 the posted message. The sandboxed iframe can't navigate to discord.com itself, so
 the ↗ opens it through the SDK's `openExternalLink`. Re-point the channel and the
 primary reverts to **Post** (a fresh post into the new destination).
+
+### Restore a posted message
+
+The bar's **⟲ Restore** opens a one-field dialog: paste the message ID (or a
+Discord message link) of something DWEEB posted in the target channel and it
+loads straight into the shared editor, broadcast to everyone in the room. The web
+app's Restore needs the webhook URL that authored the message — a secret only that
+browser holds — but inside the Activity the proxy already knows the DWEEB-owned
+webhook for the channel, so it resolves it itself (`POST /api/activity/restore`
+finds the hook, then GETs the message through it). The user supplies only the id.
+
+Discord only returns a message to the webhook that authored it, so a 404 means the
+id isn't a message DWEEB posted in that channel (a user/bot/other-webhook message
+never restores, even in the same channel). On success `lastPost` is set to the
+restored message, so the bar immediately shows **Update** — editing PATCHes that
+message in place, exactly as if you'd just posted it. Restore needs a destination
+channel (the webhook lives there), so it's disabled until one is picked.
 
 On a server launch the bar also offers **Invite** (`openInviteDialog`), so the
 launcher can pull friends straight into the same collaboration room instead of

@@ -393,6 +393,89 @@ pub async fn activity_edit(
     .into_response())
 }
 
+// ── Restore a posted message (POST /api/activity/restore) ────────────────────
+
+#[derive(Deserialize)]
+pub struct RestoreBody {
+    #[serde(default)]
+    guild_id: String,
+    #[serde(default)]
+    channel_id: String,
+    #[serde(default)]
+    message_id: String,
+}
+
+/// `POST /api/activity/restore` `{ guild_id, channel_id, message_id }` — pull a
+/// message DWEEB previously posted in the channel back into the editor.
+///
+/// The web app's Restore makes the user paste the *webhook URL* that authored the
+/// message (a secret only their browser holds). Inside the Activity that URL would
+/// be a credential we can't expose to the iframe — but we don't need it: the proxy
+/// already finds the DWEEB-owned webhook in the channel (the same one `post`/`edit`
+/// use), so the user supplies only a message id (or link) and the lookup is
+/// automatic. That's the whole simplification over the web flow.
+///
+/// Gated identically to `activity_post`/`activity_edit` (the user must hold Manage
+/// Webhooks in the guild). Discord only returns a message to the webhook that
+/// authored it, so a 404 here means the id isn't a message DWEEB's webhook posted
+/// in this channel — never a user/bot/other-webhook message, even in the same
+/// channel. The returned `webhook_id` matches what `post` returns, so the FE can
+/// wire an in-place update to the restored message straight away.
+pub async fn activity_restore(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Json(body): Json<RestoreBody>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let guild = body.guild_id.trim().to_string();
+    let channel_id = body.channel_id.trim().to_string();
+    let message_id = body.message_id.trim().to_string();
+    if !is_snowflake(&guild) || !is_snowflake(&channel_id) || !is_snowflake(&message_id) {
+        return Err(bad_request(
+            "guild_id, channel_id and message_id must be Discord ids",
+        ));
+    }
+
+    authorize_webhooks_session(&st, session.clone(), &guild).await?;
+    ensure_channel_in_guild(&st, &guild, &channel_id).await?;
+
+    let (webhook_id, token) = dweeb_webhook_in_channel(&st, &guild, &channel_id, None)
+        .await?
+        .ok_or_else(|| {
+            bad_request(
+                "DWEEB hasn't posted in this channel yet — only messages DWEEB posted here can be restored.",
+            )
+        })?;
+
+    let message = st
+        .discord
+        .webhook_message(&webhook_id, &token, &message_id)
+        .await?
+        .ok_or_else(|| AppError::Status {
+            status: StatusCode::NOT_FOUND,
+            message: "Discord couldn't find that message under DWEEB's webhook. Only a message \
+                      DWEEB posted in this channel can be restored."
+                .into(),
+            retry_after: None,
+        })?;
+
+    Ok(Json(json!({
+        // The raw Discord message — the browser decodes it into the editor.
+        "message": message,
+        "message_id": message_id,
+        "channel_id": channel_id,
+        "guild_id": guild,
+        "url": format!("https://discord.com/channels/{guild}/{channel_id}/{message_id}"),
+        // Same webhook id `post` returns, so a follow-up edit targets this hook.
+        "webhook_id": webhook_id,
+    }))
+    .into_response())
+}
+
 // ── Image proxy (GET /api/activity/image?url=…) ──────────────────────────────
 
 /// Hard bounds for the image proxy, so it can't be turned into a probe or an

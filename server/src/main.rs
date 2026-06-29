@@ -331,6 +331,12 @@ async fn run() {
             "/api/activity/edit",
             post(activity::activity_edit).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
         )
+        // Restore: pull a message DWEEB posted in the channel back into the editor.
+        // The body is just three ids, so it's bounded tight like the token call.
+        .route(
+            "/api/activity/restore",
+            post(activity::activity_restore).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
         .route("/api/activity/room/:instance", get(activity::activity_room))
         // Image proxy: fetches an external image/video so the sandboxed Activity
         // iframe (whose CSP blocks arbitrary `<img>`/`<video>` hosts) can render
