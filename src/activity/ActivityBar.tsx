@@ -10,6 +10,7 @@
 
 import { useMessageStore } from "@/core/state/messageStore";
 import { useActivityStore } from "@/core/activity/activityStore";
+import { colorFor, initial } from "@/core/activity/avatar";
 import type { CollabParticipant } from "@/core/activity/collab";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
@@ -34,7 +35,6 @@ export function ActivityBar() {
 
   const participants = useActivityStore((s) => s.participants);
   const publishing = useActivityStore((s) => s.publishing);
-  const collabConnected = useActivityStore((s) => s.collabConnected);
   const publish = useActivityStore((s) => s.publish);
   const update = useActivityStore((s) => s.update);
   const openLastPost = useActivityStore((s) => s.openLastPost);
@@ -77,15 +77,6 @@ export function ActivityBar() {
           selectedId={targetChannelId}
           onSelect={setTargetChannel}
           disabled={isDm && !targetGuildId}
-        />
-        <span
-          className={styles.dot}
-          data-on={collabConnected ? "" : undefined}
-          title={
-            collabConnected
-              ? "Live — your edits sync to everyone here"
-              : "Reconnecting to the shared session…"
-          }
         />
         <Presence participants={participants} />
       </div>
@@ -179,15 +170,4 @@ function Presence({ participants }: { participants: CollabParticipant[] }) {
       {extra > 0 ? <span className={styles.more}>+{extra}</span> : null}
     </div>
   );
-}
-
-function initial(name: string): string {
-  return (name.trim()[0] ?? "?").toUpperCase();
-}
-
-/** A stable, pleasant colour per user id (golden-angle hue around the wheel). */
-function colorFor(id: string): string {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
-  return `hsl(${h}deg 55% 45%)`;
 }

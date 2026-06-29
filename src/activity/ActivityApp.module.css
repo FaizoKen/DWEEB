@@ -116,6 +116,17 @@
   }
 }
 
+/* Bottom-right self badge, anchored to the true corner (the safe-area inset
+   keeps it clear of the mobile home indicator). Desktop only: on mobile this
+   corner holds the mini preview, so the badge stacks into the `.fab-stack`
+   column instead (see ActivityApp). */
+.selfFloat {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--app-z-toolbar);
+}
+
 /* Splash / loading / error -------------------------------------------- */
 
 .splash {
