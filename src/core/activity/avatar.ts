@@ -10,11 +10,26 @@
  */
 
 /** Discord CDN URL for a user's avatar, or null when they have none (the caller
- *  then renders a coloured initial). Animated hashes (`a_…`) are served as gifs. */
+ *  then falls back to {@link defaultAvatarUrl}). Animated hashes (`a_…`) are
+ *  served as gifs. */
 export function userAvatarUrl(id: string, avatar: string | null, size = 64): string | null {
   if (!avatar) return null;
   const ext = avatar.startsWith("a_") ? "gif" : "png";
   return `https://cdn.discordapp.com/avatars/${id}/${avatar}.${ext}?size=${size}`;
+}
+
+/** Discord's default avatar image for a user with no custom picture — a real CDN
+ *  image keyed off their id (the post-2023 username scheme: one of six designs).
+ *  So the slot shows an actual avatar rather than a placeholder even for accounts
+ *  that never set a picture. */
+export function defaultAvatarUrl(id: string): string {
+  let index = 0;
+  try {
+    index = Number((BigInt(id) >> 22n) % 6n);
+  } catch {
+    index = 0;
+  }
+  return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
 }
 
 /** First letter of a name, upper-cased — the avatar fallback glyph. */

@@ -34,6 +34,7 @@ export function ActivityBar() {
   const canRedo = useMessageStore((s) => s.future.length > 0);
 
   const participants = useActivityStore((s) => s.participants);
+  const selfId = useActivityStore((s) => s.user?.id);
   const publishing = useActivityStore((s) => s.publishing);
   const publish = useActivityStore((s) => s.publish);
   const update = useActivityStore((s) => s.update);
@@ -53,6 +54,10 @@ export function ActivityBar() {
   const guildsLoading = useActivityStore((s) => s.guildsLoading);
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
   const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
+
+  // The header roster lists only the *other* people editing — you're shown in
+  // the bottom-right self badge, so this drops you (and is empty when alone).
+  const others = participants.filter((p) => p.id !== selfId);
 
   const noDestination = !targetGuildId || !targetChannelId;
   // "Update" applies only while the chosen destination still matches where we
@@ -78,7 +83,7 @@ export function ActivityBar() {
           onSelect={setTargetChannel}
           disabled={isDm && !targetGuildId}
         />
-        <Presence participants={participants} />
+        <Presence participants={others} />
       </div>
 
       <div className={styles.right}>

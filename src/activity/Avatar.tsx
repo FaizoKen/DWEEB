@@ -1,13 +1,17 @@
 /**
- * A round user avatar: the real Discord picture when there is one, falling back
- * to a stable coloured initial when there isn't (or when the image fails to
- * load). CDN media is CSP-allowed inside the Activity sandbox, so the image
- * loads natively — see `core/activity/avatar`.
+ * A round user avatar. Tries the user's real Discord picture first, then
+ * Discord's default avatar image, and only drops to a stable coloured initial
+ * if even that fails to load — so the slot always shows a real avatar for any
+ * account with a picture, and a real *default* avatar for those without. CDN
+ * media is CSP-allowed inside the Activity sandbox, so the image loads natively
+ * (see `core/activity/avatar`).
  */
 
 import { useState } from "react";
-import { colorFor, initial, userAvatarUrl } from "@/core/activity/avatar";
+import { colorFor, defaultAvatarUrl, initial, userAvatarUrl } from "@/core/activity/avatar";
 import styles from "./Avatar.module.css";
+
+type Stage = "custom" | "default" | "initial";
 
 export function Avatar({
   id,
@@ -20,9 +24,16 @@ export function Avatar({
   avatar: string | null;
   size?: number;
 }) {
-  // Drop to the initial fallback if the CDN image 404s / fails to decode.
-  const [failed, setFailed] = useState(false);
-  const url = failed ? null : userAvatarUrl(id, avatar, size * 2);
+  // Walk custom → default → initial as each source fails. Start at "default"
+  // when there's no custom hash so we skip a request that's guaranteed to miss.
+  const [stage, setStage] = useState<Stage>(avatar ? "custom" : "default");
+
+  const url =
+    stage === "custom"
+      ? userAvatarUrl(id, avatar, 64)
+      : stage === "default"
+        ? defaultAvatarUrl(id)
+        : null;
 
   if (url) {
     return (
@@ -33,7 +44,7 @@ export function Avatar({
         width={size}
         height={size}
         draggable={false}
-        onError={() => setFailed(true)}
+        onError={() => setStage((s) => (s === "custom" ? "default" : "initial"))}
       />
     );
   }
