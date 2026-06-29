@@ -94,12 +94,13 @@ export function ActivityApp() {
           {!isMobileSheet || previewMounted ? (
             <Preview onClose={closePreview} swipeProps={swipeProps} />
           ) : null}
-          {/* Presence dock sits at the very bottom of the preview column, as a
-              footer under the rendered message. Desktop only: on mobile the
-              preview is a bottom sheet, so the dock floats in the corner instead
-              (below). */}
+          {/* Presence dock floated in the preview pane's bottom-right corner
+              (like the web app's AI FAB), so it sits at the bottom under the
+              message without a heavy full-width bar. Desktop only: on mobile the
+              preview is a bottom sheet, so the dock floats over the viewport
+              corner instead (below). */}
           {!isMobileSheet ? (
-            <div className={styles.presenceFooter}>
+            <div className={styles.presenceFab}>
               <PresenceDock />
             </div>
           ) : null}

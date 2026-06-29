@@ -60,6 +60,8 @@
 .preview {
   display: flex;
   flex-direction: column;
+  /* Anchor the floating presence dock to the bottom of this pane. */
+  position: relative;
 }
 
 /* On a narrow Activity window (mobile, or a small picture-in-picture) the editor
@@ -116,19 +118,16 @@
   }
 }
 
-/* Presence dock footer, pinned to the bottom of the preview column (the surface
-   above it is flex:1, so this sits under the rendered message). Desktop only —
-   on mobile the preview is a sheet, so the dock floats in the corner instead.
-   Its own base-bg + top border separate it from the Discord-styled preview, and
-   the elevated dock pill reads as raised against it. */
-.presenceFooter {
-  flex: none;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  padding: 10px 16px;
-  background: var(--app-bg);
-  border-top: 1px solid var(--app-border);
+/* Presence dock, floated in the bottom-right of the preview pane like the web
+   app's AI FAB — no bar, just the raised pill over the message. The preview's
+   own scroll reserves bottom padding, so the last message stays clear of it.
+   Desktop only; on mobile the preview is a sheet, so the dock floats over the
+   viewport corner instead. */
+.presenceFab {
+  position: absolute;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--app-z-toolbar);
 }
 
 /* Splash / loading / error -------------------------------------------- */
