@@ -14,18 +14,12 @@
   box-shadow: var(--app-shadow);
 }
 
-/* The people cluster: overlapping avatars + the live-sync dot, kept to the
-   left so the invite button can sit flush right. */
-.people {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
+/* The people cluster: overlapping avatars, kept to the left so the invite
+   button can sit flush right. */
 .stack {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
 }
 
 /* Each avatar carries a ring in the dock's own colour so overlapping circles
@@ -41,11 +35,15 @@
   margin-left: 0;
 }
 
-/* "You": an accent ring, lifted above the others so it's never overlapped. */
+/* "You": lifted above the others so it's never overlapped, and ringed in the
+   live-sync colour — green when the collaboration socket is connected, amber
+   (pulsing) while reconnecting. The ring *is* the status indicator (no dot). The
+   colour comes from the inline `--ring` custom property (set per connection
+   state in PresenceDock), so this one rule renders it. */
 .self {
   position: relative;
   z-index: 1;
-  box-shadow: 0 0 0 2px var(--app-accent);
+  box-shadow: 0 0 0 2px var(--ring, var(--app-warning));
 }
 
 .more {
@@ -53,22 +51,6 @@
   font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--app-text-subtle);
-}
-
-/* Live-sync indicator: green when the collaboration socket is connected, amber
-   (pulsing) while reconnecting. */
-.dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--app-warning);
-  flex: none;
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-.dot[data-on] {
-  background: var(--app-success);
-  animation: none;
 }
 
 /* Invite button — flush right, the dock's entry point for "add more editors".
@@ -102,18 +84,24 @@
   box-shadow: var(--app-focus-ring);
 }
 
-@keyframes pulse {
+/* Pulse the reconnecting ring by dimming its colour (animating opacity would
+   fade the avatar too). */
+@keyframes ringPulse {
   0%,
   100% {
-    opacity: 1;
+    box-shadow: 0 0 0 2px var(--ring, var(--app-warning));
   }
   50% {
-    opacity: 0.35;
+    box-shadow: 0 0 0 2px var(--app-warning-soft);
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dot {
-    animation: none;
+/* Pulse *only* while reconnecting, and only when motion is welcome. Scoping the
+   animation to `:not([data-online])` keeps the connected ring un-animated, so
+   its solid green always wins the cascade (a running animation would otherwise
+   override the box-shadow back to amber). */
+@media (prefers-reduced-motion: no-preference) {
+  .self:not([data-online]) {
+    animation: ringPulse 1.4s ease-in-out infinite;
   }
 }

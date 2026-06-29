@@ -14,6 +14,7 @@
  * the wrapper's job in `ActivityApp`.
  */
 
+import type { CSSProperties } from "react";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { PlusIcon } from "@/ui/Icon";
 import { Avatar } from "./Avatar";
@@ -48,19 +49,28 @@ export function PresenceDock() {
 
   return (
     <div className={styles.dock}>
-      <div className={styles.people} title={title}>
-        <div className={styles.stack}>
-          <span className={`${styles.slot} ${styles.self}`}>
-            <Avatar id={user.id} name={user.name} avatar={user.avatar} size={24} />
+      <div className={styles.stack} title={title}>
+        {/* Your status lives in the ring around your own avatar: green when the
+            collaboration socket is connected, amber (pulsing) while reconnecting
+            — no separate dot. The colour is driven by a per-state `--ring` custom
+            property so a single box-shadow rule renders it (no class-vs-attribute
+            cascade to lose). */}
+        <span
+          className={`${styles.slot} ${styles.self}`}
+          data-online={connected ? "" : undefined}
+          style={
+            { "--ring": connected ? "var(--app-success)" : "var(--app-warning)" } as CSSProperties
+          }
+          aria-label={status}
+        >
+          <Avatar id={user.id} name={user.name} avatar={user.avatar} size={24} />
+        </span>
+        {shownOthers.map((p) => (
+          <span key={p.id} className={styles.slot}>
+            <Avatar id={p.id} name={p.name} avatar={p.avatar} size={24} />
           </span>
-          {shownOthers.map((p) => (
-            <span key={p.id} className={styles.slot}>
-              <Avatar id={p.id} name={p.name} avatar={p.avatar} size={24} />
-            </span>
-          ))}
-          {extra > 0 ? <span className={styles.more}>+{extra}</span> : null}
-        </div>
-        <span className={styles.dot} data-on={connected ? "" : undefined} aria-label={status} />
+        ))}
+        {extra > 0 ? <span className={styles.more}>+{extra}</span> : null}
       </div>
       {canInvite ? (
         <button
