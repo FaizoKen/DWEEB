@@ -136,46 +136,9 @@
       .role-search { margin-top: 8px; }
       .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
       .locked { opacity: 0.5; pointer-events: none; }
-
-      /* Quick-start templates. */
-      .presets {
-        background: var(--panel-2);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 12px;
-        margin-bottom: 18px;
-      }
-      .presets-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-      .presets-head strong { font-size: 13px; }
-      .presets-sub { font-size: 12px; color: var(--muted); }
-      .presets-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-      .preset {
-        display: inline-flex; align-items: center; gap: 7px;
-        padding: 7px 11px;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        color: var(--text);
-        font: inherit; font-size: 13px;
-        cursor: pointer;
-      }
-      .preset:hover { border-color: var(--accent); }
-      .preset .ico { font-size: 15px; line-height: 1; }
-      /* The applied template reads as selected. */
-      .preset.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-      .preset.active .chk { margin-left: 1px; font-weight: 700; }
     </style>
   </head>
   <body>
-    <!-- Quick start — prefill a common giveaway ----------------------------- -->
-    <div class="presets" id="presets" hidden>
-      <div class="presets-head">
-        <strong>⚡ Quick start</strong>
-        <span class="presets-sub">Pick a template to prefill the prize and deadline, then edit anything. Optional.</span>
-      </div>
-      <div class="presets-row" id="presetRow"></div>
-    </div>
-
     <!-- Step 1 — server status ----------------------------------------------->
     <h2><span class="step-num">1</span> Server</h2>
     <div id="serverIntro"></div>
@@ -507,33 +470,6 @@
       document.addEventListener("input", () => { editedSincePreset = true; }, true);
       document.addEventListener("change", () => { editedSincePreset = true; }, true);
 
-      function renderPresets() {
-        const row = $("presetRow");
-        row.innerHTML = "";
-        PRESETS.forEach((p) => {
-          const b = document.createElement("button");
-          b.type = "button";
-          b.className = "preset" + (p.id === activePreset ? " active" : "");
-          b.title = p.hint || "";
-          b.setAttribute("aria-pressed", p.id === activePreset ? "true" : "false");
-          const ico = document.createElement("span");
-          ico.className = "ico";
-          ico.textContent = p.icon;
-          const nm = document.createElement("span");
-          nm.textContent = p.name;
-          b.append(ico, nm);
-          if (p.id === activePreset) {
-            const chk = document.createElement("span");
-            chk.className = "chk";
-            chk.textContent = "✓";
-            b.appendChild(chk);
-          }
-          b.addEventListener("click", () => applyPreset(p));
-          row.appendChild(b);
-        });
-        $("presets").hidden = false;
-      }
-
       // Fill the prize + deadline from a template and mark it selected. Switching
       // between untouched templates is free; once the form's been edited we
       // confirm before replacing that work.
@@ -552,7 +488,6 @@
         activePreset = p.id;
         editedSincePreset = false;
         renderDeadlinePreview();
-        renderPresets();
         $("error").textContent = "";
       }
 
@@ -590,7 +525,6 @@
         }
 
         if (!instanceId) {
-          renderPresets(); // starter templates on a fresh attach only
           // The host (plugin library / a template) may name a preset to open
           // pre-filled. Apply it once; an unknown id leaves the blank form.
           if (typeof msg.preset === "string") {

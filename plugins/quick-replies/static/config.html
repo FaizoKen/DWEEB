@@ -203,46 +203,9 @@
         color: var(--muted); font-size: 12px;
       }
       .emoji-clear:hover { color: var(--danger); border-color: var(--danger); }
-
-      /* Quick-start templates. */
-      .presets {
-        background: var(--panel-2);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 12px;
-        margin-bottom: 16px;
-      }
-      .presets-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-      .presets-head strong { font-size: 13px; }
-      .presets-sub { font-size: 12px; color: var(--muted); }
-      .presets-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-      .preset {
-        display: inline-flex; align-items: center; gap: 7px;
-        padding: 7px 11px;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        color: var(--text);
-        font: inherit; font-size: 13px;
-        cursor: pointer;
-      }
-      .preset:hover { border-color: var(--accent); }
-      .preset .ico { font-size: 15px; line-height: 1; }
-      /* The applied template reads as selected. */
-      .preset.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-      .preset.active .chk { margin-left: 1px; font-weight: 700; }
     </style>
   </head>
   <body>
-    <!-- Quick start — prefill a ready-made reply / menu --------------------- -->
-    <div class="presets" id="presets" hidden>
-      <div class="presets-head">
-        <strong>⚡ Quick start</strong>
-        <span class="presets-sub" id="presetsSub">Pick a template to prefill, then edit anything. Optional.</span>
-      </div>
-      <div class="presets-row" id="presetRow"></div>
-    </div>
-
     <!-- Intro (varies by target) ----------------------------------------------->
     <h2><span class="step-num">1</span> <span id="introTitle">Your reply</span>
       <span class="count" id="cardCount"></span></h2>
@@ -615,37 +578,6 @@
         },
       ];
 
-      function renderPresets() {
-        const list = isSelect() ? PRESETS_SELECT : PRESETS_BUTTON;
-        $("presetsSub").textContent = isSelect()
-          ? "Pick a ready-made menu, then edit any topic. Optional."
-          : "Pick a ready-made reply, then edit it. Optional.";
-        const row = $("presetRow");
-        row.innerHTML = "";
-        list.forEach((p) => {
-          const b = document.createElement("button");
-          b.type = "button";
-          b.className = "preset" + (p.id === activePreset ? " active" : "");
-          b.title = p.hint || "";
-          b.setAttribute("aria-pressed", p.id === activePreset ? "true" : "false");
-          const ico = document.createElement("span");
-          ico.className = "ico";
-          ico.textContent = p.icon;
-          const nm = document.createElement("span");
-          nm.textContent = p.name;
-          b.append(ico, nm);
-          if (p.id === activePreset) {
-            const chk = document.createElement("span");
-            chk.className = "chk";
-            chk.textContent = "✓";
-            b.appendChild(chk);
-          }
-          b.addEventListener("click", () => applyPreset(p));
-          row.appendChild(b);
-        });
-        $("presets").hidden = false;
-      }
-
       // Replace the current reply/menu with a template and mark it selected.
       // Switching between untouched templates is free; once the user has typed
       // something we confirm before replacing that work.
@@ -658,7 +590,6 @@
         userEdited = false;
         $("error").textContent = "";
         renderCards();
-        renderPresets();
       }
 
       function updateCount() {
@@ -1007,7 +938,6 @@
 
         applyTargetChrome();
         if (!instanceId) {
-          renderPresets(); // starter templates on a fresh attach only
           // The host (plugin library / a template) may name a preset to open
           // pre-filled. Apply it once; an unknown id leaves the sample content.
           if (typeof msg.preset === "string") {

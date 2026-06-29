@@ -31,11 +31,14 @@ interface Props {
   onClose: () => void;
 }
 
-/** App ships a single dark theme; fall back to the OS hint if that ever changes. */
+/**
+ * DWEEB ships a single dark UI, so the plugin frame is always dark too. We
+ * deliberately ignore the OS `prefers-color-scheme` hint here — following it
+ * made the config form render light (white) on a light-mode OS while the rest
+ * of the app stayed dark. If the app ever gains a real light theme, resolve it
+ * from that, not from the OS.
+ */
 function resolveTheme(): PluginTheme {
-  if (typeof window !== "undefined" && window.matchMedia) {
-    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-  }
   return "dark";
 }
 
