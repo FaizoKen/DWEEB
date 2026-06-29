@@ -108,12 +108,13 @@ export function ActivityApp() {
       </div>
 
       {/* Mobile: the preview is a bottom sheet, so the presence dock can't live
-          under it — float it in the bottom-right corner, stacked above the mini
-          preview. Hidden while the sheet is open (it would cover it). */}
+          under it — float it in the bottom-right corner, directly *under* the
+          live mini preview (the mini preview stands in for the message here).
+          Hidden while the sheet is open (it would cover it). */}
       {isMobileSheet && !previewOpen ? (
         <div className="fab-stack">
-          <PresenceDock />
           <MiniPreview onOpen={() => setPreviewOpen(true)} />
+          <PresenceDock />
         </div>
       ) : null}
 
