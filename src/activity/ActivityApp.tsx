@@ -31,7 +31,7 @@ import {
   type ActivityStep,
 } from "@/core/activity/activityStore";
 import { ActivityBar } from "./ActivityBar";
-import { SelfPresence } from "./SelfPresence";
+import { PresenceDock } from "./PresenceDock";
 import styles from "./ActivityApp.module.css";
 
 export function ActivityApp() {
@@ -97,20 +97,20 @@ export function ActivityApp() {
         </section>
       </div>
 
-      {/* Bottom-right "this is you" badge (your avatar + live sync status). On
-          desktop it floats free in the corner; on mobile that corner holds the
-          mini preview, so it stacks into the same floating column just above it.
-          Hidden while the mobile preview sheet is open (it would cover it). */}
+      {/* Bottom-right presence dock (everyone in the room + live sync status).
+          On desktop it floats free in the corner; on mobile that corner holds
+          the mini preview, so it stacks into the same floating column just above
+          it. Hidden while the mobile preview sheet is open (it would cover it). */}
       {isMobileSheet ? (
         !previewOpen ? (
           <div className="fab-stack">
-            <SelfPresence />
+            <PresenceDock />
             <MiniPreview onOpen={() => setPreviewOpen(true)} />
           </div>
         ) : null
       ) : (
-        <div className={styles.selfFloat}>
-          <SelfPresence />
+        <div className={styles.presenceFloat}>
+          <PresenceDock />
         </div>
       )}
 

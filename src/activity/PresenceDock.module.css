@@ -1,0 +1,76 @@
+.dock {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow);
+}
+
+/* Overlapping circle stack of everyone in the room. */
+.stack {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Each avatar carries a ring in the dock's own colour so overlapping circles
+   read as separate. They slide left over their predecessor; the first sits
+   flush. */
+.slot {
+  display: inline-flex;
+  border-radius: 50%;
+  border: 2px solid var(--app-bg-elevated);
+  margin-left: -8px;
+}
+
+.slot:first-child {
+  margin-left: 0;
+}
+
+/* "You": an accent ring, and lifted above the others so it's never overlapped. */
+.self {
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 0 2px var(--app-accent);
+}
+
+.more {
+  margin-left: 6px;
+  font-size: var(--app-text-xs);
+  font-weight: 600;
+  color: var(--app-text-subtle);
+}
+
+/* Live-sync indicator: green when the collaboration socket is connected, amber
+   (pulsing) while reconnecting. */
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--app-warning);
+  flex: none;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.dot[data-on] {
+  background: var(--app-success);
+  animation: none;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+}

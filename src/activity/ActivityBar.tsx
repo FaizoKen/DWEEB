@@ -10,8 +10,6 @@
 
 import { useMessageStore } from "@/core/state/messageStore";
 import { useActivityStore } from "@/core/activity/activityStore";
-import { colorFor, initial } from "@/core/activity/avatar";
-import type { CollabParticipant } from "@/core/activity/collab";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
 import {
@@ -33,8 +31,6 @@ export function ActivityBar() {
   const canUndo = useMessageStore((s) => s.past.length > 0);
   const canRedo = useMessageStore((s) => s.future.length > 0);
 
-  const participants = useActivityStore((s) => s.participants);
-  const selfId = useActivityStore((s) => s.user?.id);
   const publishing = useActivityStore((s) => s.publishing);
   const publish = useActivityStore((s) => s.publish);
   const update = useActivityStore((s) => s.update);
@@ -54,10 +50,6 @@ export function ActivityBar() {
   const guildsLoading = useActivityStore((s) => s.guildsLoading);
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
   const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
-
-  // The header roster lists only the *other* people editing — you're shown in
-  // the bottom-right self badge, so this drops you (and is empty when alone).
-  const others = participants.filter((p) => p.id !== selfId);
 
   const noDestination = !targetGuildId || !targetChannelId;
   // "Update" applies only while the chosen destination still matches where we
@@ -83,7 +75,6 @@ export function ActivityBar() {
           onSelect={setTargetChannel}
           disabled={isDm && !targetGuildId}
         />
-        <Presence participants={others} />
       </div>
 
       <div className={styles.right}>
@@ -152,27 +143,6 @@ export function ActivityBar() {
           </Button>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Overlapping initial-avatars of everyone currently in the room. Initials over
- *  CDN images so nothing depends on an external fetch inside the sandbox. */
-function Presence({ participants }: { participants: CollabParticipant[] }) {
-  if (participants.length === 0) return null;
-  const shown = participants.slice(0, 5);
-  const extra = participants.length - shown.length;
-  return (
-    <div
-      className={styles.presence}
-      title={`${participants.length} ${participants.length === 1 ? "person" : "people"} editing`}
-    >
-      {shown.map((p) => (
-        <span key={p.id} className={styles.avatar} style={{ background: colorFor(p.id) }}>
-          {initial(p.name)}
-        </span>
-      ))}
-      {extra > 0 ? <span className={styles.more}>+{extra}</span> : null}
     </div>
   );
 }
