@@ -1,25 +1,60 @@
-/* Fixed-width card matching the mobile mini preview (165px) so the two stack
-   into one aligned unit. Radius/shadow echo the mini preview card too. */
+/* Desktop: the dock hugs its content, capped at the mini preview's width. On
+   mobile it's pinned to that exact width so it stacks flush under the mini
+   preview (see the media query below). Radius/shadow echo the mini preview card.
+   The button resets are harmless when the dock renders as a plain <div> (DM
+   launch) and let it render as a <button> (the whole bar is the invite
+   control). */
 .dock {
   box-sizing: border-box;
-  width: 165px;
+  width: auto;
+  max-width: 165px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 5px 8px;
   border-radius: 14px;
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
   box-shadow: var(--app-shadow);
+  font: inherit;
+  color: inherit;
+  text-align: left;
 }
 
-/* The people cluster: overlapping avatars, kept to the left so the invite
-   button can sit flush right. */
+/* Mobile: match the mini preview's exact width so the two line up into one
+   stacked unit (breakpoint matches MOBILE_SHEET_QUERY / the mini preview). */
+@media (max-width: 900px) {
+  .dock {
+    width: 165px;
+  }
+}
+
+/* The whole bar is clickable to invite (server launch). The "+" affordance
+   lights up with the bar so the hover target reads as one unit. */
+.invite {
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.invite:hover {
+  border-color: var(--app-border-strong);
+}
+
+.invite:focus-visible {
+  outline: none;
+  box-shadow: var(--app-shadow), var(--app-focus-ring);
+}
+
+/* The people cluster: overlapping avatars, pushed flush right (so they stay
+   right even on a DM launch where the invite button is hidden); the invite
+   button sits on the left. */
 .stack {
   display: inline-flex;
   align-items: center;
   min-width: 0;
+  margin-left: auto;
 }
 
 /* Each avatar carries a ring in the dock's own colour so overlapping circles
@@ -53,8 +88,9 @@
   color: var(--app-text-subtle);
 }
 
-/* Invite button — flush right, the dock's entry point for "add more editors".
-   Triggers the same invite dialog the header's share button used to. */
+/* Invite affordance — the "+" on the left. Purely visual now (the whole bar is
+   the button); it lights up to accent when the bar is hovered/focused so the
+   click target reads as one unit. */
 .add {
   flex: none;
   display: inline-flex;
@@ -66,22 +102,17 @@
   border: 1px solid var(--app-border);
   background: var(--app-bg);
   color: var(--app-text-muted);
-  cursor: pointer;
   transition:
     background 120ms ease,
     border-color 120ms ease,
     color 120ms ease;
 }
 
-.add:hover {
+.invite:hover .add,
+.invite:focus-visible .add {
   background: var(--app-accent);
   border-color: var(--app-accent);
   color: #fff;
-}
-
-.add:focus-visible {
-  outline: none;
-  box-shadow: var(--app-focus-ring);
 }
 
 /* Pulse the reconnecting ring by dimming its colour (animating opacity would

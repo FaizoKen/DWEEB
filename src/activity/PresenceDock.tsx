@@ -47,42 +47,50 @@ export function PresenceDock() {
     : "Reconnecting to the shared session…";
   const title = `${count === 1 ? "Just you" : `${count} people`} editing · ${status}`;
 
-  return (
-    <div className={styles.dock}>
-      <div className={styles.stack} title={title}>
-        {/* Your status lives in the ring around your own avatar: green when the
-            collaboration socket is connected, amber (pulsing) while reconnecting
-            — no separate dot. The colour is driven by a per-state `--ring` custom
-            property so a single box-shadow rule renders it (no class-vs-attribute
-            cascade to lose). */}
-        <span
-          className={`${styles.slot} ${styles.self}`}
-          data-online={connected ? "" : undefined}
-          style={
-            { "--ring": connected ? "var(--app-success)" : "var(--app-warning)" } as CSSProperties
-          }
-          aria-label={status}
-        >
-          <Avatar id={user.id} name={user.name} avatar={user.avatar} size={24} />
+  // The avatar cluster, shared by both the clickable (invitable) and plain dock.
+  // Your status lives in the ring around your own avatar: green when connected,
+  // amber (pulsing) while reconnecting — no separate dot. The colour is driven by
+  // an inline `--ring` custom property so a single box-shadow rule renders it.
+  const people = (
+    <div className={styles.stack} title={title}>
+      <span
+        className={`${styles.slot} ${styles.self}`}
+        data-online={connected ? "" : undefined}
+        style={
+          { "--ring": connected ? "var(--app-success)" : "var(--app-warning)" } as CSSProperties
+        }
+        aria-label={status}
+      >
+        <Avatar id={user.id} name={user.name} avatar={user.avatar} size={24} />
+      </span>
+      {shownOthers.map((p) => (
+        <span key={p.id} className={styles.slot}>
+          <Avatar id={p.id} name={p.name} avatar={p.avatar} size={24} />
         </span>
-        {shownOthers.map((p) => (
-          <span key={p.id} className={styles.slot}>
-            <Avatar id={p.id} name={p.name} avatar={p.avatar} size={24} />
-          </span>
-        ))}
-        {extra > 0 ? <span className={styles.more}>+{extra}</span> : null}
-      </div>
-      {canInvite ? (
-        <button
-          type="button"
-          className={styles.add}
-          onClick={() => void invite()}
-          title="Invite people to edit together"
-          aria-label="Invite people to edit together"
-        >
-          <PlusIcon size={16} />
-        </button>
-      ) : null}
+      ))}
+      {extra > 0 ? <span className={styles.more}>+{extra}</span> : null}
     </div>
+  );
+
+  // In a server launch the whole bar is the invite control (the "+" on the left
+  // is just its affordance) — clicking anywhere on it opens Discord's invite
+  // dialog. A DM / group-DM launch can't invite, so the bar is a plain,
+  // non-interactive presence display with no "+".
+  if (!canInvite) {
+    return <div className={styles.dock}>{people}</div>;
+  }
+  return (
+    <button
+      type="button"
+      className={`${styles.dock} ${styles.invite}`}
+      onClick={() => void invite()}
+      title="Invite people to edit together"
+      aria-label="Invite people to edit together"
+    >
+      <span className={styles.add} aria-hidden="true">
+        <PlusIcon size={16} />
+      </span>
+      {people}
+    </button>
   );
 }
