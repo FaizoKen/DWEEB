@@ -1,7 +1,8 @@
 /**
  * The Activity's top bar — the one piece of chrome the embedded surface adds on
- * top of the reused editor: where the message is going (the channel), who else
- * is editing (presence), undo/redo, and the primary **Post** action.
+ * top of the reused editor: where the message is going (the channel), undo/redo,
+ * and the primary **Post** action. Presence and inviting live in the bottom
+ * `PresenceDock` instead.
  *
  * The web app's action bar (account menu, share links, restore, scheduling) is
  * deliberately absent: inside Discord the context is fixed and publishing is one
@@ -12,15 +13,7 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
-import {
-  ExternalLinkIcon,
-  GlobeIcon,
-  RedoIcon,
-  RefreshIcon,
-  SendIcon,
-  ShareIcon,
-  UndoIcon,
-} from "@/ui/Icon";
+import { ExternalLinkIcon, GlobeIcon, RedoIcon, RefreshIcon, SendIcon, UndoIcon } from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
 import { GuildPicker } from "./GuildPicker";
 import styles from "./ActivityBar.module.css";
@@ -35,7 +28,6 @@ export function ActivityBar() {
   const publish = useActivityStore((s) => s.publish);
   const update = useActivityStore((s) => s.update);
   const openLastPost = useActivityStore((s) => s.openLastPost);
-  const invite = useActivityStore((s) => s.invite);
   const openOnWeb = useActivityStore((s) => s.openOnWeb);
   const lastPost = useActivityStore((s) => s.lastPost);
   const targetChannelId = useActivityStore((s) => s.targetChannelId);
@@ -44,8 +36,6 @@ export function ActivityBar() {
   // A DM / group-DM launch has no guild of its own, so the user first picks a
   // destination *server* (DMs can't receive a webhook post), then a channel.
   const isDm = useActivityStore((s) => s.context != null && s.context.guildId == null);
-  // Discord's invite dialog only works in a server context (it throws in DMs).
-  const canInvite = useActivityStore((s) => s.context?.guildId != null);
   const guilds = useActivityStore((s) => s.guilds);
   const guildsLoading = useActivityStore((s) => s.guildsLoading);
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
@@ -78,11 +68,6 @@ export function ActivityBar() {
       </div>
 
       <div className={styles.right}>
-        {canInvite ? (
-          <IconButton label="Invite people to edit together" onClick={() => void invite()}>
-            <ShareIcon />
-          </IconButton>
-        ) : null}
         {/* The embedded surface is a focused "edit together, then post" view;
             this hands the current draft off to the full web app (scheduling,
             saved messages, account, restore) for anything it omits. */}

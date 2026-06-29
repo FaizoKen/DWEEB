@@ -1,23 +1,35 @@
+/* Fixed-width card matching the mobile mini preview (165px) so the two stack
+   into one aligned unit. Radius/shadow echo the mini preview card too. */
 .dock {
-  display: inline-flex;
+  box-sizing: border-box;
+  width: 165px;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 4px 10px 4px 4px;
-  border-radius: 999px;
+  padding: 5px 8px;
+  border-radius: 14px;
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
   box-shadow: var(--app-shadow);
 }
 
-/* Overlapping circle stack of everyone in the room. */
+/* The people cluster: overlapping avatars + the live-sync dot, kept to the
+   left so the invite button can sit flush right. */
+.people {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .stack {
   display: inline-flex;
   align-items: center;
 }
 
 /* Each avatar carries a ring in the dock's own colour so overlapping circles
-   read as separate. They slide left over their predecessor; the first sits
-   flush. */
+   read as separate; they slide left over their predecessor. */
 .slot {
   display: inline-flex;
   border-radius: 50%;
@@ -29,7 +41,7 @@
   margin-left: 0;
 }
 
-/* "You": an accent ring, and lifted above the others so it's never overlapped. */
+/* "You": an accent ring, lifted above the others so it's never overlapped. */
 .self {
   position: relative;
   z-index: 1;
@@ -37,7 +49,7 @@
 }
 
 .more {
-  margin-left: 6px;
+  margin-left: 5px;
   font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--app-text-subtle);
@@ -57,6 +69,37 @@
 .dot[data-on] {
   background: var(--app-success);
   animation: none;
+}
+
+/* Invite button — flush right, the dock's entry point for "add more editors".
+   Triggers the same invite dialog the header's share button used to. */
+.add {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--app-border);
+  background: var(--app-bg);
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.add:hover {
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+  color: #fff;
+}
+
+.add:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
 }
 
 @keyframes pulse {

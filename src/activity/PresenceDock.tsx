@@ -1,30 +1,37 @@
 /**
- * Bottom-right presence dock — the single home for "who's here": every person
- * currently in the room as a real avatar, plus a live connection-status dot
- * (green = your edits are syncing, amber pulsing = reconnecting).
+ * Bottom-right presence dock — the single home for "who's here": everyone in the
+ * room as a real avatar, a live connection-status dot (green = your edits are
+ * syncing, amber pulsing = reconnecting), and a "+" that invites more people to
+ * edit together (the action that used to be the header's share button).
  *
- * You're always shown first (sourced from the signed-in user, so your own
- * avatar appears immediately — before the collaboration roster has even loaded)
- * and marked with an accent ring; everyone else comes from the roster. This
- * replaces the old split where you sat in a bottom badge and the others sat up
- * in the top bar — now all of presence lives in one place.
+ * You're always shown first (sourced from the signed-in user, so your avatar
+ * appears immediately — before the collaboration roster loads) and ringed in the
+ * accent colour; everyone else comes from the roster.
  *
- * It renders as a plain inline pill; the fixed bottom-right placement is the
- * wrapper's job in `ActivityApp`, so on mobile it can instead stack into the
- * floating fab column above the mini preview.
+ * The dock is a fixed-width card sized to match the mobile mini preview above it,
+ * so the two line up into one stacked unit. It renders as a plain block; the
+ * placement (preview-pane corner on desktop, under the mini preview on mobile) is
+ * the wrapper's job in `ActivityApp`.
  */
 
 import { useActivityStore } from "@/core/activity/activityStore";
+import { PlusIcon } from "@/ui/Icon";
 import { Avatar } from "./Avatar";
 import styles from "./PresenceDock.module.css";
 
-/** Avatars shown before collapsing the rest into a "+N" count. */
-const MAX_SHOWN = 5;
+/** Avatars shown before collapsing the rest into a "+N" count. Kept low so the
+ *  row, the dot, and the invite button all fit the fixed dock width. */
+const MAX_SHOWN = 4;
 
 export function PresenceDock() {
   const user = useActivityStore((s) => s.user);
   const participants = useActivityStore((s) => s.participants);
   const connected = useActivityStore((s) => s.collabConnected);
+  const invite = useActivityStore((s) => s.invite);
+  // Discord's invite dialog only works in a server context (it throws in DMs),
+  // so the "+" is hidden on a DM / group-DM launch — same gate the old header
+  // share button used.
+  const canInvite = useActivityStore((s) => s.context?.guildId != null);
   if (!user) return null;
 
   // You first (always present), then everyone else from the room roster, deduped
@@ -40,19 +47,32 @@ export function PresenceDock() {
   const title = `${count === 1 ? "Just you" : `${count} people`} editing · ${status}`;
 
   return (
-    <div className={styles.dock} title={title}>
-      <div className={styles.stack}>
-        <span className={`${styles.slot} ${styles.self}`}>
-          <Avatar id={user.id} name={user.name} avatar={user.avatar} size={26} />
-        </span>
-        {shownOthers.map((p) => (
-          <span key={p.id} className={styles.slot}>
-            <Avatar id={p.id} name={p.name} avatar={p.avatar} size={26} />
+    <div className={styles.dock}>
+      <div className={styles.people} title={title}>
+        <div className={styles.stack}>
+          <span className={`${styles.slot} ${styles.self}`}>
+            <Avatar id={user.id} name={user.name} avatar={user.avatar} size={24} />
           </span>
-        ))}
-        {extra > 0 ? <span className={styles.more}>+{extra}</span> : null}
+          {shownOthers.map((p) => (
+            <span key={p.id} className={styles.slot}>
+              <Avatar id={p.id} name={p.name} avatar={p.avatar} size={24} />
+            </span>
+          ))}
+          {extra > 0 ? <span className={styles.more}>+{extra}</span> : null}
+        </div>
+        <span className={styles.dot} data-on={connected ? "" : undefined} aria-label={status} />
       </div>
-      <span className={styles.dot} data-on={connected ? "" : undefined} aria-label={status} />
+      {canInvite ? (
+        <button
+          type="button"
+          className={styles.add}
+          onClick={() => void invite()}
+          title="Invite people to edit together"
+          aria-label="Invite people to edit together"
+        >
+          <PlusIcon size={16} />
+        </button>
+      ) : null}
     </div>
   );
 }
