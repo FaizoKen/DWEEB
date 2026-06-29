@@ -94,25 +94,27 @@ export function ActivityApp() {
           {!isMobileSheet || previewMounted ? (
             <Preview onClose={closePreview} swipeProps={swipeProps} />
           ) : null}
+          {/* Presence dock sits at the very bottom of the preview column, as a
+              footer under the rendered message. Desktop only: on mobile the
+              preview is a bottom sheet, so the dock floats in the corner instead
+              (below). */}
+          {!isMobileSheet ? (
+            <div className={styles.presenceFooter}>
+              <PresenceDock />
+            </div>
+          ) : null}
         </section>
       </div>
 
-      {/* Bottom-right presence dock (everyone in the room + live sync status).
-          On desktop it floats free in the corner; on mobile that corner holds
-          the mini preview, so it stacks into the same floating column just above
-          it. Hidden while the mobile preview sheet is open (it would cover it). */}
-      {isMobileSheet ? (
-        !previewOpen ? (
-          <div className="fab-stack">
-            <PresenceDock />
-            <MiniPreview onOpen={() => setPreviewOpen(true)} />
-          </div>
-        ) : null
-      ) : (
-        <div className={styles.presenceFloat}>
+      {/* Mobile: the preview is a bottom sheet, so the presence dock can't live
+          under it — float it in the bottom-right corner, stacked above the mini
+          preview. Hidden while the sheet is open (it would cover it). */}
+      {isMobileSheet && !previewOpen ? (
+        <div className="fab-stack">
           <PresenceDock />
+          <MiniPreview onOpen={() => setPreviewOpen(true)} />
         </div>
-      )}
+      ) : null}
 
       <ToastViewport />
     </div>

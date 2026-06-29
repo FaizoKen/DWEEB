@@ -116,15 +116,19 @@
   }
 }
 
-/* Bottom-right presence dock, anchored to the true corner (the safe-area inset
-   keeps it clear of the mobile home indicator). Desktop only: on mobile this
-   corner holds the mini preview, so the dock stacks into the `.fab-stack`
-   column instead (see ActivityApp). */
-.presenceFloat {
-  position: fixed;
-  right: 16px;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  z-index: var(--app-z-toolbar);
+/* Presence dock footer, pinned to the bottom of the preview column (the surface
+   above it is flex:1, so this sits under the rendered message). Desktop only —
+   on mobile the preview is a sheet, so the dock floats in the corner instead.
+   Its own base-bg + top border separate it from the Discord-styled preview, and
+   the elevated dock pill reads as raised against it. */
+.presenceFooter {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 10px 16px;
+  background: var(--app-bg);
+  border-top: 1px solid var(--app-border);
 }
 
 /* Splash / loading / error -------------------------------------------- */
