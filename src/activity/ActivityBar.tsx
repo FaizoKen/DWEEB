@@ -82,7 +82,7 @@ export function ActivityBar() {
           />
         ) : targetGuildMeta ? (
           <span className={styles.serverBadge} title={`Posting to ${targetGuildMeta.name}`}>
-            <ServerGlyph guild={targetGuildMeta} size={20} />
+            <ServerGlyph guild={targetGuildMeta} size={28} />
           </span>
         ) : null}
 

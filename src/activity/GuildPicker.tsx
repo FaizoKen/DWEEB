@@ -125,7 +125,7 @@ export function GuildPicker({
           selected ? `Posting to ${selected.name} — click to change` : "Choose a server to post to"
         }
       >
-        {selected ? <ServerGlyph guild={selected} size={18} /> : <CompassIcon size={16} />}
+        {selected ? <ServerGlyph guild={selected} size={28} /> : <CompassIcon size={18} />}
         {collapsed ? null : <span className={channelStyles.triggerName}>{label}</span>}
         <ChevronDownIcon size={14} className={channelStyles.chevron} />
       </button>
