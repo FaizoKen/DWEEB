@@ -158,9 +158,9 @@ function Splash({
       <div className={styles.aura} aria-hidden="true" />
 
       <div className={styles.splashInner}>
-        {/* The mark: a rotating ring with a glowing core while connecting, or a
-            danger badge on error. Purely decorative — the text below carries the
-            actual status for screen readers. */}
+        {/* The mark: the app icon haloed by a rotating ring while connecting, or
+            a danger badge on error. Purely decorative — the text below carries
+            the actual status for screen readers. */}
         {isError ? (
           <div className={styles.markError} aria-hidden="true">
             !
@@ -168,7 +168,12 @@ function Splash({
         ) : (
           <div className={styles.mark} aria-hidden="true">
             <span className={styles.markRing} />
-            <span className={styles.markCore} />
+            {/* The real app icon at the centre, haloed by the spinning ring. */}
+            <img
+              className={styles.markLogo}
+              src={`${import.meta.env.BASE_URL}favicon.svg`}
+              alt=""
+            />
           </div>
         )}
 
