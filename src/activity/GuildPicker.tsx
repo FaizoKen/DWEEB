@@ -199,15 +199,42 @@ export function GuildPicker({
  *  Exported for the bar's static (non-picker) server badge on a guild launch. */
 export function ServerGlyph({ guild, size }: { guild: PickerGuild; size: number }) {
   const url = guildIconUrl(guild.id, guild.icon, 64);
-  if (url) {
+  const [loaded, setLoaded] = useState(false);
+  const [errored, setErrored] = useState(false);
+
+  // The same glyph slot can be re-pointed at a different server (the bar badge and
+  // compact picker trigger reuse one instance), so reset the load state when the
+  // icon URL changes — otherwise the new icon would inherit the old one's "loaded"
+  // and skip its skeleton.
+  const lastUrl = useRef(url);
+  if (lastUrl.current !== url) {
+    lastUrl.current = url;
+    setLoaded(false);
+    setErrored(false);
+  }
+
+  // Real icon, when the guild has one and it hasn't failed to load. A breathing
+  // skeleton fills the slot until the image paints, so the icon fades in over it
+  // rather than popping in against an empty gap.
+  if (url && !errored) {
     return (
-      <img
-        className={styles.icon}
-        style={{ width: size, height: size }}
-        src={url}
-        alt=""
-        aria-hidden="true"
-      />
+      <span className={styles.iconSlot} style={{ width: size, height: size }} aria-hidden="true">
+        {!loaded && <span className={styles.iconSkeleton} />}
+        <img
+          className={styles.icon}
+          style={{ width: size, height: size, opacity: loaded ? 1 : 0 }}
+          src={url}
+          alt=""
+          aria-hidden="true"
+          // A cached icon can already be complete before React wires onLoad, so
+          // confirm on mount too — otherwise its skeleton would never clear.
+          ref={(el) => {
+            if (el?.complete && el.naturalWidth > 0) setLoaded(true);
+          }}
+          onLoad={() => setLoaded(true)}
+          onError={() => setErrored(true)}
+        />
+      </span>
     );
   }
   return (

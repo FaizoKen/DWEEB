@@ -2,10 +2,52 @@
    itself is shared with ChannelPicker.module.css — only the leading icon /
    initial bubble is bespoke here. */
 
+/* Slot holding the real icon plus its loading skeleton. Relative so the skeleton
+   can sit behind the image, and clipped to the glyph's rounded square so both
+   share the same corners. */
+.iconSlot {
+  position: relative;
+  flex: none;
+  display: inline-block;
+  border-radius: var(--app-radius-sm);
+  overflow: hidden;
+}
+
 .icon {
   flex: none;
+  display: block;
   border-radius: var(--app-radius-sm);
   object-fit: cover;
+  /* Fade in over the skeleton once the image paints (opacity is toggled inline). */
+  transition: opacity 160ms ease;
+}
+
+/* Breathing placeholder shown until the server icon finishes loading — a soft
+   opacity pulse rather than a busy spinner, matching the account-menu skeleton. */
+.iconSkeleton {
+  position: absolute;
+  inset: 0;
+  background: var(--app-bg-active);
+  animation: serverGlyphBreathe 1.6s ease-in-out infinite;
+}
+
+@keyframes serverGlyphBreathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon {
+    transition: none;
+  }
+  .iconSkeleton {
+    animation: none;
+  }
 }
 
 .initial {
