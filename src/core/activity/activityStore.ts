@@ -121,6 +121,16 @@ interface ActivityState {
    *  guild (fetched once); for a DM launch it's the picked destination, taken
    *  from the postable list. Null until known. */
   targetGuildMeta: PickerGuild | null;
+  /** Whether the signed-in user holds Manage Webhooks in {@link targetGuildId} —
+   *  the gate `activity_post` enforces server-side. `null` while it's still being
+   *  determined (a server launch's guild meta hasn't loaded yet, or it couldn't be
+   *  resolved): the bar stays optimistic then, since the proxy is the real guard.
+   *  `false` means the user can still edit and collaborate, but can't be the one to
+   *  Post — the bar shows an "edit only" explainer instead of an enabled Post
+   *  button, and a permitted teammate in the room does the posting. On a DM launch
+   *  it's `true` once a server is picked: that list is pre-filtered to postable
+   *  servers. */
+  canPostToTarget: boolean | null;
 
   /** Run the SDK handshake and start the session. Safe to call once. */
   init(): Promise<void>;
@@ -199,6 +209,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   guilds: [],
   guildsLoading: false,
   targetGuildMeta: null,
+  canPostToTarget: null,
 
   async init() {
     if (initialised) return;
@@ -354,6 +365,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       pushToast("Pick a channel to post to first.", "error");
       return null;
     }
+    // Fail fast (and friendly) when we already know the user can't post here — the
+    // proxy enforces the same gate, but this avoids a confusing server-error toast.
+    if (get().canPostToTarget === false) {
+      pushToast("You need the “Manage Webhooks” permission to post in this server.", "error");
+      return null;
+    }
     if (get().publishing) return null;
     set({ publishing: true });
     try {
@@ -375,6 +392,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const last = get().lastPost;
     if (!last) {
       pushToast("Post the message first, then you can update it.", "error");
+      return null;
+    }
+    // Same gate as a fresh post — bail early if we know the user can't post here.
+    if (get().canPostToTarget === false) {
+      pushToast("You need the “Manage Webhooks” permission to update messages here.", "error");
       return null;
     }
     if (get().publishing) return null;
@@ -404,6 +426,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const channelId = get().targetChannelId;
     if (!guildId || !channelId) {
       throw new Error("Pick a channel to restore from first.");
+    }
+    // Restore reads through the channel's DWEEB webhook, so the proxy gates it on
+    // Manage Webhooks too — surface that up front rather than as a server error.
+    if (get().canPostToTarget === false) {
+      throw new Error("You need the “Manage Webhooks” permission to restore a message here.");
     }
     // Accept a bare snowflake or a full message link (the channel is fixed to the
     // target, so the link's channel part is ignored — only the message id matters).
@@ -534,15 +561,25 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     // server's channels + mapping data (which also re-resolves the preview). The
     // chosen server's meta (for the header indicator) is already in `guilds`.
     const meta = get().guilds.find((g) => g.id === guildId) ?? null;
-    set({ targetGuildId: guildId, targetChannelId: null, targetGuildMeta: meta });
+    set({
+      targetGuildId: guildId,
+      targetChannelId: null,
+      targetGuildMeta: meta,
+      // `guilds` is pre-filtered to servers the user can post to (see
+      // `loadPostableGuilds`), so a picked one is postable by construction.
+      canPostToTarget: true,
+    });
     void useGuildStore.getState().connect(guildId);
   },
 }));
 
 /** Load a server launch's launching-guild meta (name + icon) for the header's
- *  top-right server indicator. The bootstrap load carries roles/channels/emoji
- *  but not the guild's own name/icon, so this finds it in the user's guild list.
- *  Non-fatal: on failure the indicator just doesn't render. */
+ *  top-right server indicator, and resolve whether the user can post there.
+ *  The bootstrap load carries roles/channels/emoji but not the guild's own
+ *  name/icon or the caller's permission, so both are read off the user's guild
+ *  list here. Non-fatal: on failure the indicator just doesn't render and
+ *  `canPostToTarget` stays null (the bar then stays optimistic — the proxy is the
+ *  real guard). */
 async function loadTargetGuildMeta(
   set: (partial: Partial<ActivityState>) => void,
   guildId: string,
@@ -551,7 +588,12 @@ async function loadTargetGuildMeta(
     const all = await fetchUserGuilds();
     seedAuthGuilds(all);
     const meta = all.find((g) => g.id === guildId);
-    if (meta) set({ targetGuildMeta: meta });
+    if (meta) {
+      // The launching guild comes from the *full* list, which includes servers
+      // the user can't post to, so honour the flag (absent → no access, the same
+      // convention the Webhook Manager uses).
+      set({ targetGuildMeta: meta, canPostToTarget: meta.can_manage_webhooks ?? false });
+    }
   } catch {
     // Leave the indicator unrendered — it's context, not a blocker.
   }

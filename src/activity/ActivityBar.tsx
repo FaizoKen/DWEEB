@@ -17,10 +17,12 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
+import { pushToast } from "@/ui/Toast";
 import {
   ExternalLinkIcon,
   GlobeIcon,
   HistoryIcon,
+  LockIcon,
   RedoIcon,
   RefreshIcon,
   SendIcon,
@@ -55,6 +57,7 @@ export function ActivityBar() {
   const lastPost = useActivityStore((s) => s.lastPost);
   const targetChannelId = useActivityStore((s) => s.targetChannelId);
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
+  const canPostToTarget = useActivityStore((s) => s.canPostToTarget);
 
   // A DM / group-DM launch has no guild of its own, so the user first picks a
   // destination *server* (DMs can't receive a webhook post), then a channel.
@@ -85,6 +88,17 @@ export function ActivityBar() {
   } | null>(null);
 
   const noDestination = !targetGuildId || !targetChannelId;
+  // The user lacks Manage Webhooks in the destination server: they can edit and
+  // collaborate, but can't be the one to Post (a permitted teammate in the room
+  // does that). Only a *known* `false` gates the UI — while it's still being
+  // resolved (`null`) we stay optimistic, since the proxy is the real guard.
+  const blockedFromPosting = canPostToTarget === false;
+  // The full "you can't post here" explanation, reused as the pill's tooltip and
+  // the Restore button's disabled hint.
+  const blockedReason =
+    "You don't have the “Manage Webhooks” permission in this server, so you can't " +
+    "post here — but you can still edit together. Ask someone who can post, or use " +
+    "“Open on web”.";
   // "Update" applies only while the chosen destination still matches where we
   // last posted; re-point the channel/server and the primary reverts to "Post".
   const canUpdate =
@@ -145,11 +159,12 @@ export function ActivityBar() {
       <div className={styles.right}>
         {/* Restore: pull a message DWEEB posted in this channel back into the
             editor. Needs a destination channel (the webhook lives there), so it's
-            disabled until one is picked — same gate as Post. */}
+            disabled until one is picked — and, like Post, it reads through that
+            webhook, so it's gated on Manage Webhooks too. */}
         <IconButton
-          label="Restore a message DWEEB posted"
+          label={blockedFromPosting ? blockedReason : "Restore a message DWEEB posted"}
           onClick={() => setRestoreOpen(true)}
-          disabled={noDestination}
+          disabled={noDestination || blockedFromPosting}
         >
           <HistoryIcon />
         </IconButton>
@@ -172,7 +187,22 @@ export function ActivityBar() {
 
         <span className={styles.sep} aria-hidden="true" />
 
-        {canUpdate ? (
+        {blockedFromPosting ? (
+          // No Manage Webhooks here: editing/collab stays open (above), but the
+          // primary action becomes an "edit only" explainer rather than a Post
+          // button that would dead-end on a 403. Tapping it surfaces the reason as
+          // a toast, so the "why" reaches mobile (which has no hover tooltip).
+          <button
+            type="button"
+            className={styles.gated}
+            aria-label={blockedReason}
+            title={blockedReason}
+            onClick={() => pushToast(blockedReason, "info")}
+          >
+            <LockIcon size={14} />
+            Edit only
+          </button>
+        ) : canUpdate ? (
           <>
             {/* The iframe can't open discord.com itself; openLastPost routes
                 through the SDK (see activityStore). */}

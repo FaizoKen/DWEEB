@@ -42,3 +42,34 @@
   flex: none;
   padding: 2px;
 }
+
+/* Stands in for the Post button when the user lacks Manage Webhooks in the
+   destination server: they can edit and collaborate, but can't be the one to
+   post. A muted pill carrying the "why" on its title/aria-label (hover) and
+   surfacing it as a toast on tap (mobile, where there's no hover). */
+.gated {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--app-space-1);
+  padding: 4px var(--app-space-2);
+  font-family: inherit;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--app-text-muted);
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  white-space: nowrap;
+  cursor: help;
+  flex: none;
+  appearance: none;
+}
+
+.gated:hover {
+  color: var(--app-text);
+}
+
+.gated svg {
+  flex: none;
+  opacity: 0.8;
+}
