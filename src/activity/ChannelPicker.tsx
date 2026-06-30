@@ -18,7 +18,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useGuildStore } from "@/core/guild/guildStore";
 import type { GuildChannel } from "@/core/guild/types";
-import { CheckCircleIcon, ChevronDownIcon, HashIcon, SearchIcon } from "@/ui/Icon";
+import { CheckCircleIcon, ChevronDownIcon, HashIcon, SearchIcon, UsersIcon } from "@/ui/Icon";
 import styles from "./ChannelPicker.module.css";
 
 /** Channel types that can host a webhook: text, announcement, forum, media —
@@ -65,11 +65,17 @@ function groupChannels(
 export function ChannelPicker({
   selectedId,
   onSelect,
+  shared = false,
 }: {
   /** The channel the next post goes to, or null when none is chosen yet. */
   selectedId: string | null;
   /** A channel was picked — close the panel and re-point publishing at it. */
   onSelect: (channelId: string) => void;
+  /** On a server launch the destination is synced across the collaboration room,
+   *  so show a "shared with everyone here" affordance and make picking a channel
+   *  re-point the whole room (the store broadcasts it). Off on a DM launch, where
+   *  each composer keeps their own destination. */
+  shared?: boolean;
 }) {
   const data = useGuildStore((s) => s.data);
   const loading = useGuildStore((s) => s.status === "loading" && !s.data);
@@ -84,6 +90,12 @@ export function ChannelPicker({
 
   const selected = selectedId ? data?.channelById[selectedId] : undefined;
   const label = selected?.name ?? (selectedId ? "this channel" : "Pick a channel");
+
+  // On a server launch the destination is room-wide, so spell that out in the
+  // trigger's tooltip — picking a channel moves it for everyone, not just you.
+  const triggerTitle = selected
+    ? `Posting to #${label}${shared ? " — shared with everyone in this room" : ""} · click to change`
+    : `Choose a channel to post to${shared ? " (shared with everyone in this room)" : ""}`;
 
   // Webhook-hostable channels, plus the current selection even if its type isn't
   // normally listed (e.g. launched from a voice channel) so the default never
@@ -158,10 +170,17 @@ export function ChannelPicker({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={selected ? `Posting to #${label} — click to change` : "Choose a channel to post to"}
+        title={triggerTitle}
       >
         <HashIcon size={16} />
         <span className={styles.triggerName}>{label}</span>
+        {shared ? (
+          <UsersIcon
+            size={13}
+            className={styles.sharedGlyph}
+            aria-label="Shared with everyone in this room"
+          />
+        ) : null}
         <ChevronDownIcon size={14} className={styles.chevron} />
       </button>
 

@@ -42,8 +42,14 @@ interface StartOptions {
    *  the room on — the unguessable instance id keys it instead). */
   guildId: string | null;
   token: string;
+  /** The post destination chosen at start (a server launch's launching channel) —
+   *  seeds the room's shared target so a latecomer inherits it. Ignored on a DM
+   *  launch, where collaborators don't share a postable server. */
+  targetChannelId: string | null;
   onRoster: (participants: CollabParticipant[]) => void;
   onConnectedChange?: (connected: boolean) => void;
+  /** A peer moved the shared post destination (server launch only). */
+  onTarget?: (channelId: string) => void;
 }
 
 const SEND_DEBOUNCE_MS = 180;
@@ -68,6 +74,13 @@ let applyingRemote = false;
  * the store, which may also hold our own not-yet-broadcast edits).
  */
 let lastSent: WebhookMessage | null = null;
+/**
+ * The room's agreed post destination, on a server launch (null on a DM launch,
+ * which doesn't sync it). Tracks what peers know — it advances on a local
+ * broadcast or an inbound `target` frame — so a joiner's `hello` can be answered
+ * with the current channel and latecomers land on the same destination.
+ */
+let currentTarget: string | null = null;
 let opts: StartOptions | null = null;
 
 /** Open the room socket and start syncing the message store. Idempotent-ish:
@@ -79,8 +92,19 @@ export function startCollab(options: StartOptions): void {
   cid = randomId();
   // Baseline for the first diff — peers reconcile via the hello/draft exchange.
   lastSent = useMessageStore.getState().message;
+  currentTarget = options.targetChannelId;
   subscribeStore();
   connect();
+}
+
+/** Broadcast a new shared post destination to the room, so everyone's editor
+ *  re-points to the same channel. No-op on a DM launch (collaborators don't share
+ *  a postable server, so there's nothing to agree on) and when nothing changed. */
+export function broadcastTarget(channelId: string): void {
+  if (!opts?.guildId) return;
+  if (currentTarget === channelId) return;
+  currentTarget = channelId;
+  send({ type: "target", cid, channelId });
 }
 
 /** Tear everything down (socket, store subscription, timers). */
@@ -93,6 +117,7 @@ export function stopCollab(): void {
   unsubStore?.();
   unsubStore = null;
   lastSent = null;
+  currentTarget = null;
   if (socket) {
     socket.onclose = null;
     try {
@@ -166,8 +191,12 @@ function handleFrame(frame: Record<string, unknown>): void {
   if (frame.cid === cid) return;
   if (type === "hello") {
     // A peer just joined — hand them our full current draft (a latecomer can't
-    // replay patch history, so it needs the whole state).
+    // replay patch history, so it needs the whole state) and, on a server launch,
+    // the room's agreed destination so they don't land on a stale default.
     sendSnapshot(useMessageStore.getState().message);
+    if (opts?.guildId && currentTarget) {
+      send({ type: "target", cid, channelId: currentTarget });
+    }
     return;
   }
   if (type === "draft" && frame.message && typeof frame.message === "object") {
@@ -176,6 +205,16 @@ function handleFrame(frame: Record<string, unknown>): void {
   }
   if (type === "patch" && Array.isArray(frame.ops)) {
     applyPatch(frame.ops as CollabOp[]);
+    return;
+  }
+  if (type === "target" && typeof frame.channelId === "string") {
+    // A peer moved the shared post destination. Server launch only — a DM launch
+    // never sends these (collaborators don't share a postable server), and the
+    // guard keeps a stray frame from re-pointing a DM composer's local choice.
+    if (opts?.guildId) {
+      currentTarget = frame.channelId;
+      opts.onTarget?.(frame.channelId);
+    }
   }
 }
 

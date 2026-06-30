@@ -46,7 +46,7 @@ import {
   restorePostedMessage,
   type ActivityPostResult,
 } from "./api";
-import { startCollab, stopCollab, type CollabParticipant } from "./collab";
+import { startCollab, stopCollab, broadcastTarget, type CollabParticipant } from "./collab";
 import { setActivityToken } from "./runtime";
 
 export type ActivityStatus = "idle" | "connecting" | "ready" | "error";
@@ -343,8 +343,16 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         instanceId,
         guildId,
         token: accessToken,
+        // Seed the room's shared destination with the launching channel (server
+        // launch only) so a latecomer inherits it; null on a DM launch.
+        targetChannelId: guildId ? channelId : null,
         onRoster: (participants) => set({ participants }),
         onConnectedChange: (collabConnected) => set({ collabConnected }),
+        // A peer moved the shared destination — apply it locally WITHOUT
+        // re-broadcasting (that would echo back to the room and loop).
+        onTarget: (channelId) => {
+          if (get().targetChannelId !== channelId) set({ targetChannelId: channelId });
+        },
       });
     } catch (e) {
       stopCollab();
@@ -553,6 +561,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   setTargetChannel(channelId) {
     set({ targetChannelId: channelId });
+    // On a server launch the destination is shared: tell the room so everyone's
+    // editor re-points to the same channel. No-op on a DM launch (collaborators
+    // don't share a postable server) — see `broadcastTarget`.
+    broadcastTarget(channelId);
   },
 
   setTargetGuild(guildId) {

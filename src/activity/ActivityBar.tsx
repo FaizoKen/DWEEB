@@ -150,9 +150,11 @@ export function ActivityBar() {
 
         {/* The channel the post lands in. On a DM launch there are no channels to
             offer until a destination *server* is picked, so the dropdown only
-            appears once one is. */}
+            appears once one is. On a server launch the destination is synced across
+            the room (`shared`), so the picker shows a "shared" marker and changing
+            it re-points everyone. */}
         {!isDm || targetGuildId ? (
-          <ChannelPicker selectedId={targetChannelId} onSelect={setTargetChannel} />
+          <ChannelPicker selectedId={targetChannelId} onSelect={setTargetChannel} shared={!isDm} />
         ) : null}
       </div>
 
