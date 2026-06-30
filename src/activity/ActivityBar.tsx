@@ -85,16 +85,23 @@ export function ActivityBar() {
   const addBotToServer = useActivityStore((s) => s.addBotToServer);
   const recheckBot = useActivityStore((s) => s.recheckBot);
 
-  // Auto-detect when the bot finally gets added, so the user doesn't have to tap
-  // "Check again". While it's missing, re-check whenever the Activity regains
-  // focus/visibility — the user returning from Discord's add-bot flow — plus a
-  // bounded safety-net poll for clients that don't fire those events (or when a
-  // teammate adds it). All silent (no toast); finding the bot clears `botMissing`,
-  // and the guild bootstrap's own "Connected" toast confirms it — which also tears
-  // this listener down (the effect re-runs once `botMissing` is false and bails).
+  // Bumped each time the user taps "Add DWEEB" — restarts the auto-recheck below
+  // with a fresh poll window, since that tap is the moment they're off to add the
+  // bot and will return shortly.
+  const [recheckArm, setRecheckArm] = useState(0);
+
+  // Auto-detect when the bot finally gets added — no manual step needed. While
+  // it's missing, re-check whenever the Activity regains focus/visibility (the
+  // user returning from Discord's add-bot flow) plus a bounded safety-net poll
+  // for clients that don't fire those events (or when a teammate adds it). All
+  // silent (no toast); finding the bot clears `botMissing`, and the guild
+  // bootstrap's own "Connected" toast confirms it — which also tears this down
+  // (the effect re-runs once `botMissing` is false and bails). The poll is capped
+  // so an idle screen doesn't poll forever, but the free focus/visibility watch
+  // stays for the whole time, and tapping "Add DWEEB" re-arms a fresh window.
   useEffect(() => {
     if (!botMissing) return;
-    const check = () => void recheckBot({ silent: true });
+    const check = () => void recheckBot();
     const onVisibility = () => {
       if (document.visibilityState === "visible") check();
     };
@@ -113,7 +120,7 @@ export function ActivityBar() {
       window.removeEventListener("focus", check);
       window.clearInterval(poll);
     };
-  }, [botMissing, recheckBot]);
+  }, [botMissing, recheckBot, recheckArm]);
 
   // Destination channel name for the confirm/success dialogs — resolved from the
   // connected guild's channel map (the same source the picker reads).
@@ -259,26 +266,21 @@ export function ActivityBar() {
         {botMissing ? (
           // The bot isn't in this server — posting is impossible until it's added.
           // Swap the Post button for a direct "Add DWEEB" call-to-action (opens
-          // Discord's add-bot flow via the host), plus a "Check again" that
-          // re-detects it once added. Editing/collab still works in the meantime.
-          <>
-            <Button
-              variant="primary"
-              size="sm"
-              leadingIcon={<PlusIcon size={14} />}
-              onClick={() => void addBotToServer()}
-              title="Add the DWEEB bot to this server so you can post here"
-            >
-              Add DWEEB
-            </Button>
-            <IconButton
-              label="Check again — has DWEEB been added yet?"
-              onClick={() => void recheckBot()}
-              disabled={targetGuildMetaLoading}
-            >
-              <RefreshIcon />
-            </IconButton>
-          </>
+          // Discord's add-bot flow via the host). No "check" button: we re-detect
+          // it automatically on return (see the auto-recheck effect above).
+          // Editing/collab still works in the meantime.
+          <Button
+            variant="primary"
+            size="sm"
+            leadingIcon={<PlusIcon size={14} />}
+            onClick={() => {
+              void addBotToServer();
+              setRecheckArm((n) => n + 1);
+            }}
+            title="Add the DWEEB bot to this server so you can post here"
+          >
+            Add DWEEB
+          </Button>
         ) : blockedFromPosting ? (
           // No Manage Webhooks here: editing/collab stays open (above), but the
           // primary action becomes an "edit only" explainer rather than a Post
