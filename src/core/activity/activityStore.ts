@@ -33,6 +33,7 @@ import {
   getSdk,
   openExternalLink,
   openInviteDialog,
+  shareActivityLink,
   setActivityPresence,
 } from "./sdk";
 import {
@@ -130,8 +131,9 @@ interface ActivityState {
   /** Open the last posted message in Discord (the sandboxed iframe can't
    *  navigate to discord.com itself, so this goes through the SDK). */
   openLastPost(): Promise<void>;
-  /** Open Discord's invite dialog so others can join this Activity. No-op in a
-   *  DM / group-DM launch or without invite permission. */
+  /** Pull more people into this collaboration room. Server launch → Discord's
+   *  native invite dialog; DM / group-DM launch → the share-link modal (the
+   *  invite dialog throws there). Both land joiners in this same instance. */
   invite(): Promise<void>;
   /** Hand off the current draft to the full web app (account menu, scheduling,
    *  saved messages — the features the embedded surface omits). Opens the public
@@ -434,11 +436,35 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   },
 
   async invite() {
+    // Two routes to "pull more people into this collaboration room". A server
+    // launch uses Discord's native invite dialog (an activity invite dropped in
+    // the channel). A DM / group-DM launch has no such dialog — it throws — so it
+    // uses the share-link modal instead, which lets the user send the Activity
+    // link to the group / a friend or copy it; opening it joins this same
+    // instance (same room). Both end at the same place, just different host UI.
+    const inDm = get().context?.guildId == null;
+    if (inDm) {
+      try {
+        const r = await shareActivityLink("Edit this Discord message with me in DWEEB ✏️");
+        // The modal is a fire-and-forget share; only confirm when something
+        // actually happened (the user may just close it). `success` covers a
+        // send/copy on older clients that don't split out the two flags.
+        if (r.didSendMessage) {
+          pushToast("Invite sent — they'll join when they open it.", "success");
+        } else if (r.didCopyLink) {
+          pushToast("Link copied — paste it to invite people in.", "success");
+        } else if (r.success) {
+          pushToast("Invite shared ✓", "success");
+        }
+      } catch {
+        // Host declined / unsupported — nothing actionable, stay quiet.
+      }
+      return;
+    }
     try {
       await openInviteDialog();
     } catch {
-      // Thrown in a DM / group-DM or without invite permission. The button is
-      // only shown for server launches, so this is the missing-permission case.
+      // Server launch but the user can't create invites here.
       pushToast("You need permission to create invites in this server.", "error");
     }
   },

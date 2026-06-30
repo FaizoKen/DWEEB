@@ -83,10 +83,15 @@ restored message, so the bar immediately shows **Update** — editing PATCHes th
 message in place, exactly as if you'd just posted it. Restore needs a destination
 channel (the webhook lives there), so it's disabled until one is picked.
 
-On a server launch the bar also offers **Invite** (`openInviteDialog`), so the
-launcher can pull friends straight into the same collaboration room instead of
-everyone launching separately. Discord's invite dialog is server-only — it throws
-in a DM / group DM — so the button is hidden there.
+The presence bar's **"+"** pulls more people straight into the same collaboration
+room instead of everyone launching separately, and it works wherever the Activity
+runs. A **server** launch opens Discord's native invite dialog (`openInviteDialog`),
+which drops an activity invite in the channel. That dialog is server-only — it
+throws in a DM / group DM — so a **DM / group-DM** launch opens the share-link
+modal (`shareLink`) instead: the user sends the Activity link to the group / a
+friend or copies it, and opening it joins this same instance (same room). The
+store's `invite()` picks the route off `context.guildId`; the button is no longer
+hidden in DMs.
 
 The Activity also sets a best-effort **rich presence** ("Building a message") via
 `setActivity`. That command needs the `rpc.activities.write` scope, which the

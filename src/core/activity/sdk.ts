@@ -61,10 +61,35 @@ export async function openExternalLink(url: string): Promise<void> {
  * Open Discord's invite dialog so the launcher can pull friends into this
  * Activity instance (they join the same collaboration room). Throws in a DM /
  * group-DM context or without the invite permission — callers should gate on a
- * server launch and treat a rejection as a no-op.
+ * server launch and treat a rejection as a no-op. DMs/group DMs use
+ * {@link shareActivityLink} instead.
  */
 export async function openInviteDialog(): Promise<void> {
   await getSdk().commands.openInviteDialog();
+}
+
+/** What the host reports back after the share modal closes. `success` is true
+ *  when the link was actually handed to someone (sent or copied). */
+export interface ShareLinkResult {
+  success: boolean;
+  didCopyLink: boolean;
+  didSendMessage: boolean;
+}
+
+/**
+ * Open Discord's "share the Activity link" modal — the universal counterpart to
+ * {@link openInviteDialog} that also works in a DM / group DM (where the invite
+ * dialog throws). The user can send the link to the current group DM / a friend
+ * or copy it; opening it joins this same Activity instance, i.e. the same
+ * collaboration room. `message` is the note sent alongside the link.
+ */
+export async function shareActivityLink(message: string): Promise<ShareLinkResult> {
+  const r = await getSdk().commands.shareLink({ message });
+  return {
+    success: !!r?.success,
+    didCopyLink: !!r?.didCopyLink,
+    didSendMessage: !!r?.didSendMessage,
+  };
 }
 
 /**

@@ -29,10 +29,11 @@ export function PresenceDock() {
   const participants = useActivityStore((s) => s.participants);
   const connected = useActivityStore((s) => s.collabConnected);
   const invite = useActivityStore((s) => s.invite);
-  // Discord's invite dialog only works in a server context (it throws in DMs),
-  // so the "+" is hidden on a DM / group-DM launch — same gate the old header
-  // share button used.
-  const canInvite = useActivityStore((s) => s.context?.guildId != null);
+  // The "+" pulls more people into the room everywhere now. A server launch
+  // opens Discord's native invite dialog; a DM / group-DM launch (no guild)
+  // opens the share-link modal instead, since the invite dialog throws there.
+  // The store's `invite()` picks the route — here we only vary the wording.
+  const inDm = useActivityStore((s) => s.context?.guildId == null);
   if (!user) return null;
 
   // You first (always present), then everyone else from the room roster, deduped
@@ -72,20 +73,18 @@ export function PresenceDock() {
     </div>
   );
 
-  // In a server launch the whole bar is the invite control (the "+" on the left
-  // is just its affordance) — clicking anywhere on it opens Discord's invite
-  // dialog. A DM / group-DM launch can't invite, so the bar is a plain,
-  // non-interactive presence display with no "+".
-  if (!canInvite) {
-    return <div className={styles.dock}>{people}</div>;
-  }
+  // The whole bar is the invite control (the "+" on the left is just its
+  // affordance) — clicking anywhere on it pulls more people in. The label tracks
+  // the route the store takes: a server launch opens the invite dialog, a DM /
+  // group DM opens the share-link modal.
+  const label = inDm ? "Share this session to edit together" : "Invite people to edit together";
   return (
     <button
       type="button"
       className={`${styles.dock} ${styles.invite}`}
       onClick={() => void invite()}
-      title="Invite people to edit together"
-      aria-label="Invite people to edit together"
+      title={label}
+      aria-label={label}
     >
       <span className={styles.add} aria-hidden="true">
         <PlusIcon size={16} />
