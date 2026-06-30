@@ -26,7 +26,7 @@ import {
   UndoIcon,
 } from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
-import { GuildPicker } from "./GuildPicker";
+import { GuildPicker, ServerGlyph } from "./GuildPicker";
 import { RestoreDialog } from "./RestoreDialog";
 import styles from "./ActivityBar.module.css";
 
@@ -52,6 +52,7 @@ export function ActivityBar() {
   const guildsLoading = useActivityStore((s) => s.guildsLoading);
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
   const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
+  const targetGuildMeta = useActivityStore((s) => s.targetGuildMeta);
 
   const [restoreOpen, setRestoreOpen] = useState(false);
 
@@ -66,19 +67,12 @@ export function ActivityBar() {
   return (
     <div className={styles.bar}>
       <div className={styles.left}>
-        {isDm ? (
-          <GuildPicker
-            guilds={guilds}
-            loading={guildsLoading}
-            selectedId={targetGuildId}
-            onSelect={setTargetGuild}
-          />
+        {/* The channel the post lands in. On a DM launch there are no channels to
+            offer until a destination *server* is picked (top-right indicator), so
+            the dropdown only appears once one is. */}
+        {!isDm || targetGuildId ? (
+          <ChannelPicker selectedId={targetChannelId} onSelect={setTargetChannel} />
         ) : null}
-        <ChannelPicker
-          selectedId={targetChannelId}
-          onSelect={setTargetChannel}
-          disabled={isDm && !targetGuildId}
-        />
       </div>
 
       <div className={styles.right}>
@@ -152,6 +146,30 @@ export function ActivityBar() {
             {publishing ? "Posting…" : "Post"}
           </Button>
         )}
+
+        {/* Top-right server indicator — which server the post lands in. On a DM
+            launch it's the destination picker, collapsed to the chosen server's
+            icon (or a "Pick a server" prompt before one's chosen). On a guild
+            launch it's a static badge for the launching server. */}
+        {isDm ? (
+          <>
+            <span className={styles.sep} aria-hidden="true" />
+            <GuildPicker
+              guilds={guilds}
+              loading={guildsLoading}
+              selectedId={targetGuildId}
+              onSelect={setTargetGuild}
+              compact
+            />
+          </>
+        ) : targetGuildMeta ? (
+          <>
+            <span className={styles.sep} aria-hidden="true" />
+            <span className={styles.serverBadge} title={`Posting to ${targetGuildMeta.name}`}>
+              <ServerGlyph guild={targetGuildMeta} size={20} />
+            </span>
+          </>
+        ) : null}
       </div>
 
       <RestoreDialog open={restoreOpen} onClose={() => setRestoreOpen(false)} />

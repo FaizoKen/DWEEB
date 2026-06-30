@@ -28,6 +28,7 @@ export function GuildPicker({
   loading,
   selectedId,
   onSelect,
+  compact = false,
 }: {
   /** The user's postable servers (already filtered by the store). */
   guilds: PickerGuild[];
@@ -37,6 +38,10 @@ export function GuildPicker({
   selectedId: string | null;
   /** A server was picked — close the panel and re-point publishing at it. */
   onSelect: (guildId: string) => void;
+  /** Collapse the trigger to just the server icon once one is picked (no name,
+   *  no chevron) — used by the header's top-right indicator. Before a server is
+   *  picked it still shows the "Pick a server" label so it stays discoverable. */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -102,6 +107,10 @@ export function GuildPicker({
     setQuery("");
   };
 
+  // In compact mode, a picked server shows as its icon alone; the label and
+  // chevron return whenever nothing's chosen yet, so "Pick a server" stays clear.
+  const collapsed = compact && selected != null;
+
   return (
     <div ref={wrapperRef} className={channelStyles.wrapper}>
       <button
@@ -110,13 +119,14 @@ export function GuildPicker({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={collapsed ? `Posting to ${selected.name} — click to change` : undefined}
         title={
           selected ? `Posting to ${selected.name} — click to change` : "Choose a server to post to"
         }
       >
         {selected ? <ServerGlyph guild={selected} size={18} /> : <CompassIcon size={16} />}
-        <span className={channelStyles.triggerName}>{label}</span>
-        <ChevronDownIcon size={14} className={channelStyles.chevron} />
+        {collapsed ? null : <span className={channelStyles.triggerName}>{label}</span>}
+        {collapsed ? null : <ChevronDownIcon size={14} className={channelStyles.chevron} />}
       </button>
 
       {open && pos
@@ -184,8 +194,9 @@ export function GuildPicker({
 }
 
 /** A server's icon — the real one when set (Discord's CDN is CSP-allowed inside
- *  the iframe), else a coloured initial bubble so nothing depends on a fetch. */
-function ServerGlyph({ guild, size }: { guild: PickerGuild; size: number }) {
+ *  the iframe), else a coloured initial bubble so nothing depends on a fetch.
+ *  Exported for the bar's static (non-picker) server badge on a guild launch. */
+export function ServerGlyph({ guild, size }: { guild: PickerGuild; size: number }) {
   const url = guildIconUrl(guild.id, guild.icon, 64);
   if (url) {
     return (

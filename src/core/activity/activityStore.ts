@@ -108,6 +108,11 @@ interface ActivityState {
   guilds: PickerGuild[];
   /** True while the DM-launch server list is loading. */
   guildsLoading: boolean;
+  /** Display meta (name + icon) for the current target guild, shown by the
+   *  header's top-right server indicator. For a server launch it's the launching
+   *  guild (fetched once); for a DM launch it's the picked destination, taken
+   *  from the postable list. Null until known. */
+  targetGuildMeta: PickerGuild | null;
 
   /** Run the SDK handshake and start the session. Safe to call once. */
   init(): Promise<void>;
@@ -177,6 +182,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   targetChannelId: null,
   guilds: [],
   guildsLoading: false,
+  targetGuildMeta: null,
 
   async init() {
     if (initialised) return;
@@ -288,6 +294,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         // Server launch: load the launching server's data so the preview
         // resolves mentions/emoji and the channel picker is populated.
         void useGuildStore.getState().connect(guildId);
+        // …and its display meta (name + icon) for the header's server indicator,
+        // which the bootstrap above doesn't carry.
+        void loadTargetGuildMeta(set, guildId);
       } else {
         // DM launch: load the servers the user can post to, so they can pick a
         // destination. The preview resolves against whichever they choose.
@@ -470,11 +479,30 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   setTargetGuild(guildId) {
     if (get().targetGuildId === guildId) return;
     // Switching destination drops the old channel pick and loads the new
-    // server's channels + mapping data (which also re-resolves the preview).
-    set({ targetGuildId: guildId, targetChannelId: null });
+    // server's channels + mapping data (which also re-resolves the preview). The
+    // chosen server's meta (for the header indicator) is already in `guilds`.
+    const meta = get().guilds.find((g) => g.id === guildId) ?? null;
+    set({ targetGuildId: guildId, targetChannelId: null, targetGuildMeta: meta });
     void useGuildStore.getState().connect(guildId);
   },
 }));
+
+/** Load a server launch's launching-guild meta (name + icon) for the header's
+ *  top-right server indicator. The bootstrap load carries roles/channels/emoji
+ *  but not the guild's own name/icon, so this finds it in the user's guild list.
+ *  Non-fatal: on failure the indicator just doesn't render. */
+async function loadTargetGuildMeta(
+  set: (partial: Partial<ActivityState>) => void,
+  guildId: string,
+): Promise<void> {
+  try {
+    const all = await fetchUserGuilds();
+    const meta = all.find((g) => g.id === guildId);
+    if (meta) set({ targetGuildMeta: meta });
+  } catch {
+    // Leave the indicator unrendered — it's context, not a blocker.
+  }
+}
 
 /** Load the user's postable servers for a DM launch — those where the DWEEB bot
  *  is present and the user holds Manage Webhooks (the gate the post enforces).
