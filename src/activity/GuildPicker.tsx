@@ -38,9 +38,10 @@ export function GuildPicker({
   selectedId: string | null;
   /** A server was picked — close the panel and re-point publishing at it. */
   onSelect: (guildId: string) => void;
-  /** Collapse the trigger to just the server icon once one is picked (no name,
-   *  no chevron) — used by the header's top-right indicator. Before a server is
-   *  picked it still shows the "Pick a server" label so it stays discoverable. */
+  /** Collapse the trigger to just the server icon plus its dropdown arrow once a
+   *  server is picked (dropping the name) — used by the bar's left server
+   *  indicator. Before one's picked it still shows the "Pick a server" label so
+   *  it stays discoverable. */
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -107,8 +108,8 @@ export function GuildPicker({
     setQuery("");
   };
 
-  // In compact mode, a picked server shows as its icon alone; the label and
-  // chevron return whenever nothing's chosen yet, so "Pick a server" stays clear.
+  // In compact mode a picked server shows as just its icon + dropdown arrow; the
+  // name returns whenever nothing's chosen yet, so "Pick a server" stays clear.
   const collapsed = compact && selected != null;
 
   return (
@@ -126,7 +127,7 @@ export function GuildPicker({
       >
         {selected ? <ServerGlyph guild={selected} size={18} /> : <CompassIcon size={16} />}
         {collapsed ? null : <span className={channelStyles.triggerName}>{label}</span>}
-        {collapsed ? null : <ChevronDownIcon size={14} className={channelStyles.chevron} />}
+        <ChevronDownIcon size={14} className={channelStyles.chevron} />
       </button>
 
       {open && pos

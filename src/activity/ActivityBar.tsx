@@ -67,9 +67,28 @@ export function ActivityBar() {
   return (
     <div className={styles.bar}>
       <div className={styles.left}>
+        {/* Server indicator, left corner — which server the post lands in. On a
+            DM launch it's the destination picker, collapsed to the chosen
+            server's icon + dropdown arrow (or a "Pick a server" prompt before
+            one's chosen). On a guild launch it's a static icon for the launching
+            server — no dropdown, since the server is fixed. */}
+        {isDm ? (
+          <GuildPicker
+            guilds={guilds}
+            loading={guildsLoading}
+            selectedId={targetGuildId}
+            onSelect={setTargetGuild}
+            compact
+          />
+        ) : targetGuildMeta ? (
+          <span className={styles.serverBadge} title={`Posting to ${targetGuildMeta.name}`}>
+            <ServerGlyph guild={targetGuildMeta} size={20} />
+          </span>
+        ) : null}
+
         {/* The channel the post lands in. On a DM launch there are no channels to
-            offer until a destination *server* is picked (top-right indicator), so
-            the dropdown only appears once one is. */}
+            offer until a destination *server* is picked, so the dropdown only
+            appears once one is. */}
         {!isDm || targetGuildId ? (
           <ChannelPicker selectedId={targetChannelId} onSelect={setTargetChannel} />
         ) : null}
@@ -146,30 +165,6 @@ export function ActivityBar() {
             {publishing ? "Posting…" : "Post"}
           </Button>
         )}
-
-        {/* Top-right server indicator — which server the post lands in. On a DM
-            launch it's the destination picker, collapsed to the chosen server's
-            icon (or a "Pick a server" prompt before one's chosen). On a guild
-            launch it's a static badge for the launching server. */}
-        {isDm ? (
-          <>
-            <span className={styles.sep} aria-hidden="true" />
-            <GuildPicker
-              guilds={guilds}
-              loading={guildsLoading}
-              selectedId={targetGuildId}
-              onSelect={setTargetGuild}
-              compact
-            />
-          </>
-        ) : targetGuildMeta ? (
-          <>
-            <span className={styles.sep} aria-hidden="true" />
-            <span className={styles.serverBadge} title={`Posting to ${targetGuildMeta.name}`}>
-              <ServerGlyph guild={targetGuildMeta} size={20} />
-            </span>
-          </>
-        ) : null}
       </div>
 
       <RestoreDialog open={restoreOpen} onClose={() => setRestoreOpen(false)} />

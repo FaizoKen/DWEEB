@@ -33,9 +33,9 @@
   flex: none;
 }
 
-/* Static server badge (guild launch) — the launching server's icon pinned to
-   the top-right as a "posting here" indicator. Non-interactive; the DM launch
-   uses the compact GuildPicker in this slot instead. */
+/* Static server badge (guild launch) — the launching server's icon in the left
+   corner as a "posting here" indicator. Non-interactive (the server is fixed);
+   the DM launch uses the compact GuildPicker in this slot instead. */
 .serverBadge {
   display: inline-flex;
   align-items: center;
