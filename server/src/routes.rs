@@ -124,9 +124,16 @@ pub async fn emojis(
     State(st): State<AppState>,
     Query(q): Query<ReadQuery>,
     jar: PrivateCookieJar,
+    headers: axum::http::HeaderMap,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
-    authorize_member(&st, &jar, &guild).await?;
+    // The embedded Activity authenticates with a bearer token (its third-party
+    // iframe gets no session cookie). The emoji picker pulls custom emoji from
+    // every server the user shares with the bot, so this read — like `bootstrap`
+    // and `list_guilds` — must accept either credential, or the Activity 401s on
+    // each cross-server fetch and the picker mistakes it for an expired session.
+    let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
+    authorize_member_session(&st, session, &guild).await?;
     let value = fetch_emojis(&st, &guild, q.fresh).await?;
     Ok(value_response(&value))
 }
