@@ -199,12 +199,19 @@ export const SHARED_BOT_PERMISSIONS: string = Object.values(SHARED_BOT_PERMISSIO
  * origin is available. (The add-bot popup flow reads the returned `guild_id`
  * from that redirect's query; see `core/oauth/flows`.)
  *
+ * Pass `redirect: false` to omit that bounce-back — the embedded Activity needs
+ * this: its `window.location.origin` is the sandboxed `…discordsays.com` proxy
+ * origin, which is *not* a registered redirect URI, so attaching it would make
+ * Discord reject the invite. The Activity opens this link through the host SDK
+ * (externally), which can't return into the iframe anyway, so it re-checks bot
+ * presence on demand instead of relying on a redirect (see `activityStore`).
+ *
  * Pass `guildId` to pre-select that server in Discord's "Add to Server" picker —
  * used by the re-invite prompts that target the *connected* guild (e.g. granting
  * the bot Manage Webhooks there). It's a pre-selection, not a lock; the generic
  * "Add to another server" CTA omits it so the user chooses freely.
  */
-export function botInviteUrl(guildId?: string): string {
+export function botInviteUrl(guildId?: string, opts?: { redirect?: boolean }): string {
   if (!DISCORD_CLIENT_ID) return "";
   const params = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
@@ -212,7 +219,7 @@ export function botInviteUrl(guildId?: string): string {
     permissions: SHARED_BOT_PERMISSIONS,
   });
   const origin = typeof window !== "undefined" ? window.location?.origin : "";
-  if (origin) {
+  if ((opts?.redirect ?? true) && origin) {
     params.set("response_type", "code");
     params.set("redirect_uri", origin);
   }

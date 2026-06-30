@@ -14,7 +14,7 @@
  */
 
 import { create } from "zustand";
-import { DISCORD_CLIENT_ID, WEB_APP_BASE_URL } from "@/core/guild/config";
+import { DISCORD_CLIENT_ID, WEB_APP_BASE_URL, botInviteUrl } from "@/core/guild/config";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { fetchUserGuilds, type PickerGuild } from "@/core/guild/api";
@@ -126,6 +126,13 @@ interface ActivityState {
    *  guild-launch path sets this — a DM launch resolves its meta synchronously from
    *  the already-loaded postable list. */
   targetGuildMetaLoading: boolean;
+  /** True on a server launch whose launching guild doesn't have the DWEEB bot —
+   *  there's nothing to post into until it's added, and the guild bootstrap would
+   *  just 404. Drives the bar's "Add DWEEB to this server" call-to-action instead
+   *  of a dead-end error. Always false on a DM launch (its destination picker only
+   *  lists servers that already have the bot) and while presence is still unknown
+   *  (we stay optimistic then — the proxy is the real guard). */
+  botMissing: boolean;
   /** Whether the signed-in user holds Manage Webhooks in {@link targetGuildId} —
    *  the gate `activity_post` enforces server-side. `null` while it's still being
    *  determined (a server launch's guild meta hasn't loaded yet, or it couldn't be
@@ -167,6 +174,15 @@ interface ActivityState {
    *  saved messages — the features the embedded surface omits). Opens the public
    *  site with the draft carried in a share link. */
   openOnWeb(): Promise<void>;
+  /** Open Discord's "Add to Server" flow for the launching guild so the user can
+   *  add the missing DWEEB bot (see {@link botMissing}). Routes through the host
+   *  SDK — the sandboxed iframe can't open discord.com itself — and pre-selects
+   *  the launching server. Pairs with {@link recheckBot} once they're done. */
+  addBotToServer(): Promise<void>;
+  /** Re-check whether the bot has since been added to the launching guild, force-
+   *  fresh (the proxy/Discord can lag a moment after an add). Clears
+   *  {@link botMissing} and wires up the server's data once it's present. */
+  recheckBot(): Promise<void>;
   /** Re-point `publish()` at a different channel in the target guild. */
   setTargetChannel(channelId: string): void;
   /** Pick the destination server (DM launch): loads its channels + preview data
@@ -215,6 +231,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   guildsLoading: false,
   targetGuildMeta: null,
   targetGuildMetaLoading: false,
+  botMissing: false,
   canPostToTarget: null,
 
   async init() {
@@ -331,11 +348,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       void setActivityPresence("Building a message").catch(() => {});
 
       if (guildId) {
-        // Server launch: load the launching server's data so the preview
-        // resolves mentions/emoji and the channel picker is populated.
-        void useGuildStore.getState().connect(guildId);
-        // …and its display meta (name + icon) for the header's server indicator,
-        // which the bootstrap above doesn't carry.
+        // Server launch: resolve the launching server's display meta (name + icon
+        // for the header indicator) AND whether the bot is even there, then — only
+        // if it is — load its roles/channels/emoji for the preview and picker.
+        // Gating the bootstrap on bot presence avoids a guaranteed 404 + dead-end
+        // toast when the bot hasn't been added; the bar shows an "Add DWEEB" CTA
+        // for that case instead (see `botMissing` / `loadTargetGuildMeta`).
         void loadTargetGuildMeta(set, guildId);
       } else {
         // DM launch: load the servers the user can post to, so they can pick a
@@ -565,6 +583,43 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 
+  async addBotToServer() {
+    const guildId = get().context?.guildId ?? undefined;
+    // Pre-select the launching server in Discord's picker, and omit the redirect
+    // (the sandbox origin isn't a registered redirect URI — see `botInviteUrl`).
+    const url = botInviteUrl(guildId, { redirect: false });
+    if (!url) {
+      pushToast("Adding the bot isn't available in this build.", "error");
+      return;
+    }
+    try {
+      // The sandboxed iframe can't open discord.com itself — hand it to the host.
+      await openExternalLink(url);
+      pushToast('Add DWEEB in the window that opened, then tap "Check again".', "info");
+    } catch {
+      // The web app / dev URL-override aren't sandboxed, so a plain open works
+      // there when the SDK path can't.
+      try {
+        window.open(url, "_blank", "noopener");
+      } catch {
+        /* nothing more we can do */
+      }
+    }
+  },
+
+  async recheckBot() {
+    const guildId = get().context?.guildId;
+    if (!guildId || get().targetGuildMetaLoading) return;
+    const wasMissing = get().botMissing;
+    // Force-fresh: a just-added bot may not show in the proxy's cached guild list
+    // yet. `loadTargetGuildMeta` clears `botMissing` and connects when it's now
+    // present, so a success needs no toast — the CTA simply gives way to the bar.
+    await loadTargetGuildMeta(set, guildId, true);
+    if (wasMissing && get().botMissing) {
+      pushToast("DWEEB isn't in this server yet — add it, then check again.", "info");
+    }
+  },
+
   setTargetChannel(channelId) {
     set({ targetChannelId: channelId });
     // On a server launch the destination is shared: tell the room so everyone's
@@ -595,26 +650,42 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 }));
 
 /** Load a server launch's launching-guild meta (name + icon) for the header's
- *  top-right server indicator, and resolve whether the user can post there.
- *  The bootstrap load carries roles/channels/emoji but not the guild's own
- *  name/icon or the caller's permission, so both are read off the user's guild
- *  list here. Non-fatal: on failure the indicator just doesn't render and
- *  `canPostToTarget` stays null (the bar then stays optimistic — the proxy is the
- *  real guard). */
+ *  top-right server indicator, resolve whether the user can post there, and —
+ *  only when the bot is actually present — kick off the guild bootstrap
+ *  (roles/channels/emoji for the preview + channel picker). The bootstrap can't
+ *  carry the guild's own name/icon, the caller's permission, or bot presence, so
+ *  all three are read off the user's guild list here.
+ *
+ *  When we *positively* learn the bot is absent we set {@link ActivityState.botMissing}
+ *  and skip the bootstrap (it would just 404 with a dead-end toast) — the bar
+ *  shows an "Add DWEEB" CTA instead. When presence can't be resolved (fetch
+ *  failed / the guild isn't in the list) we stay optimistic and load the
+ *  bootstrap anyway, exactly as before — the proxy is the real guard.
+ *
+ *  Pass `force` (the "Check again" re-check) to bypass the proxy's cached guild
+ *  list, since a just-added bot may not show in it yet. */
 async function loadTargetGuildMeta(
   set: (partial: Partial<ActivityState>) => void,
   guildId: string,
+  force = false,
 ): Promise<void> {
   set({ targetGuildMetaLoading: true });
+  // Optimistic default: if we can't tell whether the bot is there, behave as
+  // before and load the bootstrap. Only a *known* absence diverts to the CTA.
+  let botPresent = true;
   try {
-    const all = await fetchUserGuilds();
+    const all = await fetchUserGuilds(force);
     seedAuthGuilds(all);
     const meta = all.find((g) => g.id === guildId);
     if (meta) {
-      // The launching guild comes from the *full* list, which includes servers
-      // the user can't post to, so honour the flag (absent → no access, the same
-      // convention the Webhook Manager uses).
-      set({ targetGuildMeta: meta, canPostToTarget: meta.can_manage_webhooks ?? false });
+      botPresent = meta.bot_present;
+      set({
+        targetGuildMeta: meta,
+        botMissing: !botPresent,
+        // No bot ⇒ nothing to post into. Otherwise honour the perm flag (absent
+        // → no access, the same convention the Webhook Manager uses).
+        canPostToTarget: botPresent ? (meta.can_manage_webhooks ?? false) : false,
+      });
     }
   } catch {
     // Leave the indicator unrendered — it's context, not a blocker.
@@ -622,6 +693,10 @@ async function loadTargetGuildMeta(
     // Clear loading either way: on failure the badge falls back to nothing rather
     // than holding a perpetual skeleton.
     set({ targetGuildMetaLoading: false });
+    // Load the server's data unless we know the bot's missing (that fetch just
+    // 404s, and the "Add DWEEB" CTA covers the case). This also wires up the
+    // preview/picker when a "Check again" finds the bot was finally added.
+    if (botPresent) void useGuildStore.getState().connect(guildId);
   }
 }
 

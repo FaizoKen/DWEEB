@@ -23,6 +23,7 @@ import {
   GlobeIcon,
   HistoryIcon,
   LockIcon,
+  PlusIcon,
   RedoIcon,
   RefreshIcon,
   SendIcon,
@@ -68,6 +69,13 @@ export function ActivityBar() {
   const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
   const targetGuildMeta = useActivityStore((s) => s.targetGuildMeta);
   const targetGuildMetaLoading = useActivityStore((s) => s.targetGuildMetaLoading);
+
+  // The DWEEB bot isn't in the launching server: there's nothing to post into
+  // until it's added, so the primary action becomes "Add DWEEB" rather than a
+  // Post button that would dead-end on a 404 (see `botMissing` in activityStore).
+  const botMissing = useActivityStore((s) => s.botMissing);
+  const addBotToServer = useActivityStore((s) => s.addBotToServer);
+  const recheckBot = useActivityStore((s) => s.recheckBot);
 
   // Destination channel name for the confirm/success dialogs — resolved from the
   // connected guild's channel map (the same source the picker reads).
@@ -167,7 +175,8 @@ export function ActivityBar() {
             shared={!isDm}
             // Edit-only collaborators see the destination but can't move it —
             // re-pointing a shared room is a posting decision they don't hold.
-            disabled={blockedFromPosting}
+            // Also inert until the bot's in the server (no channels are loaded).
+            disabled={blockedFromPosting || botMissing}
           />
         ) : null}
       </div>
@@ -178,9 +187,15 @@ export function ActivityBar() {
             disabled until one is picked — and, like Post, it reads through that
             webhook, so it's gated on Manage Webhooks too. */}
         <IconButton
-          label={blockedFromPosting ? blockedReason : "Restore a message DWEEB posted"}
+          label={
+            botMissing
+              ? "Add DWEEB to this server first to restore a message"
+              : blockedFromPosting
+                ? blockedReason
+                : "Restore a message DWEEB posted"
+          }
           onClick={() => setRestoreOpen(true)}
-          disabled={noDestination || blockedFromPosting}
+          disabled={noDestination || blockedFromPosting || botMissing}
         >
           <HistoryIcon />
         </IconButton>
@@ -203,7 +218,30 @@ export function ActivityBar() {
 
         <span className={styles.sep} aria-hidden="true" />
 
-        {blockedFromPosting ? (
+        {botMissing ? (
+          // The bot isn't in this server — posting is impossible until it's added.
+          // Swap the Post button for a direct "Add DWEEB" call-to-action (opens
+          // Discord's add-bot flow via the host), plus a "Check again" that
+          // re-detects it once added. Editing/collab still works in the meantime.
+          <>
+            <Button
+              variant="primary"
+              size="sm"
+              leadingIcon={<PlusIcon size={14} />}
+              onClick={() => void addBotToServer()}
+              title="Add the DWEEB bot to this server so you can post here"
+            >
+              Add DWEEB
+            </Button>
+            <IconButton
+              label="Check again — has DWEEB been added yet?"
+              onClick={() => void recheckBot()}
+              disabled={targetGuildMetaLoading}
+            >
+              <RefreshIcon />
+            </IconButton>
+          </>
+        ) : blockedFromPosting ? (
           // No Manage Webhooks here: editing/collab stays open (above), but the
           // primary action becomes an "edit only" explainer rather than a Post
           // button that would dead-end on a 403. Tapping it surfaces the reason as
