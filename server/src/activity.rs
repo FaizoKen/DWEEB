@@ -46,8 +46,8 @@ use tokio::sync::broadcast;
 use crate::discord::{DiscordUser, Webhook};
 use crate::error::AppError;
 use crate::routes::{
-    authorize_member_session, authorize_webhooks_session, current_session, ensure_channel_in_guild,
-    is_snowflake, AppState,
+    authorize_member_session, authorize_webhooks_session, current_session, dispatcher_api,
+    ensure_channel_in_guild, is_snowflake, relay_dispatcher, AppState,
 };
 use crate::session::{now, Session};
 
@@ -205,6 +205,11 @@ pub struct PostBody {
     channel_id: String,
     /// The wire payload the browser built (components + flags + username/avatar).
     message: Value,
+    /// Keep the posted message's interactive components alive past the TTL by
+    /// spending one of the guild's never-expire slots on it. Best-effort and only
+    /// honoured for a message that actually has components — see the claim below.
+    #[serde(default)]
+    make_permanent: bool,
 }
 
 /// `POST /api/activity/post` `{ guild_id, channel_id, message }` — post the
@@ -270,6 +275,38 @@ pub async fn activity_post(
             "https://discord.com/channels/{guild}/{channel_id}/{message_id}"
         ))
     };
+
+    // Optionally spend a never-expire slot on the message we just posted, so its
+    // buttons & selects keep working past the deployment TTL. Best-effort and off
+    // the post's critical path: a fresh post has no TTL-disabled components to
+    // revive (unlike the dashboard grant), so the claim is the only step, and any
+    // failure rides back as `permanent_error` rather than failing a post that has
+    // already landed. The FE only offers the toggle for interactive messages, but
+    // we re-guard on a real message id regardless.
+    let (permanent, permanent_error) = if body.make_permanent && !message_id.is_empty() {
+        match claim_permanent_slot(&st, &guild, &channel_id, &message_id, &session.uid).await {
+            PermanentClaim::Claimed => (true, Value::Null),
+            PermanentClaim::Full => (
+                false,
+                Value::String(
+                    "Every never-expire slot is in use — free one in DWEEB on the web.".into(),
+                ),
+            ),
+            // Feature isn't configured on this deployment — the FE wouldn't have
+            // shown the toggle, so stay silent rather than surface a confusing note.
+            PermanentClaim::Unavailable => (false, Value::Null),
+            PermanentClaim::Failed => (
+                false,
+                Value::String(
+                    "Couldn't reach the never-expire service — try again in DWEEB on the web."
+                        .into(),
+                ),
+            ),
+        }
+    } else {
+        (false, Value::Null)
+    };
+
     Ok(Json(json!({
         "message_id": message_id,
         "channel_id": channel_id,
@@ -278,8 +315,100 @@ pub async fn activity_post(
         // The webhook that authored the message — the FE passes it back to
         // `activity_edit` so an update targets exactly this one.
         "webhook_id": webhook_id,
+        // Never-expire outcome for the success dialog's receipt. `permanent` is
+        // true only when a slot was actually claimed; `permanent_error` carries a
+        // user-facing reason when the user asked but it couldn't be granted.
+        "permanent": permanent,
+        "permanent_error": permanent_error,
     }))
     .into_response())
+}
+
+/// Outcome of a best-effort never-expire claim made right after a post.
+enum PermanentClaim {
+    /// A slot was spent on the message — its components won't expire.
+    Claimed,
+    /// Every slot is already taken (dispatcher answered 409).
+    Full,
+    /// The never-expire feature isn't configured on this deployment.
+    Unavailable,
+    /// The dispatcher couldn't be reached or answered unexpectedly.
+    Failed,
+}
+
+/// Claim a never-expire slot for `message_id` via the interactions dispatcher's
+/// internal `/permanent` API — the same service `routes::permanent_add` drives
+/// for the web dashboard, called here with the resolved Activity session's user
+/// as `added_by`. Never returns an error: the post has already landed, so a claim
+/// problem is reported in the response, not raised.
+async fn claim_permanent_slot(
+    st: &AppState,
+    guild: &str,
+    channel_id: &str,
+    message_id: &str,
+    added_by: &str,
+) -> PermanentClaim {
+    let Ok(api) = dispatcher_api(st) else {
+        return PermanentClaim::Unavailable;
+    };
+    let req = api
+        .http
+        .post(format!("{}/permanent/{guild}", api.base))
+        .bearer_auth(&api.token)
+        .json(&json!({
+            "message_id": message_id,
+            "channel_id": channel_id,
+            "added_by": added_by,
+        }));
+    match req.send().await {
+        Ok(resp) => match resp.status().as_u16() {
+            200 => PermanentClaim::Claimed,
+            409 => PermanentClaim::Full,
+            _ => PermanentClaim::Failed,
+        },
+        Err(_) => PermanentClaim::Failed,
+    }
+}
+
+// ── Never-expire slot state (GET /api/activity/permanent) ────────────────────
+
+#[derive(Deserialize)]
+pub struct PermanentQuery {
+    #[serde(default)]
+    guild_id: String,
+}
+
+/// `GET /api/activity/permanent?guild_id=<id>` — never-expire slot usage for the
+/// Activity's destination guild, so the pre-post confirm can show the "Never
+/// expire" toggle (used/cap, the per-message TTL, and whether the feature is on).
+///
+/// The web app reads this from `/api/guilds/:id/permanent`, but that handler is
+/// cookie-only (`authorize_member`); the Activity authenticates with a bearer, so
+/// it needs this twin. Gated like the post itself — Manage Webhooks in the guild —
+/// and relays the dispatcher's slots JSON verbatim, so the FE gets the exact same
+/// shape (`{ cap, used, ttl_days, items }`) it parses for the web app. A `501`
+/// means the feature is off on this deployment, which the FE treats as "no toggle".
+pub async fn activity_permanent(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Query(q): Query<PermanentQuery>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let guild = q.guild_id.trim().to_string();
+    if !is_snowflake(&guild) {
+        return Err(bad_request("guild_id must be a Discord id"));
+    }
+    authorize_webhooks_session(&st, session, &guild).await?;
+    let api = dispatcher_api(&st)?;
+    let req = api
+        .http
+        .get(format!("{}/permanent/{guild}", api.base))
+        .bearer_auth(&api.token);
+    relay_dispatcher(req).await
 }
 
 /// Find a DWEEB-owned incoming webhook in `channel_id` whose token we can post

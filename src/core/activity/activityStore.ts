@@ -127,8 +127,10 @@ interface ActivityState {
   /** Post the current message into the chosen channel as a NEW message. Resolves
    *  with the post result on success (also stored as {@link lastPost}) so the
    *  caller can pop the success dialog, or null when it was guarded/failed (the
-   *  failure is surfaced as a toast). */
-  publish(): Promise<ActivityPostResult | null>;
+   *  failure is surfaced as a toast). `makePermanent` asks the proxy to also spend
+   *  a never-expire slot on the new message (best-effort; the result reports how
+   *  it went). */
+  publish(makePermanent?: boolean): Promise<ActivityPostResult | null>;
   /** PATCH the message last posted from this Activity with the current draft.
    *  Only meaningful while {@link lastPost} matches the chosen destination.
    *  Returns the result on success / null on failure, like {@link publish}. */
@@ -341,7 +343,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 
-  async publish() {
+  async publish(makePermanent = false) {
     const guildId = get().targetGuildId;
     if (!guildId) {
       pushToast("Pick a server to post to first.", "error");
@@ -356,7 +358,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ publishing: true });
     try {
       const payload = buildWirePayload(useMessageStore.getState().message);
-      const result = await publishToChannel(guildId, channelId, payload);
+      const result = await publishToChannel(guildId, channelId, payload, makePermanent);
       set({ lastPost: result });
       // Success is surfaced by the post-success dialog (see ActivityBar), so no
       // toast here — the two would be redundant.

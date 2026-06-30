@@ -76,6 +76,48 @@
   color: var(--app-text-muted);
 }
 
+/* "Never expire" control for messages with interactive components — mirrors the
+   web app's PermanentOptIn box. */
+.permanentBox {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+}
+
+.permanentRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.permanentCopy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.permanentTitle {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--app-text);
+}
+
+.permanentSub {
+  font-size: var(--app-text-xs);
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+
+/* "Manage on web" hand-off shown under the box when every slot is taken. */
+.permanentAction {
+  margin-top: 8px;
+}
+
 /* Spinner shown in the confirm button while the post is in flight. Borrows the
    button's text colour via `currentColor`, so it reads on the primary fill. */
 .spinner {

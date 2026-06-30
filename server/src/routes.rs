@@ -555,7 +555,7 @@ pub(crate) fn dispatcher_api(st: &AppState) -> Result<&Arc<DispatcherApi>, AppEr
 /// statuses the FE acts on (200, 400, 404 not-found, 409 full/taken) relay
 /// verbatim; anything else means *our* deployment is misconfigured or down,
 /// which is a gateway error, not the caller's.
-async fn relay_dispatcher(req: reqwest::RequestBuilder) -> Result<Response, AppError> {
+pub(crate) async fn relay_dispatcher(req: reqwest::RequestBuilder) -> Result<Response, AppError> {
     let resp = req
         .send()
         .await

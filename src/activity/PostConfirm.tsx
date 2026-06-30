@@ -20,13 +20,16 @@
  * runs `publish()` / `update()` and, on success, opens `PostSuccess`.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useRoleInfo } from "@/core/guild/guildStore";
 import { summarizePings, type PingSummary } from "@/core/schema/mentions";
-import type { PickerGuild } from "@/core/guild/api";
+import { inspectCapabilities } from "@/core/schema/capability";
+import type { PickerGuild, PermanentSlots } from "@/core/guild/api";
+import { fetchActivityPermanentSlots } from "@/core/activity/api";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
+import { Switch } from "@/ui/Switch";
 import { SendIcon, RefreshIcon } from "@/ui/Icon";
 import { ServerGlyph } from "./GuildPicker";
 import styles from "./PostConfirm.module.css";
@@ -43,12 +46,19 @@ export interface PostConfirmProps {
   newCopy?: boolean;
   /** Destination server, for the icon + name. Null until its meta is known. */
   guild?: PickerGuild | null;
+  /** Destination guild id — needed to read the never-expire slot state. */
+  guildId?: string | null;
   /** Resolved destination channel name (without the leading `#`), when known. */
   channelName?: string;
   /** True while the confirmed post is in flight — drives the button spinner. */
   busy?: boolean;
-  onConfirm: () => void;
+  /** Confirm the post. `makePermanent` carries the "Never expire" choice (always
+   *  false unless the toggle was shown and switched on). */
+  onConfirm: (makePermanent: boolean) => void;
   onCancel: () => void;
+  /** Hand off to the full web app — used by the "Manage on web" action when every
+   *  never-expire slot is taken (managing/freeing slots lives on the web). */
+  onManageOnWeb?: () => void;
 }
 
 /** Render a short, readable list of user-mention chips with a "+N more" tail. */
@@ -144,18 +154,112 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
   );
 }
 
+/**
+ * The "Never expire" control for a message with interactive components. By
+ * default the post's buttons & selects stop working after the deployment TTL;
+ * claiming one of the server's never-expire slots keeps them alive. Mirrors the
+ * web app's PermanentOptIn, minus the update-target/already-permanent cases (the
+ * Activity only offers it on a brand-new post). When every slot is taken the
+ * switch gives way to a "Manage on web" hand-off — freeing slots lives there.
+ */
+function PermanentOptIn({
+  slots,
+  checked,
+  onChange,
+  busy,
+  onManageOnWeb,
+}: {
+  slots: PermanentSlots;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  busy: boolean;
+  onManageOnWeb?: () => void;
+}) {
+  const slotsFull = slots.used >= slots.cap;
+  const sub = slotsFull
+    ? `All ${slots.cap} never-expire slots are in use — free one on the web`
+    : `Buttons & selects keep working · ${slots.used}/${slots.cap} slots used`;
+
+  return (
+    <div className={styles.permanentBox}>
+      <div className={styles.permanentRow}>
+        <span className={styles.permanentCopy} id="post-confirm-permanent">
+          <span className={styles.permanentTitle}>Never expire</span>
+          <span className={styles.permanentSub}>{sub}</span>
+        </span>
+        {!slotsFull ? (
+          <Switch
+            aria-labelledby="post-confirm-permanent"
+            checked={checked}
+            disabled={busy}
+            onChange={(e) => onChange(e.currentTarget.checked)}
+          />
+        ) : null}
+      </div>
+      {slotsFull && onManageOnWeb ? (
+        <div className={styles.permanentAction}>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={onManageOnWeb}>
+            Manage on web ↗
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function PostConfirm({
   open,
   mode,
   newCopy = false,
   guild,
+  guildId,
   channelName,
   busy = false,
   onConfirm,
   onCancel,
+  onManageOnWeb,
 }: PostConfirmProps) {
   const message = useMessageStore((s) => s.message);
   const pings = useMemo(() => summarizePings(message), [message]);
+
+  // Whether the message carries interactive components — the only case where
+  // expiry (and so the "Never expire" toggle) is relevant. Same signal the web
+  // app keys its permanence UI on.
+  const hasInteractive = useMemo(
+    () => inspectCapabilities(message).some((c) => c.kind === "app_webhook"),
+    [message],
+  );
+
+  // Never-expire slot state, fetched when the confirm opens for a brand-new post
+  // of an interactive message. Null until it resolves; the toggle only renders on
+  // a successful fetch with expiry actually configured. `makePermanent` is the
+  // switch — defaulted ON when a slot is free so interactive posts keep working
+  // unless the user opts out (matching the web app).
+  const offersPermanent = open && mode === "new" && hasInteractive && !!guildId;
+  const [slots, setSlots] = useState<PermanentSlots | null>(null);
+  const [makePermanent, setMakePermanent] = useState(false);
+  useEffect(() => {
+    if (!offersPermanent || !guildId) return;
+    setSlots(null);
+    setMakePermanent(false);
+    const ac = new AbortController();
+    fetchActivityPermanentSlots(guildId, ac.signal)
+      .then((s) => {
+        setSlots(s);
+        // On when expiry is configured here and a slot is free to claim; a full
+        // server (or expiry off) leaves it off — the user can't claim from here.
+        setMakePermanent(s.ttl_days !== null && s.used < s.cap);
+      })
+      .catch(() => {
+        // 501 (feature off), 403, network, abort — just leave the toggle hidden;
+        // the post proceeds as an ordinary (expiring) message.
+      });
+    return () => ac.abort();
+  }, [offersPermanent, guildId]);
+
+  // Show the toggle only once slots resolved and this deployment actually expires
+  // components (ttl_days set) — otherwise there's nothing to keep alive.
+  const showPermanent = offersPermanent && slots != null && slots.ttl_days !== null;
 
   const title =
     mode === "update"
@@ -193,7 +297,7 @@ export function PostConfirm({
           <Button
             variant="primary"
             size="sm"
-            onClick={onConfirm}
+            onClick={() => onConfirm(showPermanent ? makePermanent : false)}
             disabled={busy}
             leadingIcon={
               busy ? (
@@ -241,6 +345,16 @@ export function PostConfirm({
           This replaces the whole message with the current draft — anything not rebuilt in the
           editor is overwritten.
         </p>
+      ) : null}
+
+      {showPermanent && slots ? (
+        <PermanentOptIn
+          slots={slots}
+          checked={makePermanent}
+          onChange={setMakePermanent}
+          busy={busy}
+          onManageOnWeb={onManageOnWeb}
+        />
       ) : null}
 
       <PingSummaryView pings={pings} />

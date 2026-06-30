@@ -77,7 +77,12 @@ export function ActivityBar() {
   // actual POST/PATCH runs from `confirmPost` once the user confirms.
   const [pending, setPending] = useState<PendingPost | null>(null);
   // The post-success dialog: set after a publish/update lands, cleared on close.
-  const [posted, setPosted] = useState<{ mode: "new" | "update" } | null>(null);
+  // `permanent`/`permanentError` carry the never-expire outcome for its receipt.
+  const [posted, setPosted] = useState<{
+    mode: "new" | "update";
+    permanent: boolean;
+    permanentError: string | null;
+  } | null>(null);
 
   const noDestination = !targetGuildId || !targetChannelId;
   // "Update" applies only while the chosen destination still matches where we
@@ -90,14 +95,20 @@ export function ActivityBar() {
   // Run the confirmed post. `publish`/`update` resolve with the result on
   // success (null on failure, which they toast), so we only swap the confirm
   // dialog for the success one when something actually landed; a failure leaves
-  // the confirm open so the user can retry.
-  const confirmPost = async () => {
+  // the confirm open so the user can retry. `makePermanent` (the confirm's
+  // "Never expire" choice) only applies to a new post — an update keeps whatever
+  // slot the message already holds.
+  const confirmPost = async (makePermanent: boolean) => {
     if (!pending) return;
     const { mode } = pending;
-    const result = mode === "update" ? await update() : await publish();
+    const result = mode === "update" ? await update() : await publish(makePermanent);
     if (result) {
       setPending(null);
-      setPosted({ mode });
+      setPosted({
+        mode,
+        permanent: result.permanent ?? false,
+        permanentError: result.permanent_error ?? null,
+      });
     }
   };
 
@@ -211,10 +222,12 @@ export function ActivityBar() {
         mode={pending?.mode ?? "new"}
         newCopy={pending?.newCopy ?? false}
         guild={targetGuildMeta}
+        guildId={targetGuildId}
         channelName={channelName}
         busy={publishing}
-        onConfirm={() => void confirmPost()}
+        onConfirm={(makePermanent) => void confirmPost(makePermanent)}
         onCancel={() => setPending(null)}
+        onManageOnWeb={() => void openOnWeb()}
       />
 
       <PostSuccess
@@ -224,6 +237,9 @@ export function ActivityBar() {
         channelName={channelName}
         canView={lastPost?.url != null}
         onView={() => void openLastPost()}
+        permanent={posted?.permanent ?? false}
+        permanentError={posted?.permanentError ?? null}
+        onManageOnWeb={() => void openOnWeb()}
         onClose={() => setPosted(null)}
       />
     </div>

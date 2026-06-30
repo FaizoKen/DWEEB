@@ -7,6 +7,7 @@
  */
 
 import { proxyFetch } from "@/core/net/proxyFetch";
+import type { PermanentSlots } from "@/core/guild/api";
 
 /** Read the proxy's `{ error }` body for a failed call, with a sane fallback. */
 async function errorMessage(res: Response): Promise<string> {
@@ -47,27 +48,66 @@ export interface ActivityPostResult {
   guild_id: string;
   url: string | null;
   webhook_id?: string;
+  /** True when a never-expire slot was claimed for this post (the user opted in
+   *  and it succeeded). Absent/false on an ordinary post. */
+  permanent?: boolean;
+  /** A user-facing reason the requested never-expire claim couldn't be granted
+   *  (e.g. all slots full) — null/absent when there was nothing to report. */
+  permanent_error?: string | null;
 }
 
 /** `POST /api/activity/post` — post the built message into the channel through a
- *  DWEEB-owned webhook (the proxy reuses or creates one). */
+ *  DWEEB-owned webhook (the proxy reuses or creates one). When `makePermanent` is
+ *  set the proxy also spends a never-expire slot on the new message (best-effort;
+ *  reported back via `permanent` / `permanent_error`). */
 export async function publishToChannel(
   guildId: string,
   channelId: string,
   message: unknown,
+  makePermanent = false,
 ): Promise<ActivityPostResult> {
   let res: Response;
   try {
     res = await proxyFetch("/api/activity/post", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ guild_id: guildId, channel_id: channelId, message }),
+      body: JSON.stringify({
+        guild_id: guildId,
+        channel_id: channelId,
+        message,
+        make_permanent: makePermanent,
+      }),
     });
   } catch {
     throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
   }
   if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as ActivityPostResult;
+}
+
+/** `GET /api/activity/permanent` — never-expire slot usage for the destination
+ *  guild, so the pre-post confirm can offer the "Never expire" toggle. The
+ *  bearer-gated twin of the web app's `/api/guilds/:id/permanent`; returns the
+ *  same `{ cap, used, ttl_days, items }` shape. Throws `{ status: 501 }` when the
+ *  feature is off on this deployment — callers hide the toggle on it. */
+export async function fetchActivityPermanentSlots(
+  guildId: string,
+  signal?: AbortSignal,
+): Promise<PermanentSlots> {
+  let res: Response;
+  try {
+    res = await proxyFetch(`/api/activity/permanent?guild_id=${encodeURIComponent(guildId)}`, {
+      signal,
+    });
+  } catch {
+    throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
+  }
+  if (!res.ok) {
+    const err = new Error(await errorMessage(res)) as Error & { status: number };
+    err.status = res.status;
+    throw err;
+  }
+  return (await res.json()) as PermanentSlots;
 }
 
 /** Result of a successful restore: the raw Discord message to decode into the

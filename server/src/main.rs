@@ -337,6 +337,10 @@ async fn run() {
             "/api/activity/restore",
             post(activity::activity_restore).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
+        // Never-expire slot state for the destination guild, so the pre-post
+        // confirm can offer the "Never expire" toggle. Bearer-gated read (the
+        // cookie-only guild endpoint can't serve the Activity).
+        .route("/api/activity/permanent", get(activity::activity_permanent))
         .route("/api/activity/room/:instance", get(activity::activity_room))
         // Image proxy: fetches an external image/video so the sandboxed Activity
         // iframe (whose CSP blocks arbitrary `<img>`/`<video>` hosts) can render

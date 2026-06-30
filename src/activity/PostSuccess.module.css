@@ -77,3 +77,19 @@
   line-height: 1.5;
   color: var(--app-text-muted);
 }
+
+/* Never-expire claim failure — amber, with the manage-on-web hand-off. */
+.permanentError {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-sm);
+  background: rgba(240, 178, 50, 0.1);
+  border: 1px solid rgba(240, 178, 50, 0.35);
+}
+
+.permanentErrorText {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text);
+}

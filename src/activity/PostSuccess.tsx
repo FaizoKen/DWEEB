@@ -32,6 +32,15 @@ export interface PostSuccessProps {
   canView: boolean;
   /** Open the posted message in Discord — routed through the SDK by the store. */
   onView: () => void;
+  /** True when a never-expire slot was claimed — shows a "won't expire" receipt
+   *  for the message's interactive components. */
+  permanent?: boolean;
+  /** A reason the requested never-expire claim couldn't be granted (e.g. slots
+   *  full) — shown with a "manage on web" hand-off. Null/absent when there's
+   *  nothing to report. */
+  permanentError?: string | null;
+  /** Hand off to the web app — used by the never-expire error's manage action. */
+  onManageOnWeb?: () => void;
   onClose: () => void;
 }
 
@@ -42,6 +51,9 @@ export function PostSuccess({
   channelName,
   canView,
   onView,
+  permanent = false,
+  permanentError,
+  onManageOnWeb,
   onClose,
 }: PostSuccessProps) {
   // Tail of the banner sentence — names the destination when we have it.
@@ -121,7 +133,26 @@ export function PostSuccess({
             </dd>
           </div>
         ) : null}
+        {permanent ? (
+          <div className={styles.fact}>
+            <dt>Interaction</dt>
+            <dd>Never expires — its buttons &amp; selects keep working.</dd>
+          </div>
+        ) : null}
       </dl>
+
+      {permanentError ? (
+        <div className={styles.permanentError} role="note">
+          <p className={styles.permanentErrorText}>
+            Couldn’t keep its buttons &amp; selects from expiring: {permanentError}
+          </p>
+          {onManageOnWeb ? (
+            <Button size="sm" variant="secondary" onClick={onManageOnWeb}>
+              Manage on web ↗
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       {mode === "new" ? (
         <p className={styles.note}>
