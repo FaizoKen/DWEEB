@@ -563,8 +563,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ targetChannelId: channelId });
     // On a server launch the destination is shared: tell the room so everyone's
     // editor re-points to the same channel. No-op on a DM launch (collaborators
-    // don't share a postable server) — see `broadcastTarget`.
-    broadcastTarget(channelId);
+    // don't share a postable server) — see `broadcastTarget`. Skip the broadcast
+    // for an edit-only user: moving a shared destination is a posting decision, so
+    // only someone who can post may re-point the room (the picker is read-only for
+    // them too — this guards the path as defence in depth).
+    if (get().canPostToTarget !== false) broadcastTarget(channelId);
   },
 
   setTargetGuild(guildId) {

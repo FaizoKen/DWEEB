@@ -66,6 +66,7 @@ export function ChannelPicker({
   selectedId,
   onSelect,
   shared = false,
+  disabled = false,
 }: {
   /** The channel the next post goes to, or null when none is chosen yet. */
   selectedId: string | null;
@@ -76,6 +77,10 @@ export function ChannelPicker({
    *  re-point the whole room (the store broadcasts it). Off on a DM launch, where
    *  each composer keeps their own destination. */
   shared?: boolean;
+  /** Read-only: show the destination but don't let the user change it. Used for
+   *  an edit-only collaborator (no Manage Webhooks) on a server launch — moving a
+   *  shared destination is a posting decision, which they don't hold. */
+  disabled?: boolean;
 }) {
   const data = useGuildStore((s) => s.data);
   const loading = useGuildStore((s) => s.status === "loading" && !s.data);
@@ -93,9 +98,12 @@ export function ChannelPicker({
 
   // On a server launch the destination is room-wide, so spell that out in the
   // trigger's tooltip — picking a channel moves it for everyone, not just you.
-  const triggerTitle = selected
-    ? `Posting to #${label}${shared ? " — shared with everyone in this room" : ""} · click to change`
-    : `Choose a channel to post to${shared ? " (shared with everyone in this room)" : ""}`;
+  // When read-only (an edit-only collaborator) explain why it can't be changed.
+  const triggerTitle = disabled
+    ? `Posting to #${label} — only people who can post here can change the channel`
+    : selected
+      ? `Posting to #${label}${shared ? " — shared with everyone in this room" : ""} · click to change`
+      : `Choose a channel to post to${shared ? " (shared with everyone in this room)" : ""}`;
 
   // Webhook-hostable channels, plus the current selection even if its type isn't
   // normally listed (e.g. launched from a voice channel) so the default never
@@ -168,6 +176,7 @@ export function ChannelPicker({
         type="button"
         className={styles.trigger}
         onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         title={triggerTitle}

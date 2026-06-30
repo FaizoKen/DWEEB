@@ -154,7 +154,14 @@ export function ActivityBar() {
             the room (`shared`), so the picker shows a "shared" marker and changing
             it re-points everyone. */}
         {!isDm || targetGuildId ? (
-          <ChannelPicker selectedId={targetChannelId} onSelect={setTargetChannel} shared={!isDm} />
+          <ChannelPicker
+            selectedId={targetChannelId}
+            onSelect={setTargetChannel}
+            shared={!isDm}
+            // Edit-only collaborators see the destination but can't move it —
+            // re-pointing a shared room is a posting decision they don't hold.
+            disabled={blockedFromPosting}
+          />
         ) : null}
       </div>
 
