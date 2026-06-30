@@ -150,33 +150,71 @@ function Splash({
   step: ActivityStep;
   error: string | null;
 }) {
+  const isError = status === "error";
   return (
-    <div className={styles.splash}>
-      <div className={styles.wordmark}>DWEEB</div>
-      {status === "error" ? (
-        <>
-          <p className={styles.splashMsg}>{error ?? "Something went wrong starting DWEEB."}</p>
-          {/* Name the stage we stalled on, for errors whose message doesn't (a
-              non-timeout SDK failure). Hidden once the handshake had finished. */}
-          {step !== "done" ? (
-            <p className={styles.splashStep}>Stalled while {STEP_LABELS[step]}.</p>
-          ) : null}
-          <Button variant="primary" size="sm" onClick={() => window.location.reload()}>
-            Try again
-          </Button>
-        </>
-      ) : (
-        <>
-          <div className={styles.spinner} aria-hidden="true" />
-          {/* Surface the live handshake stage in *every* build, not just dev: a
-              real in-Discord launch has no reachable console, so this on-screen
-              label is the only way to see where a stalled launch got stuck. Each
-              stage is also timeout-bounded (see activityStore), so a hang resolves
-              to a labelled error rather than spinning here forever. */}
-          <p className={styles.splashMsg}>{capitalize(STEP_LABELS[step])}…</p>
-          {import.meta.env.DEV ? <p className={styles.splashStep}>step: {step}</p> : null}
-        </>
-      )}
+    <div className={styles.splash} data-state={isError ? "error" : "loading"}>
+      {/* Soft brand-tinted aurora behind the lockup — slowly breathes while we
+          wait so the screen feels alive, not frozen. Inert/red on error. */}
+      <div className={styles.aura} aria-hidden="true" />
+
+      <div className={styles.splashInner}>
+        {/* The mark: a rotating ring with a glowing core while connecting, or a
+            danger badge on error. Purely decorative — the text below carries the
+            actual status for screen readers. */}
+        {isError ? (
+          <div className={styles.markError} aria-hidden="true">
+            !
+          </div>
+        ) : (
+          <div className={styles.mark} aria-hidden="true">
+            <span className={styles.markRing} />
+            <span className={styles.markCore} />
+          </div>
+        )}
+
+        <div className={styles.wordmark}>DWEEB</div>
+
+        {isError ? (
+          <>
+            <p className={styles.splashMsg}>{error ?? "Something went wrong starting DWEEB."}</p>
+            {/* Name the stage we stalled on, for errors whose message doesn't (a
+                non-timeout SDK failure). Hidden once the handshake had finished. */}
+            {step !== "done" ? (
+              <p className={styles.splashStep}>Stalled while {STEP_LABELS[step]}.</p>
+            ) : null}
+            <Button variant="primary" size="sm" onClick={() => window.location.reload()}>
+              Try again
+            </Button>
+          </>
+        ) : (
+          <>
+            {/* Surface the live handshake stage in *every* build, not just dev: a
+                real in-Discord launch has no reachable console, so this on-screen
+                label is the only way to see where a stalled launch got stuck. Each
+                stage is also timeout-bounded (see activityStore), so a hang resolves
+                to a labelled error rather than spinning here forever. The `key`
+                re-triggers the fade as each stage swaps in. */}
+            <p key={step} className={styles.splashMsg}>
+              {capitalize(STEP_LABELS[step])}…
+            </p>
+            {/* Determinate progress across the handshake stages: a stalled launch
+                visibly parks at a stage instead of an endless indeterminate spin,
+                and a healthy one shows real forward motion. Width animates between
+                stages via CSS. */}
+            <div
+              className={styles.progress}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={STEP_PROGRESS[step]}
+              aria-label="Starting DWEEB"
+            >
+              <div className={styles.progressFill} style={{ width: `${STEP_PROGRESS[step]}%` }} />
+            </div>
+            {import.meta.env.DEV ? <p className={styles.splashStep}>step: {step}</p> : null}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -193,6 +231,20 @@ const STEP_LABELS: Record<ActivityStep, string> = {
   "exchanging-token": "signing in",
   authenticating: "finishing sign-in",
   done: "ready",
+};
+
+/** Rough completion percentage per handshake stage, driving the splash progress
+ *  bar. Not measured timings — just a monotonic sense of "how far in" so the wait
+ *  reads as forward motion and a stall parks at a visible point. The early stages
+ *  are spaced generously since `starting`/`sdk-ready` resolve fast; the back half
+ *  (token exchange + authenticate) is where a slow launch actually lingers. */
+const STEP_PROGRESS: Record<ActivityStep, number> = {
+  starting: 12,
+  "sdk-ready": 34,
+  authorizing: 54,
+  "exchanging-token": 74,
+  authenticating: 92,
+  done: 100,
 };
 
 function capitalize(s: string): string {
