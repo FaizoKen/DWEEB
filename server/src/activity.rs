@@ -46,7 +46,7 @@ use tokio::sync::broadcast;
 use crate::discord::{DiscordUser, Webhook};
 use crate::error::AppError;
 use crate::routes::{
-    authorize_member_session, authorize_webhooks_session, current_session, dispatcher_api,
+    authorize_activity_member, authorize_activity_webhooks, current_session, dispatcher_api,
     ensure_channel_in_guild, is_snowflake, relay_dispatcher, AppState,
 };
 use crate::session::{now, Session};
@@ -237,7 +237,7 @@ pub async fn activity_post(
         return Err(bad_request("message must be a JSON object"));
     }
 
-    authorize_webhooks_session(&st, session.clone(), &guild).await?;
+    authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
 
     // Reuse a DWEEB-owned incoming webhook already in the channel (so we don't
@@ -402,7 +402,7 @@ pub async fn activity_permanent(
     if !is_snowflake(&guild) {
         return Err(bad_request("guild_id must be a Discord id"));
     }
-    authorize_webhooks_session(&st, session, &guild).await?;
+    authorize_activity_webhooks(&st, session, &guild).await?;
     let api = dispatcher_api(&st)?;
     let req = api
         .http
@@ -499,7 +499,7 @@ pub async fn activity_edit(
         _ => return Err(bad_request("webhook_id must be a Discord id")),
     };
 
-    authorize_webhooks_session(&st, session.clone(), &guild).await?;
+    authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
 
     let (webhook_id, token) = dweeb_webhook_in_channel(&st, &guild, &channel_id, prefer)
@@ -569,7 +569,7 @@ pub async fn activity_restore(
         ));
     }
 
-    authorize_webhooks_session(&st, session.clone(), &guild).await?;
+    authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
 
     let (webhook_id, token) = dweeb_webhook_in_channel(&st, &guild, &channel_id, None)
@@ -1245,7 +1245,7 @@ pub async fn activity_room(
         if !is_snowflake(guild) {
             return Err(bad_request("invalid guild id"));
         }
-        authorize_member_session(&st, session.clone(), guild).await?;
+        authorize_activity_member(&st, session.clone(), guild).await?;
     }
     let me = Participant {
         id: session.uid,

@@ -132,8 +132,7 @@ pub async fn emojis(
     // every server the user shares with the bot, so this read — like `bootstrap`
     // and `list_guilds` — must accept either credential, or the Activity 401s on
     // each cross-server fetch and the picker mistakes it for an expired session.
-    let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
-    authorize_member_session(&st, session, &guild).await?;
+    authorize_member_either(&st, &jar, &headers, &guild).await?;
     let value = fetch_emojis(&st, &guild, q.fresh).await?;
     Ok(value_response(&value))
 }
@@ -150,8 +149,7 @@ pub async fn bootstrap(
     // The embedded Activity authenticates with a bearer token (its third-party
     // iframe gets no session cookie), so this — the one read the Activity's
     // preview needs to resolve mentions — accepts either credential.
-    let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
-    authorize_member_session(&st, session, &guild).await?;
+    authorize_member_either(&st, &jar, &headers, &guild).await?;
     // The three reads are independent — on a cold cache they'd otherwise be
     // three sequential Discord round-trips. Fire them concurrently (each still
     // coalesced + cached by key, and the bot semaphore caps total in-flight
@@ -196,15 +194,24 @@ pub async fn list_guilds(
     // iframe gets no session cookie). A DM-launched Activity has no guild of its
     // own, so it lists the user's servers here to pick a publish destination —
     // hence this accepts either credential, like the guild reads.
+    let via_cookie = current_session(&jar).is_some();
     let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
     // The user's guild list (a Discord call under the user token) and the bot's
     // guild set (a paginated call under the bot token) are independent — run
     // them concurrently so the picker's cold-cache load is one round-trip's
     // latency, not two. Each is still cached + coalesced internally.
-    let (guilds, bot) = tokio::join!(
-        usable_guilds(&st, &session, q.fresh),
-        bot_guild_set(&st, q.fresh),
-    );
+    //
+    // Web (cookie) keeps the `REQUIRE_MANAGE_GUILD` picker policy; the Activity
+    // (bearer) lists the user's FULL membership, so a DM-launch destination can be
+    // any server where they hold Manage Webhooks — not only ones they also manage.
+    let guilds_fut = async {
+        if via_cookie {
+            usable_guilds(&st, &session, q.fresh).await
+        } else {
+            member_guilds(&st, &session, q.fresh).await
+        }
+    };
+    let (guilds, bot) = tokio::join!(guilds_fut, bot_guild_set(&st, q.fresh));
     let guilds = guilds?;
 
     let items: Vec<Value> = guilds
@@ -1123,6 +1130,74 @@ pub(crate) async fn authorize_member_session(
     }
 }
 
+/// Resolve identity (cookie OR bearer) and apply the membership gate that fits the
+/// surface: the web app's `REQUIRE_MANAGE_GUILD` policy for a cookie session, or the
+/// embedded Activity's plain-membership gate for a bearer — there the guild is
+/// trusted SDK launch context, so any member may load it. Used by the reads both
+/// surfaces share (`bootstrap`, `emojis`).
+pub(crate) async fn authorize_member_either(
+    st: &AppState,
+    jar: &PrivateCookieJar,
+    headers: &axum::http::HeaderMap,
+    guild: &str,
+) -> Result<Session, AppError> {
+    // A valid cookie means the web app; otherwise `resolve_identity` falls through
+    // to the bearer, which only the Activity sends.
+    let via_cookie = current_session(jar).is_some();
+    let session = crate::activity::resolve_identity(st, jar, headers).await?;
+    if via_cookie {
+        authorize_member_session(st, session, guild).await
+    } else {
+        authorize_activity_member(st, session, guild).await
+    }
+}
+
+/// Membership gate for the embedded Activity (bearer path). The Activity's guild
+/// comes from Discord's SDK launch context, so the gate is plain MEMBERSHIP —
+/// `REQUIRE_MANAGE_GUILD` (a web-app picker policy) is deliberately NOT applied, so
+/// any member can load the guild's data and collaborate. Privileged actions stay
+/// gated by [`authorize_activity_webhooks`].
+pub(crate) async fn authorize_activity_member(
+    st: &AppState,
+    session: Session,
+    guild: &str,
+) -> Result<Session, AppError> {
+    let guilds = member_guilds(st, &session, false).await?;
+    if guilds.iter().any(|g| g.id == guild) {
+        Ok(session)
+    } else {
+        Err(AppError::Forbidden(
+            "You're not a member of this server — or your session is stale. Relaunch DWEEB to refresh."
+                .into(),
+        ))
+    }
+}
+
+/// Manage-Webhooks gate for the embedded Activity (bearer path) — posting, editing
+/// and restoring. Finds the guild by plain membership (not `REQUIRE_MANAGE_GUILD`,
+/// like [`authorize_activity_member`]), then requires Manage Webhooks there
+/// (Administrator/owner included) — the same permission Discord gates webhook
+/// management on, and independent of Manage Server.
+pub(crate) async fn authorize_activity_webhooks(
+    st: &AppState,
+    session: Session,
+    guild: &str,
+) -> Result<Session, AppError> {
+    let guilds = member_guilds(st, &session, false).await?;
+    match guilds.iter().find(|g| g.id == guild) {
+        Some(g) if g.can_manage_webhooks => Ok(session),
+        Some(_) => Err(AppError::Forbidden(
+            "Posting here needs the Manage Webhooks permission in this server (or Administrator). \
+             You can still edit together — ask someone who has it to post."
+                .into(),
+        )),
+        None => Err(AppError::Forbidden(
+            "You're not a member of this server — or your session is stale. Relaunch DWEEB to refresh."
+                .into(),
+        )),
+    }
+}
+
 /// Stricter gate for the webhook picker (list + create): a member of the guild
 /// (as above) who *additionally* holds Manage Webhooks (or Administrator/owner)
 /// there. The bot is what performs the calls, but we mirror Discord's own gating
@@ -1191,6 +1266,51 @@ async fn usable_guilds(
     let list: Vec<UsableGuild> = raw
         .into_iter()
         .filter(|g| !require || g.can_manage())
+        .map(|g| UsableGuild {
+            can_manage_webhooks: g.can_manage_webhooks(),
+            id: g.id,
+            name: g.name,
+            icon: g.icon,
+        })
+        .collect();
+    if let Ok(val) = serde_json::to_value(&list) {
+        st.cache.put(key, Arc::new(val)).await;
+    }
+    Ok(list)
+}
+
+/// The user's FULL guild membership — every server they belong to — mapped with
+/// the Manage-Webhooks bit and cached per-user. Unlike [`usable_guilds`] this does
+/// NOT apply `REQUIRE_MANAGE_GUILD`: it backs the embedded Activity's authorization,
+/// where the launching guild is trusted SDK context and *any* member may load and
+/// collaborate (posting stays separately gated on Manage Webhooks). Kept under its
+/// own cache key so it never mixes with the web app's filtered list.
+async fn member_guilds(
+    st: &AppState,
+    session: &Session,
+    fresh: bool,
+) -> Result<Vec<UsableGuild>, AppError> {
+    let key = format!("mguilds:{}", session.uid);
+    if !fresh {
+        if let Some(v) = st.cache.get(&key).await {
+            if let Ok(list) = serde_json::from_value::<Vec<UsableGuild>>((*v).clone()) {
+                return Ok(list);
+            }
+        }
+    }
+    // Same coalescing as `usable_guilds`: one `/users/@me/guilds` call serves a
+    // burst of concurrent misses (bootstrap + room + the picker on a launch).
+    let _gate = st.flight.acquire(&key).await;
+    if !fresh {
+        if let Some(v) = st.cache.get(&key).await {
+            if let Ok(list) = serde_json::from_value::<Vec<UsableGuild>>((*v).clone()) {
+                return Ok(list);
+            }
+        }
+    }
+    let raw = st.discord.current_user_guilds(&session.token).await?;
+    let list: Vec<UsableGuild> = raw
+        .into_iter()
         .map(|g| UsableGuild {
             can_manage_webhooks: g.can_manage_webhooks(),
             id: g.id,
