@@ -248,6 +248,20 @@ export function ServerGlyph({ guild, size }: { guild: PickerGuild; size: number 
   );
 }
 
+/** The standalone breathing placeholder for a server glyph, sized like {@link
+ *  ServerGlyph}. Shown in the bar's server badge while a guild launch's meta is
+ *  still being fetched — before there's even an icon URL to load — so the slot
+ *  holds a skeleton instead of an empty gap. */
+export function ServerGlyphSkeleton({ size }: { size: number }) {
+  return (
+    <span
+      className={styles.glyphSkeleton}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    />
+  );
+}
+
 /** A stable, pleasant colour per server id (matches the presence avatars). */
 function colorFor(id: string): string {
   let h = 0;

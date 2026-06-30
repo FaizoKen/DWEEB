@@ -31,6 +31,17 @@
   animation: serverGlyphBreathe 1.6s ease-in-out infinite;
 }
 
+/* Standalone variant of the same skeleton, laid out in normal flow (not overlaid
+   inside a slot) — used while the guild meta itself is still loading, before
+   there's an icon URL to render. */
+.glyphSkeleton {
+  flex: none;
+  display: inline-block;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-active);
+  animation: serverGlyphBreathe 1.6s ease-in-out infinite;
+}
+
 @keyframes serverGlyphBreathe {
   0%,
   100% {
@@ -45,7 +56,8 @@
   .icon {
     transition: none;
   }
-  .iconSkeleton {
+  .iconSkeleton,
+  .glyphSkeleton {
     animation: none;
   }
 }

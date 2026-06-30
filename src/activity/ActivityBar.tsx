@@ -29,7 +29,7 @@ import {
   UndoIcon,
 } from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
-import { GuildPicker, ServerGlyph } from "./GuildPicker";
+import { GuildPicker, ServerGlyph, ServerGlyphSkeleton } from "./GuildPicker";
 import { RestoreDialog } from "./RestoreDialog";
 import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
@@ -67,6 +67,7 @@ export function ActivityBar() {
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
   const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
   const targetGuildMeta = useActivityStore((s) => s.targetGuildMeta);
+  const targetGuildMetaLoading = useActivityStore((s) => s.targetGuildMetaLoading);
 
   // Destination channel name for the confirm/success dialogs — resolved from the
   // connected guild's channel map (the same source the picker reads).
@@ -145,6 +146,12 @@ export function ActivityBar() {
         ) : targetGuildMeta ? (
           <span className={styles.serverBadge} title={`Posting to ${targetGuildMeta.name}`}>
             <ServerGlyph guild={targetGuildMeta} size={28} />
+          </span>
+        ) : targetGuildMetaLoading ? (
+          // Meta still resolving on a guild launch — hold a skeleton in the slot so
+          // the indicator doesn't pop in from an empty gap once it lands.
+          <span className={styles.serverBadge}>
+            <ServerGlyphSkeleton size={28} />
           </span>
         ) : null}
 

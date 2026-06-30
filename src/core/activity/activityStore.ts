@@ -121,6 +121,11 @@ interface ActivityState {
    *  guild (fetched once); for a DM launch it's the picked destination, taken
    *  from the postable list. Null until known. */
   targetGuildMeta: PickerGuild | null;
+  /** True while a server launch's {@link targetGuildMeta} is being fetched, so the
+   *  bar's server indicator can hold a skeleton instead of an empty gap. Only the
+   *  guild-launch path sets this — a DM launch resolves its meta synchronously from
+   *  the already-loaded postable list. */
+  targetGuildMetaLoading: boolean;
   /** Whether the signed-in user holds Manage Webhooks in {@link targetGuildId} —
    *  the gate `activity_post` enforces server-side. `null` while it's still being
    *  determined (a server launch's guild meta hasn't loaded yet, or it couldn't be
@@ -209,6 +214,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   guilds: [],
   guildsLoading: false,
   targetGuildMeta: null,
+  targetGuildMetaLoading: false,
   canPostToTarget: null,
 
   async init() {
@@ -599,6 +605,7 @@ async function loadTargetGuildMeta(
   set: (partial: Partial<ActivityState>) => void,
   guildId: string,
 ): Promise<void> {
+  set({ targetGuildMetaLoading: true });
   try {
     const all = await fetchUserGuilds();
     seedAuthGuilds(all);
@@ -611,6 +618,10 @@ async function loadTargetGuildMeta(
     }
   } catch {
     // Leave the indicator unrendered — it's context, not a blocker.
+  } finally {
+    // Clear loading either way: on failure the badge falls back to nothing rather
+    // than holding a perpetual skeleton.
+    set({ targetGuildMetaLoading: false });
   }
 }
 
