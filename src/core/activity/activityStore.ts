@@ -16,6 +16,7 @@
 import { create } from "zustand";
 import { DISCORD_CLIENT_ID, WEB_APP_BASE_URL } from "@/core/guild/config";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { useAuthStore } from "@/core/auth/authStore";
 import { fetchUserGuilds, type PickerGuild } from "@/core/guild/api";
 import { useMessageStore } from "@/core/state/messageStore";
 import type { WebhookMessage } from "@/core/schema/types";
@@ -537,11 +538,25 @@ async function loadTargetGuildMeta(
 ): Promise<void> {
   try {
     const all = await fetchUserGuilds();
+    seedAuthGuilds(all);
     const meta = all.find((g) => g.id === guildId);
     if (meta) set({ targetGuildMeta: meta });
   } catch {
     // Leave the indicator unrendered — it's context, not a blocker.
   }
+}
+
+/**
+ * Make the user's server list visible to the shared cross-server emoji picker
+ * (`features/guild/MentionPicker`), which sources its servers from the auth
+ * store's `guilds`. The Activity authenticates with a bearer token and never
+ * runs the auth store's cookie-session bootstrap, so without this its guild list
+ * stays empty inside Discord and the emoji picker shows only its by-ID fallback
+ * ("Connect a server to pick its emoji"). We piggyback on the guild list the
+ * launch already fetches rather than firing a second request.
+ */
+function seedAuthGuilds(all: PickerGuild[]): void {
+  useAuthStore.setState({ guilds: all, guildsStatus: "ready", guildsError: null });
 }
 
 /** Load the user's postable servers for a DM launch — those where the DWEEB bot
@@ -551,6 +566,7 @@ async function loadPostableGuilds(set: (partial: Partial<ActivityState>) => void
   set({ guildsLoading: true });
   try {
     const all = await fetchUserGuilds();
+    seedAuthGuilds(all);
     const postable = all.filter((g) => g.bot_present && g.can_manage_webhooks);
     set({ guilds: postable });
   } catch {
