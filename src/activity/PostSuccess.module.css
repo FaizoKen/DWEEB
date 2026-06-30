@@ -1,0 +1,79 @@
+/* Green confirmation banner at the top — mirrors the web app's SendSuccess. */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 11px 12px;
+  border-radius: var(--app-radius-sm);
+  background: rgba(35, 165, 89, 0.1);
+  border: 1px solid rgba(35, 165, 89, 0.32);
+}
+
+.check {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  color: rgb(63, 196, 123);
+}
+
+.bannerText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+
+/* Destination facts — same shape as PostConfirm so the two dialogs read alike. */
+.facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fact {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.fact dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  padding-top: 3px;
+}
+
+.fact dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.server {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.destName {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "Update to edit in place" hint under the facts, after a new post. */
+.note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}

@@ -1,0 +1,144 @@
+/* Destination facts — mirrors the web app's SendConfirm so the two read alike. */
+.facts {
+  margin: 0 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fact {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.fact dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  padding-top: 3px;
+}
+
+.fact dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Server row: icon glyph + name. */
+.server {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.destName {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Mention chips in the ping summary. */
+.chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  vertical-align: middle;
+}
+
+.chip {
+  font-family: var(--app-font-mono, monospace);
+  font-size: 0.85em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+
+.chipMore {
+  font-size: 11px;
+  color: var(--app-text-muted);
+  align-self: center;
+}
+
+/* Whole-message-replace heads-up shown only in update mode. */
+.replaceNote {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+/* Spinner shown in the confirm button while the post is in flight. Borrows the
+   button's text colour via `currentColor`, so it reads on the primary fill. */
+.spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: postConfirmSpin 0.6s linear infinite;
+}
+
+@keyframes postConfirmSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* No-ping state — calm, reassuring. */
+.pingCalm {
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--app-text);
+}
+
+/* Will-ping state — amber, attention-grabbing. */
+.pingAlert {
+  background: rgba(240, 178, 50, 0.1);
+  border: 1px solid rgba(240, 178, 50, 0.35);
+  border-radius: var(--app-radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--app-text);
+}
+
+.pingList {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pingList li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.5;
+}
+
+.pingEveryone {
+  font-weight: 600;
+  color: rgb(240, 178, 50);
+}
+
+.pingDetail {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}

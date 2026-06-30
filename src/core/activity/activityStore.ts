@@ -124,11 +124,15 @@ interface ActivityState {
 
   /** Run the SDK handshake and start the session. Safe to call once. */
   init(): Promise<void>;
-  /** Post the current message into the chosen channel as a NEW message. */
-  publish(): Promise<void>;
+  /** Post the current message into the chosen channel as a NEW message. Resolves
+   *  with the post result on success (also stored as {@link lastPost}) so the
+   *  caller can pop the success dialog, or null when it was guarded/failed (the
+   *  failure is surfaced as a toast). */
+  publish(): Promise<ActivityPostResult | null>;
   /** PATCH the message last posted from this Activity with the current draft.
-   *  Only meaningful while {@link lastPost} matches the chosen destination. */
-  update(): Promise<void>;
+   *  Only meaningful while {@link lastPost} matches the chosen destination.
+   *  Returns the result on success / null on failure, like {@link publish}. */
+  update(): Promise<ActivityPostResult | null>;
   /** Pull a message DWEEB posted in the target channel back into the shared
    *  editor (`input` is a message id or a Discord message link). The proxy
    *  resolves the webhook, so — unlike the web app — no URL is needed. On success
@@ -341,22 +345,25 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const guildId = get().targetGuildId;
     if (!guildId) {
       pushToast("Pick a server to post to first.", "error");
-      return;
+      return null;
     }
     const channelId = get().targetChannelId;
     if (!channelId) {
       pushToast("Pick a channel to post to first.", "error");
-      return;
+      return null;
     }
-    if (get().publishing) return;
+    if (get().publishing) return null;
     set({ publishing: true });
     try {
       const payload = buildWirePayload(useMessageStore.getState().message);
       const result = await publishToChannel(guildId, channelId, payload);
       set({ lastPost: result });
-      pushToast("Posted to the channel ✓", "success");
+      // Success is surfaced by the post-success dialog (see ActivityBar), so no
+      // toast here — the two would be redundant.
+      return result;
     } catch (e) {
       pushToast(e instanceof Error ? e.message : "Couldn't post the message.", "error");
+      return null;
     } finally {
       set({ publishing: false });
     }
@@ -366,9 +373,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const last = get().lastPost;
     if (!last) {
       pushToast("Post the message first, then you can update it.", "error");
-      return;
+      return null;
     }
-    if (get().publishing) return;
+    if (get().publishing) return null;
     set({ publishing: true });
     try {
       const payload = buildWirePayload(useMessageStore.getState().message);
@@ -380,9 +387,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         payload,
       );
       set({ lastPost: result });
-      pushToast("Updated the message ✓", "success");
+      // The post-success dialog confirms it (see ActivityBar) — skip the toast.
+      return result;
     } catch (e) {
       pushToast(e instanceof Error ? e.message : "Couldn't update the message.", "error");
+      return null;
     } finally {
       set({ publishing: false });
     }

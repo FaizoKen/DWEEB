@@ -13,6 +13,7 @@
 
 import { useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useGuildStore } from "@/core/guild/guildStore";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
@@ -28,7 +29,17 @@ import {
 import { ChannelPicker } from "./ChannelPicker";
 import { GuildPicker, ServerGlyph } from "./GuildPicker";
 import { RestoreDialog } from "./RestoreDialog";
+import { PostConfirm } from "./PostConfirm";
+import { PostSuccess } from "./PostSuccess";
 import styles from "./ActivityBar.module.css";
+
+/** A post the user has asked for but not yet confirmed (the pre-post dialog is
+ *  open). `newCopy` marks the "New" button — a separate copy alongside the
+ *  already-linked message — so the confirm/success wording stays honest. */
+interface PendingPost {
+  mode: "new" | "update";
+  newCopy: boolean;
+}
 
 export function ActivityBar() {
   const undo = useMessageStore((s) => s.undo);
@@ -54,7 +65,19 @@ export function ActivityBar() {
   const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
   const targetGuildMeta = useActivityStore((s) => s.targetGuildMeta);
 
+  // Destination channel name for the confirm/success dialogs — resolved from the
+  // connected guild's channel map (the same source the picker reads).
+  const connectedData = useGuildStore((s) => s.data);
+  const channelName = targetChannelId
+    ? connectedData?.channelById[targetChannelId]?.name
+    : undefined;
+
   const [restoreOpen, setRestoreOpen] = useState(false);
+  // The pre-post confirm dialog: non-null while a post awaits confirmation. The
+  // actual POST/PATCH runs from `confirmPost` once the user confirms.
+  const [pending, setPending] = useState<PendingPost | null>(null);
+  // The post-success dialog: set after a publish/update lands, cleared on close.
+  const [posted, setPosted] = useState<{ mode: "new" | "update" } | null>(null);
 
   const noDestination = !targetGuildId || !targetChannelId;
   // "Update" applies only while the chosen destination still matches where we
@@ -63,6 +86,20 @@ export function ActivityBar() {
     lastPost != null &&
     lastPost.guild_id === targetGuildId &&
     lastPost.channel_id === targetChannelId;
+
+  // Run the confirmed post. `publish`/`update` resolve with the result on
+  // success (null on failure, which they toast), so we only swap the confirm
+  // dialog for the success one when something actually landed; a failure leaves
+  // the confirm open so the user can retry.
+  const confirmPost = async () => {
+    if (!pending) return;
+    const { mode } = pending;
+    const result = mode === "update" ? await update() : await publish();
+    if (result) {
+      setPending(null);
+      setPosted({ mode });
+    }
+  };
 
   return (
     <div className={styles.bar}>
@@ -136,7 +173,7 @@ export function ActivityBar() {
               size="sm"
               leadingIcon={<SendIcon />}
               collapseLabel
-              onClick={() => void publish()}
+              onClick={() => setPending({ mode: "new", newCopy: true })}
               disabled={publishing || noDestination}
               title="Post a separate new copy into the channel"
             >
@@ -146,7 +183,7 @@ export function ActivityBar() {
               variant="primary"
               size="sm"
               leadingIcon={<RefreshIcon />}
-              onClick={() => void update()}
+              onClick={() => setPending({ mode: "update", newCopy: false })}
               disabled={publishing || noDestination}
               title="Update the message you posted with the current draft"
             >
@@ -158,7 +195,7 @@ export function ActivityBar() {
             variant="primary"
             size="sm"
             leadingIcon={<SendIcon />}
-            onClick={() => void publish()}
+            onClick={() => setPending({ mode: "new", newCopy: false })}
             disabled={publishing || noDestination}
             title="Post this message into the selected channel"
           >
@@ -168,6 +205,27 @@ export function ActivityBar() {
       </div>
 
       <RestoreDialog open={restoreOpen} onClose={() => setRestoreOpen(false)} />
+
+      <PostConfirm
+        open={pending != null}
+        mode={pending?.mode ?? "new"}
+        newCopy={pending?.newCopy ?? false}
+        guild={targetGuildMeta}
+        channelName={channelName}
+        busy={publishing}
+        onConfirm={() => void confirmPost()}
+        onCancel={() => setPending(null)}
+      />
+
+      <PostSuccess
+        open={posted != null}
+        mode={posted?.mode ?? "new"}
+        guild={targetGuildMeta}
+        channelName={channelName}
+        canView={lastPost?.url != null}
+        onView={() => void openLastPost()}
+        onClose={() => setPosted(null)}
+      />
     </div>
   );
 }
