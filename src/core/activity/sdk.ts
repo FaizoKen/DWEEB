@@ -12,7 +12,7 @@
  * web app's bundle.
  */
 
-import { DiscordSDK, patchUrlMappings } from "@discord/embedded-app-sdk";
+import { DiscordSDK, Common, Events, patchUrlMappings } from "@discord/embedded-app-sdk";
 import { DISCORD_CLIENT_ID, PROXY_BASE_URL } from "@/core/guild/config";
 import { PROXY_MAPPING_PREFIX } from "./runtime";
 
@@ -102,4 +102,28 @@ export async function setActivityPresence(details: string, state?: string): Prom
   await getSdk().commands.setActivity({
     activity: { type: 0, details, state, timestamps: { start: Date.now() } },
   });
+}
+
+/**
+ * Discord's PIP (picture-in-picture) layout mode — the small floating window the
+ * Activity collapses to when the user minimises it. The value the host reports to
+ * {@link subscribeLayoutMode} equals this when minimised.
+ */
+export const LAYOUT_MODE_PIP: number = Common.LayoutModeTypeObject.PIP;
+
+/**
+ * Watch Discord's Activity layout mode and report every change. The host emits a
+ * new mode as the user resizes the Activity between focused, picture-in-picture
+ * (minimised — {@link LAYOUT_MODE_PIP}) and the multi-participant grid. Returns a
+ * disposer that unsubscribes. Best-effort: a subscribe rejection (e.g. an older
+ * client that never emits the event) is swallowed, so the surface simply stays in
+ * its focused layout.
+ */
+export function subscribeLayoutMode(onMode: (mode: number) => void): () => void {
+  const sdk = getSdk();
+  const handler = (data: { layout_mode: number }) => onMode(data.layout_mode);
+  void sdk.subscribe(Events.ACTIVITY_LAYOUT_MODE_UPDATE, handler).catch(() => {});
+  return () => {
+    void sdk.unsubscribe(Events.ACTIVITY_LAYOUT_MODE_UPDATE, handler).catch(() => {});
+  };
 }

@@ -35,6 +35,8 @@ import {
   openInviteDialog,
   shareActivityLink,
   setActivityPresence,
+  subscribeLayoutMode,
+  LAYOUT_MODE_PIP,
 } from "./sdk";
 import {
   editPostedMessage,
@@ -89,6 +91,10 @@ interface ActivityState {
   context: ActivityContext | null;
   user: ActivityUser | null;
   platform: ActivityPlatform | null;
+  /** True while Discord has the Activity minimised into its small picture-in-
+   *  picture window. In that mode the surface drops the editor and shows only a
+   *  full-bleed, live message preview (see ActivityApp). */
+  pipMode: boolean;
   participants: CollabParticipant[];
   collabConnected: boolean;
   publishing: boolean;
@@ -175,6 +181,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   context: null,
   user: null,
   platform: null,
+  pipMode: false,
   participants: [],
   collabConnected: false,
   publishing: false,
@@ -230,6 +237,13 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       // fallback (the native top bar's inset isn't populated until the first
       // layout change — see ActivityApp). `sdk.platform` is "mobile"/"desktop".
       set({ step: "sdk-ready", platform: sdk.platform === "mobile" ? "mobile" : "desktop" });
+
+      // Track Discord's layout mode so the surface can collapse to a clean, full-
+      // bleed message preview whenever the user minimises the Activity into the
+      // small picture-in-picture window (see ActivityApp). Fire-and-forget: the
+      // disposer is unneeded on this single-page surface (the page unloads on
+      // exit), and a host that never emits the event just leaves `pipMode` false.
+      subscribeLayoutMode((mode) => set({ pipMode: mode === LAYOUT_MODE_PIP }));
 
       // A DM / group-DM launch has no guild (`sdk.guildId` is null). We still
       // run the full handshake — the difference is only where the post goes:

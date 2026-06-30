@@ -130,6 +130,18 @@
   z-index: var(--app-z-toolbar);
 }
 
+/* Picture-in-picture: the Activity is minimised to a small floating window, so
+   the shell drops the editor and shows only the message preview, filling the
+   whole window. The app's single grid row already sizes this box to the viewport;
+   the preview's own surface (flex: 1) then fills it and scrolls when the message
+   is taller than the window. */
+.pipPreview {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* Splash / loading / error -------------------------------------------- */
 
 .splash {

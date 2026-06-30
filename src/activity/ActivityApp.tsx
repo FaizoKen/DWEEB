@@ -39,6 +39,7 @@ export function ActivityApp() {
   const step = useActivityStore((s) => s.step);
   const error = useActivityStore((s) => s.error);
   const platform = useActivityStore((s) => s.platform);
+  const pipMode = useActivityStore((s) => s.pipMode);
   const init = useActivityStore((s) => s.init);
 
   // The preview is a side column on desktop and a bottom sheet on mobile; this
@@ -68,6 +69,23 @@ export function ActivityApp() {
 
   if (status !== "ready") {
     return <Splash status={status} step={step} error={error} />;
+  }
+
+  // Minimised into Discord's picture-in-picture window: drop the editor and all
+  // chrome and show just the message preview, full-bleed, so the small floating
+  // window is a clean live view of the message being built (it keeps updating as
+  // the room edits). Restoring the Activity flips `layout_mode` back and the full
+  // builder returns. The mobile-sheet hooks above still ran (rules of hooks), but
+  // their state is inert here — this branch renders neither the sheet nor its FAB.
+  if (pipMode) {
+    return (
+      <div className={styles.app} data-platform={platform ?? undefined} data-pip="true">
+        <div className={styles.pipPreview}>
+          <Preview />
+        </div>
+        <ToastViewport />
+      </div>
+    );
   }
 
   return (
