@@ -632,12 +632,14 @@ export function SendPanel({
     fetchPermanentSlots(knownGuildId, ac.signal)
       .then((slots) => {
         setConfirmSlots(slots);
-        // An update target that already holds a slot starts the switch on —
-        // leaving it on keeps the slot, turning it off releases it after the
-        // PATCH. Everything else starts off (opt in to claim).
-        setMakePermanent(
-          updateTargetId != null && slots.items.some((i) => i.message_id === updateTargetId),
-        );
+        // Default the switch ON so interactive messages never expire unless the
+        // user opts out. An update target that already holds a slot stays on
+        // (leaving it on keeps the slot, turning it off releases it after the
+        // PATCH); everything else defaults on only when a slot is free to claim —
+        // a full server leaves it off, and the switch gives way to "Free a slot".
+        const alreadyPermanent =
+          updateTargetId != null && slots.items.some((i) => i.message_id === updateTargetId);
+        setMakePermanent(alreadyPermanent || slots.used < slots.cap);
       })
       .catch((e) => {
         if (e instanceof Error && "status" in e && (e as { status: number }).status === 501) {
