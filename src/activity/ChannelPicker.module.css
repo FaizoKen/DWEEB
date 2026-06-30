@@ -50,14 +50,6 @@
   flex: none;
 }
 
-/* "Shared with the room" marker on a server launch — sits between the channel
-   name and the chevron to signal the destination is room-wide, not personal. */
-.sharedGlyph {
-  color: var(--app-accent-text, var(--app-text-subtle));
-  flex: none;
-  opacity: 0.9;
-}
-
 /* Floating panel (portalled to <body>, positioned in JS) ----------------- */
 
 .panel {
