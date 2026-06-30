@@ -181,8 +181,10 @@ interface ActivityState {
   addBotToServer(): Promise<void>;
   /** Re-check whether the bot has since been added to the launching guild, force-
    *  fresh (the proxy/Discord can lag a moment after an add). Clears
-   *  {@link botMissing} and wires up the server's data once it's present. */
-  recheckBot(): Promise<void>;
+   *  {@link botMissing} and wires up the server's data once it's present. `silent`
+   *  suppresses the "still not there" toast — passed by the automatic re-checks
+   *  (focus / visibility / poll, see ActivityBar), which would otherwise spam it. */
+  recheckBot(opts?: { silent?: boolean }): Promise<void>;
   /** Re-point `publish()` at a different channel in the target guild. */
   setTargetChannel(channelId: string): void;
   /** Pick the destination server (DM launch): loads its channels + preview data
@@ -607,7 +609,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 
-  async recheckBot() {
+  async recheckBot(opts) {
     const guildId = get().context?.guildId;
     if (!guildId || get().targetGuildMetaLoading) return;
     const wasMissing = get().botMissing;
@@ -615,7 +617,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     // yet. `loadTargetGuildMeta` clears `botMissing` and connects when it's now
     // present, so a success needs no toast — the CTA simply gives way to the bar.
     await loadTargetGuildMeta(set, guildId, true);
-    if (wasMissing && get().botMissing) {
+    // Tell the user nothing changed only on an *explicit* check — the automatic
+    // re-checks pass `silent`, so the repeated polling doesn't spam this toast.
+    if (!opts?.silent && wasMissing && get().botMissing) {
       pushToast("DWEEB isn't in this server yet — add it, then check again.", "info");
     }
   },

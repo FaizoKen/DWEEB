@@ -11,7 +11,7 @@
  * just as useful in the room, and the proxy makes it a one-field action.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useActivityStore } from "@/core/activity/activityStore";
@@ -35,6 +35,14 @@ import { RestoreDialog } from "./RestoreDialog";
 import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
 import styles from "./ActivityBar.module.css";
+
+/** While the launching server is missing the bot, a safety-net poll re-checks on
+ *  this cadence — a backstop for clients that don't fire focus/visibility events
+ *  (and for a teammate adding the bot). Bounded by {@link AUTO_RECHECK_MAX_TICKS}
+ *  so an "Add DWEEB" screen left open doesn't poll the proxy forever; the free
+ *  focus/visibility re-checks and the manual button keep working past the cap. */
+const AUTO_RECHECK_INTERVAL_MS = 5_000;
+const AUTO_RECHECK_MAX_TICKS = 24; // ~2 minutes of polling
 
 /** A post the user has asked for but not yet confirmed (the pre-post dialog is
  *  open). `newCopy` marks the "New" button — a separate copy alongside the
@@ -76,6 +84,36 @@ export function ActivityBar() {
   const botMissing = useActivityStore((s) => s.botMissing);
   const addBotToServer = useActivityStore((s) => s.addBotToServer);
   const recheckBot = useActivityStore((s) => s.recheckBot);
+
+  // Auto-detect when the bot finally gets added, so the user doesn't have to tap
+  // "Check again". While it's missing, re-check whenever the Activity regains
+  // focus/visibility — the user returning from Discord's add-bot flow — plus a
+  // bounded safety-net poll for clients that don't fire those events (or when a
+  // teammate adds it). All silent (no toast); finding the bot clears `botMissing`,
+  // and the guild bootstrap's own "Connected" toast confirms it — which also tears
+  // this listener down (the effect re-runs once `botMissing` is false and bails).
+  useEffect(() => {
+    if (!botMissing) return;
+    const check = () => void recheckBot({ silent: true });
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", check);
+    let ticks = 0;
+    const poll = window.setInterval(() => {
+      if (++ticks > AUTO_RECHECK_MAX_TICKS) {
+        window.clearInterval(poll);
+        return;
+      }
+      check();
+    }, AUTO_RECHECK_INTERVAL_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", check);
+      window.clearInterval(poll);
+    };
+  }, [botMissing, recheckBot]);
 
   // Destination channel name for the confirm/success dialogs — resolved from the
   // connected guild's channel map (the same source the picker reads).
