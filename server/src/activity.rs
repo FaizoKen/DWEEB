@@ -195,6 +195,83 @@ pub async fn activity_token(
     Ok(Json(json!({ "access_token": token.access_token })).into_response())
 }
 
+// ── Handshake telemetry (POST /api/activity/telemetry) ───────────────────────
+
+#[derive(Deserialize)]
+pub struct TelemetryBody {
+    #[serde(default)]
+    launch: String,
+    #[serde(default)]
+    stage: String,
+    #[serde(default)]
+    outcome: String,
+    #[serde(default)]
+    ms: f64,
+    #[serde(default)]
+    platform: String,
+    #[serde(default)]
+    instance: String,
+    #[serde(default)]
+    detail: String,
+}
+
+/// `POST /api/activity/telemetry` — record one embedded-Activity handshake stage.
+///
+/// A real in-Discord launch runs in a sandboxed iframe with no reachable console,
+/// so a stalled handshake is otherwise invisible on our side. The browser beacons
+/// each stage it enters (and any failure) here; we log it under a dedicated target
+/// (`activity_handshake`) so *where* launches stall in the wild is greppable and
+/// aggregatable straight from the proxy logs, with per-stage timings (`ms` is the
+/// elapsed time since the launch began) reconstructable per `launch` id.
+///
+/// Diagnostic only, so it's deliberately **unauthenticated** — a stall can happen
+/// before the access token even exists (SDK `ready`/`authorize`), which is exactly
+/// the case we most want to catch. It's best-effort (answers `204` regardless) and
+/// every field is clamped hard, so an anonymous caller can't turn it into a log-
+/// spam or log-injection vector any more than they could the image proxy.
+pub async fn activity_telemetry(
+    State(st): State<AppState>,
+    Json(body): Json<TelemetryBody>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let launch = clamp_field(&body.launch, 48);
+    let stage = clamp_field(&body.stage, 24);
+    let outcome = clamp_field(&body.outcome, 12);
+    let platform = clamp_field(&body.platform, 12);
+    let instance = clamp_field(&body.instance, 100);
+    // Only failures carry a reason; keep it short and single-line so it's one
+    // clean log field.
+    let detail = clamp_field(&body.detail, 200);
+    // A finite, non-negative elapsed time (capped), or -1 for "not reported" —
+    // never NaN/inf into the log.
+    let ms: i64 = if body.ms.is_finite() && body.ms >= 0.0 {
+        body.ms.min(600_000.0) as i64
+    } else {
+        -1
+    };
+    tracing::info!(
+        target: "activity_handshake",
+        %launch,
+        %stage,
+        %outcome,
+        ms,
+        %platform,
+        %instance,
+        %detail,
+        "activity handshake stage",
+    );
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Trim an untrusted telemetry string to a bounded, single-line snippet: drop
+/// control characters (incl. newlines, so it can't forge extra log lines) and cap
+/// the length. Keeps a hostile beacon from spamming or corrupting the log.
+fn clamp_field(s: &str, max: usize) -> String {
+    s.chars().filter(|c| !c.is_control()).take(max).collect()
+}
+
 // ── Publish (POST /api/activity/post) ───────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -1559,6 +1636,17 @@ mod tests {
         assert_eq!(v["type"], "roster");
         assert_eq!(v["participants"].as_array().unwrap().len(), 1);
         assert_eq!(v["participants"][0]["name"], "Ana");
+    }
+
+    #[test]
+    fn clamp_field_strips_control_chars_and_caps_length() {
+        // Newlines/control chars are dropped so a beacon can't forge extra log
+        // lines, and the length is bounded.
+        assert_eq!(clamp_field("in\nject\red\t!", 100), "injected!");
+        assert_eq!(clamp_field("abcdefgh", 4), "abcd");
+        assert_eq!(clamp_field("", 8), "");
+        // Ordinary text is untouched.
+        assert_eq!(clamp_field("authorizing", 24), "authorizing");
     }
 
     #[test]

@@ -48,6 +48,7 @@ import {
 } from "./api";
 import { startCollab, stopCollab, broadcastTarget, type CollabParticipant } from "./collab";
 import { setActivityToken } from "./runtime";
+import { startHandshakeTrace } from "./telemetry";
 
 export type ActivityStatus = "idle" | "connecting" | "ready" | "error";
 
@@ -284,16 +285,28 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       return;
     }
 
+    // Trace each handshake stage to the proxy (best-effort) so a stall in the
+    // wild — where the in-Discord iframe has no reachable console — is visible in
+    // the server logs, not just on the user's splash. Hoisted with `instanceId`
+    // so the `catch` can name the stalling stage + context too.
+    const trace = startHandshakeTrace();
+    let instanceId: string | null = null;
     try {
       // Must precede any proxy call so requests are routed through the sandbox.
       configureUrlMappings();
+      // First reliable beacon: fired *after* the URL mapping is configured, since
+      // a pre-mapping proxy call can't leave the sandbox (CSP). A launch that
+      // never reaches even this stalled before the app booted.
+      trace.stage("starting", "reached");
 
       const sdk = getSdk();
       await withTimeout(sdk.ready(), READY_TIMEOUT_MS, "connecting to Discord");
       // Which client we're on, so the UI can apply the mobile-only safe-area
       // fallback (the native top bar's inset isn't populated until the first
       // layout change — see ActivityApp). `sdk.platform` is "mobile"/"desktop".
-      set({ step: "sdk-ready", platform: sdk.platform === "mobile" ? "mobile" : "desktop" });
+      const platform: ActivityPlatform = sdk.platform === "mobile" ? "mobile" : "desktop";
+      set({ step: "sdk-ready", platform });
+      trace.stage("sdk-ready", "reached", { platform });
 
       // Track Discord's layout mode so the surface can collapse to a clean, full-
       // bleed message preview whenever the user minimises the Activity into the
@@ -309,9 +322,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       // to post into the DM itself).
       const guildId = sdk.guildId || null;
       const channelId = sdk.channelId;
-      const instanceId = sdk.instanceId;
+      instanceId = sdk.instanceId;
 
       set({ step: "authorizing" });
+      trace.stage("authorizing", "reached", { platform, instance: instanceId });
       const { code } = await withTimeout(
         authorizeActivity(sdk),
         AUTHORIZE_TIMEOUT_MS,
@@ -319,6 +333,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       );
 
       set({ step: "exchanging-token" });
+      trace.stage("exchanging-token", "reached", { platform, instance: instanceId });
       const accessToken = await withTimeout(
         exchangeCode(code),
         EXCHANGE_TIMEOUT_MS,
@@ -327,6 +342,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       setActivityToken(accessToken);
 
       set({ step: "authenticating" });
+      trace.stage("authenticating", "reached", { platform, instance: instanceId });
       const auth = await withTimeout(
         sdk.commands.authenticate({ access_token: accessToken }),
         AUTHENTICATE_TIMEOUT_MS,
@@ -348,6 +364,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         // launch has no postable channel until a destination server is chosen.
         targetChannelId: guildId ? channelId : null,
       });
+      // Handshake complete — the beacon that lets the server compute a launch
+      // success rate and total time-to-ready alongside the stalls.
+      trace.stage("done", "done", { platform, instance: instanceId });
 
       // Best-effort rich presence — friends see "Building a message in DWEEB" on
       // the user's profile. This command needs the `rpc.activities.write` scope,
@@ -393,6 +412,15 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       stopCollab();
       const message =
         e instanceof Error ? e.message : "Couldn't start DWEEB inside Discord. Try relaunching.";
+      // Record where it failed — the last stage we entered (`get().step`) is the
+      // one that stalled. A per-stage timeout (`withTimeout`) is the fingerprint
+      // of a silent hang, so it's reported distinctly from any other error.
+      const timedOut = /timed out/i.test(message);
+      trace.stage(get().step, timedOut ? "timeout" : "error", {
+        platform: get().platform,
+        instance: instanceId,
+        detail: message,
+      });
       set({ status: "error", error: message });
     }
   },

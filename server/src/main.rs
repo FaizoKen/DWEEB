@@ -393,6 +393,15 @@ async fn run() {
         // it. Unauthenticated by necessity — an `<img>` can't carry a bearer — but
         // bounded hard (public hosts only, size + time caps) in the handler.
         .route("/api/activity/image", get(activity::activity_image))
+        // Handshake telemetry: the browser beacons each launch stage so a stalled
+        // in-Discord launch (which has no reachable console) is visible in the
+        // proxy logs. Unauthenticated by necessity — a stall can precede the token
+        // — and bounded tight in the handler (see `activity_telemetry`).
+        .route(
+            "/api/activity/telemetry",
+            post(activity::activity_telemetry)
+                .layer(axum::extract::DefaultBodyLimit::max(2 * 1024)),
+        )
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))
         .route("/api/guilds/:guild_id/roles", get(roles))
