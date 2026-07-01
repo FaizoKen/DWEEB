@@ -29,7 +29,6 @@ import { pushToast } from "@/ui/Toast";
 import { copyText } from "@/core/serialization/clipboard";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
-import { activityLaunchUrl } from "@/core/guild/config";
 import {
   createActivityInvite,
   GuildApiError,
@@ -130,8 +129,6 @@ export function CollaborateDialog() {
   const noServer = !resolvingAuth && !signedOut && !connectedId && !loadingGuild;
   const noChannels = Boolean(connectedId) && guildStatus !== "loading" && channels.length === 0;
   const canPick = channels.length > 0;
-
-  const launcher = activityLaunchUrl();
 
   let footer: React.ReactNode;
   if (signedOut) {
@@ -277,13 +274,10 @@ export function CollaborateDialog() {
         </>
       ) : null}
 
-      {launcher && !invite ? (
+      {canPick && !invite ? (
         <p className={styles.fine}>
-          Already have a channel open in Discord?{" "}
-          <a href={launcher} target="_blank" rel="noopener noreferrer">
-            Launch DWEEB there directly
-          </a>
-          .
+          Prefer to launch it yourself? In Discord, open a channel and pick DWEEB from the{" "}
+          <strong>+ (Apps)</strong> menu — that launches it right in that channel, not a DM.
         </p>
       ) : null}
     </Modal>
