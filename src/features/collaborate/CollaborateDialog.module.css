@@ -61,6 +61,11 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  /* Fill the Field's flex `.control` wrapper. Without this the row only takes
+     its content width (flex items default to `flex: 0 1 auto`), so the input
+     shrinks and the read-only URL gets clipped. */
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .linkRow > :first-child {
   flex: 1 1 auto;
