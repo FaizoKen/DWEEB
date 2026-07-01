@@ -133,39 +133,42 @@ export function usePreviewSwipeToClose(onClose: () => void) {
 }
 
 /**
- * Tracks whether the layout is in its mobile (bottom-sheet) form. Used to gate
- * mounting the live mini preview: it renders a second full <Preview /> tree, so
- * we only want it alive on the viewports where it's actually shown.
+ * Subscribe to a media query, re-rendering when it flips.
+ *
+ * Syncs once on mount, not just via the `change` event: the viewport can change
+ * between the initial render (the `useState` initializer) and this effect
+ * attaching the listener. In the Discord Activity that's the common case — the
+ * iframe is often narrow during the splash/handshake and only resized to its
+ * real (often desktop) size a moment later. If that resize lands in the gap the
+ * `change` event fires with no listener attached, is lost, and the size then
+ * stays stable, leaving us stuck on the stale initial value. Syncing here closes
+ * the gap. Some webview/resize paths also resize without reliably emitting a
+ * `change` on the MQL, so we watch plain `resize` too (cheap — React bails out
+ * when the boolean is unchanged).
  */
-export function useIsMobileSheet() {
-  const [isMobile, setIsMobile] = useState(
-    () => typeof window !== "undefined" && window.matchMedia(MOBILE_SHEET_QUERY).matches,
+export function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(query).matches,
   );
   useEffect(() => {
-    const mql = window.matchMedia(MOBILE_SHEET_QUERY);
-    const sync = () => setIsMobile(mql.matches);
-
-    // Re-read once, now: the viewport can change between the initial render (the
-    // `useState` initializer above) and this effect attaching the listener. In
-    // the Discord Activity that's the common case — the iframe is often narrow
-    // during the splash/handshake and only resized to its real (often desktop)
-    // size a moment later. If that resize lands in this gap the `change` event
-    // fires with no listener attached, is lost, and the size then stays stable,
-    // leaving us stuck on the stale initial value — desktop layout but with the
-    // mobile mini-preview showing and the side preview unmounted. Syncing here
-    // closes the gap.
+    const mql = window.matchMedia(query);
+    const sync = () => setMatches(mql.matches);
     sync();
-
     mql.addEventListener("change", sync);
-    // Belt-and-suspenders for the embedded iframe: some webview/resize paths
-    // resize the viewport without reliably emitting a `change` on the MQL, so
-    // also re-check on plain resize (cheap — React bails out when the boolean
-    // is unchanged).
     window.addEventListener("resize", sync);
     return () => {
       mql.removeEventListener("change", sync);
       window.removeEventListener("resize", sync);
     };
-  }, []);
-  return isMobile;
+  }, [query]);
+  return matches;
+}
+
+/**
+ * Tracks whether the layout is in its mobile (bottom-sheet) form. Used to gate
+ * mounting the live mini preview: it renders a second full <Preview /> tree, so
+ * we only want it alive on the viewports where it's actually shown.
+ */
+export function useIsMobileSheet() {
+  return useMediaQuery(MOBILE_SHEET_QUERY);
 }

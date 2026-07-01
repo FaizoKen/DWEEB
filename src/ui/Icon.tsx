@@ -78,6 +78,14 @@ export const ShareIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+export const MoreHorizontalIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} fill="currentColor" stroke="none" {...rest}>
+    <circle cx="5" cy="12" r="1.6" />
+    <circle cx="12" cy="12" r="1.6" />
+    <circle cx="19" cy="12" r="1.6" />
+  </svg>
+);
+
 export const SendIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M22 2L11 13" />

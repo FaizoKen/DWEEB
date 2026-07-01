@@ -73,3 +73,24 @@
   flex: none;
   opacity: 0.8;
 }
+
+/* Phone: the bar can't hold every control at full size on one line. The utility
+   actions fold into an overflow menu and "New" collapses to its icon (both in
+   ActivityBar.tsx); here we drop the cluster dividers and tighten the spacing so
+   what remains — destination · undo/redo · primary post/update — stays on a
+   single, uncrowded row. */
+@media (max-width: 560px) {
+  .bar {
+    gap: var(--app-space-2);
+    padding-left: var(--app-space-2);
+    padding-right: var(--app-space-2);
+  }
+
+  .right {
+    gap: 2px;
+  }
+
+  .sep {
+    display: none;
+  }
+}

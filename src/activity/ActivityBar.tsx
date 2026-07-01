@@ -17,12 +17,15 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
+import { Menu, MenuItem } from "@/ui/Menu";
 import { pushToast } from "@/ui/Toast";
+import { useMediaQuery } from "@/features/preview/previewSheet";
 import {
   ExternalLinkIcon,
   GlobeIcon,
   HistoryIcon,
   LockIcon,
+  MoreHorizontalIcon,
   PlusIcon,
   RedoIcon,
   RefreshIcon,
@@ -67,6 +70,12 @@ export function ActivityBar() {
   const targetChannelId = useActivityStore((s) => s.targetChannelId);
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
   const canPostToTarget = useActivityStore((s) => s.canPostToTarget);
+
+  // Below the phone breakpoint the bar can't fit every control at full size on
+  // one row, so the utility actions (restore, open-on-web, and — in the update
+  // state — view) fold into a single overflow menu and the secondary "New"
+  // button collapses to its icon. Wider windows keep everything inline.
+  const isPhone = useMediaQuery("(max-width: 560px)");
 
   // A DM / group-DM launch has no guild of its own, so the user first picks a
   // destination *server* (DMs can't receive a webhook post), then a channel.
@@ -160,6 +169,14 @@ export function ActivityBar() {
     lastPost.guild_id === targetGuildId &&
     lastPost.channel_id === targetChannelId;
 
+  // "View the posted message" belongs to the update state and only when posting
+  // here is actually possible — mirroring the desktop `canUpdate` arm below,
+  // where it sits inline. On a phone it rides in the overflow menu instead.
+  const showView = canUpdate && !botMissing && !blockedFromPosting;
+  // Undo/redo (and the overflow trigger) tighten to the small control size on a
+  // phone so the row keeps breathing room; full size on wider windows.
+  const iconSize = isPhone ? "sm" : "md";
+
   // Run the confirmed post. `publish`/`update` resolve with the result on
   // success (null on failure, which they toast), so we only swap the confirm
   // dialog for the success one when something actually landed; a failure leaves
@@ -226,38 +243,89 @@ export function ActivityBar() {
         ) : null}
       </div>
 
-      <div className={styles.right}>
-        {/* Restore: pull a message DWEEB posted in this channel back into the
-            editor. Needs a destination channel (the webhook lives there), so it's
-            disabled until one is picked — and, like Post, it reads through that
-            webhook, so it's gated on Manage Webhooks too. */}
-        <IconButton
-          label={
-            botMissing
-              ? "Add DWEEB to this server first to restore a message"
-              : blockedFromPosting
-                ? blockedReason
-                : "Restore a message DWEEB posted"
-          }
-          onClick={() => setRestoreOpen(true)}
-          disabled={noDestination || blockedFromPosting || botMissing}
-        >
-          <HistoryIcon />
-        </IconButton>
+      <div className={styles.right} data-compact={isPhone ? "" : undefined}>
+        {/* Utility actions — restoring a message DWEEB posted here and jumping to
+            the full web app. Restore reads through the channel's webhook, so
+            (like Post) it needs a destination and is gated on Manage Webhooks;
+            "Open on web" hands the current draft to the web app for what the
+            embedded surface omits (scheduling, saved messages, account).
 
-        {/* The embedded surface is a focused "edit together, then post" view;
-            this hands the current draft off to the full web app (scheduling,
-            saved messages, account) for anything it omits. */}
-        <IconButton label="Open on web for full features" onClick={() => void openOnWeb()}>
-          <GlobeIcon />
-        </IconButton>
+            On a phone the bar can't hold every control at full size on one line,
+            so these fold into a single overflow menu — which also absorbs the
+            update state's "View" — keeping the row to the destination, undo/redo,
+            and the primary action. Wider windows show them inline. */}
+        {isPhone ? (
+          <Menu
+            align="end"
+            trigger={
+              <IconButton label="More actions" size="sm">
+                <MoreHorizontalIcon />
+              </IconButton>
+            }
+          >
+            {(close) => (
+              <>
+                {showView ? (
+                  <MenuItem
+                    icon={<ExternalLinkIcon size={16} />}
+                    onSelect={() => {
+                      close();
+                      void openLastPost();
+                    }}
+                  >
+                    View posted message
+                  </MenuItem>
+                ) : null}
+                <MenuItem
+                  icon={<HistoryIcon size={16} />}
+                  disabled={noDestination || blockedFromPosting || botMissing}
+                  onSelect={() => {
+                    close();
+                    setRestoreOpen(true);
+                  }}
+                >
+                  Restore a message
+                </MenuItem>
+                <MenuItem
+                  icon={<GlobeIcon size={16} />}
+                  onSelect={() => {
+                    close();
+                    void openOnWeb();
+                  }}
+                >
+                  Open on web
+                </MenuItem>
+              </>
+            )}
+          </Menu>
+        ) : (
+          <>
+            <IconButton
+              label={
+                botMissing
+                  ? "Add DWEEB to this server first to restore a message"
+                  : blockedFromPosting
+                    ? blockedReason
+                    : "Restore a message DWEEB posted"
+              }
+              onClick={() => setRestoreOpen(true)}
+              disabled={noDestination || blockedFromPosting || botMissing}
+            >
+              <HistoryIcon />
+            </IconButton>
+
+            <IconButton label="Open on web for full features" onClick={() => void openOnWeb()}>
+              <GlobeIcon />
+            </IconButton>
+          </>
+        )}
 
         <span className={styles.sep} aria-hidden="true" />
 
-        <IconButton label="Undo" onClick={undo} disabled={!canUndo}>
+        <IconButton label="Undo" onClick={undo} disabled={!canUndo} size={iconSize}>
           <UndoIcon />
         </IconButton>
-        <IconButton label="Redo" onClick={redo} disabled={!canRedo}>
+        <IconButton label="Redo" onClick={redo} disabled={!canRedo} size={iconSize}>
           <RedoIcon />
         </IconButton>
 
@@ -299,10 +367,13 @@ export function ActivityBar() {
         ) : canUpdate ? (
           <>
             {/* The iframe can't open discord.com itself; openLastPost routes
-                through the SDK (see activityStore). */}
-            <IconButton label="View the posted message" onClick={() => void openLastPost()}>
-              <ExternalLinkIcon />
-            </IconButton>
+                through the SDK (see activityStore). On a phone this moves into
+                the overflow menu above, so it's only inline on wider windows. */}
+            {!isPhone ? (
+              <IconButton label="View the posted message" onClick={() => void openLastPost()}>
+                <ExternalLinkIcon />
+              </IconButton>
+            ) : null}
             <Button
               variant="secondary"
               size="sm"

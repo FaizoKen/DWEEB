@@ -91,12 +91,13 @@
 }
 
 /* ── Icon-only when the toolbar is tight ───────────────────────────────── */
-/* `collapseLabel` buttons live in the builder's action bar, which flags itself
-   `data-compact` (see Builder.tsx) once its controls would no longer fit on a
-   single row — at a narrow builder pane on desktop, or on a phone. When that
-   flag is set we drop the text and tighten the horizontal padding so the button
-   shrinks to just its icon(s). Callers carry a `title`/`aria-label`, so the
-   control keeps an accessible name once the visible text is gone. */
+/* `collapseLabel` buttons sit inside a toolbar that flags itself `data-compact`
+   once its controls would no longer fit on a single row — the builder's action
+   bar (see Builder.tsx) at a narrow pane, or the Activity bar (ActivityBar.tsx)
+   on a phone. When that flag is set we drop the text and tighten the horizontal
+   padding so the button shrinks to just its icon(s). Callers carry a
+   `title`/`aria-label`, so the control keeps an accessible name once the visible
+   text is gone. */
 [data-compact] .collapseLabel .label {
   display: none;
 }

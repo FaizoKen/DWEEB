@@ -50,6 +50,15 @@
   flex: none;
 }
 
+/* Phone: keep a long channel name from eating the row — cap it tighter than the
+   desktop 240px so the destination truncates early and leaves the toolbar's
+   actions room to stay on one line. */
+@media (max-width: 560px) {
+  .trigger {
+    max-width: 42vw;
+  }
+}
+
 /* Floating panel (portalled to <body>, positioned in JS) ----------------- */
 
 .panel {
