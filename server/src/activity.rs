@@ -272,6 +272,106 @@ fn clamp_field(s: &str, max: usize) -> String {
     s.chars().filter(|c| !c.is_control()).take(max).collect()
 }
 
+// ── Feedback relay (POST /api/activity/feedback) ─────────────────────────────
+
+/// Discord caps a forum `thread_name` at 100 chars and a non-Nitro message
+/// `content` at 2000; we clamp both here (the FE clamps too, but the proxy is the
+/// authority on what actually reaches Discord). A forum channel has few tags, so
+/// only a handful of tag ids are ever meaningful.
+const FEEDBACK_THREAD_NAME_MAX: usize = 100;
+const FEEDBACK_CONTENT_MAX: usize = 2000;
+const FEEDBACK_MAX_TAGS: usize = 5;
+
+#[derive(Deserialize)]
+pub struct FeedbackBody {
+    /// The forum post's title (the tag emoji + user's summary — see the web form).
+    #[serde(default)]
+    thread_name: String,
+    /// The report body, already assembled by the FE (details + its own footer).
+    #[serde(default)]
+    content: String,
+    /// The forum's own tag snowflakes to pre-sort the post under. Optional.
+    #[serde(default)]
+    applied_tags: Vec<String>,
+}
+
+/// `POST /api/activity/feedback` `{ thread_name, content, applied_tags }` — relay
+/// a "Send feedback" report from the embedded Activity to DWEEB's feedback forum.
+///
+/// The web app posts feedback straight to the forum webhook from the browser, but
+/// a sandboxed Activity iframe can't reach discord.com directly (the same reason
+/// `activity_post` exists), so the proxy forwards it. The destination webhook is
+/// held server-side (`FEEDBACK_WEBHOOK_URL`) — the browser never sees or names it,
+/// so this can't be turned into an open relay to arbitrary webhooks. Bearer-gated
+/// (only a signed-in Activity user can post) and we stamp the caller's *verified*
+/// Discord identity onto the report, since the web form's self-typed contact could
+/// be anyone. Answers `204` on a created post.
+pub async fn activity_feedback(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Json(body): Json<FeedbackBody>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let Some(webhook_url) = st.config.feedback_webhook_url.as_deref() else {
+        return Err(AppError::Status {
+            status: StatusCode::NOT_IMPLEMENTED,
+            message: "Feedback isn't available on this deployment.".into(),
+            retry_after: None,
+        });
+    };
+    // Identify the sender — also gates the endpoint to real Activity users, so it
+    // can't be scripted into a feedback-forum spam cannon.
+    let session = resolve_identity(&st, &jar, &headers).await?;
+
+    let thread_name: String = body
+        .thread_name
+        .trim()
+        .chars()
+        .take(FEEDBACK_THREAD_NAME_MAX)
+        .collect();
+    let details = body.content.trim();
+    if thread_name.is_empty() || details.is_empty() {
+        return Err(bad_request("thread_name and content are required"));
+    }
+
+    // Append the verified sender under the report as quiet subtext, then hard-cap
+    // the whole thing to Discord's content limit (the stamp always survives — the
+    // details are trimmed to make room). The web form can only carry a self-typed
+    // contact; here we know exactly who sent it.
+    let stamp = format!(
+        "\n-# ✅ {} ({}) · via DWEEB in Discord",
+        session.name, session.uid
+    );
+    let room = FEEDBACK_CONTENT_MAX.saturating_sub(stamp.chars().count());
+    let mut content: String = details.chars().take(room).collect();
+    content.push_str(&stamp);
+
+    // Forward only well-formed tag snowflakes so a malformed body can't 400 the
+    // webhook; drop anything else.
+    let applied_tags: Vec<String> = body
+        .applied_tags
+        .into_iter()
+        .filter(|t| is_snowflake(t))
+        .take(FEEDBACK_MAX_TAGS)
+        .collect();
+
+    let mut payload = json!({
+        "thread_name": thread_name,
+        "content": content,
+        // Feedback must never ping anyone, even if the body contains a mention.
+        "allowed_mentions": { "parse": [] },
+    });
+    if !applied_tags.is_empty() {
+        payload["applied_tags"] = json!(applied_tags);
+    }
+
+    st.discord.post_webhook_url(webhook_url, &payload).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 // ── Publish (POST /api/activity/post) ───────────────────────────────────────
 
 #[derive(Deserialize)]

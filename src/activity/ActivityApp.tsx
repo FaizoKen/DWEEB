@@ -18,7 +18,7 @@
  * inset the whole surface for Discord's native top bar / home indicator.
  */
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ComponentTree } from "@/features/builder/components/ComponentTree";
 import { Preview } from "@/features/preview/Preview";
 import { MiniPreview } from "@/features/preview/MiniPreview";
@@ -30,9 +30,16 @@ import {
   type ActivityStatus,
   type ActivityStep,
 } from "@/core/activity/activityStore";
+import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { ActivityBar } from "./ActivityBar";
 import { PresenceDock } from "./PresenceDock";
 import styles from "./ActivityApp.module.css";
+
+// Lazy — the feedback form (and its transport) only loads when someone opens it,
+// so it never weighs on the Activity's first paint. Mirrors the web `App`.
+const FeedbackDialog = lazy(() =>
+  import("@/features/feedback/FeedbackDialog").then((m) => ({ default: m.FeedbackDialog })),
+);
 
 export function ActivityApp() {
   const status = useActivityStore((s) => s.status);
@@ -41,6 +48,9 @@ export function ActivityApp() {
   const platform = useActivityStore((s) => s.platform);
   const pipMode = useActivityStore((s) => s.pipMode);
   const init = useActivityStore((s) => s.init);
+  // Feedback form open state — mounted lazily below only while open (like the web
+  // app), summoned from the bar's "Send feedback" action.
+  const feedbackOpen = useFeedbackStore((s) => s.open);
 
   // The preview is a side column on desktop and a bottom sheet on mobile; this
   // only matters in the sheet layout, where the CSS keeps it slid away until
@@ -134,6 +144,12 @@ export function ActivityApp() {
           <MiniPreview onOpen={() => setPreviewOpen(true)} />
           <PresenceDock />
         </div>
+      ) : null}
+
+      {feedbackOpen ? (
+        <Suspense fallback={null}>
+          <FeedbackDialog />
+        </Suspense>
       ) : null}
 
       <ToastViewport />

@@ -7,14 +7,23 @@
  * `applied_tags` — the forum's own tag snowflakes — so each report lands
  * pre-sorted under the right tag.
  *
- * Like every other Discord call in this app the request goes straight to
- * discord.com — no DWEEB backend in the loop. The webhook URL is injected at
- * build time (`VITE_FEEDBACK_WEBHOOK_URL`); it's a public, write-only
- * credential that can only create posts in the one feedback channel, never read
- * anything. When it's unset the feature stays dormant (`isFeedbackConfigured()`
- * is false and every entry point hides), so a build without it behaves exactly
- * as before.
+ * On the web the request goes straight to discord.com — no DWEEB backend in the
+ * loop. The webhook URL is injected at build time (`VITE_FEEDBACK_WEBHOOK_URL`);
+ * it's a public, write-only credential that can only create posts in the one
+ * feedback channel, never read anything. When it's unset the feature stays dormant
+ * (`isFeedbackConfigured()` is false and every entry point hides), so a build
+ * without it behaves exactly as before.
+ *
+ * Inside a Discord Activity that direct post is impossible — the sandboxed iframe
+ * can't reach discord.com (the same CSP wall that makes publishing go through the
+ * proxy). There we relay the exact same payload through `POST /api/activity/feedback`,
+ * which forwards it to the webhook the proxy holds server-side. So the operator
+ * sets `VITE_FEEDBACK_WEBHOOK_URL` (web + the entry-point gate) *and* the backend's
+ * `FEEDBACK_WEBHOOK_URL` (the Activity relay's destination) together.
  */
+
+import { isActivityMode } from "@/core/activity/runtime";
+import { proxyFetch } from "@/core/net/proxyFetch";
 
 /** Where the team and community follow up — shown to the user after they send,
  *  so they know where a reply will come from. */
@@ -141,6 +150,11 @@ export async function submitFeedback(
   // Only attach a tag once its real id is wired in — an empty id 400s.
   if (input.tag.id) payload.applied_tags = [input.tag.id];
 
+  // Inside a Discord Activity the sandboxed iframe can't POST to discord.com, so
+  // relay the same report through the proxy (which holds the webhook). Everywhere
+  // else, post to the webhook directly (below).
+  if (isActivityMode()) return submitViaProxy(payload, signal);
+
   let res: Response;
   try {
     // `wait=true` makes Discord confirm the thread was created (and surface a
@@ -170,6 +184,53 @@ export async function submitFeedback(
       if (typeof body.message === "string" && body.message.length > 0) {
         error = `Couldn’t send feedback — Discord (${res.status}): ${body.message}`;
       }
+    } catch {
+      /* keep the default message */
+    }
+  }
+  return { ok: false, error };
+}
+
+/**
+ * Activity transport: relay the built forum payload through the proxy's
+ * `POST /api/activity/feedback`, which forwards it to the webhook it holds
+ * server-side (the sandboxed iframe can't reach discord.com). We send only the
+ * fields the proxy uses — it re-imposes `allowed_mentions` and stamps the
+ * verified sender itself — and read back its `{ error }` body on failure.
+ */
+async function submitViaProxy(
+  payload: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<FeedbackResult> {
+  let res: Response;
+  try {
+    res = await proxyFetch("/api/activity/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        thread_name: payload.thread_name,
+        content: payload.content,
+        applied_tags: payload.applied_tags ?? [],
+      }),
+      signal,
+    });
+  } catch (e) {
+    if ((e as DOMException)?.name === "AbortError") return { ok: false, error: "Cancelled." };
+    return {
+      ok: false,
+      error: "Network request failed. Check your connection and try again.",
+    };
+  }
+
+  // The proxy answers 204 on a created post.
+  if (res.ok) return { ok: true };
+
+  const text = await res.text().catch(() => "");
+  let error = `Couldn’t send feedback (${res.status}). Please try again.`;
+  if (text) {
+    try {
+      const body = JSON.parse(text) as { error?: unknown };
+      if (typeof body.error === "string" && body.error.length > 0) error = body.error;
     } catch {
       /* keep the default message */
     }

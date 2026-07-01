@@ -524,6 +524,25 @@ impl Discord {
         Err(webhook_error_from(resp).await)
     }
 
+    /// Post `payload` to a full incoming-webhook URL the proxy holds as config
+    /// (e.g. `FEEDBACK_WEBHOOK_URL`), rather than an id+token pair resolved per
+    /// channel. Used by the embedded Activity's feedback relay: the sandboxed
+    /// iframe can't reach discord.com directly, so the proxy forwards the report.
+    /// `?wait=true` makes Discord confirm the post (opening a forum thread) and
+    /// surface a structured error instead of a fire-and-forget 204.
+    pub async fn post_webhook_url(&self, url: &str, payload: &Value) -> Result<(), AppError> {
+        // Respect any query already on the configured URL (e.g. `?thread_id=…`).
+        let sep = if url.contains('?') { '&' } else { '?' };
+        let full = format!("{url}{sep}wait=true");
+        let resp = send_with_retry(self.http.post(&full).json(payload))
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        if resp.status().is_success() {
+            return Ok(());
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
     /// Best-effort channel name for a `webhook.incoming` webhook's channel, so
     /// the builder can label same-named webhooks by destination. Returns None if
     /// the bot can't see the channel (not in that guild) — no login required when

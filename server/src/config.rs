@@ -75,6 +75,14 @@ pub struct Config {
     /// Days a collaboration draft is kept after its last edit before the sweeper
     /// deletes it — a session nobody has touched this long won't be resumed.
     pub activity_draft_retention_days: i64,
+    /// Feedback forum webhook the embedded Activity relays "Send feedback" reports
+    /// to. The web app posts feedback to this webhook straight from the browser
+    /// (`VITE_FEEDBACK_WEBHOOK_URL`), but a sandboxed Activity iframe can't reach
+    /// discord.com directly, so `activity_feedback` forwards the report on the
+    /// browser's behalf. Held server-side so the browser never names the
+    /// destination — it can't be turned into an open relay. None (unset) ⇒ the
+    /// Activity's feedback endpoint answers 501.
+    pub feedback_webhook_url: Option<String>,
 
     // ── Authorization policy ───────────────────────────────────────────────
     /// When true, a user may only read servers where they own or hold
@@ -209,6 +217,7 @@ impl Config {
             opt_env("ACTIVITY_DRAFT_DB_PATH").unwrap_or_else(|| "activity-drafts.db".to_string());
         let activity_draft_max_entries = parse_or("ACTIVITY_DRAFT_MAX_ENTRIES", 20_000);
         let activity_draft_retention_days = parse_or("ACTIVITY_DRAFT_RETENTION_DAYS", 7);
+        let feedback_webhook_url = opt_env("FEEDBACK_WEBHOOK_URL");
 
         let require_manage_guild = parse_bool("REQUIRE_MANAGE_GUILD", true);
 
@@ -252,6 +261,7 @@ impl Config {
             activity_draft_db_path,
             activity_draft_max_entries,
             activity_draft_retention_days,
+            feedback_webhook_url,
             session_secret,
             session_ttl,
             cookie_secure,

@@ -403,6 +403,14 @@ async fn run() {
             post(activity::activity_telemetry)
                 .layer(axum::extract::DefaultBodyLimit::max(2 * 1024)),
         )
+        // Feedback relay: the sandboxed iframe can't post to the feedback forum
+        // webhook on discord.com directly (same reason /post exists), so the proxy
+        // forwards a "Send feedback" report to the server-held FEEDBACK_WEBHOOK_URL.
+        // Bearer-gated; the body is a short report, so it's bounded tight.
+        .route(
+            "/api/activity/feedback",
+            post(activity::activity_feedback).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))
         .route("/api/guilds/:guild_id/roles", get(roles))

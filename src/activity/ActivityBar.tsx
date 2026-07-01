@@ -15,6 +15,8 @@ import { useEffect, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useActivityStore } from "@/core/activity/activityStore";
+import { useFeedbackStore } from "@/features/feedback/feedbackStore";
+import { isFeedbackConfigured } from "@/core/feedback/submit";
 import { useValidationView, type ValidationView } from "@/features/builder/useValidation";
 import { scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
 import { Button } from "@/ui/Button";
@@ -33,6 +35,7 @@ import {
   RedoIcon,
   RefreshIcon,
   SendIcon,
+  SupportIcon,
   UndoIcon,
 } from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
@@ -77,6 +80,12 @@ export function ActivityBar() {
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
   const canRedo = useMessageStore((s) => s.future.length > 0);
+
+  // "Send feedback" — same form the web app uses, relayed through the proxy from
+  // inside Discord (see `core/feedback/submit`). Shown only when the build has a
+  // feedback webhook wired up; hidden entirely otherwise.
+  const openFeedback = useFeedbackStore((s) => s.openFeedback);
+  const feedbackOn = isFeedbackConfigured();
 
   // Live validation of the shared draft. Errors are the ones Discord would reject
   // (empty message, a button with no label, …); we block Post/Update while any
@@ -377,6 +386,17 @@ export function ActivityBar() {
                 >
                   Open on web
                 </MenuItem>
+                {feedbackOn ? (
+                  <MenuItem
+                    icon={<SupportIcon size={16} />}
+                    onSelect={() => {
+                      close();
+                      openFeedback();
+                    }}
+                  >
+                    Send feedback
+                  </MenuItem>
+                ) : null}
               </>
             )}
           </Menu>
@@ -399,6 +419,12 @@ export function ActivityBar() {
             <IconButton label="Open on web for full features" onClick={() => void openOnWeb()}>
               <GlobeIcon />
             </IconButton>
+
+            {feedbackOn ? (
+              <IconButton label="Send feedback" onClick={openFeedback}>
+                <SupportIcon />
+              </IconButton>
+            ) : null}
           </>
         )}
 
