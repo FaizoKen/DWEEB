@@ -43,6 +43,19 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  /* Fill the footer row so the issue group's margin-left:auto has room to push
+     it to the far right. */
+  flex: 1;
+}
+
+/* Health alerts dock to the right — a distinct zone from the budget meters on
+   the left. Wrapping the pills keeps a single break point, so error + warning
+   stay grouped together instead of splitting the free space between them. */
+.issues {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .statPill {
@@ -78,9 +91,11 @@ button.statPill {
   cursor: pointer;
 }
 
+/* Solid, high-contrast fill — matches the floating error pill so the inline
+   summary reads as the same can't-miss-it alert. */
 .issuePillError {
-  color: var(--app-danger-text);
-  background: var(--app-danger-soft);
+  color: #fff;
+  background: var(--app-danger);
   border-color: transparent;
 }
 

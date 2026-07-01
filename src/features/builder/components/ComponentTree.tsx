@@ -627,30 +627,35 @@ function MetaHeader() {
           />
           {/* On an empty message the only issue is "add a component", which the
               empty-tree placeholder already says — so the pills wait for content.
-              A clean message shows no pill at all; absence is the "all good" cue. */}
-          {components > 0 && errorCount > 0 ? (
-            <button
-              type="button"
-              className={cn(styles.statPill, styles.issuePillError)}
-              onClick={() => jumpToIssue(firstErrorNodeId)}
-              disabled={!firstErrorNodeId}
-              title="Jump to the first component with an error"
-            >
-              <AlertCircleIcon size={12} />
-              {errorCount} {errorCount === 1 ? "error" : "errors"}
-            </button>
-          ) : null}
-          {components > 0 && warningCount > 0 ? (
-            <button
-              type="button"
-              className={cn(styles.statPill, styles.issuePillWarn)}
-              onClick={() => jumpToIssue(firstWarningNodeId)}
-              disabled={!firstWarningNodeId}
-              title="Jump to the first component with a warning"
-            >
-              <AlertTriangleIcon size={12} />
-              {warningCount} {warningCount === 1 ? "warning" : "warnings"}
-            </button>
+              A clean message shows no pill at all; absence is the "all good" cue.
+              Issue pills dock to the right, apart from the budget meters. */}
+          {components > 0 && (errorCount > 0 || warningCount > 0) ? (
+            <div className={styles.issues}>
+              {errorCount > 0 ? (
+                <button
+                  type="button"
+                  className={cn(styles.statPill, styles.issuePillError)}
+                  onClick={() => jumpToIssue(firstErrorNodeId)}
+                  disabled={!firstErrorNodeId}
+                  title="Jump to the first component with an error"
+                >
+                  <AlertCircleIcon size={12} />
+                  {errorCount} {errorCount === 1 ? "error" : "errors"}
+                </button>
+              ) : null}
+              {warningCount > 0 ? (
+                <button
+                  type="button"
+                  className={cn(styles.statPill, styles.issuePillWarn)}
+                  onClick={() => jumpToIssue(firstWarningNodeId)}
+                  disabled={!firstWarningNodeId}
+                  title="Jump to the first component with a warning"
+                >
+                  <AlertTriangleIcon size={12} />
+                  {warningCount} {warningCount === 1 ? "warning" : "warnings"}
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
