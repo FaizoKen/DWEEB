@@ -16,7 +16,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { guildIconUrl, type PickerGuild } from "@/core/guild/api";
-import { CheckCircleIcon, ChevronDownIcon, CompassIcon, SearchIcon } from "@/ui/Icon";
+import { CheckCircleIcon, ChevronDownIcon, CompassIcon, PlusIcon, SearchIcon } from "@/ui/Icon";
 import channelStyles from "./ChannelPicker.module.css";
 import styles from "./GuildPicker.module.css";
 
@@ -28,6 +28,7 @@ export function GuildPicker({
   loading,
   selectedId,
   onSelect,
+  onAddServer,
   compact = false,
 }: {
   /** The user's postable servers (already filtered by the store). */
@@ -38,6 +39,13 @@ export function GuildPicker({
   selectedId: string | null;
   /** A server was picked — close the panel and re-point publishing at it. */
   onSelect: (guildId: string) => void;
+  /** Open Discord's "Add DWEEB to a server" flow. When provided the panel shows a
+   *  persistent "Add a server" action (pinned below the list, and the whole of an
+   *  empty state) so a user with no postable server yet — or one wanting a new
+   *  destination — can add the bot without leaving the picker. The list refreshes
+   *  itself when they return (the bar re-fetches on focus), so the panel is left
+   *  open on click to let the new server pop in. */
+  onAddServer?: () => void;
   /** Collapse the trigger to just the server icon plus its dropdown arrow once a
    *  server is picked (dropping the name) — used by the bar's left server
    *  indicator. Before one's picked it still shows the "Pick a server" label so
@@ -155,14 +163,18 @@ export function GuildPicker({
               {loading ? (
                 <p className={channelStyles.note}>Loading your servers…</p>
               ) : guilds.length === 0 ? (
+                // With the "Add a server" action below, the note just explains the
+                // requirement — the button (plus the bar's refresh-on-return) is the
+                // action, so no "then relaunch" step. Without it, keep the old hint.
                 <p className={channelStyles.note}>
-                  No servers you can post to. Add DWEEB to a server where you have Manage Webhooks,
-                  then relaunch.
+                  {onAddServer
+                    ? "You're not in a server you can post to yet — add DWEEB to one where you have the “Manage Webhooks” permission:"
+                    : "No servers you can post to. Add DWEEB to a server where you have Manage Webhooks, then relaunch."}
                 </p>
               ) : filtered.length === 0 ? (
                 <p className={channelStyles.note}>No servers match that search.</p>
               ) : (
-                <ul className={channelStyles.list}>
+                <ul className={`${channelStyles.list} ${styles.guildList}`}>
                   {filtered.map((g) => {
                     const active = g.id === selectedId;
                     return (
@@ -186,6 +198,20 @@ export function GuildPicker({
                   })}
                 </ul>
               )}
+
+              {/* Persistent "Add a server" action, pinned below the list. Opens
+                  Discord's add-bot flow (no pre-selected guild) so the user can add
+                  DWEEB to a new server without leaving the picker. The panel stays
+                  open on click so the freshly added server can pop into the list
+                  once the bar's refresh-on-return lands (see ActivityBar). */}
+              {onAddServer ? (
+                <button type="button" className={styles.addServer} onClick={onAddServer}>
+                  <span className={styles.addServerIcon} aria-hidden="true">
+                    <PlusIcon size={16} />
+                  </span>
+                  <span className={styles.addServerLabel}>Add a server</span>
+                </button>
+              ) : null}
             </div>,
             document.body,
           )

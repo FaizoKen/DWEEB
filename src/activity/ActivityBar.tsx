@@ -84,6 +84,8 @@ export function ActivityBar() {
   const guildsLoading = useActivityStore((s) => s.guildsLoading);
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
   const setTargetGuild = useActivityStore((s) => s.setTargetGuild);
+  const addServer = useActivityStore((s) => s.addServer);
+  const refreshPostableGuilds = useActivityStore((s) => s.refreshPostableGuilds);
   const targetGuildMeta = useActivityStore((s) => s.targetGuildMeta);
   const targetGuildMetaLoading = useActivityStore((s) => s.targetGuildMetaLoading);
 
@@ -98,6 +100,11 @@ export function ActivityBar() {
   // with a fresh poll window, since that tap is the moment they're off to add the
   // bot and will return shortly.
   const [recheckArm, setRecheckArm] = useState(0);
+
+  // The DM-launch twin of `recheckArm`: bumped when the user taps "Add a server"
+  // in the destination picker, arming the postable-list refresh below so the
+  // newly added server appears without a relaunch.
+  const [addArm, setAddArm] = useState(0);
 
   // Auto-detect when the bot finally gets added — no manual step needed. While
   // it's missing, re-check whenever the Activity regains focus/visibility (the
@@ -130,6 +137,35 @@ export function ActivityBar() {
       window.clearInterval(poll);
     };
   }, [botMissing, recheckBot, recheckArm]);
+
+  // DM launch: once the user taps "Add a server" in the picker, refresh the
+  // postable list when they return — on focus/visibility (coming back from the
+  // add-bot flow) plus a bounded safety-net poll for clients that don't fire
+  // those events. Mirrors the botMissing auto-recheck above and is capped the
+  // same way, so an abandoned add doesn't poll the proxy forever; the free
+  // focus/visibility watch keeps working past the cap, and re-tapping re-arms.
+  useEffect(() => {
+    if (!isDm || addArm === 0) return;
+    const check = () => void refreshPostableGuilds();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", check);
+    let ticks = 0;
+    const poll = window.setInterval(() => {
+      if (++ticks > AUTO_RECHECK_MAX_TICKS) {
+        window.clearInterval(poll);
+        return;
+      }
+      check();
+    }, AUTO_RECHECK_INTERVAL_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", check);
+      window.clearInterval(poll);
+    };
+  }, [isDm, addArm, refreshPostableGuilds]);
 
   // Destination channel name for the confirm/success dialogs — resolved from the
   // connected guild's channel map (the same source the picker reads).
@@ -211,6 +247,10 @@ export function ActivityBar() {
             loading={guildsLoading}
             selectedId={targetGuildId}
             onSelect={setTargetGuild}
+            onAddServer={() => {
+              void addServer();
+              setAddArm((n) => n + 1);
+            }}
             compact
           />
         ) : targetGuildMeta ? (

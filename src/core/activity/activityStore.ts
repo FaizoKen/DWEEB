@@ -187,6 +187,18 @@ interface ActivityState {
    *  signals a still-missing bot, and a success is confirmed by the bootstrap's
    *  own "Connected" toast. */
   recheckBot(): Promise<void>;
+  /** Open Discord's "Add to Server" flow so the user can add DWEEB to another
+   *  server — the DM-launch destination picker's "Add a server" action. Unlike
+   *  {@link addBotToServer} it pre-selects nothing (a DM launch has no guild of
+   *  its own), so the user picks any server they manage. Routes through the host
+   *  SDK — the sandboxed iframe can't open discord.com itself. Pairs with
+   *  {@link refreshPostableGuilds}, which the bar re-runs on return so the newly
+   *  added server appears in the picker without a relaunch. */
+  addServer(): Promise<void>;
+  /** Re-fetch the DM-launch postable server list, force-fresh, and quietly swap
+   *  it in (no loading flash) — used after {@link addServer} so a just-added
+   *  server slots into the already-open picker. Failures keep the current list. */
+  refreshPostableGuilds(): Promise<void>;
   /** Re-point `publish()` at a different channel in the target guild. */
   setTargetChannel(channelId: string): void;
   /** Pick the destination server (DM launch): loads its channels + preview data
@@ -619,6 +631,42 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     // present — the CTA gives way to the bar and the bootstrap's "Connected" toast
     // confirms it, so there's nothing to surface on a still-missing check.
     await loadTargetGuildMeta(set, guildId, true);
+  },
+
+  async addServer() {
+    // Generic "add DWEEB to a server" for the DM-launch destination picker — no
+    // pre-selected guild (a DM launch has none of its own), so the user picks any
+    // server they manage. Same host-SDK external open as `addBotToServer`.
+    const url = botInviteUrl(undefined, { redirect: false });
+    if (!url) {
+      pushToast("Adding the bot isn't available in this build.", "error");
+      return;
+    }
+    try {
+      // The sandboxed iframe can't open discord.com itself — hand it to the host.
+      await openExternalLink(url);
+      pushToast("Add DWEEB in the window that opened — it'll appear here once you do.", "info");
+    } catch {
+      // The web app / dev URL-override aren't sandboxed, so a plain open works.
+      try {
+        window.open(url, "_blank", "noopener");
+      } catch {
+        /* nothing more we can do */
+      }
+    }
+  },
+
+  async refreshPostableGuilds() {
+    // Quiet, force-fresh re-fetch (no `guildsLoading` flash) so a just-added
+    // server slots into the already-open picker. A just-added bot may not be in
+    // the proxy's cached list yet, hence force-fresh. Keep the shown list on error.
+    try {
+      const all = await fetchUserGuilds(true);
+      seedAuthGuilds(all);
+      set({ guilds: all.filter((g) => g.bot_present && g.can_manage_webhooks) });
+    } catch {
+      /* transient — keep whatever's already listed */
+    }
   },
 
   setTargetChannel(channelId) {

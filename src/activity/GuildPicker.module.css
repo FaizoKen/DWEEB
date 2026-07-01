@@ -62,6 +62,66 @@
   }
 }
 
+/* Let the server list flex and scroll within the panel's max-height so the
+   pinned "Add a server" footer below it stays put on a long list. On a short
+   list the panel is content-sized, so this is a no-op. (The base `.list` styling
+   is shared with ChannelPicker; this only layers the flex behaviour on here.) */
+.guildList {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Persistent footer action that opens Discord's add-bot flow. Sits below the
+   list (or is the whole of the empty state's action), separated by a hairline so
+   it reads as chrome rather than another server row. */
+.addServer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  width: 100%;
+  padding: 8px var(--app-space-2);
+  border: none;
+  border-top: 1px solid var(--app-border);
+  background: transparent;
+  color: var(--app-text);
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.addServer:hover {
+  background: var(--app-bg-subtle);
+}
+
+/* Dashed square badge echoing a server glyph's slot, so "Add a server" reads as
+   a placeholder in the same column as the real server icons. */
+.addServerIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 1px dashed var(--app-border-strong);
+  border-radius: var(--app-radius-sm);
+  color: var(--app-text-subtle);
+}
+
+.addServer:hover .addServerIcon {
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+}
+
+.addServerLabel {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .initial {
   display: inline-flex;
   align-items: center;
