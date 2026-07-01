@@ -153,6 +153,13 @@ export type IncomingWebhookResult = IncomingWebhook | { error: true };
  * `src/config.rs`). Bump all of them together.
  */
 const SHARED_BOT_PERMISSION_BITS = {
+  /**
+   * Collaborate in Discord — the proxy's bot mints an Activity invite for a voice
+   * channel (`POST /channels/{id}/invites`, target_type=2) so `discord.gg/…`
+   * launches DWEEB there and a group co-edits in one instance. Creating an invite
+   * hard-requires this bit; without it the collaboration link 403s.
+   */
+  CREATE_INSTANT_INVITE: 1n << 0n,
   /** tickets — creates/deletes the per-ticket channel (`POST/DELETE …/channels`). */
   MANAGE_CHANNELS: 1n << 4n,
   /**

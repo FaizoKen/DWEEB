@@ -28,9 +28,17 @@ const MANAGE_ROLES: u64 = 1 << 28;
 /// and every create/modify/delete call requires it).
 const MANAGE_WEBHOOKS: u64 = 1 << 29;
 
-/// The union every shared-bot invite must request: Manage Channels + Manage
-/// Roles + Manage Webhooks.
-const SHARED_BOT_PERMISSIONS: u64 = MANAGE_CHANNELS | MANAGE_ROLES | MANAGE_WEBHOOKS;
+/// Create Instant Invite — the proxy's bot mints an Activity invite for a voice
+/// channel (`POST /channels/{id}/invites`, target_type=2) so `discord.gg/…`
+/// launches DWEEB there and a group co-edits in one instance ("Collaborate in
+/// Discord"). This plugin doesn't use it, but the shared invite must still request
+/// it so re-inviting through this plugin's link can't strip it.
+const CREATE_INSTANT_INVITE: u64 = 1 << 0;
+
+/// The union every shared-bot invite must request: Create Instant Invite +
+/// Manage Channels + Manage Roles + Manage Webhooks.
+const SHARED_BOT_PERMISSIONS: u64 =
+    CREATE_INSTANT_INVITE | MANAGE_CHANNELS | MANAGE_ROLES | MANAGE_WEBHOOKS;
 
 /// Force an operator-supplied invite URL's `permissions` to [`SHARED_BOT_PERMISSIONS`].
 ///
@@ -184,7 +192,7 @@ mod tests {
         let out = normalize_invite_permissions(
             "https://discord.com/oauth2/authorize?client_id=123&scope=bot&permissions=0",
         );
-        assert_eq!(perms_of(&out).as_deref(), Some("805306384"));
+        assert_eq!(perms_of(&out).as_deref(), Some("805306385"));
     }
 
     #[test]
@@ -207,7 +215,7 @@ mod tests {
             Some("bot".to_string())
         );
         // …and the union is appended.
-        assert_eq!(perms_of(&out).as_deref(), Some("805306384"));
+        assert_eq!(perms_of(&out).as_deref(), Some("805306385"));
         // Exactly one `permissions` param, never duplicated.
         assert_eq!(
             url.query_pairs()

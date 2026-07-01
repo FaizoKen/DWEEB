@@ -141,6 +141,17 @@ pub struct Webhook {
     pub user: Option<WebhookUser>,
 }
 
+/// A freshly created invite, as `POST /channels/{id}/invites` returns it (only
+/// the fields the collaboration-link flow surfaces). See [`Discord::create_activity_invite`].
+#[derive(Deserialize)]
+pub struct InviteCreated {
+    /// The invite code — the `discord.gg/{code}` slug.
+    pub code: String,
+    /// ISO-8601 expiry, or null for a never-expiring invite.
+    #[serde(default)]
+    pub expires_at: Option<String>,
+}
+
 /// Trimmed creator object on a [`Webhook`]. `username`/`global_name` may both be
 /// present; the handler prefers the global (display) name when building output.
 #[derive(Deserialize, Serialize)]
@@ -320,6 +331,64 @@ impl Discord {
             reason,
         )
         .await
+    }
+
+    /// Create an **Activity invite** for a voice channel — an invite whose target
+    /// is the embedded application (`target_type = 2`), so opening
+    /// `discord.gg/{code}` drops whoever clicks it into that voice channel *with
+    /// the app launched*. That shared voice-channel instance is what lets several
+    /// people co-edit in one Activity room; a bare `discord.com/activities/{id}`
+    /// launch only ever opens a lone user's solo call. Powers the web app's
+    /// "Collaborate in Discord".
+    ///
+    /// Needs the bot to hold **Create Instant Invite** in the channel (part of the
+    /// shared invite permission union). `max_age` is seconds until the invite
+    /// expires (Discord caps it at 604800; 0 = never). A 403 is specifically the
+    /// missing permission — surfaced with a re-add-the-bot hint rather than the
+    /// generic Manage-Webhooks message `webhook_error_from` gives.
+    pub async fn create_activity_invite(
+        &self,
+        channel_id: &str,
+        application_id: &str,
+        max_age: u32,
+        reason: Option<&str>,
+    ) -> Result<InviteCreated, AppError> {
+        let mut body = Map::new();
+        body.insert("max_age".into(), Value::from(max_age));
+        // Unlimited uses — a whole group joins the same instance. Not temporary:
+        // a temporary member is kicked when they leave the voice channel, which
+        // would evict collaborators mid-session.
+        body.insert("max_uses".into(), Value::from(0));
+        body.insert("temporary".into(), Value::from(false));
+        body.insert("target_type".into(), Value::from(2));
+        body.insert(
+            "target_application_id".into(),
+            Value::String(application_id.to_string()),
+        );
+        let resp = self
+            .send_bot(
+                reqwest::Method::POST,
+                &format!("/channels/{channel_id}/invites"),
+                Some(Value::Object(body)),
+                reason,
+            )
+            .await?;
+        if resp.status().is_success() {
+            return resp.json::<InviteCreated>().await.map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
+        }
+        if resp.status().as_u16() == 403 {
+            return Err(AppError::Status {
+                status: StatusCode::FORBIDDEN,
+                message: "DWEEB's bot can't create a collaboration link in that channel yet — it \
+                          needs the Create Invite permission. Re-add the bot to this server \
+                          (Account → Add to another server) to grant it, then try again."
+                    .into(),
+                retry_after: None,
+            });
+        }
+        Err(webhook_error_from(resp).await)
     }
 
     /// Modify a webhook by id. `name` renames; `avatar` is `None` to leave it,

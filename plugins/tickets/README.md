@@ -124,8 +124,8 @@ The config UI then needs zero setup in the common case:
 
 Because the bot is **shared** across plugins and Discord's invite is destructive
 on re-authorization (it *replaces* a bot's permissions, never merges), every
-DWEEB invite URL requests the **same union** — currently **Manage Channels +
-Manage Roles + Manage Webhooks** (`805306384`). Tickets normalizes any
+DWEEB invite URL requests the **same union** — currently **Create Instant Invite
++ Manage Channels + Manage Roles + Manage Webhooks** (`805306385`). Tickets normalizes any
 operator-supplied `BOT_INVITE_URL` to that union at startup, and the value is
 mirrored in the DWEEB frontend (`src/core/guild/config.ts`) and every other
 plugin. Bump them all together when a plugin's needs change. (Manage Webhooks is

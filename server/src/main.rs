@@ -47,9 +47,10 @@ use crate::config::Config;
 use crate::discord::Discord;
 use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
 use crate::routes::{
-    bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, emojis, health,
-    list_guilds, permanent_add, permanent_list, permanent_reenable, permanent_remove, roles,
-    webhook_create, webhook_delete, webhook_modify, webhooks_list, AppState, DispatcherApi,
+    bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, emojis,
+    guild_activity_invite, health, list_guilds, permanent_add, permanent_list, permanent_reenable,
+    permanent_remove, roles, webhook_create, webhook_delete, webhook_modify, webhooks_list,
+    AppState, DispatcherApi,
 };
 use crate::schedule::{
     schedule_create, schedule_delete, schedule_get, schedule_list, schedule_list_for_guild,
@@ -435,6 +436,13 @@ async fn run() {
         .route(
             "/api/guilds/:guild_id/webhooks/:webhook_id",
             patch(webhook_modify).delete(webhook_delete),
+        )
+        // Collaboration links (login + membership gated): mint a Discord Activity
+        // invite for a voice channel so `discord.gg/…` launches DWEEB there and a
+        // group co-edits in one shared instance. Powers "Collaborate in Discord".
+        .route(
+            "/api/guilds/:guild_id/activity-invite",
+            post(guild_activity_invite),
         )
         // Custom bots: a guild's own Discord apps served by the dispatcher
         // (login + Manage Server gated, relayed to the dispatcher's registry).

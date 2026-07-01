@@ -56,6 +56,11 @@ const TemplateSetup = lazy(() =>
 const FeedbackDialog = lazy(() =>
   import("@/features/feedback/FeedbackDialog").then((m) => ({ default: m.FeedbackDialog })),
 );
+const CollaborateDialog = lazy(() =>
+  import("@/features/collaborate/CollaborateDialog").then((m) => ({
+    default: m.CollaborateDialog,
+  })),
+);
 import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
@@ -74,6 +79,7 @@ import { shouldAutoOpenGallery, markGalleryAutoOpened } from "@/features/templat
 import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
+import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
@@ -151,6 +157,11 @@ export function App() {
   // About panel. Mounted lazily only while open (its in-progress text resets on
   // close, which is fine for a one-off report).
   const feedbackOpen = useFeedbackStore((s) => s.open);
+
+  // The "Collaborate in Discord" dialog — summoned from the Builder's "More"
+  // menu. Mints a voice-channel Activity invite so a group co-edits in one shared
+  // instance. Mounted lazily only while open.
+  const collaborateOpen = useCollaborateStore((s) => s.open);
 
   // Guided setup for an interactive template the gallery just applied: wires its
   // paired plugin(s), then closes, leaving the editor in front.
@@ -396,6 +407,11 @@ export function App() {
         {feedbackOpen ? (
           <Suspense fallback={null}>
             <FeedbackDialog />
+          </Suspense>
+        ) : null}
+        {collaborateOpen ? (
+          <Suspense fallback={null}>
+            <CollaborateDialog />
           </Suspense>
         ) : null}
         <SendCoachMark />

@@ -35,6 +35,7 @@ import { AccountMenu } from "@/features/guild/AccountMenu";
 import { activityLaunchUrl, isProxyConfigured } from "@/core/guild/config";
 import { isFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
+import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import styles from "./Builder.module.css";
 
 interface BuilderProps {
@@ -107,6 +108,7 @@ function ActionBar({
   const sendLabel = isUpdate ? "Update" : "Send";
 
   const openFeedback = useFeedbackStore((s) => s.openFeedback);
+  const openCollaborate = useCollaborateStore((s) => s.openCollaborate);
 
   // Real-time co-editing lives only in the embedded Discord Activity; offer a
   // hand-off to it when a backend + app id are configured (both are required for
@@ -207,10 +209,11 @@ function ActionBar({
                   icon={<UsersIcon />}
                   onSelect={() => {
                     close();
-                    // Opens Discord's Activity launcher for DWEEB, where the
-                    // shared room + live presence live. The draft isn't carried
-                    // (the launch link takes no payload); use Share link for that.
-                    window.open(collaborateUrl, "_blank", "noopener,noreferrer");
+                    // Opens the collaboration dialog, which mints a Discord
+                    // Activity invite for a voice channel so the whole group lands
+                    // in one shared instance and co-edits live. A bare launcher
+                    // link only ever opens a solo call (see CollaborateDialog).
+                    openCollaborate();
                   }}
                 >
                   Collaborate in Discord

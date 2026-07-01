@@ -961,6 +961,90 @@ pub async fn webhook_delete(
     Ok(value_response(&json!({ "ok": true })))
 }
 
+// ── Collaboration links (POST /api/guilds/:id/activity-invite) ───────────────
+
+/// How long a collaboration invite stays valid, in seconds. Discord caps `max_age`
+/// at 7 days; we use the max so a link shared ahead of a session survives, while
+/// still expiring rather than leaving a permanent join link to a voice channel.
+const ACTIVITY_INVITE_MAX_AGE: u32 = 604_800;
+
+#[derive(Deserialize)]
+pub struct ActivityInviteBody {
+    #[serde(default)]
+    channel_id: String,
+}
+
+/// True when `channel_id` is a **voice** channel (`GUILD_VOICE`, type 2) in the
+/// guild's cached channel list — the only channel kind an Activity invite can
+/// target. Stage channels (13) are deliberately excluded: `target_type = 2`
+/// invites are rejected there.
+fn is_voice_channel(channels: &Value, channel_id: &str) -> bool {
+    channels
+        .as_array()
+        .map(|arr| {
+            arr.iter().any(|c| {
+                c.get("id").and_then(Value::as_str) == Some(channel_id)
+                    && c.get("type").and_then(Value::as_u64) == Some(2)
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// `POST /api/guilds/:id/activity-invite` `{ channel_id }` — mint a Discord
+/// **Activity invite** for a voice channel, so `discord.gg/{code}` drops whoever
+/// opens it into that channel with DWEEB launched. That shared voice-channel
+/// instance is what makes real-time co-editing possible (a bare
+/// `discord.com/activities/{id}` launch strands a lone user in a solo call) — it
+/// backs the web app's "Collaborate in Discord".
+///
+/// Gated on plain membership ([`authorize_member`]): creating a collaboration
+/// link is the entry point to co-editing, not a privileged action, so any member
+/// who can load the server may make one. The bot performs the call and needs
+/// Create Instant Invite in the channel (part of the shared invite union); a
+/// server that hasn't re-added the bot gets a clear re-invite prompt from
+/// [`Discord::create_activity_invite`].
+pub async fn guild_activity_invite(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Path(guild): Path<String>,
+    Json(body): Json<ActivityInviteBody>,
+) -> Result<Response, AppError> {
+    authorize_member(&st, &jar, &guild).await?;
+    let channel_id = body.channel_id.trim().to_string();
+    if !is_snowflake(&channel_id) {
+        return Err(client_error(
+            StatusCode::BAD_REQUEST,
+            "channel_id must be a Discord id.",
+        ));
+    }
+    // The channel must be a voice channel of *this* guild before we point the bot
+    // token at it — check the cache, then live in case it was just created.
+    let cached = fetch_channels(&st, &guild, false).await?;
+    if !is_voice_channel(&cached, &channel_id) {
+        let fresh = fetch_channels(&st, &guild, true).await?;
+        if !is_voice_channel(&fresh, &channel_id) {
+            return Err(client_error(
+                StatusCode::BAD_REQUEST,
+                "Pick a voice channel — collaboration links launch DWEEB inside one.",
+            ));
+        }
+    }
+    let invite = st
+        .discord
+        .create_activity_invite(
+            &channel_id,
+            &st.config.client_id,
+            ACTIVITY_INVITE_MAX_AGE,
+            Some("DWEEB collaboration link"),
+        )
+        .await?;
+    Ok(value_response(&json!({
+        "code": invite.code,
+        "url": format!("https://discord.gg/{}", invite.code),
+        "expires_at": invite.expires_at,
+    })))
+}
+
 // ── Webhook handler helpers ────────────────────────────────────────────────
 
 /// Build a small client-error response without repeating the struct each time.

@@ -168,6 +168,48 @@ export async function fetchGuildEmojis(guildId: string, signal?: AbortSignal): P
   return getJson<RawEmoji[]>(`/api/guilds/${id}/emojis`, signal);
 }
 
+// ── Collaboration links ─────────────────────────────────────────────────────
+
+/** A collaboration link minted by `POST /api/guilds/:id/activity-invite`. */
+export interface ActivityInvite {
+  /** The `discord.gg/{code}` invite slug. */
+  code: string;
+  /** The full shareable URL — `https://discord.gg/{code}`. */
+  url: string;
+  /** ISO-8601 expiry, or null for a never-expiring invite. */
+  expires_at: string | null;
+}
+
+/**
+ * `POST /api/guilds/:id/activity-invite` `{ channel_id }` — mint a Discord
+ * Activity invite for a voice channel. Opening the returned `discord.gg/…` link
+ * drops whoever clicks it into that voice channel with DWEEB launched, so a group
+ * lands in one shared instance and co-edits live — the "Collaborate in Discord"
+ * hand-off. `channelId` must be a voice channel in the server.
+ */
+export async function createActivityInvite(
+  guildId: string,
+  channelId: string,
+): Promise<ActivityInvite> {
+  let res: Response;
+  try {
+    res = await fetch(`${PROXY_BASE_URL}/api/guilds/${guildId.trim()}/activity-invite`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel_id: channelId.trim() }),
+    });
+  } catch {
+    throw new GuildApiError("Couldn't reach the server. Check your connection.", 0);
+  }
+  if (!res.ok) throw await toApiError(res);
+  try {
+    return (await res.json()) as ActivityInvite;
+  } catch {
+    throw new GuildApiError("The server returned an unexpected response.", res.status);
+  }
+}
+
 // ── Permanent component slots ───────────────────────────────────────────────
 // Messages exempted from the component expiry (the interactions dispatcher
 // disables plugin buttons/selects COMPONENT_TTL_DAYS after a message is sent).

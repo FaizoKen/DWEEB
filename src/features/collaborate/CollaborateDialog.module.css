@@ -1,0 +1,92 @@
+/* Intro / explanatory copy, matching the Share- and Feedback-dialog panels. */
+.lead {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--app-text-muted);
+}
+.lead strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+/* Neutral guidance line for the sign-in / no-server / no-voice-channel states. */
+.note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.note strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+/* Green confirmation banner on the finished-link view — mirrors SendSuccess. */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 11px 12px;
+  border-radius: var(--app-radius-sm);
+  background: rgba(35, 165, 89, 0.1);
+  border: 1px solid rgba(35, 165, 89, 0.32);
+}
+
+.check {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  color: rgb(63, 196, 123);
+}
+
+.bannerText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+.bannerText strong {
+  font-weight: 600;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Read-only link field + its inline "Open" button. */
+.linkRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.linkRow > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Small print under the link / picker. */
+.fine {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.fine strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+.fine a {
+  color: var(--app-accent);
+}
+
+/* Create-link failure line under the picker. */
+.error {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-danger);
+  white-space: pre-wrap;
+}
