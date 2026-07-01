@@ -45,33 +45,35 @@
   text-decoration: underline;
 }
 
-/* ── Library trigger ─────────────────────────────────────────────────────── */
-/* Deliberately richer than a plain row: an accent-tinted puzzle tile and a
-   value line make the plugin path the thing the eye lands on first, so users
-   reach for a ready-made action before hand-wiring a custom_id. */
+/* ── Library trigger (the hero) ──────────────────────────────────────────── */
+/* The recommended path, and it should look it: an accent-tinted card with a
+   solid puzzle tile and a "Recommended" eyebrow, so the eye lands here first
+   and the hand-wired custom_id below reads as the fallback it is. */
 .browse {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 10px;
+  padding: 12px 14px;
   text-align: left;
-  background: var(--app-bg-input);
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
+  background: linear-gradient(180deg, rgba(88, 101, 242, 0.16), rgba(88, 101, 242, 0.07));
+  border: 1px solid rgba(88, 101, 242, 0.34);
+  border-radius: var(--app-radius);
   color: var(--app-text);
   cursor: pointer;
   transition:
     background 120ms ease,
-    border-color 120ms ease;
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 .browse:hover {
-  background: var(--app-bg-hover);
+  background: linear-gradient(180deg, rgba(88, 101, 242, 0.24), rgba(88, 101, 242, 0.12));
   border-color: var(--app-accent);
+  box-shadow: var(--app-shadow-sm);
 }
 .browse:focus-visible {
   outline: none;
-  border-color: var(--app-border-focus);
+  border-color: var(--app-accent);
   box-shadow: var(--app-focus-ring);
 }
 
@@ -79,22 +81,23 @@
   flex: none;
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  color: var(--app-accent-text);
-  background: var(--app-accent-soft);
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: #fff;
+  background: var(--app-accent);
+  box-shadow: 0 2px 10px rgba(88, 101, 242, 0.45);
 }
 
 .browseBody {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   flex: 1;
   min-width: 0;
 }
 .browseTitle {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .browseSub {
@@ -102,44 +105,68 @@
   color: var(--app-text-muted);
 }
 
-.browseCount {
+.browseEnd {
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.browseCount {
   font-size: 11px;
-  font-weight: 600;
-  padding: 1px 7px;
+  font-weight: 700;
+  padding: 2px 8px;
   border-radius: 999px;
-  background: var(--app-accent-soft);
-  border: 1px solid transparent;
+  background: var(--app-accent);
+  color: #fff;
+}
+.browseChevron {
   color: var(--app-accent-text);
 }
 
-.browseChevron {
-  flex: none;
-  color: var(--app-text-subtle);
-}
-
-/* ── "or set the id manually" divider ────────────────────────────────────── */
-/* A centered label on a hairline rule — frames the plugin and the custom_id
-   below as the two ends of one either/or choice. */
-.orRow {
+/* ── "Set the ID manually" disclosure ────────────────────────────────────── */
+/* The hand-wiring path, demoted to a quiet toggle beneath the plugin card so
+   it never competes with it. Expands in place to reveal the custom_id field. */
+.manual {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
-  margin: -2px 0;
+}
+.manualToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 12px;
   color: var(--app-text-subtle);
+  cursor: pointer;
+  transition: color 120ms ease;
 }
-.orRow::before,
-.orRow::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--app-border);
+.manualToggle:hover {
+  color: var(--app-text-muted);
 }
-.orText {
+.manualToggle:focus-visible {
+  outline: none;
+  color: var(--app-text);
+  text-decoration: underline;
+}
+.manualChevron {
   flex: none;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: var(--app-text-subtle);
+  transition: transform 120ms ease;
+}
+.manualChevronOpen {
+  transform: rotate(90deg);
+}
+.manualLabel {
+  font-weight: 500;
+}
+.manualNote {
+  color: var(--app-text-subtle);
+  opacity: 0.85;
 }
 
 /* ── Attached chip ───────────────────────────────────────────────────────── */

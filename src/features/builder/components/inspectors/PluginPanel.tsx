@@ -90,6 +90,10 @@ export function PluginPanel({ node }: Props) {
     preset?: string;
   } | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  // The raw custom_id is the secondary, hand-wiring path — kept collapsed so the
+  // ready-made plugin card stays the focus. Only rendered when plugins are on
+  // offer; otherwise the field shows on its own (see below).
+  const [showManualId, setShowManualId] = useState(false);
 
   // Lazy, idempotent: only the first targetable node to render triggers a fetch.
   useEffect(() => {
@@ -183,14 +187,18 @@ export function PluginPanel({ node }: Props) {
     chooser = (
       <button type="button" className={styles.browse} onClick={() => setLibraryOpen(true)}>
         <span className={styles.browseIcon} aria-hidden>
-          <PuzzleIcon size={18} />
+          <PuzzleIcon size={20} />
         </span>
         <span className={styles.browseBody}>
           <span className={styles.browseTitle}>Browse plugins</span>
-          <span className={styles.browseSub}>Let a ready-made action handle this for you</span>
+          <span className={styles.browseSub}>
+            Let a ready-made action handle this — no bot code needed.
+          </span>
         </span>
-        <span className={styles.browseCount}>{available.length}</span>
-        <ChevronRightIcon size={16} className={styles.browseChevron} aria-hidden />
+        <span className={styles.browseEnd}>
+          <span className={styles.browseCount}>{available.length}</span>
+          <ChevronRightIcon size={18} className={styles.browseChevron} aria-hidden />
+        </span>
       </button>
     );
   }
@@ -208,16 +216,33 @@ export function PluginPanel({ node }: Props) {
 
       {chooser}
 
-      {/* The plugin and the custom_id are the same decision: a plugin claims
-          the id, or you set one yourself. Spell that "either/or" out so the
-          field below reads as part of this section, not a stray input. */}
+      {/* The plugin *is* the custom_id: a plugin claims the id, or you wire one
+          up for your own bot. When plugins are on offer we lead with them and
+          tuck the raw field behind a disclosure, so the ready-made path reads as
+          the default — not one option among two equals. Every other state (no
+          registry, none for this type, loading, or already attached) shows the
+          field directly, since there's no plugin card to defer to. */}
       {offersPlugin ? (
-        <div className={styles.orRow}>
-          <span className={styles.orText}>or set the id manually</span>
+        <div className={styles.manual}>
+          <button
+            type="button"
+            className={styles.manualToggle}
+            onClick={() => setShowManualId((v) => !v)}
+            aria-expanded={showManualId}
+          >
+            <ChevronRightIcon
+              size={14}
+              className={cn(styles.manualChevron, showManualId && styles.manualChevronOpen)}
+              aria-hidden
+            />
+            <span className={styles.manualLabel}>Set the ID manually</span>
+            <span className={styles.manualNote}>for your own bot</span>
+          </button>
+          {showManualId ? idField : null}
         </div>
-      ) : null}
-
-      {idField}
+      ) : (
+        idField
+      )}
 
       {libraryOpen ? (
         <PluginLibraryModal
