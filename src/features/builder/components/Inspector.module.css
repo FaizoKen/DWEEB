@@ -44,3 +44,51 @@
   color: var(--app-text-muted);
   font-size: var(--app-text-sm);
 }
+
+/* "Someone else is editing this block too" banner (Activity collaboration only).
+   Warning-tinted — it's a heads-up about a possible last-write-wins overwrite,
+   not an error. Sits above the validation list at the top of the inspector. */
+.collab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  font-size: var(--app-text-sm);
+  line-height: 1.45;
+  color: var(--app-warning-text);
+  background: var(--app-warning-soft);
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-sm);
+}
+
+.collabAvatars {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.collabSlot {
+  display: inline-flex;
+  border-radius: 50%;
+  /* Ring in the editor's colour with a surface-coloured gap, so overlapped
+     avatars read as a tidy cluster (mirrors the tree row's presence cluster). */
+  box-shadow:
+    0 0 0 1.5px var(--ring, var(--app-accent, #5865f2)),
+    0 0 0 3px var(--app-bg, #17191f);
+  margin-left: -6px;
+}
+
+.collabSlot:first-child {
+  margin-left: 0;
+}
+
+.collabMore {
+  margin-left: 6px;
+  font-size: var(--app-text-xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.collabText {
+  min-width: 0;
+}

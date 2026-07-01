@@ -442,10 +442,17 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       pushToast("You need the “Manage Webhooks” permission to post in this server.", "error");
       return null;
     }
+    // Don't fire a post Discord would reject — validate the draft up front and
+    // surface the count as a friendly toast rather than a raw server error. The
+    // bar also disables Post while errors stand (see ActivityBar), so this mainly
+    // guards non-UI paths and the race where a collaborator's edit invalidated the
+    // draft between the click and here.
+    const message = useMessageStore.getState().message;
+    if (!guardValid(message, "post")) return null;
     if (get().publishing) return null;
     set({ publishing: true });
     try {
-      const payload = buildWirePayload(useMessageStore.getState().message);
+      const payload = buildWirePayload(message);
       const result = await publishToChannel(guildId, channelId, payload, makePermanent);
       set({ lastPost: result });
       // Success is surfaced by the post-success dialog (see ActivityBar), so no
@@ -470,10 +477,14 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       pushToast("You need the “Manage Webhooks” permission to update messages here.", "error");
       return null;
     }
+    // Same up-front validation as a fresh post — an edit to an invalid draft is
+    // rejected by Discord just the same, so fail early and friendly.
+    const message = useMessageStore.getState().message;
+    if (!guardValid(message, "update")) return null;
     if (get().publishing) return null;
     set({ publishing: true });
     try {
-      const payload = buildWirePayload(useMessageStore.getState().message);
+      const payload = buildWirePayload(message);
       const result = await editPostedMessage(
         last.guild_id,
         last.channel_id,
@@ -866,6 +877,24 @@ function decodeRestored(raw: unknown): WebhookMessage {
   } catch {
     throw new Error("That message can't be opened in the editor — it isn't a DWEEB message.");
   }
+}
+
+/**
+ * Block a post/update when the draft carries validation errors Discord would
+ * reject, surfacing the count as a friendly toast instead of a raw server error.
+ * Returns true when it's safe to send. Warnings don't block (Discord accepts
+ * them); only `error`-severity issues do — matching the Send gate on the web app.
+ */
+function guardValid(message: WebhookMessage, action: "post" | "update"): boolean {
+  const { ok, issues } = validateMessage(message);
+  if (ok) return true;
+  const errors = issues.filter((i) => i.severity === "error").length;
+  const verb = action === "post" ? "posting" : "updating";
+  pushToast(
+    `Fix ${errors} ${errors === 1 ? "issue" : "issues"} before ${verb} — check the highlighted components.`,
+    "error",
+  );
+  return false;
 }
 
 /**
