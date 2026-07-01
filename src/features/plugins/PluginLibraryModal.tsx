@@ -43,6 +43,15 @@ const matches = (q: string, ...fields: (string | undefined)[]) =>
 
 export function PluginLibraryModal({ plugins, target, onPick, onClose }: Props) {
   const [query, setQuery] = useState("");
+  // Which plugin groups have their templates expanded. Collapsed by default so the
+  // list reads as one row per plugin; the toggle reveals that plugin's templates.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   // Total preset count, for the search placeholder ("Search N plugins…").
   const presetCount = useMemo(
@@ -70,50 +79,88 @@ export function PluginLibraryModal({ plugins, target, onPick, onClose }: Props) 
     return out;
   }, [plugins, target, query]);
 
-  const renderGroup = ({ manifest, presets }: Group) => (
-    <li key={manifest.id} className={styles.group}>
-      <button type="button" className={styles.row} onClick={() => onPick(manifest)}>
-        <PluginIcon manifest={manifest} />
-        <span className={styles.rowText}>
-          <span className={styles.rowNameLine}>
-            <span className={styles.rowName}>{manifest.name}</span>
-            {/* Flags the plugins that drive the shared DWEEB bot — the user has
-                to log in and invite it before the setup works. The rest run over
-                webhooks and carry no tag. */}
-            {manifest.requiresBot ? <span className={styles.loginTag}>Needs login</span> : null}
-          </span>
-          {manifest.description ? (
-            <span className={styles.rowDesc}>{manifest.description}</span>
-          ) : null}
-        </span>
-        {presets.length ? <span className={styles.blankTag}>Start blank</span> : null}
-      </button>
+  const renderGroup = ({ manifest, presets }: Group) => {
+    // Templates start collapsed; a live search auto-opens every group so matching
+    // rows aren't hidden behind a toggle.
+    const open = query.trim() !== "" || expanded.has(manifest.id);
+    const listId = `preset-list-${manifest.id}`;
 
-      {presets.length ? (
-        <ul className={styles.presetList}>
-          {presets.map((preset) => (
-            <li key={preset.id}>
-              <button
-                type="button"
-                className={styles.presetRow}
-                onClick={() => onPick(manifest, preset.id)}
+    return (
+      <li key={manifest.id} className={styles.group}>
+        <div className={styles.header}>
+          <button type="button" className={styles.row} onClick={() => onPick(manifest)}>
+            <PluginIcon manifest={manifest} />
+            <span className={styles.rowText}>
+              <span className={styles.rowNameLine}>
+                <span className={styles.rowName}>{manifest.name}</span>
+                {/* Flags the plugins that drive the shared DWEEB bot — the user has
+                    to log in and invite it before the setup works. The rest run over
+                    webhooks and carry no tag. */}
+                {manifest.requiresBot ? <span className={styles.loginTag}>Needs bot</span> : null}
+              </span>
+              {manifest.description ? (
+                <span className={styles.rowDesc}>{manifest.description}</span>
+              ) : null}
+            </span>
+            {presets.length ? <span className={styles.blankTag}>Start blank</span> : null}
+          </button>
+
+          {presets.length ? (
+            <button
+              type="button"
+              className={styles.toggle}
+              onClick={() => toggle(manifest.id)}
+              aria-expanded={open}
+              aria-controls={listId}
+              aria-label={`${open ? "Hide" : "Show"} ${presets.length} template${presets.length === 1 ? "" : "s"}`}
+            >
+              <span className={styles.toggleCount}>{presets.length}</span>
+              <svg
+                className={open ? styles.chevronOpen : styles.chevron}
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
               >
-                <span className={styles.presetEmoji} aria-hidden>
-                  {preset.emoji ?? "⚡"}
-                </span>
-                <span className={styles.rowText}>
-                  <span className={styles.presetName}>{preset.name}</span>
-                  {preset.description ? (
-                    <span className={styles.presetDesc}>{preset.description}</span>
-                  ) : null}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </li>
-  );
+                <path
+                  d="M6 9l6 6 6-6"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          ) : null}
+        </div>
+
+        {presets.length && open ? (
+          <ul id={listId} className={styles.presetList}>
+            {presets.map((preset) => (
+              <li key={preset.id}>
+                <button
+                  type="button"
+                  className={styles.presetRow}
+                  onClick={() => onPick(manifest, preset.id)}
+                >
+                  <span className={styles.presetEmoji} aria-hidden>
+                    {preset.emoji ?? "⚡"}
+                  </span>
+                  <span className={styles.rowText}>
+                    <span className={styles.presetName}>{preset.name}</span>
+                    {preset.description ? (
+                      <span className={styles.presetDesc}>{preset.description}</span>
+                    ) : null}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </li>
+    );
+  };
 
   return (
     <Modal open title="Plugin library" onClose={onClose}>

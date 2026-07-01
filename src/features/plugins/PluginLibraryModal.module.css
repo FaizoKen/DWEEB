@@ -7,30 +7,82 @@
   gap: 6px;
 }
 
-.row {
+/* Plugin row + its collapse toggle share one card, so they read as one unit. */
+.header {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px 12px;
-  text-align: left;
+  align-items: stretch;
+  gap: 0;
   background: var(--app-bg-input);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
-  color: var(--app-text);
-  cursor: pointer;
+  overflow: hidden;
   transition:
     background 120ms ease,
     border-color 120ms ease;
 }
-.row:hover {
+.header:hover {
   background: var(--app-bg-hover);
   border-color: var(--app-border-strong);
 }
-.row:focus-visible {
-  outline: none;
+.header:focus-within {
   border-color: var(--app-border-focus);
   box-shadow: var(--app-focus-ring);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--app-text);
+  cursor: pointer;
+}
+.row:focus-visible {
+  outline: none;
+}
+
+/* Chevron button that reveals/hides the plugin's templates. */
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--app-border);
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+.toggle:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.toggle:focus-visible {
+  outline: none;
+  color: var(--app-text);
+}
+.toggleCount {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.chevron,
+.chevronOpen {
+  flex: none;
+  transition: transform 150ms ease;
+}
+.chevronOpen {
+  transform: rotate(180deg);
 }
 
 .rowText {
