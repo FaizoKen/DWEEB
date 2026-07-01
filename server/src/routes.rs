@@ -56,6 +56,9 @@ pub struct AppState {
     /// Live collaboration rooms for the embedded Activity (see `activity.rs`).
     /// Ephemeral + in-memory, so it's always present (cheap when unused).
     pub activity_rooms: Arc<crate::activity::ActivityRooms>,
+    /// Persisted Activity collaboration drafts (see `activity_draft.rs`), so a
+    /// room resumes where it was left off. None when Activities are disabled.
+    pub activity_drafts: Option<Arc<crate::activity_draft::ActivityDraftStore>>,
     /// Master key for encrypting/decrypting cookies.
     pub key: Key,
 }

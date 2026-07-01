@@ -1138,11 +1138,15 @@ impl ActivityRooms {
     /// Join `instance`: subscribe a receiver, register the participant, and
     /// broadcast the updated roster (the joiner is already subscribed, so it sees
     /// the roster too). `None` when the room cap is hit on a brand-new instance.
+    ///
+    /// The returned `bool` is true when this connection is the room's **first**
+    /// member — nobody else is here to answer its `hello` with the live draft, so
+    /// the caller replays the persisted draft to it instead (resume-on-reopen).
     fn join(
         &self,
         instance: &str,
         me: &Participant,
-    ) -> Option<(broadcast::Sender<String>, broadcast::Receiver<String>)> {
+    ) -> Option<(broadcast::Sender<String>, broadcast::Receiver<String>, bool)> {
         let mut map = self.inner.lock().ok()?;
         if !map.contains_key(instance) && map.len() >= MAX_ROOMS {
             return None;
@@ -1153,6 +1157,8 @@ impl ActivityRooms {
                 tx: broadcast::channel(BROADCAST_CAP).0,
                 members: HashMap::new(),
             });
+        // First member iff the room held nobody before we register ourselves.
+        let is_first = room.members.is_empty();
         let rx = room.tx.subscribe();
         let entry = room.members.entry(me.id.clone()).or_insert((me.clone(), 0));
         entry.1 += 1;
@@ -1160,7 +1166,7 @@ impl ActivityRooms {
         let tx = room.tx.clone();
         drop(map);
         let _ = tx.send(roster);
-        Some((tx, rx))
+        Some((tx, rx, is_first))
     }
 
     /// Drop one of `uid`'s connections from `instance`; remove the participant
@@ -1263,10 +1269,23 @@ pub async fn activity_room(
 /// connection id and ignores its own echo, so the server never has to understand
 /// the payload, only fan it out.
 async fn room_socket(st: AppState, instance: String, me: Participant, mut socket: WebSocket) {
-    let Some((tx, mut rx)) = st.activity_rooms.join(&instance, &me) else {
+    let Some((tx, mut rx, is_first)) = st.activity_rooms.join(&instance, &me) else {
         let _ = socket.send(Message::Close(None)).await;
         return;
     };
+    // Resume-on-reopen: when we're the first one back in the room, no peer will
+    // answer our `hello`, so replay the persisted draft (if any) straight to this
+    // socket. It's sent as a dedicated `resume` frame (not a peer `draft`) so the
+    // client applies it only when it hasn't diverged from its fresh-open baseline
+    // — a mere reconnect, which already holds newer local state, ignores it rather
+    // than reverting to the ≤throttle-stale stored copy. A live room skips this
+    // entirely: a peer's fresher in-memory state supersedes anything on disk.
+    if is_first {
+        if let Some(message) = load_persisted_draft(&st, &instance).await {
+            let frame = json!({ "type": "resume", "message": message }).to_string();
+            let _ = socket.send(Message::Text(frame)).await;
+        }
+    }
     // Keepalive: ping on a fixed interval so an idle intermediary doesn't drop
     // the socket, and reap a peer we've heard nothing from. Browsers answer our
     // ping with a pong automatically, which refreshes `last_seen`.
@@ -1280,7 +1299,15 @@ async fn room_socket(st: AppState, instance: String, me: Participant, mut socket
                 Some(Ok(Message::Text(t))) => {
                     last_seen = Instant::now();
                     if t.len() <= MAX_RELAY_BYTES {
-                        let _ = tx.send(t);
+                        // Persist full-draft frames for resume-on-reopen, and keep
+                        // the server-only `snapshot` frames off the wire (peers
+                        // already have that state via the granular patch that
+                        // triggered it — rebroadcasting a full draft would revert
+                        // concurrent edits, the very thing patches exist to avoid).
+                        let rebroadcast = persist_and_should_relay(&st, &instance, &t);
+                        if rebroadcast {
+                            let _ = tx.send(t);
+                        }
                     }
                 }
                 // A pong (or a client-sent ping) proves the peer is still alive.
@@ -1312,6 +1339,64 @@ async fn room_socket(st: AppState, instance: String, me: Participant, mut socket
         }
     }
     st.activity_rooms.leave(&instance, &me.id);
+}
+
+/// Inspect one inbound room frame: persist the draft it carries and report
+/// whether it should still be relayed to peers.
+///
+/// Two frame types carry the full message — `draft` (the structural/latecomer
+/// sync peers apply) and `snapshot` (a server-only heartbeat the client sends
+/// purely to refresh the stored draft). Both update the persisted draft; only
+/// `snapshot` is withheld from the broadcast, since peers already hold that state
+/// via the granular patch that prompted it, and re-applying a full draft would
+/// revert their concurrent edits. Everything else relays unchanged. The DB write
+/// runs on a blocking task off the socket loop; a no-op when persistence is off.
+fn persist_and_should_relay(st: &AppState, instance: &str, frame: &str) -> bool {
+    let Some(store) = &st.activity_drafts else {
+        return true;
+    };
+    // Cheap pre-filter: only the two full-message frame types name themselves
+    // here, so patch/focus/target/hello frames skip the JSON parser entirely. A
+    // false positive (a text edit literally containing the word) just costs one
+    // extra parse and is still relayed correctly.
+    if !frame.contains("\"snapshot\"") && !frame.contains("\"draft\"") {
+        return true;
+    }
+    let Ok(v) = serde_json::from_str::<Value>(frame) else {
+        return true;
+    };
+    let ty = v.get("type").and_then(Value::as_str);
+    if matches!(ty, Some("draft") | Some("snapshot")) {
+        if let Some(message) = v.get("message") {
+            if let Ok(msg_str) = serde_json::to_string(message) {
+                if let Some(sealed) = crate::seal::seal(&st.key, &msg_str) {
+                    let store = Arc::clone(store);
+                    let instance = instance.to_string();
+                    let now = crate::schedule::unix_now();
+                    tokio::task::spawn_blocking(move || {
+                        if let Err(e) = store.put(&instance, &sealed, now) {
+                            tracing::warn!("activity draft persist failed: {e}");
+                        }
+                    });
+                }
+            }
+        }
+    }
+    // `snapshot` is server-only; `draft` and everything else still fan out.
+    ty != Some("snapshot")
+}
+
+/// Load and unseal the persisted draft for `instance` as a JSON message, or
+/// `None` when nothing is stored, persistence is off, or it can't be read/opened.
+async fn load_persisted_draft(st: &AppState, instance: &str) -> Option<Value> {
+    let store = Arc::clone(st.activity_drafts.as_ref()?);
+    let key = instance.to_string();
+    let sealed = tokio::task::spawn_blocking(move || store.get(&key))
+        .await
+        .ok()?
+        .ok()??;
+    let plain = crate::seal::open(&st.key, &sealed)?;
+    serde_json::from_str::<Value>(&plain).ok()
 }
 
 /// Discord's Activity instance ids are short slugs; accept a bounded set of

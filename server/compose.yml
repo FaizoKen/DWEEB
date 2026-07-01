@@ -106,6 +106,12 @@ services:
       # per-webhook cap, horizon, tick, lease, batch, retention) have sensible
       # defaults — override in .env only to tune.
       SCHEDULE_DB_PATH: ${SCHEDULE_DB_PATH:-/data/schedules.db}
+      # The embedded Activity's live collaboration drafts persist here (sealed at
+      # rest) so a room can be reopened where it was left off, surviving a restart
+      # with no peers online to re-seed it. Same proxy_data volume so it outlives a
+      # redeploy; best-effort, so an unwritable path just disables resume rather
+      # than failing boot. Rows are swept after ACTIVITY_DRAFT_RETENTION_DAYS.
+      ACTIVITY_DRAFT_DB_PATH: ${ACTIVITY_DRAFT_DB_PATH:-/data/activity-drafts.db}
     volumes:
       # The proxy's only state: the SQLite file with the opt-in share short
       # links (auto-expiring, default 7 days).

@@ -472,6 +472,69 @@ button.statPill {
   }
 }
 
+/* ── Live per-node editing presence (Activity collab) ─────────────────────────
+   A row someone else is currently editing is outlined in their colour, and
+   their avatar(s) float at the row's right edge. `--presence-color` is set
+   inline from the first editor's hue; the classes are inert in the web app,
+   where no collaborators are ever present. */
+.rowEditing {
+  outline: 1.5px solid var(--presence-color, hsl(230deg 60% 60%));
+  outline-offset: -1.5px;
+}
+
+/* Absolutely positioned so it sits outside the row's fixed grid tracks (adding
+   a 6th child would otherwise wrap). It occupies the same right-edge region the
+   hover actions use, so it yields to them: hidden whenever the row is hovered or
+   selected (you're the one working there then) and the ring alone carries the
+   cue. */
+.presence {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.row:hover .presence,
+.rowSelected .presence {
+  opacity: 0;
+}
+
+.presenceSlot {
+  display: inline-flex;
+  border-radius: 50%;
+  /* Ring in the editor's colour, then a surface-coloured gap so overlapped
+     avatars read as a tidy cluster. Fallbacks keep the ring valid even if a
+     token is missing (an invalid value would drop the whole box-shadow). */
+  box-shadow:
+    0 0 0 1.5px var(--ring, var(--app-accent, #5865f2)),
+    0 0 0 3px var(--app-bg-elevated, #17191f);
+  margin-left: -6px;
+}
+
+.presenceSlot:first-child {
+  margin-left: 0;
+}
+
+.presenceMore {
+  margin-left: 5px;
+  font-size: var(--app-text-xs);
+  color: var(--app-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Touch / narrow viewports keep the row actions permanently visible, so the
+   avatar cluster would collide — drop it there and let the outline ring stand
+   in. */
+@media (hover: none), (max-width: 900px) {
+  .presence {
+    display: none;
+  }
+}
+
 /* "Add" affordance — a dashed pill so it's clearly an action, not another
  * component row. Lives inside the same nested <ul> as its siblings so it
  * inherits the rail and indent automatically. */

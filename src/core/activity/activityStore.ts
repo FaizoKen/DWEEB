@@ -313,14 +313,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
       set({ step: "authorizing" });
       const { code } = await withTimeout(
-        sdk.commands.authorize({
-          client_id: DISCORD_CLIENT_ID,
-          response_type: "code",
-          state: cryptoState(),
-          prompt: "none",
-          // identify → who's editing (presence); guilds → membership/permission gate.
-          scope: ["identify", "guilds"] as ("identify" | "guilds")[],
-        }),
+        authorizeActivity(sdk),
         AUTHORIZE_TIMEOUT_MS,
         "authorizing with Discord",
       );
@@ -383,6 +376,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         instanceId,
         guildId,
         token: accessToken,
+        // Stamped onto our `focus` frames so peers can render per-node presence.
+        self: { id: user.id, name: user.name, avatar: user.avatar },
         // Seed the room's shared destination with the launching channel (server
         // launch only) so a latecomer inherits it; null on a DM launch.
         targetChannelId: guildId ? channelId : null,
@@ -842,6 +837,44 @@ function decodeRestored(raw: unknown): WebhookMessage {
     return attachEditorFields(raw);
   } catch {
     throw new Error("That message can't be opened in the editor — it isn't a DWEEB message.");
+  }
+}
+
+/**
+ * Run the Embedded App SDK's `authorize`, requesting the rich-presence scope
+ * (`rpc.activities.write`) alongside the two the session actually needs
+ * (`identify` for who's editing, `guilds` for the membership/permission gate).
+ *
+ * The presence scope is what lets `setActivityPresence` light up "Building a
+ * message in DWEEB" on the editor's profile. It was historically left off to
+ * avoid perturbing a launch handshake that used to hang — but every stage is now
+ * timeout-bounded (see the constants above), so it's safe to ask for. Even so we
+ * stay defensive: if `authorize` *rejects* with the presence scope (an account
+ * or app config where it isn't grantable under `prompt: "none"`), we retry once
+ * with just the essential scopes, so presence being unavailable can never turn
+ * into a failed launch. A rejection returns fast; a genuine hang is caught by the
+ * caller's timeout, not here.
+ */
+async function authorizeActivity(sdk: ReturnType<typeof getSdk>): Promise<{ code: string }> {
+  const base = {
+    client_id: DISCORD_CLIENT_ID,
+    response_type: "code" as const,
+    state: cryptoState(),
+    prompt: "none" as const,
+  };
+  type Scope = "identify" | "guilds" | "rpc.activities.write";
+  try {
+    return await sdk.commands.authorize({
+      ...base,
+      scope: ["identify", "guilds", "rpc.activities.write"] as Scope[],
+    });
+  } catch {
+    // Presence scope not grantable here — fall back to the essentials so the
+    // launch still succeeds (presence simply stays off, exactly as before).
+    return await sdk.commands.authorize({
+      ...base,
+      scope: ["identify", "guilds"] as Scope[],
+    });
   }
 }
 

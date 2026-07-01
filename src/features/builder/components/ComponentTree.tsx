@@ -26,6 +26,7 @@ import {
   useRef,
   useState,
   type AriaAttributes,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -33,6 +34,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useNodeEditors, type NodeEditor } from "@/core/activity/presence";
+import { Avatar } from "@/activity/Avatar";
 import {
   addThenScroll,
   scrollPreviewNodeIntoView,
@@ -1054,10 +1057,50 @@ function usePointerDragRow({
   };
 }
 
+/** Avatars shown on a row before collapsing the rest into a "+N". */
+const MAX_PRESENCE = 3;
+
+/**
+ * Live "who's editing this block" cluster for a tree row — the visible half of
+ * the Activity's per-node presence (see `core/activity/presence`). Renders the
+ * other editors currently focused on this node as small avatars, each ringed in
+ * that person's colour; the row itself also gets an outline in the first
+ * editor's colour (applied by the caller). Returns null when nobody else is
+ * here, which is always the case in the web app — so the shared tree pays
+ * nothing for the feature outside Discord.
+ */
+function PresenceCluster({ editors }: { editors: NodeEditor[] }) {
+  if (editors.length === 0) return null;
+  const shown = editors.slice(0, MAX_PRESENCE);
+  const extra = editors.length - shown.length;
+  const names = editors.map((e) => e.name);
+  const title =
+    names.length === 1
+      ? `${names[0]} is editing this`
+      : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} are editing this`;
+  return (
+    <span className={styles.presence} title={title} aria-label={title}>
+      {shown.map((e) => (
+        <span
+          key={e.userId}
+          className={styles.presenceSlot}
+          style={{ "--ring": e.color } as CSSProperties}
+        >
+          <Avatar id={e.userId} name={e.name} avatar={e.avatar} size={16} />
+        </span>
+      ))}
+      {extra > 0 ? <span className={styles.presenceMore}>+{extra}</span> : null}
+    </span>
+  );
+}
+
 function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }: TreeNodeProps) {
   // Subscribe to just this row's selected state so changing the selection only
   // re-renders the two rows whose highlight flips, not every row in the tree.
   const isSelected = useMessageStore((s) => s.selectedId === node._id);
+  // Other collaborators currently editing THIS node (Activity only — empty and
+  // inert in the web app, so this subscription never wakes there).
+  const editors = useNodeEditors(node._id);
   const select = useMessageStore((s) => s.select);
   const moveSibling = useMessageStore((s) => s.moveSibling);
   const moveToParent = useMessageStore((s) => s.moveToParent);
@@ -1201,7 +1244,15 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
           showDropAfter && styles.rowDropAfter,
           showDropInto && styles.rowDropInto,
           fileDragOver && styles.rowFileDrop,
+          editors.length > 0 && styles.rowEditing,
         )}
+        // Outline this row in the first collaborator's colour when they're
+        // editing it (no-op when `editors` is empty — see `--presence-color`).
+        style={
+          editors.length > 0
+            ? ({ "--presence-color": editors[0]!.color } as CSSProperties)
+            : undefined
+        }
         // Data attributes drive drop-target resolution: the source's
         // pointermove uses `document.elementFromPoint` + `closest()` to find
         // a row, then reads these to validate and place the drop.
@@ -1229,6 +1280,8 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
         </span>
         <span className={styles.label}>{meta.label}</span>
         <span className={styles.summary}>{summarize(node)}</span>
+
+        <PresenceCluster editors={editors} />
 
         <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
           {canMoveUp ? (
@@ -1313,6 +1366,7 @@ function GalleryItemNode({
   total: number;
 }) {
   const isSelected = useMessageStore((s) => s.selectedId === item._id);
+  const editors = useNodeEditors(item._id);
   const select = useMessageStore((s) => s.select);
   const moveGalleryItem = useMessageStore((s) => s.moveGalleryItem);
   const moveGalleryItemToGallery = useMessageStore((s) => s.moveGalleryItemToGallery);
@@ -1405,7 +1459,13 @@ function GalleryItemNode({
           showDropAfter && styles.rowDropAfter,
           showDropInto && styles.rowDropInto,
           fileDragOver && styles.rowFileDrop,
+          editors.length > 0 && styles.rowEditing,
         )}
+        style={
+          editors.length > 0
+            ? ({ "--presence-color": editors[0]!.color } as CSSProperties)
+            : undefined
+        }
         data-tree-row="true"
         data-row-id={item._id}
         data-parent-kind="gallery"
@@ -1429,6 +1489,8 @@ function GalleryItemNode({
         </span>
         <span className={styles.label}>Image</span>
         <span className={styles.summary}>{summarizeGalleryItem(item)}</span>
+
+        <PresenceCluster editors={editors} />
 
         <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
           {canMoveUp ? (

@@ -13,6 +13,7 @@
 //! (HttpOnly) session cookies.
 
 mod activity;
+mod activity_draft;
 mod auth;
 mod cache;
 mod config;
@@ -260,6 +261,50 @@ async fn run() {
         );
     }
 
+    // Persisted Activity collaboration drafts: a small SQLite file (on the same
+    // persistent volume as the short links / schedules) so a collaboration room
+    // can be reopened where it was left off, and survives a restart with no peers
+    // online to re-seed it. Best-effort by design — if it can't be opened we log
+    // and carry on with the old ephemeral behaviour rather than failing boot, so
+    // an unwritable path never takes down publishing/collab. An hourly sweep
+    // drops drafts nobody has touched within the retention window.
+    let activity_drafts = if config.activities_enabled {
+        match activity_draft::ActivityDraftStore::open(
+            &config.activity_draft_db_path,
+            config.activity_draft_max_entries,
+        ) {
+            Ok(store) => {
+                tracing::info!(db = %config.activity_draft_db_path, "activity draft persistence enabled");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                tracing::warn!("activity draft store disabled (couldn't open): {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(store) = &activity_drafts {
+        let store = Arc::clone(store);
+        let retention_secs = config.activity_draft_retention_days.max(1) * 86_400;
+        tokio::spawn(async move {
+            // First tick fires immediately, reclaiming leftovers from before a restart.
+            let mut tick = tokio::time::interval(Duration::from_secs(3600));
+            loop {
+                tick.tick().await;
+                let s = Arc::clone(&store);
+                let now = crate::schedule::unix_now();
+                match tokio::task::spawn_blocking(move || s.sweep(now, retention_secs)).await {
+                    Ok(Ok(0)) => {}
+                    Ok(Ok(n)) => tracing::info!(deleted = n, "swept stale activity drafts"),
+                    Ok(Err(e)) => tracing::warn!("activity draft sweep failed: {e}"),
+                    Err(e) => tracing::warn!("activity draft sweep panicked: {e}"),
+                }
+            }
+        });
+    }
+
     let state = AppState {
         discord: Arc::new(Discord::new(
             config.bot_token.clone(),
@@ -271,6 +316,7 @@ async fn run() {
         shortlinks,
         schedules,
         activity_rooms: Arc::new(crate::activity::ActivityRooms::new()),
+        activity_drafts,
         key,
         config: Arc::new(config),
     };

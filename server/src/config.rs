@@ -64,6 +64,17 @@ pub struct Config {
     /// equals an entry or is a sub-domain of one. From `ACTIVITY_PLUGIN_HOSTS`
     /// (comma-separated); defaults to the DWEEB plugin domain.
     pub activity_plugin_hosts: Vec<String>,
+    /// SQLite file the Activity's collaboration drafts persist to, so a room can
+    /// be reopened where it was left off (see `activity_draft.rs`). Should sit on
+    /// the same persistent volume as the schedule/short-link DBs to survive a
+    /// redeploy. Only used when `activities_enabled`.
+    pub activity_draft_db_path: String,
+    /// Creation of a *new* instance's draft is dropped once this many are stored
+    /// (existing rows keep updating); bounds worst-case disk use under abuse.
+    pub activity_draft_max_entries: u64,
+    /// Days a collaboration draft is kept after its last edit before the sweeper
+    /// deletes it — a session nobody has touched this long won't be resumed.
+    pub activity_draft_retention_days: i64,
 
     // ── Authorization policy ───────────────────────────────────────────────
     /// When true, a user may only read servers where they own or hold
@@ -194,6 +205,10 @@ impl Config {
             .map(|s| split_list(&s))
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| vec!["dweeb.faizo.net".to_string()]);
+        let activity_draft_db_path = opt_env("ACTIVITY_DRAFT_DB_PATH")
+            .unwrap_or_else(|| "activity-drafts.db".to_string());
+        let activity_draft_max_entries = parse_or("ACTIVITY_DRAFT_MAX_ENTRIES", 20_000);
+        let activity_draft_retention_days = parse_or("ACTIVITY_DRAFT_RETENTION_DAYS", 7);
 
         let require_manage_guild = parse_bool("REQUIRE_MANAGE_GUILD", true);
 
@@ -234,6 +249,9 @@ impl Config {
             frontend_url,
             activities_enabled,
             activity_plugin_hosts,
+            activity_draft_db_path,
+            activity_draft_max_entries,
+            activity_draft_retention_days,
             session_secret,
             session_ttl,
             cookie_secure,
