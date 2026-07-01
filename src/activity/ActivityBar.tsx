@@ -17,15 +17,13 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { isFeedbackConfigured } from "@/core/feedback/submit";
-import { useValidationView, type ValidationView } from "@/features/builder/useValidation";
-import { scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
+import { useMergedValidationView } from "@/features/builder/useValidation";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { pushToast } from "@/ui/Toast";
 import { useMediaQuery } from "@/features/preview/previewSheet";
 import {
-  AlertCircleIcon,
   ExternalLinkIcon,
   GlobeIcon,
   HistoryIcon,
@@ -61,20 +59,6 @@ interface PendingPost {
   newCopy: boolean;
 }
 
-/** The first blocking (error-severity) message in document order — a message-wide
- *  issue first (empty message, bad mentions), else the first node's first error.
- *  Used by the issue chip's toast so tapping it names the actual problem. */
-function firstErrorMessage(view: ValidationView): string | null {
-  const msgError = view.messageIssues.find((i) => i.severity === "error");
-  if (msgError) return msgError.message;
-  const nodeId = view.firstErrorNodeId;
-  if (nodeId) {
-    const nodeError = view.byNode.get(nodeId)?.find((i) => i.severity === "error");
-    if (nodeError) return nodeError.message;
-  }
-  return null;
-}
-
 export function ActivityBar() {
   const undo = useMessageStore((s) => s.undo);
   const redo = useMessageStore((s) => s.redo);
@@ -92,7 +76,7 @@ export function ActivityBar() {
   // stand so the primary action never dead-ends on a server error. Warnings don't
   // gate. Computed fresh here — the bar sits above the tree's ValidationContext
   // provider — but it's memoized per message, so it's a single cheap pass.
-  const validation = useValidationView();
+  const validation = useMergedValidationView();
   const hasErrors = validation.errorCount > 0;
 
   const publishing = useActivityStore((s) => s.publishing);
@@ -253,23 +237,6 @@ export function ActivityBar() {
   // the confirm open so the user can retry. `makePermanent` (the confirm's
   // "Never expire" choice) only applies to a new post — an update keeps whatever
   // slot the message already holds.
-  // The issue chip's action: take the user to the first thing to fix. Select the
-  // offending node (its inspector then shows the exact problems) and scroll its
-  // tree row into view, and toast the first message so the "why" reaches mobile,
-  // which has no hover tooltip. A message-level error (empty message) has no node
-  // to jump to — just the toast.
-  const jumpToFirstError = () => {
-    const nodeId = validation.firstErrorNodeId;
-    if (nodeId) {
-      useMessageStore.getState().select(nodeId);
-      scrollTreeRowIntoView(nodeId);
-    }
-    pushToast(
-      firstErrorMessage(validation) ?? "Fix the highlighted issues before posting.",
-      "error",
-    );
-  };
-
   const confirmPost = async (makePermanent: boolean) => {
     if (!pending) return;
     const { mode } = pending;
@@ -438,25 +405,6 @@ export function ActivityBar() {
         </IconButton>
 
         <span className={styles.sep} aria-hidden="true" />
-
-        {/* Blocking-issue chip — shown only in the normal post/update path (the
-            bot-missing and edit-only states already replace the primary action, so
-            a validation nag there would be noise). Tapping it jumps to the first
-            problem; the disabled Post/Update beside it is the other half of the cue. */}
-        {!botMissing && !blockedFromPosting && hasErrors ? (
-          <button
-            type="button"
-            className={styles.issues}
-            onClick={jumpToFirstError}
-            aria-label={`${validation.errorCount} ${
-              validation.errorCount === 1 ? "issue" : "issues"
-            } to fix before posting — tap to view`}
-            title="Fix these before posting"
-          >
-            <AlertCircleIcon size={14} />
-            {validation.errorCount === 1 ? "1 issue" : `${validation.errorCount} issues`}
-          </button>
-        ) : null}
 
         {botMissing ? (
           // The bot isn't in this server — posting is impossible until it's added.

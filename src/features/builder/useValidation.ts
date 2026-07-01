@@ -163,6 +163,20 @@ export function usePluginGuildIssues(): ValidationIssue[] {
   }, [message, connectedGuildId]);
 }
 
+/**
+ * The full validation view — base message checks with the guild-scoped plugin
+ * issues folded in — for surfaces that need it *above* the tree's
+ * {@link ValidationContext} provider: the web action bar and the Activity bar,
+ * whose shared header issue chip must count exactly what the tree does. It's the
+ * same fold `ComponentTree` applies before providing the context, extracted so
+ * both the provider and the header read one memoized source.
+ */
+export function useMergedValidationView(): ValidationView {
+  const base = useValidationView();
+  const pluginIssues = usePluginGuildIssues();
+  return useMemo(() => mergeNodeIssues(base, pluginIssues), [base, pluginIssues]);
+}
+
 /** Recompute the live validation view from the current message (memoized). */
 export function useValidationView(): ValidationView {
   const message = useMessageStore((s) => s.message);

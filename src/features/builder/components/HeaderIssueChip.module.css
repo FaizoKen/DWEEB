@@ -1,0 +1,63 @@
+/* The floating validation pill, docked to the builder pane's top-right by
+   ComponentTree (shared by the web and Activity editors). It floats over the
+   scrolling content, so — unlike a chip sat inside solid chrome — it carries a
+   solid, high-contrast fill and a shadow to lift off the rows beneath and read
+   as a can't-miss-it alert. The whole pill is a button that jumps to the first
+   offending component. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: var(--app-text-xs);
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: pointer;
+  flex: none;
+  appearance: none;
+  box-shadow: var(--app-shadow);
+  animation: chipIn 140ms ease both;
+}
+
+.chip svg {
+  flex: none;
+}
+
+.chipError {
+  color: #fff;
+  background: var(--app-danger);
+}
+
+.chipWarn {
+  color: #2a1d04;
+  background: var(--app-warning);
+}
+
+.chip:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+/* A message-level problem (empty message, bad mentions) has no component to
+   jump to — the chip still counts it, but there's nothing to click through to. */
+.chip:disabled {
+  cursor: default;
+}
+
+@keyframes chipIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

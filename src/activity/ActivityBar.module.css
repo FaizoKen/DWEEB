@@ -74,36 +74,6 @@
   opacity: 0.8;
 }
 
-/* Blocking-issue chip beside the primary action — the draft has validation
-   errors Discord would reject, so Post/Update is disabled. Danger-tinted and
-   tappable: it jumps to the first problem and (on mobile, where there's no hover)
-   toasts the reason. */
-.issues {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px var(--app-space-2);
-  font-family: inherit;
-  font-size: var(--app-text-sm);
-  font-weight: 600;
-  color: var(--app-danger-text);
-  background: var(--app-danger-soft);
-  border: 1px solid transparent;
-  border-radius: var(--app-radius-sm);
-  white-space: nowrap;
-  cursor: pointer;
-  flex: none;
-  appearance: none;
-}
-
-.issues:hover {
-  border-color: var(--app-danger);
-}
-
-.issues svg {
-  flex: none;
-}
-
 /* Phone: the bar can't hold every control at full size on one line. The utility
    actions fold into an overflow menu and "New" collapses to its icon (both in
    ActivityBar.tsx); here we drop the cluster dividers and tighten the spacing so

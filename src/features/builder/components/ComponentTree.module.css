@@ -10,6 +10,22 @@
   position: relative;
 }
 
+/* The floating issue pill's dock: tucked to the pane's top-right, right up under
+   the action bar, over the scrolling content. Right offset lines up with the
+   fields' right edge below; sizes to the chip, so its empty state covers nothing
+   and the chip itself carries the shadow and re-enables clicks. */
+.issueDock {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: var(--app-z-toolbar);
+  pointer-events: none;
+}
+
+.issueDock > * {
+  pointer-events: auto;
+}
+
 .scroll {
   overflow-y: auto;
   /* Bottom padding clears the floating Add-component pill bottom-left; the mobile
@@ -27,8 +43,8 @@
   margin-bottom: 12px;
 }
 
-/* Footer of the meta header: budget pills, plus any error/warning summary
-   pills. A clean message shows no issue pill at all. */
+/* Footer of the meta header: the two budget pills. Issue counts now live in the
+   header bar's chip, so this row is just the meters. */
 .metaFooter {
   display: flex;
   align-items: center;
@@ -43,19 +59,6 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  /* Fill the footer row so the issue group's margin-left:auto has room to push
-     it to the far right. */
-  flex: 1;
-}
-
-/* Health alerts dock to the right — a distinct zone from the budget meters on
-   the left. Wrapping the pills keeps a single break point, so error + warning
-   stay grouped together instead of splitting the free space between them. */
-.issues {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
 }
 
 .statPill {
@@ -82,43 +85,6 @@
   color: var(--app-danger-text);
   background: var(--app-danger-soft);
   border-color: transparent;
-}
-
-/* Clickable issue summary pills. Buttons need their font-family reset to match
-   the surrounding text; everything else is inherited from .statPill. */
-button.statPill {
-  font-family: inherit;
-  cursor: pointer;
-}
-
-/* Solid, high-contrast fill — matches the floating error pill so the inline
-   summary reads as the same can't-miss-it alert. */
-.issuePillError {
-  color: #fff;
-  background: var(--app-danger);
-  border-color: transparent;
-}
-
-.issuePillWarn {
-  color: var(--app-warning-text);
-  background: var(--app-warning-soft);
-  border-color: transparent;
-}
-
-.issuePillError:hover,
-.issuePillWarn:hover {
-  filter: brightness(1.1);
-}
-
-.issuePillError:focus-visible,
-.issuePillWarn:focus-visible {
-  outline: none;
-  box-shadow: var(--app-focus-ring);
-}
-
-.statPill:disabled {
-  cursor: default;
-  filter: none;
 }
 
 .list {
@@ -690,58 +656,6 @@ button.statPill {
   border-radius: 999px !important;
   font-size: var(--app-text-base) !important;
   box-shadow: var(--app-shadow-lg);
-}
-
-/* Zero-height marker after the meta header, watched by an IntersectionObserver
-   to detect when the header's issue summary has scrolled out of view. */
-.metaSentinel {
-  height: 0;
-}
-
-/* Floating mirror of the header's issue pills, docked to the editor pane's
-   top-right. Shown only once the header summary has scrolled away, so an
-   outstanding error stays visible — and one tap from being fixed — while editing
-   rows lower down. */
-.floatingIssues {
-  position: absolute;
-  top: 10px;
-  right: 16px;
-  z-index: var(--app-z-toolbar);
-  display: flex;
-  gap: 6px;
-  animation: floatingIssuesIn 140ms ease both;
-}
-
-/* Lift the pill off the scrolling content it floats over, and — unlike the
-   subtle inline summary it mirrors — give it a solid, high-contrast fill so it
-   reads as an alert that can't be missed. */
-.floatingPill {
-  font-weight: 600;
-  padding: 5px 12px;
-  border: none;
-  box-shadow: var(--app-shadow);
-}
-.floatingPill.issuePillError {
-  background: var(--app-danger);
-  color: #fff;
-}
-.floatingPill.issuePillWarn {
-  background: var(--app-warning);
-  color: #2a1d04;
-}
-.floatingPill:hover {
-  filter: brightness(1.08);
-}
-
-@keyframes floatingIssuesIn {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .advanced {

@@ -36,11 +36,7 @@ import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useNodeEditors, type NodeEditor } from "@/core/activity/presence";
 import { Avatar } from "@/activity/Avatar";
-import {
-  addThenScroll,
-  scrollPreviewNodeIntoView,
-  scrollTreeRowIntoView,
-} from "@/features/builder/scrollTreeRow";
+import { addThenScroll, scrollPreviewNodeIntoView } from "@/features/builder/scrollTreeRow";
 import {
   COMPONENT_META,
   CONTAINER_PICKER,
@@ -72,8 +68,6 @@ import { AddComponentMenu, type AddMenuNode } from "./AddComponentMenu";
 import { AdvancedMessageOptions } from "./AdvancedMessageOptions";
 import { PostedMessageBanner } from "../PostedMessageBanner";
 import {
-  AlertCircleIcon,
-  AlertTriangleIcon,
   ArrowDownIcon,
   ArrowUpIcon,
   ChevronDownIcon,
@@ -87,18 +81,16 @@ import { cn } from "@/lib/cn";
 import { pushToast } from "@/ui/Toast";
 import {
   ValidationContext,
-  mergeNodeIssues,
+  useMergedValidationView,
   useNodeIssues,
-  usePluginGuildIssues,
   useValidationSummary,
-  useValidationView,
   worstSeverity,
-  type ValidationView,
 } from "@/features/builder/useValidation";
 import { useFileDrop } from "./useFileDrop";
 import { addFilesToGallery, replaceGalleryItemFiles } from "./galleryUpload";
 import { Inspector } from "./Inspector";
 import { GalleryItemInspector } from "./inspectors/GalleryItemInspector";
+import { HeaderIssueChip } from "./HeaderIssueChip";
 import { IssueDot, IssueList } from "./ValidationIssues";
 import styles from "./ComponentTree.module.css";
 import type { ContainerChildFactoryKey } from "@/core/factory/createComponent";
@@ -357,11 +349,6 @@ export function ComponentTree() {
   const [dropTarget, setDropTarget] = useState<DragSession["dropTarget"]>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Zero-height marker just after the meta header. An IntersectionObserver
-  // watches it so we know when the header's at-rest issue summary has scrolled
-  // out of view — the cue to float a reminder pill near where the user is editing.
-  const metaSentinelRef = useRef<HTMLDivElement>(null);
-  const [headerOffscreen, setHeaderOffscreen] = useState(false);
   const dragSession = useMemo<DragSession>(
     () => ({
       drag,
@@ -389,26 +376,10 @@ export function ComponentTree() {
 
   // One validation pass for the whole tree, shared via context so each row is a
   // cheap map lookup instead of its own re-validation. The plugin guild checks
-  // are folded in here (not in `validateMessage`, which is pure) so a
-  // wrong-server binding gets the same tree-dot + inspector-banner as any issue.
-  const base = useValidationView();
-  const pluginIssues = usePluginGuildIssues();
-  const validation = useMemo(() => mergeNodeIssues(base, pluginIssues), [base, pluginIssues]);
-
-  // Float the issue reminder only once the header summary has scrolled away.
-  useEffect(() => {
-    const root = scrollRef.current;
-    const target = metaSentinelRef.current;
-    if (!root || !target) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => {
-        if (entry) setHeaderOffscreen(!entry.isIntersecting);
-      },
-      { root },
-    );
-    obs.observe(target);
-    return () => obs.disconnect();
-  }, []);
+  // are folded in (not in `validateMessage`, which is pure) so a wrong-server
+  // binding gets the same tree-dot + inspector-banner as any issue. The header's
+  // issue chip reads this same merged view via `useMergedValidationView`.
+  const validation = useMergedValidationView();
 
   return (
     <ValidationContext.Provider value={validation}>
@@ -417,7 +388,6 @@ export function ComponentTree() {
           <div ref={scrollRef} className={styles.scroll}>
             <PostedMessageBanner />
             <MetaHeader />
-            <div ref={metaSentinelRef} aria-hidden className={styles.metaSentinel} />
 
             {components.length === 0 ? (
               <div className={styles.empty}>
@@ -439,6 +409,14 @@ export function ComponentTree() {
             )}
           </div>
 
+          {/* The one validation indicator: a pill floating at the pane's
+              top-right, just under the action bar. Docked here (not in the action
+              bar) so it's shared verbatim by the web and Activity editors and
+              never crowds the bar's controls. Self-hides when the message is clean. */}
+          <div className={styles.issueDock}>
+            <HeaderIssueChip view={validation} />
+          </div>
+
           <div className={styles.footer}>
             <AddComponentMenu
               nodes={topLevelNodes}
@@ -457,63 +435,10 @@ export function ComponentTree() {
               )}
             />
           </div>
-
-          <FloatingIssueSummary view={validation} visible={headerOffscreen} />
         </div>
         <DragGhost />
       </DragContext.Provider>
     </ValidationContext.Provider>
-  );
-}
-
-/**
- * Floating mirror of the meta header's error / warning pills. Once the header
- * (which carries the at-rest summary) has scrolled out of view, this fades in
- * over the bottom-left of the tree — stacked just above the Add-component pill —
- * so an outstanding problem stays visible, and one click from being fixed, while
- * editing rows far down the message. Clicking jumps to the first offending
- * component, exactly like the header pill it mirrors.
- */
-function FloatingIssueSummary({ view, visible }: { view: ValidationView; visible: boolean }) {
-  const select = useMessageStore((s) => s.select);
-  const { errorCount, warningCount, firstErrorNodeId, firstWarningNodeId } = view;
-
-  if (!visible || (errorCount === 0 && warningCount === 0)) return null;
-
-  const jump = (id: EditorId | null) => {
-    if (!id) return;
-    select(id);
-    scrollTreeRowIntoView(id);
-    scrollPreviewNodeIntoView(id);
-  };
-
-  return (
-    <div className={styles.floatingIssues} role="status">
-      {errorCount > 0 ? (
-        <button
-          type="button"
-          className={cn(styles.statPill, styles.issuePillError, styles.floatingPill)}
-          onClick={() => jump(firstErrorNodeId)}
-          disabled={!firstErrorNodeId}
-          title="Jump to the first component with an error"
-        >
-          <AlertCircleIcon size={13} />
-          {errorCount} {errorCount === 1 ? "error" : "errors"}
-        </button>
-      ) : null}
-      {warningCount > 0 ? (
-        <button
-          type="button"
-          className={cn(styles.statPill, styles.issuePillWarn, styles.floatingPill)}
-          onClick={() => jump(firstWarningNodeId)}
-          disabled={!firstWarningNodeId}
-          title="Jump to the first component with a warning"
-        >
-          <AlertTriangleIcon size={13} />
-          {warningCount} {warningCount === 1 ? "warning" : "warnings"}
-        </button>
-      ) : null}
-    </div>
   );
 }
 
@@ -554,30 +479,18 @@ function MetaHeader() {
   const setAvatar = useMessageStore((s) => s.setAvatarUrl);
   const placeholders = useMessagePlaceholders();
 
-  const select = useMessageStore((s) => s.select);
-
   // Both walk the whole tree. Keyed on `message` so a drag (which re-renders
   // this header via its parent on every pointermove) doesn't re-walk the tree —
   // only an actual message change recomputes.
   const characters = useMemo(() => countCharacters(message), [message]);
   const components = useMemo(() => countComponents(message), [message]);
 
-  const { errorCount, warningCount, firstErrorNodeId, firstWarningNodeId, messageIssues } =
-    useValidationSummary();
-
-  // Select the offending row and scroll it into view so a flagged component is
-  // one click away from the summary pill. Also scroll the preview to the same
-  // node — mirroring a normal row click — so the flagged component is visible
-  // on both sides, not just in the tree.
-  const jumpToIssue = (id: EditorId | null) => {
-    if (!id) return;
-    select(id);
-    scrollTreeRowIntoView(id);
-    scrollPreviewNodeIntoView(id);
-  };
-
-  // "A message must contain at least one component" is already covered by the
-  // empty-tree placeholder, so drop it from the banner to avoid saying it twice.
+  // The at-a-glance issue *count* now lives in the header bar's chip (shared with
+  // the Activity bar); here we only surface message-level problems that have no
+  // component to point at (bad mentions, …) as a readable banner. "A message must
+  // contain at least one component" is already covered by the empty-tree
+  // placeholder, so drop it to avoid saying it twice.
+  const { messageIssues } = useValidationSummary();
   const bannerIssues = messageIssues.filter((i) => i.code !== "EMPTY_MESSAGE");
 
   return (
@@ -625,38 +538,6 @@ function MetaHeader() {
             max={LIMITS.TOTAL_CHARACTERS}
             label={characters === 1 ? "char" : "chars"}
           />
-          {/* On an empty message the only issue is "add a component", which the
-              empty-tree placeholder already says — so the pills wait for content.
-              A clean message shows no pill at all; absence is the "all good" cue.
-              Issue pills dock to the right, apart from the budget meters. */}
-          {components > 0 && (errorCount > 0 || warningCount > 0) ? (
-            <div className={styles.issues}>
-              {errorCount > 0 ? (
-                <button
-                  type="button"
-                  className={cn(styles.statPill, styles.issuePillError)}
-                  onClick={() => jumpToIssue(firstErrorNodeId)}
-                  disabled={!firstErrorNodeId}
-                  title="Jump to the first component with an error"
-                >
-                  <AlertCircleIcon size={12} />
-                  {errorCount} {errorCount === 1 ? "error" : "errors"}
-                </button>
-              ) : null}
-              {warningCount > 0 ? (
-                <button
-                  type="button"
-                  className={cn(styles.statPill, styles.issuePillWarn)}
-                  onClick={() => jumpToIssue(firstWarningNodeId)}
-                  disabled={!firstWarningNodeId}
-                  title="Jump to the first component with a warning"
-                >
-                  <AlertTriangleIcon size={12} />
-                  {warningCount} {warningCount === 1 ? "warning" : "warnings"}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
         </div>
       </div>
     </section>
