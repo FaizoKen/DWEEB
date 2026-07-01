@@ -333,13 +333,15 @@ impl Discord {
         .await
     }
 
-    /// Create an **Activity invite** for a voice channel — an invite whose target
-    /// is the embedded application (`target_type = 2`), so opening
-    /// `discord.gg/{code}` drops whoever clicks it into that voice channel *with
-    /// the app launched*. That shared voice-channel instance is what lets several
-    /// people co-edit in one Activity room; a bare `discord.com/activities/{id}`
-    /// launch only ever opens a lone user's solo call. Powers the web app's
-    /// "Collaborate in Discord".
+    /// Create an **Activity invite** for a channel — an invite whose target is the
+    /// embedded application (`target_type = 2`), so opening `discord.gg/{code}`
+    /// drops whoever clicks it into that channel *with the app launched*. That
+    /// shared instance is what lets several people co-edit in one Activity room; a
+    /// bare `discord.com/activities/{id}` launch only ever opens a lone user's solo
+    /// call. Powers the web app's "Collaborate in Discord". Discord accepts these
+    /// invites in both text and voice channels (verified against the live API), so
+    /// the caller doesn't pre-restrict the channel kind — an unsupported one comes
+    /// back as Discord's own error.
     ///
     /// Needs the bot to hold **Create Instant Invite** in the channel (part of the
     /// shared invite permission union). `max_age` is seconds until the invite

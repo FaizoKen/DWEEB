@@ -182,10 +182,11 @@ export interface ActivityInvite {
 
 /**
  * `POST /api/guilds/:id/activity-invite` `{ channel_id }` — mint a Discord
- * Activity invite for a voice channel. Opening the returned `discord.gg/…` link
- * drops whoever clicks it into that voice channel with DWEEB launched, so a group
- * lands in one shared instance and co-edits live — the "Collaborate in Discord"
- * hand-off. `channelId` must be a voice channel in the server.
+ * Activity invite for a channel. Opening the returned `discord.gg/…` link drops
+ * whoever clicks it into that channel with DWEEB launched, so a group lands in one
+ * shared instance and co-edits live — the "Collaborate in Discord" hand-off.
+ * `channelId` is a text or voice channel in the server (Discord accepts activity
+ * invites in both).
  */
 export async function createActivityInvite(
   guildId: string,

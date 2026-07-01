@@ -2,17 +2,19 @@
  * "Collaborate in Discord" dialog.
  *
  * Real-time co-editing lives only in the embedded Discord Activity, and an
- * Activity is only *shared* when several people are in the same instance — which
- * happens when they're in the same **voice channel**. A bare
+ * Activity is only *shared* when several people are in the same instance. A bare
  * `discord.com/activities/{id}` launch drops a lone user into a solo call (a bot
  * DM), so there's no one to collaborate with. This dialog fixes that: it mints a
- * Discord **Activity invite** for a voice channel (proxy → bot →
- * `POST /channels/{id}/invites`), handing back a `discord.gg/…` link that launches
- * DWEEB *inside that channel*. Everyone who opens it lands in the same instance
- * and co-edits live.
+ * Discord **Activity invite** for a channel (proxy → bot →
+ * `POST /channels/{id}/invites`, `target_type=2`), handing back a `discord.gg/…`
+ * link that launches DWEEB *inside that channel*. Everyone who opens it lands in
+ * the same instance and co-edits live. Discord accepts these invites in both
+ * **text and voice channels** (confirmed against the live API), so the picker
+ * offers both — the proxy leaves the final say to Discord rather than hardcoding
+ * a channel-type rule.
  *
- * It operates on the connected server (like Send), reading its voice channels
- * straight from `guildStore`. Self-contained: it reads open/close state from
+ * It operates on the connected server (like Send), reading its channels straight
+ * from `guildStore`. Self-contained: it reads open/close state from
  * `collaborateStore`, so any entry point just calls `openCollaborate()`.
  */
 
@@ -37,8 +39,17 @@ import {
 import { useCollaborateStore } from "./collaborateStore";
 import styles from "./CollaborateDialog.module.css";
 
-/** GUILD_VOICE — the only channel kind an Activity invite can target. */
-const VOICE_CHANNEL_TYPE = 2;
+/** GUILD_VOICE — shown with a speaker glyph; everything else here is a text kind. */
+const VOICE_TYPE = 2;
+/** Channel kinds an Activity invite can launch in: GUILD_TEXT (0), GUILD_VOICE
+ *  (2), GUILD_ANNOUNCEMENT (5). Confirmed text + voice against the live API; the
+ *  proxy doesn't hard-restrict, so this is only which channels the picker offers. */
+const ACTIVITY_CHANNEL_TYPES = new Set([0, VOICE_TYPE, 5]);
+
+/** Discord's own glyph for a channel: 🔊 for voice, # for a text kind. */
+function channelGlyph(type: number): string {
+  return type === VOICE_TYPE ? "🔊" : "#";
+}
 
 export function CollaborateDialog() {
   const close = useCollaborateStore((s) => s.closeCollaborate);
@@ -52,10 +63,10 @@ export function CollaborateDialog() {
   const guildStatus = useGuildStore((s) => s.status);
   const guildName = guilds.find((g) => g.id === connectedId)?.name ?? null;
 
-  const voiceChannels = useMemo(
+  const channels = useMemo(
     () =>
       (guildData?.channels ?? [])
-        .filter((c) => c.type === VOICE_CHANNEL_TYPE)
+        .filter((c) => ACTIVITY_CHANNEL_TYPES.has(c.type))
         .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name)),
     [guildData],
   );
@@ -65,14 +76,14 @@ export function CollaborateDialog() {
   const [error, setError] = useState<string | null>(null);
   const [invite, setInvite] = useState<ActivityInvite | null>(null);
 
-  // Default to the first voice channel once the list resolves, and keep the
-  // selection valid if the connected server (and its channels) changes.
+  // Default to the first channel once the list resolves, and keep the selection
+  // valid if the connected server (and its channels) changes.
   useEffect(() => {
-    if (!voiceChannels.length) return;
-    setChannelId((cur) => (voiceChannels.some((c) => c.id === cur) ? cur : voiceChannels[0]!.id));
-  }, [voiceChannels]);
+    if (!channels.length) return;
+    setChannelId((cur) => (channels.some((c) => c.id === cur) ? cur : channels[0]!.id));
+  }, [channels]);
 
-  const selectedChannel = voiceChannels.find((c) => c.id === channelId) ?? null;
+  const selectedChannel = channels.find((c) => c.id === channelId) ?? null;
 
   const pickChannel = (id: string) => {
     setChannelId(id);
@@ -110,15 +121,15 @@ export function CollaborateDialog() {
   };
 
   // ── State branches ─────────────────────────────────────────────────────────
-  // Resolve which view (and footer) to show: sign-in, no server, no voice
-  // channel, the picker, or the finished link.
+  // Resolve which view (and footer) to show: sign-in, no server, no channel, the
+  // picker, or the finished link.
 
   const resolvingAuth = authStatus === "unknown" || authStatus === "loading";
   const signedOut = authStatus === "anon";
   const loadingGuild = !guildData && guildStatus === "loading";
   const noServer = !resolvingAuth && !signedOut && !connectedId && !loadingGuild;
-  const noVoice = Boolean(connectedId) && guildStatus !== "loading" && voiceChannels.length === 0;
-  const canPick = voiceChannels.length > 0;
+  const noChannels = Boolean(connectedId) && guildStatus !== "loading" && channels.length === 0;
+  const canPick = channels.length > 0;
 
   const launcher = activityLaunchUrl();
 
@@ -172,9 +183,9 @@ export function CollaborateDialog() {
   return (
     <Modal open onClose={close} title="Collaborate in Discord" footer={footer}>
       <p className={styles.lead}>
-        Live co-editing runs inside a Discord <strong>voice channel</strong>. Create a link below
-        and everyone who opens it joins that channel with DWEEB launched — you build the message
-        together in real time.
+        Pick a channel and create a link that launches DWEEB <strong>inside</strong> it. Everyone
+        who opens the link joins the same instance and builds the message together, live. A voice
+        channel works too (no need to actually talk — it’s just the shared room).
       </p>
 
       {resolvingAuth ? (
@@ -190,11 +201,10 @@ export function CollaborateDialog() {
           Connect a server first — open the account menu (top-left) and pick one the DWEEB bot is
           in.
         </p>
-      ) : noVoice ? (
+      ) : noChannels ? (
         <p className={styles.note}>
-          {guildName ? <strong>{guildName}</strong> : "This server"} has no voice channels.
-          Collaboration launches DWEEB inside one — create a voice channel in Discord, then try
-          again.
+          {guildName ? <strong>{guildName}</strong> : "This server"} has no channels DWEEB can
+          launch in. Add a text or voice channel in Discord, then try again.
         </p>
       ) : invite ? (
         <div className={styles.result}>
@@ -208,10 +218,12 @@ export function CollaborateDialog() {
               {selectedChannel ? (
                 <>
                   {" "}
-                  <strong>🔊 {selectedChannel.name}</strong>
+                  <strong>
+                    {channelGlyph(selectedChannel.type)} {selectedChannel.name}
+                  </strong>
                 </>
               ) : (
-                " the voice channel"
+                " the channel"
               )}{" "}
               and co-edits live.
             </p>
@@ -240,7 +252,7 @@ export function CollaborateDialog() {
       ) : canPick ? (
         <>
           <Field
-            label="Voice channel"
+            label="Channel"
             hint={
               guildName
                 ? `In ${guildName}. Switch servers in the account menu (top-left).`
@@ -253,9 +265,9 @@ export function CollaborateDialog() {
                 value={channelId}
                 onChange={(e) => pickChannel(e.currentTarget.value)}
               >
-                {voiceChannels.map((c) => (
+                {channels.map((c) => (
                   <option key={c.id} value={c.id}>
-                    🔊 {c.name}
+                    {channelGlyph(c.type)} {c.name}
                   </option>
                 ))}
               </Select>
@@ -267,7 +279,7 @@ export function CollaborateDialog() {
 
       {launcher && !invite ? (
         <p className={styles.fine}>
-          Already sitting in a voice channel?{" "}
+          Already have a channel open in Discord?{" "}
           <a href={launcher} target="_blank" rel="noopener noreferrer">
             Launch DWEEB there directly
           </a>
