@@ -1253,13 +1253,25 @@ pub async fn activity_room(
         }
         authorize_activity_member(&st, session.clone(), guild).await?;
     }
+    // The key drafts persist/resume under. It's the STABLE context of the
+    // instance id (`gc-<guild>-<channel>` / the DM context), NOT the whole id —
+    // Discord changes the per-launch prefix on every End→Play, so keying by the
+    // full id would never resume a relaunch (see `draft_context`). `None` disables
+    // persistence for this socket (unrecognized id, or a `gc-` context whose guild
+    // doesn't match the authorized query guild — so a forged instance path can't
+    // read or poison another channel's draft; the room still works, just ephemeral).
+    let draft_key: Option<String> =
+        draft_context(&instance).and_then(|ctx| match context_guild(ctx) {
+            Some(cg) => (cg == guild).then(|| ctx.to_string()),
+            None => Some(ctx.to_string()),
+        });
     let me = Participant {
         id: session.uid,
         name: session.name,
         avatar: session.avatar,
     };
     Ok(ws.on_upgrade(move |socket| async move {
-        room_socket(st, instance, me, socket).await;
+        room_socket(st, instance, draft_key, me, socket).await;
     }))
 }
 
@@ -1268,7 +1280,13 @@ pub async fn activity_room(
 /// disconnect. Drafts are opaque here — the browser tags each with its own
 /// connection id and ignores its own echo, so the server never has to understand
 /// the payload, only fan it out.
-async fn room_socket(st: AppState, instance: String, me: Participant, mut socket: WebSocket) {
+async fn room_socket(
+    st: AppState,
+    instance: String,
+    draft_key: Option<String>,
+    me: Participant,
+    mut socket: WebSocket,
+) {
     let Some((tx, mut rx, is_first)) = st.activity_rooms.join(&instance, &me) else {
         let _ = socket.send(Message::Close(None)).await;
         return;
@@ -1281,9 +1299,11 @@ async fn room_socket(st: AppState, instance: String, me: Participant, mut socket
     // than reverting to the ≤throttle-stale stored copy. A live room skips this
     // entirely: a peer's fresher in-memory state supersedes anything on disk.
     if is_first {
-        if let Some(message) = load_persisted_draft(&st, &instance).await {
-            let frame = json!({ "type": "resume", "message": message }).to_string();
-            let _ = socket.send(Message::Text(frame)).await;
+        if let Some(key) = &draft_key {
+            if let Some(message) = load_persisted_draft(&st, key).await {
+                let frame = json!({ "type": "resume", "message": message }).to_string();
+                let _ = socket.send(Message::Text(frame)).await;
+            }
         }
     }
     // Keepalive: ping on a fixed interval so an idle intermediary doesn't drop
@@ -1304,7 +1324,8 @@ async fn room_socket(st: AppState, instance: String, me: Participant, mut socket
                         // already have that state via the granular patch that
                         // triggered it — rebroadcasting a full draft would revert
                         // concurrent edits, the very thing patches exist to avoid).
-                        let rebroadcast = persist_and_should_relay(&st, &instance, &t);
+                        let rebroadcast =
+                            persist_and_should_relay(&st, draft_key.as_deref(), &t);
                         if rebroadcast {
                             let _ = tx.send(t);
                         }
@@ -1350,9 +1371,11 @@ async fn room_socket(st: AppState, instance: String, me: Participant, mut socket
 /// `snapshot` is withheld from the broadcast, since peers already hold that state
 /// via the granular patch that prompted it, and re-applying a full draft would
 /// revert their concurrent edits. Everything else relays unchanged. The DB write
-/// runs on a blocking task off the socket loop; a no-op when persistence is off.
-fn persist_and_should_relay(st: &AppState, instance: &str, frame: &str) -> bool {
-    let Some(store) = &st.activity_drafts else {
+/// runs on a blocking task off the socket loop, keyed by the room's stable
+/// `draft_key`; a no-op (always relay) when persistence is off or disabled for
+/// this socket (`draft_key` is `None`).
+fn persist_and_should_relay(st: &AppState, draft_key: Option<&str>, frame: &str) -> bool {
+    let (Some(store), Some(key)) = (&st.activity_drafts, draft_key) else {
         return true;
     };
     // Cheap pre-filter: only the two full-message frame types name themselves
@@ -1371,10 +1394,10 @@ fn persist_and_should_relay(st: &AppState, instance: &str, frame: &str) -> bool 
             if let Ok(msg_str) = serde_json::to_string(message) {
                 if let Some(sealed) = crate::seal::seal(&st.key, &msg_str) {
                     let store = Arc::clone(store);
-                    let instance = instance.to_string();
+                    let key = key.to_string();
                     let now = crate::schedule::unix_now();
                     tokio::task::spawn_blocking(move || {
-                        if let Err(e) = store.put(&instance, &sealed, now) {
+                        if let Err(e) = store.put(&key, &sealed, now) {
                             tracing::warn!("activity draft persist failed: {e}");
                         }
                     });
@@ -1386,17 +1409,42 @@ fn persist_and_should_relay(st: &AppState, instance: &str, frame: &str) -> bool 
     ty != Some("snapshot")
 }
 
-/// Load and unseal the persisted draft for `instance` as a JSON message, or
+/// Load and unseal the persisted draft stored under `key` as a JSON message, or
 /// `None` when nothing is stored, persistence is off, or it can't be read/opened.
-async fn load_persisted_draft(st: &AppState, instance: &str) -> Option<Value> {
+async fn load_persisted_draft(st: &AppState, key: &str) -> Option<Value> {
     let store = Arc::clone(st.activity_drafts.as_ref()?);
-    let key = instance.to_string();
+    let key = key.to_string();
     let sealed = tokio::task::spawn_blocking(move || store.get(&key))
         .await
         .ok()?
         .ok()??;
     let plain = crate::seal::open(&st.key, &sealed)?;
     serde_json::from_str::<Value>(&plain).ok()
+}
+
+/// The STABLE context of a Discord Activity instance id — what a draft is keyed
+/// by so a relaunch in the same place resumes it.
+///
+/// Instance ids look like `i-<per-launch id>-gc-<guild>-<channel>` (a channel
+/// launch) or `i-<per-launch id>-<other context>` (e.g. a DM). Discord mints a
+/// fresh `<per-launch id>` on every End→Play, but the trailing context is stable
+/// for a given channel/DM — so we strip the leading `i-<per-launch id>-` and key
+/// on the rest. `None` when the id doesn't fit that shape (then persistence is
+/// disabled rather than keyed on something unstable).
+fn draft_context(instance: &str) -> Option<&str> {
+    let rest = instance.strip_prefix("i-")?;
+    let dash = rest.find('-')?;
+    let ctx = &rest[dash + 1..];
+    (!ctx.is_empty()).then_some(ctx)
+}
+
+/// The guild embedded in a `gc-<guild>-<channel>` context, or `None` for a
+/// non-guild (e.g. DM) context. Used to bind draft access to the authorized guild.
+fn context_guild(context: &str) -> Option<&str> {
+    let rest = context.strip_prefix("gc-")?;
+    let end = rest.find('-').unwrap_or(rest.len());
+    let g = &rest[..end];
+    (!g.is_empty()).then_some(g)
 }
 
 /// Discord's Activity instance ids are short slugs; accept a bounded set of
@@ -1454,6 +1502,34 @@ mod tests {
             cid,
             app
         ));
+    }
+
+    #[test]
+    fn draft_context_is_stable_across_relaunch() {
+        // Real Discord channel-launch ids: the leading `i-<num>` changes every
+        // End→Play, but the `gc-<guild>-<channel>` tail is stable — so two
+        // relaunches in one channel must resolve to the SAME draft key.
+        let a = "i-1521845307220955136-gc-1152851518228283392-1387427085177327747";
+        let b = "i-1521847258067243149-gc-1152851518228283392-1387427085177327747";
+        assert_eq!(
+            draft_context(a),
+            Some("gc-1152851518228283392-1387427085177327747")
+        );
+        assert_eq!(draft_context(a), draft_context(b));
+        // A different channel is a different key.
+        let other = "i-999-gc-1152851518228283392-1316755985397715014";
+        assert_ne!(draft_context(a), draft_context(other));
+        // Guild extraction binds a draft to its guild.
+        assert_eq!(
+            context_guild("gc-1152851518228283392-1387427085177327747"),
+            Some("1152851518228283392")
+        );
+        // A DM / non-guild context has no embedded guild.
+        assert_eq!(context_guild("pc-1387427085177327747"), None);
+        // Malformed shapes yield no context (persistence disabled, not crashed).
+        assert_eq!(draft_context("garbage"), None);
+        assert_eq!(draft_context("i-"), None);
+        assert_eq!(draft_context("i-onlylaunchid"), None);
     }
 
     #[test]
