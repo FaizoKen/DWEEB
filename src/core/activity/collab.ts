@@ -197,7 +197,13 @@ function connect(): void {
   ws.onopen = () => {
     reconnectAttempts = 0;
     opts?.onConnectedChange?.(true);
-    // Announce ourselves; existing peers answer with their current draft.
+    // Announce ourselves; existing peers answer with their current draft. We do
+    // NOT flush pending offline edits here: the baseline (`lastSent`) stays at the
+    // pre-drop state, so when a peer's answering draft lands, `applyFull` reapplies
+    // our still-pending edits on top of it and then broadcasts them. Flushing a
+    // patch here first would advance the baseline and let a peer's *stale* draft
+    // (sent before our patch reached it) overwrite us — the race `applyFull` avoids
+    // by reconciling against the un-advanced baseline instead.
     send({ type: "hello", cid });
     // Re-announce where we're editing so a reconnect restores our presence ring
     // for everyone (peers dropped it when our socket closed).
@@ -293,22 +299,47 @@ function handleFrame(frame: Record<string, unknown>): void {
   }
 }
 
-/** Replace the whole message with a peer's snapshot (latecomer sync or a
- *  top-level structural change). Bypasses history/id-reassignment so the tree
- *  stays identical across peers. */
+/** Adopt a peer's full-message snapshot (latecomer sync, a top-level structural
+ *  change, or a reconnect peer answering our `hello`) — but reconcile it with any
+ *  local edits we haven't managed to broadcast yet, so an inbound full message
+ *  never silently discards local work.
+ *
+ *  This is a three-way merge against our last synced baseline (`lastSent`):
+ *  reapply our pending per-node ops on top of the incoming draft. Nodes only the
+ *  peer touched come through; nodes we edited offline (or mid-keystroke, before a
+ *  peer's structural `draft` landed) survive. Without it, a peer's reconnect
+ *  snapshot overwrites edits made while our socket was down — the offline-edit
+ *  data-loss bug. When nothing is pending this reduces to adopting the peer's
+ *  state verbatim, exactly as before. */
 function applyFull(message: WebhookMessage): void {
+  const ours = useMessageStore.getState().message;
+  const pending = lastSent ? diffMessage(lastSent, ours) : [];
+
+  // A top-level structural change we haven't broadcast can't be merged per node.
+  // Don't drop it: keep our version and let the next sync re-broadcast it as a
+  // full draft (last-write-wins wholesale — the documented tradeoff for a
+  // structural conflict). Adopt the peer's frame only as the new baseline so the
+  // diff recomputes against it.
+  if (pending === null) {
+    lastSent = message;
+    diverged = true;
+    scheduleSync();
+    return;
+  }
+
+  const next = pending.length > 0 ? applyOps(message, pending) : message;
   applyingRemote = true;
   try {
-    useMessageStore.setState({ message });
+    useMessageStore.setState({ message: next });
   } finally {
     applyingRemote = false;
   }
-  // Our baseline is now exactly the peer's state. A full snapshot supersedes any
-  // un-sent local edit — the accepted edge of last-write-wins, and only sent for
-  // a latecomer or a top-level structural change.
+  // Baseline is the peer's frame; any reapplied local ops remain a pending diff
+  // against it, so the next sync re-broadcasts our surviving edits to the room.
   lastSent = message;
   // We now hold live room state; a later server `resume` must not revert us.
   diverged = true;
+  if (pending.length > 0) scheduleSync();
 }
 
 /** Apply a peer's per-node ops, touching only the named nodes so a concurrent
@@ -374,25 +405,35 @@ function scheduleSync(): void {
 function syncNow(): void {
   const current = useMessageStore.getState().message;
   const base = lastSent;
-  lastSent = current;
+  // The baseline only advances when the frame actually goes on the wire (see
+  // `send`). If the socket is down, `current` stays a pending diff against the
+  // old baseline, so a reconnect re-broadcasts the whole accumulated change
+  // instead of silently swallowing edits made while disconnected.
   if (!base) {
-    sendSnapshot(current);
-    schedulePersist();
+    if (sendSnapshot(current)) {
+      lastSent = current;
+      schedulePersist();
+    }
     return;
   }
   const ops = diffMessage(base, current);
   if (ops === null) {
-    sendSnapshot(current);
-    schedulePersist();
+    if (sendSnapshot(current)) {
+      lastSent = current;
+      schedulePersist();
+    }
     return;
   }
   if (ops.length === 0) return; // nothing semantic changed
-  send({ type: "patch", cid, ops });
-  schedulePersist();
+  if (send({ type: "patch", cid, ops })) {
+    lastSent = current;
+    schedulePersist();
+  }
 }
 
-function sendSnapshot(message: WebhookMessage): void {
-  send({ type: "draft", cid, message });
+/** Broadcast the whole message as a `draft`; returns whether it was sent. */
+function sendSnapshot(message: WebhookMessage): boolean {
+  return send({ type: "draft", cid, message });
 }
 
 /**
@@ -417,14 +458,21 @@ function sendPersistSnapshot(): void {
   send({ type: "snapshot", cid, message: useMessageStore.getState().message });
 }
 
-function send(frame: unknown): void {
+/** Put a frame on the wire, returning whether it actually went out. The caller
+ *  uses this to decide whether to advance the sync baseline: a frame dropped
+ *  because the socket is closed (an edit made while disconnected) must NOT
+ *  advance `lastSent`, or the change is never a diff to re-broadcast on
+ *  reconnect — the offline-edit data-loss bug. */
+function send(frame: unknown): boolean {
   if (socket && socket.readyState === WebSocket.OPEN) {
     try {
       socket.send(JSON.stringify(frame));
+      return true;
     } catch {
-      /* dropped frame — the next edit (or reconnect) supersedes it */
+      return false; // dropped — a later sync (or reconnect) supersedes it
     }
   }
+  return false;
 }
 
 function scheduleReconnect(): void {
