@@ -140,10 +140,13 @@ mod tests {
     use super::*;
 
     fn temp_store(tag: &str, max: u64) -> (ActivityDraftStore, std::path::PathBuf) {
-        let path = std::env::temp_dir()
-            .join(format!("dweeb-draft-test-{}-{tag}.db", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("dweeb-draft-test-{}-{tag}.db", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        (ActivityDraftStore::open(path.to_str().unwrap(), max).unwrap(), path)
+        (
+            ActivityDraftStore::open(path.to_str().unwrap(), max).unwrap(),
+            path,
+        )
     }
 
     #[test]

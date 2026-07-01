@@ -205,8 +205,8 @@ impl Config {
             .map(|s| split_list(&s))
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| vec!["dweeb.faizo.net".to_string()]);
-        let activity_draft_db_path = opt_env("ACTIVITY_DRAFT_DB_PATH")
-            .unwrap_or_else(|| "activity-drafts.db".to_string());
+        let activity_draft_db_path =
+            opt_env("ACTIVITY_DRAFT_DB_PATH").unwrap_or_else(|| "activity-drafts.db".to_string());
         let activity_draft_max_entries = parse_or("ACTIVITY_DRAFT_MAX_ENTRIES", 20_000);
         let activity_draft_retention_days = parse_or("ACTIVITY_DRAFT_RETENTION_DAYS", 7);
 
