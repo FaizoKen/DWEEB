@@ -296,7 +296,9 @@ export const ScenePlugins: React.FC = () => {
                           Button — Enter giveaway · configured visually, sandboxed
                         </span>
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      {/* minmax(0,…): a bare 1fr can't shrink below the cards'
+                          nowrap descriptions, which made the left column wider */}
+                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
                         {PLUGINS.map((p) => {
                           const hlIdx = hlOrder.indexOf(p.id);
                           const lit = hlIdx !== -1 && hlIdx === hover;
@@ -361,6 +363,25 @@ export const ScenePlugins: React.FC = () => {
                             </div>
                           );
                         })}
+                        {/* 8th cell — evens out the 7-plugin grid into 2×4 */}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 9,
+                            border: `1.5px dashed ${COLORS.border}`,
+                            borderRadius: 12,
+                            height: 84,
+                            boxSizing: "border-box",
+                            color: COLORS.textMuted,
+                            fontSize: 13.5,
+                            fontWeight: 700,
+                          }}
+                        >
+                          <Icon name="sparkle" size={17} color={COLORS.textMuted} />
+                          {PLUGINS.reduce((n, p) => n + p.presets, 0)} ready-made presets included
+                        </div>
                       </div>
                     </div>
                   </div>

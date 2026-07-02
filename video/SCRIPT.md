@@ -1,6 +1,6 @@
-# DWEEB — Launch Film v3.1: Script & Storyboard
+# DWEEB — Launch Film v3.2: Script & Storyboard
 
-**Runtime:** 1:17 (2,304 frames) @ 30fps, 1920×1080 (`DweebPromo`) — the exact
+**Runtime:** 1:23 (2,497 frames) @ 30fps, 1920×1080 (`DweebPromo`) — the exact
 frame count comes from `public/audio/manifest.json` after `npm run audio`.
 **Voice:** Microsoft Edge neural `en-US-AndrewMultilingualNeural`, +6% rate
 **Goal:** one clear story a first-time viewer can follow with zero Discord-admin
@@ -13,16 +13,18 @@ v3.1 flow fixes over v3 (all in service of "clean, easy, simple"):
 - **Hook**: the plain post *swaps in place* for the rich message — one message
   slot, one framing, the viewer's eye never moves.
 - **Build**: the camera *follows* the narration with slow glides — tree while
-  blocks land, across to the preview, onto the inspector fix (the cursor
-  selects the flagged button and clicks into the Label field) — then zooms out
-  so the whole editor is seen in sync. Gentle, never whipping between panes.
+  blocks land (every block arrives complete, no fix-it detour), across to the
+  preview — then eases wide so the whole editor is seen in sync and the green
+  "Ready to send" pill pops on the limits beat. Gentle, never whipping
+  between panes.
 - **Assistant**: its own scene; the panel docks to the far right exactly like
   the real app (`AiChatPanel`). No model or provider names anywhere.
 - **Plugins**: continues the assistant's shot — a matched cut (`hold`
   transition + shared camera framing + synced handheld-drift phase) where the
-  AI chat simply slides closed, then the flagged button is selected and the
-  "Attach a plugin" picker opens in-editor with all 7 plugins; Giveaway is
-  attached and the chip lands on the button row.
+  AI chat simply slides closed, then the Enter-giveaway button is selected and
+  the "Attach a plugin" picker opens in-editor with all 7 plugins (plus a
+  presets note that squares the grid); Giveaway is attached and the chip lands
+  on the button row.
 - **Send**: naming and sending happen *in place on the Components pane* — the
   identity card (name/avatar) heads the pane above the tree (identity lives in
   the real `ComponentTree`; there is no separate Message tab), and the
@@ -56,14 +58,14 @@ frame durations), so re-recording the VO re-syncs every cut automatically.
 | # | id | VO | Picture |
 |---|----|----|---------|
 | 1 | hook | Every day, your server posts messages that look like this. They could look like this. | Discord chat: a plain grey text post swaps in place for a rich Components V2 announcement card. |
-| 2 | reveal | This is DWEEB — the visual builder for Discord messages. | Mascot lands, wordmark + green underline, tagline. |
-| 3 | build | Design with Discord's real building blocks — containers, sections, media galleries, buttons, select menus — and watch a pixel-accurate preview update live, while DWEEB enforces Discord's limits for you. | The editor in one steady framing: tree assembles block-by-block, the preview mirrors each block; the floating issue pill flags a problem, then resolves. |
+| 2 | reveal | This is DWEEB — the ultimate toolkit for fancy Discord messages. | Mascot lands, wordmark + green underline, tagline. |
+| 3 | build | Design with Discord's real building blocks — containers, sections, media galleries, buttons, select menus — and watch a pixel-accurate preview update live, while DWEEB enforces Discord's limits for you. | The editor in one steady framing: tree assembles block-by-block (each lands complete), the preview mirrors each block; on the limits beat the floating pill pops green — Ready to send. |
 | 4 | assistant | Or just describe it — the built-in AI assistant drafts the whole message, right in your editor. | The AI Assistant docks on the right (like the real app), a prompt types, the draft lands in tree + preview at once. No model names. |
 | 5 | plugins | Now make it do things. Select a button, pick a plugin — support tickets, giveaways, role menus, pop-up forms — real behavior, set up visually. | The Enter-giveaway button is selected; the "Attach a plugin" picker opens in-editor with all 7 real plugins; Giveaway is attached, the chip lands on the row. |
-| 6 | send | When it's ready, name the message, pick a channel — DWEEB finds or creates the webhook for you. One click. Posted. | Message tab names it ("Nebula Announcements"), the action-bar Send drops a channel popover in place → click → the message lands in Discord with a ping. |
+| 6 | send | When it's ready, name the message, pick a channel — DWEEB finds or creates the webhook for you. One click. Posted. | Message tab names it ("Nebula Announcements"), the action-bar Send drops a channel popover in place — a Deliver row shows "Send now / Schedule…" with Send now selected → click → the message lands in Discord with a ping. |
 | 7 | templates | And you never start from zero — flip through ready-made templates, preview the message live, and open one to make it yours. | Gallery on the left, a big live-preview stage on the right: Welcome → Role menu → Giveaway → Announcement flip by as the cursor browses, then one opens. |
 | 8 | activity | DWEEB also runs inside Discord. Open the Activity in a voice channel and build together — live presence, real-time co-editing, one-click publish. | A Staff Lounge voice call → the DWEEB Activity launches from it → the simplified embedded builder: presence rings on the tree, two edits land at once, **Post** flips to **Update**. |
-| 9 | cta | DWEEB. Free to use, right in your browser. Just search dweeb bot on Google, and start building. | Riser → impact: mascot + wordmark, feature tags (Visual builder · AI assistant · Plugins · Build together); a Google search bar (G logo) types **dweeb bot** centered. |
+| 9 | cta | DWEEB. Way more features are waiting — explore them now, for free, right in your browser. Just search dweeb bot on Google, and start building. | Riser → impact: mascot + wordmark, feature tags (Visual builder · AI assistant · Plugins · Build together) + "…and a whole lot more — explore it all, free"; a Google search bar (G logo) types **dweeb bot** centered. |
 
 ## Accuracy sources (per claim)
 

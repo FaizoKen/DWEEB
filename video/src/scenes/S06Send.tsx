@@ -46,9 +46,9 @@ export const SceneSend: React.FC = () => {
     { f: tSendClick, x: 581, y: 142, press: true },
     { f: tPickCh - 6, x: 490, y: 256 },
     { f: tPickCh, x: 490, y: 256, press: true },
-    { f: tSendNow - 8, x: 657, y: 417 },
-    { f: tSendNow, x: 657, y: 417, press: true },
-    { f: tSendNow + 10, x: 657, y: 417 },
+    { f: tSendNow - 8, x: 657, y: 462 }, // Send sits lower — the Deliver row is above it
+    { f: tSendNow, x: 657, y: 462, press: true },
+    { f: tSendNow + 10, x: 657, y: 462 },
   ];
   const cur = cursorAt(frame, waypoints);
 
@@ -183,6 +183,37 @@ export const SceneSend: React.FC = () => {
                     />
                     <ChannelRow name="general" note="DWEEB creates one" />
                     <ChannelRow name="events" note="DWEEB creates one" />
+                    {/* delivery timing — the real Send panel's Send now / Schedule toggle */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.textMuted }}>Deliver</span>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 3,
+                          background: COLORS.bgInput,
+                          border: `1px solid ${COLORS.border}`,
+                          borderRadius: 9,
+                          padding: 3,
+                        }}
+                      >
+                        <span
+                          style={{
+                            padding: "5px 12px",
+                            borderRadius: 7,
+                            background: COLORS.bgActive,
+                            border: `1px solid ${COLORS.borderStrong}`,
+                            color: COLORS.text,
+                            fontSize: 13,
+                            fontWeight: 800,
+                          }}
+                        >
+                          Send now
+                        </span>
+                        <span style={{ padding: "6px 12px", color: COLORS.textSubtle, fontSize: 13, fontWeight: 700 }}>
+                          Schedule…
+                        </span>
+                      </div>
+                    </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
                       <Chip icon="link" color="#9b84ee">
                         or paste a webhook URL

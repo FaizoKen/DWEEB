@@ -5,7 +5,7 @@ import { Camera, Shot } from "../components/Camera";
 import { Mascot } from "../components/Mascot";
 import { Wordmark } from "../components/Wordmark";
 import { Chip, Rise, TypeText, useSpr } from "../components/Bits";
-import { voDelay, SCENES, IMPACT, CHIME } from "../timeline";
+import { voDelay, SCENES, VO, IMPACT, CHIME } from "../timeline";
 import { COLORS } from "../theme";
 import { INTER } from "../fonts";
 
@@ -37,7 +37,10 @@ export const SceneCta: React.FC = () => {
   const d = voDelay("cta");
 
   const drop = useSpr(4, { damping: 11, stiffness: 130, mass: 0.9 });
-  const searchIn = useSpr(d + 96, { damping: 13 });
+  // The search bar lands on "…search dweeb bot…" — derived from the line's
+  // length so re-recording the VO keeps the beat in place.
+  const searchAt = d + Math.round(VO.cta.frames * 0.66);
+  const searchIn = useSpr(searchAt, { damping: 13 });
 
   const shots: Shot[] = [
     { f: 0, x: 960, y: 560, s: 1.22 },
@@ -74,6 +77,20 @@ export const SceneCta: React.FC = () => {
                 ))}
               </div>
             </Rise>
+            <Rise delay={40} style={{ marginTop: -6 }}>
+              <div
+                style={{
+                  fontFamily: INTER,
+                  fontSize: 28,
+                  fontWeight: 600,
+                  color: COLORS.textMuted,
+                  letterSpacing: "0.01em",
+                }}
+              >
+                …and a whole lot more —{" "}
+                <span style={{ color: COLORS.text, fontWeight: 800 }}>explore it all, free</span>
+              </div>
+            </Rise>
 
             {/* the Google search bar — "dweeb bot" types itself in, centered */}
             <div
@@ -95,7 +112,7 @@ export const SceneCta: React.FC = () => {
                 <GoogleG size={38} />
               </div>
               <span style={{ fontFamily: INTER, fontSize: 44, fontWeight: 500, color: "#202124" }}>
-                <TypeText text="dweeb bot" start={d + 108} cps={14} caretColor="#4285f4" />
+                <TypeText text="dweeb bot" start={searchAt + 16} cps={14} caretColor="#4285f4" />
               </span>
               <svg
                 width={32}
@@ -118,7 +135,7 @@ export const SceneCta: React.FC = () => {
       <Sequence from={2} durationInFrames={30}>
         <Audio src={staticFile(IMPACT)} volume={0.85} />
       </Sequence>
-      <Sequence from={d + 100} durationInFrames={24}>
+      <Sequence from={searchAt + 4} durationInFrames={24}>
         <Audio src={staticFile(CHIME)} volume={0.5} />
       </Sequence>
     </AbsoluteFill>

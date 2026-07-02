@@ -328,7 +328,8 @@ export const SceneActivity: React.FC = () => {
                       />
                     </div>
 
-                    <div style={{ flex: 1, minWidth: 0, padding: 22, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                    {/* preview top-aligned with the tree — not floating mid-pane */}
+                    <div style={{ flex: 1, minWidth: 0, padding: 22, display: "flex", flexDirection: "column", justifyContent: "flex-start" }}>
                       <DMsg author="Nebula Events" mascot time={posted ? "Today at 9:41 AM" : "live preview"}>
                         <div style={{ maxWidth: 620 }}>
                           <DContainer accent="#eb459e">

@@ -27,14 +27,14 @@ const FPS = 30;
 // before the next scene leads in.
 const LINES = [
   { id: "hook",      gapAfter: 20, text: "Every day, your server posts messages that look like this. They could look like this." },
-  { id: "reveal",    gapAfter: 18, text: "This is DWEEB — the visual builder for Discord messages." },
+  { id: "reveal",    gapAfter: 18, text: "This is DWEEB — the ultimate toolkit for fancy Discord messages." },
   { id: "build",     gapAfter: 16, text: "Design with Discord's real building blocks — containers, sections, media galleries, buttons, select menus — and watch a pixel-accurate preview update live, while DWEEB enforces Discord's limits for you." },
   { id: "assistant", gapAfter: 18, text: "Or just describe it — the built-in AI assistant drafts the whole message, right in your editor." },
   { id: "plugins",   gapAfter: 16, text: "Now make it do things. Select a button, pick a plugin — support tickets, giveaways, role menus, pop-up forms — real behavior, set up visually." },
   { id: "send",      gapAfter: 26, text: "When it's ready, name the message, pick a channel — DWEEB finds or creates the webhook for you. One click. Posted." },
   { id: "templates", gapAfter: 18, text: "And you never start from zero — flip through ready-made templates, preview the message live, and open one to make it yours." },
   { id: "activity",  gapAfter: 20, text: "DWEEB also runs inside Discord. Open the Activity in a voice channel and build together — live presence, real-time co-editing, one-click publish." },
-  { id: "cta",       gapAfter: 0,  text: "DWEEB. Free to use, right in your browser. Just search dweeb bot on Google, and start building." },
+  { id: "cta",       gapAfter: 0,  text: "DWEEB. Way more features are waiting — explore them now, for free, right in your browser. Just search dweeb bot on Google, and start building." },
 ];
 
 const VOICE_CANDIDATES = [
@@ -68,7 +68,9 @@ async function synth() {
     fs.renameSync(audioFilePath, file);
     const bytes = fs.statSync(file).size;
     const durationSec = bytes / 6000; // 48 kbps CBR mono mp3
-    const frames = Math.ceil(durationSec * FPS);
+    // +2 safety frames: the byte estimate can undershoot the decoded tail, and
+    // this pad keeps the music duck covering the last syllable.
+    const frames = Math.ceil(durationSec * FPS) + 2;
     manifest.lines.push({
       id: line.id,
       file: `audio/${line.id}.mp3`,

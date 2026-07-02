@@ -52,8 +52,8 @@ export const SceneReveal: React.FC = () => {
                   letterSpacing: "0.01em",
                 }}
               >
-                The <span style={{ color: COLORS.text, fontWeight: 800 }}>visual builder</span> for Discord
-                messages
+                The <span style={{ color: COLORS.text, fontWeight: 800 }}>ultimate toolkit</span> for fancy
+                Discord messages
               </div>
             </Rise>
             <Rise delay={44}>

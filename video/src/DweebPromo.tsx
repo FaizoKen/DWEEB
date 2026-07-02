@@ -70,12 +70,20 @@ export const DweebPromo: React.FC = () => {
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       <Audio src={staticFile(MUSIC)} volume={MUSIC_BASE} />
 
-      {/* Voice-over per line (absolute timeline — never shifted by transitions) */}
-      {Object.values(VO).map((v) => (
-        <Sequence key={v.id} from={v.startFrame} durationInFrames={v.frames + 8}>
-          <Audio src={staticFile(v.file)} volume={1} />
-        </Sequence>
-      ))}
+      {/* Voice-over per line (absolute timeline — never shifted by transitions).
+          Each line's window runs until the NEXT line begins, not just its
+          estimated length: `frames` is derived from CBR byte math and can
+          undershoot the real mp3 by a few frames, which used to clip word
+          tails. The mp3 ends inside the window, so the slack is silence. */}
+      {SCENE_IDS.map((id, i) => {
+        const v = VO[id];
+        const end = i === SCENE_IDS.length - 1 ? TOTAL : VO[SCENE_IDS[i + 1]].startFrame;
+        return (
+          <Sequence key={v.id} from={v.startFrame} durationInFrames={end - v.startFrame}>
+            <Audio src={staticFile(v.file)} volume={1} />
+          </Sequence>
+        );
+      })}
 
       {/* Riser into the end card — ends exactly on the CTA impact (the scene
           plays the impact itself at its 2nd frame; riser.wav peaks on its last
