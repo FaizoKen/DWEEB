@@ -33,6 +33,12 @@ export const COLORS = {
   dButtonPrimary: "#5865f2",
   dButtonSecondary: "#4e5058",
   dButtonSuccess: "#248046",
+  dButtonDanger: "#da373c",
+  dMentionBg: "rgba(88,101,242,0.3)",
+  dMentionText: "#c9cdfb",
+  dChannel: "#80848e",
+  dInput: "#383a40",
+  dDivider: "#3f4147",
 } as const;
 
 export const FONT =

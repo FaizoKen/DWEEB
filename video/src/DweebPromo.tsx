@@ -7,57 +7,68 @@ import {
   useCurrentFrame,
   interpolate,
 } from "remotion";
-import { SCENES, VO, MUSIC, WHOOSH, TOTAL } from "./timeline";
-import { SceneOpening } from "./scenes/SceneOpening";
-import { SceneBuild } from "./scenes/SceneBuild";
-import { ScenePlugins } from "./scenes/ScenePlugins";
-import { SceneChannel } from "./scenes/SceneChannel";
-import { SceneMoreCta } from "./scenes/SceneMoreCta";
+import { SCENES, SCENE_IDS, VO, MUSIC, WHOOSH, RISER, TOTAL, SceneId } from "./timeline";
 import { SceneTransition, TRANSITION_FRAMES, TransitionType } from "./components/SceneTransition";
+import { SceneHook } from "./scenes/S01Hook";
+import { SceneReveal } from "./scenes/S02Reveal";
+import { SceneBuild } from "./scenes/S03Build";
+import { SceneAssistant } from "./scenes/S04Assistant";
+import { ScenePlugins } from "./scenes/S05Plugins";
+import { SceneSend } from "./scenes/S06Send";
+import { SceneTemplates } from "./scenes/S07Templates";
+import { SceneActivity } from "./scenes/S08Activity";
+import { SceneCta } from "./scenes/S09Cta";
 
-// Music bus: fade in/out + sidechain-style duck under every voice-over line, so
-// the track breathes up in the gaps and pulls back while narration plays.
-const MUSIC_BASE = 0.26;
-const DUCK = 0.42; // music drops to 42% under the voice
-const musicVolume = (f: number): number => {
-  let activity = 0;
-  for (const v of Object.values(VO)) {
-    const s = v.startFrame;
-    const e = v.startFrame + v.frames;
-    const env = Math.min(
-      interpolate(f, [s - 8, s + 4], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }),
-      interpolate(f, [e - 6, e + 14], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }),
-    );
-    activity = Math.max(activity, env);
-  }
-  const fadeIn = interpolate(f, [0, 20], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const fadeOut = interpolate(f, [TOTAL - 42, TOTAL - 2], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  return MUSIC_BASE * fadeIn * fadeOut * (1 - activity * (1 - DUCK));
-};
+// Music bus. music.wav is the licensed bed baked to length by the audio
+// scripts — trimmed, faded, and with the duck under the narration already in
+// the waveform (a per-frame volume function would expand into a huge ffmpeg
+// expression and blow the Windows command-line limit at stitch time). So the
+// prop stays a constant; it is low because the source track is mastered loud.
+const MUSIC_BASE = 0.22;
 
 const Fades: React.FC<{ total: number }> = ({ total }) => {
   const frame = useCurrentFrame();
-  const o = interpolate(frame, [0, 12, total - 18, total], [1, 0, 0, 1], {
+  const o = interpolate(frame, [0, 12, total - 20, total], [1, 0, 0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
   return <AbsoluteFill style={{ background: "#000", opacity: o, pointerEvents: "none", zIndex: 50 }} />;
 };
 
+const COMPONENTS: Record<SceneId, React.FC> = {
+  hook: SceneHook,
+  reveal: SceneReveal,
+  build: SceneBuild,
+  assistant: SceneAssistant,
+  plugins: ScenePlugins,
+  send: SceneSend,
+  templates: SceneTemplates,
+  activity: SceneActivity,
+  cta: SceneCta,
+};
+
+// Cut style per scene entrance — dissolves for tone shifts, gentle pushes for
+// continuity through the editor beats. assistant → plugins matches framing on
+// both sides of the cut ("hold"), so it reads as one continuous take where
+// the AI chat simply closes.
+const TRANSITIONS: Record<SceneId, TransitionType> = {
+  hook: "dissolve",
+  reveal: "dissolve",
+  build: "push",
+  assistant: "push",
+  plugins: "hold",
+  send: "push",
+  templates: "push",
+  activity: "dissolve",
+  cta: "dissolve",
+};
+
 export const DweebPromo: React.FC = () => {
-  // Visual scene boundaries (the custom-bot post + interaction share one scene).
   const T = TRANSITION_FRAMES;
-  const defs: { key: string; Comp: React.FC; start: number; end: number; type: TransitionType }[] = [
-    { key: "open", Comp: SceneOpening, start: SCENES.open.from, end: SCENES.build.from, type: "dissolve" },
-    { key: "build", Comp: SceneBuild, start: SCENES.build.from, end: SCENES.plugins.from, type: "push" },
-    { key: "plugins", Comp: ScenePlugins, start: SCENES.plugins.from, end: SCENES.custombot.from, type: "whip" },
-    { key: "channel", Comp: SceneChannel, start: SCENES.custombot.from, end: SCENES.morecta.from, type: "push" },
-    { key: "morecta", Comp: SceneMoreCta, start: SCENES.morecta.from, end: TOTAL, type: "dissolve" },
-  ];
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      <Audio src={staticFile(MUSIC)} volume={musicVolume} />
+      <Audio src={staticFile(MUSIC)} volume={MUSIC_BASE} />
 
       {/* Voice-over per line (absolute timeline — never shifted by transitions) */}
       {Object.values(VO).map((v) => (
@@ -66,25 +77,37 @@ export const DweebPromo: React.FC = () => {
         </Sequence>
       ))}
 
-      {/* Transition whooshes at each cut (skip the first scene). Volume tracks
-          the transition energy so kinetic "whip" cuts hit harder than gentle
-          "dissolve" settles — keeps the repeated swoosh from feeling flat. */}
-      {defs.slice(1).map(({ key, start, type }) => {
-        const vol = type === "whip" ? 0.6 : type === "push" ? 0.45 : 0.3;
+      {/* Riser into the end card — ends exactly on the CTA impact (the scene
+          plays the impact itself at its 2nd frame; riser.wav peaks on its last
+          sample and runs 36 frames). */}
+      <Sequence from={SCENES.cta.from - 54} durationInFrames={38}>
+        <Audio src={staticFile(RISER)} volume={0.55} />
+      </Sequence>
+
+      {/* Transition whooshes at each cut (skip the first scene; a "hold" is a
+          matched cut meant to be inaudible — the scene plays its own panel
+          whoosh instead). */}
+      {SCENE_IDS.slice(1).map((id) => {
+        const type = TRANSITIONS[id];
+        if (type === "hold") return null;
+        const vol = type === "whip" ? 0.55 : type === "push" ? 0.42 : 0.28;
         return (
-          <Sequence key={`w-${key}`} from={start - T} durationInFrames={22}>
+          <Sequence key={`w-${id}`} from={SCENES[id].from - T} durationInFrames={22}>
             <Audio src={staticFile(WHOOSH)} volume={vol} />
           </Sequence>
         );
       })}
 
-      {/* Scenes overlap by T frames so the incoming scene's transition plays
-          over the outgoing one. */}
-      {defs.map(({ key, Comp, start, end, type }, i) => {
+      {/* Scenes overlap by T frames so the incoming transition plays over the
+          outgoing shot. */}
+      {SCENE_IDS.map((id, i) => {
+        const Comp = COMPONENTS[id];
+        const start = SCENES[id].from;
+        const end = i === SCENE_IDS.length - 1 ? TOTAL : SCENES[SCENE_IDS[i + 1]].from;
         const from = i === 0 ? 0 : start - T;
         return (
-          <Sequence key={key} from={from} durationInFrames={end - from}>
-            <SceneTransition type={type}>
+          <Sequence key={id} from={from} durationInFrames={end - from}>
+            <SceneTransition type={TRANSITIONS[id]}>
               <Comp />
             </SceneTransition>
           </Sequence>

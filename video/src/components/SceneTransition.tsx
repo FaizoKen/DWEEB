@@ -1,9 +1,10 @@
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, interpolate, Easing } from "remotion";
+import { TRANSITION_FRAMES } from "../timeline";
 
-export type TransitionType = "dissolve" | "whip" | "push";
+export type TransitionType = "dissolve" | "whip" | "push" | "hold";
 
-export const TRANSITION_FRAMES = 20;
+export { TRANSITION_FRAMES };
 
 // Soft, gentle ease-in-out. The incoming shot resolves to rest on an S-curve
 // rather than a snappy spring, so nothing "pops" or flashes in.
@@ -22,6 +23,8 @@ const EASE = Easing.bezier(0.4, 0, 0.2, 1);
  * - `dissolve` — a clean cross-fade with a barely-there scale settle.
  * - `push`     — fade plus a small directional glide, for momentum between beats.
  * - `whip`     — a soft directional glide with a hint of blur that clears fast.
+ * - `hold`     — opacity only, no movement: for matched cuts where both sides
+ *                frame the same shot and the cut should be invisible.
  */
 export const SceneTransition: React.FC<{
   type?: TransitionType;
@@ -41,7 +44,9 @@ export const SceneTransition: React.FC<{
   const opacity = interpolate(e, [0, 0.5, 1], [0, 0.4, 1]);
 
   let style: React.CSSProperties = { opacity };
-  if (type === "dissolve") {
+  if (type === "hold") {
+    style = { opacity };
+  } else if (type === "dissolve") {
     style = { opacity, transform: `scale(${interpolate(e, [0, 1], [1.015, 1])})` };
   } else if (type === "push") {
     style = {

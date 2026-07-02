@@ -30,7 +30,8 @@ export type Shot = {
   ease?: (t: number) => number;
 };
 
-const DEFAULT_EASE = Easing.bezier(0.33, 0, 0.12, 1); // smooth, slightly snappy ease-in-out
+// Soft S-curve: slow attack, long settle — camera moves never feel like snaps.
+const DEFAULT_EASE = Easing.bezier(0.45, 0, 0.15, 1);
 
 function sample(shots: Shot[], frame: number) {
   const cx = (k: Shot) => k.x ?? 960;
@@ -59,10 +60,16 @@ export const Camera: React.FC<{
   shots: Shot[];
   /** Handheld drift amplitude in world px (0 to disable). */
   drift?: number;
+  /**
+   * Added to the frame that drives the drift. Pass the scene's absolute start
+   * (seqFrom) so the handheld motion is continuous across a matched cut —
+   * without it, two scenes framing the same shot drift out of register.
+   */
+  phase?: number;
   /** Motion-blur strength multiplier (0 to disable). */
   blur?: number;
   children: React.ReactNode;
-}> = ({ shots, drift = 5, blur = 1, children }) => {
+}> = ({ shots, drift = 5, phase = 0, blur = 1, children }) => {
   const frame = useCurrentFrame();
   const { width: W, height: H } = useVideoConfig();
 
@@ -70,8 +77,9 @@ export const Camera: React.FC<{
   const prev = sample(shots, frame - 1);
 
   // Perpetual handheld breathing — tiny, organic, never distracting.
-  const dx = drift ? Math.sin(frame / 57) * drift + Math.sin(frame / 23) * drift * 0.3 : 0;
-  const dy = drift ? Math.cos(frame / 71) * drift + Math.cos(frame / 31) * drift * 0.3 : 0;
+  const df = frame + phase;
+  const dx = drift ? Math.sin(df / 57) * drift + Math.sin(df / 23) * drift * 0.3 : 0;
+  const dy = drift ? Math.cos(df / 71) * drift + Math.cos(df / 31) * drift * 0.3 : 0;
 
   const x = here.x + dx;
   const y = here.y + dy;

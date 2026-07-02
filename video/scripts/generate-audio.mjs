@@ -1,7 +1,7 @@
 // Generates the film's entire audio bed — neural voice-over (Microsoft Edge TTS,
-// one mp3 per line), an original beat-synced music score, and a kit of UI sound
-// effects — all written to public/audio with a manifest carrying exact durations
-// (in frames) so the visual timeline stays perfectly in sync with the voice.
+// one mp3 per line), the original beat-synced score, and the UI SFX kit — all
+// written to public/audio with a manifest carrying exact durations (in frames)
+// so the visual timeline stays perfectly in sync with the voice.
 //
 // No ffmpeg/python required: TTS comes from msedge-tts as CBR 48kbps mp3 (so
 // duration = bytes / 6000), and the music/SFX are synthesized as raw PCM WAV
@@ -11,7 +11,7 @@ import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildMusic, buildAllSfx } from "./audio-synth.mjs";
+import { buildMusicAuto, buildAllSfx } from "./audio-synth.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(__dirname, "..", "public", "audio");
@@ -20,15 +20,21 @@ fs.mkdirSync(OUT, { recursive: true });
 const FPS = 30;
 
 // ─── Voice-over ──────────────────────────────────────────────────────────────
-// Tighter, benefit-led copy. Each line is written so the camera has clear
-// "moments" to hit (the bracketed words drive the shot design in the scenes).
+// The simplified cut: one clear story — problem → product → build → describe it →
+// make it do things → send → templates → build together → CTA. Nine lines, no
+// prior Discord knowledge required. `gapAfter` (frames) gives a scene extra air
+// after its line ends — room for a payoff beat (a message landing, chips popping)
+// before the next scene leads in.
 const LINES = [
-  { id: "vo1", text: "This is DWEEB. It enhances your Discord messages." },
-  { id: "vo2", text: "Design rich, interactive messages right in your browser. Add text, media, and buttons, and watch a pixel-perfect preview update live." },
-  { id: "vo3", text: "Then make them do things. Tickets, giveaways, self-roles, polls, forms — a whole library of plugins, one click away." },
-  { id: "vo4", text: "Send it through your very own custom bot, straight into any channel." },
-  { id: "vo5", text: "And your members get buttons that actually work." },
-  { id: "vo6", text: "Scheduling, A.I., sharing, and so much more — every feature, completely free. Just search dweeb on Google." },
+  { id: "hook",      gapAfter: 20, text: "Every day, your server posts messages that look like this. They could look like this." },
+  { id: "reveal",    gapAfter: 18, text: "This is DWEEB — the visual builder for Discord messages." },
+  { id: "build",     gapAfter: 16, text: "Design with Discord's real building blocks — containers, sections, media galleries, buttons, select menus — and watch a pixel-accurate preview update live, while DWEEB enforces Discord's limits for you." },
+  { id: "assistant", gapAfter: 18, text: "Or just describe it — the built-in AI assistant drafts the whole message, right in your editor." },
+  { id: "plugins",   gapAfter: 16, text: "Now make it do things. Select a button, pick a plugin — support tickets, giveaways, role menus, pop-up forms — real behavior, set up visually." },
+  { id: "send",      gapAfter: 26, text: "When it's ready, name the message, pick a channel — DWEEB finds or creates the webhook for you. One click. Posted." },
+  { id: "templates", gapAfter: 18, text: "And you never start from zero — flip through ready-made templates, preview the message live, and open one to make it yours." },
+  { id: "activity",  gapAfter: 20, text: "DWEEB also runs inside Discord. Open the Activity in a voice channel and build together — live presence, real-time co-editing, one-click publish." },
+  { id: "cta",       gapAfter: 0,  text: "DWEEB. Free to use, right in your browser. Just search dweeb bot on Google, and start building." },
 ];
 
 const VOICE_CANDIDATES = [
@@ -56,7 +62,7 @@ async function synth() {
   for (const line of LINES) {
     const file = path.join(OUT, `${line.id}.mp3`);
     const { audioFilePath } = await tts.toFile(OUT, line.text, {
-      rate: "+8%",
+      rate: "+6%",
       pitch: "+0Hz",
     });
     fs.renameSync(audioFilePath, file);
@@ -69,6 +75,7 @@ async function synth() {
       text: line.text,
       durationSec: Number(durationSec.toFixed(3)),
       frames,
+      gapAfter: line.gapAfter,
     });
     console.log(`${line.id}: ${durationSec.toFixed(2)}s (${frames}f)`);
   }
@@ -79,24 +86,39 @@ async function synth() {
 const main = async () => {
   const manifest = await synth();
 
-  // Lay lines back-to-back with gaps that give each scene room to breathe and
-  // for the camera to travel between shots.
-  const GAP = 16;
-  let cursor = 12;
+  // Lay lines back-to-back; each line's own gapAfter gives its scene room for a
+  // payoff beat before the next line leads in.
+  let cursor = 14;
   const timeline = [];
   for (const l of manifest.lines) {
     timeline.push({ ...l, startFrame: cursor });
-    cursor += l.frames + GAP;
+    cursor += l.frames + l.gapAfter;
   }
-  const totalFrames = cursor + 30; // tail for the final hold
+  const totalFrames = cursor + 66; // hold on the end card
   manifest.timeline = timeline;
   manifest.totalFrames = totalFrames;
   manifest.totalSec = Number((totalFrames / FPS).toFixed(2));
 
+  const at = (id) => timeline.find((l) => l.id === id).startFrame / FPS;
   const cutSecs = timeline.map((l) => l.startFrame / FPS);
-  const ctaSec = timeline[timeline.length - 1].startFrame / FPS; // last line = CTA
 
-  buildMusic(OUT, totalFrames / FPS, cutSecs, ctaSec);
+  // Arrangement markers for the score — the music turns with the story:
+  // drums enter at *build*, a lift at *templates* (the fast montage near the
+  // end), a breakdown under *activity* (the calm "build together" beat), then
+  // the riser starts 5s out and the impact lands on *cta*.
+  const marks = {
+    grooveSec: at("build"),
+    liftSec: at("templates"),
+    breakdownSec: at("activity"),
+    riseSec: at("cta") - 5,
+    ctaSec: at("cta"),
+  };
+
+  const voWindows = timeline.map((l) => ({
+    start: l.startFrame / FPS,
+    end: (l.startFrame + l.frames) / FPS,
+  }));
+  buildMusicAuto(OUT, totalFrames / FPS, cutSecs, marks, voWindows);
   buildAllSfx(OUT);
 
   fs.writeFileSync(path.join(OUT, "manifest.json"), JSON.stringify(manifest, null, 2));
