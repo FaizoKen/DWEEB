@@ -147,11 +147,14 @@ can't have:
 ### The `url` template is the whole binding
 
 Exactly as the interactive plugins own a `custom_id`, a link plugin owns the
-button's `url` — DWEEB stores nothing else. On reload of a draft or share
-link, the owning plugin is re-derived by prefix-matching the URL against the
-template's literal prefix (everything before the first `{token}`), and the URL
-field locks read-only while attached so hand-editing can't silently break the
-binding. Detach restores an editable default. Two rules follow:
+button's `url` — DWEEB stores nothing else. The owning plugin is re-derived by
+prefix-matching the URL against the template's literal prefix (everything
+before the first `{token}`) — on reload of a draft or share link, and *live as
+the URL is edited*: unlike an opaque custom_id, a URL is human-meaningful, so
+the field stays freely editable and the attachment simply follows it. Paste a
+finished link and the matching chip (and its param fields) fill in by
+themselves; paste another plugin's URL and the chip swaps; edit away from any
+template and the button is a plain link again. Two rules follow:
 
 - **Scheme and host must be literal `https`.** A token may parameterize the
   path or query, never where the link points. (`http://localhost` is allowed
@@ -198,9 +201,12 @@ can't come from the webhook. Declare it as a **user param**:
 The editor renders one input per param next to the attached chip (and in the
 guided template setup). The typed value is trimmed, URI-encoded and spliced
 into the button URL — the URL stays the *entire* binding, so a reloaded draft
-or share link reads the value straight back out of it. While a param is
-unfilled the URL keeps its raw `{token}` and the message **validator blocks
-send**, so a half-configured button can't post as a dead link.
+or share link reads the value straight back out of it. It works the other way
+too: pasting the finished link into the freely-editable URL field fills the
+param inputs (a trailing `?query`/`#fragment` on the pasted link is
+tolerated). While a param is unfilled the URL keeps its raw `{token}` and the
+message **validator blocks send**, so a half-configured button can't post as
+a dead link.
 
 Rules, enforced at parse (a violation drops the whole entry):
 

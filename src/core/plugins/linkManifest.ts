@@ -317,8 +317,11 @@ const PARAM_VALUE_SRC = "([^/?#&]*)";
 
 /**
  * The template as a whole-URL matcher: literals exact, each token a bounded
- * wildcard, declared params capturing. Returns the regex plus the param token
- * captured by each group, in group order.
+ * wildcard, declared params capturing. A trailing query/fragment beyond the
+ * template (`?utm_source=…`, `#…`) is tolerated — the URL field is freely
+ * editable and a pasted link often carries one; it changes nothing about the
+ * binding. Returns the regex plus the param token captured by each group, in
+ * group order.
  */
 function templateMatcher(manifest: LinkPluginManifest): { re: RegExp; groups: string[] } {
   const declared = new Set((manifest.params ?? []).map((p) => p.token));
@@ -338,7 +341,7 @@ function templateMatcher(manifest: LinkPluginManifest): { re: RegExp; groups: st
     }
     last = at + m[0].length;
   }
-  src += escapeRegExp(manifest.url.slice(last)) + "$";
+  src += escapeRegExp(manifest.url.slice(last)) + "(?:[?#&].*)?$";
   return { re: new RegExp(src), groups };
 }
 
@@ -347,7 +350,8 @@ function templateMatcher(manifest: LinkPluginManifest): { re: RegExp; groups: st
  * URL. A still-raw `{token}`, a URL that doesn't fit the template (e.g. an
  * older draft carrying the bare prefix), or an undecodable value all read as
  * `""` — the unfilled state the chip's inputs and the validator key off.
- * `{}` for a manifest without params.
+ * A pasted URL's trailing query/fragment is ignored (see
+ * {@link templateMatcher}). `{}` for a manifest without params.
  */
 export function readLinkParams(
   manifest: LinkPluginManifest,

@@ -65,9 +65,10 @@ export function LinkPluginPanel({ node }: Props) {
         <>
           <LinkAttachedChip manifest={attached} onDetach={() => writeUrl(DETACHED_URL)} />
           {/* The plugin's user params (a form id, a page slug) — the piece of
-              the URL only this admin knows. Typing splices it into the locked
-              URL below; until filled, the validator blocks send rather than
-              letting a dead link post. */}
+              the URL only this admin knows. Typing splices it into the URL
+              below (and pasting a finished link into the URL fills these in);
+              until filled, the validator blocks send rather than letting a
+              dead link post. */}
           <LinkParamFields manifest={attached} url={node.url} onWrite={writeUrl} />
         </>
       ) : (
@@ -90,7 +91,10 @@ export function LinkPluginPanel({ node }: Props) {
 
       {/* The URL field itself stays in the ButtonInspector below — it's a core
           Link-button field, not a power-user fallback like the raw custom_id,
-          so it isn't tucked behind a disclosure. It locks while attached. */}
+          so it isn't tucked behind a disclosure. It stays editable while
+          attached: the attachment is recomputed from the URL, so it follows
+          whatever is pasted or typed there (and swaps plugins if the URL
+          matches a different template). */}
 
       {libraryOpen ? (
         <LinkPluginLibraryModal

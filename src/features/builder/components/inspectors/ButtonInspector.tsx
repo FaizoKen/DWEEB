@@ -26,11 +26,9 @@ import { Select } from "@/ui/Select";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { PlaceholderInput } from "@/ui/PlaceholderInput";
-import { LockIcon } from "@/ui/Icon";
 import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { CapabilityNote } from "./CapabilityNote";
 import { EmojiField } from "./EmojiField";
-import lockStyles from "./CustomIdField.module.css";
 
 interface Props {
   node: ButtonComponent;
@@ -113,49 +111,36 @@ export function ButtonInspector({ node }: Props) {
       ) : null}
 
       {node.style === ButtonStyle.Link ? (
-        // While a link plugin owns the URL (see LinkPluginPanel) the URL *is*
-        // the binding, so the field locks read-only — hand-editing would
-        // silently re-point or break the attachment, exactly like a
-        // plugin-owned custom_id. Detaching in the panel above unlocks it.
-        linkPlugin ? (
-          <Field
-            label="URL"
-            hint={
+        // The URL *is* the plugin binding, but unlike a plugin-owned custom_id
+        // it's human-meaningful and the attachment above is recomputed from it
+        // live — so the field stays freely editable and the plugin *follows*
+        // the URL. Paste a finished link and the matching chip (and its param
+        // fields) light up by themselves; edit away from the template and the
+        // chip detaches; paste another plugin's URL and the chip swaps.
+        <Field
+          label="URL"
+          hint={
+            linkPlugin ? (
               <>
-                Set by <strong>{linkPlugin.name}</strong> — detach the plugin above to edit it
-                directly. Placeholders fill in when the message is sent.
+                Linked to <strong>{linkPlugin.name}</strong> — the plugin follows this URL: paste
+                your finished link or edit freely. Placeholders fill in when the message is sent.
               </>
-            }
-          >
-            {(id) => (
-              <div className={lockStyles.locked} title={`Managed by ${linkPlugin.name}`}>
-                <LockIcon size={14} className={lockStyles.lockedIcon} aria-hidden />
-                <input
-                  id={id}
-                  className={lockStyles.lockedValue}
-                  value={node.url}
-                  readOnly
-                  aria-readonly="true"
-                  spellCheck={false}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-              </div>
-            )}
-          </Field>
-        ) : (
-          <Field label="URL" hint="Must be https:// (or a placeholder that resolves to one).">
-            {(id) => (
-              <PlaceholderInput
-                id={id}
-                type="url"
-                maxLength={LIMITS.BUTTON_URL}
-                value={node.url}
-                placeholders={placeholders}
-                onChange={(value) => patch<LinkButtonComponent>(node._id, { url: value })}
-              />
-            )}
-          </Field>
-        )
+            ) : (
+              "Must be https:// (or a placeholder that resolves to one)."
+            )
+          }
+        >
+          {(id) => (
+            <PlaceholderInput
+              id={id}
+              type="url"
+              maxLength={LIMITS.BUTTON_URL}
+              value={node.url}
+              placeholders={placeholders}
+              onChange={(value) => patch<LinkButtonComponent>(node._id, { url: value })}
+            />
+          )}
+        </Field>
       ) : null}
 
       {node.style === ButtonStyle.Premium ? (
