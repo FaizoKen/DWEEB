@@ -16,7 +16,6 @@
         { "id": "staff-application", "name": "Staff Application", "description": "Recruit moderators or helpers — name, timezone, availability, experience.", "emoji": "📋" },
         { "id": "suggestion", "name": "Suggestion Box", "description": "Collect ideas from members.", "emoji": "💡" },
         { "id": "bug-report", "name": "Bug Report", "description": "Let members report problems with steps to reproduce.", "emoji": "🐛" },
-        { "id": "member-report", "name": "Member Report", "description": "Private reports about a user, with evidence.", "emoji": "🚨" },
         { "id": "ban-appeal", "name": "Ban Appeal", "description": "Let banned users appeal — one response per person.", "emoji": "⚖️" },
         { "id": "contact", "name": "Contact Us", "description": "A simple get-in-touch form.", "emoji": "✉️" }
       ]
@@ -66,7 +65,6 @@
       "presets": [
         { "id": "ticket-general", "name": "General Support panel", "description": "A simple help desk — one intake question.", "emoji": "🎫", "targets": ["button"] },
         { "id": "ticket-report", "name": "Player Report panel", "description": "Private reports about a user, with evidence.", "emoji": "🚨", "targets": ["button"] },
-        { "id": "ticket-staff-app", "name": "Staff Application panel", "description": "Recruit moderators or helpers.", "emoji": "📋", "targets": ["button"] },
         { "id": "ticket-store", "name": "Store / Billing panel", "description": "Purchases and payments.", "emoji": "🛒", "targets": ["button"] },
         { "id": "ticket-support-menu", "name": "Support topic menu", "description": "One menu, several help topics.", "emoji": "🎫", "targets": ["string_select"] },
         { "id": "ticket-community-menu", "name": "Community topic menu", "description": "Partnerships, staff and suggestions.", "emoji": "🌐", "targets": ["string_select"] }

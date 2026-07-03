@@ -343,112 +343,6 @@ const VERIFY_MESSAGE: WebhookMessage = {
   ],
 };
 
-// Onboarding panel that pairs two Self Role instances in one message — a
-// give-only verify button and a multi-pick roles menu. Drives the multi-slot
-// path of the guided setup checklist.
-const WELCOME_HUB_MESSAGE: WebhookMessage = {
-  username: "Get Started",
-  components: [
-    {
-      _id: id(),
-      type: ComponentType.Container,
-      accent_color: ACCENT.blurple,
-      components: [
-        {
-          _id: id(),
-          type: ComponentType.TextDisplay,
-          content:
-            "# 🚀 Get started here\nTwo quick steps and you're in — verify, then pick the roles you want.",
-        },
-        {
-          _id: id(),
-          type: ComponentType.Separator,
-          divider: true,
-          spacing: SeparatorSpacing.Small,
-        },
-        {
-          _id: id(),
-          type: ComponentType.TextDisplay,
-          content:
-            "**Step 1 — Verify**\nTap the button to confirm you're human and unlock the server.",
-        },
-        {
-          _id: id(),
-          type: ComponentType.ActionRow,
-          components: [
-            {
-              _id: id(),
-              type: ComponentType.Button,
-              style: ButtonStyle.Success,
-              label: "Verify me",
-              emoji: { name: "✅" },
-              custom_id: "welcome_verify",
-            },
-          ],
-        },
-        {
-          _id: id(),
-          type: ComponentType.Separator,
-          divider: true,
-          spacing: SeparatorSpacing.Large,
-        },
-        {
-          _id: id(),
-          type: ComponentType.TextDisplay,
-          content:
-            "**Step 2 — Pick your roles**\nChoose what you're into to unlock channels and pings. Take as many as you like.",
-        },
-        {
-          _id: id(),
-          type: ComponentType.ActionRow,
-          components: [
-            {
-              _id: id(),
-              type: ComponentType.StringSelect,
-              custom_id: "welcome_roles",
-              placeholder: "Choose your interests…",
-              min_values: 0,
-              max_values: 4,
-              options: [
-                {
-                  label: "Gaming",
-                  value: "gaming",
-                  description: "Squad up and find players",
-                  emoji: { name: "🎮" },
-                },
-                {
-                  label: "Art & Design",
-                  value: "art",
-                  description: "Share and critique creative work",
-                  emoji: { name: "🎨" },
-                },
-                {
-                  label: "Music",
-                  value: "music",
-                  description: "Recommendations and listening parties",
-                  emoji: { name: "🎵" },
-                },
-                {
-                  label: "Announcements",
-                  value: "announcements",
-                  description: "Get pinged for big news",
-                  emoji: { name: "📢" },
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      _id: id(),
-      type: ComponentType.TextDisplay,
-      content:
-        "-# Wire both the button and the menu to Self Role — give-only on the verify button, multi-pick on the roles menu. The guided setup does both in one go.",
-    },
-  ],
-};
-
 // ════════════════════════════════════════════════════════════════════════════
 // COMMUNITY
 // ════════════════════════════════════════════════════════════════════════════
@@ -809,6 +703,120 @@ const SERVER_DIRECTORY_MESSAGE: WebhookMessage = {
   ],
 };
 
+// Suggestion box powered by Modal Form: the button pops a form, the answers
+// are forwarded to a channel of the owner's choosing, and the member gets a
+// private thank-you — structured ideas instead of a drive-by #suggestions mess.
+const SUGGESTIONS_MESSAGE: WebhookMessage = {
+  username: "Suggestions",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.gold,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 💡 Suggestion Box\nGot an idea to make **{server}** better? We want to hear it — big or small.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**What makes a great suggestion**\n- 🎯 One idea per submission\n- 📝 Say what problem it solves\n- 🔍 Check it hasn't been suggested already",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Primary,
+              label: "Share an idea",
+              emoji: { name: "💡" },
+              custom_id: "suggest_idea",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# The button opens a pop-up form — your idea goes straight to the team, and you get a private confirmation.",
+    },
+  ],
+};
+
+// Staff recruitment panel powered by Modal Form's one-per-person application
+// form: what we look for, what you get, and an Apply button that pops the
+// full questionnaire — no application channel spam.
+const STAFF_APPS_MESSAGE: WebhookMessage = {
+  username: "Staff Team",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.red,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🛡️ Join the team\n**{server}** is growing and we're looking for moderators and helpers to keep it awesome.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**What we look for**\n- 🕒 Active a few hours a week\n- 🤝 Calm, fair, and friendly under pressure\n- 🧠 Knows the rules inside out",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**What you get**\n- 🛡️ The staff role and badge\n- 🔧 Access to staff channels and tools\n- 💜 A real say in where the server goes",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Primary,
+              label: "Apply now",
+              emoji: { name: "📋" },
+              custom_id: "staff_apply",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# Applying opens a pop-up questionnaire that goes straight to the review team — one application per person.",
+    },
+  ],
+};
+
 // ════════════════════════════════════════════════════════════════════════════
 // EVENTS & ENGAGEMENT
 // ════════════════════════════════════════════════════════════════════════════
@@ -863,6 +871,14 @@ const EVENT_MESSAGE: WebhookMessage = {
             {
               _id: id(),
               type: ComponentType.Button,
+              style: ButtonStyle.Success,
+              label: "RSVP — I'm in!",
+              emoji: { name: "🎟️" },
+              custom_id: "event_rsvp",
+            },
+            {
+              _id: id(),
+              type: ComponentType.Button,
               style: ButtonStyle.Link,
               label: "Add to calendar",
               url: "https://example.com/event.ics",
@@ -881,7 +897,8 @@ const EVENT_MESSAGE: WebhookMessage = {
     {
       _id: id(),
       type: ComponentType.TextDisplay,
-      content: "-# React with 🎉 if you're coming so we know how many to expect!",
+      content:
+        "-# RSVP grants the Attendee role so we can ping everyone who's coming — tap again to bow out. Set a role expiry and it cleans itself up after the event.",
     },
   ],
 };
@@ -1043,6 +1060,139 @@ const SUPPORT_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content: "-# Wire the button to the Tickets plugin to spin up a private channel per request.",
+    },
+  ],
+};
+
+// The flagship multi-plugin support panel: a Quick Replies FAQ menu answers
+// the common stuff instantly (privately, no staff needed), and a Tickets topic
+// menu opens a private channel for everything else. Two plugins, one message —
+// the guided setup walks both slots. Both plugins own their menu's options, so
+// the option lists below are just the preview until each slot is wired.
+const HELP_CENTER_MESSAGE: WebhookMessage = {
+  username: "Help Center",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blue,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🛟 Help Center\nEverything in one place — grab an instant answer, or open a private ticket with the team.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Large,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "**⚡ Instant answers** — the questions we get every day, answered on the spot.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.StringSelect,
+              custom_id: "help_faq",
+              placeholder: "Browse common questions…",
+              min_values: 1,
+              max_values: 1,
+              options: [
+                {
+                  label: "How do I get roles?",
+                  value: "faq_roles",
+                  description: "Pick them up yourself in seconds",
+                  emoji: { name: "🙋" },
+                },
+                {
+                  label: "How do I report someone?",
+                  value: "faq_report",
+                  description: "The right way to flag rule-breaking",
+                  emoji: { name: "🚨" },
+                },
+                {
+                  label: "Where are the invite & socials?",
+                  value: "faq_links",
+                  description: "Share the server or follow us",
+                  emoji: { name: "🔗" },
+                },
+                {
+                  label: "Something's broken",
+                  value: "faq_bug",
+                  description: "Where to send bug reports",
+                  emoji: { name: "🐛" },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**🎫 Talk to the team** — pick a topic and a private ticket opens just for you.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.StringSelect,
+              custom_id: "help_topics",
+              placeholder: "Open a ticket…",
+              min_values: 1,
+              max_values: 1,
+              options: [
+                {
+                  label: "General help",
+                  value: "topic_general",
+                  description: "Questions and general support",
+                  emoji: { name: "❓" },
+                },
+                {
+                  label: "Report a player",
+                  value: "topic_report",
+                  description: "Report rule-breaking privately",
+                  emoji: { name: "🚨" },
+                },
+                {
+                  label: "Billing / store",
+                  value: "topic_billing",
+                  description: "Purchases and payments",
+                  emoji: { name: "🛒" },
+                },
+                {
+                  label: "Something else",
+                  value: "topic_other",
+                  description: "Anything not listed",
+                  emoji: { name: "💬" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# Answers arrive privately — only you see them. Tickets open a private channel with staff.",
     },
   ],
 };
@@ -1411,22 +1561,6 @@ export const TEMPLATES: MessageTemplate[] = [
     message: VERIFY_MESSAGE,
   },
   {
-    id: "welcome-hub",
-    name: "Welcome & roles hub",
-    description: "Verify and self-assign roles in one onboarding panel.",
-    emoji: "🚀",
-    category: "Welcome",
-    tags: ["onboarding", "verify", "self role", "roles", "menu", "button", "gate"],
-    accent: ACCENT.blurple,
-    requiresBot: true,
-    pairsWith: "Self Role",
-    pluginSlots: [
-      { customId: "welcome_verify", pluginId: "self-role" },
-      { customId: "welcome_roles", pluginId: "self-role" },
-    ],
-    message: WELCOME_HUB_MESSAGE,
-  },
-  {
     id: "announcement",
     name: "Announcement",
     description: "A borderless, image-led banner for big news.",
@@ -1500,13 +1634,42 @@ export const TEMPLATES: MessageTemplate[] = [
     message: SERVER_DIRECTORY_MESSAGE,
   },
   {
+    id: "suggestions",
+    name: "Suggestion box",
+    description: "A share-an-idea button that pops a form and forwards ideas to the team.",
+    emoji: "💡",
+    category: "Community",
+    tags: ["suggestions", "ideas", "feedback", "form", "modal", "button"],
+    accent: ACCENT.gold,
+    requiresBot: true,
+    pairsWith: "Modal Form",
+    pluginSlots: [{ customId: "suggest_idea", pluginId: "modal-form", preset: "suggestion" }],
+    message: SUGGESTIONS_MESSAGE,
+  },
+  {
+    id: "staff-apps",
+    name: "Staff applications",
+    description: "A recruitment panel with a pop-up application form — one entry per person.",
+    emoji: "🛡️",
+    category: "Community",
+    tags: ["staff", "moderator", "application", "recruit", "apply", "form", "modal"],
+    accent: ACCENT.red,
+    requiresBot: true,
+    pairsWith: "Modal Form",
+    pluginSlots: [{ customId: "staff_apply", pluginId: "modal-form", preset: "staff-application" }],
+    message: STAFF_APPS_MESSAGE,
+  },
+  {
     id: "event",
     name: "Event / RSVP",
-    description: "A dated event card with cover art and details.",
+    description: "A dated event card with cover art and a working one-tap RSVP button.",
     emoji: "🎟️",
     category: "Events",
-    tags: ["event", "rsvp", "calendar", "meetup", "schedule"],
+    tags: ["event", "rsvp", "calendar", "meetup", "schedule", "attendee", "button"],
     accent: ACCENT.orange,
+    requiresBot: true,
+    pairsWith: "Self Role",
+    pluginSlots: [{ customId: "event_rsvp", pluginId: "self-role" }],
     message: EVENT_MESSAGE,
   },
   {
@@ -1544,6 +1707,22 @@ export const TEMPLATES: MessageTemplate[] = [
     pairsWith: "Tickets",
     pluginSlots: [{ customId: "ticket_open", pluginId: "tickets", preset: "ticket-general" }],
     message: SUPPORT_MESSAGE,
+  },
+  {
+    id: "help-center",
+    name: "Help center",
+    description: "Instant FAQ answers plus topic tickets — two plugins working in one panel.",
+    emoji: "🛟",
+    category: "Support",
+    tags: ["help", "support", "faq", "tickets", "menu", "select", "self-serve", "hub"],
+    accent: ACCENT.blue,
+    requiresBot: true,
+    pairsWith: "Quick Replies + Tickets",
+    pluginSlots: [
+      { customId: "help_faq", pluginId: "quick-replies", preset: "qr-faq" },
+      { customId: "help_topics", pluginId: "tickets", preset: "ticket-support-menu" },
+    ],
+    message: HELP_CENTER_MESSAGE,
   },
   {
     id: "faq",

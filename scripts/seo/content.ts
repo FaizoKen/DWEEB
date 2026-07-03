@@ -31,7 +31,7 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-06-24";
+export const TEMPLATES_LASTMOD = "2026-07-03";
 
 export interface FaqEntry {
   q: string;
@@ -64,7 +64,7 @@ export interface TemplateSeoOverride {
 export const CATEGORY_BLURB: Record<string, string> = {
   Featured: "Hand-picked starting points and a full tour of the editor.",
   Welcome: "Greet new members, lay down the rules, and gate access.",
-  Community: "Announcements, changelogs, intros and self-serve role menus.",
+  Community: "Announcements, changelogs, intros, role menus, suggestions and staff applications.",
   Events: "Events, polls and giveaways that drive engagement.",
   Support: "Help desks and FAQs that cut repeat questions.",
   Commerce: "Product cards and pricing tables for selling in your server.",
@@ -142,20 +142,6 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Running a lightweight alternative to a captcha bot",
     ],
   },
-  "welcome-hub": {
-    slug: "discord-onboarding-panel",
-    title: "Discord Onboarding Panel — verify + self-roles in one | DWEEB",
-    h1: "Discord Onboarding Panel Template",
-    description:
-      "An all-in-one Discord onboarding panel: a verify button and a self-assign roles menu in one message. Pairs with the Self Role plugin.",
-    intro:
-      "Combine verification and role selection into one tidy onboarding panel. Members verify in step one, then pick the roles they care about in step two — a complete 'get started' flow in a single message instead of juggling several posts.",
-    whenToUse: [
-      "Building a single get-started panel for new members",
-      "Combining a verify gate with interest roles",
-      "Streamlining onboarding into one message",
-    ],
-  },
   announcement: {
     slug: "discord-announcement-template",
     title: "Discord Announcement Template — bold image banner | DWEEB",
@@ -227,19 +213,50 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Showcasing every Discord select-menu type at once",
     ],
   },
+  suggestions: {
+    slug: "discord-suggestion-box-template",
+    title: "Discord Suggestion Box Template — pop-up idea form | DWEEB",
+    h1: "Discord Suggestion Box Template",
+    description:
+      "A Discord suggestion box with a share-an-idea button that opens a pop-up form and forwards each idea to your team. Pairs with the Modal Form plugin.",
+    intro:
+      "Collect ideas without the chaos of an open #suggestions channel. Members tap one button, fill in a short pop-up form — what the idea is and why it helps — and the structured submission lands in the channel you choose, while they get a private thank-you. No half-written ideas, no drive-by spam, no digging through replies.",
+    whenToUse: [
+      "Replacing a messy #suggestions channel with structured submissions",
+      "Collecting feature requests for your community, game or product",
+      "Routing member ideas privately to a staff review channel",
+    ],
+    keywords: ["suggestion form", "feedback form", "idea box", "modal form"],
+  },
+  "staff-apps": {
+    slug: "discord-staff-application-template",
+    title: "Discord Staff Application Template — pop-up form, one per person | DWEEB",
+    h1: "Discord Staff Application Template",
+    description:
+      "A Discord staff application template: a recruitment panel whose Apply button opens a pop-up questionnaire, limited to one application per person. Pairs with Modal Form.",
+    intro:
+      "Recruit moderators the organised way. This panel pitches the role — what you look for, what applicants get — and its Apply button opens a full pop-up questionnaire: name, timezone, availability, experience and motivation. Submissions arrive in your review channel, and each member can only apply once, so there's no application channel to police.",
+    whenToUse: [
+      "Recruiting moderators, helpers or event staff",
+      "Collecting structured applications instead of DMs",
+      "Limiting applications to one per member automatically",
+    ],
+    keywords: ["mod application", "staff recruitment", "application form", "apply button"],
+  },
   event: {
     slug: "discord-event-announcement-template",
-    title: "Discord Event Announcement Template — RSVP card | DWEEB",
+    title: "Discord Event Announcement Template — one-tap RSVP | DWEEB",
     h1: "Discord Event Announcement Template",
     description:
-      "A dated Discord event template with cover art, details and RSVP links. Free, no bot needed — customize the event info and post through any webhook.",
+      "A dated Discord event template with cover art, details and a working one-tap RSVP button that grants an Attendee role. Pairs with the Self Role plugin.",
     intro:
-      "Promote your next event with a card that has everything at a glance: cover art, date and time, where it's happening and what you'll be doing. Add-to-calendar and details buttons make it easy for members to commit and show up.",
+      "Promote your next event with a card that has everything at a glance: cover art, date and time, where it's happening and what you'll be doing. The RSVP button actually works — one tap grants an Attendee role so you can ping everyone who's coming (and tapping again bows out), with add-to-calendar and details links alongside. Set a role expiry and the list even cleans itself up after the event.",
     whenToUse: [
       "Announcing game nights, streams or meetups",
-      "Sharing event details with date, time and place",
-      "Driving RSVPs with calendar and detail links",
+      "Counting attendees with a one-tap RSVP role",
+      "Pinging confirmed attendees when the event starts",
     ],
+    keywords: ["rsvp button", "attendee role", "event signup"],
   },
   poll: {
     slug: "discord-poll-template",
@@ -284,6 +301,21 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Organising staff support into tickets",
     ],
     keywords: ["ticket system", "support tickets", "help desk", "ticket bot"],
+  },
+  "help-center": {
+    slug: "discord-help-center-template",
+    title: "Discord Help Center Template — instant FAQ + topic tickets | DWEEB",
+    h1: "Discord Help Center Template",
+    description:
+      "A complete Discord help center in one message: a self-serve FAQ menu answers common questions instantly, and a topic menu opens private tickets. Two plugins, one panel.",
+    intro:
+      "Turn one message into your server's entire support desk. The first menu answers the questions you get every day on the spot — privately, instantly, no staff needed. The second opens a private ticket on the member's chosen topic for everything the FAQ can't solve. Members self-serve first and escalate second, so your team only sees the tickets that actually need a human.",
+    whenToUse: [
+      "Building a full support hub for a busy server",
+      "Deflecting repeat questions before they become tickets",
+      "Combining self-serve FAQ answers with private staff tickets",
+    ],
+    keywords: ["support hub", "help desk", "self-serve support", "faq menu", "ticket menu"],
   },
   faq: {
     slug: "discord-faq-template",
