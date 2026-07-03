@@ -23,15 +23,9 @@
  * round-trip stays accepted.
  */
 
-import {
-  ComponentType,
-  type WebhookMessage,
-} from "@/core/schema/types";
+import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 import { stripEditorFields } from "./normalize";
-import {
-  getAttachmentFile,
-  parseSessionUrl,
-} from "@/core/state/attachmentStore";
+import { getAttachmentFile, parseSessionUrl } from "@/core/state/attachmentStore";
 
 export interface CollectedFile {
   file: File;
@@ -128,7 +122,9 @@ export function collectSessionAttachments(message: WebhookMessage): CollectedAtt
     return `attachment://${finalName}`;
   };
 
-  const handleMedia = (media: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+  const handleMedia = (
+    media: Record<string, unknown> | undefined,
+  ): Record<string, unknown> | undefined => {
     if (!media) return undefined;
     const next = { ...media };
     if (typeof next.url === "string") next.url = rewriteUrl(next.url);

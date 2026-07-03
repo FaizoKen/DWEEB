@@ -14,7 +14,9 @@
   font-size: var(--app-text-base);
   appearance: none;
   cursor: pointer;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .select:focus {

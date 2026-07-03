@@ -18,9 +18,7 @@ export function ContainerInspector({ node }: Props) {
             id={id}
             value={node.accent_color}
             clearable
-            onChange={(value) =>
-              patch<ContainerComponent>(node._id, { accent_color: value })
-            }
+            onChange={(value) => patch<ContainerComponent>(node._id, { accent_color: value })}
           />
         )}
       </Field>

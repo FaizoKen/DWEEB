@@ -229,9 +229,7 @@ export function WebhookManageDialog({
             </span>
           </label>
 
-          <div
-            className={`${styles.danger}${confirmDelete ? ` ${styles.dangerConfirming}` : ""}`}
-          >
+          <div className={`${styles.danger}${confirmDelete ? ` ${styles.dangerConfirming}` : ""}`}>
             <div className={styles.dangerText}>
               <strong>Delete this webhook</strong>
               <span className={styles.hint}>

@@ -37,10 +37,7 @@ export function ChannelSelectInspector({ node }: Props) {
     <>
       <SelectBaseFields node={node} />
 
-      <Field
-        label="Channel types filter"
-        hint="Leave all off to allow any channel type."
-      >
+      <Field label="Channel types filter" hint="Leave all off to allow any channel type.">
         {() => (
           <div className={styles.chipRow}>
             {ALL_TYPES.map((t) => {

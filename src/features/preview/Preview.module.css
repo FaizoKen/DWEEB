@@ -73,7 +73,9 @@
   padding: 0;
   cursor: pointer;
   position: relative;
-  transition: box-shadow 120ms ease, transform 120ms ease;
+  transition:
+    box-shadow 120ms ease,
+    transform 120ms ease;
 }
 .avatarEmpty {
   background: var(--discord-accent);
@@ -81,7 +83,9 @@
 .avatar:hover,
 .avatar:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--discord-bg-primary), 0 0 0 4px var(--discord-accent);
+  box-shadow:
+    0 0 0 2px var(--discord-bg-primary),
+    0 0 0 4px var(--discord-accent);
 }
 .avatar:active {
   transform: scale(0.96);
@@ -124,7 +128,10 @@
   font-family: inherit;
   line-height: inherit;
   border-radius: 3px;
-  transition: color 120ms ease, text-decoration-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    color 120ms ease,
+    text-decoration-color 120ms ease,
+    box-shadow 120ms ease;
   text-decoration: underline transparent;
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;

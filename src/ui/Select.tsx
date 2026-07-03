@@ -19,7 +19,9 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       >
         {children}
       </select>
-      <span className={styles.chevron} aria-hidden="true">▾</span>
+      <span className={styles.chevron} aria-hidden="true">
+        ▾
+      </span>
     </div>
   );
 });

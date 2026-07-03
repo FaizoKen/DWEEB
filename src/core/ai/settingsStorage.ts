@@ -29,8 +29,7 @@ export function loadAiSettings(): AiSettings {
     // provider) we fall back to the default; the persisted model/base URL belong
     // to the old provider, so seed fresh defaults rather than carry them over.
     if (!known) return seed;
-    const model =
-      typeof parsed.model === "string" && parsed.model ? parsed.model : seed.model;
+    const model = typeof parsed.model === "string" && parsed.model ? parsed.model : seed.model;
     return {
       provider,
       apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",

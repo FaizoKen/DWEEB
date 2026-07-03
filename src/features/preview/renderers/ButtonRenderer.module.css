@@ -13,7 +13,9 @@
   color: #fff;
   text-decoration: none;
   cursor: pointer;
-  transition: background-color 140ms ease, opacity 140ms ease;
+  transition:
+    background-color 140ms ease,
+    opacity 140ms ease;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -21,22 +23,44 @@
   line-height: 1;
 }
 
-.btn:hover { text-decoration: none; }
+.btn:hover {
+  text-decoration: none;
+}
 
-.primary { background: var(--discord-button-primary); }
-.primary:hover { background: var(--discord-button-primary-hover); }
+.primary {
+  background: var(--discord-button-primary);
+}
+.primary:hover {
+  background: var(--discord-button-primary-hover);
+}
 
-.secondary { background: var(--discord-button-secondary); }
-.secondary:hover { background: var(--discord-button-secondary-hover); }
+.secondary {
+  background: var(--discord-button-secondary);
+}
+.secondary:hover {
+  background: var(--discord-button-secondary-hover);
+}
 
-.success { background: var(--discord-button-success); }
-.success:hover { background: var(--discord-button-success-hover); }
+.success {
+  background: var(--discord-button-success);
+}
+.success:hover {
+  background: var(--discord-button-success-hover);
+}
 
-.danger { background: var(--discord-button-danger); }
-.danger:hover { background: var(--discord-button-danger-hover); }
+.danger {
+  background: var(--discord-button-danger);
+}
+.danger:hover {
+  background: var(--discord-button-danger-hover);
+}
 
-.link { background: var(--discord-button-secondary); }
-.link:hover { background: var(--discord-button-secondary-hover); }
+.link {
+  background: var(--discord-button-secondary);
+}
+.link:hover {
+  background: var(--discord-button-secondary-hover);
+}
 
 .premium {
   background: linear-gradient(135deg, #f6cf57 0%, #cb8c1f 100%);

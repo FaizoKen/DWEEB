@@ -63,11 +63,7 @@ export interface MarkdownAst {
 export function parseMarkdown(input: string): MarkdownAst {
   // Normalize newlines and trim leading/trailing blank lines (Discord does the
   // same) so a stray blank at either end doesn't render as an empty gap.
-  const lines = input
-    .replace(/\r\n?/g, "\n")
-    .replace(/^\n+/, "")
-    .replace(/\n+$/, "")
-    .split("\n");
+  const lines = input.replace(/\r\n?/g, "\n").replace(/^\n+/, "").replace(/\n+$/, "").split("\n");
   const blocks: BlockNode[] = [];
 
   let i = 0;

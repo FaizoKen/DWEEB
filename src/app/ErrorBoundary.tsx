@@ -42,8 +42,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
       >
         <h1 style={{ marginTop: 0, fontSize: 18 }}>Something broke.</h1>
         <p style={{ color: "var(--app-text-muted)" }}>
-          The builder hit an unexpected error and stopped. Reloading the page usually fixes it.
-          If it doesn't, your share URL may be corrupt — open the page without the hash.
+          The builder hit an unexpected error and stopped. Reloading the page usually fixes it. If
+          it doesn't, your share URL may be corrupt — open the page without the hash.
         </p>
         <pre
           style={{

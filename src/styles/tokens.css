@@ -120,6 +120,5 @@
   --discord-radius-sm: 4px;
   --discord-radius: 8px;
 
-  --discord-font:
-    "gg sans", "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --discord-font: "gg sans", "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }

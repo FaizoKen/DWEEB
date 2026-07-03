@@ -49,8 +49,7 @@ export const isSeparator = (c: AnyComponent): c is SeparatorComponent =>
 export const isActionRow = (c: AnyComponent): c is ActionRowComponent =>
   c.type === ComponentType.ActionRow;
 
-export const isButton = (c: AnyComponent): c is ButtonComponent =>
-  c.type === ComponentType.Button;
+export const isButton = (c: AnyComponent): c is ButtonComponent => c.type === ComponentType.Button;
 
 export const isStringSelect = (c: AnyComponent): c is StringSelectComponent =>
   c.type === ComponentType.StringSelect;
@@ -61,9 +60,8 @@ export const isUserSelect = (c: AnyComponent): c is UserSelectComponent =>
 export const isRoleSelect = (c: AnyComponent): c is RoleSelectComponent =>
   c.type === ComponentType.RoleSelect;
 
-export const isMentionableSelect = (
-  c: AnyComponent,
-): c is MentionableSelectComponent => c.type === ComponentType.MentionableSelect;
+export const isMentionableSelect = (c: AnyComponent): c is MentionableSelectComponent =>
+  c.type === ComponentType.MentionableSelect;
 
 export const isChannelSelect = (c: AnyComponent): c is ChannelSelectComponent =>
   c.type === ComponentType.ChannelSelect;

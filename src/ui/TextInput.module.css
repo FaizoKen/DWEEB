@@ -7,7 +7,10 @@
   border-radius: var(--app-radius-sm);
   color: var(--app-text);
   font-size: var(--app-text-base);
-  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .input::placeholder {

@@ -21,23 +21,12 @@ interface FieldProps {
   children: (controlId: string) => ReactNode;
 }
 
-export function Field({
-  label,
-  hint,
-  error,
-  htmlFor,
-  hideLabel,
-  className,
-  children,
-}: FieldProps) {
+export function Field({ label, hint, error, htmlFor, hideLabel, className, children }: FieldProps) {
   const reactId = useId();
   const controlId = htmlFor ?? reactId;
   return (
     <div className={cn(styles.field, className)}>
-      <label
-        htmlFor={controlId}
-        className={cn(styles.label, hideLabel && styles.labelHidden)}
-      >
+      <label htmlFor={controlId} className={cn(styles.label, hideLabel && styles.labelHidden)}>
         {label}
       </label>
       <div className={styles.control}>{children(controlId)}</div>

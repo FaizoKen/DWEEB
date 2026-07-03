@@ -112,12 +112,7 @@ function lineBlock(text: string, selStart: number, selEnd: number) {
   return { start, end, block: text.slice(start, end) };
 }
 
-function replaceBlock(
-  text: string,
-  start: number,
-  end: number,
-  nextBlock: string,
-): EditResult {
+function replaceBlock(text: string, start: number, end: number, nextBlock: string): EditResult {
   return {
     text: text.slice(0, start) + nextBlock + text.slice(end),
     selStart: start,

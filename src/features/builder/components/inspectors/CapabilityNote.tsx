@@ -15,10 +15,7 @@ interface Props {
 
 export function CapabilityNote({ tone = "warning", children }: Props) {
   return (
-    <div
-      role="note"
-      className={cn(styles.note, tone === "info" ? styles.info : styles.warn)}
-    >
+    <div role="note" className={cn(styles.note, tone === "info" ? styles.info : styles.warn)}>
       {children}
     </div>
   );

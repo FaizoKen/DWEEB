@@ -924,8 +924,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set((s) => ({
       ...pushHistory(s),
       message: updateById<SectionComponent>(s.message, sectionId, (sec) => {
-        const accessory: SectionAccessory =
-          kind === "button" ? createButton() : createThumbnail();
+        const accessory: SectionAccessory = kind === "button" ? createButton() : createThumbnail();
         return { ...sec, accessory };
       }),
     }));

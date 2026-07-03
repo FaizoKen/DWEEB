@@ -12,7 +12,9 @@
   color: var(--discord-text-normal);
   font-size: 14px;
   cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 
 .select:hover {

@@ -35,7 +35,10 @@
   border-radius: var(--app-radius-sm);
   color: var(--app-text-muted);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .btn:hover {

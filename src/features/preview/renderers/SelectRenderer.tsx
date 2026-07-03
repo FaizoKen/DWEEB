@@ -35,18 +35,14 @@ export function SelectRenderer({ node }: Props) {
         ) : (
           <div className={styles.pills}>
             {selections.map((s, i) => (
-              <span key={i} className={styles.pill}>{s}</span>
+              <span key={i} className={styles.pill}>
+                {s}
+              </span>
             ))}
           </div>
         )}
       </div>
-      <svg
-        className={styles.chevron}
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        width="20"
-        height="20"
-      >
+      <svg className={styles.chevron} aria-hidden="true" viewBox="0 0 24 24" width="20" height="20">
         <path
           d="M6 9l6 6 6-6"
           fill="none"
@@ -88,4 +84,9 @@ function symbolForDefault(
   return "";
 }
 
-export type { ChannelSelectComponent, MentionableSelectComponent, RoleSelectComponent, UserSelectComponent };
+export type {
+  ChannelSelectComponent,
+  MentionableSelectComponent,
+  RoleSelectComponent,
+  UserSelectComponent,
+};

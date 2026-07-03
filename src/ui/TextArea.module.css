@@ -8,7 +8,9 @@
   font-size: var(--app-text-base);
   line-height: 1.55;
   font-family: var(--app-font-sans);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
   min-height: 80px;
 }
 

@@ -114,9 +114,7 @@ export const useSavedMessagesStore = create<SavedMessagesState>((set, get) => ({
   },
 
   rename(id, name) {
-    const next = get().entries.map((e) =>
-      e.id === id ? { ...e, name, savedAt: Date.now() } : e,
-    );
+    const next = get().entries.map((e) => (e.id === id ? { ...e, name, savedAt: Date.now() } : e));
     writeRaw(next);
     set({ entries: next });
   },

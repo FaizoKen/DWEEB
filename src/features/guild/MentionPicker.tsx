@@ -81,12 +81,14 @@ export function GuildMentionPanel({ onPick }: { onPick: Pick }) {
       <div className={styles.list}>
         {showEveryone ? (
           <Row onClick={() => onPick("@everyone")}>
-            <MentionIcon size={14} className={styles.rowIcon} />@everyone
+            <MentionIcon size={14} className={styles.rowIcon} />
+            @everyone
           </Row>
         ) : null}
         {showHere ? (
           <Row onClick={() => onPick("@here")}>
-            <MentionIcon size={14} className={styles.rowIcon} />@here
+            <MentionIcon size={14} className={styles.rowIcon} />
+            @here
           </Row>
         ) : null}
 
