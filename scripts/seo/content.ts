@@ -133,12 +133,12 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     title: "Discord Verification Message — one-click verify button | DWEEB",
     h1: "Discord Verification Gate Template",
     description:
-      "A one-click Discord verification message: members tap a button to confirm they're human and unlock the server. Pairs with the Self Role plugin.",
+      "A one-click Discord verification message: members tap a verify button, RoleLogic checks where they joined from and grants the matching role. No bot needed on the webhook.",
     intro:
-      "Gate your server behind a single verify button. New members tap it to confirm they've read the rules and unlock the rest of the channels — a simple, friendly check that keeps bots and drive-by trolls out without the friction of a captcha.",
+      "Gate your server behind a single verify button, powered by the RoleLogic Member Origin Role service. New members tap it, verify in the browser, and get their origin role automatically — while admins track who verified from a dashboard linked right in the message. The button is a plain link, so it posts through any webhook and never expires.",
     whenToUse: [
       "Adding a human check before granting access",
-      "Confirming members have read the rules",
+      "Granting roles based on where members joined from",
       "Running a lightweight alternative to a captcha bot",
     ],
   },

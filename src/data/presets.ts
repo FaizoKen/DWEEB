@@ -322,13 +322,17 @@ const VERIFY_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.ActionRow,
           components: [
+            // Pre-wired to the Member Origin Role link plugin: the URL is the
+            // binding (see linkManifest.ts), so the template ships already
+            // attached — {server_id} resolves at send from the destination
+            // webhook, and no bot or guided setup is needed.
             {
               _id: id(),
               type: ComponentType.Button,
-              style: ButtonStyle.Success,
+              style: ButtonStyle.Link,
               label: "Verify me",
               emoji: { name: "✅" },
-              custom_id: "verify_me",
+              url: "https://plugin-rolelogic.faizo.net/member-origin-role/verify?guild={server_id}",
             },
           ],
         },
@@ -338,7 +342,7 @@ const VERIFY_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# Wire the button to the Self Role plugin in give-only mode — one click grants the verified role and unlocks the server.",
+        "-# 🛡️ Admins: review verified members in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/member-origin-role/members/{server_id}).",
     },
   ],
 };
@@ -1523,11 +1527,13 @@ export const TEMPLATES: MessageTemplate[] = [
     description: "A one-click verify button to unlock the server.",
     emoji: "✅",
     category: "Welcome",
-    tags: ["verify", "gate", "human", "captcha", "role", "button"],
+    tags: ["verify", "gate", "human", "captcha", "role", "button", "origin", "rolelogic"],
     accent: ACCENT.green,
-    requiresBot: true,
-    pairsWith: "Self Role",
-    pluginSlots: [{ customId: "verify_me", pluginId: "self-role" }],
+    // The verify button is a *link* plugin (Member Origin Role) — the binding
+    // ships inside the button URL, so there's no bot requirement and no
+    // pluginSlots: nothing to wire, only the per-server RoleLogic setup the
+    // attached chip points at.
+    pairsWith: "Member Origin Role",
     message: VERIFY_MESSAGE,
   },
   {
