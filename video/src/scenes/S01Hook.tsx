@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, interpolate } from "remotion";
 import { Background } from "../components/Background";
-import { Camera, Shot } from "../components/Camera";
+import { Camera, Shot, useVertical } from "../components/Camera";
 import { Caption } from "../components/Caption";
 import { DiscordShell, DMsg, DContainer, DHeading, DBody, DGallery, DBtn, DMention } from "../components/DiscordUI";
 import { PING, WHOOSH } from "../timeline";
@@ -16,6 +16,7 @@ import { useSpr } from "../components/Bits";
  */
 export const SceneHook: React.FC = () => {
   const frame = useCurrentFrame();
+  const vert = useVertical();
   const d = voDelay("hook"); // VO: "…look like this. They could look like this."
   const turn = d + 68; // ≈ "They could look like this"
   const landed = turn + 10;
@@ -24,12 +25,19 @@ export const SceneHook: React.FC = () => {
   const richIn = useSpr(landed, { damping: 15, stiffness: 110 });
 
   // One slot, one gentle push — the swap happens where the viewer is already
-  // looking, so the camera never has to reframe.
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 460, s: 1.06 },
-    { f: d + 28, x: 940, y: 420, s: 1.26 }, // slow push onto the message slot
-    { f: landed + 46, x: 950, y: 470, s: 1.16 }, // breathe out to fit the rich card
-  ];
+  // looking, so the camera never has to reframe. Portrait crops to the chat
+  // column (the message IS the shot); the sidebar is scenery it can spare.
+  const shots: Shot[] = vert
+    ? [
+        { f: 0, x: 880, y: 440, s: 1.14 },
+        { f: d + 28, x: 860, y: 400, s: 1.32 }, // slow push onto the message slot
+        { f: landed + 46, x: 880, y: 450, s: 1.2 }, // breathe out to fit the rich card
+      ]
+    : [
+        { f: 0, x: 960, y: 460, s: 1.06 },
+        { f: d + 28, x: 940, y: 420, s: 1.26 }, // slow push onto the message slot
+        { f: landed + 46, x: 950, y: 470, s: 1.16 }, // breathe out to fit the rich card
+      ];
 
   return (
     <AbsoluteFill>
@@ -68,12 +76,16 @@ export const SceneHook: React.FC = () => {
                 }}
               >
                 <DMsg author="Moderator" app={false} avatarColor="#4e5058" time="Yesterday at 8:12 PM">
-                  <DBody>
-                    <DMention>@everyone</DMention> season 4 drops tomorrow!!! new maps + ranked rewards.
-                    patch notes here → <span style={{ color: COLORS.dLink }}>nebula.gg/patch-4-0-full-notes</span>{" "}
-                    and dont forget the giveaway form <span style={{ color: COLORS.dLink }}>forms.nebula.gg/s4</span>{" "}
-                    (pls actually read it this time)
-                  </DBody>
+                  {/* portrait clamps the text wall to the framed column — it
+                      wraps taller, which only helps the "tired post" read */}
+                  <div style={{ maxWidth: vert ? 720 : undefined }}>
+                    <DBody>
+                      <DMention>@everyone</DMention> season 4 drops tomorrow!!! new maps + ranked rewards.
+                      patch notes here → <span style={{ color: COLORS.dLink }}>nebula.gg/patch-4-0-full-notes</span>{" "}
+                      and dont forget the giveaway form <span style={{ color: COLORS.dLink }}>forms.nebula.gg/s4</span>{" "}
+                      (pls actually read it this time)
+                    </DBody>
+                  </div>
                 </DMsg>
               </div>
 

@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
 import { Background } from "../components/Background";
-import { Camera, Shot } from "../components/Camera";
+import { Camera, Shot, useVertical } from "../components/Camera";
 import { Caption } from "../components/Caption";
 import { Cursor } from "../components/Cursor";
 import { Icon } from "../components/Icon";
@@ -29,6 +29,7 @@ const VoiceIcon: React.FC<{ size?: number; color?: string }> = ({ size = 17, col
  */
 export const SceneActivity: React.FC = () => {
   const frame = useCurrentFrame();
+  const vert = useVertical();
   const d = voDelay("activity");
 
   const tLaunch = d + 100; // click Launch in the voice channel
@@ -56,18 +57,33 @@ export const SceneActivity: React.FC = () => {
   const cur = cursorAt(frame, waypoints);
 
   // Strictly ascending keyframes, every move ≥30 frames — close on each beat,
-  // wide again at the end.
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 540, s: 1.02 },
-    { f: tLaunch - 24, x: 1085, y: 770, s: 1.26 }, // onto the launcher card
-    { f: tOpen, x: 1085, y: 770, s: 1.26 }, // hold through the click
-    { f: tOpen + 30, x: 960, y: 540, s: 1.08 }, // the whole builder, briefly
-    { f: tPresence + 10, x: 830, y: 430, s: 1.22 }, // close: presence rings + live edits
-    { f: tEditAria, x: 830, y: 430, s: 1.22 }, // hold through both edits
-    { f: tPost + 8, x: 1280, y: 260, s: 1.26 }, // slow glide up to the header publish
-    { f: tPosted + 16, x: 1280, y: 260, s: 1.26 },
-    { f: tPosted + 48, x: 960, y: 540, s: 1.05 }, // zoom out through the tail
-  ];
+  // wide again at the end. Portrait can't hold tree + preview together, so it
+  // adds one extra glide: presence on the tree, then across for the edits.
+  const shots: Shot[] = vert
+    ? [
+        { f: 0, x: 960, y: 540, s: 0.62 }, // the whole call
+        { f: tLaunch - 24, x: 1085, y: 850, s: 1.3 }, // onto the launcher card
+        { f: tOpen, x: 1085, y: 850, s: 1.3 }, // hold through the click
+        { f: tOpen + 30, x: 960, y: 540, s: 0.62 }, // the whole builder, briefly
+        { f: tPresence + 10, x: 580, y: 430, s: 1.4 }, // presence rings on the tree
+        { f: tPresence + 24, x: 580, y: 430, s: 1.4 },
+        { f: tEditKai + 8, x: 1210, y: 330, s: 1.3 }, // across: the edits land live
+        { f: tPost - 14, x: 1210, y: 330, s: 1.3 },
+        { f: tPost + 8, x: 1310, y: 260, s: 1.1 }, // up to the header publish
+        { f: tPosted + 16, x: 1310, y: 260, s: 1.1 },
+        { f: tPosted + 48, x: 960, y: 540, s: 0.64 }, // zoom out through the tail
+      ]
+    : [
+        { f: 0, x: 960, y: 540, s: 1.02 },
+        { f: tLaunch - 24, x: 1085, y: 770, s: 1.26 }, // onto the launcher card
+        { f: tOpen, x: 1085, y: 770, s: 1.26 }, // hold through the click
+        { f: tOpen + 30, x: 960, y: 540, s: 1.08 }, // the whole builder, briefly
+        { f: tPresence + 10, x: 830, y: 430, s: 1.22 }, // close: presence rings + live edits
+        { f: tEditAria, x: 830, y: 430, s: 1.22 }, // hold through both edits
+        { f: tPost + 8, x: 1280, y: 260, s: 1.26 }, // slow glide up to the header publish
+        { f: tPosted + 16, x: 1280, y: 260, s: 1.26 },
+        { f: tPosted + 48, x: 960, y: 540, s: 1.05 }, // zoom out through the tail
+      ];
 
   const participants = [CAST.aria, CAST.kai, CAST.mo];
 

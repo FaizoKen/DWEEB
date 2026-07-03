@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, interpolate } from "remotion";
 import { Background } from "../components/Background";
-import { Camera, Shot } from "../components/Camera";
+import { Camera, Shot, useVertical } from "../components/Camera";
 import { Mascot } from "../components/Mascot";
 import { Wordmark } from "../components/Wordmark";
 import { Chip, Rise, TypeText, useSpr } from "../components/Bits";
@@ -34,6 +34,7 @@ const GoogleG: React.FC<{ size?: number }> = ({ size = 36 }) => (
 /** CTA — the end card: lockup, feature tags, and a Google search for "dweeb bot". */
 export const SceneCta: React.FC = () => {
   const frame = useCurrentFrame();
+  const vert = useVertical();
   const d = voDelay("cta");
 
   const drop = useSpr(4, { damping: 11, stiffness: 130, mass: 0.9 });
@@ -42,11 +43,19 @@ export const SceneCta: React.FC = () => {
   const searchAt = d + Math.round(VO.cta.frames * 0.66);
   const searchIn = useSpr(searchAt, { damping: 13 });
 
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 560, s: 1.22 },
-    { f: 34, x: 960, y: 540, s: 1.0 },
-    { f: SCENES.cta.durationInFrames - 40, x: 960, y: 540, s: 1.04 },
-  ];
+  // Portrait wraps the feature tags into two rows (below), so the column stays
+  // narrower than the search bar and the lockup can fill the tall frame.
+  const shots: Shot[] = vert
+    ? [
+        { f: 0, x: 960, y: 560, s: 1.42 },
+        { f: 34, x: 960, y: 540, s: 1.22 },
+        { f: SCENES.cta.durationInFrames - 40, x: 960, y: 540, s: 1.26 },
+      ]
+    : [
+        { f: 0, x: 960, y: 560, s: 1.22 },
+        { f: 34, x: 960, y: 540, s: 1.0 },
+        { f: SCENES.cta.durationInFrames - 40, x: 960, y: 540, s: 1.04 },
+      ];
 
   return (
     <AbsoluteFill>
@@ -64,7 +73,17 @@ export const SceneCta: React.FC = () => {
             </div>
             <Wordmark size={140} delay={10} />
             <Rise delay={26}>
-              <div style={{ display: "flex", gap: 12 }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  flexWrap: vert ? "wrap" : "nowrap",
+                  justifyContent: "center",
+                  // 460 forces a balanced 2×2 (three tags still fit at ~500)
+                  maxWidth: vert ? 460 : undefined,
+                  rowGap: 12,
+                }}
+              >
                 {[
                   { t: "Visual builder", c: COLORS.blurple },
                   { t: "AI assistant", c: "#9b84ee" },

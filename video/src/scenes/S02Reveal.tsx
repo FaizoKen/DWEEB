@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, interpolate } from "remotion";
 import { Background } from "../components/Background";
-import { Camera, Shot } from "../components/Camera";
+import { Camera, Shot, useVertical } from "../components/Camera";
 import { Mascot } from "../components/Mascot";
 import { Wordmark } from "../components/Wordmark";
 import { Rise, Chip, useSpr } from "../components/Bits";
@@ -12,6 +12,7 @@ import { INTER } from "../fonts";
 /** REVEAL — the brand card: mascot drop, wordmark, tagline, URL. */
 export const SceneReveal: React.FC = () => {
   const frame = useCurrentFrame();
+  const vert = useVertical();
   const d = voDelay("reveal");
 
   const drop = useSpr(6, { damping: 12, stiffness: 120, mass: 0.8 });
@@ -20,11 +21,19 @@ export const SceneReveal: React.FC = () => {
     extrapolateRight: "clamp",
   });
 
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 520, s: 1.16 },
-    { f: 60, x: 960, y: 540, s: 1.0 },
-    { f: 140, x: 960, y: 540, s: 1.03 },
-  ];
+  // The brand column fits portrait natively — just a touch more zoom so the
+  // lockup carries the tall frame (tagline ~820 world px sets the width cap).
+  const shots: Shot[] = vert
+    ? [
+        { f: 0, x: 960, y: 520, s: 1.24 },
+        { f: 60, x: 960, y: 540, s: 1.12 },
+        { f: 140, x: 960, y: 540, s: 1.16 },
+      ]
+    : [
+        { f: 0, x: 960, y: 520, s: 1.16 },
+        { f: 60, x: 960, y: 540, s: 1.0 },
+        { f: 140, x: 960, y: 540, s: 1.03 },
+      ];
 
   return (
     <AbsoluteFill>

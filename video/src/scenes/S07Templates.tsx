@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
 import { Background } from "../components/Background";
-import { Camera, Shot } from "../components/Camera";
+import { Camera, Shot, useVertical } from "../components/Camera";
 import { Caption } from "../components/Caption";
 import { Cursor } from "../components/Cursor";
 import { Icon } from "../components/Icon";
@@ -33,6 +33,7 @@ const HOVER_ROWS = [0, 2, 3, 5];
  */
 export const SceneTemplates: React.FC = () => {
   const frame = useCurrentFrame();
+  const vert = useVertical();
   const d = voDelay("templates");
 
   // One preview swap roughly every 1.3s while the VO lists them.
@@ -46,28 +47,38 @@ export const SceneTemplates: React.FC = () => {
   const springs = hoverAt.map((t) => useSpr(t, { damping: 15, stiffness: 120 }));
   const active = hoverAt.reduce((acc, t, i) => (frame >= t ? i : acc), -1);
 
-  // World-space row centers (gallery card is laid out at left 250, rows from
-  // y≈332 every 64px — see the layout constants below).
-  const rowY = (i: number) => 332 + i * 64;
+  // World-space row centers. Landscape: gallery card at left 250, rows from
+  // y≈332 every 64px. Portrait restacks gallery-over-stage in a centered
+  // column (~1217 world px tall), so the rows start near y≈21 instead.
+  const rowY = (i: number) => (vert ? 21 : 332) + i * 64;
+  const hoverX = vert ? 900 : 530;
   const waypoints: Waypoint[] = [
-    { f: d + 2, x: 640, y: 620 },
-    { f: hoverAt[0] - 6, x: 530, y: rowY(HOVER_ROWS[0]) },
-    { f: hoverAt[1], x: 530, y: rowY(HOVER_ROWS[1]) },
-    { f: hoverAt[2], x: 530, y: rowY(HOVER_ROWS[2]) },
-    { f: hoverAt[3], x: 530, y: rowY(HOVER_ROWS[3]) },
-    { f: tOpen, x: 530, y: rowY(HOVER_ROWS[3]), press: true },
-    { f: tOpen + 12, x: 530, y: rowY(HOVER_ROWS[3]) },
+    { f: d + 2, x: vert ? 960 : 640, y: vert ? 380 : 620 },
+    { f: hoverAt[0] - 6, x: hoverX, y: rowY(HOVER_ROWS[0]) },
+    { f: hoverAt[1], x: hoverX, y: rowY(HOVER_ROWS[1]) },
+    { f: hoverAt[2], x: hoverX, y: rowY(HOVER_ROWS[2]) },
+    { f: hoverAt[3], x: hoverX, y: rowY(HOVER_ROWS[3]) },
+    { f: tOpen, x: hoverX, y: rowY(HOVER_ROWS[3]), press: true },
+    { f: tOpen + 12, x: hoverX, y: rowY(HOVER_ROWS[3]) },
   ];
   const cur = cursorAt(frame, waypoints);
 
   // Push in while the previews flip (gallery + stage both in frame), then
-  // zoom out once one opens.
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 540, s: 1.06 },
-    { f: d + 32, x: 960, y: 532, s: 1.2 },
-    { f: tOpen + 4, x: 945, y: 540, s: 1.2 },
-    { f: tOpen + 32, x: 960, y: 540, s: 1.06 },
-  ];
+  // zoom out once one opens. The portrait column holds both cards in one tall
+  // frame, so its camera only breathes.
+  const shots: Shot[] = vert
+    ? [
+        { f: 0, x: 960, y: 540, s: 1.08 },
+        { f: d + 32, x: 960, y: 545, s: 1.2 },
+        { f: tOpen + 4, x: 960, y: 560, s: 1.2 },
+        { f: tOpen + 32, x: 960, y: 545, s: 1.1 },
+      ]
+    : [
+        { f: 0, x: 960, y: 540, s: 1.06 },
+        { f: d + 32, x: 960, y: 532, s: 1.2 },
+        { f: tOpen + 4, x: 945, y: 540, s: 1.2 },
+        { f: tOpen + 32, x: 960, y: 540, s: 1.06 },
+      ];
 
   const previews: React.ReactNode[] = [
     /* Welcome */
@@ -119,7 +130,8 @@ export const SceneTemplates: React.FC = () => {
       <Background glow="dual" />
       <Camera shots={shots}>
         <AbsoluteFill style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ display: "flex", gap: 40, alignItems: "center" }}>
+          {/* portrait: gallery over stage in one tall column */}
+          <div style={{ display: "flex", flexDirection: vert ? "column" : "row", gap: vert ? 28 : 40, alignItems: "center" }}>
             {/* ── the gallery ──────────────────────────────────────────── */}
             <div
               style={{

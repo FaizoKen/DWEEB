@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
 import { Background } from "../components/Background";
-import { Camera, Shot } from "../components/Camera";
+import { Camera, Shot, useVertical } from "../components/Camera";
 import { Caption } from "../components/Caption";
 import { AppWindow, ActionBar, AppTabs, TreeRow, AddComponentBtn, IssuePill } from "../components/AppUI";
 import { DMsg, DContainer, DHeading, DBody, DGallery, DBtn, DSelect } from "../components/DiscordUI";
@@ -17,6 +17,7 @@ import { COLORS } from "../theme";
  */
 export const SceneBuild: React.FC = () => {
   const frame = useCurrentFrame();
+  const vert = useVertical();
   const d = voDelay("build");
 
   // Beats synced to the narration.
@@ -41,15 +42,25 @@ export const SceneBuild: React.FC = () => {
   // The camera follows the narration with slow, gentle glides — close on the
   // tree while blocks land, easing out just enough to take in the preview,
   // then wide before the limits beat so the pill pops in full view. Every
-  // move spans 30+ frames.
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 540, s: 1.0 },
-    { f: d + 52, x: 660, y: 460, s: 1.26 }, // slow push onto the tree as blocks land
-    { f: d + 160, x: 660, y: 460, s: 1.26 },
-    { f: d + 200, x: 900, y: 470, s: 1.2 }, // ease out: tree AND preview in frame
-    { f: d + 264, x: 900, y: 470, s: 1.2 }, // hold: the preview mirrors the tree
-    { f: d + 312, x: 960, y: 540, s: 1.05 }, // wide before the limits beat
-  ];
+  // move spans 30+ frames. Portrait can't hold both panes at once, so it
+  // establishes the whole editor, then pans pane-to-pane with the narration.
+  const shots: Shot[] = vert
+    ? [
+        { f: 0, x: 960, y: 540, s: 0.6 }, // establish the whole editor
+        { f: d + 52, x: 368, y: 480, s: 1.5 }, // the tree, as blocks land
+        { f: d + 160, x: 368, y: 480, s: 1.5 },
+        { f: d + 200, x: 1240, y: 460, s: 1.28 }, // across to the live preview
+        { f: d + 264, x: 1240, y: 460, s: 1.28 },
+        { f: d + 312, x: 1350, y: 390, s: 1.15 }, // preview + the header pill
+      ]
+    : [
+        { f: 0, x: 960, y: 540, s: 1.0 },
+        { f: d + 52, x: 660, y: 460, s: 1.26 }, // slow push onto the tree as blocks land
+        { f: d + 160, x: 660, y: 460, s: 1.26 },
+        { f: d + 200, x: 900, y: 470, s: 1.2 }, // ease out: tree AND preview in frame
+        { f: d + 264, x: 900, y: 470, s: 1.2 }, // hold: the preview mirrors the tree
+        { f: d + 312, x: 960, y: 540, s: 1.05 }, // wide before the limits beat
+      ];
 
   return (
     <AbsoluteFill>

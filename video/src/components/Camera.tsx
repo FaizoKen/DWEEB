@@ -30,6 +30,22 @@ export type Shot = {
   ease?: (t: number) => number;
 };
 
+/**
+ * The world every scene lays out in — a fixed landscape stage, regardless of
+ * the canvas aspect. The vertical (9:16) composition films the SAME
+ * 1920×1080 world through a taller viewport, so every world coordinate
+ * (camera shots, cursor waypoints, overlay positions) is valid in both
+ * orientations; only the per-scene shot lists differ.
+ */
+export const WORLD_W = 1920;
+export const WORLD_H = 1080;
+
+/** True when rendering the portrait (9:16) composition. */
+export const useVertical = (): boolean => {
+  const { width, height } = useVideoConfig();
+  return height > width;
+};
+
 // Soft S-curve: slow attack, long settle — camera moves never feel like snaps.
 const DEFAULT_EASE = Easing.bezier(0.45, 0, 0.15, 1);
 
@@ -101,8 +117,8 @@ export const Camera: React.FC<{
       <div
         style={{
           position: "absolute",
-          width: W,
-          height: H,
+          width: WORLD_W,
+          height: WORLD_H,
           transformOrigin: "0 0",
           transform: `translate3d(${tx}px, ${ty}px, 0) scale(${s})`,
           filter: blurPx > 0.15 ? `blur(${blurPx.toFixed(2)}px)` : undefined,

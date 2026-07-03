@@ -101,10 +101,14 @@ frame durations), so re-recording the VO re-syncs every cut automatically.
   breakdown under *activity*, riser → impact into *cta*.
 - **SFX**: original synthesized kit — click, tick, pop, chime, whoosh, ping
   (message-land), riser, impact. Regenerate offline with `npm run sfx`.
-- **Camera**: per-scene keyframes, deliberately minimal in v3.1; captions render
-  at screen level (pin-sharp).
-- The v1 40s cut's vertical (9:16) composition was retired with the v2 film;
-  `out/dweeb-promo-vertical.mp4` from v1 remains until re-authored.
+- **Camera**: per-scene keyframes, deliberately minimal since v3.1; captions
+  render at screen level (pin-sharp).
+- **Vertical (9:16)**: `DweebPromoVertical` (1080×1920) films the SAME
+  1920×1080 world (the camera's stage is fixed — see `Camera.tsx`), so every
+  world coordinate is shared and only per-scene portrait shot lists differ
+  (`useVertical()`). Templates restacks gallery-over-stage; the CTA wraps its
+  feature tags 2×2; captions sit above the platform-UI safe zone.
+  `npm run render:vertical` → `out/dweeb-promo-vertical.mp4`.
 
 ## Rebuild
 

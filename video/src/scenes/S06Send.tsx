@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, interpolate } from "remotion";
 import { Background } from "../components/Background";
-import { Camera, Shot } from "../components/Camera";
+import { Camera, Shot, useVertical } from "../components/Camera";
 import { Caption } from "../components/Caption";
 import { Cursor } from "../components/Cursor";
 import { AppWindow, ActionBar, AppTabs, TreeRow, InspectorCard, Field, ChannelRow } from "../components/AppUI";
@@ -19,6 +19,7 @@ import { INTER } from "../fonts";
  */
 export const SceneSend: React.FC = () => {
   const frame = useCurrentFrame();
+  const vert = useVertical();
   const d = voDelay("send");
 
   const tName = d + 36; // "name the message" — typing starts
@@ -55,15 +56,25 @@ export const SceneSend: React.FC = () => {
   // ONE close framing holds through the whole in-editor sequence — the
   // identity card, the action-bar Send and the popover all live inside it, so
   // the camera never has to jump between beats. Then a slow zoom-out into the
-  // Discord payoff.
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 540, s: 1.02 },
-    { f: tName - 10, x: 490, y: 305, s: 1.36 },
-    { f: tSendNow + 8, x: 490, y: 305, s: 1.36 },
-    { f: tSwap + 24, x: 960, y: 540, s: 1.06 }, // zoom out through the swap
-    { f: tLand + 34, x: 1010, y: 500, s: 1.24 }, // the message lands
-    { f: tLand + 70, x: 960, y: 540, s: 1.1 },
-  ];
+  // Discord payoff. Portrait: the whole in-editor beat lives on the left pane,
+  // which is a natural tall column — one framing again, then the payoff close.
+  const shots: Shot[] = vert
+    ? [
+        { f: 0, x: 960, y: 540, s: 0.6 },
+        { f: tName - 10, x: 410, y: 425, s: 1.48 },
+        { f: tSendNow + 8, x: 410, y: 425, s: 1.48 },
+        { f: tSwap + 24, x: 900, y: 430, s: 0.95 }, // zoom out through the swap
+        { f: tLand + 34, x: 890, y: 380, s: 1.3 }, // the message lands
+        { f: tLand + 70, x: 900, y: 450, s: 1.15 },
+      ]
+    : [
+        { f: 0, x: 960, y: 540, s: 1.02 },
+        { f: tName - 10, x: 490, y: 305, s: 1.36 },
+        { f: tSendNow + 8, x: 490, y: 305, s: 1.36 },
+        { f: tSwap + 24, x: 960, y: 540, s: 1.06 }, // zoom out through the swap
+        { f: tLand + 34, x: 1010, y: 500, s: 1.24 }, // the message lands
+        { f: tLand + 70, x: 960, y: 540, s: 1.1 },
+      ];
 
   return (
     <AbsoluteFill>

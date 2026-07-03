@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
 import { Background } from "../components/Background";
-import { Camera, Shot } from "../components/Camera";
+import { Camera, Shot, useVertical } from "../components/Camera";
 import { Caption } from "../components/Caption";
 import { Cursor } from "../components/Cursor";
 import { Icon } from "../components/Icon";
@@ -35,6 +35,7 @@ const SHORT: Record<string, string> = {
  */
 export const ScenePlugins: React.FC = () => {
   const frame = useCurrentFrame();
+  const vert = useVertical();
   const d = voDelay("plugins");
 
   const tPanelOut = d + 10; // the AI chat slides closed — same take, next beat
@@ -77,17 +78,27 @@ export const ScenePlugins: React.FC = () => {
   // Opens on the assistant scene's final framing (continuous take), then close
   // in on each beat and pull wide once the chip lands. The camera HOLDS through
   // the 20-frame overlap — if it moved, the matched cut would ghost.
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 535, s: 1.05 },
-    { f: 24, x: 960, y: 535, s: 1.05 },
-    { f: tSel - 12, x: 620, y: 520, s: 1.28 }, // onto the button row
-    { f: tSel + 10, x: 620, y: 520, s: 1.28 },
-    { f: tDialog + 16, x: 960, y: 535, s: 1.24 }, // the picker
-    { f: tClose, x: 960, y: 535, s: 1.24 },
-    // one slow settle toward the button row as the chip lands — wide enough to
-    // read the whole editor, so no extra zoom-out is needed before the cut
-    { f: tClose + 30, x: 760, y: 545, s: 1.18 },
-  ];
+  const shots: Shot[] = vert
+    ? [
+        { f: 0, x: 1240, y: 490, s: 1.1 }, // == assistant's portrait final framing
+        { f: 24, x: 1240, y: 490, s: 1.1 }, // hold: the AI chat slides off-frame
+        { f: tSel - 12, x: 400, y: 530, s: 1.5 }, // onto the button row
+        { f: tSel + 10, x: 400, y: 530, s: 1.5 },
+        { f: tDialog + 16, x: 960, y: 540, s: 1.06 }, // the picker, edge to edge
+        { f: tClose, x: 960, y: 540, s: 1.06 },
+        { f: tClose + 30, x: 500, y: 555, s: 1.45 }, // the chip lands on the row
+      ]
+    : [
+        { f: 0, x: 960, y: 535, s: 1.05 },
+        { f: 24, x: 960, y: 535, s: 1.05 },
+        { f: tSel - 12, x: 620, y: 520, s: 1.28 }, // onto the button row
+        { f: tSel + 10, x: 620, y: 520, s: 1.28 },
+        { f: tDialog + 16, x: 960, y: 535, s: 1.24 }, // the picker
+        { f: tClose, x: 960, y: 535, s: 1.24 },
+        // one slow settle toward the button row as the chip lands — wide enough to
+        // read the whole editor, so no extra zoom-out is needed before the cut
+        { f: tClose + 30, x: 760, y: 545, s: 1.18 },
+      ];
 
   return (
     <AbsoluteFill>

@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, interpolate } from "remotion";
 import { Background } from "../components/Background";
-import { Camera, Shot } from "../components/Camera";
+import { Camera, Shot, useVertical } from "../components/Camera";
 import { Caption } from "../components/Caption";
 import { AppWindow, ActionBar, AppTabs, TreeRow, AddComponentBtn } from "../components/AppUI";
 import { DMsg, DContainer, DHeading, DBody, DGallery, DBtn } from "../components/DiscordUI";
@@ -43,6 +43,7 @@ const Thinking: React.FC = () => {
  */
 export const SceneAssistant: React.FC = () => {
   const frame = useCurrentFrame();
+  const vert = useVertical();
   const d = voDelay("assistant");
 
   const tPanel = d + 14; // panel slides in
@@ -70,13 +71,21 @@ export const SceneAssistant: React.FC = () => {
   // out as the draft lands — tree and preview enter the frame as it widens.
   // The final framing matches the plugins scene's first shot AND is reached
   // before the scenes start overlapping, so the cut reads as one continuous
-  // take where the chat simply closes.
-  const shots: Shot[] = [
-    { f: 0, x: 960, y: 540, s: 1.02 },
-    { f: tPanel + 26, x: 1130, y: 440, s: 1.3 }, // close-up: the prompt types
-    { f: tDraft + 2, x: 1130, y: 440, s: 1.3 },
-    { f: tDraft + 42, x: 960, y: 535, s: 1.05 }, // slow zoom out, settled pre-cut
-  ];
+  // take where the chat simply closes. Portrait: close on the docked panel,
+  // then settle on preview + panel — the same framing plugins opens on.
+  const shots: Shot[] = vert
+    ? [
+        { f: 0, x: 960, y: 540, s: 0.6 }, // establish: the empty editor
+        { f: tPanel + 26, x: 1560, y: 400, s: 1.9 }, // close-up: the prompt types
+        { f: tDraft + 2, x: 1560, y: 400, s: 1.9 },
+        { f: tDraft + 42, x: 1240, y: 490, s: 1.1 }, // preview + panel, settled pre-cut
+      ]
+    : [
+        { f: 0, x: 960, y: 540, s: 1.02 },
+        { f: tPanel + 26, x: 1130, y: 440, s: 1.3 }, // close-up: the prompt types
+        { f: tDraft + 2, x: 1130, y: 440, s: 1.3 },
+        { f: tDraft + 42, x: 960, y: 535, s: 1.05 }, // slow zoom out, settled pre-cut
+      ];
 
   return (
     <AbsoluteFill>
