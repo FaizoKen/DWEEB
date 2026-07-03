@@ -29,6 +29,7 @@ import {
   type WebhookMessage,
 } from "@/core/schema/types";
 import type { PluginManifest } from "./manifest";
+import { linkUrlPrefix, type LinkPluginManifest } from "./linkManifest";
 
 export type PluginTarget =
   | "button"
@@ -213,6 +214,27 @@ export function targetableNodeByCustomId(
     if ((node as { custom_id?: unknown }).custom_id === customId) {
       return { nodeId: node._id, target: t };
     }
+  }
+  return null;
+}
+
+/**
+ * Locate the Link button bound (by URL prefix) to the given link plugin,
+ * returning its editor id, or `null`. The link-slot counterpart of
+ * {@link targetableNodeByCustomId}: the guided template-setup flow uses it to
+ * map a declared link slot — identified only by its plugin id, since a Link
+ * button carries no `custom_id` — to the live component holding that plugin's
+ * URL. First match wins; a template shipping two buttons on the same link
+ * plugin would need per-slot disambiguation that nothing requires yet.
+ */
+export function linkButtonNodeByPlugin(
+  message: WebhookMessage,
+  manifest: LinkPluginManifest,
+): EditorId | null {
+  const prefix = linkUrlPrefix(manifest.url);
+  for (const node of walkAll(message)) {
+    if (!isButton(node) || node.style !== ButtonStyle.Link) continue;
+    if (node.url.startsWith(prefix)) return node._id;
   }
   return null;
 }

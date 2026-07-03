@@ -16,7 +16,7 @@
 import { useEffect, useRef } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
-import { getPlugins, isPluginRegistryConfigured } from "@/core/plugins/registry";
+import { isRegisteredPluginId } from "@/core/plugins/registry";
 import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
 import { pushToast } from "@/ui/Toast";
 
@@ -55,13 +55,12 @@ export function useTemplateDeepLink(): void {
 
       replaceMessage(template.message);
 
-      // Mirror the gallery's pick behaviour: an interactive template with a
-      // resolvable plugin slot hands off to the guided setup; everything else
-      // points the user straight at Send.
+      // Mirror the gallery's pick behaviour: a template with a resolvable
+      // plugin slot (interactive or link) hands off to the guided setup;
+      // everything else points the user straight at Send.
       const canSetup =
-        isPluginRegistryConfigured() &&
         !!template.pluginSlots?.length &&
-        template.pluginSlots.some((slot) => getPlugins().some((p) => p.id === slot.pluginId));
+        template.pluginSlots.some((slot) => isRegisteredPluginId(slot.pluginId));
       if (canSetup) {
         useTemplateSetupStore.getState().begin(template.id);
       } else {

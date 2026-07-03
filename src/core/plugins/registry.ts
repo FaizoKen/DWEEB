@@ -80,3 +80,12 @@ export const LINK_PLUGINS: LinkPluginManifest[] = parseLinkRegistryPayload(regis
 export function isLinkPluginRegistryConfigured(): boolean {
   return LINK_PLUGINS.length > 0;
 }
+
+/**
+ * True when a plugin id exists in either registry (service or link) — the
+ * "does this template slot resolve to anything we ship" check, so the guided
+ * setup only launches for slots a build can actually walk.
+ */
+export function isRegisteredPluginId(id: string): boolean {
+  return PLUGINS.some((p) => p.id === id) || LINK_PLUGINS.some((p) => p.id === id);
+}

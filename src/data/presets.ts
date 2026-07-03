@@ -62,7 +62,9 @@ export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
  * walks them as a checklist. The placeholder id survives `replaceMessage` (only
  * `_id`s are reassigned), so it's a stable handle to the live component.
  */
-export interface TemplatePluginSlot {
+export interface TemplateInteractiveSlot {
+  /** Discriminator; absent means this original, custom_id-bound kind. */
+  kind?: "interactive";
   /** The placeholder `custom_id` on the component this slot configures. */
   customId: string;
   /** Registry id of the plugin to wire it to (e.g. `"tickets"`). */
@@ -76,6 +78,22 @@ export interface TemplatePluginSlot {
    */
   preset?: string;
 }
+
+/**
+ * A Link button pre-wired to a URL-based link plugin (see `linkManifest.ts`).
+ * The binding already ships inside the button's `url`, so there is nothing to
+ * configure in DWEEB — the guided setup surfaces the plugin's per-server
+ * `setupUrl` step instead (register the server with the external service so
+ * the link actually does something). Resolved to the live component by URL
+ * prefix, since a Link button carries no `custom_id`.
+ */
+export interface TemplateLinkSlot {
+  kind: "link";
+  /** Registry id of the link plugin the button carries. */
+  pluginId: string;
+}
+
+export type TemplatePluginSlot = TemplateInteractiveSlot | TemplateLinkSlot;
 
 /** A named, pickable starting message shown in the Template Gallery. */
 export interface MessageTemplate {
@@ -1530,10 +1548,11 @@ export const TEMPLATES: MessageTemplate[] = [
     tags: ["verify", "gate", "human", "captcha", "role", "button", "origin", "rolelogic"],
     accent: ACCENT.green,
     // The verify button is a *link* plugin (Member Origin Role) — the binding
-    // ships inside the button URL, so there's no bot requirement and no
-    // pluginSlots: nothing to wire, only the per-server RoleLogic setup the
-    // attached chip points at.
+    // ships inside the button URL, so there's no bot requirement and nothing to
+    // configure in DWEEB. The link slot exists so the guided setup still runs:
+    // its one step is registering the server with RoleLogic (the setupUrl).
     pairsWith: "Member Origin Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-member-origin-role" }],
     message: VERIFY_MESSAGE,
   },
   {

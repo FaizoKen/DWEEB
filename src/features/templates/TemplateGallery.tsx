@@ -40,14 +40,10 @@ import { guildIconUrl } from "@/core/guild/api";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { loadDraftMessage } from "@/core/state/draftStorage";
 import { attachEditorFields } from "@/core/serialization/normalize";
-import {
-  TEMPLATES,
-  type MessageTemplate,
-  type TemplateCategory,
-} from "@/data/presets";
+import { TEMPLATES, type MessageTemplate, type TemplateCategory } from "@/data/presets";
 import type { WebhookMessage } from "@/core/schema/types";
 import { collectSearchText } from "@/core/schema/traversal";
-import { getPlugins, isPluginRegistryConfigured } from "@/core/plugins/registry";
+import { isRegisteredPluginId } from "@/core/plugins/registry";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { Preview } from "@/features/preview/Preview";
 import { Button } from "@/ui/Button";
@@ -326,15 +322,15 @@ export function TemplateGallery() {
         onPick: () => {
           replaceMessage(t.message);
           closeGallery();
-          // An interactive template ships one or more buttons/menus that still
-          // need their paired plugin wired. Hand straight to the guided setup
-          // checklist instead of dropping the user in a cold editor to hunt for
-          // each component — but only when at least one declared slot resolves
-          // to an available plugin.
+          // A template with plugin slots still has setup to finish — wiring an
+          // interactive component's plugin, or completing a link plugin's
+          // external per-server setup. Hand straight to the guided checklist
+          // instead of dropping the user in a cold editor — but only when at
+          // least one declared slot resolves to a plugin this build ships
+          // (service or link registry).
           const canSetup =
-            isPluginRegistryConfigured() &&
             !!t.pluginSlots?.length &&
-            t.pluginSlots.some((slot) => getPlugins().some((p) => p.id === slot.pluginId));
+            t.pluginSlots.some((slot) => isRegisteredPluginId(slot.pluginId));
           if (canSetup) {
             useTemplateSetupStore.getState().begin(t.id);
           } else {

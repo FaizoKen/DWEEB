@@ -29,15 +29,24 @@
  * old flow started, reachable later from the Action panel. Mounted by `App` as
  * a peer of the Share dialog (not nested in the gallery portal), keyed off
  * `templateSetupStore`.
+ *
+ * **Link slots** (`kind: "link"`) walk the same checklist with an inverted
+ * job: the binding already ships inside the button's URL, so there is nothing
+ * to configure in DWEEB — what remains is the *external service's* per-server
+ * setup (its `setupUrl`). The row's "Set up" simply opens that dashboard in a
+ * new tab and the slot counts as ready; DWEEB can't observe the service's
+ * state, so opening the page is the whole step (held in local state, never
+ * persisted). A link plugin with no `setupUrl` needs nothing and starts ready.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { getPluginSummary, setPluginSummary } from "@/core/state/pluginSummaryCache";
-import { getPlugins } from "@/core/plugins/registry";
+import { getPlugins, LINK_PLUGINS } from "@/core/plugins/registry";
 import {
   componentIdentity,
   interactiveComponents,
+  linkButtonNodeByPlugin,
   targetableNodeByCustomId,
   targetNoun,
   type PluginTarget,
@@ -45,13 +54,14 @@ import {
 import { TEMPLATES } from "@/data/presets";
 import type { EditorId, StringSelectComponent } from "@/core/schema/types";
 import type { PluginManifest } from "@/core/plugins/manifest";
+import type { LinkPluginManifest } from "@/core/plugins/linkManifest";
 import { PluginConfigModal } from "@/features/plugins/PluginConfigModal";
 import { PluginIcon } from "@/features/plugins/PluginIcon";
 import type { PluginSaveResult } from "@/features/plugins/usePluginConfig";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
-import { CheckCircleIcon, ChevronRightIcon } from "@/ui/Icon";
+import { CheckCircleIcon, ChevronRightIcon, ExternalLinkIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateSetup.module.css";
@@ -59,14 +69,24 @@ import styles from "./TemplateSetup.module.css";
 /** Sentence-case a noun for use as a row title fallback ("channel menu" → "Channel menu"). */
 const capitalize = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
 
-/** One resolved slot: a live component paired with the plugin to wire it to. */
-interface Slot {
+/** One resolved slot: a live interactive component + the plugin to wire it to. */
+interface InteractiveSlot {
+  kind: "interactive";
   manifest: PluginManifest;
   nodeId: EditorId;
   target: PluginTarget;
   /** Manifest preset id to pre-apply when setting this slot up fresh, if any. */
   preset?: string;
 }
+
+/** A pre-wired Link button whose external service needs per-server setup. */
+interface LinkSlot {
+  kind: "link";
+  manifest: LinkPluginManifest;
+  nodeId: EditorId;
+}
+
+type Slot = InteractiveSlot | LinkSlot;
 
 export function TemplateSetup({ templateId }: { templateId: string }) {
   const close = useTemplateSetupStore((s) => s.close);
@@ -84,13 +104,24 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
   const slots = useMemo<Slot[]>(() => {
     if (!template?.pluginSlots?.length) return [];
     const msg = useMessageStore.getState().message;
-    return template.pluginSlots.flatMap((slot) => {
+    return template.pluginSlots.flatMap((slot): Slot[] => {
+      if (slot.kind === "link") {
+        // A link slot names only the plugin — the live component is the Link
+        // button already carrying that plugin's URL (the template ships it
+        // pre-wired), found by prefix rather than custom_id.
+        const manifest = LINK_PLUGINS.find((p) => p.id === slot.pluginId);
+        if (!manifest) return [];
+        const nodeId = linkButtonNodeByPlugin(msg, manifest);
+        if (!nodeId) return [];
+        return [{ kind: "link", manifest, nodeId }];
+      }
       const manifest = getPlugins().find((p) => p.id === slot.pluginId);
       if (!manifest) return [];
       const found = targetableNodeByCustomId(msg, slot.customId);
       if (!found) return [];
       return [
         {
+          kind: "interactive",
           manifest,
           nodeId: found.nodeId,
           target: found.target,
@@ -102,6 +133,12 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
 
   // Which slot's config UI is open (index into `slots`), or null for checklist.
   const [configuring, setConfiguring] = useState<number | null>(null);
+
+  // Link slots whose setup page was opened, keyed by slot index. A link
+  // binding already ships in the button URL and DWEEB can't observe the
+  // external service's per-server state, so launching its dashboard is the
+  // whole step — local to this flow, never persisted.
+  const [linkOpened, setLinkOpened] = useState<Record<number, boolean>>({});
 
   // Nothing to wire (registry gone / unknown plugins / no matching components) —
   // bail out; the template is already applied to the editor.
@@ -120,12 +157,27 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
   };
   const isReady = (i: number) => {
     const slot = slots[i];
-    return !!slot && !!currentIdFor(i)?.startsWith(slot.manifest.customIdPrefix);
+    if (!slot) return false;
+    // A link slot ships wired; ready = its setup page was opened (or there is
+    // no setup page, so nothing is owed).
+    if (slot.kind === "link") return !slot.manifest.setupUrl || !!linkOpened[i];
+    return !!currentIdFor(i)?.startsWith(slot.manifest.customIdPrefix);
+  };
+
+  // Open the external service's per-server setup page for a link slot — that
+  // one click is the slot's whole step.
+  const openLinkSetup = (i: number) => {
+    const slot = slots[i];
+    if (!slot || slot.kind !== "link" || !slot.manifest.setupUrl) return;
+    window.open(slot.manifest.setupUrl, "_blank", "noopener,noreferrer");
+    setLinkOpened((s) => ({ ...s, [i]: true }));
   };
 
   const readyCount = slots.filter((_, i) => isReady(i)).length;
   const pending = slots.length - readyCount;
   const multi = slots.length > 1;
+  // Captured for the single-slot lead copy so the union narrows properly.
+  const first = slots[0];
 
   // Adopt what the plugin handed back — exactly like the inspector's Action
   // panel: the returned `custom_id` is the binding, plus (for a string select)
@@ -133,7 +185,7 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
   // the Send panel's wrong-server check.
   const handleSave = (i: number) => (result: PluginSaveResult) => {
     const slot = slots[i];
-    if (!slot) return;
+    if (!slot || slot.kind !== "interactive") return;
     const fields: Partial<StringSelectComponent> = { custom_id: result.customId };
     if (slot.target === "string_select" && result.options?.length) fields.options = result.options;
     if (result.fields) Object.assign(fields, result.fields);
@@ -174,7 +226,9 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
   // reconfigures (pass its current id); an unwired one attaches fresh.
   if (configuring !== null) {
     const slot = slots[configuring];
-    if (!slot) return null;
+    // Only interactive slots open a config UI; a link slot's setup lives on the
+    // external service, so `setConfiguring` is never called for one.
+    if (!slot || slot.kind !== "interactive") return null;
     const ready = isReady(configuring);
     return (
       <PluginConfigModal
@@ -249,14 +303,20 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
       <p className={styles.lead}>
         {multi ? (
           <>
-            This template has <strong>{slots.length}</strong> interactive components. Connect each
-            to its plugin and they'll respond the moment you post — no hunting through the editor.
+            This template has <strong>{slots.length}</strong> actions to finish. Connect each one
+            below and they'll work the moment you post — no hunting through the editor.
+          </>
+        ) : first?.kind === "link" ? (
+          <>
+            This template's button links to <strong>{first.manifest.name}</strong>, an external
+            service. Set it up for your server once and the link works the moment you post — there's
+            nothing to configure in DWEEB.
           </>
         ) : (
           <>
-            This template includes an interactive{" "}
-            {slots[0]?.target === "button" ? "button" : "menu"}. Connect it to its plugin and it'll
-            respond the moment you post — no hunting through the editor.
+            This template includes an interactive {first?.target === "button" ? "button" : "menu"}.
+            Connect it to its plugin and it'll respond the moment you post — no hunting through the
+            editor.
           </>
         )}
       </p>
@@ -264,18 +324,24 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
       <ul className={styles.slotList}>
         {slots.map((slot, i) => {
           const ready = isReady(i);
-          const cached = ready ? getPluginSummary(currentIdFor(i)) : undefined;
-          const noun = targetNoun(slot.target);
+          const isLink = slot.kind === "link";
+          const cached = ready && !isLink ? getPluginSummary(currentIdFor(i)) : undefined;
+          const noun = isLink ? "link button" : targetNoun(slot.target);
           // The component's own identity — its visible placeholder/label and the
           // heading above it — is what tells four "Picker" rows apart: it names
           // which part of the message this slot wires, in the user's own words.
           const ident = componentIdentity(message, slot.nodeId);
           const title = ident.label ?? (multi ? `${capitalize(noun)} ${i + 1}` : capitalize(noun));
           // Description: where in the message it sits (or the plugin's purpose)
-          // until wired; what it'll do once connected.
-          const desc = ready
-            ? (cached?.summary.description ?? `Connected to this ${noun}.`)
-            : (ident.context ?? slot.manifest.description);
+          // until wired; what it'll do once connected. A link slot leads with its
+          // setup hint — the one thing standing between the button and working.
+          const desc = isLink
+            ? ready
+              ? `The button links to ${slot.manifest.publisher ?? slot.manifest.name}'s service — finish any steps in the setup tab.`
+              : (slot.manifest.setupHint ?? slot.manifest.description)
+            : ready
+              ? (cached?.summary.description ?? `Connected to this ${noun}.`)
+              : (ident.context ?? slot.manifest.description);
           return (
             <li key={i} className={styles.slotRow} data-ready={ready ? "true" : undefined}>
               <PluginIcon manifest={slot.manifest} summaryIcon={cached?.summary.icon} />
@@ -296,13 +362,29 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
                     <CheckCircleIcon size={15} aria-hidden /> Ready
                   </span>
                 ) : null}
-                <Button
-                  size="sm"
-                  variant={ready ? "ghost" : "primary"}
-                  onClick={() => setConfiguring(i)}
-                >
-                  {ready ? "Reconfigure" : "Set up"}
-                </Button>
+                {isLink ? (
+                  // One click: launch the service's own dashboard in a new tab
+                  // — DWEEB can't watch the external setup, so opening it is
+                  // the whole step and the row flips to Ready.
+                  slot.manifest.setupUrl ? (
+                    <Button
+                      size="sm"
+                      variant={ready ? "ghost" : "primary"}
+                      trailingIcon={<ExternalLinkIcon size={14} />}
+                      onClick={() => openLinkSetup(i)}
+                    >
+                      {ready ? "Open setup" : "Set up"}
+                    </Button>
+                  ) : null
+                ) : (
+                  <Button
+                    size="sm"
+                    variant={ready ? "ghost" : "primary"}
+                    onClick={() => setConfiguring(i)}
+                  >
+                    {ready ? "Reconfigure" : "Set up"}
+                  </Button>
+                )}
               </div>
             </li>
           );
