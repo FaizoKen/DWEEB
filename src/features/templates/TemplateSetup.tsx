@@ -30,13 +30,13 @@
  * a peer of the Share dialog (not nested in the gallery portal), keyed off
  * `templateSetupStore`.
  *
- * **Link slots** (`kind: "link"`) walk the same checklist with an inverted
- * job: the binding already ships inside the button's URL, so there is nothing
- * to configure in DWEEB — what remains is the *external service's* per-server
- * setup (its `setupUrl`). The row's "Set up" simply opens that dashboard in a
- * new tab and the slot counts as ready; DWEEB can't observe the service's
- * state, so opening the page is the whole step (held in local state, never
- * persisted). A link plugin with no `setupUrl` needs nothing and starts ready.
+ * **Link slots** (`kind: "link"`) appear on the same checklist but carry no
+ * ready state and never gate "Review in editor": the binding already ships
+ * inside the button's URL, and the one thing left — the external service's
+ * per-server setup (its `setupUrl`) — may well have been done before, which
+ * DWEEB can't observe either way. So the row is purely a shortcut: "Set up"
+ * opens the service's dashboard in a new tab, and an admin whose server is
+ * already registered just continues past it.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -134,12 +134,6 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
   // Which slot's config UI is open (index into `slots`), or null for checklist.
   const [configuring, setConfiguring] = useState<number | null>(null);
 
-  // Link slots whose setup page was opened, keyed by slot index. A link
-  // binding already ships in the button URL and DWEEB can't observe the
-  // external service's per-server state, so launching its dashboard is the
-  // whole step — local to this flow, never persisted.
-  const [linkOpened, setLinkOpened] = useState<Record<number, boolean>>({});
-
   // Nothing to wire (registry gone / unknown plugins / no matching components) —
   // bail out; the template is already applied to the editor.
   useEffect(() => {
@@ -155,26 +149,20 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
     const slot = slots[i];
     return slot ? idToCustom.get(slot.nodeId) : undefined;
   };
+  // Link slots carry no ready state: the binding ships wired and the external
+  // per-server setup may already be done — DWEEB can't tell either way, so
+  // they never count toward (or against) the flow's progress.
   const isReady = (i: number) => {
     const slot = slots[i];
-    if (!slot) return false;
-    // A link slot ships wired; ready = its setup page was opened (or there is
-    // no setup page, so nothing is owed).
-    if (slot.kind === "link") return !slot.manifest.setupUrl || !!linkOpened[i];
+    if (!slot || slot.kind === "link") return false;
     return !!currentIdFor(i)?.startsWith(slot.manifest.customIdPrefix);
   };
 
-  // Open the external service's per-server setup page for a link slot — that
-  // one click is the slot's whole step.
-  const openLinkSetup = (i: number) => {
-    const slot = slots[i];
-    if (!slot || slot.kind !== "link" || !slot.manifest.setupUrl) return;
-    window.open(slot.manifest.setupUrl, "_blank", "noopener,noreferrer");
-    setLinkOpened((s) => ({ ...s, [i]: true }));
-  };
-
-  const readyCount = slots.filter((_, i) => isReady(i)).length;
-  const pending = slots.length - readyCount;
+  // Progress is measured over the *interactive* slots only — they're the ones
+  // that are genuinely dead until configured. Link slots never block Review.
+  const interactiveCount = slots.filter((s) => s.kind === "interactive").length;
+  const readyCount = slots.filter((s, i) => s.kind === "interactive" && isReady(i)).length;
+  const pending = interactiveCount - readyCount;
   const multi = slots.length > 1;
   // Captured for the single-slot lead copy so the union narrows properly.
   const first = slots[0];
@@ -262,7 +250,7 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
             title={
               pending > 0
                 ? `Connect ${
-                    pending === 1 ? "the remaining action" : `all ${slots.length} actions`
+                    pending === 1 ? "the remaining action" : `all ${interactiveCount} actions`
                   } first, or skip to set them up manually.`
                 : undefined
             }
@@ -286,9 +274,9 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
             2
           </span>
           Connect {multi ? "the plugins" : "the plugin"}
-          {multi ? (
+          {interactiveCount > 1 ? (
             <span className={styles.stepPill}>
-              {readyCount}/{slots.length}
+              {readyCount}/{interactiveCount}
             </span>
           ) : null}
         </li>
@@ -309,8 +297,8 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
         ) : first?.kind === "link" ? (
           <>
             This template's button links to <strong>{first.manifest.name}</strong>, an external
-            service. Set it up for your server once and the link works the moment you post — there's
-            nothing to configure in DWEEB.
+            service. If your server isn't set up with it yet, do that once below — already set up?
+            Just continue. There's nothing to configure in DWEEB.
           </>
         ) : (
           <>
@@ -333,12 +321,11 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
           const ident = componentIdentity(message, slot.nodeId);
           const title = ident.label ?? (multi ? `${capitalize(noun)} ${i + 1}` : capitalize(noun));
           // Description: where in the message it sits (or the plugin's purpose)
-          // until wired; what it'll do once connected. A link slot leads with its
-          // setup hint — the one thing standing between the button and working.
+          // until wired; what it'll do once connected. A link slot always leads
+          // with its setup hint — the one thing that could stand between the
+          // button and working, if the server isn't registered yet.
           const desc = isLink
-            ? ready
-              ? `The button links to ${slot.manifest.publisher ?? slot.manifest.name}'s service — finish any steps in the setup tab.`
-              : (slot.manifest.setupHint ?? slot.manifest.description)
+            ? (slot.manifest.setupHint ?? slot.manifest.description)
             : ready
               ? (cached?.summary.description ?? `Connected to this ${noun}.`)
               : (ident.context ?? slot.manifest.description);
@@ -363,17 +350,19 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
                   </span>
                 ) : null}
                 {isLink ? (
-                  // One click: launch the service's own dashboard in a new tab
-                  // — DWEEB can't watch the external setup, so opening it is
-                  // the whole step and the row flips to Ready.
+                  // Just a shortcut to the service's own dashboard — no state,
+                  // no gating: the admin may have registered the server long
+                  // before this template, and DWEEB can't tell either way.
                   slot.manifest.setupUrl ? (
                     <Button
                       size="sm"
-                      variant={ready ? "ghost" : "primary"}
+                      variant="primary"
                       trailingIcon={<ExternalLinkIcon size={14} />}
-                      onClick={() => openLinkSetup(i)}
+                      onClick={() =>
+                        window.open(slot.manifest.setupUrl, "_blank", "noopener,noreferrer")
+                      }
                     >
-                      {ready ? "Open setup" : "Set up"}
+                      Set up
                     </Button>
                   ) : null
                 ) : (
