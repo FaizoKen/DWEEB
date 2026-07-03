@@ -47,18 +47,16 @@ import {
   componentIdentity,
   interactiveComponents,
   linkButtonNodeByPlugin,
-  linkButtonUrlById,
   targetableNodeByCustomId,
   targetNoun,
   type PluginTarget,
 } from "@/core/plugins/targets";
 import { TEMPLATES } from "@/data/presets";
-import type { EditorId, LinkButtonComponent, StringSelectComponent } from "@/core/schema/types";
+import type { EditorId, StringSelectComponent } from "@/core/schema/types";
 import type { PluginManifest } from "@/core/plugins/manifest";
 import type { LinkPluginManifest } from "@/core/plugins/linkManifest";
 import { PluginConfigModal } from "@/features/plugins/PluginConfigModal";
 import { PluginIcon } from "@/features/plugins/PluginIcon";
-import { LinkParamFields } from "@/features/plugins/LinkParamFields";
 import type { PluginSaveResult } from "@/features/plugins/usePluginConfig";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { Modal } from "@/ui/Modal";
@@ -297,20 +295,12 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
             below and they'll work the moment you post — no hunting through the editor.
           </>
         ) : first?.kind === "link" ? (
-          first.manifest.params?.length ? (
-            <>
-              This template's button links to <strong>{first.manifest.name}</strong>, an external
-              service. Register your server with it if you haven't, then fill in the{" "}
-              {first.manifest.params.length === 1 ? "field" : "fields"} below — the button's link
-              isn't complete without it.
-            </>
-          ) : (
-            <>
-              This template's button links to <strong>{first.manifest.name}</strong>, an external
-              service. If your server isn't set up with it yet, do that once below — already set up?
-              Just continue. There's nothing to configure in DWEEB.
-            </>
-          )
+          <>
+            This template's button links to <strong>{first.manifest.name}</strong>, an external
+            service. If your server isn't set up with it yet, do that once below — already set up?
+            Just continue. Anything the link still needs (its setup note says so) goes straight into
+            the button's URL.
+          </>
         ) : (
           <>
             This template includes an interactive {first?.target === "button" ? "button" : "menu"}.
@@ -353,19 +343,6 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
                   </span>
                 </span>
                 {desc ? <span className={styles.slotDesc}>{desc}</span> : null}
-                {isLink && slot.manifest.params?.length ? (
-                  // The plugin's user params (e.g. the form id) collected right
-                  // here, so "finish the link" doesn't mean hunting the button
-                  // down in the editor afterwards. Same component as the Action
-                  // panel; writes go straight onto the live button URL. Left
-                  // unfilled it still doesn't gate the flow — the message
-                  // validator holds the send until it's complete.
-                  <LinkSlotParams
-                    manifest={slot.manifest}
-                    url={linkButtonUrlById(message, slot.nodeId)}
-                    onWrite={(url) => patchNode<LinkButtonComponent>(slot.nodeId, { url })}
-                  />
-                ) : null}
               </div>
               <div className={styles.slotAction}>
                 {ready ? (
@@ -409,23 +386,5 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
         Action panel.
       </p>
     </Modal>
-  );
-}
-
-/** A link slot's param inputs, tolerating a vanished node (`url` gone null). */
-function LinkSlotParams({
-  manifest,
-  url,
-  onWrite,
-}: {
-  manifest: LinkPluginManifest;
-  url: string | null;
-  onWrite: (url: string) => void;
-}) {
-  if (url === null) return null;
-  return (
-    <div className={styles.slotParams}>
-      <LinkParamFields manifest={manifest} url={url} onWrite={onWrite} />
-    </div>
   );
 }

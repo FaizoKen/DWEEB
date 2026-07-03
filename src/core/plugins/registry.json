@@ -386,16 +386,7 @@
       "homepage": "https://rolelogic.faizo.net/integrations/form-respondent-role",
       "url": "https://plugin-rolelogic.faizo.net/form-respondent-role/f/{form_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role",
-      "setupHint": "Build your form on the RoleLogic dashboard, then paste its id into the Form ID field below.",
-      "params": [
-        {
-          "token": "form_id",
-          "label": "Form ID",
-          "hint": "The id from your form's link on the RoleLogic dashboard — the part after /f/.",
-          "placeholder": "e.g. rules-quiz-4kf2",
-          "pattern": "^[A-Za-z0-9_-]{1,64}$"
-        }
-      ]
+      "setupHint": "Build your form on the RoleLogic dashboard, then paste its link (…/f/YOUR-FORM-ID) over the button URL below."
     },
     {
       "schemaVersion": 1,

@@ -814,10 +814,10 @@ const FORM_ROLE_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.ActionRow,
           components: [
-            // {form_id} is the plugin's declared user param: RoleLogic issues
-            // the id when the admin builds the form, and the guided setup /
-            // Action panel collect it. Until it's filled, validation holds the
-            // send instead of letting a dead form link post.
+            // {form_id} is a fill-me slot: RoleLogic issues the id when the
+            // admin builds the form, and they paste the finished link over the
+            // button URL (the plugin follows the URL). Until it's replaced,
+            // validation holds the send instead of letting a dead link post.
             {
               _id: id(),
               type: ComponentType.Button,
@@ -834,7 +834,7 @@ const FORM_ROLE_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# 🛡️ Admins: build your form in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role), then paste its id into the button's Form ID field.",
+        "-# 🛡️ Admins: build your form in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role), then paste its link over the button's URL.",
     },
   ],
 };
