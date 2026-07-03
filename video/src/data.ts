@@ -94,7 +94,7 @@ export const TEMPLATES: { name: string; emoji: string; cat: string; accent: stri
   { name: "Event / RSVP", emoji: "🎟️", cat: "Events", accent: "#eb459e" },
   { name: "Poll", emoji: "📊", cat: "Events", accent: "#00a8fc" },
   { name: "Giveaway", emoji: "🎉", cat: "Events", accent: "#f0b232" },
-  { name: "Support desk", emoji: "🛟", cat: "Support", accent: "#3ba55d" },
+  { name: "Help center", emoji: "🛟", cat: "Support", accent: "#00a8fc" },
   { name: "FAQ", emoji: "❓", cat: "Support", accent: "#00a8fc" },
   { name: "Product card", emoji: "✨", cat: "Commerce", accent: "#eb459e" },
   { name: "Pricing tiers", emoji: "💎", cat: "Commerce", accent: COLORS.blurple },

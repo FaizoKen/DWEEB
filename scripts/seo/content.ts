@@ -172,17 +172,18 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   introductions: {
     slug: "discord-introductions-template",
-    title: "Discord Introductions Template — icebreaker prompt | DWEEB",
+    title: "Discord Introductions Template — one-tap intro form | DWEEB",
     h1: "Discord Introductions Template",
     description:
-      "A copy-and-fill Discord introductions template that gets new members talking. Free, no bot needed — customize the prompts and post through any webhook.",
+      "A Discord introductions template with a button that pops an intro form and posts each new member's answers to the channel. Pairs with the Modal Form plugin.",
     intro:
-      "Turn a quiet #introductions channel into a lively one. This template gives newcomers a ready-made prompt to copy and fill in — name, where they're from, what brought them here — so introducing themselves feels easy instead of awkward.",
+      "Turn a quiet #introductions channel into a lively one. Instead of asking newcomers to copy and fill in a wall of text, this template gives them one button: tap it, fill in a short pop-up form — name, where they're from, what brought them here — and their intro posts straight to the channel so everyone can say hi. Less friction means more people actually introduce themselves, and every intro reads in the same tidy format.",
     whenToUse: [
       "Encouraging new members to say hello",
       "Setting a consistent format for intros",
       "Breaking the ice in a growing community",
     ],
+    keywords: ["introduction form", "member intro", "icebreaker", "modal form"],
   },
   "reaction-roles": {
     slug: "discord-reaction-roles-menu",
@@ -286,21 +287,6 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Drawing a fair winner automatically",
     ],
     keywords: ["discord giveaway bot", "giveaway message", "raffle", "prize draw"],
-  },
-  support: {
-    slug: "discord-ticket-panel-template",
-    title: "Discord Ticket Panel Template — open-a-ticket button | DWEEB",
-    h1: "Discord Support Ticket Panel Template",
-    description:
-      "A Discord support ticket panel: members tap a button to open a private help ticket. Pairs with the Tickets plugin — customize and post in your support channel.",
-    intro:
-      "Give members a clean way to ask for help privately. The button opens a private ticket channel where your staff can assist one-on-one, with a short checklist that nudges people to check the FAQ first — cutting down duplicate requests and keeping support organised.",
-    whenToUse: [
-      "Setting up a support or help-desk channel",
-      "Handling private requests without DMs",
-      "Organising staff support into tickets",
-    ],
-    keywords: ["ticket system", "support tickets", "help desk", "ticket bot"],
   },
   "help-center": {
     slug: "discord-help-center-template",

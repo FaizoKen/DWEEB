@@ -461,6 +461,11 @@ const PATCH_NOTES_MESSAGE: WebhookMessage = {
   ],
 };
 
+// Introductions powered by Modal Form: instead of asking newcomers to copy and
+// fill a plain-text template, the button pops a short form and posts their
+// answers to the channel — no blank-page friction, and every intro reads the
+// same. The Modal Form plugin owns the form fields (seeded by the
+// `introduction` preset); the message just pitches it.
 const INTRODUCTIONS_MESSAGE: WebhookMessage = {
   username: "Introductions",
   components: [
@@ -473,7 +478,7 @@ const INTRODUCTIONS_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.TextDisplay,
           content:
-            "# 🙋 Introduce yourself!\nNew here? Copy the template below and tell us about you.",
+            "# 🙋 Introduce yourself!\nNew here? Tap the button below, fill in a quick form, and your intro posts right here so everyone can say hi.",
         },
         {
           _id: id(),
@@ -485,14 +490,29 @@ const INTRODUCTIONS_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.TextDisplay,
           content:
-            "> **Name / nickname:**\n> **Where you're from:**\n> **What brought you here:**\n> **A hobby or fun fact:**\n> **Currently into:**",
+            "**We'd love to know**\n- 🙂 Your name or nickname\n- 🌍 Where you're from\n- ✨ What brought you here\n- 🎯 A hobby or what you're currently into",
         },
         {
           _id: id(),
-          type: ComponentType.TextDisplay,
-          content: "Don't be shy — everyone started with their first message. 😊",
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Primary,
+              label: "Introduce yourself",
+              emoji: { name: "🙋" },
+              custom_id: "introduce_self",
+            },
+          ],
         },
       ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# The button opens a quick pop-up form — don't be shy, everyone started with their first message. 😊",
     },
   ],
 };
@@ -1014,56 +1034,6 @@ const GIVEAWAY_BUTTON_MESSAGE: WebhookMessage = {
 // SUPPORT
 // ════════════════════════════════════════════════════════════════════════════
 
-const SUPPORT_MESSAGE: WebhookMessage = {
-  username: "Support",
-  components: [
-    {
-      _id: id(),
-      type: ComponentType.Container,
-      accent_color: ACCENT.blue,
-      components: [
-        {
-          _id: id(),
-          type: ComponentType.TextDisplay,
-          content:
-            "# 🛟 Need a hand?\nOpen a private ticket and a staff member will be right with you.",
-        },
-        {
-          _id: id(),
-          type: ComponentType.Separator,
-          divider: true,
-          spacing: SeparatorSpacing.Small,
-        },
-        {
-          _id: id(),
-          type: ComponentType.TextDisplay,
-          content:
-            "**Before you open a ticket**\n- 📚 Check **#faq** — it covers the common stuff\n- 📝 Have your details ready so we can help faster\n- 🤝 One ticket per issue, please",
-        },
-        {
-          _id: id(),
-          type: ComponentType.ActionRow,
-          components: [
-            {
-              _id: id(),
-              type: ComponentType.Button,
-              style: ButtonStyle.Primary,
-              label: "Open a ticket",
-              emoji: { name: "🎫" },
-              custom_id: "ticket_open",
-            },
-          ],
-        },
-      ],
-    },
-    {
-      _id: id(),
-      type: ComponentType.TextDisplay,
-      content: "-# Wire the button to the Tickets plugin to spin up a private channel per request.",
-    },
-  ],
-};
-
 // The flagship multi-plugin support panel: a Quick Replies FAQ menu answers
 // the common stuff instantly (privately, no staff needed), and a Tickets topic
 // menu opens a private channel for everything else. Two plugins, one message —
@@ -1583,11 +1553,14 @@ export const TEMPLATES: MessageTemplate[] = [
   {
     id: "introductions",
     name: "Introductions",
-    description: "A copy-and-fill prompt that gets new members talking.",
+    description: "A one-tap form that gets new members introducing themselves — no copy-paste.",
     emoji: "🙋",
     category: "Community",
-    tags: ["intro", "icebreaker", "about", "prompt"],
+    tags: ["intro", "icebreaker", "about", "prompt", "form", "modal"],
     accent: ACCENT.fuchsia,
+    requiresBot: true,
+    pairsWith: "Modal Form",
+    pluginSlots: [{ customId: "introduce_self", pluginId: "modal-form", preset: "introduction" }],
     message: INTRODUCTIONS_MESSAGE,
   },
   {
@@ -1694,19 +1667,6 @@ export const TEMPLATES: MessageTemplate[] = [
     pairsWith: "Giveaway",
     pluginSlots: [{ customId: "giveaway_enter", pluginId: "giveaway", preset: "gw-nitro" }],
     message: GIVEAWAY_BUTTON_MESSAGE,
-  },
-  {
-    id: "support",
-    name: "Support desk",
-    description: "An open-a-ticket button for private help.",
-    emoji: "🛟",
-    category: "Support",
-    tags: ["tickets", "help", "support", "staff", "button"],
-    accent: ACCENT.blue,
-    requiresBot: true,
-    pairsWith: "Tickets",
-    pluginSlots: [{ customId: "ticket_open", pluginId: "tickets", preset: "ticket-general" }],
-    message: SUPPORT_MESSAGE,
   },
   {
     id: "help-center",

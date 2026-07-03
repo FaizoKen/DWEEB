@@ -14,6 +14,7 @@
       "customIdPrefix": "modalform:",
       "presets": [
         { "id": "staff-application", "name": "Staff Application", "description": "Recruit moderators or helpers — name, timezone, availability, experience.", "emoji": "📋" },
+        { "id": "introduction", "name": "Introduce Yourself", "description": "Let new members introduce themselves with a quick form.", "emoji": "🙋" },
         { "id": "suggestion", "name": "Suggestion Box", "description": "Collect ideas from members.", "emoji": "💡" },
         { "id": "bug-report", "name": "Bug Report", "description": "Let members report problems with steps to reproduce.", "emoji": "🐛" },
         { "id": "ban-appeal", "name": "Ban Appeal", "description": "Let banned users appeal — one response per person.", "emoji": "⚖️" },

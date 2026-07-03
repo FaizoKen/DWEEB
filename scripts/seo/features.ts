@@ -216,7 +216,7 @@ export const FEATURES: FeatureSeo[] = [
     ],
     pluginId: "tickets",
     requiresBot: true,
-    previewTemplateId: "support",
+    previewTemplateId: "help-center",
   },
   {
     id: "quick-replies",
