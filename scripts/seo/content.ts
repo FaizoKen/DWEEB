@@ -64,6 +64,8 @@ export interface TemplateSeoOverride {
 export const CATEGORY_BLURB: Record<string, string> = {
   Featured: "Hand-picked starting points and a full tour of the editor.",
   Welcome: "Greet new members, lay down the rules, and gate access.",
+  Roles:
+    "Verify accounts and hand out roles automatically — Genshin, Steam, YouTube, Twitch, birthdays and more, powered by RoleLogic link plugins.",
   Community: "Announcements, changelogs, intros, role menus, suggestions and staff applications.",
   Events: "Events, polls and giveaways that drive engagement.",
   Support: "Help desks and FAQs that cut repeat questions.",
@@ -140,6 +142,188 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Adding a human check before granting access",
       "Granting roles based on where members joined from",
       "Running a lightweight alternative to a captcha bot",
+    ],
+  },
+  "topgg-vote": {
+    slug: "discord-topgg-vote-rewards",
+    title: "Discord Top.gg Vote Rewards — voter role panel | DWEEB",
+    h1: "Top.gg Vote Rewards Template",
+    description:
+      "A vote-for-us Discord panel that rewards Top.gg voters with a temporary role via RoleLogic. Plain link button — posts through any webhook, no bot needed.",
+    intro:
+      "Turn Top.gg votes into a perk members actually chase. This panel links straight to your server's (or bot's) Top.gg vote page, and the RoleLogic Top.gg Voter Role service grants a temporary Voter role when the vote lands — expiring on a timer you pick, from an hour to a week, so members come back and vote again.",
+    whenToUse: [
+      "Growing your server's Top.gg ranking with a standing vote reminder",
+      "Rewarding bot voters with a cosmetic or perk role",
+      "Running vote-gated perks that expire between vote cooldowns",
+    ],
+  },
+  "genshin-verify": {
+    slug: "discord-genshin-verification",
+    title: "Discord Genshin Impact Verification — UID roles | DWEEB",
+    h1: "Genshin Impact Verification Template",
+    description:
+      "A Genshin Impact verification panel for Discord: players link their UID and get Adventure Rank, World Level and Spiral Abyss roles automatically via RoleLogic.",
+    intro:
+      "Give your Genshin community roles that mean something. Players tap the verify button, enter their UID on RoleLogic, and roles for Adventure Rank, World Level, Spiral Abyss progress, achievements and server region are granted automatically — with an admin dashboard linked right in the message.",
+    whenToUse: [
+      "Verifying Genshin players before opening co-op or LFG channels",
+      "Granting AR / World Level / Abyss roles without manual screenshots",
+      "Splitting members by game region for event pings",
+    ],
+  },
+  "youtube-sub-role": {
+    slug: "discord-youtube-subscriber-role",
+    title: "Discord YouTube Subscriber Role — auto-verify subs | DWEEB",
+    h1: "YouTube Subscriber Role Template",
+    description:
+      "A claim-your-role panel for YouTube communities: members link YouTube with one-click Google OAuth and RoleLogic grants the subscriber role automatically.",
+    intro:
+      "Stop verifying subscribers by screenshot. This panel sends members through YouTube's official Google sign-in; RoleLogic checks the subscription and hands out the Subscriber role automatically — no mod queue, no fakeable proof, and an admin dashboard to review who linked.",
+    whenToUse: [
+      "Rewarding YouTube subscribers with an exclusive Discord role",
+      "Gating subscriber-only channels behind a real check",
+      "Replacing screenshot-proof verification with OAuth",
+    ],
+  },
+  "twitch-follower": {
+    slug: "discord-twitch-follower-role",
+    title: "Discord Twitch Follower & Sub Roles — real-time | DWEEB",
+    h1: "Twitch Follower Role Template",
+    description:
+      "A link-your-Twitch panel that grants follower and Tier 1/2/3 subscriber roles in real time via RoleLogic and Twitch EventSub. No bot on the webhook.",
+    intro:
+      "Give your stream community live-updating roles. Members link Twitch once and RoleLogic keeps their Discord roles in sync through EventSub — follows and Tier 1/2/3 subs land in real time, and roles update automatically when a sub lapses or upgrades.",
+    whenToUse: [
+      "Syncing Twitch sub tiers to Discord perk roles",
+      "Rewarding followers with access to stream-crew channels",
+      "Keeping sub roles accurate without nightly re-checks",
+    ],
+  },
+  "steam-verify": {
+    slug: "discord-steam-verification",
+    title: "Discord Steam Verification — playtime & game roles | DWEEB",
+    h1: "Steam Verification Template",
+    description:
+      "A Steam verification panel for Discord: players sign in via Steam OpenID and RoleLogic grants roles by games owned, playtime, achievements and Steam level.",
+    intro:
+      "Know who actually plays. This panel sends members through Steam's own OpenID sign-in; RoleLogic reads their public profile and grants roles for the games they own, hours played, achievements, Steam level, group membership and more — perfect for game-specific servers and clans.",
+    whenToUse: [
+      "Gating game channels to members who own the game",
+      "Granting veteran roles by playtime or achievements",
+      "Verifying clan members' Steam accounts at the door",
+    ],
+  },
+  "referral-code": {
+    slug: "discord-referral-code-role",
+    title: "Discord Referral Code Role — redeem codes & QR | DWEEB",
+    h1: "Referral Code Role Template",
+    description:
+      "A redeem-a-code Discord panel: members enter a referral code (or scan a QR) and RoleLogic grants the matching role — time-limited batches supported.",
+    intro:
+      "Hand out roles with codes instead of mod work. Print QR codes on event wristbands, drop codes in a podcast or Kickstarter update, and members redeem them here for the matching role — RoleLogic supports time-limited batches and six-figure redemption counts, with an admin dashboard for minting codes.",
+    whenToUse: [
+      "Granting attendee roles at IRL events via QR codes",
+      "Rewarding backers or podcast listeners with a code",
+      "Running limited-time promo roles that expire",
+    ],
+  },
+  "roblox-verify": {
+    slug: "discord-roblox-verification",
+    title: "Discord Roblox Verification — gamepass & group roles | DWEEB",
+    h1: "Roblox Verification Template",
+    description:
+      "A Roblox verification panel for Discord: players link via Roblox OAuth and get roles by account age, badges, gamepasses, group rank and in-game stats.",
+    intro:
+      "Verify Roblox players the official way. Members sign in through Roblox's own OAuth — no follow-for-proof tricks — and RoleLogic grants roles from account age, verified badge, gamepasses, group rank, and even custom per-game stats wired up through Open Cloud.",
+    whenToUse: [
+      "Verifying Roblox accounts before giving game-server access",
+      "Granting VIP roles to gamepass owners automatically",
+      "Mirroring Roblox group ranks into Discord roles",
+    ],
+  },
+  "tiktok-creator": {
+    slug: "discord-tiktok-creator-role",
+    title: "Discord TikTok Creator Role — follower-tier roles | DWEEB",
+    h1: "TikTok Creator Role Template",
+    description:
+      "A TikTok verification panel for Discord: creators link via TikTok's Login Kit and RoleLogic grants roles by follower count, verified badge, videos and likes.",
+    intro:
+      "Give real creators a badge that can't be faked. Members link their TikTok through the official Login Kit and RoleLogic grants creator roles based on follower count, verification status, video count and total likes — great for creator hubs, collab servers and talent communities.",
+    whenToUse: [
+      "Verifying creators in a collab or networking server",
+      "Granting tiered roles by TikTok follower count",
+      "Reserving creator-only channels for verified accounts",
+    ],
+  },
+  "form-role": {
+    slug: "discord-form-role-quiz",
+    title: "Discord Application Form & Quiz Role Template | DWEEB",
+    h1: "Form & Quiz Role Template",
+    description:
+      "A fill-in-the-form Discord panel: applications, rules quizzes and surveys built in RoleLogic auto-grade answers and grant the role instantly. No bot needed.",
+    intro:
+      "Let the form hand out the role. Build an application, rules quiz, poll or survey in RoleLogic, point this panel's button at it, and submissions are auto-graded — grant on a passing score, on specific answers, or on simple submission, with one response per person to keep it fair.",
+    whenToUse: [
+      "Running a rules quiz that unlocks the server on a pass",
+      "Collecting applications that grant a role automatically",
+      "Screening members with a survey before opening access",
+    ],
+  },
+  "kick-channel": {
+    slug: "discord-kick-follower-role",
+    title: "Discord Kick Follower & Sub Roles — real-time | DWEEB",
+    h1: "Kick Channel Role Template",
+    description:
+      "A link-your-Kick panel that grants follower, subscriber, VIP, mod and OG roles in real time via RoleLogic — gated on sub tenure, gifts and account age.",
+    intro:
+      "Bring your Kick.com channel crew into Discord with roles that keep themselves up to date. Members link Kick once through its official OAuth and RoleLogic grants follower, subscriber, VIP, moderator and OG roles in real time — with gates for sub tenure, gift counts, account age and live status.",
+    whenToUse: [
+      "Syncing Kick subs and VIPs into Discord perk roles",
+      "Rewarding long-tenured subscribers with veteran roles",
+      "Giving your mod team matching roles across platforms",
+    ],
+  },
+  birthdays: {
+    slug: "discord-birthday-role",
+    title: "Discord Birthday Role — auto birthday-of-the-day | DWEEB",
+    h1: "Birthday Role Template",
+    description:
+      "A set-your-birthday Discord panel: members save their date once and RoleLogic grants timezone-aware birthday, zodiac, birth-month and age roles automatically.",
+    intro:
+      "Never miss a member's birthday again. Members set their date once — no extra account needed — and RoleLogic handles the rest: a birthday-of-the-day role that lands at their local midnight, plus zodiac, birth-month and optional age roles the whole year round.",
+    whenToUse: [
+      "Celebrating members with an automatic birthday role",
+      "Powering a birthday-ping channel without a dedicated bot",
+      "Adding zodiac and birth-month flair roles",
+    ],
+  },
+  "osu-verify": {
+    slug: "discord-osu-verification",
+    title: "Discord osu! Verification — rank & PP roles | DWEEB",
+    h1: "osu! Verification Template",
+    description:
+      "An osu! verification panel for Discord: players link via osu! OAuth and RoleLogic grants roles by global rank, PP, play count and accuracy — per game mode.",
+    intro:
+      "Rank roles your osu! community can trust. Players link their account through osu!'s own OAuth and RoleLogic grants roles from global rank, PP, play count and accuracy — per game mode, including taiko and mania — plus supporter status and official BN/GMT/NAT groups.",
+    whenToUse: [
+      "Granting digit roles (1k, 10k, 100k) from real rank data",
+      "Verifying players before tournament sign-ups",
+      "Highlighting supporters and official group members",
+    ],
+  },
+  "bluesky-role": {
+    slug: "discord-bluesky-role",
+    title: "Discord Bluesky Roles — followers, mutuals & lists | DWEEB",
+    h1: "Bluesky Account Role Template",
+    description:
+      "A link-your-Bluesky Discord panel: RoleLogic grants roles for followers, mutuals, starter-pack and list members, account age and follower count.",
+    intro:
+      "Connect your Bluesky following to your Discord. Members link their Bluesky account and RoleLogic grants roles for following you, being a mutual, sitting in a starter pack or list, post engagement, and account properties like age, follower count or a custom domain handle.",
+    whenToUse: [
+      "Rewarding your Bluesky followers with a Discord role",
+      "Granting roles to starter-pack or curated-list members",
+      "Verifying custom-domain handles for a trusted-member role",
     ],
   },
   announcement: {

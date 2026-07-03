@@ -46,6 +46,7 @@ const ACCENT = {
 export const TEMPLATE_CATEGORIES = [
   "Featured",
   "Welcome",
+  "Roles",
   "Community",
   "Events",
   "Support",
@@ -361,6 +362,676 @@ const VERIFY_MESSAGE: WebhookMessage = {
       type: ComponentType.TextDisplay,
       content:
         "-# 🛡️ Admins: review verified members in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/member-origin-role/members/{server_id}).",
+    },
+  ],
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// ROLES — RoleLogic link-plugin panels
+//
+// Each of these follows the Verification-gate pattern: the Link button ships
+// pre-wired to a RoleLogic link plugin (the URL *is* the binding, see
+// linkManifest.ts), {server_id} resolves at send from the destination webhook,
+// and the admin footer links the plugin's per-server dashboard. No bot needed.
+// ════════════════════════════════════════════════════════════════════════════
+
+const TOPGG_VOTE_MESSAGE: WebhookMessage = {
+  username: "Vote Rewards",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.fuchsia,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🗳️ Vote for us on Top.gg\nA vote takes ten seconds and helps new members find us — and it earns you the exclusive **Voter** role as thanks.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "The role expires after a while, so vote again whenever the cooldown resets to keep it. 💜",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Vote on Top.gg",
+              emoji: { name: "🗳️" },
+              url: "https://top.gg/discord/servers/{server_id}/vote",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: connect your Top.gg vote webhook in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftopgg-voter-role).",
+    },
+  ],
+};
+
+const GENSHIN_VERIFY_MESSAGE: WebhookMessage = {
+  username: "Traveler Check-in",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.teal,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# ⚔️ Verify your Genshin account\nLink your UID to unlock traveler roles — Adventure Rank, World Level, Spiral Abyss and region roles are granted automatically.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "Set your in-game profile to public first, then verify — it only takes a minute. ✨",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Verify my UID",
+              emoji: { name: "⚔️" },
+              url: "https://plugin-rolelogic.faizo.net/genshin-player-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/genshin-player-role/players/{server_id}).",
+    },
+  ],
+};
+
+const YOUTUBE_SUB_MESSAGE: WebhookMessage = {
+  username: "Subscriber Perks",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.red,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# ▶️ Claim your Subscriber role\nSubscribed on YouTube? Link your account with one click and get the **Subscriber** role automatically.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "Sign-in uses Google OAuth — we never see your password, and you can unlink anytime.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Link YouTube",
+              emoji: { name: "▶️" },
+              url: "https://plugin-rolelogic.faizo.net/youtube-subscriber-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: review linked subscribers in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/youtube-subscriber-role/subscribers/{server_id}).",
+    },
+  ],
+};
+
+const TWITCH_FOLLOWER_MESSAGE: WebhookMessage = {
+  username: "Stream Crew",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.purple,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 📺 Link your Twitch\nFollowers and subs get their roles here — **Follower**, and **Tier 1 / 2 / 3** roles update in real time as your sub status changes.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "Link once and you're done — roles follow your Twitch status automatically. 💜",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Link Twitch",
+              emoji: { name: "📺" },
+              url: "https://plugin-rolelogic.faizo.net/twitch-follower-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: review linked viewers in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/twitch-follower-role/users/{server_id}).",
+    },
+  ],
+};
+
+const STEAM_VERIFY_MESSAGE: WebhookMessage = {
+  username: "Steam Check-in",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blue,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🎮 Verify your Steam profile\nSign in through Steam and get roles for the games you own, your playtime, achievements and Steam level — automatically.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "Verification uses Steam's own OpenID sign-in — set your profile to public so your stats can be read.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Link Steam",
+              emoji: { name: "🎮" },
+              url: "https://plugin-rolelogic.faizo.net/steam-player-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/steam-player-role/players/{server_id}).",
+    },
+  ],
+};
+
+const REFERRAL_CODE_MESSAGE: WebhookMessage = {
+  username: "Code Redemption",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.orange,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🎟️ Got a code? Redeem it here\nEnter the code from your ticket, flyer, wristband or invite and the matching role lands on your account instantly.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "Codes are one-per-person and some are time-limited — redeem yours early!",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Redeem a code",
+              emoji: { name: "🎟️" },
+              url: "https://plugin-rolelogic.faizo.net/referral-code-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: create codes and QR batches in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/referral-code-role/admin?guild_id={server_id}).",
+    },
+  ],
+};
+
+const ROBLOX_VERIFY_MESSAGE: WebhookMessage = {
+  username: "Roblox Check-in",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.red,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🧱 Verify your Roblox account\nLink your Roblox account to unlock roles for account age, badges, gamepasses, group rank — even your in-game stats.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "Verification is through Roblox's official sign-in — no passwords, no follow-for-proof tricks.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Verify Roblox",
+              emoji: { name: "🧱" },
+              url: "https://plugin-rolelogic.faizo.net/roblox-player-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/roblox-player-role/players/{server_id}).",
+    },
+  ],
+};
+
+const TIKTOK_CREATOR_MESSAGE: WebhookMessage = {
+  username: "Creator Corner",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.fuchsia,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🎵 TikTok creator? Prove it\nLink your TikTok account and get creator roles based on your follower count, verified badge, videos and likes.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "Sign-in uses TikTok's official Login Kit — takes under a minute, unlink anytime.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Link TikTok",
+              emoji: { name: "🎵" },
+              url: "https://plugin-rolelogic.faizo.net/tiktok-creator-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: manage creator tiers in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftiktok-creator-role).",
+    },
+  ],
+};
+
+const FORM_ROLE_MESSAGE: WebhookMessage = {
+  username: "Applications",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blurple,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 📝 Fill in the form\nAnswer a short form to get your role — applications, rules quizzes and surveys are graded automatically and the role lands instantly.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "One submission per person — take your time and answer honestly. ✅",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            // The form id is per-server: RoleLogic issues it when the admin
+            // builds the form, so the URL ships as the bare /f/ prefix and the
+            // guided setup + footer tell the admin to complete it.
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Open the form",
+              emoji: { name: "📝" },
+              url: "https://plugin-rolelogic.faizo.net/form-respondent-role/f/",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: build your form in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role), then paste its /f/ link into the button.",
+    },
+  ],
+};
+
+const KICK_CHANNEL_MESSAGE: WebhookMessage = {
+  username: "Kick Crew",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.green,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🎥 Link your Kick account\nFollowers, subs, VIPs, mods and OGs — link once and your channel roles arrive in real time, gift subs and tenure included.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "Sign-in uses Kick's official OAuth — no passwords shared, unlink anytime. 💚",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Link Kick",
+              emoji: { name: "🎥" },
+              url: "https://plugin-rolelogic.faizo.net/kick-channel-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: review linked viewers in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/kick-channel-role/users/{server_id}).",
+    },
+  ],
+};
+
+const BIRTHDAY_ROLE_MESSAGE: WebhookMessage = {
+  username: "Birthdays",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.gold,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🎂 Tell us your birthday\nSet it once and the magic happens on the day: a shiny **Birthday** role, plus zodiac and birth-month roles all year round.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "Timezone-aware, so your role shows up on *your* midnight. The year is optional if you'd rather not share your age.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Set my birthday",
+              emoji: { name: "🎂" },
+              url: "https://plugin-rolelogic.faizo.net/birthday-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: see upcoming birthdays in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/birthday-role/users/{server_id}).",
+    },
+  ],
+};
+
+const OSU_VERIFY_MESSAGE: WebhookMessage = {
+  username: "osu! Check-in",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.fuchsia,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🎯 Verify your osu! account\nLink your account and earn roles for global rank, PP, play count and accuracy — per game mode, supporter and BN/GMT/NAT included.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "Sign-in is osu!'s own OAuth — one click and your rank roles are live. 🩷",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Link osu!",
+              emoji: { name: "🎯" },
+              url: "https://plugin-rolelogic.faizo.net/osu-player-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/osu-player-role/users/{server_id}).",
+    },
+  ],
+};
+
+const BLUESKY_ROLE_MESSAGE: WebhookMessage = {
+  username: "Bluesky Link",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blue,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🦋 Link your Bluesky\nFollowers, mutuals, starter-pack and list members — link your Bluesky account and the matching roles are granted automatically.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "Account-age, follower-count and custom-domain roles work too — one link covers them all.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Link Bluesky",
+              emoji: { name: "🦋" },
+              url: "https://plugin-rolelogic.faizo.net/bluesky-account-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: review linked accounts in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/bluesky-account-role/users/{server_id}).",
     },
   ],
 };
@@ -1554,6 +2225,162 @@ export const TEMPLATES: MessageTemplate[] = [
     pairsWith: "Member Origin Role",
     pluginSlots: [{ kind: "link", pluginId: "rolelogic-member-origin-role" }],
     message: VERIFY_MESSAGE,
+  },
+  {
+    id: "topgg-vote",
+    name: "Top.gg vote rewards",
+    description: "A vote-for-us button that pays voters back with a temporary role.",
+    emoji: "🗳️",
+    category: "Roles",
+    tags: ["topgg", "top.gg", "vote", "voter", "upvote", "reward", "role", "rolelogic"],
+    accent: ACCENT.fuchsia,
+    pairsWith: "Top.gg Voter Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-topgg-voter-role" }],
+    message: TOPGG_VOTE_MESSAGE,
+  },
+  {
+    id: "genshin-verify",
+    name: "Genshin verification",
+    description: "Players link their UID and get AR, World Level and Abyss roles.",
+    emoji: "⚔️",
+    category: "Roles",
+    tags: ["genshin", "genshin impact", "uid", "adventure rank", "verify", "role", "rolelogic"],
+    accent: ACCENT.teal,
+    pairsWith: "Genshin Player Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-genshin-player-role" }],
+    message: GENSHIN_VERIFY_MESSAGE,
+  },
+  {
+    id: "youtube-sub-role",
+    name: "YouTube subscriber role",
+    description: "Subscribers link YouTube with one click and get their role.",
+    emoji: "▶️",
+    category: "Roles",
+    tags: ["youtube", "subscriber", "creator", "oauth", "verify", "role", "rolelogic"],
+    accent: ACCENT.red,
+    pairsWith: "YouTube Subscriber Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-youtube-subscriber-role" }],
+    message: YOUTUBE_SUB_MESSAGE,
+  },
+  {
+    id: "twitch-follower",
+    name: "Twitch follower role",
+    description: "Followers and Tier 1/2/3 subs get live-updating channel roles.",
+    emoji: "📺",
+    category: "Roles",
+    tags: ["twitch", "follower", "subscriber", "tier", "stream", "verify", "role", "rolelogic"],
+    accent: ACCENT.purple,
+    pairsWith: "Twitch Follower Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-twitch-follower-role" }],
+    message: TWITCH_FOLLOWER_MESSAGE,
+  },
+  {
+    id: "steam-verify",
+    name: "Steam verification",
+    description: "Players sign in via Steam and get roles for games and playtime.",
+    emoji: "🎮",
+    category: "Roles",
+    tags: ["steam", "openid", "playtime", "games", "achievements", "verify", "role", "rolelogic"],
+    accent: ACCENT.blue,
+    pairsWith: "Steam Player Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-steam-player-role" }],
+    message: STEAM_VERIFY_MESSAGE,
+  },
+  {
+    id: "referral-code",
+    name: "Code redemption",
+    description: "Members redeem a referral code or QR and get the matching role.",
+    emoji: "🎟️",
+    category: "Roles",
+    tags: ["referral", "code", "redeem", "qr", "event", "giveaway", "role", "rolelogic"],
+    accent: ACCENT.orange,
+    pairsWith: "Referral Code Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-referral-code-role" }],
+    message: REFERRAL_CODE_MESSAGE,
+  },
+  {
+    id: "roblox-verify",
+    name: "Roblox verification",
+    description: "Players verify their Roblox account and get stat-based roles.",
+    emoji: "🧱",
+    category: "Roles",
+    tags: ["roblox", "gamepass", "group rank", "badges", "verify", "role", "rolelogic"],
+    accent: ACCENT.red,
+    pairsWith: "Roblox Player Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-roblox-player-role" }],
+    message: ROBLOX_VERIFY_MESSAGE,
+  },
+  {
+    id: "tiktok-creator",
+    name: "TikTok creator role",
+    description: "Creators link TikTok and get follower- and badge-based roles.",
+    emoji: "🎵",
+    category: "Roles",
+    tags: ["tiktok", "creator", "follower", "verified", "verify", "role", "rolelogic"],
+    accent: ACCENT.fuchsia,
+    pairsWith: "TikTok Creator Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-tiktok-creator-role" }],
+    message: TIKTOK_CREATOR_MESSAGE,
+  },
+  {
+    id: "form-role",
+    name: "Form & quiz role",
+    description: "An application form or rules quiz that grants the role itself.",
+    emoji: "📝",
+    category: "Roles",
+    tags: ["form", "quiz", "application", "survey", "onboarding", "role", "rolelogic"],
+    accent: ACCENT.blurple,
+    pairsWith: "Form Respondent Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-form-respondent-role" }],
+    message: FORM_ROLE_MESSAGE,
+  },
+  {
+    id: "kick-channel",
+    name: "Kick channel role",
+    description: "Kick followers, subs, VIPs, mods and OGs get live channel roles.",
+    emoji: "🎥",
+    category: "Roles",
+    tags: ["kick", "kick.com", "follower", "subscriber", "vip", "stream", "role", "rolelogic"],
+    accent: ACCENT.green,
+    pairsWith: "Kick Channel Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-kick-channel-role" }],
+    message: KICK_CHANNEL_MESSAGE,
+  },
+  {
+    id: "birthdays",
+    name: "Birthday roles",
+    description: "Members set their birthday once and get the role on the day.",
+    emoji: "🎂",
+    category: "Roles",
+    tags: ["birthday", "bday", "zodiac", "celebration", "timezone", "role", "rolelogic"],
+    accent: ACCENT.gold,
+    pairsWith: "Birthday Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-birthday-role" }],
+    message: BIRTHDAY_ROLE_MESSAGE,
+  },
+  {
+    id: "osu-verify",
+    name: "osu! verification",
+    description: "Players link osu! and get rank, PP and accuracy roles per mode.",
+    emoji: "🎯",
+    category: "Roles",
+    tags: ["osu", "osu!", "rank", "pp", "rhythm game", "verify", "role", "rolelogic"],
+    accent: ACCENT.fuchsia,
+    pairsWith: "osu! Player Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-osu-player-role" }],
+    message: OSU_VERIFY_MESSAGE,
+  },
+  {
+    id: "bluesky-role",
+    name: "Bluesky roles",
+    description: "Followers, mutuals and list members get roles for linking Bluesky.",
+    emoji: "🦋",
+    category: "Roles",
+    tags: ["bluesky", "bsky", "atproto", "follower", "mutual", "social", "role", "rolelogic"],
+    accent: ACCENT.blue,
+    pairsWith: "Bluesky Account Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-bluesky-account-role" }],
+    message: BLUESKY_ROLE_MESSAGE,
   },
   {
     id: "announcement",
