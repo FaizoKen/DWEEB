@@ -1,17 +1,27 @@
 /**
  * Action panel — wire up what happens when an interactive component is used.
  *
- * Rendered by the Inspector for any plugin-targetable node (interactive button
- * or select). It owns the two halves of that one decision, kept together
- * because they're the *same* value: the `custom_id` Discord delivers on use,
- * and the plugin (if any) that claims it by prefix. Picking a plugin opens its
- * config iframe and adopts the `custom_id` it returns; on reload we recompute
- * the attachment purely from that id via `matchPlugin`, so nothing
- * plugin-specific is ever persisted on the message.
+ * Rendered by the Inspector for any button (except Premium) and any select. It
+ * owns the one decision the component makes — its action — and keeps together
+ * the value that *is* that decision:
  *
- * When no registry ships (`isPluginRegistryConfigured()` is false) the whole
- * plugin half is dormant and we render just the bare `custom_id` field — the
- * editor looks exactly as it did before plugins existed.
+ *  - For a **select** or an **interactive button**, that's the `custom_id`
+ *    Discord delivers on use, and the plugin (if any) that claims it by prefix.
+ *  - For a **Link button**, it's the `url`, and the URL-based link plugin that
+ *    claims it by template prefix.
+ *
+ * A button can take *either* kind of action, so its "Browse plugins" library
+ * lists both — interactive plugins that DWEEB handles, and link plugins that
+ * open an external page — in one modal. Picking across the divide switches the
+ * button's style to match (a link plugin makes it a Link; an interactive plugin
+ * makes it a normal button) and, on a fresh attach, names the button after the
+ * plugin and enables it, so a picked action arrives ready to use. On reload we
+ * recompute the attachment purely from the id/url via `matchPlugin` /
+ * `matchLinkPlugin`, so nothing plugin-specific is ever persisted on the message.
+ *
+ * When no registry ships (`isPluginRegistryConfigured()` is false and no link
+ * plugins bundled) the plugin half is dormant and we render just the bare
+ * `custom_id` field — the editor looks exactly as it did before plugins existed.
  */
 
 import { useEffect, useState, type ReactNode } from "react";
@@ -24,14 +34,25 @@ import {
   getPluginSummary,
   setPluginSummary,
 } from "@/core/state/pluginSummaryCache";
-import { isPluginRegistryConfigured } from "@/core/plugins/registry";
+import {
+  isPluginRegistryConfigured,
+  isLinkPluginRegistryConfigured,
+  LINK_PLUGINS,
+} from "@/core/plugins/registry";
 import { LIMITS } from "@/core/schema/limits";
 import type { PluginManifest } from "@/core/plugins/manifest";
+import { matchLinkPlugin, type LinkPluginManifest } from "@/core/plugins/linkManifest";
 import { matchPlugin, pluginsForTarget, targetOf, type PluginTarget } from "@/core/plugins/targets";
-import type {
-  AnyComponent,
-  InteractiveButtonComponent,
-  StringSelectComponent,
+import { isButton } from "@/core/schema/guards";
+import {
+  ButtonStyle,
+  ComponentType,
+  type AnyComponent,
+  type ButtonComponent,
+  type InteractiveButtonComponent,
+  type LinkButtonComponent,
+  type PartialEmoji,
+  type StringSelectComponent,
 } from "@/core/schema/types";
 import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
@@ -41,6 +62,7 @@ import { PluginIcon } from "@/features/plugins/PluginIcon";
 import { PluginLibraryModal } from "@/features/plugins/PluginLibraryModal";
 import type { PluginSaveResult } from "@/features/plugins/usePluginConfig";
 import { CustomIdField } from "./CustomIdField";
+import { emojiFromString } from "./EmojiField";
 import styles from "./PluginPanel.module.css";
 
 interface Props {
@@ -57,8 +79,25 @@ const DETACH_DEFAULTS: Record<PluginTarget, string> = {
   channel_select: "channel_select",
 };
 
+/** The URL a detached Link button falls back to — the fresh-Link default, which
+ *  matches no link-plugin template prefix. */
+const DETACHED_URL = "https://discord.com";
+
+/** The stock labels a fresh/converted button carries — the ones we're free to
+ *  overwrite with a plugin's name on attach. A label the user actually typed
+ *  isn't in here, so their wording is left alone. */
+const STOCK_LABELS = new Set(["", "click me", "open link", "button", "new button"]);
+
 function currentCustomId(node: AnyComponent): string | undefined {
   return "custom_id" in node ? (node as { custom_id?: string }).custom_id : undefined;
+}
+
+/** The plugin target a button/select maps to for the interactive library —
+ *  "button" for any non-Premium button (Link included, since picking an
+ *  interactive plugin converts it), else the select's own target. */
+function actionTarget(node: AnyComponent): PluginTarget | null {
+  if (isButton(node)) return node.style === ButtonStyle.Premium ? null : "button";
+  return targetOf(node);
 }
 
 /** The custom_id field's wording + cap, per kind of component. */
@@ -75,24 +114,111 @@ function idFieldProps(target: PluginTarget): { maxLength: number; hint: string }
   };
 }
 
+/** Display label + emoji a plugin/preset lends a freshly-attached button. */
+interface Presentation {
+  label: string;
+  emoji?: string;
+}
+
+/** The button fields a fresh attach overwrites — narrow enough to apply to a
+ *  Link or an interactive button alike (no `style`, which each conversion sets
+ *  itself). `disabled: undefined` clears a disabled state (enables the button). */
+interface PresentationFields {
+  label?: string;
+  emoji?: PartialEmoji;
+  disabled?: boolean | undefined;
+}
+
+/**
+ * The label / emoji / enabled state to stamp on a button when a plugin is
+ * *freshly* attached — the "name it and turn it on" step. Protective by design:
+ * a label the user typed (anything not in {@link STOCK_LABELS}) is kept, and an
+ * emoji they already chose is kept; only a blank/stock slot is filled. The
+ * button is always enabled — a just-attached action should be live.
+ */
+function presentationFields(
+  node: ButtonComponent,
+  chosen: Presentation,
+  overrideLabel?: string,
+): PresentationFields {
+  const currentLabel = "label" in node ? node.label : undefined;
+  const currentEmoji = "emoji" in node ? node.emoji : undefined;
+  const label = overrideLabel || chosen.label;
+  const out: PresentationFields = { disabled: undefined };
+  if (label && isStockLabel(currentLabel)) out.label = label.slice(0, LIMITS.BUTTON_LABEL);
+  if (chosen.emoji && !currentEmoji) out.emoji = emojiFromString(chosen.emoji);
+  return out;
+}
+
+function isStockLabel(label: string | undefined): boolean {
+  return !label || STOCK_LABELS.has(label.trim().toLowerCase());
+}
+
+/** Build a fresh interactive button from any button node, adopting `customId`
+ *  and the presentation overrides — used when a Link button is converted by
+ *  attaching an interactive plugin. */
+function toInteractiveButton(
+  prev: ButtonComponent,
+  customId: string,
+  overrides: PresentationFields,
+): Omit<InteractiveButtonComponent, "_id"> {
+  const emoji = "emoji" in overrides ? overrides.emoji : "emoji" in prev ? prev.emoji : undefined;
+  const prevLabel = "label" in prev ? prev.label : undefined;
+  return {
+    type: ComponentType.Button,
+    // A Link/Premium source has no interactive style to keep — default to blurple.
+    style:
+      prev.style === ButtonStyle.Link || prev.style === ButtonStyle.Premium
+        ? ButtonStyle.Primary
+        : prev.style,
+    label: overrides.label ?? prevLabel ?? "Click me",
+    custom_id: customId,
+    ...(emoji ? { emoji } : {}),
+    ...(overrides.disabled ? { disabled: overrides.disabled } : {}),
+  };
+}
+
+/** Build a fresh Link button from any button node — used when an interactive
+ *  button is converted by attaching a link plugin. */
+function toLinkButton(
+  prev: ButtonComponent,
+  url: string,
+  overrides: PresentationFields,
+): Omit<LinkButtonComponent, "_id"> {
+  const emoji = "emoji" in overrides ? overrides.emoji : "emoji" in prev ? prev.emoji : undefined;
+  const prevLabel = "label" in prev ? prev.label : undefined;
+  return {
+    type: ComponentType.Button,
+    style: ButtonStyle.Link,
+    label: overrides.label ?? prevLabel ?? "Open link",
+    url,
+    ...(emoji ? { emoji } : {}),
+    ...(overrides.disabled ? { disabled: overrides.disabled } : {}),
+  };
+}
+
+/** The config-iframe session in flight: which plugin, the id being edited (if
+ *  reconfiguring), the preset to seed a fresh attach, and the button
+ *  presentation to apply on save (only set for a fresh attach). */
+interface Configuring {
+  manifest: PluginManifest;
+  customId?: string;
+  preset?: string;
+  presentation?: Presentation;
+}
+
 export function PluginPanel({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
+  const replace = useMessageStore((s) => s.replaceNode);
   const status = usePluginRegistry((s) => s.status);
   const plugins = usePluginRegistry((s) => s.plugins);
   const load = usePluginRegistry((s) => s.load);
   const reload = usePluginRegistry((s) => s.reload);
 
-  // Which plugin's config iframe is open, plus the id we're editing (if any) and
-  // the preset to pre-apply on a fresh attach (when picked from the library).
-  const [configuring, setConfiguring] = useState<{
-    manifest: PluginManifest;
-    customId?: string;
-    preset?: string;
-  } | null>(null);
+  const [configuring, setConfiguring] = useState<Configuring | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   // The raw custom_id is the secondary, hand-wiring path — kept collapsed so the
-  // ready-made plugin card stays the focus. Only rendered when plugins are on
-  // offer; otherwise the field shows on its own (see below).
+  // ready-made plugin card stays the focus. Only shown for id-bearing components.
   const [showManualId, setShowManualId] = useState(false);
 
   // Lazy, idempotent: only the first targetable node to render triggers a fetch.
@@ -100,16 +226,30 @@ export function PluginPanel({ node }: Props) {
     if (isPluginRegistryConfigured()) load();
   }, [load]);
 
-  const target = targetOf(node);
+  const target = actionTarget(node);
   if (!target) return null;
 
+  const isBtn = isButton(node);
+  const linkStyle = isBtn && node.style === ButtonStyle.Link;
+
+  const registryOn = isPluginRegistryConfigured();
+  // Link plugins only apply to buttons (they bind by URL, which selects lack).
+  const linkOn = isBtn && isLinkPluginRegistryConfigured();
+
   const customId = currentCustomId(node);
-  const attached = matchPlugin(plugins, customId);
+  const attached = registryOn && !linkStyle ? matchPlugin(plugins, customId) : null;
+  const attachedLink = linkStyle && linkOn ? matchLinkPlugin(LINK_PLUGINS, node.url) : null;
+
+  const interactiveAvailable = registryOn ? pluginsForTarget(plugins, target) : [];
+  const linkAvailable = linkOn ? LINK_PLUGINS : [];
+  const totalAvailable = interactiveAvailable.length + linkAvailable.length;
+
   const { maxLength, hint } = idFieldProps(target);
 
-  // The raw custom_id field — locked read-only while a plugin owns it (the
-  // attachment *is* this value, so editing by hand would break the binding).
-  const idField = (
+  // The raw custom_id field — only exists for id-bearing components (not a Link
+  // button, whose URL lives in the ButtonInspector). Locked read-only while a
+  // plugin owns it (the attachment *is* this value).
+  const idField = linkStyle ? null : (
     <CustomIdField
       node={node as AnyComponent & { custom_id: string }}
       maxLength={maxLength}
@@ -118,32 +258,54 @@ export function PluginPanel({ node }: Props) {
     />
   );
 
-  // No registry → behave exactly as before plugins existed: just the field.
-  if (!isPluginRegistryConfigured()) return idField;
-
-  const available = pluginsForTarget(plugins, target);
+  // Nothing on offer for this component → behave exactly as before plugins
+  // existed: the bare id field (or nothing, for a Link button whose URL editor
+  // lives below in the ButtonInspector).
+  if (!registryOn && !linkOn) return linkStyle ? null : idField;
 
   const writeCustomId = (next: string) =>
     patch<InteractiveButtonComponent>(node._id, { custom_id: next });
 
-  const handleSave = (manifest: PluginManifest) => (result: PluginSaveResult) => {
+  // ── Attach / detach ──────────────────────────────────────────────────────
+
+  const handleSave = (ctx: Configuring) => (result: PluginSaveResult) => {
+    const { manifest, customId: editingId, presentation } = ctx;
     // Adopting a new id supersedes the old binding's cached summary.
-    if (customId && customId !== result.customId) clearPluginSummary(customId);
-    // The plugin owns the custom_id, and — for a string select — may also hand
-    // back the exact option list to wire, so the user never maps each option's
-    // value (e.g. a role id) by hand. Both get locked in their inspectors while
-    // the plugin stays attached.
-    const fields: Partial<StringSelectComponent> = { custom_id: result.customId };
-    if (target === "string_select" && result.options?.length) fields.options = result.options;
-    // Fields the plugin owns (e.g. min/max selections) — written here and locked
-    // in the inspector while attached. Already sanitized + limited to the
-    // manifest's declared set by usePluginConfig.
-    if (result.fields) Object.assign(fields, result.fields);
-    patch<StringSelectComponent>(node._id, fields);
-    // Cache the summary plus, for a guild-scoped plugin, the guild it targets
-    // (the Send panel warns before posting to another server) and any static
-    // placeholder values (to render the message's `{token}` text). All expendable
-    // cosmetics — fall back to the manifest name when there's no summary.
+    if (editingId && editingId !== result.customId) clearPluginSummary(editingId);
+
+    if (isBtn) {
+      // The plugin owns the custom_id; a fresh attach also names + enables the
+      // button, with the plugin's own summary label (when it sent one) winning
+      // over the manifest/preset name.
+      const fields: Partial<InteractiveButtonComponent> = { custom_id: result.customId };
+      if (result.fields) Object.assign(fields, result.fields);
+      const shown = presentation
+        ? presentationFields(node, presentation, result.summary?.label)
+        : {};
+      Object.assign(fields, shown);
+      if (linkStyle) {
+        // Link → interactive: replace so the url is shed and the style/custom_id
+        // are set cleanly rather than left half-converted.
+        replace<InteractiveButtonComponent>(
+          node._id,
+          toInteractiveButton(node, result.customId, shown),
+        );
+      } else {
+        patch<InteractiveButtonComponent>(node._id, fields);
+      }
+    } else {
+      // A select: the plugin owns the custom_id and may hand back the exact
+      // option list to wire; both lock in their inspectors while attached.
+      const fields: Partial<StringSelectComponent> = { custom_id: result.customId };
+      if (target === "string_select" && result.options?.length) fields.options = result.options;
+      // Fields the plugin owns (e.g. min/max selections) — sanitized + limited
+      // to the manifest's declared set by usePluginConfig.
+      if (result.fields) Object.assign(fields, result.fields);
+      patch<StringSelectComponent>(node._id, fields);
+    }
+
+    // Cache the summary plus, for a guild-scoped plugin, the guild it targets and
+    // any static placeholder values. All expendable cosmetics.
     if (result.summary || result.guildId || result.values) {
       const summary = result.summary ?? { label: manifest.name };
       setPluginSummary(result.customId, manifest.id, summary, result.guildId, result.values);
@@ -156,10 +318,40 @@ export function PluginPanel({ node }: Props) {
     writeCustomId(DETACH_DEFAULTS[target]);
   };
 
-  // The plugin chooser — the prominent, recommended path. Falls back to a
-  // status line while the registry loads / errors / has nothing to offer.
+  const handleDetachLink = () => patch<LinkButtonComponent>(node._id, { url: DETACHED_URL });
+
+  // Adopt a link plugin: convert an interactive button to a Link (or just
+  // repoint an existing Link button), naming + enabling it on a fresh attach.
+  const attachLink = (manifest: LinkPluginManifest) => {
+    if (!isBtn) return;
+    const overrides = presentationFields(node, {
+      label: manifest.name,
+      emoji: manifest.defaultEmoji,
+    });
+    if (linkStyle) {
+      patch<LinkButtonComponent>(node._id, { url: manifest.url, ...overrides });
+    } else {
+      replace<LinkButtonComponent>(node._id, toLinkButton(node, manifest.url, overrides));
+    }
+  };
+
+  // Open the config iframe for a picked interactive plugin, carrying the
+  // presentation to apply on save (fresh attach only).
+  const openConfig = (manifest: PluginManifest, presetId?: string) => {
+    const preset = presetId ? manifest.presets?.find((p) => p.id === presetId) : undefined;
+    setConfiguring({
+      manifest,
+      preset: presetId,
+      presentation: {
+        label: preset?.name ?? manifest.name,
+        emoji: preset?.emoji ?? manifest.defaultEmoji,
+      },
+    });
+  };
+
+  // ── Chooser: attached chip, a status line, or the library trigger ──────────
   let chooser: ReactNode;
-  let offersPlugin = false;
+  let offersBrowse = false;
   if (attached) {
     chooser = (
       <AttachedChip
@@ -169,6 +361,8 @@ export function PluginPanel({ node }: Props) {
         onDetach={handleDetach}
       />
     );
+  } else if (attachedLink) {
+    chooser = <LinkAttachedChip manifest={attachedLink} onDetach={handleDetachLink} />;
   } else if (status === "loading") {
     chooser = <p className={styles.muted}>Loading plugins…</p>;
   } else if (status === "error") {
@@ -180,10 +374,10 @@ export function PluginPanel({ node }: Props) {
         </button>
       </p>
     );
-  } else if (available.length === 0) {
+  } else if (totalAvailable === 0) {
     chooser = <p className={styles.muted}>No plugins available for this component type.</p>;
   } else {
-    offersPlugin = true;
+    offersBrowse = true;
     chooser = (
       <button type="button" className={styles.browse} onClick={() => setLibraryOpen(true)}>
         <span className={styles.browseIcon} aria-hidden>
@@ -196,33 +390,34 @@ export function PluginPanel({ node }: Props) {
           </span>
         </span>
         <span className={styles.browseEnd}>
-          <span className={styles.browseCount}>{available.length}</span>
+          <span className={styles.browseCount}>{totalAvailable}</span>
           <ChevronRightIcon size={18} className={styles.browseChevron} aria-hidden />
         </span>
       </button>
     );
   }
 
+  const sub = linkStyle
+    ? "Where this link takes people."
+    : target === "button"
+      ? "What happens when someone clicks this button."
+      : "What happens when someone uses this menu.";
+
   return (
     <div className={styles.panel}>
       <div className={styles.heading}>
         <span className={styles.title}>Action</span>
-        <span className={styles.sub}>
-          {target === "button"
-            ? "What happens when someone clicks this button."
-            : "What happens when someone uses this menu."}
-        </span>
+        <span className={styles.sub}>{sub}</span>
       </div>
 
       {chooser}
 
-      {/* The plugin *is* the custom_id: a plugin claims the id, or you wire one
-          up for your own bot. When plugins are on offer we lead with them and
-          tuck the raw field behind a disclosure, so the ready-made path reads as
-          the default — not one option among two equals. Every other state (no
-          registry, none for this type, loading, or already attached) shows the
-          field directly, since there's no plugin card to defer to. */}
-      {offersPlugin ? (
+      {/* The plugin *is* the custom_id / url. A Link button's URL editor lives in
+          the ButtonInspector below, so nothing shows here for it. For an
+          id-bearing component we lead with the plugin card and tuck the raw field
+          behind a disclosure while the library is on offer; once attached (or
+          with no library) the field shows directly. */}
+      {linkStyle ? null : offersBrowse ? (
         <div className={styles.manual}>
           <button
             type="button"
@@ -246,11 +441,16 @@ export function PluginPanel({ node }: Props) {
 
       {libraryOpen ? (
         <PluginLibraryModal
-          plugins={available}
+          plugins={interactiveAvailable}
+          linkPlugins={linkAvailable}
           target={target}
           onPick={(manifest, preset) => {
             setLibraryOpen(false);
-            setConfiguring({ manifest, preset });
+            openConfig(manifest, preset);
+          }}
+          onPickLink={(manifest) => {
+            setLibraryOpen(false);
+            attachLink(manifest);
           }}
           onClose={() => setLibraryOpen(false)}
         />
@@ -263,7 +463,7 @@ export function PluginPanel({ node }: Props) {
           target={target}
           customId={configuring.customId}
           preset={configuring.preset}
-          onSave={handleSave(configuring.manifest)}
+          onSave={handleSave(configuring)}
           onClose={() => setConfiguring(null)}
         />
       ) : null}
@@ -345,5 +545,60 @@ function AttachedChip({
         </Button>
       </div>
     </div>
+  );
+}
+
+/** The attached-plugin chip for a Link button — a link plugin has no config
+ *  iframe, so its per-server half lives on the external service, reached via
+ *  "Set up". Mirrors the interactive {@link AttachedChip} visually. */
+function LinkAttachedChip({
+  manifest,
+  onDetach,
+}: {
+  manifest: LinkPluginManifest;
+  onDetach: () => void;
+}) {
+  const by = manifest.publisher ?? manifest.name;
+  return (
+    <>
+      <div className={styles.chip}>
+        <PluginIcon manifest={manifest} />
+        <div className={styles.chipText}>
+          <span className={styles.chipName}>{manifest.name}</span>
+          {manifest.description ? (
+            <span className={styles.chipDesc}>{manifest.description}</span>
+          ) : null}
+          <span className={styles.chipMeta}>via {by} — external link service</span>
+        </div>
+        <div className={styles.chipActions}>
+          {manifest.setupUrl ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => window.open(manifest.setupUrl, "_blank", "noopener,noreferrer")}
+            >
+              Set up
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" onClick={onDetach}>
+            Detach
+          </Button>
+        </div>
+      </div>
+      {/* DWEEB can't verify the external service's per-server state, so the one
+          thing that can go quietly wrong — posting the button before the server
+          is registered — is called out persistently, not just in the library. */}
+      {manifest.setupUrl ? (
+        <p className={styles.muted}>
+          {manifest.setupHint ??
+            `The link only works once your server is set up with ${by} — “Set up” takes you there.`}{" "}
+          {manifest.homepage ? (
+            <a className={styles.link} href={manifest.homepage} target="_blank" rel="noreferrer">
+              Learn more
+            </a>
+          ) : null}
+        </p>
+      ) : null}
+    </>
   );
 }

@@ -44,6 +44,15 @@ export interface PluginManifest {
   homepage?: string;
   /** Optional publisher/author label. */
   publisher?: string;
+  /**
+   * A unicode emoji (or `<:name:id>` custom token) the editor stamps onto a
+   * button when this plugin is freshly attached to a blank one — so a picked
+   * action arrives already wearing a fitting glyph instead of the default
+   * emoji-less button. Ignored when a preset supplies its own emoji (the
+   * preset's wins) and never overwrites an emoji the user already set. Absent
+   * for a plugin that would rather leave the button bare.
+   */
+  defaultEmoji?: string;
   /** Which interactive component kinds this plugin can attach to. */
   targets: PluginTarget[];
   /**
@@ -197,6 +206,7 @@ export function parseManifest(raw: unknown): PluginManifest | null {
     ...(isAllowedUrl(o.icon) ? { icon: o.icon } : {}),
     ...(isAllowedUrl(o.homepage) ? { homepage: o.homepage } : {}),
     ...(isNonEmptyString(o.publisher) ? { publisher: o.publisher } : {}),
+    ...(isNonEmptyString(o.defaultEmoji) ? { defaultEmoji: o.defaultEmoji.slice(0, 32) } : {}),
     ...(typeof o.apiVersion === "number" ? { apiVersion: o.apiVersion } : {}),
     ...(o.managesSelectOptions === true ? { managesSelectOptions: true } : {}),
     ...(managesFields ? { managesFields } : {}),

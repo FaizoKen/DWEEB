@@ -130,6 +130,18 @@ export function EmojiField({ emoji: current, onChange, advancedMode }: Props) {
   );
 }
 
+/**
+ * Turn a raw emoji string — a unicode glyph (`🔥`) or a Discord custom token
+ * (`<:name:id>`) — into a {@link PartialEmoji}, or `undefined` when empty. The
+ * one-shot converter used when something other than the editor supplies an
+ * emoji (e.g. a plugin's `defaultEmoji` stamped onto a button on attach).
+ */
+export function emojiFromString(raw: string | undefined): PartialEmoji | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) return undefined;
+  return parseDiscordEmojiToken(trimmed) ?? { name: trimmed };
+}
+
 /** Parse `<:name:id>` / `<a:name:id>` into a PartialEmoji. Returns null when not a token. */
 export function parseDiscordEmojiToken(raw: string): PartialEmoji | null {
   const m = /^<(a)?:([\w~]+):(\d{15,25})>$/.exec(raw.trim());

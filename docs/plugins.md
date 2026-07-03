@@ -72,6 +72,7 @@ renders nothing). `configUrl` (and any `icon`/`homepage`) must be `https://`, or
 | `icon`           | no       | `https` image URL. |
 | `homepage`       | no       | `https` docs/support link. |
 | `publisher`      | no       | Author/brand label. |
+| `defaultEmoji`   | no       | A unicode emoji (or `<:name:id>` token) the editor stamps onto a **button** when your plugin is freshly attached to a blank one, so a picked action arrives already labelled + emojied. A preset's own `emoji` wins over it; an emoji the user already set is never overwritten. |
 | `targets`        | yes      | Which component kinds you support (see below). At least one. |
 | `configUrl`      | yes      | `https` (or `http://localhost`) iframe URL for configuration. |
 | `customIdPrefix` | yes      | Every `custom_id` you mint must start with this. How DWEEB re-binds on reload and how it validates your saves. Keep it short and unique, e.g. `"rolemenu:"`. |
@@ -139,6 +140,7 @@ can't have:
 | `name`      | yes      | Shown in the library and the attached chip. |
 | `description` | no     | One line under the name. |
 | `version` / `icon` / `homepage` / `publisher` | no | Same meaning as the interactive manifest. |
+| `defaultEmoji` | no    | Unicode emoji (or `<:name:id>` token) stamped onto the Link button on a fresh attach — same behaviour as the interactive manifest's `defaultEmoji`. Never overwrites an emoji the user set. |
 | `url`       | yes      | The URL template written onto the button — see below. |
 | `setupUrl`  | no       | The service's admin page where a server manager registers their server (invites your bot, configures the feature). Surfaced as a **Set up** action on the chip and a *Needs setup* tag in the library. |
 | `setupHint` | no       | One line shown under the chip instead of the stock "set it up first" note. |

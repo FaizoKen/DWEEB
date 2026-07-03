@@ -72,6 +72,13 @@ export interface LinkPluginManifest {
   /** Optional publisher/brand label ("via X — external link service"). */
   publisher?: string;
   /**
+   * A unicode emoji (or `<:name:id>` custom token) the editor stamps onto the
+   * Link button when this plugin is freshly attached to a blank one — the URL
+   * sibling of {@link PluginManifest.defaultEmoji}. Never overwrites an emoji
+   * the user already set. Absent to leave the button bare.
+   */
+  defaultEmoji?: string;
+  /**
    * The URL template written onto the button — the whole binding. Scheme and
    * host must be literal `https` (tokens only in the path/query), and the
    * literal prefix before the first `{token}` is what re-identifies the plugin
@@ -145,6 +152,7 @@ export function parseLinkManifest(raw: unknown): LinkPluginManifest | null {
     ...(isAllowedUrl(o.icon) ? { icon: o.icon } : {}),
     ...(isAllowedUrl(o.homepage) ? { homepage: o.homepage } : {}),
     ...(isNonEmptyString(o.publisher) ? { publisher: o.publisher } : {}),
+    ...(isNonEmptyString(o.defaultEmoji) ? { defaultEmoji: o.defaultEmoji.slice(0, 32) } : {}),
     ...(isAllowedUrl(o.setupUrl) ? { setupUrl: o.setupUrl } : {}),
     ...(isNonEmptyString(o.setupHint) ? { setupHint: o.setupHint.slice(0, MAX_SETUP_HINT) } : {}),
   };

@@ -32,8 +32,6 @@ import { MentionableSelectInspector } from "./inspectors/MentionableSelectInspec
 import { ChannelSelectInspector } from "./inspectors/ChannelSelectInspector";
 import { ComponentIdField } from "./inspectors/ComponentIdField";
 import { PluginPanel } from "./inspectors/PluginPanel";
-import { LinkPluginPanel } from "./inspectors/LinkPluginPanel";
-import { isPluginTarget } from "@/core/plugins/targets";
 import styles from "./Inspector.module.css";
 
 export function Inspector() {
@@ -67,15 +65,14 @@ export function Inspector() {
       <div className={styles.body}>
         <CollabEditingNotice editors={editors} />
         <IssueList issues={issues} />
-        {/* Interactive components (buttons with a custom_id, selects) can hand
-            their action to an external plugin. The action *is* the point of the
-            component, so it leads — above the field editor. The bot/app-webhook
-            requirement isn't repeated here: it's enforced (and explained) at the
-            Send gate. Inert unless a plugin registry is configured. Link buttons
-            get the URL-based sibling panel instead (it self-gates to Link
-            buttons + a configured link registry, so every other node renders
-            neither). */}
-        {isPluginTarget(node) ? <PluginPanel node={node} /> : <LinkPluginPanel node={node} />}
+        {/* Buttons and selects can hand their action to a plugin — an
+            interactive one DWEEB handles, or (for a button) a URL-based link
+            plugin. The action *is* the point of the component, so it leads,
+            above the field editor. The panel self-gates: it renders nothing for
+            a Premium button or a layout node, and stays inert unless a registry
+            is configured. The bot/app-webhook requirement isn't repeated here —
+            it's enforced (and explained) at the Send gate. */}
+        <PluginPanel node={node} />
         {renderInspector(node)}
         {/* The per-component Discord id is a power-user concern — only surface
             it in Advanced mode. The value (if any) persists regardless. */}

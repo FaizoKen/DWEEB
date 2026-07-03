@@ -7,8 +7,72 @@
   gap: 6px;
 }
 
+/* ── Category sections (combined button library) ─────────────────────────── */
+/* The combined library splits into "handled by DWEEB" and "link to a service"
+   so the two integration models read as deliberate sections rather than one
+   flat list. Each gets a small titled header above its own row list. */
+.category {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.category + .category {
+  margin-top: 16px;
+}
+
+.categoryHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.categoryIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--app-accent-text, #fff);
+  background: var(--app-accent);
+}
+/* The link section reads as the "external" counterpart — a cooler, distinct
+   tile so the two categories are separable at a glance. */
+.categoryIconExternal {
+  color: #0b1220;
+  background: linear-gradient(135deg, #5eead4, #38bdf8);
+}
+.categoryText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.categoryTitleLine {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.categoryTitle {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--app-text);
+}
+.categoryCount {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-text-subtle);
+}
+.categorySub {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
 /* Plugin row + its collapse toggle share one card, so they read as one unit. */
 .header {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 0;
@@ -19,6 +83,22 @@
   transition:
     background 120ms ease,
     border-color 120ms ease;
+}
+/* A colour strip that grows in from the left edge on hover/focus — a small
+   cue that lifts the flat list without shouting. */
+.header::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  transform: scaleY(0);
+  transform-origin: center;
+  background: var(--app-accent);
+  transition: transform 140ms ease;
+}
+.header:hover::before,
+.header:focus-within::before {
+  transform: scaleY(1);
 }
 .header:hover {
   background: var(--app-bg-hover);
@@ -114,6 +194,20 @@
   border-radius: 999px;
   background: var(--app-warning-soft);
   color: var(--app-warning-text);
+}
+
+/* Cool-toned pill marking a link plugin — an external service reached by URL,
+   distinct from the amber "needs bot" tag on the interactive side. */
+.externalTag {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #38bdf8 18%, transparent);
+  color: #38bdf8;
 }
 .rowDesc {
   font-size: 12px;
