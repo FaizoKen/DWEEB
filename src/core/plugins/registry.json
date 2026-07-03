@@ -272,9 +272,9 @@
       "publisher": "RoleLogic",
       "icon": "https://rolelogic.faizo.net/plugin/icons/topgg-voter-role.webp",
       "homepage": "https://rolelogic.faizo.net/integrations/topgg-voter-role",
-      "url": "https://plugin-rolelogic.faizo.net/topgg-voter-role/vote?guild={server_id}",
+      "url": "https://top.gg/{vote_page}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftopgg-voter-role",
-      "setupHint": "Connect your Top.gg vote webhook on the RoleLogic dashboard — the button then forwards voters to your server's or bot's vote page automatically."
+      "setupHint": "Connect your Top.gg vote webhook on the RoleLogic dashboard, then paste your server's or bot's Top.gg vote page over the button URL below."
     },
     {
       "schemaVersion": 1,

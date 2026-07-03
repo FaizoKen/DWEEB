@@ -405,17 +405,18 @@ const TOPGG_VOTE_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.ActionRow,
           components: [
-            // The vote page (server's or bot's) is per-server config RoleLogic
-            // learns when the admin connects the vote webhook — so the button
-            // goes through RoleLogic's redirect, which 302s to the right page,
-            // rather than guessing a top.gg URL here.
+            // The plugin binds to the whole top.gg URL space (its template is
+            // `https://top.gg/{vote_page}`), so this ships the server-vote
+            // page — top.gg keys it by guild id, so {server_id} makes it work
+            // as-is. Rewarding votes for a *bot* instead? Paste its top.gg
+            // vote link over the URL; the chip follows.
             {
               _id: id(),
               type: ComponentType.Button,
               style: ButtonStyle.Link,
               label: "Vote on Top.gg",
               emoji: { name: "🗳️" },
-              url: "https://plugin-rolelogic.faizo.net/topgg-voter-role/vote?guild={server_id}",
+              url: "https://top.gg/discord/servers/{server_id}/vote",
             },
           ],
         },

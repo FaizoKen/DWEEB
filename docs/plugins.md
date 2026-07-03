@@ -169,12 +169,15 @@ server — the service receives e.g. `?guild=812…` with the real guild id, wit
 no per-guild URL to configure. Discord's 512-character button-URL cap applies
 to the template.
 
-**Prefer a redirect over a fill-me slot.** If the unknown part of the
-destination is *per-server* config your service already holds (say, which
-Top.gg vote page a guild connected), don't ask for it in the URL — template a
-page on your own host (`…/vote?guild={server_id}`) and 302 to the real
-destination. The button stays fully predictable, and your redirect can show a
-friendly "this server isn't set up yet" page instead of a dead link.
+**When the destination isn't on your host**, put the token right after the
+foreign host so the literal prefix is the host itself — the Top.gg entry is
+`https://top.gg/{vote_page}`, which makes the chip claim *any* top.gg URL:
+the admin pastes their server's or bot's vote page and the binding follows.
+(Trade-off: every top.gg link button shows that chip, which is the point —
+the plugin *is* "a top.gg link, rewarded".) Alternatively, if the unknown
+part is per-server config your service already holds, a page on your own
+host (`…/vote?guild={server_id}`) that 302s to the real destination keeps
+the URL fully predictable with nothing to paste at all.
 
 ### Fill-me slots
 
