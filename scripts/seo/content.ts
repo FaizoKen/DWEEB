@@ -31,7 +31,7 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-07-03";
+export const TEMPLATES_LASTMOD = "2026-07-04";
 
 export interface FaqEntry {
   q: string;
@@ -324,6 +324,20 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Rewarding your Bluesky followers with a Discord role",
       "Granting roles to starter-pack or curated-list members",
       "Verifying custom-domain handles for a trusted-member role",
+    ],
+  },
+  "github-contributor": {
+    slug: "discord-github-contributor-role",
+    title: "Discord GitHub Contributor Roles — commits, PRs & issues | DWEEB",
+    h1: "GitHub Contributor Role Template",
+    description:
+      "A link-your-GitHub Discord panel: RoleLogic grants roles for commits, pull requests, merged PRs and issues on any public repository.",
+    intro:
+      "Give contributors the recognition they've earned. Members link their GitHub account through GitHub's own OAuth and RoleLogic grants roles from real contribution data — commits, opened and merged pull requests, and issues on any public repository you choose.",
+    whenToUse: [
+      "Rewarding open-source contributors with a Discord role",
+      "Gating a contributors-only channel on merged PRs",
+      "Ranking hackathon or dev-community members by activity",
     ],
   },
   announcement: {

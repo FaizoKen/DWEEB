@@ -446,6 +446,20 @@
     },
     {
       "schemaVersion": 1,
+      "kind": "link",
+      "id": "rolelogic-github-contributor-role",
+      "name": "GitHub Contributor Role",
+      "description": "Send contributors to RoleLogic to link GitHub and receive roles for commits, pull requests, merged PRs and issues on any public repository.",
+      "version": "1.0.0",
+      "publisher": "RoleLogic",
+      "icon": "https://rolelogic.faizo.net/plugin/icons/github-contributor-role.webp",
+      "homepage": "https://rolelogic.faizo.net/integrations/github-contributor-role",
+      "url": "https://plugin-rolelogic.faizo.net/github-contributor-role/verify?guild={server_id}",
+      "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fgithub-contributor-role",
+      "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
+    },
+    {
+      "schemaVersion": 1,
       "id": "picker",
       "name": "Picker",
       "description": "Attach to a User / Role / Mentionable / Channel select — a member's picks come back as mentions in a private confirmation. No bot needed.",

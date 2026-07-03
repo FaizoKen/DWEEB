@@ -1042,6 +1042,57 @@ const BLUESKY_ROLE_MESSAGE: WebhookMessage = {
   ],
 };
 
+const GITHUB_CONTRIBUTOR_MESSAGE: WebhookMessage = {
+  username: "GitHub Link",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.purple,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🐙 Link your GitHub\nCommits, pull requests, merged PRs and issues — link your GitHub account and the roles you've earned as a contributor are granted automatically.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "Works with any public repository — perfect for open-source projects, hackathons and dev communities.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              label: "Link GitHub",
+              emoji: { name: "🐙" },
+              url: "https://plugin-rolelogic.faizo.net/github-contributor-role/verify?guild={server_id}",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      _id: id(),
+      type: ComponentType.TextDisplay,
+      content:
+        "-# 🛡️ Admins: choose repos and contribution tiers in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fgithub-contributor-role).",
+    },
+  ],
+};
+
 // ════════════════════════════════════════════════════════════════════════════
 // COMMUNITY
 // ════════════════════════════════════════════════════════════════════════════
@@ -2387,6 +2438,27 @@ export const TEMPLATES: MessageTemplate[] = [
     pairsWith: "Bluesky Account Role",
     pluginSlots: [{ kind: "link", pluginId: "rolelogic-bluesky-account-role" }],
     message: BLUESKY_ROLE_MESSAGE,
+  },
+  {
+    id: "github-contributor",
+    name: "GitHub contributor role",
+    description: "Contributors link GitHub and get roles for commits, PRs and issues.",
+    emoji: "🐙",
+    category: "Roles",
+    tags: [
+      "github",
+      "contributor",
+      "commits",
+      "pull requests",
+      "open source",
+      "developer",
+      "role",
+      "rolelogic",
+    ],
+    accent: ACCENT.purple,
+    pairsWith: "GitHub Contributor Role",
+    pluginSlots: [{ kind: "link", pluginId: "rolelogic-github-contributor-role" }],
+    message: GITHUB_CONTRIBUTOR_MESSAGE,
   },
   {
     id: "announcement",
