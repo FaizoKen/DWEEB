@@ -272,9 +272,9 @@
       "publisher": "RoleLogic",
       "icon": "https://rolelogic.faizo.net/plugin/icons/topgg-voter-role.webp",
       "homepage": "https://rolelogic.faizo.net/integrations/topgg-voter-role",
-      "url": "https://top.gg/discord",
+      "url": "https://plugin-rolelogic.faizo.net/topgg-voter-role/vote?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftopgg-voter-role",
-      "setupHint": "Connect your Top.gg vote webhook on the RoleLogic dashboard, then finish the button URL with your server's or bot's vote page — until then votes grant nothing."
+      "setupHint": "Connect your Top.gg vote webhook on the RoleLogic dashboard — the button then forwards voters to your server's or bot's vote page automatically."
     },
     {
       "schemaVersion": 1,
@@ -384,9 +384,18 @@
       "publisher": "RoleLogic",
       "icon": "https://rolelogic.faizo.net/plugin/icons/form-respondent-role.webp",
       "homepage": "https://rolelogic.faizo.net/integrations/form-respondent-role",
-      "url": "https://plugin-rolelogic.faizo.net/form-respondent-role/f/",
+      "url": "https://plugin-rolelogic.faizo.net/form-respondent-role/f/{form_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role",
-      "setupHint": "Build your form on the RoleLogic dashboard, then finish the button URL with the form's id (…/f/YOUR-FORM-ID)."
+      "setupHint": "Build your form on the RoleLogic dashboard, then paste its id into the Form ID field below.",
+      "params": [
+        {
+          "token": "form_id",
+          "label": "Form ID",
+          "hint": "The id from your form's link on the RoleLogic dashboard — the part after /f/.",
+          "placeholder": "e.g. rules-quiz-4kf2",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        }
+      ]
     },
     {
       "schemaVersion": 1,

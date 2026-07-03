@@ -405,13 +405,17 @@ const TOPGG_VOTE_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.ActionRow,
           components: [
+            // The vote page (server's or bot's) is per-server config RoleLogic
+            // learns when the admin connects the vote webhook — so the button
+            // goes through RoleLogic's redirect, which 302s to the right page,
+            // rather than guessing a top.gg URL here.
             {
               _id: id(),
               type: ComponentType.Button,
               style: ButtonStyle.Link,
               label: "Vote on Top.gg",
               emoji: { name: "🗳️" },
-              url: "https://top.gg/discord/servers/{server_id}/vote",
+              url: "https://plugin-rolelogic.faizo.net/topgg-voter-role/vote?guild={server_id}",
             },
           ],
         },
@@ -810,16 +814,17 @@ const FORM_ROLE_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.ActionRow,
           components: [
-            // The form id is per-server: RoleLogic issues it when the admin
-            // builds the form, so the URL ships as the bare /f/ prefix and the
-            // guided setup + footer tell the admin to complete it.
+            // {form_id} is the plugin's declared user param: RoleLogic issues
+            // the id when the admin builds the form, and the guided setup /
+            // Action panel collect it. Until it's filled, validation holds the
+            // send instead of letting a dead form link post.
             {
               _id: id(),
               type: ComponentType.Button,
               style: ButtonStyle.Link,
               label: "Open the form",
               emoji: { name: "📝" },
-              url: "https://plugin-rolelogic.faizo.net/form-respondent-role/f/",
+              url: "https://plugin-rolelogic.faizo.net/form-respondent-role/f/{form_id}",
             },
           ],
         },
@@ -829,7 +834,7 @@ const FORM_ROLE_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# 🛡️ Admins: build your form in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role), then paste its /f/ link into the button.",
+        "-# 🛡️ Admins: build your form in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role), then paste its id into the button's Form ID field.",
     },
   ],
 };

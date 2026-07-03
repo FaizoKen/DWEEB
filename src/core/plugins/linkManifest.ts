@@ -33,15 +33,52 @@
  * (inviting its bot, mapping its settings) — the manifest points at that with
  * `setupUrl`, which the editor surfaces next to the attached chip.
  *
+ * A token the webhook *can't* resolve — a value only the admin placing the
+ * button knows, like which form a "Fill in the form" button targets — is a
+ * **user param**: declared in `params`, rendered as an input next to the
+ * attached chip, and spliced into the URL as its typed (URI-encoded). The URL
+ * stays the whole binding: {@link readLinkParams} parses the values straight
+ * back out of it on reload, and a still-raw `{token}` is the visible,
+ * validator-flaggable "unfinished" state — instead of a stub URL that posts
+ * fine and quietly goes nowhere.
+ *
  * Parsing is validate-and-drop, mirroring `manifest.ts`: a malformed entry
- * simply doesn't appear, it never breaks the app.
+ * simply doesn't appear, it never breaks the app. The one escalation: a
+ * template token that is neither core nor a declared param could *never*
+ * resolve, so it invalidates the whole entry rather than shipping a button
+ * that sends members to a literal `{token}`.
  */
 
 import { LIMITS } from "@/core/schema/limits";
 import { isAllowedUrl, PLUGIN_MANIFEST_SCHEMA_VERSION } from "./manifest";
+import { CORE_PLACEHOLDER_TOKENS, PLACEHOLDER_TOKEN_RE } from "./placeholders";
 
 /** Registry `kind` discriminator for link plugins. Absent means "service". */
 export const LINK_PLUGIN_KIND = "link" as const;
+
+/**
+ * A user-supplied URL parameter — a `{token}` in the template whose value only
+ * the admin placing the button knows (a form id, a page slug), as opposed to
+ * the core tokens the webhook resolves at send. The editor renders one input
+ * per param next to the attached chip; the typed value is URI-encoded into the
+ * button URL and read back from it, so the URL remains the entire binding.
+ */
+export interface LinkPluginParam {
+  /** The template token this param fills, written `{token}` in `url`. */
+  token: string;
+  /** Input label ("Form ID"). Also how validation names a missing value. */
+  label: string;
+  /** One-liner under the input — where the admin finds the value. */
+  hint?: string;
+  /** Example text shown inside the empty input. */
+  placeholder?: string;
+  /**
+   * Anchored regex source the (decoded) value must match — a typo tripwire,
+   * not security: the value is URI-encoded on write regardless. A pattern that
+   * doesn't compile drops the whole manifest, same as a misplaced token.
+   */
+  pattern?: string;
+}
 
 export interface LinkPluginManifest {
   /** Manifest shape version. Shared with the service-plugin schema. */
@@ -80,11 +117,95 @@ export interface LinkPluginManifest {
   setupUrl?: string;
   /** Optional one-liner shown under the chip instead of the stock setup note. */
   setupHint?: string;
+  /**
+   * User-supplied params for the non-core `{tokens}` in `url`, in declaration
+   * order. Every non-core token in the template must be declared here (and
+   * every declared token must appear in the template, once, at a delimited
+   * position) or the entry is dropped — see {@link parseLinkParams}.
+   */
+  params?: LinkPluginParam[];
 }
 
 const MAX_SETUP_HINT = 200;
+const MAX_PARAMS = 4;
+const MAX_PARAM_LABEL = 40;
+const MAX_PARAM_HINT = 200;
+const MAX_PARAM_PLACEHOLDER = 60;
+const MAX_PARAM_PATTERN = 200;
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+
+/** Fresh (non-global-state) matcher for `{token}` occurrences in a template. */
+const TEMPLATE_TOKEN_RE = /\{([a-z0-9_]{1,32})\}/g;
+
+/**
+ * True when `{token}` sits at an unambiguous spot in the template: exactly one
+ * occurrence, entered from a `/`, `?`, `&` or `=` and exited into a `/`, `?`,
+ * `#`, `&` or the end. That's what lets {@link readLinkParams} cut the value
+ * back out of a written URL with no ambiguity (values are URI-encoded, so they
+ * can never contain those delimiters themselves).
+ */
+function isDelimitedOnce(url: string, token: string): boolean {
+  const needle = `{${token}}`;
+  const at = url.indexOf(needle);
+  if (at <= 0 || url.indexOf(needle, at + 1) !== -1) return false;
+  const before = url[at - 1]!;
+  if (before !== "/" && before !== "?" && before !== "&" && before !== "=") return false;
+  const after = url[at + needle.length];
+  return after === undefined || after === "/" || after === "?" || after === "#" || after === "&";
+}
+
+/**
+ * Parse a manifest's `params` against its URL template. Unlike the sibling
+ * validate-and-drop parsers, a bad param can't degrade to a missing param: the
+ * template would keep a token nothing can ever fill, so the caller drops the
+ * whole entry. Returns the clean list, `undefined` for "none declared", or
+ * `null` for "entry is invalid" — also raised when the template carries a
+ * non-core token that no param declares.
+ */
+function parseLinkParams(raw: unknown, url: string): LinkPluginParam[] | undefined | null {
+  const out: LinkPluginParam[] = [];
+  const seen = new Set<string>();
+  if (raw !== undefined) {
+    if (!Array.isArray(raw) || raw.length > MAX_PARAMS) return null;
+    for (const item of raw) {
+      if (!item || typeof item !== "object") return null;
+      const o = item as Record<string, unknown>;
+      if (!isNonEmptyString(o.token) || !PLACEHOLDER_TOKEN_RE.test(o.token)) return null;
+      // Core tokens resolve from the webhook at send — a param may not shadow
+      // one, or the user's typed value and the send-time value would fight.
+      if (CORE_PLACEHOLDER_TOKENS.has(o.token)) return null;
+      if (seen.has(o.token)) return null;
+      if (!isDelimitedOnce(url, o.token)) return null;
+      if (!isNonEmptyString(o.label)) return null;
+      if (o.pattern !== undefined) {
+        if (!isNonEmptyString(o.pattern) || o.pattern.length > MAX_PARAM_PATTERN) return null;
+        try {
+          new RegExp(o.pattern);
+        } catch {
+          return null;
+        }
+      }
+      seen.add(o.token);
+      out.push({
+        token: o.token,
+        label: o.label.slice(0, MAX_PARAM_LABEL),
+        ...(isNonEmptyString(o.hint) ? { hint: o.hint.slice(0, MAX_PARAM_HINT) } : {}),
+        ...(isNonEmptyString(o.placeholder)
+          ? { placeholder: o.placeholder.slice(0, MAX_PARAM_PLACEHOLDER) }
+          : {}),
+        ...(isNonEmptyString(o.pattern) ? { pattern: o.pattern } : {}),
+      });
+    }
+  }
+  // Every token the template carries must be resolvable — core at send, or a
+  // declared param in the editor. Anything else would reach Discord literally.
+  for (const m of url.matchAll(TEMPLATE_TOKEN_RE)) {
+    const token = m[1]!;
+    if (!CORE_PLACEHOLDER_TOKENS.has(token) && !seen.has(token)) return null;
+  }
+  return out.length ? out : undefined;
+}
 
 /**
  * Literal part of a URL template before its first `{token}` — the prefix the
@@ -121,6 +242,8 @@ export function parseLinkManifest(raw: unknown): LinkPluginManifest | null {
   if (o.kind !== LINK_PLUGIN_KIND) return null;
   if (!isNonEmptyString(o.id) || !isNonEmptyString(o.name)) return null;
   if (!isValidUrlTemplate(o.url)) return null;
+  const params = parseLinkParams(o.params, o.url);
+  if (params === null) return null;
 
   return {
     schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
@@ -135,6 +258,7 @@ export function parseLinkManifest(raw: unknown): LinkPluginManifest | null {
     ...(isNonEmptyString(o.publisher) ? { publisher: o.publisher } : {}),
     ...(isAllowedUrl(o.setupUrl) ? { setupUrl: o.setupUrl } : {}),
     ...(isNonEmptyString(o.setupHint) ? { setupHint: o.setupHint.slice(0, MAX_SETUP_HINT) } : {}),
+    ...(params ? { params } : {}),
   };
 }
 
@@ -182,4 +306,105 @@ export function matchLinkPlugin(
     }
   }
   return best;
+}
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** What one param's value may look like inside a written URL: anything up to
+ *  the next delimiter. URI-encoding on write guarantees a real value never
+ *  contains these, so the greedy class can't eat past its own segment. */
+const PARAM_VALUE_SRC = "([^/?#&]*)";
+
+/**
+ * The template as a whole-URL matcher: literals exact, each token a bounded
+ * wildcard, declared params capturing. Returns the regex plus the param token
+ * captured by each group, in group order.
+ */
+function templateMatcher(manifest: LinkPluginManifest): { re: RegExp; groups: string[] } {
+  const declared = new Set((manifest.params ?? []).map((p) => p.token));
+  const groups: string[] = [];
+  let src = "^";
+  let last = 0;
+  for (const m of manifest.url.matchAll(TEMPLATE_TOKEN_RE)) {
+    const at = m.index ?? 0;
+    src += escapeRegExp(manifest.url.slice(last, at));
+    if (declared.has(m[1]!)) {
+      groups.push(m[1]!);
+      src += PARAM_VALUE_SRC;
+    } else {
+      // A core token: still raw `{server_id}` in the stored URL (it resolves
+      // at send), which the delimiter-bounded class matches like any value.
+      src += "(?:[^/?#&]*)";
+    }
+    last = at + m[0].length;
+  }
+  src += escapeRegExp(manifest.url.slice(last)) + "$";
+  return { re: new RegExp(src), groups };
+}
+
+/**
+ * The current value of each declared param, read back out of a bound button
+ * URL. A still-raw `{token}`, a URL that doesn't fit the template (e.g. an
+ * older draft carrying the bare prefix), or an undecodable value all read as
+ * `""` — the unfilled state the chip's inputs and the validator key off.
+ * `{}` for a manifest without params.
+ */
+export function readLinkParams(
+  manifest: LinkPluginManifest,
+  url: string | undefined,
+): Record<string, string> {
+  const params = manifest.params;
+  if (!params?.length) return {};
+  const values: Record<string, string> = {};
+  for (const p of params) values[p.token] = "";
+  if (!url) return values;
+  const { re, groups } = templateMatcher(manifest);
+  const m = re.exec(url);
+  if (!m) return values;
+  groups.forEach((token, i) => {
+    const raw = m[i + 1] ?? "";
+    if (raw === `{${token}}`) return; // the unfilled template form
+    try {
+      values[token] = decodeURIComponent(raw);
+    } catch {
+      values[token] = raw;
+    }
+  });
+  return values;
+}
+
+/**
+ * The button URL for a set of param values: the template with each declared
+ * param's URI-encoded value spliced in. The value is written *as given* — an
+ * eager trim here would make interior spaces untypeable (the trailing space
+ * disappears before the next character lands), so trimming is the input's
+ * job, on blur. A whitespace-only value counts as empty and keeps the raw
+ * `{token}`, so the unfinished state stays visible in the URL — and flaggable
+ * by validation. Core tokens pass through untouched for the send path to
+ * resolve. The inverse of {@link readLinkParams}.
+ */
+export function writeLinkParams(
+  manifest: LinkPluginManifest,
+  values: Record<string, string>,
+): string {
+  const declared = new Set((manifest.params ?? []).map((p) => p.token));
+  return manifest.url.replace(TEMPLATE_TOKEN_RE, (whole, token: string) => {
+    if (!declared.has(token)) return whole;
+    const value = values[token] ?? "";
+    return value.trim() ? encodeURIComponent(value) : whole;
+  });
+}
+
+/**
+ * True when `value` satisfies the param's `pattern` (or there's nothing to
+ * check — no pattern, or no value yet: emptiness is "unfilled", a different
+ * state with its own messaging, not "invalid").
+ */
+export function isValidLinkParamValue(param: LinkPluginParam, value: string): boolean {
+  if (!value || !param.pattern) return true;
+  try {
+    return new RegExp(param.pattern).test(value);
+  } catch {
+    return true;
+  }
 }

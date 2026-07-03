@@ -142,6 +142,7 @@ can't have:
 | `url`       | yes      | The URL template written onto the button — see below. |
 | `setupUrl`  | no       | The service's admin page where a server manager registers their server (invites your bot, configures the feature). Surfaced as a **Set up** action on the chip and a *Needs setup* tag in the library. |
 | `setupHint` | no       | One line shown under the chip instead of the stock "set it up first" note. |
+| `params`    | no       | User-supplied values for the non-core `{tokens}` in `url` — see *User params* below. |
 
 ### The `url` template is the whole binding
 
@@ -164,7 +165,56 @@ section (`{server_id}`, `{channel_id}`, `{server}`, …). They substitute at
 send time from the destination webhook, so one registry entry serves every
 server — the service receives e.g. `?guild=812…` with the real guild id, with
 no per-guild URL to configure. Discord's 512-character button-URL cap applies
-to the template.
+to the template. Any *other* token in the template must be declared as a user
+param (below) — an entry with a token that is neither is dropped, because
+nothing could ever resolve it.
+
+**Prefer a redirect over a param.** If the unknown part of the destination is
+*per-server* config your service already holds (say, which Top.gg vote page a
+guild connected), don't ask for it in the URL — template a page on your own
+host (`…/vote?guild={server_id}`) and 302 to the real destination. The button
+stays fully predictable, and your redirect can show a friendly "this server
+isn't set up yet" page instead of a dead link. Reach for a user param only
+when the value is genuinely *per-button*, like which form a button targets.
+
+### User params (`params`)
+
+A value only the admin placing the button knows — which form, which page —
+can't come from the webhook. Declare it as a **user param**:
+
+```json
+"url": "https://plugin-rolelogic.faizo.net/form-respondent-role/f/{form_id}",
+"params": [
+  {
+    "token": "form_id",
+    "label": "Form ID",
+    "hint": "The id from your form's link on the RoleLogic dashboard — the part after /f/.",
+    "placeholder": "e.g. rules-quiz-4kf2",
+    "pattern": "^[A-Za-z0-9_-]{1,64}$"
+  }
+]
+```
+
+The editor renders one input per param next to the attached chip (and in the
+guided template setup). The typed value is trimmed, URI-encoded and spliced
+into the button URL — the URL stays the *entire* binding, so a reloaded draft
+or share link reads the value straight back out of it. While a param is
+unfilled the URL keeps its raw `{token}` and the message **validator blocks
+send**, so a half-configured button can't post as a dead link.
+
+Rules, enforced at parse (a violation drops the whole entry):
+
+- `token`: same shape as a placeholder token (`^[a-z0-9_]{1,32}$`), must not
+  shadow a core token, and must appear in the template **exactly once**,
+  entered from a `/`, `?`, `&` or `=` and exited into a `/`, `?`, `#`, `&` or
+  the end of the template — that boundary is what lets the value be parsed
+  back out unambiguously.
+- `label` is required (it names the input *and* the validation message);
+  `hint`, `placeholder` and `pattern` are optional. A `pattern` that doesn't
+  compile is a parse error, and it's a typo tripwire for the admin — treat the
+  value as untrusted input on your service regardless.
+- At most 4 params per entry. If you need more than that, you want a config
+  page on your own dashboard and a redirect, not a URL form.
 
 ### What the external service implements
 
@@ -185,10 +235,12 @@ using the guild id the URL carries:
    repeats the same warning next to the attached chip because it has no way to
    check your per-server state.
 
-A link plugin has no config iframe today. If a service needs per-instance
-parameters beyond the core tokens, the natural extension is an optional
-`configUrl` whose `save` returns a `url` instead of a `customId` — additive to
-this schema, not designed until something needs it.
+A link plugin has no config iframe. Per-instance values are covered by user
+params (above) for per-button input, or a redirect on your own host for
+per-server config; if a service ever needs richer authoring than that, the
+natural extension is an optional `configUrl` whose `save` returns a `url`
+instead of a `customId` — additive to this schema, not designed until
+something needs it.
 
 ## 2. The `custom_id` is the whole binding
 

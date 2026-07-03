@@ -28,6 +28,7 @@ import { Button } from "@/ui/Button";
 import { ChevronRightIcon, GlobeIcon } from "@/ui/Icon";
 import { PluginIcon } from "@/features/plugins/PluginIcon";
 import { LinkPluginLibraryModal } from "@/features/plugins/LinkPluginLibraryModal";
+import { LinkParamFields } from "@/features/plugins/LinkParamFields";
 import styles from "./PluginPanel.module.css";
 
 interface Props {
@@ -61,7 +62,14 @@ export function LinkPluginPanel({ node }: Props) {
       </div>
 
       {attached ? (
-        <LinkAttachedChip manifest={attached} onDetach={() => writeUrl(DETACHED_URL)} />
+        <>
+          <LinkAttachedChip manifest={attached} onDetach={() => writeUrl(DETACHED_URL)} />
+          {/* The plugin's user params (a form id, a page slug) — the piece of
+              the URL only this admin knows. Typing splices it into the locked
+              URL below; until filled, the validator blocks send rather than
+              letting a dead link post. */}
+          <LinkParamFields manifest={attached} url={node.url} onWrite={writeUrl} />
+        </>
       ) : (
         <button type="button" className={styles.browse} onClick={() => setLibraryOpen(true)}>
           <span className={styles.browseIcon} aria-hidden>

@@ -240,6 +240,21 @@ export function linkButtonNodeByPlugin(
 }
 
 /**
+ * The live URL of a Link button tracked by editor id, or `null` when the node
+ * is gone or isn't a Link button (anymore). Companion to
+ * {@link linkButtonNodeByPlugin} for UI that resolved a node once and needs to
+ * read the current binding back off the message — the template-setup checklist
+ * rendering a link slot's param inputs.
+ */
+export function linkButtonUrlById(message: WebhookMessage, nodeId: EditorId): string | null {
+  for (const node of walkAll(message)) {
+    if (node._id !== nodeId) continue;
+    return isButton(node) && node.style === ButtonStyle.Link ? node.url : null;
+  }
+  return null;
+}
+
+/**
  * How a single interactive component reads to a member, for UI that lists
  * several of them at once and must say which is which. `label` is the control's
  * own visible text (a button's label or a select's placeholder); `context` is

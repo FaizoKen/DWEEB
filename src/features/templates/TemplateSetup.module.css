@@ -156,6 +156,15 @@
   white-space: nowrap;
 }
 
+/* A link slot's user-param inputs (e.g. the form id), tucked under the row's
+   description in the text column. */
+.slotParams {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .slotAction {
   display: flex;
   align-items: center;

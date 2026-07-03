@@ -44,6 +44,12 @@ import {
 } from "./types";
 import { getAttachmentFile, parseSessionUrl } from "@/core/state/attachmentStore";
 import { containsPlaceholder } from "@/core/plugins/placeholders";
+import {
+  isValidLinkParamValue,
+  matchLinkPlugin,
+  readLinkParams,
+} from "@/core/plugins/linkManifest";
+import { LINK_PLUGINS } from "@/core/plugins/registry";
 
 export type IssueSeverity = "error" | "warning";
 
@@ -489,6 +495,34 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
         code: "BUTTON_URL_LONG",
         message: `Link button URL must be ≤${LIMITS.BUTTON_URL} characters.`,
       });
+    }
+    // A link-plugin URL may owe user params (a form id — see `linkManifest.ts`).
+    // Their raw `{token}` form sails past the placeholder exemption above but
+    // nothing ever substitutes it, so an unfilled param means the posted button
+    // opens a dead link — flag it here, where it blocks send.
+    const linkPlugin = matchLinkPlugin(LINK_PLUGINS, btn.url);
+    if (linkPlugin?.params?.length) {
+      const values = readLinkParams(linkPlugin, btn.url);
+      for (const param of linkPlugin.params) {
+        // Trimmed: un-blurred whitespace padding shouldn't flip "missing"
+        // into "invalid" (or sneak a padded value past a strict pattern).
+        const value = (values[param.token] ?? "").trim();
+        if (!value) {
+          issues.push({
+            nodeId: btn._id,
+            severity: "error",
+            code: "BUTTON_LINK_PARAM_MISSING",
+            message: `${linkPlugin.name} needs its ${param.label} — fill it in from this button's Action panel.`,
+          });
+        } else if (!isValidLinkParamValue(param, value)) {
+          issues.push({
+            nodeId: btn._id,
+            severity: "error",
+            code: "BUTTON_LINK_PARAM_INVALID",
+            message: `${linkPlugin.name}: “${value}” doesn't look like a valid ${param.label}.`,
+          });
+        }
+      }
     }
   } else if (btn.style === ButtonStyle.Premium) {
     if (!btn.sku_id) {
