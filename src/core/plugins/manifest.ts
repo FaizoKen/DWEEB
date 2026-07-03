@@ -139,8 +139,9 @@ export interface PluginRegistryPayload {
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 
-/** Only https (or, for local dev convenience, http://localhost) iframe/registry URLs are trusted. */
-function isAllowedUrl(raw: unknown): raw is string {
+/** Only https (or, for local dev convenience, http://localhost) iframe/registry URLs are trusted.
+ *  Shared with `linkManifest.ts`, which holds its setup/homepage URLs to the same bar. */
+export function isAllowedUrl(raw: unknown): raw is string {
   if (typeof raw !== "string" || raw.length === 0) return false;
   let url: URL;
   try {
@@ -164,6 +165,10 @@ export function parseManifest(raw: unknown): PluginManifest | null {
   const o = raw as Record<string, unknown>;
 
   if (o.schemaVersion !== PLUGIN_MANIFEST_SCHEMA_VERSION) return null;
+  // A registry entry of another kind — e.g. a URL-based link plugin
+  // (`kind: "link"`, parsed by `linkManifest.ts`) — is never half-read as a
+  // service plugin. An absent `kind` means service, the original shape.
+  if (o.kind !== undefined && o.kind !== "service") return null;
   if (!isNonEmptyString(o.id) || !isNonEmptyString(o.name)) return null;
   if (!isAllowedUrl(o.configUrl)) return null;
   if (!isNonEmptyString(o.customIdPrefix)) return null;

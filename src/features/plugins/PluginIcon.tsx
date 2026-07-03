@@ -11,8 +11,18 @@
  */
 
 import type { ReactNode } from "react";
-import type { PluginManifest } from "@/core/plugins/manifest";
 import styles from "./PluginIcon.module.css";
+
+/**
+ * The display identity an icon needs — structurally satisfied by both manifest
+ * kinds (the interactive `PluginManifest` and the URL-based
+ * `LinkPluginManifest`), so one icon serves every library row and chip.
+ */
+export interface PluginIconSource {
+  id: string;
+  name: string;
+  icon?: string;
+}
 
 /** Bundled 24×24 stroke icons for the curated plugins, keyed by manifest id. */
 const BUILTIN_ICONS: Record<string, { color: string; bg: string; paths: ReactNode }> = {
@@ -98,7 +108,7 @@ export function PluginIcon({
   manifest,
   summaryIcon,
 }: {
-  manifest: PluginManifest;
+  manifest: PluginIconSource;
   summaryIcon?: string;
 }) {
   const src = summaryIcon ?? manifest.icon;

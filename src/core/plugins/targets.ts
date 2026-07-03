@@ -55,7 +55,9 @@ export const ALL_PLUGIN_TARGETS: readonly PluginTarget[] = [
  */
 export function targetOf(node: AnyComponent): PluginTarget | null {
   if (isButton(node)) {
-    // Link and Premium buttons carry no custom_id — nothing for a plugin to own.
+    // Link and Premium buttons carry no custom_id — nothing for a plugin to
+    // own here. (Link buttons instead take the URL-based plugins that bind by
+    // `url` prefix — see `linkManifest.ts`.)
     if (node.style === ButtonStyle.Link || node.style === ButtonStyle.Premium) return null;
     return "button";
   }

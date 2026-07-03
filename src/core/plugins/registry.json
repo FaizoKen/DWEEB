@@ -13,12 +13,42 @@
       "configUrl": "https://modalform.dweeb.faizo.net/config.html",
       "customIdPrefix": "modalform:",
       "presets": [
-        { "id": "staff-application", "name": "Staff Application", "description": "Recruit moderators or helpers — name, timezone, availability, experience.", "emoji": "📋" },
-        { "id": "introduction", "name": "Introduce Yourself", "description": "Let new members introduce themselves with a quick form.", "emoji": "🙋" },
-        { "id": "suggestion", "name": "Suggestion Box", "description": "Collect ideas from members.", "emoji": "💡" },
-        { "id": "bug-report", "name": "Bug Report", "description": "Let members report problems with steps to reproduce.", "emoji": "🐛" },
-        { "id": "ban-appeal", "name": "Ban Appeal", "description": "Let banned users appeal — one response per person.", "emoji": "⚖️" },
-        { "id": "contact", "name": "Contact Us", "description": "A simple get-in-touch form.", "emoji": "✉️" }
+        {
+          "id": "staff-application",
+          "name": "Staff Application",
+          "description": "Recruit moderators or helpers — name, timezone, availability, experience.",
+          "emoji": "📋"
+        },
+        {
+          "id": "introduction",
+          "name": "Introduce Yourself",
+          "description": "Let new members introduce themselves with a quick form.",
+          "emoji": "🙋"
+        },
+        {
+          "id": "suggestion",
+          "name": "Suggestion Box",
+          "description": "Collect ideas from members.",
+          "emoji": "💡"
+        },
+        {
+          "id": "bug-report",
+          "name": "Bug Report",
+          "description": "Let members report problems with steps to reproduce.",
+          "emoji": "🐛"
+        },
+        {
+          "id": "ban-appeal",
+          "name": "Ban Appeal",
+          "description": "Let banned users appeal — one response per person.",
+          "emoji": "⚖️"
+        },
+        {
+          "id": "contact",
+          "name": "Contact Us",
+          "description": "A simple get-in-touch form.",
+          "emoji": "✉️"
+        }
       ]
     },
     {
@@ -64,11 +94,41 @@
       "managesSelectOptions": true,
       "managesFields": ["min_values", "max_values"],
       "presets": [
-        { "id": "ticket-general", "name": "General Support panel", "description": "A simple help desk — one intake question.", "emoji": "🎫", "targets": ["button"] },
-        { "id": "ticket-report", "name": "Player Report panel", "description": "Private reports about a user, with evidence.", "emoji": "🚨", "targets": ["button"] },
-        { "id": "ticket-store", "name": "Store / Billing panel", "description": "Purchases and payments.", "emoji": "🛒", "targets": ["button"] },
-        { "id": "ticket-support-menu", "name": "Support topic menu", "description": "One menu, several help topics.", "emoji": "🎫", "targets": ["string_select"] },
-        { "id": "ticket-community-menu", "name": "Community topic menu", "description": "Partnerships, staff and suggestions.", "emoji": "🌐", "targets": ["string_select"] }
+        {
+          "id": "ticket-general",
+          "name": "General Support panel",
+          "description": "A simple help desk — one intake question.",
+          "emoji": "🎫",
+          "targets": ["button"]
+        },
+        {
+          "id": "ticket-report",
+          "name": "Player Report panel",
+          "description": "Private reports about a user, with evidence.",
+          "emoji": "🚨",
+          "targets": ["button"]
+        },
+        {
+          "id": "ticket-store",
+          "name": "Store / Billing panel",
+          "description": "Purchases and payments.",
+          "emoji": "🛒",
+          "targets": ["button"]
+        },
+        {
+          "id": "ticket-support-menu",
+          "name": "Support topic menu",
+          "description": "One menu, several help topics.",
+          "emoji": "🎫",
+          "targets": ["string_select"]
+        },
+        {
+          "id": "ticket-community-menu",
+          "name": "Community topic menu",
+          "description": "Partnerships, staff and suggestions.",
+          "emoji": "🌐",
+          "targets": ["string_select"]
+        }
       ]
     },
     {
@@ -91,11 +151,36 @@
         { "token": "status", "label": "Status", "sample": "open" }
       ],
       "presets": [
-        { "id": "gw-nitro", "name": "Nitro giveaway", "description": "1 month of Discord Nitro, drawn in 24h.", "emoji": "💎" },
-        { "id": "gw-custom-role", "name": "Custom Role giveaway", "description": "An exclusive personal role, drawn in 48h.", "emoji": "🎨" },
-        { "id": "gw-game-key", "name": "Game Key giveaway", "description": "A Steam game of the winner's choice.", "emoji": "🎮" },
-        { "id": "gw-gift-card", "name": "Gift Card giveaway", "description": "A digital gift card, drawn in 3 days.", "emoji": "🎁" },
-        { "id": "gw-supporter", "name": "Supporter Perks giveaway", "description": "Role + server perks for 3 winners.", "emoji": "⭐" }
+        {
+          "id": "gw-nitro",
+          "name": "Nitro giveaway",
+          "description": "1 month of Discord Nitro, drawn in 24h.",
+          "emoji": "💎"
+        },
+        {
+          "id": "gw-custom-role",
+          "name": "Custom Role giveaway",
+          "description": "An exclusive personal role, drawn in 48h.",
+          "emoji": "🎨"
+        },
+        {
+          "id": "gw-game-key",
+          "name": "Game Key giveaway",
+          "description": "A Steam game of the winner's choice.",
+          "emoji": "🎮"
+        },
+        {
+          "id": "gw-gift-card",
+          "name": "Gift Card giveaway",
+          "description": "A digital gift card, drawn in 3 days.",
+          "emoji": "🎁"
+        },
+        {
+          "id": "gw-supporter",
+          "name": "Supporter Perks giveaway",
+          "description": "Role + server perks for 3 winners.",
+          "emoji": "⭐"
+        }
       ]
     },
     {
@@ -112,14 +197,69 @@
       "managesSelectOptions": true,
       "managesFields": ["min_values", "max_values"],
       "presets": [
-        { "id": "qr-rules", "name": "Server Rules reply", "description": "Show your rules when the button is clicked.", "emoji": "📜", "targets": ["button"] },
-        { "id": "qr-roles", "name": "Getting Roles reply", "description": "Point members at the role menu.", "emoji": "🙋", "targets": ["button"] },
-        { "id": "qr-support", "name": "Get Support reply", "description": "Explain how to reach staff.", "emoji": "🎫", "targets": ["button"] },
-        { "id": "qr-welcome", "name": "Welcome reply", "description": "A friendly start-here message.", "emoji": "👋", "targets": ["button"] },
-        { "id": "qr-faq", "name": "Support FAQ menu", "description": "A self-serve help menu of common answers.", "emoji": "❓", "targets": ["string_select"] },
-        { "id": "qr-server-info", "name": "Server Info menu", "description": "Key channels, announcements and partners.", "emoji": "📌", "targets": ["string_select"] },
-        { "id": "qr-events", "name": "Events & Community menu", "description": "For game / event servers.", "emoji": "🎮", "targets": ["string_select"] }
+        {
+          "id": "qr-rules",
+          "name": "Server Rules reply",
+          "description": "Show your rules when the button is clicked.",
+          "emoji": "📜",
+          "targets": ["button"]
+        },
+        {
+          "id": "qr-roles",
+          "name": "Getting Roles reply",
+          "description": "Point members at the role menu.",
+          "emoji": "🙋",
+          "targets": ["button"]
+        },
+        {
+          "id": "qr-support",
+          "name": "Get Support reply",
+          "description": "Explain how to reach staff.",
+          "emoji": "🎫",
+          "targets": ["button"]
+        },
+        {
+          "id": "qr-welcome",
+          "name": "Welcome reply",
+          "description": "A friendly start-here message.",
+          "emoji": "👋",
+          "targets": ["button"]
+        },
+        {
+          "id": "qr-faq",
+          "name": "Support FAQ menu",
+          "description": "A self-serve help menu of common answers.",
+          "emoji": "❓",
+          "targets": ["string_select"]
+        },
+        {
+          "id": "qr-server-info",
+          "name": "Server Info menu",
+          "description": "Key channels, announcements and partners.",
+          "emoji": "📌",
+          "targets": ["string_select"]
+        },
+        {
+          "id": "qr-events",
+          "name": "Events & Community menu",
+          "description": "For game / event servers.",
+          "emoji": "🎮",
+          "targets": ["string_select"]
+        }
       ]
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "link",
+      "id": "rolelogic-member-origin-role",
+      "name": "Member Origin Role",
+      "description": "Send members to RoleLogic to verify where they joined from and receive the matching origin role — handled entirely by the RoleLogic bot.",
+      "version": "1.0.0",
+      "publisher": "RoleLogic",
+      "homepage": "https://rolelogic.faizo.net/integrations/member-origin-role",
+      "url": "https://plugin-rolelogic.faizo.net/member-origin-role/verify?guild={server_id}",
+      "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fmember-origin-role",
+      "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
       "schemaVersion": 1,

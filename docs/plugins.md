@@ -9,7 +9,8 @@ interaction for that `custom_id` and does the rest.
 
 This decoupling means a new plugin is added by **listing its manifest** in the
 bundled registry — no plugin code runs in DWEEB, you only edit one JSON file and
-rebuild.
+rebuild. (A second, URL-only kind exists for **Link buttons** — see
+[Link plugins](#link-plugins--url-based-for-link-buttons) below.)
 
 ```
 ┌──────────────┐   manifest    ┌──────────────┐   custom_id    ┌──────────────┐
@@ -90,7 +91,104 @@ Stable, Discord-agnostic names for the components a plugin can attach to:
 `mentionable_select` · `channel_select`
 
 (`button` means an **interactive** button — Link and Premium buttons carry no
-`custom_id`, so plugins can't attach to them.)
+`custom_id`, so these plugins can't attach to them. Link buttons instead take
+the URL-based **link plugins** below.)
+
+## Link plugins — URL-based, for Link buttons
+
+Everything above describes the interactive kind of plugin. The registry also
+accepts a second, much smaller kind: a **link plugin** (`"kind": "link"`),
+which gives a *Link button* its destination. It is nothing but an `https` URL
+template served by an external service — clicking the button opens that URL in
+the member's browser, and everything after the click (identifying the member,
+acting on the server) happens on the external service. DWEEB is not involved
+at all past the click, which buys three properties the interactive plugins
+can't have:
+
+- **No DWEEB backend footprint.** No dispatcher route, no Caddy site, no
+  compose service, no health check. The §5 five-edit table collapses to *one*
+  edit: list the manifest in `registry.json` and rebuild the web app.
+- **Works through any webhook.** No `custom_id` means no interaction to route,
+  so the message doesn't need an app-owned webhook.
+- **Never expires.** The component-TTL rules only govern interactions; a link
+  keeps working for the life of the message.
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "link",
+  "id": "rolelogic-member-origin-role",
+  "name": "Member Origin Role",
+  "description": "Send members to RoleLogic to verify where they joined from and receive the matching origin role.",
+  "version": "1.0.0",
+  "publisher": "RoleLogic",
+  "homepage": "https://rolelogic.faizo.net/integrations/member-origin-role",
+  "url": "https://plugin-rolelogic.faizo.net/member-origin-role/verify?guild={server_id}",
+  "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fmember-origin-role",
+  "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
+}
+```
+
+### Manifest fields (link kind)
+
+| Field       | Required | Notes |
+|-------------|----------|-------|
+| `schemaVersion` | yes  | Must be `1`. |
+| `kind`      | yes      | Must be `"link"`. (Entries without a `kind` are the interactive plugins above.) |
+| `id`        | yes      | Stable kebab id, unique in the registry. |
+| `name`      | yes      | Shown in the library and the attached chip. |
+| `description` | no     | One line under the name. |
+| `version` / `icon` / `homepage` / `publisher` | no | Same meaning as the interactive manifest. |
+| `url`       | yes      | The URL template written onto the button — see below. |
+| `setupUrl`  | no       | The service's admin page where a server manager registers their server (invites your bot, configures the feature). Surfaced as a **Set up** action on the chip and a *Needs setup* tag in the library. |
+| `setupHint` | no       | One line shown under the chip instead of the stock "set it up first" note. |
+
+### The `url` template is the whole binding
+
+Exactly as the interactive plugins own a `custom_id`, a link plugin owns the
+button's `url` — DWEEB stores nothing else. On reload of a draft or share
+link, the owning plugin is re-derived by prefix-matching the URL against the
+template's literal prefix (everything before the first `{token}`), and the URL
+field locks read-only while attached so hand-editing can't silently break the
+binding. Detach restores an editable default. Two rules follow:
+
+- **Scheme and host must be literal `https`.** A token may parameterize the
+  path or query, never where the link points. (`http://localhost` is allowed
+  for local development.)
+- **End the literal prefix at an unambiguous boundary** — a `/`, `?` or `=`,
+  as in `…/verify?guild={server_id}` — so the prefix can't accidentally match
+  another URL on the same host.
+
+The template may carry any of the **core tokens** from the placeholders
+section (`{server_id}`, `{channel_id}`, `{server}`, …). They substitute at
+send time from the destination webhook, so one registry entry serves every
+server — the service receives e.g. `?guild=812…` with the real guild id, with
+no per-guild URL to configure. Discord's 512-character button-URL cap applies
+to the template.
+
+### What the external service implements
+
+No DWEEB protocol at all — just the destination page. The recommended shape,
+using the guild id the URL carries:
+
+1. **Treat the `guild` query parameter as an untrusted hint**, not an
+   authorization. Anyone can edit a URL.
+2. **Identify the visitor yourself** — typically your own Discord OAuth
+   (`identify` + `guilds`/`guilds.members.read`) — and verify they are
+   actually a member of that guild before acting.
+3. **Act with your own bot** (assign the role, record the verification) and
+   show a human result page: what happened, or what to do if the server isn't
+   set up yet.
+4. **Serve a setup dashboard** (`setupUrl`) where a server manager can
+   register the guild — invite your bot, map your settings. Until that's done
+   the verify page should say so plainly rather than fail silently; DWEEB
+   repeats the same warning next to the attached chip because it has no way to
+   check your per-server state.
+
+A link plugin has no config iframe today. If a service needs per-instance
+parameters beyond the core tokens, the natural extension is an optional
+`configUrl` whose `save` returns a `url` instead of a `customId` — additive to
+this schema, not designed until something needs it.
 
 ## 2. The `custom_id` is the whole binding
 

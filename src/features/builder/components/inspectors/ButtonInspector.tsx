@@ -10,6 +10,8 @@
 import { useMessageStore } from "@/core/state/messageStore";
 import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
+import { LINK_PLUGINS } from "@/core/plugins/registry";
+import { matchLinkPlugin } from "@/core/plugins/linkManifest";
 import {
   ButtonStyle,
   ComponentType,
@@ -24,9 +26,11 @@ import { Select } from "@/ui/Select";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { PlaceholderInput } from "@/ui/PlaceholderInput";
+import { LockIcon } from "@/ui/Icon";
 import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { CapabilityNote } from "./CapabilityNote";
 import { EmojiField } from "./EmojiField";
+import lockStyles from "./CustomIdField.module.css";
 
 interface Props {
   node: ButtonComponent;
@@ -46,6 +50,10 @@ export function ButtonInspector({ node }: Props) {
   const replace = useMessageStore((s) => s.replaceNode);
   const advancedMode = useUiPrefs((s) => s.advancedMode);
   const placeholders = useMessagePlaceholders();
+  // The link plugin owning this button's URL (by template-prefix match), if
+  // any — recomputed from the URL alone, same as custom_id plugin bindings.
+  const linkPlugin =
+    node.style === ButtonStyle.Link ? matchLinkPlugin(LINK_PLUGINS, node.url) : null;
 
   const changeStyle = (next: ButtonStyleValue) => {
     if (next === node.style) return;
@@ -105,18 +113,49 @@ export function ButtonInspector({ node }: Props) {
       ) : null}
 
       {node.style === ButtonStyle.Link ? (
-        <Field label="URL" hint="Must be https:// (or a placeholder that resolves to one).">
-          {(id) => (
-            <PlaceholderInput
-              id={id}
-              type="url"
-              maxLength={LIMITS.BUTTON_URL}
-              value={node.url}
-              placeholders={placeholders}
-              onChange={(value) => patch<LinkButtonComponent>(node._id, { url: value })}
-            />
-          )}
-        </Field>
+        // While a link plugin owns the URL (see LinkPluginPanel) the URL *is*
+        // the binding, so the field locks read-only — hand-editing would
+        // silently re-point or break the attachment, exactly like a
+        // plugin-owned custom_id. Detaching in the panel above unlocks it.
+        linkPlugin ? (
+          <Field
+            label="URL"
+            hint={
+              <>
+                Set by <strong>{linkPlugin.name}</strong> — detach the plugin above to edit it
+                directly. Placeholders fill in when the message is sent.
+              </>
+            }
+          >
+            {(id) => (
+              <div className={lockStyles.locked} title={`Managed by ${linkPlugin.name}`}>
+                <LockIcon size={14} className={lockStyles.lockedIcon} aria-hidden />
+                <input
+                  id={id}
+                  className={lockStyles.lockedValue}
+                  value={node.url}
+                  readOnly
+                  aria-readonly="true"
+                  spellCheck={false}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+              </div>
+            )}
+          </Field>
+        ) : (
+          <Field label="URL" hint="Must be https:// (or a placeholder that resolves to one).">
+            {(id) => (
+              <PlaceholderInput
+                id={id}
+                type="url"
+                maxLength={LIMITS.BUTTON_URL}
+                value={node.url}
+                placeholders={placeholders}
+                onChange={(value) => patch<LinkButtonComponent>(node._id, { url: value })}
+              />
+            )}
+          </Field>
+        )
       ) : null}
 
       {node.style === ButtonStyle.Premium ? (

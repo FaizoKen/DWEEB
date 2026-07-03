@@ -16,6 +16,7 @@
 
 import registryData from "./registry.json";
 import { parseRegistryPayload, type PluginManifest } from "./manifest";
+import { parseLinkRegistryPayload, type LinkPluginManifest } from "./linkManifest";
 
 /**
  * Dev-only config-UI origins. `registry.json` points each plugin at its
@@ -33,9 +34,11 @@ const DEV_CONFIG_ORIGINS: Record<string, string> = {
   "modal-form": (import.meta.env.VITE_DEV_MODAL_FORM_ORIGIN || "http://localhost:8090").trim(),
   "ping-pong": (import.meta.env.VITE_DEV_PING_PONG_ORIGIN || "http://localhost:8091").trim(),
   "self-role": (import.meta.env.VITE_DEV_SELF_ROLE_ORIGIN || "http://localhost:8092").trim(),
-  "tickets": (import.meta.env.VITE_DEV_TICKETS_ORIGIN || "http://localhost:8093").trim(),
-  "giveaway": (import.meta.env.VITE_DEV_GIVEAWAY_ORIGIN || "http://localhost:8094").trim(),
-  "quick-replies": (import.meta.env.VITE_DEV_QUICK_REPLIES_ORIGIN || "http://localhost:8096").trim(),
+  tickets: (import.meta.env.VITE_DEV_TICKETS_ORIGIN || "http://localhost:8093").trim(),
+  giveaway: (import.meta.env.VITE_DEV_GIVEAWAY_ORIGIN || "http://localhost:8094").trim(),
+  "quick-replies": (
+    import.meta.env.VITE_DEV_QUICK_REPLIES_ORIGIN || "http://localhost:8096"
+  ).trim(),
 };
 
 /** Repoint a plugin's configUrl at its local dev origin, preserving the path. */
@@ -64,4 +67,16 @@ export function isPluginRegistryConfigured(): boolean {
 /** The bundled, validated plugin manifests. Synchronous; never throws. */
 export function getPlugins(): PluginManifest[] {
   return PLUGINS;
+}
+
+/**
+ * The bundled URL-based link plugins (`kind: "link"` entries of the same
+ * `registry.json` — see `linkManifest.ts`). They have no config iframe, so
+ * there's nothing to repoint at a dev origin: the parsed list is final.
+ */
+export const LINK_PLUGINS: LinkPluginManifest[] = parseLinkRegistryPayload(registryData);
+
+/** True when at least one link plugin ships — gates the Link button's panel. */
+export function isLinkPluginRegistryConfigured(): boolean {
+  return LINK_PLUGINS.length > 0;
 }

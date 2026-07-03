@@ -32,6 +32,7 @@ import { MentionableSelectInspector } from "./inspectors/MentionableSelectInspec
 import { ChannelSelectInspector } from "./inspectors/ChannelSelectInspector";
 import { ComponentIdField } from "./inspectors/ComponentIdField";
 import { PluginPanel } from "./inspectors/PluginPanel";
+import { LinkPluginPanel } from "./inspectors/LinkPluginPanel";
 import { isPluginTarget } from "@/core/plugins/targets";
 import styles from "./Inspector.module.css";
 
@@ -70,8 +71,11 @@ export function Inspector() {
             their action to an external plugin. The action *is* the point of the
             component, so it leads — above the field editor. The bot/app-webhook
             requirement isn't repeated here: it's enforced (and explained) at the
-            Send gate. Inert unless a plugin registry is configured. */}
-        {isPluginTarget(node) ? <PluginPanel node={node} /> : null}
+            Send gate. Inert unless a plugin registry is configured. Link buttons
+            get the URL-based sibling panel instead (it self-gates to Link
+            buttons + a configured link registry, so every other node renders
+            neither). */}
+        {isPluginTarget(node) ? <PluginPanel node={node} /> : <LinkPluginPanel node={node} />}
         {renderInspector(node)}
         {/* The per-component Discord id is a power-user concern — only surface
             it in Advanced mode. The value (if any) persists regardless. */}
