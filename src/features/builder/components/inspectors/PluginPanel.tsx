@@ -83,11 +83,6 @@ const DETACH_DEFAULTS: Record<PluginTarget, string> = {
  *  matches no link-plugin template prefix. */
 const DETACHED_URL = "https://discord.com";
 
-/** The stock labels a fresh/converted button carries — the ones we're free to
- *  overwrite with a plugin's name on attach. A label the user actually typed
- *  isn't in here, so their wording is left alone. */
-const STOCK_LABELS = new Set(["", "click me", "open link", "button", "new button"]);
-
 function currentCustomId(node: AnyComponent): string | undefined {
   return "custom_id" in node ? (node as { custom_id?: string }).custom_id : undefined;
 }
@@ -131,27 +126,20 @@ interface PresentationFields {
 
 /**
  * The label / emoji / enabled state to stamp on a button when a plugin is
- * *freshly* attached — the "name it and turn it on" step. Protective by design:
- * a label the user typed (anything not in {@link STOCK_LABELS}) is kept, and an
- * emoji they already chose is kept; only a blank/stock slot is filled. The
- * button is always enabled — a just-attached action should be live.
+ * *freshly* attached — the "make it look like the plugin" step. Picking a plugin
+ * from the library is an explicit "adopt this action" gesture, so we overwrite
+ * the button's label and emoji outright with the plugin/preset's own — a summary
+ * label the plugin handed back wins over the preset name, and a preset with no
+ * emoji clears whatever emoji was there, so the button ends up looking exactly
+ * like the action it now runs. The button is always enabled — a just-attached
+ * action should be live. Only runs on a fresh attach; reconfiguring an
+ * already-attached plugin passes no presentation, so the user's tweaks stand.
  */
-function presentationFields(
-  node: ButtonComponent,
-  chosen: Presentation,
-  overrideLabel?: string,
-): PresentationFields {
-  const currentLabel = "label" in node ? node.label : undefined;
-  const currentEmoji = "emoji" in node ? node.emoji : undefined;
+function presentationFields(chosen: Presentation, overrideLabel?: string): PresentationFields {
   const label = overrideLabel || chosen.label;
-  const out: PresentationFields = { disabled: undefined };
-  if (label && isStockLabel(currentLabel)) out.label = label.slice(0, LIMITS.BUTTON_LABEL);
-  if (chosen.emoji && !currentEmoji) out.emoji = emojiFromString(chosen.emoji);
+  const out: PresentationFields = { disabled: undefined, emoji: emojiFromString(chosen.emoji) };
+  if (label) out.label = label.slice(0, LIMITS.BUTTON_LABEL);
   return out;
-}
-
-function isStockLabel(label: string | undefined): boolean {
-  return !label || STOCK_LABELS.has(label.trim().toLowerCase());
 }
 
 /** Build a fresh interactive button from any button node, adopting `customId`
@@ -279,9 +267,7 @@ export function PluginPanel({ node }: Props) {
       // over the manifest/preset name.
       const fields: Partial<InteractiveButtonComponent> = { custom_id: result.customId };
       if (result.fields) Object.assign(fields, result.fields);
-      const shown = presentation
-        ? presentationFields(node, presentation, result.summary?.label)
-        : {};
+      const shown = presentation ? presentationFields(presentation, result.summary?.label) : {};
       Object.assign(fields, shown);
       if (linkStyle) {
         // Link → interactive: replace so the url is shed and the style/custom_id
@@ -324,7 +310,7 @@ export function PluginPanel({ node }: Props) {
   // repoint an existing Link button), naming + enabling it on a fresh attach.
   const attachLink = (manifest: LinkPluginManifest) => {
     if (!isBtn) return;
-    const overrides = presentationFields(node, {
+    const overrides = presentationFields({
       label: manifest.name,
       emoji: manifest.defaultEmoji,
     });
