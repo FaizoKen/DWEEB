@@ -1,0 +1,89 @@
+name: Plugins CI
+
+# Cargo checks (fmt, clippy, tests) for every plugin crate — the same bar
+# `server.yml` holds for the proxy. The per-plugin image workflows
+# (plugin-*.yml) deliberately run on every main push with no paths filter
+# (tag pushes skip filtered workflows) and only prove the Dockerfile builds,
+# so cargo checks don't belong there. This workflow is the missing half:
+# path-filtered so frontend-only commits skip it entirely, matrixed so each
+# crate is checked in parallel with its own cache.
+#
+# Any plugins/** change checks ALL crates rather than diffing per plugin:
+# the crates copy each other's shape (attestation, signature verify), so a
+# shared-pattern edit touching several plugins is the common case, and a
+# cached no-op verify costs ~a minute. Adding a plugin = add it to the
+# matrix below (see docs/plugins.md §5).
+on:
+  push:
+    branches: [main]
+    paths: &plugin-paths
+      - "plugins/**"
+      - ".github/workflows/plugins-ci.yml"
+  pull_request:
+    branches: [main]
+    paths: *plugin-paths
+  workflow_dispatch:
+
+# Minimum-needed permissions. We only read the source.
+permissions:
+  contents: read
+
+# Cancel an in-flight run when a newer commit lands on the same ref.
+concurrency:
+  group: plugins-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: ${{ matrix.plugin }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      # One red crate shouldn't hide another's result.
+      fail-fast: false
+      matrix:
+        plugin:
+          - dispatcher
+          - giveaway
+          - modal-form
+          - picker
+          - ping-pong
+          - quick-replies
+          - self-role
+          - tickets
+
+    # Every Cargo command runs inside the crate, where its manifest lives.
+    defaults:
+      run:
+        working-directory: plugins/${{ matrix.plugin }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pin to the stable toolchain and pull in the components the checks need.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Cache the registry, git deps, and target/ keyed on Cargo.lock so reruns
+      # skip recompiling unchanged dependencies. Scoped per plugin crate.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: plugins/${{ matrix.plugin }}
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      # `-D warnings` turns every clippy lint into a hard failure, matching
+      # server.yml and the frontend typecheck.
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # No separate build step: `cargo test` already compiles the binary, and
+      # the release build is proven by the plugin's image workflow.
+      - name: Test
+        run: cargo test --locked

@@ -107,7 +107,7 @@ at all past the click, which buys three properties the interactive plugins
 can't have:
 
 - **No DWEEB backend footprint.** No dispatcher route, no Caddy site, no
-  compose service, no health check. The §5 five-edit table collapses to *one*
+  compose service, no health check. The §5 six-edit table collapses to *one*
   edit: list the manifest in `registry.json` and rebuild the web app.
 - **Works through any webhook.** No `custom_id` means no interaction to route,
   so the message doesn't need an app-owned webhook.
@@ -552,7 +552,7 @@ own origin, `https://<id>.dweeb.faizo.net` — covered by ONE wildcard DNS recor
 (`frame-src https://*.dweeb.faizo.net` in the CSP built from `vite.config.ts`), so none of that
 recurs per plugin.
 
-Adding a plugin (say `ping-pong`, prefix `pingpong:`) is five edits:
+Adding a plugin (say `ping-pong`, prefix `pingpong:`) is six edits:
 
 | # | File | Edit |
 |---|---|---|
@@ -561,6 +561,7 @@ Adding a plugin (say `ping-pong`, prefix `pingpong:`) is five edits:
 | 3 | `server/compose.yml` (dispatcher) | Add `"pingpong:": "http://ping-pong:8090"` to `ROUTES`. |
 | 4 | `src/core/plugins/registry.json` | Add the manifest with `configUrl: https://pingpong.dweeb.faizo.net/config.html`. |
 | 5 | `server/gatus/config.yaml` | Copy a `plugins`-group endpoint hitting `https://pingpong.{$PLUGINS_DOMAIN}/health`, so the new plugin shows on the status page and alerts on failure. |
+| 6 | `.github/workflows/plugins-ci.yml` | Add the plugin id to the `matrix.plugin` list so fmt/clippy/tests gate it like every other crate. |
 
 Then `docker compose pull && docker compose up -d` on the server (Caddy issues
 the new subdomain's certificate automatically) and push so the frontend
