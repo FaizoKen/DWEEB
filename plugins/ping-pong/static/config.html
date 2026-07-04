@@ -26,16 +26,25 @@
         --text: #1e1f22;
         --muted: #4e5058;
       }
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
       body {
         margin: 0;
         padding: 16px;
-        font: 14px/1.5 system-ui, sans-serif;
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
         background: var(--bg);
         color: var(--text);
       }
-      h2 { font-size: 14px; margin: 18px 0 8px; }
-      h2:first-of-type { margin-top: 0; }
+      h2 {
+        font-size: 14px;
+        margin: 18px 0 8px;
+      }
+      h2:first-of-type {
+        margin-top: 0;
+      }
       textarea {
         width: 100%;
         min-height: 64px;
@@ -47,10 +56,26 @@
         color: var(--text);
         font: inherit;
       }
-      textarea:focus-visible { outline: none; border-color: var(--accent); }
-      .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
-      .hint.over { color: var(--danger); }
-      .check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin-top: 12px; }
+      textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .hint {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .hint.over {
+        color: var(--danger);
+      }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 12px;
+      }
       button {
         padding: 8px 12px;
         border-radius: 6px;
@@ -60,12 +85,32 @@
         font: inherit;
         cursor: pointer;
       }
-      button:hover { border-color: var(--accent); }
-      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-      button:disabled { opacity: 0.5; cursor: not-allowed; }
-      .row { display: flex; gap: 8px; margin-top: 20px; }
-      .row .grow { flex: 1; }
-      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-top: 20px;
+      }
+      .row .grow {
+        flex: 1;
+      }
+      .err {
+        color: var(--danger);
+        font-size: 13px;
+        margin-top: 10px;
+        min-height: 1em;
+      }
     </style>
   </head>
   <body>
@@ -73,8 +118,8 @@
     <textarea id="reply" placeholder="Pong! 🏓"></textarea>
     <div class="hint" id="budget"></div>
     <div class="hint">
-      A detailed latency report (click → server, dispatcher hop, handler time)
-      is appended underneath automatically.
+      A detailed latency report (click → server, dispatcher hop, handler time) is appended
+      underneath automatically.
     </div>
 
     <label class="check">
@@ -113,7 +158,8 @@
         const budget = CUSTOM_ID_MAX - overhead();
         const used = encodedReply().length;
         const el = $("budget");
-        el.textContent = `${used}/${budget} of the encoded budget used` +
+        el.textContent =
+          `${used}/${budget} of the encoded budget used` +
           (used > budget ? " — too long, shorten the reply" : "");
         el.classList.toggle("over", used > budget);
         $("save").disabled = used > budget;
@@ -139,7 +185,11 @@
           const m = msg.customId.slice(PREFIX.length).match(/^1:(e|p):(.*)$/);
           if (m) {
             $("ephemeral").checked = m[1] === "e";
-            try { $("reply").value = decodeURIComponent(m[2]); } catch { /* keep blank */ }
+            try {
+              $("reply").value = decodeURIComponent(m[2]);
+            } catch {
+              /* keep blank */
+            }
           }
         }
         updateBudget();
@@ -173,8 +223,17 @@
             nonce,
             customId,
             summary: {
-              label: text.length > 40 ? text.slice(0, 39) + "…" : text,
-              description: $("ephemeral").checked ? "ephemeral reply" : "public reply",
+              // The button is the *Ping* someone clicks; the configured text is
+              // the *Pong* reply. Name the button "Ping!" and surface the reply
+              // in the description, rather than stamping the reply (emoji and
+              // all) onto the button label — the button emoji comes from the
+              // manifest's defaultEmoji, so the label stays plain text.
+              label: "Ping!",
+              description:
+                'replies "' +
+                (text.length > 32 ? text.slice(0, 31) + "…" : text) +
+                '" · ' +
+                ($("ephemeral").checked ? "ephemeral" : "public"),
             },
           },
           hostOrigin,

@@ -134,11 +134,22 @@ interface PresentationFields {
  * like the action it now runs. The button is always enabled — a just-attached
  * action should be live. Only runs on a fresh attach; reconfiguring an
  * already-attached plugin passes no presentation, so the user's tweaks stand.
+ *
+ * Guards against a doubled glyph: if the chosen label text already carries the
+ * (unicode) emoji we'd stamp, we leave the dedicated emoji slot empty instead of
+ * rendering the same glyph twice (e.g. a summary label like "Pong! 🏓").
  */
 function presentationFields(chosen: Presentation, overrideLabel?: string): PresentationFields {
   const label = overrideLabel || chosen.label;
-  const out: PresentationFields = { disabled: undefined, emoji: emojiFromString(chosen.emoji) };
-  if (label) out.label = label.slice(0, LIMITS.BUTTON_LABEL);
+  const trimmed = label ? label.slice(0, LIMITS.BUTTON_LABEL) : undefined;
+  const emoji = emojiFromString(chosen.emoji);
+  const alreadyInLabel =
+    !!emoji && !emoji.id && !!emoji.name && !!trimmed && trimmed.includes(emoji.name);
+  const out: PresentationFields = {
+    disabled: undefined,
+    emoji: alreadyInLabel ? undefined : emoji,
+  };
+  if (trimmed) out.label = trimmed;
   return out;
 }
 
