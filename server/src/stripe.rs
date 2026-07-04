@@ -297,7 +297,11 @@ impl StripeClient {
         let customer = self.get_or_create_customer(store, uid, name).await?;
         let mut form = vec![
             ("mode".into(), "subscription".into()),
-            ("ui_mode".into(), "embedded".into()),
+            // Stripe renamed the embedded Checkout ui_mode: the account's API
+            // version rejects the old `embedded` with "use `embedded_page`". The
+            // returned client_secret is the same `cs_…` the FE's EmbeddedCheckout
+            // consumes, so only this value changes.
+            ("ui_mode".into(), "embedded_page".into()),
             ("customer".into(), customer),
             ("line_items[0][price]".into(), price.clone()),
             ("line_items[0][quantity]".into(), "1".into()),
