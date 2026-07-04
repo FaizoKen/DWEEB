@@ -20,6 +20,7 @@ on:
       - "bun.lock"
       - "tsconfig*.json"
       - "vite.config.ts"
+      - "vitest.config.ts"
       - ".github/workflows/web.yml"
   pull_request:
     branches: [main]
@@ -64,6 +65,12 @@ jobs:
 
       - name: Typecheck
         run: bun run typecheck
+
+      # Unit suite over the framework-free core: share-link serialization
+      # (incl. the frozen golden-token contract), schema validation, and
+      # placeholder substitution. Fast, no browser — see vitest.config.ts.
+      - name: Test
+        run: bun run test
 
       # The Vite env values are public (they're inlined into the shipped
       # bundle) but live in git-ignored .env files locally, so the runner

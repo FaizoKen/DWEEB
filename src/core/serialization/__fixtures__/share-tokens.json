@@ -1,0 +1,126 @@
+[
+  {
+    "name": "simpleText",
+    "token": "1.N4Igxg9gtgDhB2BTeAXAziAXAbVCgnjIlgIwAMANOAisiliABKIA2LEFABAO4QBOLACYBCEAF8AulQBmLAIYBzDJgDMAJgDsANgAcYoA",
+    "wire": {
+      "components": [
+        {
+          "type": 10,
+          "content": "Hello, world!"
+        }
+      ],
+      "flags": 32768
+    }
+  },
+  {
+    "name": "rich",
+    "token": "1.N4IgrgzgpgTgdgQwLZRALhAQTnA9mOAY1hABoQEA3BAFwRgH0wYAbdEACxpoAcI0A9AKgAPZDxZQAdIVxIBVWvSk84AczIUWLXAHcoAEwYo4NAJa44EdKB71o6ANrhoMawF0AvuVlIelqFNrNEdQGgBPHlQ0AEYAdnIEQmJTBlkdGHQAVjiATgBmACYANmKfOX84QJpg0JAIqPRc8r8AoKcwyOiYgAZy02r2AGIAAgB1KBZfKAAdOABxFgQDEfD8AHIYKBGOWGkQT3dE5KgICFwYcJt6rvQYmPIUAzMEa+Y2DC5efiFRcUkZHIBDo1LgVOoDuQDKdCDAzDxzJZ2ABlWCUWAjEG4A7eTqNWItSrVWp46KFcgQCKSbLkJYAI0m7AAIrhCNZyO92F8+IJhGI-ADfAIDKzrLibvjySBKeFqQSQPTGRgAGqwMwAMyuPkgNDkDDMBnY6LhmuMqEO4oa3QALFCzJQDSQ0DQYGAoBS7IQzBDYhbSKS7lKzDQoEgSSAni83qwudweb9+RJpEKYuCNN4QNCILD4Yi4OwAPJVSGgSOvNCgTmfOM-Pn-ZNAwppnFeI4gdVLNTBfLFAAcxWtniAA",
+    "wire": {
+      "username": "Announcer",
+      "avatar_url": "https://example.com/avatar.png",
+      "allowed_mentions": {
+        "parse": [
+          "users"
+        ]
+      },
+      "components": [
+        {
+          "type": 17,
+          "accent_color": 5793266,
+          "components": [
+            {
+              "type": 9,
+              "components": [
+                {
+                  "type": 10,
+                  "content": "# Welcome\nGlad you're here."
+                }
+              ],
+              "accessory": {
+                "type": 11,
+                "media": {
+                  "url": "https://example.com/logo.png"
+                },
+                "description": "Server logo"
+              }
+            },
+            {
+              "type": 1,
+              "components": [
+                {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Docs",
+                  "url": "https://example.com/docs"
+                },
+                {
+                  "type": 2,
+                  "style": 1,
+                  "label": "Verify",
+                  "custom_id": "verify_me"
+                }
+              ]
+            },
+            {
+              "type": 14,
+              "divider": true,
+              "spacing": 1
+            }
+          ]
+        },
+        {
+          "type": 12,
+          "items": [
+            {
+              "media": {
+                "url": "https://example.com/1.png"
+              },
+              "description": "One"
+            },
+            {
+              "media": {
+                "url": "https://example.com/2.png"
+              }
+            }
+          ]
+        }
+      ],
+      "flags": 36864
+    }
+  },
+  {
+    "name": "select",
+    "token": "1.N4Igxg9gtgDhB2BTeAXAziAXAbVCgnjIlgIwA040cSqGOehxmAzBWAK5orQD6AlgBMsIGHzABrHgCcIAG2IUYsgIZhEACzkDEU4QGFNENIgAEykzPkgKUPvB4A3ZbPaI65EFGUAPR89d0AEwUEDAofAh0uCAqAEaIssIASohCFE4uTCBSqSAAvmSgcQnCAOI5yNYgGa7CAOYV8PmFMcrxiZggAEKZVTVZsb15ALojIxQAZip1dMyBAOwAbAAceUA",
+    "wire": {
+      "components": [
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 3,
+              "custom_id": "pick_role",
+              "placeholder": "Choose a role",
+              "min_values": 1,
+              "max_values": 2,
+              "options": [
+                {
+                  "label": "Red",
+                  "value": "red"
+                },
+                {
+                  "label": "Green",
+                  "value": "green"
+                },
+                {
+                  "label": "Blue",
+                  "value": "blue"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "flags": 32768
+    }
+  }
+]

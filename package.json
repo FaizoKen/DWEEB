@@ -11,6 +11,9 @@
     "gen:seo": "bun scripts/gen-template-pages.ts",
     "preview": "vite preview --host",
     "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "gen:golden": "bun scripts/gen-golden-fixtures.ts",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\""
   },
@@ -31,7 +34,8 @@
     "terser": "^5.48.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
-    "vite-plugin-pwa": "^0.21"
+    "vite-plugin-pwa": "^0.21",
+    "vitest": "^2.1.9"
   },
   "engines": {
     "bun": ">=1.1.0",

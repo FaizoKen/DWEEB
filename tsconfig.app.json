@@ -29,5 +29,9 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Test files and their fixtures are excluded from the production typecheck /
+  // build so `tsc -b` neither needs Vitest's types nor emits test code. They
+  // are type-checked via `tsconfig.vitest.json` and run by Vitest (esbuild).
+  "exclude": ["src/**/*.test.ts", "src/test", "src/**/__fixtures__"]
 }
