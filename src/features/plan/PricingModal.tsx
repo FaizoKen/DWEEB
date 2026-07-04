@@ -52,11 +52,11 @@ const TIERS: TierDef[] = [
 ];
 
 /** The metered quotas, in the shipped default numbers (`server/src/config.rs`). */
-const ROWS: { label: string; free: string; plus: string; pro: string }[] = [
-  { label: "Scheduled posts", free: "3", plus: "30", pro: "Unlimited" },
-  { label: "Never-expire panels", free: "5", plus: "25", pro: "Unlimited" },
-  { label: "Custom bots", free: "1", plus: "2", pro: "5" },
-  { label: "Live co-editors", free: "2", plus: "6", pro: "25" },
+const ROWS: { label: string; values: Record<PlanTier, string> }[] = [
+  { label: "Scheduled posts", values: { free: "3", plus: "30", pro: "Unlimited" } },
+  { label: "Never-expire panels", values: { free: "5", plus: "25", pro: "Unlimited" } },
+  { label: "Custom bots", values: { free: "1", plus: "2", pro: "5" } },
+  { label: "Live co-editors", values: { free: "2", plus: "6", pro: "25" } },
 ];
 
 const INCLUDED =
@@ -207,23 +207,35 @@ export function PricingModal() {
       }
     >
       {server ? (
-        <div className={styles.serverContext}>
+        <div className={styles.contextBar}>
           <GuildGlyph guild={server} />
-          <span>{server.name}</span>
+          <span className={styles.contextText}>
+            <span className={styles.contextName}>{server.name}</span>
+            <span className={styles.contextSub}>
+              {currentTier ? (
+                <>
+                  On <strong>{tierName(currentTier)}</strong> — nothing is locked, paid tiers only
+                  raise the limits below.
+                </>
+              ) : (
+                "Nothing is locked — paid tiers only raise the limits below."
+              )}
+            </span>
+          </span>
+          {currentTier ? (
+            <span
+              className={cn(styles.contextTier, currentTier !== "free" && styles.contextTierPaid)}
+            >
+              {tierName(currentTier)}
+            </span>
+          ) : null}
         </div>
-      ) : null}
-
-      <p className={styles.lead}>
-        Premium applies to one server, and nothing is locked — paid tiers just raise these limits.
-        {server && currentTier ? (
-          <>
-            {" "}
-            <strong>{server.name}</strong> is on <strong>{tierName(currentTier)}</strong>.
-          </>
-        ) : !guildId ? (
-          <> Connect a server to upgrade it.</>
-        ) : null}
-      </p>
+      ) : (
+        <p className={styles.lead}>
+          Connect a server to upgrade it. Premium applies to one server; nothing is locked — paid
+          tiers only raise the limits below.
+        </p>
+      )}
 
       {coveredByOther ? (
         <p className={styles.coveredNote}>
@@ -232,76 +244,47 @@ export function PricingModal() {
         </p>
       ) : null}
 
-      <div className={styles.periodToggle} role="group" aria-label="Billing interval">
-        <button
-          type="button"
-          className={cn(styles.periodBtn, period === "month" && styles.periodActive)}
-          aria-pressed={period === "month"}
-          onClick={() => setPeriod("month")}
-        >
-          Monthly
-        </button>
-        <button
-          type="button"
-          className={cn(styles.periodBtn, period === "year" && styles.periodActive)}
-          aria-pressed={period === "year"}
-          onClick={() => setPeriod("year")}
-        >
-          Annual
-          <span className={styles.periodSave}>2 months free</span>
-        </button>
+      <div className={styles.toggleRow}>
+        <div className={styles.periodToggle} role="group" aria-label="Billing interval">
+          <button
+            type="button"
+            className={cn(styles.periodBtn, period === "month" && styles.periodActive)}
+            aria-pressed={period === "month"}
+            onClick={() => setPeriod("month")}
+          >
+            Monthly
+          </button>
+          <button
+            type="button"
+            className={cn(styles.periodBtn, period === "year" && styles.periodActive)}
+            aria-pressed={period === "year"}
+            onClick={() => setPeriod("year")}
+          >
+            Annual
+            <span className={styles.periodSave}>2 months free</span>
+          </button>
+        </div>
       </div>
 
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th className={styles.rowHead} aria-hidden="true" />
-              {TIERS.map((t) => {
-                const canBuy =
-                  canUpgradeHere && t.id !== "free" && RANK[currentTier ?? "free"] < RANK[t.id];
-                return (
-                  <th
-                    key={t.id}
-                    scope="col"
-                    className={cn(styles.tierHead, currentTier === t.id && styles.tierCurrent)}
-                  >
-                    <span className={styles.tierName}>{t.name}</span>
-                    <span className={styles.tierPrice}>
-                      {period === "year" ? t.yearly : t.monthly}
-                      <span className={styles.per}>{period === "year" ? "/yr" : "/mo"}</span>
-                    </span>
-                    <span className={styles.tierTagline}>{t.tagline}</span>
-                    {currentTier === t.id ? (
-                      <span className={styles.youBadge}>This server</span>
-                    ) : canBuy ? (
-                      <button
-                        type="button"
-                        className={styles.tierCta}
-                        disabled={starting !== null}
-                        onClick={() => void startCheckout(t.id as PaidTier)}
-                      >
-                        {starting === t.id ? "Starting…" : "Upgrade"}
-                      </button>
-                    ) : null}
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {ROWS.map((r) => (
-              <tr key={r.label}>
-                <th scope="row" className={styles.rowHead}>
-                  {r.label}
-                </th>
-                <td className={cn(currentTier === "free" && styles.colCurrent)}>{r.free}</td>
-                <td className={cn(currentTier === "plus" && styles.colCurrent)}>{r.plus}</td>
-                <td className={cn(currentTier === "pro" && styles.colCurrent)}>{r.pro}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className={styles.plans}>
+        {TIERS.map((t) => {
+          const canBuy =
+            canUpgradeHere && t.id !== "free" && RANK[currentTier ?? "free"] < RANK[t.id];
+          return (
+            <PlanCard
+              key={t.id}
+              tier={t}
+              period={period}
+              isCurrent={currentTier === t.id}
+              // Highlight the natural upgrade, unless it's already the current tier.
+              featured={t.id === "plus" && currentTier !== "plus"}
+              canBuy={canBuy}
+              starting={starting === t.id}
+              disabled={starting !== null}
+              onBuy={() => void startCheckout(t.id as PaidTier)}
+            />
+          );
+        })}
       </div>
 
       {canManage ? (
@@ -317,6 +300,72 @@ export function PricingModal() {
 
       <p className={styles.included}>{INCLUDED}</p>
     </Modal>
+  );
+}
+
+/** One tier's pricing card: name, price for the chosen interval, tagline, a CTA
+ *  (Upgrade / a "Current plan" marker / an empty slot for a lower tier), and the
+ *  quota list so the tiers compare row-for-row down the columns. */
+function PlanCard({
+  tier,
+  period,
+  isCurrent,
+  featured,
+  canBuy,
+  starting,
+  disabled,
+  onBuy,
+}: {
+  tier: TierDef;
+  period: BillingInterval;
+  isCurrent: boolean;
+  featured: boolean;
+  canBuy: boolean;
+  starting: boolean;
+  disabled: boolean;
+  onBuy: () => void;
+}) {
+  return (
+    <div
+      className={cn(styles.card, isCurrent && styles.cardCurrent, featured && styles.cardFeatured)}
+    >
+      {featured ? <span className={styles.featTag}>Most popular</span> : null}
+      <div className={styles.cardHead}>
+        <span className={styles.cardName}>{tier.name}</span>
+        {isCurrent ? <span className={styles.currentPill}>Current</span> : null}
+      </div>
+      <div className={styles.cardPrice}>
+        <span className={styles.cardAmount}>{period === "year" ? tier.yearly : tier.monthly}</span>
+        <span className={styles.cardPer}>{period === "year" ? "/yr" : "/mo"}</span>
+      </div>
+      <span className={styles.cardTagline}>{tier.tagline}</span>
+
+      <div className={styles.cardCta}>
+        {isCurrent ? (
+          <span className={styles.ctaCurrent}>Your plan</span>
+        ) : canBuy ? (
+          <button type="button" className={styles.ctaBuy} disabled={disabled} onClick={onBuy}>
+            {starting ? "Starting…" : "Upgrade"}
+          </button>
+        ) : (
+          <span className={styles.ctaSpacer} aria-hidden="true" />
+        )}
+      </div>
+
+      <ul className={styles.quotas}>
+        {ROWS.map((r) => {
+          const v = r.values[tier.id];
+          return (
+            <li key={r.label} className={styles.quota}>
+              <span className={cn(styles.quotaVal, v === "Unlimited" && styles.quotaUnlimited)}>
+                {v}
+              </span>
+              <span className={styles.quotaLabel}>{r.label}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -356,12 +405,28 @@ function PremiumServers({
         // Servers the user manages with the bot present, minus this sub's current
         // one — the valid move targets.
         const targets = guilds.filter((x) => x.bot_present && x.id !== s.guildId);
+        // A recently-moved sub is on cooldown (the server owns the window; we just
+        // mirror it as a disabled button so a click can't fail server-side).
+        const cooldownUntil =
+          s.movableAt != null && s.movableAt * 1000 > Date.now() ? s.movableAt : null;
+        const moveTitle = cooldownUntil
+          ? `You can move this again on ${new Date(cooldownUntil * 1000).toLocaleDateString()}`
+          : targets.length === 0
+            ? "Add the bot to another server first"
+            : undefined;
         return (
           <div key={s.id} className={styles.serverItem}>
             {g ? <GuildGlyph guild={g} /> : null}
             <span className={styles.serverItemMain}>
               <span className={styles.serverItemName}>{g?.name ?? s.guildId ?? "Unassigned"}</span>
-              <span className={styles.serverItemMeta}>{subMeta(s)}</span>
+              <span className={styles.serverItemMeta}>
+                {subMeta(s)}
+                {cooldownUntil ? (
+                  <span className={styles.moveLock}>
+                    {" · "}Movable {new Date(cooldownUntil * 1000).toLocaleDateString()}
+                  </span>
+                ) : null}
+              </span>
             </span>
             <span className={styles.serverTierBadge}>{tierName(s.tier)}</span>
             {movingId === s.id ? (
@@ -387,8 +452,8 @@ function PremiumServers({
               <button
                 type="button"
                 className={styles.moveBtn}
-                disabled={busy || targets.length === 0}
-                title={targets.length === 0 ? "Add the bot to another server first" : undefined}
+                disabled={busy || targets.length === 0 || cooldownUntil != null}
+                title={moveTitle}
                 onClick={() => setMovingId(s.id)}
               >
                 Move
@@ -397,6 +462,9 @@ function PremiumServers({
           </div>
         );
       })}
+      <p className={styles.serversHint}>
+        Premium follows you — move it to another server anytime (once a week per subscription).
+      </p>
     </div>
   );
 }

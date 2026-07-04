@@ -82,6 +82,9 @@ export interface PremiumSubscription {
   currentPeriodEnd: number;
   /** True when it's set to end at the period boundary rather than renew. */
   cancelAtPeriodEnd: boolean;
+  /** Unix seconds this sub can next be moved to another server, or null once it's
+   *  freely movable (never moved, or the move cooldown has elapsed). */
+  movableAt: number | null;
 }
 
 /** Raw row shape from the proxy (snake_case), before normalisation. */
@@ -92,6 +95,7 @@ interface RawSubscription {
   status: string;
   current_period_end: number;
   cancel_at_period_end: boolean;
+  movable_at: number | null;
 }
 
 /** `GET /api/stripe/subscriptions` → the signed-in user's premium subscriptions
@@ -116,6 +120,7 @@ export async function fetchMySubscriptions(): Promise<PremiumSubscription[]> {
     status: s.status,
     currentPeriodEnd: s.current_period_end,
     cancelAtPeriodEnd: s.cancel_at_period_end,
+    movableAt: s.movable_at ?? null,
   }));
 }
 

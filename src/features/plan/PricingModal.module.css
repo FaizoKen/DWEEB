@@ -1,5 +1,5 @@
 .lead {
-  margin: 0 0 14px;
+  margin: 0 0 4px;
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--app-text-muted);
@@ -9,10 +9,63 @@
   font-weight: 600;
 }
 
+/* Server-context banner — which server this modal is scoped to, its current
+   tier, and the "nothing is locked" framing, all in one row. */
+.contextBar {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  border-radius: var(--app-radius-lg);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-hover);
+}
+.contextText {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.contextName {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--app-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contextSub {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+.contextSub strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+/* Current-tier chip on the right of the banner. */
+.contextTier {
+  flex: none;
+  padding: 3px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  color: var(--app-text-muted);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+}
+.contextTierPaid {
+  color: #fff;
+  background: var(--app-accent);
+  border-color: transparent;
+}
+
 /* "Already covered by another member" callout — steers a second mod away from
    stacking a redundant subscription on a server someone else already pays for. */
 .coveredNote {
-  margin: 0 0 14px;
+  margin: 0;
   padding: 8px 11px;
   border-radius: var(--app-radius-sm);
   border: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
@@ -25,20 +78,24 @@
   font-weight: 600;
 }
 
-/* Monthly / Annual switch above the table. */
+/* Row holding the Monthly / Annual switch, centered above the cards. */
+.toggleRow {
+  display: flex;
+  justify-content: center;
+}
 .periodToggle {
   display: inline-flex;
   gap: 2px;
-  margin: 0 0 14px;
   padding: 3px;
   border-radius: 999px;
   background: var(--app-bg-hover);
+  border: 1px solid var(--app-border);
 }
 .periodBtn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 14px;
+  padding: 5px 16px;
   border: none;
   border-radius: 999px;
   background: none;
@@ -51,6 +108,7 @@
 .periodActive {
   background: var(--app-bg-elevated);
   color: var(--app-text);
+  box-shadow: var(--app-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.2));
 }
 .periodSave {
   font-size: 9px;
@@ -60,114 +118,166 @@
   color: var(--app-accent);
 }
 
-/* Horizontal scroll container so the table never forces the page to scroll. */
-.tableWrap {
-  overflow-x: auto;
+/* ── Plan cards ─────────────────────────────────────────────────────────── */
+.plans {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+@media (max-width: 560px) {
+  .plans {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 14px 14px;
   border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
+  border-radius: var(--app-radius-lg);
+  background: color-mix(in srgb, var(--app-text) 3%, transparent);
 }
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12.5px;
-}
-
-.table th,
-.table td {
-  padding: 9px 12px;
-  text-align: center;
-  border-bottom: 1px solid var(--app-border);
-}
-.table tbody tr:last-child th,
-.table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-/* Left column: the quota label. */
-.rowHead {
-  text-align: left;
-  font-weight: 500;
-  color: var(--app-text);
-  white-space: nowrap;
-}
-
-/* Tier column header stacks name / price / tagline. */
-.tierHead {
-  vertical-align: bottom;
-  border-left: 1px solid var(--app-border);
-}
-.tierName {
-  display: block;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--app-text);
-}
-.tierPrice {
-  display: block;
-  margin-top: 2px;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--app-text);
-}
-.per {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--app-text-muted);
-}
-.tierTagline {
-  display: block;
-  margin-top: 2px;
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--app-text-muted);
-}
-
-/* Body cells inherit the left divider so columns read as columns. */
-.table td {
-  border-left: 1px solid var(--app-border);
-  color: var(--app-text);
-}
-
-/* The signed-in user's current tier is tinted top-to-bottom. */
-.tierCurrent {
-  background: color-mix(in srgb, var(--app-accent) 14%, transparent);
-}
-.colCurrent {
+/* The natural upgrade — a soft accent wash + lift. */
+.cardFeatured {
+  border-color: color-mix(in srgb, var(--app-accent) 45%, var(--app-border));
   background: color-mix(in srgb, var(--app-accent) 8%, transparent);
-  font-weight: 600;
+}
+/* The server's current tier — a solid accent ring. */
+.cardCurrent {
+  border-color: var(--app-accent);
+  background: color-mix(in srgb, var(--app-accent) 12%, transparent);
 }
 
-.youBadge {
-  display: inline-block;
-  margin-top: 5px;
-  padding: 1px 7px;
+.featTag {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 10px;
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  white-space: nowrap;
   border-radius: 999px;
-  color: var(--app-accent-text, #fff);
+  color: #fff;
   background: var(--app-accent);
 }
 
-/* Per-tier "Upgrade" button in the column header — starts embedded checkout. */
-.tierCta {
-  display: inline-block;
-  margin-top: 6px;
-  padding: 3px 12px;
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.cardName {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--app-text);
+}
+.currentPill {
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--app-accent);
+}
+
+.cardPrice {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  margin-top: 8px;
+}
+.cardAmount {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--app-text);
+}
+.cardPer {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text-muted);
+}
+.cardTagline {
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--app-text-muted);
+}
+
+/* CTA area — fixed min-height so buttons/labels line up across the three cards. */
+.cardCta {
+  display: flex;
+  margin-top: 12px;
+  min-height: 32px;
+}
+.ctaBuy {
+  flex: 1;
+  padding: 7px 12px;
   border: none;
   border-radius: 999px;
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  color: var(--app-accent-text, #fff);
+  color: #fff;
   background: var(--app-accent);
 }
-.tierCta:disabled {
+.ctaBuy:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+.ctaBuy:disabled {
   opacity: 0.6;
   cursor: default;
+}
+.ctaCurrent {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text-muted);
+}
+.ctaSpacer {
+  flex: 1;
+}
+
+.quotas {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--app-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.quota {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+.quotaVal {
+  margin-right: 5px;
+  font-weight: 700;
+  color: var(--app-text);
+}
+.quotaUnlimited {
+  color: var(--app-accent);
+}
+.quotaLabel {
+  font-weight: 500;
 }
 
 /* Holds Stripe's embedded Checkout iframe — reserve height so the modal doesn't
@@ -179,34 +289,15 @@
 }
 
 .included {
-  margin: 12px 0 0;
+  margin: 4px 0 0;
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--app-text-muted);
 }
 
-.hint {
-  margin: 8px 0 0;
-  font-size: 11.5px;
-  color: var(--app-text-muted);
-}
-
-/* The server this upgrade is for — a small chip above the lead. */
-.serverContext {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 0 10px;
-  padding: 4px 10px 4px 4px;
-  border-radius: 999px;
-  background: var(--app-bg-hover);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--app-text);
-}
 .serverIcon {
-  width: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   object-fit: cover;
   flex: none;
@@ -215,16 +306,16 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--app-text);
   background: var(--app-bg-elevated);
 }
 
-/* "Your premium servers" management block below the table. */
+/* "Your premium servers" management block below the cards. */
 .serversSection {
-  margin: 16px 0 0;
-  padding-top: 14px;
+  margin: 4px 0 0;
+  padding-top: 16px;
   border-top: 1px solid var(--app-border);
 }
 .serversTitle {
@@ -238,11 +329,11 @@
 .serverItem {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 0;
+  gap: 9px;
+  padding: 8px 0;
   border-bottom: 1px solid var(--app-border);
 }
-.serverItem:last-child {
+.serverItem:last-of-type {
   border-bottom: none;
 }
 .serverItemMain {
@@ -264,6 +355,11 @@
   font-size: 10.5px;
   color: var(--app-text-muted);
 }
+/* The "· Movable <date>" cooldown note appended to the meta line. */
+.moveLock {
+  color: color-mix(in srgb, var(--app-accent) 60%, var(--app-text-muted));
+  font-weight: 600;
+}
 .serverTierBadge {
   flex: none;
   padding: 1px 8px;
@@ -272,12 +368,12 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   border-radius: 999px;
-  color: var(--app-accent-text, #fff);
+  color: #fff;
   background: var(--app-accent);
 }
 .moveBtn {
   flex: none;
-  padding: 3px 10px;
+  padding: 4px 12px;
   border: 1px solid var(--app-border);
   border-radius: 999px;
   background: none;
@@ -287,18 +383,27 @@
   font-weight: 600;
   color: var(--app-text);
 }
+.moveBtn:hover:not(:disabled) {
+  background: var(--app-bg-hover);
+}
 .moveBtn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: default;
 }
 .moveSelect {
   flex: none;
   max-width: 55%;
-  padding: 3px 6px;
+  padding: 4px 8px;
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
   background: var(--app-bg-elevated);
   color: var(--app-text);
   font: inherit;
   font-size: 11.5px;
+}
+.serversHint {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
 }

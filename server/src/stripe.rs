@@ -61,6 +61,14 @@ const STRIPE_API: &str = "https://api.stripe.com";
 /// Reject a webhook whose timestamp is this far from now (replay protection).
 const WEBHOOK_TOLERANCE_SECS: i64 = 300;
 
+/// How long after moving a subscription before it can be moved again. Premium is
+/// per-server and movable, so without this one paid sub could be cycled across
+/// many servers to seed each with creation-gated benefits (scheduled posts,
+/// never-expire panels…). A week barely touches the legit "wrong server / we
+/// migrated communities" case while killing rapid hopping. Enforced server-side —
+/// the client only mirrors it as a disabled button.
+const MOVE_COOLDOWN_SECS: i64 = 7 * 24 * 60 * 60;
+
 // ── Local mirror ─────────────────────────────────────────────────────────────
 
 /// One mirrored subscription row.
@@ -79,6 +87,10 @@ pub struct SubRow {
     /// per-server premium). `None` for a legacy/foreign sub with no `guild_id`
     /// metadata — it grants no server (so it's simply ignored).
     pub guild_id: Option<String>,
+    /// Unix seconds of the owner's last user-initiated *move* of this sub to a
+    /// different server. `None` until the first move. Drives the move cooldown
+    /// (see [`MOVE_COOLDOWN_SECS`]); deliberately not touched by webhook re-mirrors.
+    pub reassigned_at: Option<i64>,
 }
 
 /// SQLite mirror of the user's Stripe subscriptions + the discord→customer map.
@@ -111,7 +123,11 @@ impl StripeStore {
                  current_period_end   INTEGER NOT NULL,
                  cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
                  updated_at           INTEGER NOT NULL,
-                 guild_id             TEXT
+                 guild_id             TEXT,
+                 -- When the owner last *moved* this sub to another server. Distinct
+                 -- from updated_at (which every webhook re-mirror bumps); drives the
+                 -- move cooldown. NULL = never moved.
+                 reassigned_at        INTEGER
              );
              CREATE INDEX IF NOT EXISTS idx_stripe_sub_user
                  ON stripe_subscriptions(user_id, status);
@@ -151,6 +167,21 @@ impl StripeStore {
              ON stripe_subscriptions(guild_id, status);",
         )
         .map_err(|e| format!("index guild_id: {e}"))?;
+        // Move-cooldown clock (added after guild_id) — same ADD-COLUMN dance.
+        let has_reassigned: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('stripe_subscriptions') \
+                 WHERE name = 'reassigned_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_reassigned == 0 {
+            conn.execute_batch(
+                "ALTER TABLE stripe_subscriptions ADD COLUMN reassigned_at INTEGER;",
+            )
+            .map_err(|e| format!("migrate reassigned_at: {e}"))?;
+        }
         Ok(StripeStore {
             conn: Mutex::new(conn),
         })
@@ -210,7 +241,7 @@ impl StripeStore {
     /// All columns, in the order [`sub_from_row`] reads them.
     const SUB_COLS: &'static str =
         "id, user_id, customer_id, price_id, status, current_period_end, \
-         cancel_at_period_end, guild_id";
+         cancel_at_period_end, guild_id, reassigned_at";
 
     /// One subscription by id (for ownership checks before a reassignment).
     pub fn get_subscription(&self, id: &str) -> Option<SubRow> {
@@ -255,6 +286,19 @@ impl StripeStore {
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Stamp a subscription's last user-initiated move (the move-cooldown clock).
+    /// Kept separate from [`set_subscription_guild`] so the *binding* half of a
+    /// move (and the carry-over auto-apply, which reuses the reassign path) don't
+    /// start the cooldown — only an explicit move from the "your premium servers"
+    /// UI does, via the `reassign` handler.
+    pub fn mark_reassigned(&self, id: &str) {
+        let conn = self.lock();
+        let _ = conn.execute(
+            "UPDATE stripe_subscriptions SET reassigned_at = ?2 WHERE id = ?1",
+            params![id, unix_now()],
+        );
     }
 
     /// When we last searched Stripe for a server's subscriptions (backfill
@@ -688,6 +732,9 @@ impl StripeClient {
             current_period_end: period_end,
             cancel_at_period_end: cancel,
             guild_id,
+            // upsert_subscription's SQL never writes reassigned_at, so this is
+            // ignored — an existing move-stamp is preserved across re-mirrors.
+            reassigned_at: None,
         }) {
             tracing::warn!("stripe mirror upsert failed: {e}");
         }
@@ -790,7 +837,23 @@ fn sub_from_row(r: &rusqlite::Row) -> rusqlite::Result<SubRow> {
         current_period_end: r.get(5)?,
         cancel_at_period_end: r.get::<_, i64>(6)? != 0,
         guild_id: r.get(7)?,
+        reassigned_at: r.get(8)?,
     })
+}
+
+/// A coarse "in X days/hours/minutes" phrase for a remaining-cooldown message.
+/// Rounds up to the larger unit so we never under-promise (the client shows the
+/// exact unlock date; this is only the rare direct-call fallback).
+fn humanize(secs: i64) -> String {
+    let secs = secs.max(1);
+    let (n, unit) = if secs >= 86_400 {
+        ((secs + 86_399) / 86_400, "day")
+    } else if secs >= 3_600 {
+        ((secs + 3_599) / 3_600, "hour")
+    } else {
+        ((secs + 59) / 60, "minute")
+    };
+    format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }
 
 /// Normalize a Stripe expandable field (string id | object with `id` | null).
@@ -1037,6 +1100,12 @@ pub async fn subscriptions(
                 "status": s.status,
                 "current_period_end": s.current_period_end,
                 "cancel_at_period_end": s.cancel_at_period_end,
+                // Unix seconds this sub can next be moved; null once freely movable
+                // (never moved, or the cooldown has elapsed). Keeps the cooldown
+                // length server-owned — the client just compares it to now.
+                "movable_at": s.reassigned_at
+                    .map(|t| t + MOVE_COOLDOWN_SECS)
+                    .filter(|m| *m > unix_now()),
             })
         })
         .collect();
@@ -1085,8 +1154,8 @@ pub async fn reassign(
     // Must manage the destination server (also resolves the signed-in identity).
     let session = crate::routes::authorize_member(&st, &jar, &new_guild).await?;
     // Must own the subscription being moved.
-    match stripe.store.get_subscription(&sub_id) {
-        Some(s) if s.user_id == session.uid => {}
+    let sub = match stripe.store.get_subscription(&sub_id) {
+        Some(s) if s.user_id == session.uid => s,
         Some(_) => {
             return Err(AppError::Forbidden(
                 "That subscription isn't yours to move.".into(),
@@ -1099,12 +1168,37 @@ pub async fn reassign(
                 retry_after: None,
             })
         }
+    };
+    // Already here → nothing to move; return success without burning the cooldown.
+    if sub.guild_id.as_deref() == Some(new_guild.as_str()) {
+        return Ok((
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(json!({ "ok": true, "guild_id": new_guild })),
+        )
+            .into_response());
+    }
+    // Move cooldown — one sub can't be cycled across servers to seed each. The FE
+    // disables the button using `movable_at`; this guards the race / direct call.
+    if let Some(last) = sub.reassigned_at {
+        let remaining = MOVE_COOLDOWN_SECS - (unix_now() - last);
+        if remaining > 0 {
+            return Err(AppError::Status {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                message: format!(
+                    "You can move this premium again in {}.",
+                    humanize(remaining)
+                ),
+                retry_after: Some(remaining as f64),
+            });
+        }
     }
     let prev = stripe
         .client
         .reassign_subscription(&stripe.store, &sub_id, &new_guild)
         .await
         .map_err(|e| AppError::BadGateway(format!("Couldn't move the subscription: {e}")))?;
+    // Start the cooldown from this explicit move (not the carry-over bind path).
+    stripe.store.mark_reassigned(&sub_id);
     // Both servers' tiers just changed — clear their cached entitlement.
     if let Some(prev) = prev.as_deref() {
         st.entitlements.invalidate(prev);
@@ -1195,6 +1289,7 @@ mod tests {
             current_period_end: 0,
             cancel_at_period_end: false,
             guild_id: Some(guild.into()),
+            reassigned_at: None,
         }
     }
 
@@ -1260,6 +1355,42 @@ mod tests {
     }
 
     #[test]
+    fn mark_reassigned_stamps_only_the_move_and_survives_remirror() {
+        let (store, path) = temp_store("move-cooldown");
+        store
+            .upsert_subscription(&row("sub_a", "u1", "g1", "p_pro", "active"))
+            .unwrap();
+        // A fresh sub has never been moved → no cooldown clock.
+        assert!(store
+            .get_subscription("sub_a")
+            .unwrap()
+            .reassigned_at
+            .is_none());
+        // An explicit move stamps it…
+        store.mark_reassigned("sub_a");
+        let stamped = store.get_subscription("sub_a").unwrap().reassigned_at;
+        assert!(stamped.is_some());
+        // …and a later webhook re-mirror (upsert) must not clear it.
+        store
+            .upsert_subscription(&row("sub_a", "u1", "g2", "p_pro", "active"))
+            .unwrap();
+        assert_eq!(
+            store.get_subscription("sub_a").unwrap().reassigned_at,
+            stamped
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn humanize_rounds_up_to_the_coarser_unit() {
+        assert_eq!(humanize(6 * 86_400 + 100), "7 days"); // 6d + a bit → 7 days
+        assert_eq!(humanize(86_400), "1 day");
+        assert_eq!(humanize(3_600), "1 hour");
+        assert_eq!(humanize(90 * 60), "2 hours");
+        assert_eq!(humanize(30), "1 minute");
+    }
+
+    #[test]
     fn guild_backfill_check_roundtrips() {
         let (store, path) = temp_store("gcheck");
         assert!(store.get_guild_checked("g1").is_none());
@@ -1282,6 +1413,7 @@ mod tests {
             current_period_end: 0,
             cancel_at_period_end: false,
             guild_id: None,
+            reassigned_at: None,
         };
         // Two floating recognized subs → the higher-slot one is auto-applied.
         let subs = vec![
