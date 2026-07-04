@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use axum_extra::extract::cookie::PrivateCookieJar;
@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 
 use crate::config::{Config, TierLimits};
 use crate::error::AppError;
-use crate::routes::{current_session, AppState};
+use crate::routes::{authorize_member, AppState};
 use crate::schedule::unix_now;
 use crate::stripe::StripeState;
 
@@ -100,58 +100,67 @@ impl Entitlement {
         }
     }
 
-    /// The acting user's tier. Always answers (Free when unconfigured/unknown).
-    pub async fn tier_for(&self, uid: &str) -> Tier {
-        Tier::from_slots(self.slots_for(uid).await)
+    /// A **server's** tier — derived from the subscriptions bound to it, MEE6/
+    /// Dyno-style. Always answers (Free when unconfigured / no premium).
+    pub async fn tier_for(&self, guild: &str) -> Tier {
+        Tier::from_slots(self.slots_for(guild).await)
     }
 
-    /// A per-server scheduled-post quota override honouring the user's tier.
-    /// `None` when disabled (caller uses its store default). Unlimited → `i64::MAX`.
-    pub async fn schedule_limit(&self, uid: &str) -> Option<i64> {
+    /// A server's scheduled-post quota, honouring its tier. `None` when disabled
+    /// (caller uses its store default). Unlimited → `i64::MAX`.
+    pub async fn schedule_limit(&self, guild: &str) -> Option<i64> {
         if !self.enabled() {
             return None;
         }
-        let tier = self.tier_for(uid).await;
+        let tier = self.tier_for(guild).await;
         Some(unlimited_to_max(self.limits_for(tier).schedules))
     }
 
-    /// The acting user's never-expire slot cap for the dispatcher, or `None` when
+    /// A server's never-expire slot cap for the dispatcher, or `None` when
     /// disabled. Unlimited tiers map to [`UNLIMITED_SLOTS`].
-    pub async fn permanent_cap(&self, uid: &str) -> Option<u32> {
+    pub async fn permanent_cap(&self, guild: &str) -> Option<u32> {
         if !self.enabled() {
             return None;
         }
-        let tier = self.tier_for(uid).await;
+        let tier = self.tier_for(guild).await;
         Some(cap_u32(self.limits_for(tier).permanent))
     }
 
-    /// The acting user's custom-bot registration cap for the dispatcher, or
-    /// `None` when disabled.
-    pub async fn custom_bots_cap(&self, uid: &str) -> Option<u32> {
+    /// A server's custom-bot registration cap for the dispatcher, or `None` when
+    /// disabled.
+    pub async fn custom_bots_cap(&self, guild: &str) -> Option<u32> {
         if !self.enabled() {
             return None;
         }
-        let tier = self.tier_for(uid).await;
+        let tier = self.tier_for(guild).await;
         Some(cap_u32(self.limits_for(tier).custom_bots))
     }
 
-    /// The acting user's concurrent live co-editor cap for an Activity room they
-    /// host, or `None` when disabled (caller treats it as unlimited).
-    pub async fn coeditor_cap(&self, uid: &str) -> Option<u32> {
+    /// A server's concurrent live co-editor cap for an Activity room hosted in
+    /// it, or `None` when disabled (caller treats it as unlimited).
+    pub async fn coeditor_cap(&self, guild: &str) -> Option<u32> {
         if !self.enabled() {
             return None;
         }
-        let tier = self.tier_for(uid).await;
+        let tier = self.tier_for(guild).await;
         Some(cap_u32(self.limits_for(tier).coeditors))
     }
 
-    async fn slots_for(&self, uid: &str) -> i64 {
+    /// Drop a server's cached tier so a purchase / move / cancel shows at once
+    /// instead of waiting out the cache window.
+    pub fn invalidate(&self, guild: &str) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.remove(guild);
+        }
+    }
+
+    async fn slots_for(&self, guild: &str) -> i64 {
         let Some(stripe) = &self.stripe else {
             return 0;
         };
         let now = unix_now();
         if let Ok(cache) = self.cache.lock() {
-            if let Some(c) = cache.get(uid) {
+            if let Some(c) = cache.get(guild) {
                 if now - c.fetched_at < self.cache_secs {
                     return c.slots;
                 }
@@ -159,10 +168,10 @@ impl Entitlement {
         }
         // Reads the local mirror (network-free); a stale/missing entry may trigger
         // one throttled Stripe backfill inside `active_slots_for`.
-        let slots = stripe.active_slots_for(uid).await;
+        let slots = stripe.active_slots_for(guild).await;
         if let Ok(mut cache) = self.cache.lock() {
             cache.insert(
-                uid.to_string(),
+                guild.to_string(),
                 Cached {
                     slots,
                     fetched_at: now,
@@ -198,16 +207,27 @@ fn cap_u32(n: i64) -> u32 {
     }
 }
 
-/// `GET /api/me/plan` — the signed-in user's tier, per-tier limits, and whether
-/// in-app billing is available (so the FE shows/hides checkout). Cookie-gated.
-/// Unlimited limits are sent as JSON `null`.
-pub async fn me_plan(
+/// `GET /api/guilds/:guild_id/plan` — a **server's** tier, per-tier limits, and
+/// whether in-app billing is available (so the FE shows/hides checkout). Gated on
+/// the caller managing the server, like the other per-server features. Unlimited
+/// limits are sent as JSON `null`.
+pub async fn guild_plan(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
+    Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
-    let session = current_session(&jar)
-        .ok_or_else(|| AppError::Unauthorized("Sign in with Discord to view your plan.".into()))?;
-    let tier = st.entitlements.tier_for(&session.uid).await;
+    let session = authorize_member(&st, &jar, &guild).await?;
+    // Auto-apply an existing subscriber's floating premium (e.g. a RoleLogic sub
+    // with no server binding yet) to this server — one-server premium, granted
+    // automatically on first use. Safe: the user manages this server (gated
+    // above), and it's a no-op once the server has premium or the user has no
+    // unbound sub. Only meaningful when billing is configured.
+    if let Some(stripe) = &st.stripe {
+        if stripe.claim_legacy_for_guild(&session.uid, &guild).await {
+            st.entitlements.invalidate(&guild);
+        }
+    }
+    let tier = st.entitlements.tier_for(&guild).await;
     let limits = st.entitlements.limits_for(tier);
     Ok(Json(json!({
         "tier": tier.as_str(),

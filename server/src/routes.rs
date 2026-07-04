@@ -264,9 +264,9 @@ pub async fn permanent_list(
     jar: PrivateCookieJar,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
-    let session = authorize_member(&st, &jar, &guild).await?;
+    authorize_member(&st, &jar, &guild).await?;
     let api = dispatcher_api(&st)?;
-    let cap = st.entitlements.permanent_cap(&session.uid).await;
+    let cap = st.entitlements.permanent_cap(&guild).await;
     let req = api
         .http
         .get(dispatcher_url_with_cap(
@@ -294,7 +294,7 @@ pub async fn permanent_add(
         });
     }
     let api = dispatcher_api(&st)?;
-    let cap = st.entitlements.permanent_cap(&session.uid).await;
+    let cap = st.entitlements.permanent_cap(&guild).await;
     let req = api
         .http
         .post(dispatcher_url_with_cap(
@@ -330,7 +330,7 @@ pub async fn permanent_remove(
     jar: PrivateCookieJar,
     Path((guild, message_id)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    let session = authorize_member(&st, &jar, &guild).await?;
+    authorize_member(&st, &jar, &guild).await?;
     if !is_snowflake(&message_id) {
         return Err(AppError::Status {
             status: StatusCode::BAD_REQUEST,
@@ -339,7 +339,7 @@ pub async fn permanent_remove(
         });
     }
     let api = dispatcher_api(&st)?;
-    let cap = st.entitlements.permanent_cap(&session.uid).await;
+    let cap = st.entitlements.permanent_cap(&guild).await;
     let req = api
         .http
         .delete(dispatcher_url_with_cap(
@@ -377,9 +377,9 @@ pub async fn custom_apps_list(
     jar: PrivateCookieJar,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
-    let session = authorize_member(&st, &jar, &guild).await?;
+    authorize_member(&st, &jar, &guild).await?;
     let api = dispatcher_api(&st)?;
-    let cap = st.entitlements.custom_bots_cap(&session.uid).await;
+    let cap = st.entitlements.custom_bots_cap(&guild).await;
     let req = api
         .http
         .get(dispatcher_url_with_cap(
@@ -472,7 +472,7 @@ pub async fn custom_apps_add(
                 .unwrap_or_default();
         }
     }
-    let cap = st.entitlements.custom_bots_cap(&session.uid).await;
+    let cap = st.entitlements.custom_bots_cap(&guild).await;
     let req = api
         .http
         .post(dispatcher_url_with_cap(
@@ -519,7 +519,7 @@ pub async fn custom_apps_remove(
     jar: PrivateCookieJar,
     Path((guild, application_id)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    let session = authorize_member(&st, &jar, &guild).await?;
+    authorize_member(&st, &jar, &guild).await?;
     if !is_snowflake(&application_id) {
         return Err(AppError::Status {
             status: StatusCode::BAD_REQUEST,
@@ -555,7 +555,7 @@ pub async fn custom_apps_remove(
             .and_then(|sealed| crate::seal::open(&st.key, &sealed)),
         _ => None,
     };
-    let cap = st.entitlements.custom_bots_cap(&session.uid).await;
+    let cap = st.entitlements.custom_bots_cap(&guild).await;
     let req = api
         .http
         .delete(dispatcher_url_with_cap(

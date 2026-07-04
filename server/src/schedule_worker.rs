@@ -337,13 +337,10 @@ async fn maybe_make_permanent(
                 .into(),
         );
     };
-    // Honour the schedule owner's plan tier when spending a slot at fire time, so
-    // a make-permanent schedule can't exceed their never-expire cap. None (owner
-    // unknown, or entitlement disabled) → the dispatcher's own env default.
-    let cap = match job.owner_user_id.as_deref() {
-        Some(uid) => entitlements.permanent_cap(uid).await,
-        None => None,
-    };
+    // Honour the destination server's plan tier when spending a slot at fire
+    // time, so a make-permanent schedule can't exceed that server's never-expire
+    // cap. None (entitlement disabled) → the dispatcher's own env default.
+    let cap = entitlements.permanent_cap(guild).await;
     let req = api
         .http
         .post(crate::routes::dispatcher_url_with_cap(

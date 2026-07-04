@@ -1,21 +1,34 @@
-//! DWEEB's own Stripe billing — decoupled from RoleLogic.
+//! DWEEB's own Stripe billing — per-server premium, decoupled from RoleLogic.
 //!
-//! DWEEB reads Stripe **directly**: its own embedded Checkout, its own webhook,
-//! and its own local subscription mirror. It shares the same Stripe account and
-//! the same price IDs (SKUs) as the sibling RoleLogic app, so one subscription
-//! grants benefits in both — but there is **no runtime dependency** on RoleLogic:
-//! it being down never affects DWEEB. Stripe is the single source of truth.
+//! Premium is sold **per Discord server** (MEE6/Dyno-style): a subscription is
+//! bound to one `guild_id` (stamped as subscription metadata at checkout) and
+//! grants that server its tier. DWEEB reads Stripe **directly** — its own
+//! embedded Checkout, its own webhook, its own local subscription mirror — using
+//! its own dedicated price IDs, so its billing is fully independent of the sibling
+//! RoleLogic app (RoleLogic being down never affects DWEEB). Stripe is the single
+//! source of truth.
 //!
-//! Entitlement flows: the webhook keeps the local `stripe_subscriptions` mirror
-//! current; [`StripeState::active_slots_for`] reads that mirror (network-free) and
-//! sums `price_slots[price_id]`. For subscribers who predate DWEEB's webhook (e.g.
-//! someone who subscribed via RoleLogic), a throttled **lazy backfill** asks
-//! Stripe once for that user's customer + subscriptions and seeds the mirror.
+//! Entitlement flows per server: the webhook keeps the local `stripe_subscriptions`
+//! mirror current; [`StripeState::active_slots_for`] reads that mirror for a guild
+//! (network-free) and sums `price_slots[price_id]` over the subscriptions bound to
+//! it. For a server whose sub predates (or missed) the webhook, a throttled **lazy
+//! backfill** searches Stripe once by `guild_id` metadata and seeds the mirror.
 //!
-//! Customers are keyed by the `discord_user_id` metadata RoleLogic already stamps,
-//! so DWEEB reuses the same customer per user — no duplicate customers, no double
-//! charges. All state here is non-secret (subscription/price ids), so unlike the
+//! Ownership vs entitlement: a subscription's `discord_user_id` metadata is the
+//! paying customer (drives the billing portal + the move-premium UI), while its
+//! `guild_id` is the server that receives the tier — the two are independent, and
+//! one person can hold premium on several servers. Customers are keyed by
+//! `discord_user_id` so a user reuses one Stripe customer across their servers.
+//! All state here is non-secret (subscription/price/guild ids), so unlike the
 //! schedule store it is not sealed.
+//!
+//! Carry-over for existing subscribers: a subscription DWEEB recognises (its
+//! price is in `price_slots`) but that carries no `guild_id` — e.g. a sibling
+//! RoleLogic subscription — is "floating" premium. [`StripeState::claim_legacy_for_guild`]
+//! auto-applies one such sub to the first server the owner uses (binding it by
+//! stamping the `guild_id`, so it thereafter behaves exactly like a native sub —
+//! one server, movable). This preserves the pre-per-server behaviour where a
+//! RoleLogic sub granted DWEEB premium, now scoped to a single server.
 
 use std::collections::HashMap;
 use std::path::Path as FsPath;
@@ -51,12 +64,19 @@ const WEBHOOK_TOLERANCE_SECS: i64 = 300;
 /// One mirrored subscription row.
 pub struct SubRow {
     pub id: String,
+    /// The Discord user who owns (pays for) the subscription — the billing
+    /// customer. Distinct from `guild_id`: ownership drives the portal and the
+    /// "move" UI, while the guild is what actually receives the tier.
     pub user_id: String,
     pub customer_id: String,
     pub price_id: String,
     pub status: String,
     pub current_period_end: i64,
     pub cancel_at_period_end: bool,
+    /// The Discord server this subscription grants its tier to (MEE6/Dyno-style
+    /// per-server premium). `None` for a legacy/foreign sub with no `guild_id`
+    /// metadata — it grants no server (so it's simply ignored).
+    pub guild_id: Option<String>,
 }
 
 /// SQLite mirror of the user's Stripe subscriptions + the discord→customer map.
@@ -88,7 +108,8 @@ impl StripeStore {
                  status               TEXT NOT NULL,
                  current_period_end   INTEGER NOT NULL,
                  cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
-                 updated_at           INTEGER NOT NULL
+                 updated_at           INTEGER NOT NULL,
+                 guild_id             TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_stripe_sub_user
                  ON stripe_subscriptions(user_id, status);
@@ -98,9 +119,36 @@ impl StripeStore {
                  user_id     TEXT PRIMARY KEY,
                  customer_id TEXT NOT NULL,
                  checked_at  INTEGER NOT NULL
+             );
+             -- Per-guild backfill throttle: when we last searched Stripe for a
+             -- server's subscriptions (so a server with none doesn't re-hit the
+             -- API on every read).
+             CREATE TABLE IF NOT EXISTS stripe_guild_checks (
+                 guild_id   TEXT PRIMARY KEY,
+                 checked_at INTEGER NOT NULL
              );",
         )
         .map_err(|e| format!("schema: {e}"))?;
+        // Migrate mirrors created before subscriptions were bound to a guild
+        // (SQLite has no ADD COLUMN IF NOT EXISTS), then index it for the
+        // per-server tier lookup.
+        let has_guild: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('stripe_subscriptions') \
+                 WHERE name = 'guild_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_guild == 0 {
+            conn.execute_batch("ALTER TABLE stripe_subscriptions ADD COLUMN guild_id TEXT;")
+                .map_err(|e| format!("migrate guild_id: {e}"))?;
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_stripe_sub_guild \
+             ON stripe_subscriptions(guild_id, status);",
+        )
+        .map_err(|e| format!("index guild_id: {e}"))?;
         Ok(StripeStore {
             conn: Mutex::new(conn),
         })
@@ -110,17 +158,19 @@ impl StripeStore {
         self.conn.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// Sum of `price_slots[price_id]` over the user's active/trialing subs.
-    pub fn active_slots(&self, user_id: &str, price_slots: &HashMap<String, i64>) -> i64 {
+    /// Sum of `price_slots[price_id]` over a **server's** active/trialing subs —
+    /// the per-guild entitlement (a server's tier is derived from the slots of
+    /// the subscriptions bound to it, whoever paid).
+    pub fn active_slots(&self, guild_id: &str, price_slots: &HashMap<String, i64>) -> i64 {
         let conn = self.lock();
         let mut stmt = match conn.prepare(
             "SELECT price_id FROM stripe_subscriptions \
-             WHERE user_id = ?1 AND status IN ('active','trialing')",
+             WHERE guild_id = ?1 AND status IN ('active','trialing')",
         ) {
             Ok(s) => s,
             Err(_) => return 0,
         };
-        let rows = match stmt.query_map([user_id], |r| r.get::<_, String>(0)) {
+        let rows = match stmt.query_map([guild_id], |r| r.get::<_, String>(0)) {
             Ok(r) => r,
             Err(_) => return 0,
         };
@@ -134,11 +184,11 @@ impl StripeStore {
         conn.execute(
             "INSERT INTO stripe_subscriptions \
              (id, user_id, customer_id, price_id, status, current_period_end, \
-              cancel_at_period_end, updated_at) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
+              cancel_at_period_end, updated_at, guild_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) \
              ON CONFLICT(id) DO UPDATE SET \
                user_id=?2, customer_id=?3, price_id=?4, status=?5, \
-               current_period_end=?6, cancel_at_period_end=?7, updated_at=?8",
+               current_period_end=?6, cancel_at_period_end=?7, updated_at=?8, guild_id=?9",
             params![
                 s.id,
                 s.user_id,
@@ -148,10 +198,82 @@ impl StripeStore {
                 s.current_period_end,
                 s.cancel_at_period_end as i64,
                 unix_now(),
+                s.guild_id,
             ],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// All columns, in the order [`sub_from_row`] reads them.
+    const SUB_COLS: &'static str =
+        "id, user_id, customer_id, price_id, status, current_period_end, \
+         cancel_at_period_end, guild_id";
+
+    /// One subscription by id (for ownership checks before a reassignment).
+    pub fn get_subscription(&self, id: &str) -> Option<SubRow> {
+        let conn = self.lock();
+        conn.query_row(
+            &format!(
+                "SELECT {} FROM stripe_subscriptions WHERE id = ?1",
+                Self::SUB_COLS
+            ),
+            [id],
+            sub_from_row,
+        )
+        .ok()
+    }
+
+    /// Every subscription a user owns (pays for) — the "your premium servers"
+    /// list that powers the management + move UI. Most-recent period first.
+    pub fn list_subscriptions_for_user(&self, user_id: &str) -> Vec<SubRow> {
+        let conn = self.lock();
+        let mut stmt = match conn.prepare(&format!(
+            "SELECT {} FROM stripe_subscriptions \
+             WHERE user_id = ?1 ORDER BY current_period_end DESC",
+            Self::SUB_COLS
+        )) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let out: Vec<SubRow> = match stmt.query_map([user_id], sub_from_row) {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => Vec::new(),
+        };
+        out
+    }
+
+    /// Re-point a mirrored subscription at a different server (the local half of
+    /// a reassignment; the Stripe metadata update is the source of truth).
+    pub fn set_subscription_guild(&self, id: &str, guild_id: &str) -> Result<(), String> {
+        let conn = self.lock();
+        conn.execute(
+            "UPDATE stripe_subscriptions SET guild_id = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, guild_id, unix_now()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// When we last searched Stripe for a server's subscriptions (backfill
+    /// throttle). `None` = never.
+    pub fn get_guild_checked(&self, guild_id: &str) -> Option<i64> {
+        let conn = self.lock();
+        conn.query_row(
+            "SELECT checked_at FROM stripe_guild_checks WHERE guild_id = ?1",
+            [guild_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .ok()
+    }
+
+    pub fn put_guild_checked(&self, guild_id: &str, checked_at: i64) {
+        let conn = self.lock();
+        let _ = conn.execute(
+            "INSERT INTO stripe_guild_checks (guild_id, checked_at) VALUES (?1,?2) \
+             ON CONFLICT(guild_id) DO UPDATE SET checked_at=?2",
+            params![guild_id, checked_at],
+        );
     }
 
     /// The user's cached Stripe customer id (may be empty = "checked, none") and
@@ -290,6 +412,7 @@ impl StripeClient {
         name: &str,
         tier: &str,
         interval: &str,
+        guild_id: &str,
     ) -> Result<String, String> {
         let key = checkout_key(tier, interval);
         let price = self
@@ -311,6 +434,12 @@ impl StripeClient {
             (
                 "subscription_data[metadata][discord_user_id]".into(),
                 uid.to_string(),
+            ),
+            // The server this subscription grants premium to — read back off the
+            // subscription by the webhook/backfill to bind it to the guild.
+            (
+                "subscription_data[metadata][guild_id]".into(),
+                guild_id.to_string(),
             ),
             ("allow_promotion_codes".into(), "true".into()),
             // Stay in our modal; the FE refreshes the plan on completion.
@@ -352,6 +481,25 @@ impl StripeClient {
         self.get(&format!("/v1/subscriptions/{id}"), &[]).await
     }
 
+    /// Every subscription bound to a server, via Stripe's search on the
+    /// `guild_id` metadata — the per-guild counterpart to
+    /// `list_customer_subscriptions`, used to backfill a mirror that predates
+    /// (or missed) the webhook.
+    async fn search_subscriptions_by_guild(&self, guild_id: &str) -> Vec<Value> {
+        let query = format!("metadata['guild_id']:'{guild_id}'");
+        self.get(
+            "/v1/subscriptions/search",
+            &[("query", &query), ("limit", "100")],
+        )
+        .await
+        .ok()
+        .and_then(|b| b.get("data").and_then(Value::as_array).cloned())
+        .unwrap_or_default()
+    }
+
+    /// Every subscription on a customer — used to discover a user's *unbound*
+    /// subscriptions (e.g. a sibling-app / RoleLogic sub with no `guild_id`) so
+    /// DWEEB can auto-apply one to a server.
     async fn list_customer_subscriptions(&self, customer: &str) -> Vec<Value> {
         self.get(
             "/v1/subscriptions",
@@ -361,6 +509,50 @@ impl StripeClient {
         .ok()
         .and_then(|b| b.get("data").and_then(Value::as_array).cloned())
         .unwrap_or_default()
+    }
+
+    /// Seed the mirror with a **user's** subscriptions (found via their Stripe
+    /// customer), so an unbound legacy sub becomes visible to the auto-apply.
+    /// Records the customer (possibly empty) to bound repeats.
+    pub async fn refresh_user_subscriptions(&self, store: &StripeStore, uid: &str) {
+        let customer = match store.get_customer(uid) {
+            Some((cid, _)) if !cid.is_empty() => cid,
+            _ => match self.find_customer(uid).await {
+                Some(cid) => cid,
+                None => {
+                    // No customer — remember we checked so we don't re-hit Stripe.
+                    store.put_customer(uid, "", unix_now());
+                    return;
+                }
+            },
+        };
+        for sub in self.list_customer_subscriptions(&customer).await {
+            self.upsert_from_sub(store, &sub, Some(uid)).await;
+        }
+        store.put_customer(uid, &customer, unix_now());
+    }
+
+    /// Re-point a subscription at a different server by rewriting its `guild_id`
+    /// metadata (Stripe is the source of truth), then mirror the change locally.
+    /// The caller has already verified ownership + that the user manages the new
+    /// server. Returns the previous guild (if any) so the caller can refresh both.
+    pub async fn reassign_subscription(
+        &self,
+        store: &StripeStore,
+        sub_id: &str,
+        new_guild: &str,
+    ) -> Result<Option<String>, String> {
+        let prev = store.get_subscription(sub_id).and_then(|s| s.guild_id);
+        let form = vec![("metadata[guild_id]".to_string(), new_guild.to_string())];
+        let sub = self
+            .post_form(&format!("/v1/subscriptions/{sub_id}"), &form)
+            .await?;
+        // Re-mirror from Stripe's response so status/period/guild all stay in step.
+        self.upsert_from_sub(store, &sub, None).await;
+        // Defensive: guarantee the local guild matches even if the response was
+        // missing the metadata echo for any reason.
+        store.set_subscription_guild(sub_id, new_guild)?;
+        Ok(prev)
     }
 
     /// The `discord_user_id` recorded on a customer (fallback attribution when a
@@ -455,28 +647,20 @@ impl StripeClient {
         }
     }
 
-    /// Ask Stripe for a user's customer + subscriptions and seed the mirror.
-    /// Records a customer row (possibly empty) so the caller can throttle repeats.
-    pub async fn backfill(&self, store: &StripeStore, uid: &str) {
-        let customer = match store.get_customer(uid) {
-            Some((cid, _)) if !cid.is_empty() => cid,
-            _ => match self.find_customer(uid).await {
-                Some(cid) => cid,
-                None => {
-                    // No customer — remember we checked so we don't re-hit Stripe.
-                    store.put_customer(uid, "", unix_now());
-                    return;
-                }
-            },
-        };
-        store.put_customer(uid, &customer, unix_now());
-        for sub in self.list_customer_subscriptions(&customer).await {
-            self.upsert_from_sub(store, &sub, Some(uid)).await;
+    /// Ask Stripe for a server's subscriptions (matched on `guild_id` metadata)
+    /// and seed the mirror — for a server whose subs predate (or missed) the
+    /// webhook. Records that we checked so a server with none doesn't re-hit the
+    /// API on every read.
+    pub async fn backfill_guild(&self, store: &StripeStore, guild_id: &str) {
+        for sub in self.search_subscriptions_by_guild(guild_id).await {
+            self.upsert_from_sub(store, &sub, None).await;
         }
+        store.put_guild_checked(guild_id, unix_now());
     }
 
     async fn upsert_from_sub(&self, store: &StripeStore, sub: &Value, fallback_uid: Option<&str>) {
-        let Some((id, customer_id, price_id, status, period_end, cancel)) = extract_sub_fields(sub)
+        let Some((id, customer_id, price_id, status, period_end, cancel, guild_id)) =
+            extract_sub_fields(sub)
         else {
             return;
         };
@@ -501,6 +685,7 @@ impl StripeClient {
             status,
             current_period_end: period_end,
             cancel_at_period_end: cancel,
+            guild_id,
         }) {
             tracing::warn!("stripe mirror upsert failed: {e}");
         }
@@ -530,7 +715,10 @@ impl StripeClient {
 
 /// Pull the fields we mirror out of a Stripe subscription object. `None` only
 /// when it's shaped nothing like a subscription.
-fn extract_sub_fields(sub: &Value) -> Option<(String, String, String, String, i64, bool)> {
+#[allow(clippy::type_complexity)]
+fn extract_sub_fields(
+    sub: &Value,
+) -> Option<(String, String, String, String, i64, bool, Option<String>)> {
     let id = sub.get("id").and_then(Value::as_str)?.to_string();
     let item = sub.pointer("/items/data/0");
     let price_id = item
@@ -557,7 +745,50 @@ fn extract_sub_fields(sub: &Value) -> Option<(String, String, String, String, i6
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let customer_id = id_of(&sub["customer"]).unwrap_or_default();
-    Some((id, customer_id, price_id, status, period_end, cancel))
+    // The server this sub grants premium to (stamped at checkout / reassignment).
+    // Absent on legacy or foreign (e.g. sibling-app) subs — they bind no guild.
+    let guild_id = sub
+        .pointer("/metadata/guild_id")
+        .and_then(Value::as_str)
+        .filter(|g| !g.is_empty())
+        .map(String::from);
+    Some((
+        id,
+        customer_id,
+        price_id,
+        status,
+        period_end,
+        cancel,
+        guild_id,
+    ))
+}
+
+/// The best (highest-slot) recognized, active/trialing subscription in `subs`
+/// that isn't bound to any server yet — the "floating" premium the auto-apply
+/// attaches to a guild. `None` when the user owns no such sub (so nothing is
+/// carried over). Pure, so the selection rule is unit-testable without Stripe.
+fn best_unbound_claimable(subs: Vec<SubRow>, price_slots: &HashMap<String, i64>) -> Option<SubRow> {
+    subs.into_iter()
+        .filter(|s| {
+            s.guild_id.is_none()
+                && matches!(s.status.as_str(), "active" | "trialing")
+                && price_slots.get(&s.price_id).copied().unwrap_or(0) > 0
+        })
+        .max_by_key(|s| price_slots.get(&s.price_id).copied().unwrap_or(0))
+}
+
+/// Read a mirrored [`SubRow`] back out of a query (column order = `SUB_COLS`).
+fn sub_from_row(r: &rusqlite::Row) -> rusqlite::Result<SubRow> {
+    Ok(SubRow {
+        id: r.get(0)?,
+        user_id: r.get(1)?,
+        customer_id: r.get(2)?,
+        price_id: r.get(3)?,
+        status: r.get(4)?,
+        current_period_end: r.get(5)?,
+        cancel_at_period_end: r.get::<_, i64>(6)? != 0,
+        guild_id: r.get(7)?,
+    })
 }
 
 /// Normalize a Stripe expandable field (string id | object with `id` | null).
@@ -615,23 +846,83 @@ impl StripeState {
         }))
     }
 
-    /// The user's entitlement slots: the mirror first, then a throttled lazy
-    /// backfill for a subscriber who predates DWEEB's webhook.
-    pub async fn active_slots_for(&self, uid: &str) -> i64 {
-        let slots = self.store.active_slots(uid, &self.price_slots);
+    /// A **server's** entitlement slots: the mirror first, then a throttled lazy
+    /// backfill for a server whose subscription predates (or missed) the webhook.
+    pub async fn active_slots_for(&self, guild_id: &str) -> i64 {
+        let slots = self.store.active_slots(guild_id, &self.price_slots);
         if slots > 0 {
             return slots;
         }
-        if self.backfill_due(uid) {
-            self.client.backfill(&self.store, uid).await;
+        if self.backfill_due(guild_id) {
+            self.client.backfill_guild(&self.store, guild_id).await;
         }
-        self.store.active_slots(uid, &self.price_slots)
+        self.store.active_slots(guild_id, &self.price_slots)
     }
 
-    fn backfill_due(&self, uid: &str) -> bool {
-        match self.store.get_customer(uid) {
+    fn backfill_due(&self, guild_id: &str) -> bool {
+        match self.store.get_guild_checked(guild_id) {
+            Some(checked_at) => unix_now() - checked_at > self.backfill_ttl,
+            None => true,
+        }
+    }
+
+    /// Entitlement slots a single price grants (0 for an unknown/foreign price)
+    /// — used to label each of a user's subscriptions with its DWEEB tier.
+    pub fn slots_of_price(&self, price_id: &str) -> i64 {
+        self.price_slots.get(price_id).copied().unwrap_or(0)
+    }
+
+    /// Throttled per-user mirror refresh — seed the user's subscriptions so an
+    /// unbound legacy sub (e.g. a RoleLogic subscription) becomes visible to the
+    /// auto-apply. Reuses the customer's `checked_at` as the throttle.
+    async fn ensure_user_subs(&self, uid: &str) {
+        let due = match self.store.get_customer(uid) {
             Some((_, checked_at)) => unix_now() - checked_at > self.backfill_ttl,
             None => true,
+        };
+        if due {
+            self.client
+                .refresh_user_subscriptions(&self.store, uid)
+                .await;
+        }
+    }
+
+    /// Auto-apply a user's **floating** premium to a server: MEE6/Dyno-style
+    /// "one server", but automatic — an existing subscriber (e.g. from the
+    /// sibling RoleLogic app) whose sub isn't yet bound to any DWEEB server has it
+    /// attached to `guild` on first use. No-op when the server already has
+    /// premium, or the user owns no recognized, active, *unbound* subscription.
+    /// Binding stamps the sub's `guild_id` metadata (the same path as a native
+    /// sub), so it thereafter behaves identically — countable here, movable, and
+    /// visible in "your premium servers". Returns true when it bound one.
+    pub async fn claim_legacy_for_guild(&self, uid: &str, guild: &str) -> bool {
+        // Already premium here — nothing to auto-apply.
+        if self.store.active_slots(guild, &self.price_slots) > 0 {
+            return false;
+        }
+        self.ensure_user_subs(uid).await;
+        // The best (highest-slot) recognized, active/trialing sub the user owns
+        // that isn't bound to any server yet.
+        let candidate = best_unbound_claimable(
+            self.store.list_subscriptions_for_user(uid),
+            &self.price_slots,
+        );
+        let Some(sub) = candidate else {
+            return false;
+        };
+        match self
+            .client
+            .reassign_subscription(&self.store, &sub.id, guild)
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(%uid, %guild, sub = %sub.id, "auto-applied existing subscription to server");
+                true
+            }
+            Err(e) => {
+                tracing::warn!(%uid, %guild, "couldn't auto-apply subscription: {e}");
+                false
+            }
         }
     }
 }
@@ -653,18 +944,32 @@ pub struct CheckoutBody {
     /// Billing interval: "month" (default) or "year".
     #[serde(default)]
     pub interval: Option<String>,
+    /// The server this subscription buys premium for (MEE6/Dyno-style per-server
+    /// pricing). Required — a subscription always belongs to one server.
+    pub guild_id: String,
 }
 
-/// `POST /api/stripe/checkout` `{ tier }` → `{ client_secret }` for the FE's
-/// embedded Checkout. Cookie-gated (a real Discord identity to attribute the sub).
+/// `POST /api/stripe/checkout` `{ tier, interval, guild_id }` → `{ client_secret }`
+/// for the FE's embedded Checkout. The subscription is bound to `guild_id`, so
+/// the caller must manage that server (same gate as the other per-server
+/// features); the signed-in Discord user owns/pays for it.
 pub async fn checkout(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
     Json(body): Json<CheckoutBody>,
 ) -> Result<Response, AppError> {
     let stripe = require_stripe(&st)?;
-    let session = current_session(&jar)
-        .ok_or_else(|| AppError::Unauthorized("Sign in with Discord to upgrade.".into()))?;
+    let guild = body.guild_id.trim().to_string();
+    if !crate::routes::is_snowflake(&guild) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "Pick a server to upgrade.".into(),
+            retry_after: None,
+        });
+    }
+    // Only a manager of the server may buy premium for it (and it proves the
+    // signed-in identity we attribute the sub to).
+    let session = crate::routes::authorize_member(&st, &jar, &guild).await?;
     let tier = body.tier.trim().to_lowercase();
     if tier != "plus" && tier != "pro" {
         return Err(AppError::Status {
@@ -688,12 +993,124 @@ pub async fn checkout(
     }
     let client_secret = stripe
         .client
-        .create_embedded_checkout(&stripe.store, &session.uid, &session.name, &tier, &interval)
+        .create_embedded_checkout(
+            &stripe.store,
+            &session.uid,
+            &session.name,
+            &tier,
+            &interval,
+            &guild,
+        )
         .await
         .map_err(|e| AppError::BadGateway(format!("Couldn't start checkout: {e}")))?;
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(json!({ "client_secret": client_secret })),
+    )
+        .into_response())
+}
+
+/// `GET /api/stripe/subscriptions` → the signed-in user's premium subscriptions,
+/// each with the server it's bound to and its DWEEB tier — the data behind the
+/// "your premium servers" list and the move-premium picker. Cookie-gated.
+pub async fn subscriptions(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+) -> Result<Response, AppError> {
+    let stripe = require_stripe(&st)?;
+    let session = current_session(&jar).ok_or_else(|| {
+        AppError::Unauthorized("Sign in with Discord to view your subscriptions.".into())
+    })?;
+    let rows = stripe.store.list_subscriptions_for_user(&session.uid);
+    let items: Vec<Value> = rows
+        .iter()
+        // Only subs that still grant something — hide canceled/incomplete clutter.
+        .filter(|s| matches!(s.status.as_str(), "active" | "trialing" | "past_due"))
+        .map(|s| {
+            let tier = crate::entitlement::Tier::from_slots(stripe.slots_of_price(&s.price_id));
+            json!({
+                "id": s.id,
+                "guild_id": s.guild_id,
+                "tier": tier.as_str(),
+                "status": s.status,
+                "current_period_end": s.current_period_end,
+                "cancel_at_period_end": s.cancel_at_period_end,
+            })
+        })
+        .collect();
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({ "items": items })),
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
+pub struct ReassignBody {
+    /// The subscription to move (must be one the signed-in user owns).
+    pub subscription_id: String,
+    /// The server to move it to (must be one the signed-in user manages).
+    pub guild_id: String,
+}
+
+/// `POST /api/stripe/reassign` `{ subscription_id, guild_id }` — move a premium
+/// subscription to a different server (MEE6/Dyno-style). Requires that the user
+/// **owns** the subscription and **manages** the target server. Re-points the
+/// Stripe metadata (source of truth) and the local mirror, and drops the cached
+/// tier for both the old and new server so the change shows at once.
+pub async fn reassign(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Json(body): Json<ReassignBody>,
+) -> Result<Response, AppError> {
+    let stripe = require_stripe(&st)?;
+    let sub_id = body.subscription_id.trim().to_string();
+    let new_guild = body.guild_id.trim().to_string();
+    if sub_id.is_empty() || !sub_id.starts_with("sub_") {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "Unknown subscription.".into(),
+            retry_after: None,
+        });
+    }
+    if !crate::routes::is_snowflake(&new_guild) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "Pick a server to move it to.".into(),
+            retry_after: None,
+        });
+    }
+    // Must manage the destination server (also resolves the signed-in identity).
+    let session = crate::routes::authorize_member(&st, &jar, &new_guild).await?;
+    // Must own the subscription being moved.
+    match stripe.store.get_subscription(&sub_id) {
+        Some(s) if s.user_id == session.uid => {}
+        Some(_) => {
+            return Err(AppError::Forbidden(
+                "That subscription isn't yours to move.".into(),
+            ))
+        }
+        None => {
+            return Err(AppError::Status {
+                status: StatusCode::NOT_FOUND,
+                message: "No such subscription.".into(),
+                retry_after: None,
+            })
+        }
+    }
+    let prev = stripe
+        .client
+        .reassign_subscription(&stripe.store, &sub_id, &new_guild)
+        .await
+        .map_err(|e| AppError::BadGateway(format!("Couldn't move the subscription: {e}")))?;
+    // Both servers' tiers just changed — clear their cached entitlement.
+    if let Some(prev) = prev.as_deref() {
+        st.entitlements.invalidate(prev);
+    }
+    st.entitlements.invalidate(&new_guild);
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({ "ok": true, "guild_id": new_guild })),
     )
         .into_response())
 }
@@ -766,7 +1183,7 @@ mod tests {
         (StripeStore::open(path.to_str().unwrap()).unwrap(), path)
     }
 
-    fn row(id: &str, uid: &str, price: &str, status: &str) -> SubRow {
+    fn row(id: &str, uid: &str, guild: &str, price: &str, status: &str) -> SubRow {
         SubRow {
             id: id.into(),
             user_id: uid.into(),
@@ -775,36 +1192,114 @@ mod tests {
             status: status.into(),
             current_period_end: 0,
             cancel_at_period_end: false,
+            guild_id: Some(guild.into()),
         }
     }
 
     #[test]
-    fn active_slots_sums_only_active_and_known_prices() {
+    fn active_slots_sums_only_active_and_known_prices_per_guild() {
         let (store, path) = temp_store("slots");
         let slots: HashMap<String, i64> =
             [("p_medium".into(), 36), ("p_expanded".into(), 130)].into();
-        // Active Medium + trialing Expanded → 36 + 130.
+        // Server g1: active Medium + trialing Expanded → 36 + 130.
         store
-            .upsert_subscription(&row("s1", "u1", "p_medium", "active"))
+            .upsert_subscription(&row("s1", "u1", "g1", "p_medium", "active"))
             .unwrap();
         store
-            .upsert_subscription(&row("s2", "u1", "p_expanded", "trialing"))
+            .upsert_subscription(&row("s2", "u1", "g1", "p_expanded", "trialing"))
             .unwrap();
         // Canceled sub and an unknown price contribute nothing.
         store
-            .upsert_subscription(&row("s3", "u1", "p_medium", "canceled"))
+            .upsert_subscription(&row("s3", "u1", "g1", "p_medium", "canceled"))
             .unwrap();
         store
-            .upsert_subscription(&row("s4", "u1", "p_unknown", "active"))
+            .upsert_subscription(&row("s4", "u1", "g1", "p_unknown", "active"))
             .unwrap();
-        assert_eq!(store.active_slots("u1", &slots), 166);
+        // A sub bound to a DIFFERENT server doesn't count toward g1 (even though
+        // the same user owns it) — this is the whole point of per-server pricing.
+        store
+            .upsert_subscription(&row("s5", "u1", "g2", "p_expanded", "active"))
+            .unwrap();
+        assert_eq!(store.active_slots("g1", &slots), 166);
+        assert_eq!(store.active_slots("g2", &slots), 130);
         assert_eq!(store.active_slots("nobody", &slots), 0);
         // Upsert is keyed by id: flipping s1 to canceled drops its slots.
         store
-            .upsert_subscription(&row("s1", "u1", "p_medium", "canceled"))
+            .upsert_subscription(&row("s1", "u1", "g1", "p_medium", "canceled"))
             .unwrap();
-        assert_eq!(store.active_slots("u1", &slots), 130);
+        assert_eq!(store.active_slots("g1", &slots), 130);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn list_and_reassign_subscriptions_by_owner() {
+        let (store, path) = temp_store("owner-subs");
+        let slots: HashMap<String, i64> = [("p_pro".into(), 130)].into();
+        store
+            .upsert_subscription(&row("sub_a", "u1", "g1", "p_pro", "active"))
+            .unwrap();
+        store
+            .upsert_subscription(&row("sub_b", "u2", "g2", "p_pro", "active"))
+            .unwrap();
+        // The owner listing is scoped to the paying user.
+        let mine = store.list_subscriptions_for_user("u1");
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].id, "sub_a");
+        assert_eq!(mine[0].guild_id.as_deref(), Some("g1"));
+        // Move sub_a from g1 → g3: g1 loses the tier, g3 gains it.
+        store.set_subscription_guild("sub_a", "g3").unwrap();
+        assert_eq!(store.active_slots("g1", &slots), 0);
+        assert_eq!(store.active_slots("g3", &slots), 130);
+        assert_eq!(
+            store.get_subscription("sub_a").unwrap().guild_id.as_deref(),
+            Some("g3")
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn guild_backfill_check_roundtrips() {
+        let (store, path) = temp_store("gcheck");
+        assert!(store.get_guild_checked("g1").is_none());
+        store.put_guild_checked("g1", 1000);
+        assert_eq!(store.get_guild_checked("g1"), Some(1000));
+        store.put_guild_checked("g1", 2000);
+        assert_eq!(store.get_guild_checked("g1"), Some(2000));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn best_unbound_claimable_picks_the_richest_floating_sub() {
+        let slots: HashMap<String, i64> = [("p_plus".into(), 36), ("p_pro".into(), 130)].into();
+        let unbound = |id: &str, price: &str, status: &str| SubRow {
+            id: id.into(),
+            user_id: "u1".into(),
+            customer_id: "cus_1".into(),
+            price_id: price.into(),
+            status: status.into(),
+            current_period_end: 0,
+            cancel_at_period_end: false,
+            guild_id: None,
+        };
+        // Two floating recognized subs → the higher-slot one is auto-applied.
+        let subs = vec![
+            unbound("s1", "p_plus", "active"),
+            unbound("s2", "p_pro", "active"),
+        ];
+        assert_eq!(best_unbound_claimable(subs, &slots).unwrap().id, "s2");
+        // A sub already bound to a server isn't "floating".
+        let bound = row("s3", "u1", "g1", "p_pro", "active");
+        assert!(best_unbound_claimable(vec![bound], &slots).is_none());
+        // Canceled or unrecognized (foreign price) subs don't qualify.
+        assert!(best_unbound_claimable(vec![unbound("s4", "p_pro", "canceled")], &slots).is_none());
+        assert!(best_unbound_claimable(vec![unbound("s5", "p_x", "active")], &slots).is_none());
+        // Trialing counts.
+        assert_eq!(
+            best_unbound_claimable(vec![unbound("s6", "p_plus", "trialing")], &slots)
+                .unwrap()
+                .id,
+            "s6"
+        );
     }
 
     #[test]
@@ -821,12 +1316,13 @@ mod tests {
 
     #[test]
     fn extract_sub_fields_reads_new_and_old_shapes() {
-        // Newer API: price + period end at the item level.
+        // Newer API: price + period end at the item level, plus the guild binding.
         let new_shape = json!({
             "id": "sub_1",
             "status": "active",
             "cancel_at_period_end": true,
             "customer": "cus_1",
+            "metadata": { "guild_id": "g1", "discord_user_id": "u1" },
             "items": { "data": [ { "price": { "id": "p_x" }, "current_period_end": 111 } ] }
         });
         let f = extract_sub_fields(&new_shape).unwrap();
@@ -836,7 +1332,9 @@ mod tests {
         assert_eq!(f.3, "active");
         assert_eq!(f.4, 111);
         assert!(f.5);
-        // Older API: current_period_end at the top level, customer as an object.
+        assert_eq!(f.6.as_deref(), Some("g1"));
+        // Older API: current_period_end at the top level, customer as an object,
+        // and no guild metadata (a legacy/foreign sub) → binds no server.
         let old_shape = json!({
             "id": "sub_2",
             "status": "active",
@@ -848,6 +1346,7 @@ mod tests {
         assert_eq!(f.1, "cus_2");
         assert_eq!(f.4, 222);
         assert!(!f.5);
+        assert_eq!(f.6, None);
         // Not a subscription → None.
         assert!(extract_sub_fields(&json!({ "foo": 1 })).is_none());
     }

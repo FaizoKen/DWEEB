@@ -452,16 +452,20 @@ async fn run() {
             "/api/activity/feedback",
             post(activity::activity_feedback).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
-        // The signed-in user's plan: tier + per-tier limits + whether billing is
-        // available, for the FE's pricing surface. Cookie-gated; fails open to Free.
-        .route("/api/me/plan", get(entitlement::me_plan))
-        // DWEEB's own Stripe billing: start an embedded Checkout, open the billing
-        // portal, and receive Stripe webhooks. Checkout/portal are cookie-gated;
-        // the webhook is signature-verified (no user session). The webhook body is
-        // bounded but roomy (Stripe events can carry a fair bit).
+        // DWEEB's own Stripe billing (per-server, MEE6/Dyno-style). Start an
+        // embedded Checkout bound to a server, list the user's premium servers,
+        // move a subscription between servers, open the billing portal, and
+        // receive Stripe webhooks. All but the webhook are cookie-gated; the
+        // webhook is signature-verified. The webhook body is bounded but roomy
+        // (Stripe events can carry a fair bit); the JSON bodies are tiny.
         .route(
             "/api/stripe/checkout",
             post(stripe::checkout).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
+        )
+        .route("/api/stripe/subscriptions", get(stripe::subscriptions))
+        .route(
+            "/api/stripe/reassign",
+            post(stripe::reassign).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
         )
         .route("/api/stripe/portal", post(stripe::portal))
         .route(
@@ -474,6 +478,10 @@ async fn run() {
         .route("/api/guilds/:guild_id/channels", get(channels))
         .route("/api/guilds/:guild_id/emojis", get(emojis))
         .route("/api/guilds/:guild_id/bootstrap", get(bootstrap))
+        // A server's plan: its tier + per-tier limits + whether billing is
+        // available, for the FE's per-server pricing surface. Membership-gated;
+        // fails open to Free.
+        .route("/api/guilds/:guild_id/plan", get(entitlement::guild_plan))
         // Permanent component slots (login + Manage Server gated, relayed to
         // the interactions dispatcher which owns them).
         .route(

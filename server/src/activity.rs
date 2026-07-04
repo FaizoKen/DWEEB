@@ -1467,15 +1467,18 @@ pub async fn activity_room(
             Some(cg) => (cg == guild).then(|| ctx.to_string()),
             None => Some(ctx.to_string()),
         });
-    // The host's plan tier caps how many people can co-edit this room. Resolved
-    // from the *first* joiner (this one, when the room is new); `None` (plan
-    // disabled) → unlimited, preserving the pre-plan behaviour. Read before
-    // `session.uid` moves into `me`.
-    let host_cap = st
-        .entitlements
-        .coeditor_cap(&session.uid)
-        .await
-        .unwrap_or(crate::entitlement::UNLIMITED_SLOTS);
+    // This server's plan tier caps how many people can co-edit a room hosted in
+    // it (per-server premium). A room with no guild context (a solo DM launch)
+    // isn't billable to any server, so it stays unlimited — as does a
+    // plan-disabled deployment (`coeditor_cap` → `None`).
+    let host_cap = if guild.is_empty() {
+        crate::entitlement::UNLIMITED_SLOTS
+    } else {
+        st.entitlements
+            .coeditor_cap(guild)
+            .await
+            .unwrap_or(crate::entitlement::UNLIMITED_SLOTS)
+    };
     let me = Participant {
         id: session.uid,
         name: session.name,

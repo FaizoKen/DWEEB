@@ -162,7 +162,7 @@ export function ManagedMessagesDialog({
                 className={styles.upgradeLink}
                 onClick={() => {
                   onClose();
-                  usePlanStore.getState().openPricing();
+                  usePlanStore.getState().openPricing(guildId);
                 }}
               >
                 Upgrade for more
@@ -258,7 +258,7 @@ export function ManagedMessagesDialog({
                     className={styles.upgradeLink}
                     onClick={() => {
                       onClose();
-                      usePlanStore.getState().openPricing();
+                      usePlanStore.getState().openPricing(guildId);
                     }}
                   >
                     Upgrade for more

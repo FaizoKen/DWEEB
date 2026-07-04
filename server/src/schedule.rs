@@ -794,11 +794,14 @@ pub async fn schedule_create(
     // row honestly records that it won't keep the message permanent.
     let make_permanent = body.make_permanent && guild_id.is_some();
 
-    // The acting user's plan tier caps how many scheduled posts a server may
-    // hold. `None` when entitlement is disabled → the store default applies, so
-    // a standalone deployment is unchanged. Resolved before `session.uid` moves
-    // into the row below.
-    let limit_override = st.entitlements.schedule_limit(&session.uid).await;
+    // The destination server's plan tier caps how many scheduled posts it may
+    // hold (per-server premium). `None` when entitlement is disabled, or when the
+    // post has no known guild (nothing to bill) → the store default applies, so a
+    // standalone deployment is unchanged.
+    let limit_override = match &guild_id {
+        Some(g) => st.entitlements.schedule_limit(g).await,
+        None => None,
+    };
 
     let new = NewSchedule {
         id: id.clone(),
@@ -921,15 +924,16 @@ pub async fn schedule_list_for_guild(
     // The per-server quota travels with the list so the UI can show "used / cap"
     // (the `used` count is derived client-side from the live rows below), and the
     // retention window so it can note when posted/failed rows auto-clear. When
-    // plan entitlement is on, the cap reflects the *caller's* tier (unlimited →
+    // plan entitlement is on, the cap reflects *this server's* tier (unlimited →
     // JSON null); otherwise it's the store default.
-    let quota: Value = match (st.entitlements.enabled(), session.as_ref()) {
-        (true, Some(s)) => match st.entitlements.schedule_limit(&s.uid).await {
+    let quota: Value = if st.entitlements.enabled() {
+        match st.entitlements.schedule_limit(&guild).await {
             Some(n) if n == i64::MAX => Value::Null,
             Some(n) => json!(n),
             None => json!(store.max_per_guild()),
-        },
-        _ => json!(store.max_per_guild()),
+        }
+    } else {
+        json!(store.max_per_guild())
     };
     let retention_days = st.config.schedule_retention_days;
     let g = guild.clone();

@@ -38,11 +38,13 @@ export type BillingInterval = "month" | "year";
 
 export type CheckoutResult = { ok: true; clientSecret: string } | { ok: false; error: string };
 
-/** `POST /api/stripe/checkout` `{ tier, interval }` → the embedded Checkout
- *  client secret. `interval` defaults to monthly. */
+/** `POST /api/stripe/checkout` `{ tier, interval, guild_id }` → the embedded
+ *  Checkout client secret. The subscription is bound to `guildId` (per-server
+ *  premium); `interval` defaults to monthly. */
 export async function createCheckout(
   tier: PaidTier,
-  interval: BillingInterval = "month",
+  interval: BillingInterval,
+  guildId: string,
 ): Promise<CheckoutResult> {
   let res: Response;
   try {
@@ -50,7 +52,7 @@ export async function createCheckout(
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tier, interval }),
+      body: JSON.stringify({ tier, interval, guild_id: guildId }),
     });
   } catch {
     return { ok: false, error: "Couldn't reach the billing service." };
@@ -63,6 +65,83 @@ export async function createCheckout(
     return { ok: false, error: data?.error ?? `Couldn't start checkout (${res.status}).` };
   }
   return { ok: true, clientSecret: data.client_secret };
+}
+
+/** One of the signed-in user's premium subscriptions, from
+ *  `GET /api/stripe/subscriptions`. Ownership (this user pays) is implied; the
+ *  `guildId` is the server it currently grants premium to. */
+export interface PremiumSubscription {
+  /** Stripe subscription id (`sub_…`). */
+  id: string;
+  /** The server this subscription is bound to (null only for an unbound legacy sub). */
+  guildId: string | null;
+  tier: PaidTier;
+  /** Stripe status — `active` | `trialing` | `past_due`. */
+  status: string;
+  /** Unix seconds when the current period ends. */
+  currentPeriodEnd: number;
+  /** True when it's set to end at the period boundary rather than renew. */
+  cancelAtPeriodEnd: boolean;
+}
+
+/** Raw row shape from the proxy (snake_case), before normalisation. */
+interface RawSubscription {
+  id: string;
+  guild_id: string | null;
+  tier: PaidTier;
+  status: string;
+  current_period_end: number;
+  cancel_at_period_end: boolean;
+}
+
+/** `GET /api/stripe/subscriptions` → the signed-in user's premium subscriptions
+ *  (the "your premium servers" list + move picker source). Empty on any miss —
+ *  this only ever hides management UI, never blocks the pricing table. */
+export async function fetchMySubscriptions(): Promise<PremiumSubscription[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${PROXY_BASE_URL}/api/stripe/subscriptions`, {
+      method: "GET",
+      credentials: "include",
+    });
+  } catch {
+    return [];
+  }
+  if (!res.ok) return [];
+  const data = (await res.json().catch(() => null)) as { items?: RawSubscription[] } | null;
+  return (data?.items ?? []).map((s) => ({
+    id: s.id,
+    guildId: s.guild_id,
+    tier: s.tier,
+    status: s.status,
+    currentPeriodEnd: s.current_period_end,
+    cancelAtPeriodEnd: s.cancel_at_period_end,
+  }));
+}
+
+export type ReassignResult = { ok: true } | { ok: false; error: string };
+
+/** `POST /api/stripe/reassign` `{ subscription_id, guild_id }` — move a premium
+ *  subscription to a different server. The proxy checks the user owns the sub and
+ *  manages the target server. */
+export async function reassignSubscription(
+  subscriptionId: string,
+  guildId: string,
+): Promise<ReassignResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${PROXY_BASE_URL}/api/stripe/reassign`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subscription_id: subscriptionId, guild_id: guildId }),
+    });
+  } catch {
+    return { ok: false, error: "Couldn't reach the billing service." };
+  }
+  if (res.ok) return { ok: true };
+  const data = (await res.json().catch(() => null)) as { error?: string } | null;
+  return { ok: false, error: data?.error ?? `Couldn't move premium (${res.status}).` };
 }
 
 export type PortalResult = { ok: true; url: string } | { ok: false; error: string };

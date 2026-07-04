@@ -341,7 +341,7 @@ export function CustomBotDialog({
                 className={styles.linkBtn}
                 onClick={() => {
                   onClose();
-                  usePlanStore.getState().openPricing();
+                  usePlanStore.getState().openPricing(guildId);
                 }}
               >
                 Upgrade for more

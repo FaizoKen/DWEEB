@@ -144,6 +144,15 @@ export function AccountMenu() {
     void initAuth();
   }, [initAuth]);
 
+  // Load the connected server's plan as soon as it connects (not only when the
+  // menu opens). Besides lighting up the tier badge, this is what auto-applies an
+  // existing subscriber's floating premium (e.g. a RoleLogic sub) to the server —
+  // so it lands automatically, without opening any menu.
+  const loadPlan = usePlanStore((s) => s.load);
+  useEffect(() => {
+    if (connectedId) void loadPlan(connectedId);
+  }, [connectedId, loadPlan]);
+
   // A bot-add popup ("Add to another server" / "Re-add the bot") reports the
   // chosen server back here over a same-origin channel. Connect to it and refresh
   // the picker so its data and the new `bot_present` flag fill in — the same
@@ -342,14 +351,15 @@ function AccountPanel({
   const connect = useGuildStore((s) => s.connect);
   const refresh = useGuildStore((s) => s.refresh);
 
-  // The signed-in user's plan tier, shown on the "Plans" row. Loaded lazily when
-  // the panel opens (cheap + idempotent); a miss just hides the tier label.
+  // The connected server's plan tier, shown on the "Plans" row (premium is
+  // per-server). Loaded lazily when the panel opens and whenever the connected
+  // server changes; a miss just hides the tier label.
   const plan = usePlanStore((s) => s.plan);
   const loadPlan = usePlanStore((s) => s.load);
   const openPricing = usePlanStore((s) => s.openPricing);
   useEffect(() => {
-    void loadPlan();
-  }, [loadPlan]);
+    if (connectedId) void loadPlan(connectedId);
+  }, [loadPlan, connectedId]);
 
   // Manual refresh: re-pull the picker list *and* the connected guild's data,
   // both with `force` so the proxy bypasses its short-TTL cache and returns live
@@ -443,7 +453,7 @@ function AccountPanel({
           className={styles.actionRow}
           onClick={() => {
             onClose();
-            openPricing();
+            openPricing(connectedId ?? "");
           }}
         >
           <SparkleIcon size={16} />

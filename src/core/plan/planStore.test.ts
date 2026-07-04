@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Hoisted so the mock factory below can reference it (vi.mock is hoisted above
 // module-level consts).
-const { fetchPlanMock } = vi.hoisted(() => ({ fetchPlanMock: vi.fn() }));
+const { fetchGuildPlanMock } = vi.hoisted(() => ({ fetchGuildPlanMock: vi.fn() }));
 
 vi.mock("@/core/guild/api", () => ({
-  fetchPlan: fetchPlanMock,
+  fetchGuildPlan: fetchGuildPlanMock,
   isAuthError: (e: unknown) => e instanceof Error && (e as { status?: number }).status === 401,
 }));
 vi.mock("@/core/guild/config", () => ({
@@ -21,54 +21,77 @@ const PLAN: PlanInfo = {
   billing: true,
 };
 
+const G1 = "111111111111111111";
+const G2 = "222222222222222222";
+
 describe("planStore", () => {
   beforeEach(() => {
-    usePlanStore.setState({ plan: null, status: "idle", open: false });
-    fetchPlanMock.mockReset();
+    usePlanStore.setState({ guildId: null, plan: null, status: "idle", open: false });
+    fetchGuildPlanMock.mockReset();
   });
 
-  it("load() populates the plan and marks ready", async () => {
-    fetchPlanMock.mockResolvedValue(PLAN);
-    await usePlanStore.getState().load();
-    expect(fetchPlanMock).toHaveBeenCalledTimes(1);
+  it("load(guild) populates that server's plan and marks ready", async () => {
+    fetchGuildPlanMock.mockResolvedValue(PLAN);
+    await usePlanStore.getState().load(G1);
+    expect(fetchGuildPlanMock).toHaveBeenCalledWith(G1);
     expect(usePlanStore.getState().plan).toEqual(PLAN);
+    expect(usePlanStore.getState().guildId).toBe(G1);
     expect(usePlanStore.getState().status).toBe("ready");
   });
 
-  it("load() is idempotent once ready, and force re-reads", async () => {
-    fetchPlanMock.mockResolvedValue(PLAN);
-    await usePlanStore.getState().load();
-    await usePlanStore.getState().load(); // warm → skips the network
-    expect(fetchPlanMock).toHaveBeenCalledTimes(1);
-    await usePlanStore.getState().load(true); // force → re-reads
-    expect(fetchPlanMock).toHaveBeenCalledTimes(2);
+  it("load() is idempotent for the same server, and force re-reads", async () => {
+    fetchGuildPlanMock.mockResolvedValue(PLAN);
+    await usePlanStore.getState().load(G1);
+    await usePlanStore.getState().load(G1); // warm, same server → skips the network
+    expect(fetchGuildPlanMock).toHaveBeenCalledTimes(1);
+    await usePlanStore.getState().load(G1, true); // force → re-reads
+    expect(fetchGuildPlanMock).toHaveBeenCalledTimes(2);
   });
 
-  it("a null response (signed out) leaves plan null but ready (no spin)", async () => {
-    fetchPlanMock.mockResolvedValue(null);
-    await usePlanStore.getState().load();
+  it("load() reloads when the server changes", async () => {
+    fetchGuildPlanMock.mockResolvedValue(PLAN);
+    await usePlanStore.getState().load(G1);
+    await usePlanStore.getState().load(G2); // different server → re-reads
+    expect(fetchGuildPlanMock).toHaveBeenCalledTimes(2);
+    expect(fetchGuildPlanMock).toHaveBeenLastCalledWith(G2);
+    expect(usePlanStore.getState().guildId).toBe(G2);
+  });
+
+  it("an empty guild id is a no-op", async () => {
+    await usePlanStore.getState().load("");
+    expect(fetchGuildPlanMock).not.toHaveBeenCalled();
+  });
+
+  it("a null response (signed out / not a member) leaves plan null but ready", async () => {
+    fetchGuildPlanMock.mockResolvedValue(null);
+    await usePlanStore.getState().load(G1);
     expect(usePlanStore.getState().plan).toBeNull();
     expect(usePlanStore.getState().status).toBe("ready");
   });
 
   it("a soft error marks status error without wedging", async () => {
-    fetchPlanMock.mockRejectedValue(new Error("network"));
-    await usePlanStore.getState().load();
+    fetchGuildPlanMock.mockRejectedValue(new Error("network"));
+    await usePlanStore.getState().load(G1);
     expect(usePlanStore.getState().status).toBe("error");
   });
 
-  it("openPricing() opens the modal and kicks off a load", async () => {
-    fetchPlanMock.mockResolvedValue(PLAN);
-    usePlanStore.getState().openPricing();
+  it("openPricing(guild) opens the modal and kicks off a load", async () => {
+    fetchGuildPlanMock.mockResolvedValue(PLAN);
+    usePlanStore.getState().openPricing(G1);
     expect(usePlanStore.getState().open).toBe(true);
-    // fetchPlan is invoked synchronously inside load(), before its first await.
-    expect(fetchPlanMock).toHaveBeenCalled();
+    // fetchGuildPlan is invoked synchronously inside load(), before its first await.
+    expect(fetchGuildPlanMock).toHaveBeenCalledWith(G1);
     await Promise.resolve();
   });
 
   it("reset() clears cached state", () => {
-    usePlanStore.setState({ plan: PLAN, status: "ready", open: true });
+    usePlanStore.setState({ guildId: G1, plan: PLAN, status: "ready", open: true });
     usePlanStore.getState().reset();
-    expect(usePlanStore.getState()).toMatchObject({ plan: null, status: "idle", open: false });
+    expect(usePlanStore.getState()).toMatchObject({
+      guildId: null,
+      plan: null,
+      status: "idle",
+      open: false,
+    });
   });
 });

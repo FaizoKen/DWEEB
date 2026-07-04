@@ -134,12 +134,13 @@ export async function fetchMe(): Promise<AuthUser | null> {
   }
 }
 
-// ── Plan (tiers bundled onto a RoleLogic subscription) ─────────────────────
-// DWEEB has no checkout of its own: a RoleLogic subscription unlocks the mapped
-// DWEEB tier, and the proxy resolves it from the same Discord identity. These
-// caps only ever raise numeric quotas — nothing is paywall-locked.
+// ── Plan (per-server premium, MEE6/Dyno-style) ─────────────────────────────
+// Premium is sold per Discord server: a Stripe subscription is bound to one
+// guild and raises that server's quotas. The proxy resolves a server's tier from
+// the subscriptions bound to it (see `server/src/stripe.rs`). These caps only
+// ever raise numeric quotas — nothing is paywall-locked.
 
-/** A DWEEB plan tier, from `GET /api/me/plan`. */
+/** A DWEEB plan tier, from `GET /api/guilds/:id/plan`. */
 export type PlanTier = "free" | "plus" | "pro";
 
 /** Per-tier numeric quotas; `null` means unlimited. */
@@ -150,7 +151,7 @@ export interface PlanLimits {
   coeditors: number | null;
 }
 
-/** The signed-in user's plan, from `GET /api/me/plan`. */
+/** A server's plan, from `GET /api/guilds/:id/plan`. */
 export interface PlanInfo {
   tier: PlanTier;
   limits: PlanLimits;
@@ -160,12 +161,14 @@ export interface PlanInfo {
   billing: boolean;
 }
 
-/** `GET /api/me/plan` — the signed-in user's tier + limits. Returns null when
+/** `GET /api/guilds/:id/plan` — that server's tier + limits. Returns null when
  *  not signed in (401), so callers treat anonymous as "no plan loaded". Always
- *  resolves to a real tier when signed in (the proxy fails open to Free). */
-export async function fetchPlan(): Promise<PlanInfo | null> {
+ *  resolves to a real tier when authorized (the proxy fails open to Free). */
+export async function fetchGuildPlan(guildId: string): Promise<PlanInfo | null> {
+  const id = guildId.trim();
+  if (!isValidGuildId(id)) return null;
   try {
-    return await getJson<PlanInfo>("/api/me/plan");
+    return await getJson<PlanInfo>(`/api/guilds/${id}/plan`);
   } catch (e) {
     if (isAuthError(e)) return null;
     throw e;
