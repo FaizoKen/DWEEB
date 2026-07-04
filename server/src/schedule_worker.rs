@@ -53,6 +53,7 @@ pub fn spawn(
     key: Key,
     http: reqwest::Client,
     dispatcher: Option<Arc<DispatcherApi>>,
+    entitlements: Arc<crate::entitlement::Entitlement>,
     tick_secs: u64,
     lease_secs: i64,
     batch: usize,
@@ -67,8 +68,16 @@ pub fn spawn(
         let mut last_sweep: i64 = 0;
         loop {
             ticker.tick().await;
-            if let Err(e) =
-                drain_once(&store, &key, &http, dispatcher.as_ref(), lease_secs, batch).await
+            if let Err(e) = drain_once(
+                &store,
+                &key,
+                &http,
+                dispatcher.as_ref(),
+                &entitlements,
+                lease_secs,
+                batch,
+            )
+            .await
             {
                 tracing::warn!(error = %e, "scheduler tick failed");
             }
@@ -93,6 +102,7 @@ async fn drain_once(
     key: &Key,
     http: &reqwest::Client,
     dispatcher: Option<&Arc<DispatcherApi>>,
+    entitlements: &Arc<crate::entitlement::Entitlement>,
     lease_secs: i64,
     batch: usize,
 ) -> Result<(), String> {
@@ -102,17 +112,19 @@ async fn drain_once(
         .await
         .map_err(|e| e.to_string())??;
     for job in jobs {
-        process(store, key, http, dispatcher, job, now).await;
+        process(store, key, http, dispatcher, entitlements, job, now).await;
     }
     Ok(())
 }
 
 /// Fire one claimed occurrence and record the outcome.
+#[allow(clippy::too_many_arguments)]
 async fn process(
     store: &Arc<ScheduleStore>,
     key: &Key,
     http: &reqwest::Client,
     dispatcher: Option<&Arc<DispatcherApi>>,
+    entitlements: &Arc<crate::entitlement::Entitlement>,
     job: ClaimedJob,
     now: i64,
 ) {
@@ -184,6 +196,7 @@ async fn process(
                 // the post. The outcome rides into the row's run detail as a note.
                 let note = maybe_make_permanent(
                     dispatcher,
+                    entitlements,
                     &job,
                     msg_id.as_deref(),
                     channel_id.as_deref(),
@@ -298,6 +311,7 @@ async fn success(
 /// to do or the slot was claimed cleanly.
 async fn maybe_make_permanent(
     dispatcher: Option<&Arc<DispatcherApi>>,
+    entitlements: &Arc<crate::entitlement::Entitlement>,
     job: &ClaimedJob,
     message_id: Option<&str>,
     channel_id: Option<&str>,
@@ -323,9 +337,19 @@ async fn maybe_make_permanent(
                 .into(),
         );
     };
+    // Honour the schedule owner's plan tier when spending a slot at fire time, so
+    // a make-permanent schedule can't exceed their never-expire cap. None (owner
+    // unknown, or entitlement disabled) → the dispatcher's own env default.
+    let cap = match job.owner_user_id.as_deref() {
+        Some(uid) => entitlements.permanent_cap(uid).await,
+        None => None,
+    };
     let req = api
         .http
-        .post(format!("{}/permanent/{guild}", api.base))
+        .post(crate::routes::dispatcher_url_with_cap(
+            format!("{}/permanent/{guild}", api.base),
+            cap,
+        ))
         .bearer_auth(&api.token)
         .json(&serde_json::json!({
             "message_id": message_id,

@@ -321,9 +321,22 @@ impl ScheduleStore {
     }
 
     pub fn create(&self, n: &NewSchedule) -> Result<(), CreateError> {
+        self.create_with_limit(n, None)
+    }
+
+    /// Like [`create`], but the per-server quota is `limit_override` when given
+    /// (the acting user's plan-tier limit) instead of the store default. `None`
+    /// keeps the configured `max_per_guild` — used when plan entitlement is
+    /// disabled, so a standalone deployment is unchanged.
+    pub fn create_with_limit(
+        &self,
+        n: &NewSchedule,
+        limit_override: Option<i64>,
+    ) -> Result<(), CreateError> {
         if self.count.load(Ordering::Relaxed) >= self.max_entries {
             return Err(CreateError::Full);
         }
+        let per_guild_cap = limit_override.unwrap_or(self.max_per_guild);
         let conn = self.lock();
         let active: i64 = conn
             .query_row(
@@ -347,8 +360,8 @@ impl ScheduleStore {
                     |r| r.get(0),
                 )
                 .map_err(|e| CreateError::Storage(e.to_string()))?;
-            if in_guild >= self.max_per_guild {
-                return Err(CreateError::PerGuildFull(self.max_per_guild));
+            if in_guild >= per_guild_cap {
+                return Err(CreateError::PerGuildFull(per_guild_cap));
             }
         }
         conn.execute(
@@ -781,6 +794,12 @@ pub async fn schedule_create(
     // row honestly records that it won't keep the message permanent.
     let make_permanent = body.make_permanent && guild_id.is_some();
 
+    // The acting user's plan tier caps how many scheduled posts a server may
+    // hold. `None` when entitlement is disabled → the store default applies, so
+    // a standalone deployment is unchanged. Resolved before `session.uid` moves
+    // into the row below.
+    let limit_override = st.entitlements.schedule_limit(&session.uid).await;
+
     let new = NewSchedule {
         id: id.clone(),
         manage_token_hash: hash_token(&token),
@@ -801,7 +820,7 @@ pub async fn schedule_create(
         make_permanent,
     };
 
-    let res = tokio::task::spawn_blocking(move || store.create(&new))
+    let res = tokio::task::spawn_blocking(move || store.create_with_limit(&new, limit_override))
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
     match res {
@@ -901,8 +920,17 @@ pub async fn schedule_list_for_guild(
     let session = current_session(&jar);
     // The per-server quota travels with the list so the UI can show "used / cap"
     // (the `used` count is derived client-side from the live rows below), and the
-    // retention window so it can note when posted/failed rows auto-clear.
-    let quota = store.max_per_guild();
+    // retention window so it can note when posted/failed rows auto-clear. When
+    // plan entitlement is on, the cap reflects the *caller's* tier (unlimited →
+    // JSON null); otherwise it's the store default.
+    let quota: Value = match (st.entitlements.enabled(), session.as_ref()) {
+        (true, Some(s)) => match st.entitlements.schedule_limit(&s.uid).await {
+            Some(n) if n == i64::MAX => Value::Null,
+            Some(n) => json!(n),
+            None => json!(store.max_per_guild()),
+        },
+        _ => json!(store.max_per_guild()),
+    };
     let retention_days = st.config.schedule_retention_days;
     let g = guild.clone();
     let rows = tokio::task::spawn_blocking(move || store.list_for_guild(&g, LIST_LIMIT))
@@ -1392,6 +1420,30 @@ mod tests {
         let mut nog = sample("e", "555", 100);
         nog.guild_id = None;
         assert!(store.create(&nog).is_ok());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn per_guild_limit_override_beats_store_default() {
+        // Store default per-guild is generous (100), but the acting user's tier
+        // caps at 2 — the override is what bites.
+        let (store, path) = temp_store_caps("override", 100, 100);
+        store
+            .create_with_limit(&sample("a", "111", 100), Some(2))
+            .unwrap();
+        store
+            .create_with_limit(&sample("b", "222", 100), Some(2))
+            .unwrap();
+        assert!(matches!(
+            store.create_with_limit(&sample("c", "333", 100), Some(2)),
+            Err(CreateError::PerGuildFull(2))
+        ));
+        // An unlimited tier (i64::MAX) lets more through in the same guild.
+        assert!(store
+            .create_with_limit(&sample("c", "333", 100), Some(i64::MAX))
+            .is_ok());
+        // None falls back to the store default (100 here) — a standalone deploy.
+        assert!(store.create(&sample("d", "444", 100)).is_ok());
         let _ = std::fs::remove_file(path);
     }
 

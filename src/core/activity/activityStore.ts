@@ -407,6 +407,14 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         onTarget: (channelId) => {
           if (get().targetChannelId !== channelId) set({ targetChannelId: channelId });
         },
+        // The room is full for the host's plan tier — keep editing solo.
+        onRoomFull: (cap) =>
+          pushToast(
+            cap > 0
+              ? `This room is full — the host's plan allows ${cap} live editors. You can keep editing on your own.`
+              : "This collaboration room is full. You can keep editing on your own.",
+            "info",
+          ),
       });
     } catch (e) {
       stopCollab();

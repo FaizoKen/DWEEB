@@ -27,6 +27,7 @@ import {
   type CustomBots,
 } from "@/core/guild/api";
 import { customBotInviteUrl, interactionsEndpointUrl, oauthCallbackUrl } from "@/core/guild/config";
+import { usePlanStore } from "@/core/plan/planStore";
 import { openExternalPopup } from "@/core/oauth/popupFlow";
 import { copyText } from "@/core/serialization/clipboard";
 import { Modal } from "@/ui/Modal";
@@ -334,6 +335,18 @@ export function CustomBotDialog({
             <span className={styles.usage}>
               {bots.used}/{bots.cap}
             </span>
+            {bots.used >= bots.cap ? (
+              <button
+                type="button"
+                className={styles.linkBtn}
+                onClick={() => {
+                  onClose();
+                  usePlanStore.getState().openPricing();
+                }}
+              >
+                Upgrade for more
+              </button>
+            ) : null}
           </div>
 
           {bots.items.length === 0 ? (

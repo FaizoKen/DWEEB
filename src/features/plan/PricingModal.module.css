@@ -1,0 +1,141 @@
+.lead {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--app-text-muted);
+}
+.lead strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+/* Horizontal scroll container so the table never forces the page to scroll. */
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table th,
+.table td {
+  padding: 9px 12px;
+  text-align: center;
+  border-bottom: 1px solid var(--app-border);
+}
+.table tbody tr:last-child th,
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Left column: the quota label. */
+.rowHead {
+  text-align: left;
+  font-weight: 500;
+  color: var(--app-text);
+  white-space: nowrap;
+}
+
+/* Tier column header stacks name / price / tagline. */
+.tierHead {
+  vertical-align: bottom;
+  border-left: 1px solid var(--app-border);
+}
+.tierName {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--app-text);
+}
+.tierPrice {
+  display: block;
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text);
+}
+.per {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--app-text-muted);
+}
+.tierTagline {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--app-text-muted);
+}
+
+/* Body cells inherit the left divider so columns read as columns. */
+.table td {
+  border-left: 1px solid var(--app-border);
+  color: var(--app-text);
+}
+
+/* The signed-in user's current tier is tinted top-to-bottom. */
+.tierCurrent {
+  background: color-mix(in srgb, var(--app-accent) 14%, transparent);
+}
+.colCurrent {
+  background: color-mix(in srgb, var(--app-accent) 8%, transparent);
+  font-weight: 600;
+}
+
+.youBadge {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 1px 7px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  color: var(--app-accent-text, #fff);
+  background: var(--app-accent);
+}
+
+/* Per-tier "Upgrade" button in the column header — starts embedded checkout. */
+.tierCta {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 12px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--app-accent-text, #fff);
+  background: var(--app-accent);
+}
+.tierCta:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Holds Stripe's embedded Checkout iframe — reserve height so the modal doesn't
+   jump while Stripe.js loads, and let it scroll if the form is tall. */
+.checkout {
+  min-height: 320px;
+  max-height: 68vh;
+  overflow-y: auto;
+}
+
+.included {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--app-text-muted);
+}

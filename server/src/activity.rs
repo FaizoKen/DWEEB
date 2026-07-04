@@ -1291,6 +1291,23 @@ struct Participant {
 struct RoomState {
     tx: broadcast::Sender<String>,
     members: HashMap<String, (Participant, u32)>,
+    /// Max distinct participants (live co-editors), fixed by the first (host)
+    /// joiner's plan tier. A reconnecting member never counts twice, so this caps
+    /// *people*, not connections.
+    cap: u32,
+}
+
+/// Outcome of a [`ActivityRooms::join`] attempt.
+enum Joined {
+    Ok {
+        tx: broadcast::Sender<String>,
+        rx: broadcast::Receiver<String>,
+        is_first: bool,
+    },
+    /// The global `MAX_ROOMS` ceiling was hit on a brand-new instance.
+    RoomsFull,
+    /// This room is full for the host's plan tier (carries that cap for the FE).
+    CoeditorsFull(u32),
 }
 
 /// All live collaboration rooms, keyed by Activity instance id. Ephemeral: a
@@ -1314,26 +1331,34 @@ impl ActivityRooms {
 
     /// Join `instance`: subscribe a receiver, register the participant, and
     /// broadcast the updated roster (the joiner is already subscribed, so it sees
-    /// the roster too). `None` when the room cap is hit on a brand-new instance.
+    /// the roster too). `host_cap` sets the room's per-host co-editor limit when
+    /// this call *creates* the room (the first joiner is the host); later joiners
+    /// are measured against the stored cap, so a Free host's room stays capped
+    /// even if a Pro user tries to join.
     ///
-    /// The returned `bool` is true when this connection is the room's **first**
+    /// The `is_first` bool is true when this connection is the room's **first**
     /// member — nobody else is here to answer its `hello` with the live draft, so
     /// the caller replays the persisted draft to it instead (resume-on-reopen).
-    fn join(
-        &self,
-        instance: &str,
-        me: &Participant,
-    ) -> Option<(broadcast::Sender<String>, broadcast::Receiver<String>, bool)> {
-        let mut map = self.inner.lock().ok()?;
+    fn join(&self, instance: &str, me: &Participant, host_cap: u32) -> Joined {
+        let Ok(mut map) = self.inner.lock() else {
+            return Joined::RoomsFull;
+        };
         if !map.contains_key(instance) && map.len() >= MAX_ROOMS {
-            return None;
+            return Joined::RoomsFull;
         }
         let room = map
             .entry(instance.to_string())
             .or_insert_with(|| RoomState {
                 tx: broadcast::channel(BROADCAST_CAP).0,
                 members: HashMap::new(),
+                cap: host_cap.max(1),
             });
+        // A returning member (another tab / a reconnect) never counts against the
+        // cap; only a genuinely new person does.
+        let already_here = room.members.contains_key(&me.id);
+        if !already_here && room.members.len() as u32 >= room.cap {
+            return Joined::CoeditorsFull(room.cap);
+        }
         // First member iff the room held nobody before we register ourselves.
         let is_first = room.members.is_empty();
         let rx = room.tx.subscribe();
@@ -1343,7 +1368,7 @@ impl ActivityRooms {
         let tx = room.tx.clone();
         drop(map);
         let _ = tx.send(roster);
-        Some((tx, rx, is_first))
+        Joined::Ok { tx, rx, is_first }
     }
 
     /// Drop one of `uid`'s connections from `instance`; remove the participant
@@ -1442,13 +1467,22 @@ pub async fn activity_room(
             Some(cg) => (cg == guild).then(|| ctx.to_string()),
             None => Some(ctx.to_string()),
         });
+    // The host's plan tier caps how many people can co-edit this room. Resolved
+    // from the *first* joiner (this one, when the room is new); `None` (plan
+    // disabled) → unlimited, preserving the pre-plan behaviour. Read before
+    // `session.uid` moves into `me`.
+    let host_cap = st
+        .entitlements
+        .coeditor_cap(&session.uid)
+        .await
+        .unwrap_or(crate::entitlement::UNLIMITED_SLOTS);
     let me = Participant {
         id: session.uid,
         name: session.name,
         avatar: session.avatar,
     };
     Ok(ws.on_upgrade(move |socket| async move {
-        room_socket(st, instance, draft_key, me, socket).await;
+        room_socket(st, instance, draft_key, me, host_cap, socket).await;
     }))
 }
 
@@ -1462,11 +1496,23 @@ async fn room_socket(
     instance: String,
     draft_key: Option<String>,
     me: Participant,
+    host_cap: u32,
     mut socket: WebSocket,
 ) {
-    let Some((tx, mut rx, is_first)) = st.activity_rooms.join(&instance, &me) else {
-        let _ = socket.send(Message::Close(None)).await;
-        return;
+    let (tx, mut rx, is_first) = match st.activity_rooms.join(&instance, &me, host_cap) {
+        Joined::Ok { tx, rx, is_first } => (tx, rx, is_first),
+        Joined::RoomsFull => {
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        }
+        Joined::CoeditorsFull(cap) => {
+            // Tell the client why (so it can show "this room is full on the host's
+            // plan" and fall back to solo editing), then close.
+            let frame = json!({ "type": "room_full", "cap": cap }).to_string();
+            let _ = socket.send(Message::Text(frame)).await;
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        }
     };
     // Resume-on-reopen: when we're the first one back in the room, no peer will
     // answer our `hello`, so replay the persisted draft (if any) straight to this
@@ -1678,6 +1724,34 @@ mod tests {
             &mk(1, "100", "app-123", Some("")),
             cid,
             app
+        ));
+    }
+
+    #[test]
+    fn room_caps_distinct_coeditors_at_the_host_tier() {
+        let rooms = ActivityRooms::new();
+        let p = |id: &str| Participant {
+            id: id.into(),
+            name: id.into(),
+            avatar: None,
+        };
+        // Host joins first with a cap of 2 — that fixes the room's limit.
+        assert!(matches!(
+            rooms.join("inst", &p("host"), 2),
+            Joined::Ok { .. }
+        ));
+        // A second distinct person fits.
+        assert!(matches!(rooms.join("inst", &p("b"), 2), Joined::Ok { .. }));
+        // A third is refused with the host's cap, even if THEY are unlimited —
+        // the stored room cap (from the host) is what bites.
+        assert!(matches!(
+            rooms.join("inst", &p("c"), crate::entitlement::UNLIMITED_SLOTS),
+            Joined::CoeditorsFull(2)
+        ));
+        // A returning member (another tab) never counts against the cap.
+        assert!(matches!(
+            rooms.join("inst", &p("host"), 2),
+            Joined::Ok { .. }
         ));
     }
 

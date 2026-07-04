@@ -15,6 +15,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { usePlanStore } from "@/core/plan/planStore";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { loadLastGuildId } from "@/core/guild/cache";
 import {
@@ -34,6 +35,7 @@ import {
   PlusIcon,
   RefreshIcon,
   SettingsIcon,
+  SparkleIcon,
   UserIcon,
 } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
@@ -340,6 +342,15 @@ function AccountPanel({
   const connect = useGuildStore((s) => s.connect);
   const refresh = useGuildStore((s) => s.refresh);
 
+  // The signed-in user's plan tier, shown on the "Plans" row. Loaded lazily when
+  // the panel opens (cheap + idempotent); a miss just hides the tier label.
+  const plan = usePlanStore((s) => s.plan);
+  const loadPlan = usePlanStore((s) => s.load);
+  const openPricing = usePlanStore((s) => s.openPricing);
+  useEffect(() => {
+    void loadPlan();
+  }, [loadPlan]);
+
   // Manual refresh: re-pull the picker list *and* the connected guild's data,
   // both with `force` so the proxy bypasses its short-TTL cache and returns live
   // Discord state (new roles/channels/emojis show up immediately). Passive loads
@@ -427,6 +438,19 @@ function AccountPanel({
       )}
 
       <div className={styles.actions}>
+        <button
+          type="button"
+          className={styles.actionRow}
+          onClick={() => {
+            onClose();
+            openPricing();
+          }}
+        >
+          <SparkleIcon size={16} />
+          <span>
+            Plans{plan ? ` · ${plan.tier.charAt(0).toUpperCase()}${plan.tier.slice(1)}` : ""}
+          </span>
+        </button>
         {invite ? (
           <a
             className={styles.actionRow}

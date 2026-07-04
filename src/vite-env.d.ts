@@ -15,6 +15,9 @@ interface ImportMetaEnv {
   readonly VITE_DISCORD_CLIENT_ID?: string;
   /** Feedback forum webhook URL — quick-feedback posts go here. Empty → feature off. */
   readonly VITE_FEEDBACK_WEBHOOK_URL?: string;
+  /** Stripe publishable key (`pk_live_…`/`pk_test_…`) for the in-app embedded
+   *  Checkout. Empty → the pricing modal is informational only (no checkout). */
+  readonly VITE_STRIPE_PUBLISHABLE_KEY?: string;
   /** Dev only: local origin for the modal-form plugin's config UI (default `http://localhost:8090`). */
   readonly VITE_DEV_MODAL_FORM_ORIGIN?: string;
   /** Dev only: local origin for the ping-pong plugin's config UI (default `http://localhost:8091`). */

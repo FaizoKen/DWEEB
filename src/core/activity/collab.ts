@@ -55,6 +55,10 @@ interface StartOptions {
   onConnectedChange?: (connected: boolean) => void;
   /** A peer moved the shared post destination (server launch only). */
   onTarget?: (channelId: string) => void;
+  /** The host's plan caps concurrent co-editors and this room is full — the
+   *  server refused the socket. `cap` is that limit. Editing continues solo, and
+   *  we stop retrying (a reconnect would just be refused again). */
+  onRoomFull?: (cap: number) => void;
 }
 
 const SEND_DEBOUNCE_MS = 180;
@@ -243,6 +247,15 @@ function handleFrame(frame: Record<string, unknown>): void {
     // left stops haunting the block they had open (their socket close doesn't
     // send a focus-clear; the roster is the authority on who's still here).
     usePresenceStore.getState().retain(participants.map((p) => p.id));
+    return;
+  }
+  if (type === "room_full") {
+    // The host's plan caps concurrent co-editors and this room is full. Stop
+    // reconnecting (it would just be refused again) and let the app notify the
+    // user; the Activity still works solo.
+    stopped = true;
+    opts?.onConnectedChange?.(false);
+    opts?.onRoomFull?.(typeof frame.cap === "number" ? frame.cap : 0);
     return;
   }
   // Ignore the echo of our own frames.

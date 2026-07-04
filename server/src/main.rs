@@ -18,6 +18,7 @@ mod auth;
 mod cache;
 mod config;
 mod discord;
+mod entitlement;
 mod error;
 mod ratelimit;
 mod routes;
@@ -29,6 +30,7 @@ mod seal;
 mod session;
 mod shortlink;
 mod singleflight;
+mod stripe;
 mod telemetry;
 
 use std::net::SocketAddr;
@@ -168,6 +170,30 @@ async fn run() {
         _ => None,
     };
 
+    // DWEEB's own Stripe billing (mirror + client). None when STRIPE_SECRET_KEY
+    // is unset — the plan system is then inert and DWEEB runs standalone. Boot
+    // fails loudly only if the mirror DB can't be opened (a deployment that
+    // accepts payments must be able to record them).
+    let stripe = match crate::stripe::StripeState::from_config(&config) {
+        Ok(s) => s.map(Arc::new),
+        Err(e) => {
+            eprintln!("stripe store error: {e}");
+            std::process::exit(1);
+        }
+    };
+    if stripe.is_some() {
+        tracing::info!("stripe billing enabled (DWEEB reads Stripe directly)");
+    }
+
+    // Plan entitlement reader. Inert (everyone Free, gates use store defaults)
+    // until Stripe is configured, so DWEEB runs standalone. Built here so the
+    // schedule worker (which spends never-expire slots at fire time) can consult
+    // it too.
+    let entitlements = Arc::new(crate::entitlement::Entitlement::new(
+        &config,
+        stripe.clone(),
+    ));
+
     // Short links: a small SQLite file (fails the boot loudly when unwritable —
     // a deployment that promises 7-day links must be able to keep them). An
     // hourly sweep deletes expired rows; reads already filter on expiry, so a
@@ -256,6 +282,9 @@ async fn run() {
             // The permanent-slot relay, so a `make_permanent` schedule can keep
             // its components alive when it fires (None → it just posts normally).
             dispatcher.clone(),
+            // Consulted at fire time so a make-permanent schedule respects the
+            // owner's plan tier when spending a never-expire slot.
+            entitlements.clone(),
             config.scheduler_tick_secs,
             config.scheduler_lease_secs,
             config.scheduler_batch,
@@ -319,6 +348,8 @@ async fn run() {
         schedules,
         activity_rooms: Arc::new(crate::activity::ActivityRooms::new()),
         activity_drafts,
+        entitlements,
+        stripe,
         key,
         config: Arc::new(config),
     };
@@ -420,6 +451,22 @@ async fn run() {
         .route(
             "/api/activity/feedback",
             post(activity::activity_feedback).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
+        // The signed-in user's plan: tier + per-tier limits + whether billing is
+        // available, for the FE's pricing surface. Cookie-gated; fails open to Free.
+        .route("/api/me/plan", get(entitlement::me_plan))
+        // DWEEB's own Stripe billing: start an embedded Checkout, open the billing
+        // portal, and receive Stripe webhooks. Checkout/portal are cookie-gated;
+        // the webhook is signature-verified (no user session). The webhook body is
+        // bounded but roomy (Stripe events can carry a fair bit).
+        .route(
+            "/api/stripe/checkout",
+            post(stripe::checkout).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
+        )
+        .route("/api/stripe/portal", post(stripe::portal))
+        .route(
+            "/api/stripe/webhook",
+            post(stripe::webhook).layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
         )
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))

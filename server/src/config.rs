@@ -2,6 +2,7 @@
 //! binary works for `cargo run`, Docker, and `docker compose` without code
 //! changes. See `.env.example` for the full list with explanations.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 /// Which browser origins may call the proxy (the CORS allow-list).
@@ -11,6 +12,28 @@ use std::time::Duration;
 /// credentials. So unlike the earlier read-only design there is no `Any` variant:
 /// the allowed origins must be listed explicitly.
 pub struct Origins(pub Vec<String>);
+
+/// Per-tier numeric quotas for the plan gates. `0` means **unlimited** — the
+/// enforcement points translate it to `i64::MAX`. All values are env-tunable;
+/// the defaults encode the shipped Free/Plus/Pro table.
+#[derive(Clone, Copy)]
+pub struct TierLimits {
+    /// Active scheduled posts (per server).
+    pub schedules: i64,
+    /// Never-expire / permanent component slots (per server).
+    pub permanent: i64,
+    /// Registered custom bots (per server).
+    pub custom_bots: i64,
+    /// Concurrent live co-editors in an Activity collaboration room.
+    pub coeditors: i64,
+}
+
+/// The Free / Plus / Pro quota table read by `entitlement.rs`.
+pub struct PlanLimits {
+    pub free: TierLimits,
+    pub plus: TierLimits,
+    pub pro: TierLimits,
+}
 
 pub struct Config {
     /// Bot token used as `Authorization: Bot <token>` against Discord.
@@ -156,6 +179,37 @@ pub struct Config {
     /// Bearer token for the dispatcher's internal API (`INTERNAL_API_TOKEN`
     /// on the dispatcher side).
     pub dispatcher_token: Option<String>,
+
+    // ── Plans & billing (DWEEB's own Stripe integration) ───────────────────
+    // DWEEB reads Stripe DIRECTLY (its own webhook + local mirror + checkout),
+    // sharing the same Stripe account + price IDs (SKUs) as RoleLogic but with no
+    // runtime dependency on it: RoleLogic being down never affects DWEEB.
+    /// Stripe secret key (`sk_live_…`/`sk_test_…`). None ⇒ the whole plan system
+    /// is inert (every user Free, gates use store defaults) and DWEEB runs
+    /// standalone.
+    pub stripe_secret_key: Option<String>,
+    /// Stripe webhook signing secret (`whsec_…`). None ⇒ `/api/stripe/webhook`
+    /// answers 501 (the mirror then fills only via lazy backfill).
+    pub stripe_webhook_secret: Option<String>,
+    /// price_id → entitlement slots: the shared-SKU map (the same prices
+    /// RoleLogic sells). From `STRIPE_PRICE_SLOTS` (JSON `{price_id: slots}`).
+    pub stripe_price_slots: HashMap<String, i64>,
+    /// DWEEB tier → the price id its in-app checkout buys (keys "plus"/"pro").
+    /// From `STRIPE_CHECKOUT_PRICE_PLUS` / `_PRO`.
+    pub stripe_checkout_price: HashMap<String, String>,
+    /// Optional fixed TaxRate id (`txr_…`) added on top at checkout (parity with
+    /// RoleLogic's manual-tax path). None ⇒ no tax line.
+    pub stripe_tax_rate_id: Option<String>,
+    /// SQLite file the local subscription mirror lives in — on the same
+    /// persistent volume as the other stores.
+    pub stripe_db_path: String,
+    /// How long before DWEEB re-checks Stripe for a user with no mirrored
+    /// subscription — bounds backfill calls for existing subscribers + free users.
+    pub stripe_backfill_ttl_secs: i64,
+    /// How long a resolved tier is cached per user before re-reading the mirror.
+    pub entitlement_cache_secs: i64,
+    /// The Free/Plus/Pro quota table (env-tunable; defaults shipped).
+    pub plan_limits: PlanLimits,
 }
 
 #[derive(Clone, Copy)]
@@ -247,6 +301,44 @@ impl Config {
         let dispatcher_url = opt_env("DISPATCHER_URL").map(|u| u.trim_end_matches('/').to_string());
         let dispatcher_token = opt_env("DISPATCHER_API_TOKEN");
 
+        let stripe_secret_key = opt_env("STRIPE_SECRET_KEY");
+        let stripe_webhook_secret = opt_env("STRIPE_WEBHOOK_SECRET");
+        let stripe_price_slots = opt_env("STRIPE_PRICE_SLOTS")
+            .and_then(|s| serde_json::from_str::<HashMap<String, i64>>(&s).ok())
+            .unwrap_or_default();
+        let mut stripe_checkout_price = HashMap::new();
+        if let Some(p) = opt_env("STRIPE_CHECKOUT_PRICE_PLUS") {
+            stripe_checkout_price.insert("plus".to_string(), p);
+        }
+        if let Some(p) = opt_env("STRIPE_CHECKOUT_PRICE_PRO") {
+            stripe_checkout_price.insert("pro".to_string(), p);
+        }
+        let stripe_tax_rate_id = opt_env("STRIPE_TAX_RATE_ID");
+        let stripe_db_path = opt_env("STRIPE_DB_PATH").unwrap_or_else(|| "stripe.db".to_string());
+        let stripe_backfill_ttl_secs = parse_or("STRIPE_BACKFILL_TTL_SECS", 86_400);
+        let entitlement_cache_secs = parse_or("ENTITLEMENT_CACHE_SECS", 300);
+        let plan_limits = PlanLimits {
+            free: TierLimits {
+                schedules: parse_or("PLAN_FREE_SCHEDULES", 3),
+                permanent: parse_or("PLAN_FREE_PERMANENT", 5),
+                custom_bots: parse_or("PLAN_FREE_CUSTOM_BOTS", 1),
+                coeditors: parse_or("PLAN_FREE_COEDITORS", 2),
+            },
+            plus: TierLimits {
+                schedules: parse_or("PLAN_PLUS_SCHEDULES", 30),
+                permanent: parse_or("PLAN_PLUS_PERMANENT", 25),
+                custom_bots: parse_or("PLAN_PLUS_CUSTOM_BOTS", 2),
+                coeditors: parse_or("PLAN_PLUS_COEDITORS", 6),
+            },
+            pro: TierLimits {
+                // 0 = unlimited (mapped to i64::MAX at each gate).
+                schedules: parse_or("PLAN_PRO_SCHEDULES", 0),
+                permanent: parse_or("PLAN_PRO_PERMANENT", 0),
+                custom_bots: parse_or("PLAN_PRO_CUSTOM_BOTS", 5),
+                coeditors: parse_or("PLAN_PRO_COEDITORS", 25),
+            },
+        };
+
         Ok(Config {
             bot_token,
             bind_addr,
@@ -287,6 +379,15 @@ impl Config {
             schedule_retention_days,
             dispatcher_url,
             dispatcher_token,
+            stripe_secret_key,
+            stripe_webhook_secret,
+            stripe_price_slots,
+            stripe_checkout_price,
+            stripe_tax_rate_id,
+            stripe_db_path,
+            stripe_backfill_ttl_secs,
+            entitlement_cache_secs,
+            plan_limits,
         })
     }
 }

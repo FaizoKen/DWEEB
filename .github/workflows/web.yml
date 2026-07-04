@@ -84,6 +84,10 @@ jobs:
           VITE_DISCORD_CLIENT_ID: ${{ vars.VITE_DISCORD_CLIENT_ID }}
           VITE_INTERACTIONS_URL: ${{ vars.VITE_INTERACTIONS_URL }}
           VITE_FEEDBACK_WEBHOOK_URL: ${{ vars.VITE_FEEDBACK_WEBHOOK_URL }}
+          # Stripe publishable key for the in-app embedded Checkout. Unset → the
+          # pricing modal is informational only (no in-app upgrade). Pairs with
+          # the backend's STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET.
+          VITE_STRIPE_PUBLISHABLE_KEY: ${{ vars.VITE_STRIPE_PUBLISHABLE_KEY }}
           # Mirror of the dispatcher's COMPONENT_TTL_DAYS — drives the exact
           # expiry figure shown to signed-out users pre-send. Unset → code
           # default 7 (the dispatcher's own default).

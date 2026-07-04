@@ -28,11 +28,13 @@ import { useAuthStore } from "@/core/auth/authStore";
 import {
   fetchPermanentSlots,
   isAuthError,
+  isUnlimitedCap,
   removePermanentMessage,
   type PermanentSlots,
 } from "@/core/guild/api";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import { isScheduleConfigured } from "@/core/schedule/api";
+import { usePlanStore } from "@/core/plan/planStore";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { ScheduledList, type ScheduleStats } from "./ScheduledList";
@@ -139,17 +141,33 @@ export function ManagedMessagesDialog({
     // back to `number | null` despite the null check above.
     const ttlDays = state.slots.ttl_days;
 
+    const unlimited = isUnlimitedCap(slots.cap);
+
     body = (
       <>
         <p className={styles.lead}>
-          Buttons &amp; selects stop working <strong>{ttlDays} days</strong> after sending — unless
-          they’re one of {guildName ?? "this server"}’s {slots.cap} never-expire messages.
+          Buttons &amp; selects stop working <strong>{ttlDays} days</strong> after sending —{" "}
+          {unlimited
+            ? `unless they’re marked never-expire (unlimited on your plan).`
+            : `unless they’re one of ${guildName ?? "this server"}’s ${slots.cap} never-expire messages.`}
         </p>
 
         <div className={styles.sectionHead}>
           <h3 className={styles.sectionTitle}>Never expire</h3>
           <span className={styles.usage}>
-            {slots.used}/{slots.cap} used
+            {unlimited ? `${slots.used} used` : `${slots.used}/${slots.cap} used`}
+            {!unlimited && slots.used >= slots.cap ? (
+              <button
+                type="button"
+                className={styles.upgradeLink}
+                onClick={() => {
+                  onClose();
+                  usePlanStore.getState().openPricing();
+                }}
+              >
+                Upgrade for more
+              </button>
+            ) : null}
           </span>
         </div>
         {slots.items.length === 0 ? (
@@ -234,6 +252,18 @@ export function ManagedMessagesDialog({
                 {scheduleStats.quota != null
                   ? `${scheduleStats.active}/${scheduleStats.quota} used`
                   : scheduleStats.total}
+                {scheduleStats.quota != null && scheduleStats.active >= scheduleStats.quota ? (
+                  <button
+                    type="button"
+                    className={styles.upgradeLink}
+                    onClick={() => {
+                      onClose();
+                      usePlanStore.getState().openPricing();
+                    }}
+                  >
+                    Upgrade for more
+                  </button>
+                ) : null}
               </span>
             ) : null}
           </div>

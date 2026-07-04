@@ -96,7 +96,7 @@ export type ScheduleResult =
   | { ok: false; error: string; status: number };
 
 export type ListResult =
-  | { ok: true; items: ScheduleView[]; quota?: number; retentionDays?: number }
+  | { ok: true; items: ScheduleView[]; quota?: number | null; retentionDays?: number }
   | { ok: false; error: string; status: number };
 
 export type CancelResult = { ok: true } | { ok: false; error: string; status: number };
@@ -196,7 +196,8 @@ export async function listForGuild(guildId: string): Promise<ListResult> {
   if (!res.ok) return { ok: false, error: await readError(res), status: res.status };
   const data = (await res.json().catch(() => null)) as {
     items?: ScheduleView[];
-    quota?: number;
+    // null = unlimited (a Pro-tier caller); a number is the per-server cap.
+    quota?: number | null;
     retention_days?: number;
   } | null;
   return {

@@ -134,6 +134,44 @@ export async function fetchMe(): Promise<AuthUser | null> {
   }
 }
 
+// ── Plan (tiers bundled onto a RoleLogic subscription) ─────────────────────
+// DWEEB has no checkout of its own: a RoleLogic subscription unlocks the mapped
+// DWEEB tier, and the proxy resolves it from the same Discord identity. These
+// caps only ever raise numeric quotas — nothing is paywall-locked.
+
+/** A DWEEB plan tier, from `GET /api/me/plan`. */
+export type PlanTier = "free" | "plus" | "pro";
+
+/** Per-tier numeric quotas; `null` means unlimited. */
+export interface PlanLimits {
+  schedules: number | null;
+  permanent: number | null;
+  custom_bots: number | null;
+  coeditors: number | null;
+}
+
+/** The signed-in user's plan, from `GET /api/me/plan`. */
+export interface PlanInfo {
+  tier: PlanTier;
+  limits: PlanLimits;
+  /** Whether in-app billing (embedded checkout) is available on this deployment
+   *  (Stripe configured server-side). When false the pricing modal is
+   *  informational only. */
+  billing: boolean;
+}
+
+/** `GET /api/me/plan` — the signed-in user's tier + limits. Returns null when
+ *  not signed in (401), so callers treat anonymous as "no plan loaded". Always
+ *  resolves to a real tier when signed in (the proxy fails open to Free). */
+export async function fetchPlan(): Promise<PlanInfo | null> {
+  try {
+    return await getJson<PlanInfo>("/api/me/plan");
+  } catch (e) {
+    if (isAuthError(e)) return null;
+    throw e;
+  }
+}
+
 /** `GET /api/guilds` — the signed-in user's usable servers. Pass `force` on a
  *  manual refresh to bypass the proxy's cache and pull a live list. */
 export async function fetchUserGuilds(force = false): Promise<PickerGuild[]> {
@@ -223,6 +261,16 @@ export interface PermanentSlotItem {
   channel_id: string;
   /** Unix millis when the slot was granted. */
   added_at: number;
+}
+
+/** A cap the proxy sends to mean "unlimited" (matches `UNLIMITED_SLOTS` in
+ *  `server/src/entitlement.rs`) — a Pro tier. Rendered as "Unlimited" rather
+ *  than the raw number. */
+export const UNLIMITED_CAP = 1_000_000;
+
+/** True when a slot/registration cap is effectively unlimited. */
+export function isUnlimitedCap(cap: number): boolean {
+  return cap >= UNLIMITED_CAP;
 }
 
 /** A server's permanent-slot state, as every slot endpoint returns it. */

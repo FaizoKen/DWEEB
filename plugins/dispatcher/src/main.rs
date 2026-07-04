@@ -91,7 +91,7 @@ use std::{
 
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{Path, RawQuery, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -724,13 +724,15 @@ fn disable_component(node: &mut Value, custom_id: &str) {
 async fn permanent_list(
     State(app): State<Arc<App>>,
     Path(guild_id): Path<String>,
+    RawQuery(raw): RawQuery,
     headers: HeaderMap,
 ) -> Response {
     if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
         return denied;
     }
+    let cap = cap_override(raw.as_deref(), app.permanent_slots);
     match app.store.list(&guild_id) {
-        Ok(rows) => slots_json(&app, &rows).into_response(),
+        Ok(rows) => slots_json(&app, &rows, cap).into_response(),
         Err(err) => internal_error(err),
     }
 }
@@ -740,6 +742,7 @@ async fn permanent_list(
 async fn permanent_add(
     State(app): State<Arc<App>>,
     Path(guild_id): Path<String>,
+    RawQuery(raw): RawQuery,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -757,23 +760,20 @@ async fn permanent_add(
         return bad_request("message_id and channel_id must be snowflakes");
     }
 
-    let added = app.store.add(
-        &guild_id,
-        channel_id,
-        message_id,
-        added_by,
-        app.permanent_slots,
-    );
+    let cap = cap_override(raw.as_deref(), app.permanent_slots);
+    let added = app
+        .store
+        .add(&guild_id, channel_id, message_id, added_by, cap);
     let outcome = match added {
         Ok(o) => o,
         Err(err) => return internal_error(err),
     };
     match app.store.list(&guild_id) {
         Ok(rows) => match outcome {
-            store::Add::Added | store::Add::Already => slots_json(&app, &rows).into_response(),
+            store::Add::Added | store::Add::Already => slots_json(&app, &rows, cap).into_response(),
             store::Add::Full => (
                 StatusCode::CONFLICT,
-                slots_error_json(&app, &rows, "slots_full"),
+                slots_error_json(&app, &rows, cap, "slots_full"),
             )
                 .into_response(),
         },
@@ -785,6 +785,7 @@ async fn permanent_add(
 async fn permanent_remove(
     State(app): State<Arc<App>>,
     Path((guild_id, message_id)): Path<(String, String)>,
+    RawQuery(raw): RawQuery,
     headers: HeaderMap,
 ) -> Response {
     if let Some(denied) = deny_internal(&app, &headers, &[&guild_id, &message_id]) {
@@ -801,8 +802,9 @@ async fn permanent_remove(
         )
             .into_response();
     }
+    let cap = cap_override(raw.as_deref(), app.permanent_slots);
     match app.store.list(&guild_id) {
-        Ok(rows) => slots_json(&app, &rows).into_response(),
+        Ok(rows) => slots_json(&app, &rows, cap).into_response(),
         Err(err) => internal_error(err),
     }
 }
@@ -818,13 +820,15 @@ async fn permanent_remove(
 async fn custom_apps_list(
     State(app): State<Arc<App>>,
     Path(guild_id): Path<String>,
+    RawQuery(raw): RawQuery,
     headers: HeaderMap,
 ) -> Response {
     if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
         return denied;
     }
+    let cap = cap_override(raw.as_deref(), app.custom_apps_cap);
     match app.store.custom_apps_list(&guild_id) {
-        Ok(rows) => custom_apps_json(&app, &rows).into_response(),
+        Ok(rows) => custom_apps_json(&rows, cap).into_response(),
         Err(err) => internal_error(err),
     }
 }
@@ -837,6 +841,7 @@ async fn custom_apps_list(
 async fn custom_apps_add(
     State(app): State<Arc<App>>,
     Path(guild_id): Path<String>,
+    RawQuery(raw): RawQuery,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -877,6 +882,7 @@ async fn custom_apps_add(
         .take(100)
         .collect();
 
+    let cap = cap_override(raw.as_deref(), app.custom_apps_cap);
     let added = app.store.custom_app_add(
         &guild_id,
         application_id,
@@ -884,7 +890,7 @@ async fn custom_apps_add(
         &name,
         client_secret_enc,
         added_by,
-        app.custom_apps_cap,
+        cap,
     );
     let outcome = match added {
         Ok(o) => o,
@@ -899,15 +905,15 @@ async fn custom_apps_add(
     }
     match app.store.custom_apps_list(&guild_id) {
         Ok(rows) => match outcome {
-            store::AddApp::Added => custom_apps_json(&app, &rows).into_response(),
+            store::AddApp::Added => custom_apps_json(&rows, cap).into_response(),
             store::AddApp::Full => (
                 StatusCode::CONFLICT,
-                custom_apps_error_json(&app, &rows, "quota_full"),
+                custom_apps_error_json(&rows, cap, "quota_full"),
             )
                 .into_response(),
             store::AddApp::Taken => (
                 StatusCode::CONFLICT,
-                custom_apps_error_json(&app, &rows, "app_taken"),
+                custom_apps_error_json(&rows, cap, "app_taken"),
             )
                 .into_response(),
         },
@@ -920,6 +926,7 @@ async fn custom_apps_add(
 async fn custom_apps_remove(
     State(app): State<Arc<App>>,
     Path((guild_id, application_id)): Path<(String, String)>,
+    RawQuery(raw): RawQuery,
     headers: HeaderMap,
 ) -> Response {
     if let Some(denied) = deny_internal(&app, &headers, &[&guild_id, &application_id]) {
@@ -940,8 +947,9 @@ async fn custom_apps_remove(
     // Forget the in-memory "already persisted" guard too, so a later
     // re-registration of the same id starts unverified and re-checks.
     app.custom_verified.write().unwrap().remove(&application_id);
+    let cap = cap_override(raw.as_deref(), app.custom_apps_cap);
     match app.store.custom_apps_list(&guild_id) {
-        Ok(rows) => custom_apps_json(&app, &rows).into_response(),
+        Ok(rows) => custom_apps_json(&rows, cap).into_response(),
         Err(err) => internal_error(err),
     }
 }
@@ -971,9 +979,9 @@ async fn custom_app_secret(
 /// The registry state every custom-app response carries. `cap` comes from the
 /// deployment env today; a per-guild plan lookup can replace it later without
 /// touching this shape.
-fn custom_apps_json(app: &App, rows: &[store::CustomAppRow]) -> Json<Value> {
+fn custom_apps_json(rows: &[store::CustomAppRow], cap: u32) -> Json<Value> {
     Json(json!({
-        "cap": app.custom_apps_cap,
+        "cap": cap,
         "used": rows.len(),
         "items": rows.iter().map(|r| json!({
             "application_id": r.application_id,
@@ -988,8 +996,8 @@ fn custom_apps_json(app: &App, rows: &[store::CustomAppRow]) -> Json<Value> {
 }
 
 /// Same state plus an error code, for the 409 quota-full / app-taken responses.
-fn custom_apps_error_json(app: &App, rows: &[store::CustomAppRow], error: &str) -> Json<Value> {
-    let mut body = custom_apps_json(app, rows).0;
+fn custom_apps_error_json(rows: &[store::CustomAppRow], cap: u32, error: &str) -> Json<Value> {
+    let mut body = custom_apps_json(rows, cap).0;
     body["error"] = json!(error);
     Json(body)
 }
@@ -1027,12 +1035,29 @@ fn deny_internal(app: &App, headers: &HeaderMap, ids: &[&str]) -> Option<Respons
     None
 }
 
+/// The effective per-guild cap for a management request: the `?cap=N` the proxy
+/// passes (the caller's plan tier) when present, else this deployment's env
+/// default. Keeping the plan lookup in the proxy lets this service stay a dumb
+/// enforcer of a provided number — no plan awareness here.
+fn cap_override(raw: Option<&str>, default: u32) -> u32 {
+    let Some(q) = raw else { return default };
+    for pair in q.split('&') {
+        if let Some(v) = pair.strip_prefix("cap=") {
+            if let Ok(n) = v.parse::<u32>() {
+                return n;
+            }
+        }
+    }
+    default
+}
+
 /// The slot state every management response carries. `ttl_days` is null when
 /// components never expire on this deployment (COMPONENT_TTL_DAYS=0) — the
-/// dashboard hides the feature then.
-fn slots_json(app: &App, rows: &[store::PermanentRow]) -> Json<Value> {
+/// dashboard hides the feature then. `cap` is the effective per-guild cap (the
+/// caller's plan tier, or the env default).
+fn slots_json(app: &App, rows: &[store::PermanentRow], cap: u32) -> Json<Value> {
     Json(json!({
-        "cap": app.permanent_slots,
+        "cap": cap,
         "used": rows.len(),
         "ttl_days": app.component_ttl_ms.map(|ms| ms / 86_400_000),
         "items": rows.iter().map(|r| json!({
@@ -1044,8 +1069,8 @@ fn slots_json(app: &App, rows: &[store::PermanentRow]) -> Json<Value> {
 }
 
 /// Same state plus an error code, for the 409 slots-full response.
-fn slots_error_json(app: &App, rows: &[store::PermanentRow], error: &str) -> Json<Value> {
-    let mut body = slots_json(app, rows).0;
+fn slots_error_json(app: &App, rows: &[store::PermanentRow], cap: u32, error: &str) -> Json<Value> {
+    let mut body = slots_json(app, rows, cap).0;
     body["error"] = json!(error);
     Json(body)
 }

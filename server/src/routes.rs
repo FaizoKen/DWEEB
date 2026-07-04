@@ -59,6 +59,14 @@ pub struct AppState {
     /// Persisted Activity collaboration drafts (see `activity_draft.rs`), so a
     /// room resumes where it was left off. None when Activities are disabled.
     pub activity_drafts: Option<Arc<crate::activity_draft::ActivityDraftStore>>,
+    /// Plan entitlement reader (see `entitlement.rs`) — resolves a user's tier
+    /// from DWEEB's own Stripe mirror and answers the per-tier quota for each
+    /// gate. Always present (inert when unconfigured, so the gates fall back to
+    /// store defaults).
+    pub entitlements: Arc<crate::entitlement::Entitlement>,
+    /// DWEEB's own Stripe billing (mirror + client; see `stripe.rs`). None when
+    /// Stripe isn't configured — the plan system is then inert.
+    pub stripe: Option<Arc<crate::stripe::StripeState>>,
     /// Master key for encrypting/decrypting cookies.
     pub key: Key,
 }
@@ -256,11 +264,15 @@ pub async fn permanent_list(
     jar: PrivateCookieJar,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
-    authorize_member(&st, &jar, &guild).await?;
+    let session = authorize_member(&st, &jar, &guild).await?;
     let api = dispatcher_api(&st)?;
+    let cap = st.entitlements.permanent_cap(&session.uid).await;
     let req = api
         .http
-        .get(format!("{}/permanent/{guild}", api.base))
+        .get(dispatcher_url_with_cap(
+            format!("{}/permanent/{guild}", api.base),
+            cap,
+        ))
         .bearer_auth(&api.token);
     relay_dispatcher(req).await
 }
@@ -282,9 +294,13 @@ pub async fn permanent_add(
         });
     }
     let api = dispatcher_api(&st)?;
+    let cap = st.entitlements.permanent_cap(&session.uid).await;
     let req = api
         .http
-        .post(format!("{}/permanent/{guild}", api.base))
+        .post(dispatcher_url_with_cap(
+            format!("{}/permanent/{guild}", api.base),
+            cap,
+        ))
         .bearer_auth(&api.token)
         .json(&json!({
             "message_id": body.message_id,
@@ -314,7 +330,7 @@ pub async fn permanent_remove(
     jar: PrivateCookieJar,
     Path((guild, message_id)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    authorize_member(&st, &jar, &guild).await?;
+    let session = authorize_member(&st, &jar, &guild).await?;
     if !is_snowflake(&message_id) {
         return Err(AppError::Status {
             status: StatusCode::BAD_REQUEST,
@@ -323,9 +339,13 @@ pub async fn permanent_remove(
         });
     }
     let api = dispatcher_api(&st)?;
+    let cap = st.entitlements.permanent_cap(&session.uid).await;
     let req = api
         .http
-        .delete(format!("{}/permanent/{guild}/{message_id}", api.base))
+        .delete(dispatcher_url_with_cap(
+            format!("{}/permanent/{guild}/{message_id}", api.base),
+            cap,
+        ))
         .bearer_auth(&api.token);
     relay_dispatcher(req).await
 }
@@ -357,11 +377,15 @@ pub async fn custom_apps_list(
     jar: PrivateCookieJar,
     Path(guild): Path<String>,
 ) -> Result<Response, AppError> {
-    authorize_member(&st, &jar, &guild).await?;
+    let session = authorize_member(&st, &jar, &guild).await?;
     let api = dispatcher_api(&st)?;
+    let cap = st.entitlements.custom_bots_cap(&session.uid).await;
     let req = api
         .http
-        .get(format!("{}/custom-apps/{guild}", api.base))
+        .get(dispatcher_url_with_cap(
+            format!("{}/custom-apps/{guild}", api.base),
+            cap,
+        ))
         .bearer_auth(&api.token);
     relay_dispatcher(req).await
 }
@@ -448,9 +472,13 @@ pub async fn custom_apps_add(
                 .unwrap_or_default();
         }
     }
+    let cap = st.entitlements.custom_bots_cap(&session.uid).await;
     let req = api
         .http
-        .post(format!("{}/custom-apps/{guild}", api.base))
+        .post(dispatcher_url_with_cap(
+            format!("{}/custom-apps/{guild}", api.base),
+            cap,
+        ))
         .bearer_auth(&api.token)
         .json(&json!({
             "application_id": application_id,
@@ -491,7 +519,7 @@ pub async fn custom_apps_remove(
     jar: PrivateCookieJar,
     Path((guild, application_id)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    authorize_member(&st, &jar, &guild).await?;
+    let session = authorize_member(&st, &jar, &guild).await?;
     if !is_snowflake(&application_id) {
         return Err(AppError::Status {
             status: StatusCode::BAD_REQUEST,
@@ -527,9 +555,13 @@ pub async fn custom_apps_remove(
             .and_then(|sealed| crate::seal::open(&st.key, &sealed)),
         _ => None,
     };
+    let cap = st.entitlements.custom_bots_cap(&session.uid).await;
     let req = api
         .http
-        .delete(format!("{}/custom-apps/{guild}/{application_id}", api.base))
+        .delete(dispatcher_url_with_cap(
+            format!("{}/custom-apps/{guild}/{application_id}", api.base),
+            cap,
+        ))
         .bearer_auth(&api.token);
     let resp = relay_dispatcher(req).await?;
     if resp.status() == StatusCode::OK {
@@ -559,6 +591,19 @@ pub(crate) fn dispatcher_api(st: &AppState) -> Result<&Arc<DispatcherApi>, AppEr
         message: "This feature isn't enabled on this deployment.".into(),
         retry_after: None,
     })
+}
+
+/// Append `?cap=N` to a dispatcher URL when the proxy has a plan-derived cap to
+/// impose (the acting user's tier). `None` ⇒ leave the URL as-is so the
+/// dispatcher uses its own env default — the standalone / plan-disabled case.
+/// The dispatcher reads `cap` off the query on every `/permanent` and
+/// `/custom-apps` route and uses it for both enforcement and the `cap` it
+/// echoes back to the FE.
+pub(crate) fn dispatcher_url_with_cap(base: String, cap: Option<u32>) -> String {
+    match cap {
+        Some(c) => format!("{base}?cap={c}"),
+        None => base,
+    }
 }
 
 /// Send a prepared dispatcher request and pass its answer through. The

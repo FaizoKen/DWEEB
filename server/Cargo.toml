@@ -40,6 +40,9 @@ chrono-tz = "0.10"
 # SHA-256 of a schedule's manage token, so the DB stores only a hash (a leak of
 # the file never yields a usable bearer capability).
 sha2 = "0.10"
+# HMAC-SHA256 for verifying Stripe webhook signatures (see `stripe.rs`). Pairs
+# with `sha2` above (same `digest` 0.10 line), so no version conflict.
+hmac = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Optional shared cache + rate-limit backend for multi-instance deployments.
 # Minimal feature set: an async (tokio) connection manager with auto-reconnect.

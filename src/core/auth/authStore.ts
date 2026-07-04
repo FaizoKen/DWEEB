@@ -25,6 +25,7 @@ import {
 import { isProxyConfigured } from "@/core/guild/config";
 import { startLoginPopup } from "@/core/oauth/flows";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { usePlanStore } from "@/core/plan/planStore";
 import { pushToast } from "@/ui/Toast";
 
 /** Set right before a popup-blocked full-page login redirect so we greet the user
@@ -153,12 +154,14 @@ export const useAuthStore = create<AuthState>((set, get) => {
     async logout() {
       await postLogout();
       useGuildStore.getState().disconnect();
+      usePlanStore.getState().reset();
       set({ status: "anon", user: null, guilds: [], guildsStatus: "idle", guildsError: null });
       pushToast("Signed out", "info");
     },
 
     markSignedOut() {
       useGuildStore.getState().disconnect();
+      usePlanStore.getState().reset();
       set({
         status: "anon",
         user: null,

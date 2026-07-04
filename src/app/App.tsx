@@ -61,6 +61,9 @@ const CollaborateDialog = lazy(() =>
     default: m.CollaborateDialog,
   })),
 );
+const PricingModal = lazy(() =>
+  import("@/features/plan/PricingModal").then((m) => ({ default: m.PricingModal })),
+);
 import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
@@ -79,6 +82,7 @@ import { shouldAutoOpenGallery, markGalleryAutoOpened } from "@/features/templat
 import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
+import { usePlanStore } from "@/core/plan/planStore";
 import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
@@ -157,6 +161,11 @@ export function App() {
   // About panel. Mounted lazily only while open (its in-progress text resets on
   // close, which is fine for a one-off report).
   const feedbackOpen = useFeedbackStore((s) => s.open);
+
+  // The pricing modal — summoned from the account menu or a maxed-out quota's
+  // "Upgrade" link. Shows the Free/Plus/Pro tiers and points "Upgrade" at
+  // RoleLogic's checkout. Mounted lazily only while open.
+  const pricingOpen = usePlanStore((s) => s.open);
 
   // The "Collaborate in Discord" dialog — summoned from the Builder's "More"
   // menu. Mints a voice-channel Activity invite so a group co-edits in one shared
@@ -407,6 +416,11 @@ export function App() {
         {feedbackOpen ? (
           <Suspense fallback={null}>
             <FeedbackDialog />
+          </Suspense>
+        ) : null}
+        {pricingOpen ? (
+          <Suspense fallback={null}>
+            <PricingModal />
           </Suspense>
         ) : null}
         {collaborateOpen ? (
