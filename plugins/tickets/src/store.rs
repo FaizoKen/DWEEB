@@ -72,7 +72,10 @@ pub struct ResponseDef {
 
 impl Default for ResponseDef {
     fn default() -> Self {
-        Self { mode: "summary".to_string(), text: None }
+        Self {
+            mode: "summary".to_string(),
+            text: None,
+        }
     }
 }
 
@@ -231,7 +234,9 @@ impl Store {
                  next_number INTEGER NOT NULL
              );",
         )?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Take the connection lock, shrugging off poisoning.
@@ -241,7 +246,9 @@ impl Store {
     /// today. Recovering anyway (instead of `unwrap()`) keeps one unlucky panic
     /// in a future caller from bricking every later DB op for the process's life.
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|poison| poison.into_inner())
+        self.conn
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     // ── instances ────────────────────────────────────────────────────────────
@@ -268,7 +275,9 @@ impl Store {
     pub fn get(&self, id: &str) -> rusqlite::Result<Option<InstanceConfig>> {
         let conn = self.lock();
         let row: Option<String> = conn
-            .query_row("SELECT config FROM instances WHERE id = ?1", [id], |r| r.get(0))
+            .query_row("SELECT config FROM instances WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
@@ -394,7 +403,11 @@ impl Store {
 
     /// When this member last opened a ticket from this panel (millis), across all
     /// statuses — so opening then closing can't bypass the cooldown.
-    pub fn last_open_at(&self, instance_id: &str, opener_id: &str) -> rusqlite::Result<Option<i64>> {
+    pub fn last_open_at(
+        &self,
+        instance_id: &str,
+        opener_id: &str,
+    ) -> rusqlite::Result<Option<i64>> {
         let conn = self.lock();
         let v: Option<i64> = conn.query_row(
             "SELECT MAX(created_at) FROM tickets WHERE instance_id = ?1 AND opener_id = ?2",
@@ -428,7 +441,9 @@ mod tests {
              CREATE TABLE counters (instance_id TEXT PRIMARY KEY, next_number INTEGER NOT NULL);",
         )
         .unwrap();
-        Store { conn: Mutex::new(conn) }
+        Store {
+            conn: Mutex::new(conn),
+        }
     }
 
     #[test]
@@ -459,14 +474,18 @@ mod tests {
     #[test]
     fn claim_and_lookup_round_trip() {
         let s = store();
-        s.create_ticket("c1", "i", "g", 7, "opener", "Billing").unwrap();
+        s.create_ticket("c1", "i", "g", 7, "opener", "Billing")
+            .unwrap();
         let t = s.get_ticket("c1").unwrap().unwrap();
         assert_eq!(t.number, 7);
         assert_eq!(t.opener_id, "opener");
         assert_eq!(t.topic, "Billing");
         assert!(t.claimed_by.is_none());
         assert!(s.set_claim("c1", "staff42").unwrap());
-        assert_eq!(s.get_ticket("c1").unwrap().unwrap().claimed_by.as_deref(), Some("staff42"));
+        assert_eq!(
+            s.get_ticket("c1").unwrap().unwrap().claimed_by.as_deref(),
+            Some("staff42")
+        );
     }
 
     #[test]

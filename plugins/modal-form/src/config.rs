@@ -36,7 +36,9 @@ impl Config {
             .to_string();
 
         let discord_public_key = env::var("DISCORD_PUBLIC_KEY")
-            .map_err(|_| "DISCORD_PUBLIC_KEY is required (your Discord app's public key)".to_string())?
+            .map_err(|_| {
+                "DISCORD_PUBLIC_KEY is required (your Discord app's public key)".to_string()
+            })?
             .trim()
             .to_string();
 

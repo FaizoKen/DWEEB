@@ -473,7 +473,13 @@ impl App {
         });
         let message_id = message_id.to_string();
         tokio::spawn(async move {
-            match client.post(&url).bearer_auth(&token).json(&body).send().await {
+            match client
+                .post(&url)
+                .bearer_auth(&token)
+                .json(&body)
+                .send()
+                .await
+            {
                 Ok(resp) if resp.status().is_success() => {
                     tracing::info!(%message_id, "asked proxy to revive components after never-expire grant")
                 }

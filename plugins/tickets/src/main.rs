@@ -115,7 +115,9 @@ async fn run() {
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("failed to bind");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind");
     tracing::info!(%addr, "tickets plugin listening");
 
     axum::serve(listener, app)

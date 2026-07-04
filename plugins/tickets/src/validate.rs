@@ -72,12 +72,16 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
         return Err("Write a welcome message for new tickets.".into());
     }
     if welcome.chars().count() > MAX_WELCOME {
-        return Err(format!("The welcome message must be \u{2264} {MAX_WELCOME} characters."));
+        return Err(format!(
+            "The welcome message must be \u{2264} {MAX_WELCOME} characters."
+        ));
     }
 
     // Intake questions (0–5).
     if cfg.intake.len() > MAX_INTAKE {
-        return Err(format!("An intake form can have at most {MAX_INTAKE} questions."));
+        return Err(format!(
+            "An intake form can have at most {MAX_INTAKE} questions."
+        ));
     }
     let mut intake_ids = HashSet::new();
     for f in &cfg.intake {
@@ -138,7 +142,9 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     }
 
     if cfg.max_open_per_user > MAX_OPEN_CAP {
-        return Err(format!("The per-user open limit can't exceed {MAX_OPEN_CAP}."));
+        return Err(format!(
+            "The per-user open limit can't exceed {MAX_OPEN_CAP}."
+        ));
     }
     if cfg.cooldown_secs > MAX_COOLDOWN_SECS {
         return Err("The cooldown can't exceed a day.".into());
@@ -152,7 +158,9 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
                 return Err("Your custom reply is empty — type a message or switch to the automatic summary.".into());
             }
             if text.chars().count() > MAX_CUSTOM_REPLY {
-                return Err(format!("Custom reply must be \u{2264} {MAX_CUSTOM_REPLY} characters."));
+                return Err(format!(
+                    "Custom reply must be \u{2264} {MAX_CUSTOM_REPLY} characters."
+                ));
             }
         }
         _ => return Err("Reply mode must be \"summary\" or \"custom\".".into()),
@@ -179,7 +187,11 @@ mod tests {
             target: "button".into(),
             guild_id: GUILD.into(),
             guild_name: "Server".into(),
-            staff_roles: vec![StaffRole { id: ROLE.into(), name: "Support".into(), color: 0 }],
+            staff_roles: vec![StaffRole {
+                id: ROLE.into(),
+                name: "Support".into(),
+                color: 0,
+            }],
             category_id: None,
             category_name: String::new(),
             log_channel_id: None,
@@ -238,12 +250,30 @@ mod tests {
     fn intake_is_bounded_and_unique() {
         let mut c = button_cfg();
         c.intake = (0..6)
-            .map(|i| IntakeField { id: format!("f{i}"), label: "Q".into(), style: "short".into(), required: false, placeholder: None })
+            .map(|i| IntakeField {
+                id: format!("f{i}"),
+                label: "Q".into(),
+                style: "short".into(),
+                required: false,
+                placeholder: None,
+            })
             .collect();
         assert!(validate_config(&c).is_err()); // 6 > 5
         c.intake = vec![
-            IntakeField { id: "dup".into(), label: "Q".into(), style: "short".into(), required: false, placeholder: None },
-            IntakeField { id: "dup".into(), label: "Q".into(), style: "short".into(), required: false, placeholder: None },
+            IntakeField {
+                id: "dup".into(),
+                label: "Q".into(),
+                style: "short".into(),
+                required: false,
+                placeholder: None,
+            },
+            IntakeField {
+                id: "dup".into(),
+                label: "Q".into(),
+                style: "short".into(),
+                required: false,
+                placeholder: None,
+            },
         ];
         assert!(validate_config(&c).is_err()); // duplicate id
     }
@@ -254,11 +284,21 @@ mod tests {
         c.target = "string_select".into();
         // select with no topics → error
         assert!(validate_config(&c).is_err());
-        c.topics = vec![Topic { id: "t1".into(), label: "Billing".into(), emoji: None, description: None }];
+        c.topics = vec![Topic {
+            id: "t1".into(),
+            label: "Billing".into(),
+            emoji: None,
+            description: None,
+        }];
         assert!(validate_config(&c).is_ok());
         // a button with topics → error
         let mut b = button_cfg();
-        b.topics = vec![Topic { id: "t1".into(), label: "Billing".into(), emoji: None, description: None }];
+        b.topics = vec![Topic {
+            id: "t1".into(),
+            label: "Billing".into(),
+            emoji: None,
+            description: None,
+        }];
         assert!(validate_config(&b).is_err());
     }
 
@@ -266,11 +306,23 @@ mod tests {
     fn duplicate_staff_roles_and_bad_ids_rejected() {
         let mut c = button_cfg();
         c.staff_roles = vec![
-            StaffRole { id: ROLE.into(), name: "A".into(), color: 0 },
-            StaffRole { id: ROLE.into(), name: "B".into(), color: 0 },
+            StaffRole {
+                id: ROLE.into(),
+                name: "A".into(),
+                color: 0,
+            },
+            StaffRole {
+                id: ROLE.into(),
+                name: "B".into(),
+                color: 0,
+            },
         ];
         assert!(validate_config(&c).is_err());
-        c.staff_roles = vec![StaffRole { id: "bad".into(), name: "A".into(), color: 0 }];
+        c.staff_roles = vec![StaffRole {
+            id: "bad".into(),
+            name: "A".into(),
+            color: 0,
+        }];
         assert!(validate_config(&c).is_err());
     }
 
@@ -287,11 +339,20 @@ mod tests {
     #[test]
     fn custom_reply_must_be_nonempty_and_bounded() {
         let mut c = button_cfg();
-        c.response = ResponseDef { mode: "custom".into(), text: Some("  ".into()) };
+        c.response = ResponseDef {
+            mode: "custom".into(),
+            text: Some("  ".into()),
+        };
         assert!(validate_config(&c).is_err());
-        c.response = ResponseDef { mode: "custom".into(), text: Some("x".repeat(MAX_CUSTOM_REPLY + 1)) };
+        c.response = ResponseDef {
+            mode: "custom".into(),
+            text: Some("x".repeat(MAX_CUSTOM_REPLY + 1)),
+        };
         assert!(validate_config(&c).is_err());
-        c.response = ResponseDef { mode: "custom".into(), text: Some("Thanks!".into()) };
+        c.response = ResponseDef {
+            mode: "custom".into(),
+            text: Some("Thanks!".into()),
+        };
         assert!(validate_config(&c).is_ok());
     }
 }

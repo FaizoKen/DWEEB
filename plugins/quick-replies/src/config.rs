@@ -118,7 +118,9 @@ impl Config {
             .to_string();
 
         let discord_public_key = env::var("DISCORD_PUBLIC_KEY")
-            .map_err(|_| "DISCORD_PUBLIC_KEY is required (your Discord app's public key)".to_string())?
+            .map_err(|_| {
+                "DISCORD_PUBLIC_KEY is required (your Discord app's public key)".to_string()
+            })?
             .trim()
             .to_string();
 
@@ -193,11 +195,18 @@ mod tests {
         );
         let url = reqwest::Url::parse(&out).unwrap();
         assert_eq!(
-            url.query_pairs().find(|(k, _)| k == "client_id").map(|(_, v)| v.into_owned()),
+            url.query_pairs()
+                .find(|(k, _)| k == "client_id")
+                .map(|(_, v)| v.into_owned()),
             Some("123".to_string())
         );
         assert_eq!(perms_of(&out).as_deref(), Some("805306385"));
-        assert_eq!(url.query_pairs().filter(|(k, _)| k == "permissions").count(), 1);
+        assert_eq!(
+            url.query_pairs()
+                .filter(|(k, _)| k == "permissions")
+                .count(),
+            1
+        );
     }
 
     #[test]

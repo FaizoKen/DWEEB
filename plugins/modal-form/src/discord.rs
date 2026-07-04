@@ -41,8 +41,16 @@ const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15; // 32768
 /// Verify Discord's `X-Signature-Ed25519` over `timestamp || body`. Any
 /// malformed input fails closed (returns false). This MUST run on the raw body
 /// bytes, before JSON parsing.
-pub fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &str, body: &[u8]) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex).ok().and_then(|b| b.try_into().ok()) {
+pub fn verify_signature(
+    public_key_hex: &str,
+    signature_hex: &str,
+    timestamp: &str,
+    body: &[u8],
+) -> bool {
+    let pk: [u8; 32] = match hex::decode(public_key_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -50,7 +58,10 @@ pub fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &s
         Ok(k) => k,
         Err(_) => return false,
     };
-    let sig: [u8; 64] = match hex::decode(signature_hex).ok().and_then(|b| b.try_into().ok()) {
+    let sig: [u8; 64] = match hex::decode(signature_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -294,7 +305,10 @@ pub fn build_forward_message(
     // Assemble title + answers + footer as one Markdown block. Each answer keeps
     // the old embed's per-field clamp; the whole block is then clamped to V2's
     // message-wide text budget so a long submission can't get rejected.
-    let mut body = format!("### {}", clamp(&format!("New submission · {}", modal.title), 256));
+    let mut body = format!(
+        "### {}",
+        clamp(&format!("New submission · {}", modal.title), 256)
+    );
     for (id, value) in values {
         let label = modal
             .fields
@@ -302,11 +316,17 @@ pub fn build_forward_message(
             .find(|f| &f.id == id)
             .map(|f| f.label.clone())
             .unwrap_or_else(|| id.clone());
-        body.push_str(&format!("\n\n**{}**\n{}", clamp(&label, 256), value_or_dash(value)));
+        body.push_str(&format!(
+            "\n\n**{}**\n{}",
+            clamp(&label, 256),
+            value_or_dash(value)
+        ));
     }
     let ts = unix_secs();
     if cfg.include_submitter {
-        let who = submitter.map(display_name).unwrap_or_else(|| "someone".to_string());
+        let who = submitter
+            .map(display_name)
+            .unwrap_or_else(|| "someone".to_string());
         body.push_str(&format!("\n\n-# from {who} · <t:{ts}:f>"));
     } else {
         body.push_str(&format!("\n\n-# Anonymous submission · <t:{ts}:f>"));
@@ -435,7 +455,10 @@ mod tests {
 
     #[test]
     fn forward_named_carries_answers_submitter_and_suppresses_mentions() {
-        let vals = vec![("f1".into(), "Ada".into()), ("f2".into(), "@everyone hi".into())];
+        let vals = vec![
+            ("f1".into(), "Ada".into()),
+            ("f2".into(), "@everyone hi".into()),
+        ];
         let msg = build_forward_message(&base_cfg(), &vals, Some(&user()));
         let text = forward_text(&msg);
         assert!(text.contains("**Name**") && text.contains("Ada"));
@@ -443,7 +466,10 @@ mod tests {
         assert!(text.contains("Ada L")); // submitter named in the footer
         assert_eq!(msg["username"], "Modal Form");
         // A pasted @everyone must never ping the destination channel.
-        assert_eq!(msg["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            msg["allowed_mentions"]["parse"].as_array().unwrap().len(),
+            0
+        );
     }
 
     #[test]
@@ -470,10 +496,19 @@ mod tests {
             payload: Some(json!({ "components": [{ "type": 10, "content": "Saved!" }] })),
             text: Some("ignored".into()),
         };
-        assert_eq!(build_reply(&saved)["data"]["components"][0]["content"], "Saved!");
+        assert_eq!(
+            build_reply(&saved)["data"]["components"][0]["content"],
+            "Saved!"
+        );
 
-        let plain = ReplyDef { payload: None, text: Some("Thanks".into()) };
-        assert_eq!(build_reply(&plain)["data"]["components"][0]["content"], "Thanks");
+        let plain = ReplyDef {
+            payload: None,
+            text: Some("Thanks".into()),
+        };
+        assert_eq!(
+            build_reply(&plain)["data"]["components"][0]["content"],
+            "Thanks"
+        );
 
         let def = build_reply(&ReplyDef::default());
         assert!(def["data"]["components"][0]["content"]
@@ -492,7 +527,10 @@ mod tests {
         f.placeholder = Some("Describe".into());
         f.required = true;
         f.style = "paragraph".into();
-        let modal = ModalDef { title: "Report".into(), fields: vec![f] };
+        let modal = ModalDef {
+            title: "Report".into(),
+            fields: vec![f],
+        };
         let v = modal_response("modalform:submit:x", &modal);
         let input = &v["data"]["components"][0]["components"][0];
         assert_eq!(input["custom_id"], "f1");

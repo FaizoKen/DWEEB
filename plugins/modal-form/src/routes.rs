@@ -173,7 +173,8 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
     let cfg = match state.store.get(id) {
         Ok(Some(c)) => c,
         Ok(None) => {
-            return Json(discord::ephemeral_text("This form is no longer available.")).into_response()
+            return Json(discord::ephemeral_text("This form is no longer available."))
+                .into_response()
         }
         Err(e) => {
             tracing::error!(error = %e, "component lookup");
@@ -186,12 +187,10 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
             // Fail *open* on a storage hiccup: better to let a member submit
             // (perhaps twice) than to wall off a working form behind a DB blip.
             match state.store.has_submitted(id, uid) {
-                Ok(true) => {
-                    return Json(discord::ephemeral_text(
-                        "You've already submitted this form — only one response per person is allowed.",
-                    ))
-                    .into_response()
-                }
+                Ok(true) => return Json(discord::ephemeral_text(
+                    "You've already submitted this form — only one response per person is allowed.",
+                ))
+                .into_response(),
                 Ok(false) => {}
                 Err(e) => tracing::warn!(error = %e, "has_submitted check"),
             }
@@ -223,7 +222,8 @@ async fn handle_modal_submit(state: &AppState, interaction: &discord::Interactio
     let cfg = match state.store.get(id) {
         Ok(Some(c)) => c,
         Ok(None) => {
-            return Json(discord::ephemeral_text("This form is no longer available.")).into_response()
+            return Json(discord::ephemeral_text("This form is no longer available."))
+                .into_response()
         }
         Err(e) => {
             tracing::error!(error = %e, "submit lookup");
@@ -281,7 +281,11 @@ fn bad_request(message: String) -> Response {
 }
 
 fn not_found() -> Response {
-    (StatusCode::NOT_FOUND, Json(json!({ "error": "Unknown instance." }))).into_response()
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "Unknown instance." })),
+    )
+        .into_response()
 }
 
 fn storage_error() -> Response {

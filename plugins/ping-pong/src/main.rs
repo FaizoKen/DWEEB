@@ -285,7 +285,10 @@ fn latency_report(
         .and_then(|s| s.parse::<u64>().ok());
     if let Some(received) = dispatcher_us {
         let hop_us = now_us.saturating_sub(received);
-        parts.push(format!("dispatcher hop **{:.1} ms**", hop_us as f64 / 1000.0));
+        parts.push(format!(
+            "dispatcher hop **{:.1} ms**",
+            hop_us as f64 / 1000.0
+        ));
     }
 
     parts.push(format!("handler **{} µs**", started.elapsed().as_micros()));
@@ -322,8 +325,16 @@ fn decode_custom_id(custom_id: &str) -> (String, bool) {
 /// Verify Discord's `X-Signature-Ed25519` over `timestamp || body`. Any
 /// malformed input fails closed (returns false). This MUST run on the raw body
 /// bytes, before JSON parsing. (Same logic as the modal-form plugin.)
-fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &str, body: &[u8]) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex).ok().and_then(|b| b.try_into().ok()) {
+fn verify_signature(
+    public_key_hex: &str,
+    signature_hex: &str,
+    timestamp: &str,
+    body: &[u8],
+) -> bool {
+    let pk: [u8; 32] = match hex::decode(public_key_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -331,7 +342,10 @@ fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &str, 
         Ok(k) => k,
         Err(_) => return false,
     };
-    let sig: [u8; 64] = match hex::decode(signature_hex).ok().and_then(|b| b.try_into().ok()) {
+    let sig: [u8; 64] = match hex::decode(signature_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };

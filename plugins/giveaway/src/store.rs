@@ -193,7 +193,9 @@ impl Store {
     /// unlucky panic in a future caller from bricking every later DB op for the
     /// life of the process.
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|poison| poison.into_inner())
+        self.conn
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     /// Insert a new giveaway (status `open`, no winners) under a fresh id.

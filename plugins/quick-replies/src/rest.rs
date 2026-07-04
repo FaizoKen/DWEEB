@@ -133,15 +133,21 @@ pub async fn connect(
     guild_id: &str,
 ) -> Result<ConnectResult, ConnectError> {
     let me: SelfUser = get_json(http, token, &format!("{API_BASE}/users/@me")).await?;
-    let bot_name = me.global_name.clone().or(me.username.clone()).unwrap_or_else(|| "the bot".into());
+    let bot_name = me
+        .global_name
+        .clone()
+        .or(me.username.clone())
+        .unwrap_or_else(|| "the bot".into());
 
     // The guild doubles as our "is the bot in here?" probe (403/404 → not in).
     let guild: Guild = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}")).await?;
-    let roles: Vec<Role> = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/roles")).await?;
+    let roles: Vec<Role> =
+        get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/roles")).await?;
     // Emoji power the config UI's picker. Treat a fetch failure as "no custom
     // emoji" rather than failing the whole connect — roles/gating still work.
-    let emojis: Vec<Emoji> =
-        get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/emojis")).await.unwrap_or_default();
+    let emojis: Vec<Emoji> = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/emojis"))
+        .await
+        .unwrap_or_default();
 
     // Drop @everyone (id == guild id) and managed (integration/booster) roles —
     // they're not useful gate targets. Surface highest-first like the other
@@ -165,9 +171,11 @@ pub async fn connect(
         .into_iter()
         .filter(|e| e.available)
         .filter_map(|e| match (e.id, e.name) {
-            (Some(id), Some(name)) if !id.is_empty() && !name.is_empty() => {
-                Some(EmojiView { id, name, animated: e.animated })
-            }
+            (Some(id), Some(name)) if !id.is_empty() && !name.is_empty() => Some(EmojiView {
+                id,
+                name,
+                animated: e.animated,
+            }),
             _ => None,
         })
         .collect();

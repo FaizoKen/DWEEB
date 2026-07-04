@@ -93,20 +93,29 @@ pub struct ConnectRequest {
 /// bot's permission status for the picker. Never stores anything.
 pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectRequest>) -> Response {
     if !validate::is_snowflake(req.guild_id.trim()) {
-        return bad_request("That server id doesn't look right — it should be 17–20 digits.".into());
+        return bad_request(
+            "That server id doesn't look right — it should be 17–20 digits.".into(),
+        );
     }
     let Some(token) = state.config.default_bot_token.as_deref() else {
         return bad_request("This deployment has no Tickets bot configured.".into());
     };
     match rest::connect(&state.http, token, req.guild_id.trim()).await {
         Ok(result) => Json(json!(result)).into_response(),
-        Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "error": e.message() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": e.message() })),
+        )
+            .into_response(),
     }
 }
 
 // ── /api/instances ───────────────────────────────────────────────────────────
 
-pub async fn create_instance(State(state): State<AppState>, Json(cfg): Json<InstanceConfig>) -> Response {
+pub async fn create_instance(
+    State(state): State<AppState>,
+    Json(cfg): Json<InstanceConfig>,
+) -> Response {
     if let Err(e) = validate::validate_config(&cfg) {
         return bad_request(e);
     }
@@ -153,14 +162,23 @@ pub async fn get_instance(State(state): State<AppState>, Path(id): Path<String>)
 
 /// Discord interactions webhook. Verifies the signature on the raw body, then
 /// dispatches by interaction type.
-pub async fn interactions(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let signature = headers.get("X-Signature-Ed25519").and_then(|v| v.to_str().ok());
-    let timestamp = headers.get("X-Signature-Timestamp").and_then(|v| v.to_str().ok());
+pub async fn interactions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let signature = headers
+        .get("X-Signature-Ed25519")
+        .and_then(|v| v.to_str().ok());
+    let timestamp = headers
+        .get("X-Signature-Timestamp")
+        .and_then(|v| v.to_str().ok());
     let (Some(signature), Some(timestamp)) = (signature, timestamp) else {
         return (StatusCode::UNAUTHORIZED, "missing signature").into_response();
     };
-    let key_hex = discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
-        .unwrap_or(&state.config.discord_public_key);
+    let key_hex =
+        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
+            .unwrap_or(&state.config.discord_public_key);
     if !discord::verify_signature(key_hex, signature, timestamp, &body) {
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
@@ -189,7 +207,9 @@ fn load_for_click(
 ) -> Result<InstanceConfig, &'static str> {
     let cfg = match state.store.get(id) {
         Ok(Some(c)) => c,
-        Ok(None) => return Err("This ticket panel is no longer set up. Ask an admin to recreate it."),
+        Ok(None) => {
+            return Err("This ticket panel is no longer set up. Ask an admin to recreate it.")
+        }
         Err(e) => {
             tracing::error!(error = %e, "instance lookup");
             return Err("Something went wrong on my end.");
@@ -197,11 +217,17 @@ fn load_for_click(
     };
     match interaction.guild_id.as_deref() {
         Some(g) if g == cfg.guild_id => {}
-        Some(_) => return Err("This panel was set up for a different server, so I can't open tickets here."),
+        Some(_) => {
+            return Err(
+                "This panel was set up for a different server, so I can't open tickets here.",
+            )
+        }
         None => return Err("Use this inside the server, not in DMs."),
     }
     if state.config.default_bot_token.is_none() {
-        return Err("This panel isn't finished — no bot is connected. Ask an admin to reconfigure it.");
+        return Err(
+            "This panel isn't finished — no bot is connected. Ask an admin to reconfigure it.",
+        );
     }
     Ok(cfg)
 }
@@ -236,7 +262,10 @@ fn handle_open_click(state: &AppState, interaction: &discord::Interaction, id: &
         Err(msg) => return Json(discord::ephemeral_text(msg)).into_response(),
     };
     let Some(uid) = interaction.actor_id() else {
-        return Json(discord::ephemeral_text("I couldn't tell who clicked — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell who clicked — try again.",
+        ))
+        .into_response();
     };
 
     // The chosen topic (select panels only). A button has none. Trust only a
@@ -266,18 +295,31 @@ fn handle_open_click(state: &AppState, interaction: &discord::Interaction, id: &
             Some(t) if !t.is_empty() => format!("{}intake:{id}:{t}", discord::PREFIX),
             _ => format!("{}intake:{id}", discord::PREFIX),
         };
-        Json(discord::intake_modal(&submit_id, "Open a ticket", &cfg.intake)).into_response()
+        Json(discord::intake_modal(
+            &submit_id,
+            "Open a ticket",
+            &cfg.intake,
+        ))
+        .into_response()
     }
 }
 
 /// Intake form submitted → re-gate, then defer + create with the answers.
-fn handle_intake_submit(state: &AppState, interaction: &discord::Interaction, id: &str, topic: &str) -> Response {
+fn handle_intake_submit(
+    state: &AppState,
+    interaction: &discord::Interaction,
+    id: &str,
+    topic: &str,
+) -> Response {
     let cfg = match load_for_click(state, interaction, id) {
         Ok(c) => c,
         Err(msg) => return Json(discord::ephemeral_text(msg)).into_response(),
     };
     let Some(uid) = interaction.actor_id() else {
-        return Json(discord::ephemeral_text("I couldn't tell who submitted — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell who submitted — try again.",
+        ))
+        .into_response();
     };
     if let Some(denied) = gate_reply(state, id, uid, &cfg) {
         return denied;
@@ -287,7 +329,11 @@ fn handle_intake_submit(state: &AppState, interaction: &discord::Interaction, id
         .as_ref()
         .map(discord::collect_modal_values)
         .unwrap_or_default();
-    let topic_value = if topic.is_empty() { None } else { Some(topic.to_string()) };
+    let topic_value = if topic.is_empty() {
+        None
+    } else {
+        Some(topic.to_string())
+    };
     spawn_open(state, interaction, &cfg, id, uid, topic_value, answers);
     Json(discord::deferred_ephemeral()).into_response()
 }
@@ -365,12 +411,18 @@ impl OpenTask {
             None => return self.fail("No bot is connected.").await,
         };
         let Some(bot_id) = ensure_bot_id(&self.state, &token_bot).await else {
-            return self.fail("Couldn't reach Discord just now — try again in a moment.").await;
+            return self
+                .fail("Couldn't reach Discord just now — try again in a moment.")
+                .await;
         };
 
         // Re-check the cap at creation time to close the open-the-modal-then-wait
         // race; the ledger is authoritative.
-        let open_count = self.state.store.count_open(&self.instance_id, &self.opener_id).unwrap_or(0);
+        let open_count = self
+            .state
+            .store
+            .count_open(&self.instance_id, &self.opener_id)
+            .unwrap_or(0);
         if self.cfg.max_open_per_user > 0 && open_count >= self.cfg.max_open_per_user as i64 {
             return self
                 .fail("You've hit the open-ticket limit here — close one first, then try again.")
@@ -380,12 +432,19 @@ impl OpenTask {
         let number = self.state.store.next_number(&self.instance_id).unwrap_or(0);
         let name = discord::channel_name(&self.cfg.naming, number, &self.opener_name);
         let topic_label = discord::topic_label(&self.cfg.topics, self.topic_value.as_deref());
-        let overwrites =
-            discord::permission_overwrites(&self.guild_id, &self.opener_id, &self.cfg.staff_roles, &bot_id);
+        let overwrites = discord::permission_overwrites(
+            &self.guild_id,
+            &self.opener_id,
+            &self.cfg.staff_roles,
+            &bot_id,
+        );
         let channel_topic = if topic_label.is_empty() {
             format!("Ticket #{number} • opened by {}", self.opener_name)
         } else {
-            format!("Ticket #{number} • {topic_label} • opened by {}", self.opener_name)
+            format!(
+                "Ticket #{number} • {topic_label} • opened by {}",
+                self.opener_name
+            )
         };
         let reason = format!("Ticket opened by {}", self.opener_name);
 
@@ -434,7 +493,9 @@ impl OpenTask {
             staff_mentions: &staff,
         };
         let welcome = discord::welcome_message(&self.cfg, &self.instance_id, &ctx);
-        if let Err(e) = rest::post_message(&self.state.http, &token_bot, &channel_id, &welcome).await {
+        if let Err(e) =
+            rest::post_message(&self.state.http, &token_bot, &channel_id, &welcome).await
+        {
             tracing::warn!(?e, "post welcome");
         }
         if !self.answers.is_empty() {
@@ -447,7 +508,11 @@ impl OpenTask {
             let line = format!(
                 "\u{1F3AB} Ticket #{number:04} opened by <@{}> → <#{channel_id}>{}",
                 self.opener_id,
-                if topic_label.is_empty() { String::new() } else { format!(" · {topic_label}") }
+                if topic_label.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {topic_label}")
+                }
             );
             let _ = rest::post_message(
                 &self.state.http,
@@ -488,29 +553,52 @@ fn handle_claim(state: &AppState, interaction: &discord::Interaction, id: &str) 
         Err(msg) => return Json(discord::ephemeral_text(msg)).into_response(),
     };
     if !cfg.claim_enabled {
-        return Json(discord::ephemeral_text("Claiming isn't enabled for these tickets.")).into_response();
+        return Json(discord::ephemeral_text(
+            "Claiming isn't enabled for these tickets.",
+        ))
+        .into_response();
     }
-    if !discord::is_staff(interaction.actor_roles(), interaction.actor_permissions(), &cfg.staff_roles) {
+    if !discord::is_staff(
+        interaction.actor_roles(),
+        interaction.actor_permissions(),
+        &cfg.staff_roles,
+    ) {
         return Json(discord::ephemeral_text("Only staff can claim tickets.")).into_response();
     }
     let Some(channel_id) = interaction.channel_id.as_deref() else {
-        return Json(discord::ephemeral_text("I couldn't tell which ticket this is.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell which ticket this is.",
+        ))
+        .into_response();
     };
     let Some(claimer) = interaction.actor_id() else {
-        return Json(discord::ephemeral_text("I couldn't tell who clicked — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell who clicked — try again.",
+        ))
+        .into_response();
     };
     match state.store.get_ticket(channel_id) {
         Ok(Some(_)) => {}
-        Ok(None) => return Json(discord::ephemeral_text("This doesn't look like an active ticket.")).into_response(),
+        Ok(None) => {
+            return Json(discord::ephemeral_text(
+                "This doesn't look like an active ticket.",
+            ))
+            .into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, "claim lookup");
-            return Json(discord::ephemeral_text("Something went wrong on my end.")).into_response();
+            return Json(discord::ephemeral_text("Something went wrong on my end."))
+                .into_response();
         }
     }
     if let Err(e) = state.store.set_claim(channel_id, claimer) {
         tracing::warn!(error = %e, "record claim");
     }
-    let existing = interaction.message.as_ref().and_then(|m| m.content.as_deref()).unwrap_or("");
+    let existing = interaction
+        .message
+        .as_ref()
+        .and_then(|m| m.content.as_deref())
+        .unwrap_or("");
     Json(discord::claimed_update(id, existing, claimer)).into_response()
 }
 
@@ -524,14 +612,23 @@ fn handle_close_click(state: &AppState, interaction: &discord::Interaction, id: 
         Err(msg) => return Json(discord::ephemeral_text(msg)).into_response(),
     };
     let Some(channel_id) = interaction.channel_id.as_deref() else {
-        return Json(discord::ephemeral_text("I couldn't tell which ticket this is.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell which ticket this is.",
+        ))
+        .into_response();
     };
     let ticket = match state.store.get_ticket(channel_id) {
         Ok(Some(t)) => t,
-        Ok(None) => return Json(discord::ephemeral_text("This doesn't look like an active ticket.")).into_response(),
+        Ok(None) => {
+            return Json(discord::ephemeral_text(
+                "This doesn't look like an active ticket.",
+            ))
+            .into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, "close lookup");
-            return Json(discord::ephemeral_text("Something went wrong on my end.")).into_response();
+            return Json(discord::ephemeral_text("Something went wrong on my end."))
+                .into_response();
         }
     };
     if let Some(denied) = close_permission_reply(interaction, &cfg, &ticket) {
@@ -552,41 +649,60 @@ fn handle_do_close(state: &AppState, interaction: &discord::Interaction, id: &st
         Err(msg) => return Json(discord::ephemeral_text(msg)).into_response(),
     };
     let Some(channel_id) = interaction.channel_id.as_deref() else {
-        return Json(discord::ephemeral_text("I couldn't tell which ticket this is.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell which ticket this is.",
+        ))
+        .into_response();
     };
     let ticket = match state.store.get_ticket(channel_id) {
         Ok(Some(t)) => t,
-        Ok(None) => return Json(discord::ephemeral_text("This ticket is already gone.")).into_response(),
+        Ok(None) => {
+            return Json(discord::ephemeral_text("This ticket is already gone.")).into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, "doclose lookup");
-            return Json(discord::ephemeral_text("Something went wrong on my end.")).into_response();
+            return Json(discord::ephemeral_text("Something went wrong on my end."))
+                .into_response();
         }
     };
     if let Some(denied) = close_permission_reply(interaction, &cfg, &ticket) {
         return denied;
     }
-    let reason = interaction.data.as_ref().map(discord::reason_from_modal).unwrap_or_default();
+    let reason = interaction
+        .data
+        .as_ref()
+        .map(discord::reason_from_modal)
+        .unwrap_or_default();
     begin_close(state, interaction, &cfg, &ticket, &reason)
 }
 
 /// Staff may always close; the opener may if the panel allows it.
-fn close_permission_reply(interaction: &discord::Interaction, cfg: &InstanceConfig, ticket: &Ticket) -> Option<Response> {
+fn close_permission_reply(
+    interaction: &discord::Interaction,
+    cfg: &InstanceConfig,
+    ticket: &Ticket,
+) -> Option<Response> {
     let actor = interaction.actor_id().unwrap_or_default();
-    let staff = discord::is_staff(interaction.actor_roles(), interaction.actor_permissions(), &cfg.staff_roles);
+    let staff = discord::is_staff(
+        interaction.actor_roles(),
+        interaction.actor_permissions(),
+        &cfg.staff_roles,
+    );
     let is_opener = actor == ticket.opener_id;
     if staff || (is_opener && cfg.allow_opener_close) {
         return None;
     }
-    Some(
-        Json(discord::ephemeral_text(
-            "Only staff can close this ticket.",
-        ))
-        .into_response(),
-    )
+    Some(Json(discord::ephemeral_text("Only staff can close this ticket.")).into_response())
 }
 
 /// Acknowledge the close instantly, then do transcript + delete/lock off-path.
-fn begin_close(state: &AppState, interaction: &discord::Interaction, cfg: &InstanceConfig, ticket: &Ticket, reason: &str) -> Response {
+fn begin_close(
+    state: &AppState,
+    interaction: &discord::Interaction,
+    cfg: &InstanceConfig,
+    ticket: &Ticket,
+    reason: &str,
+) -> Response {
     let task = CloseTask {
         state: state.clone(),
         cfg: cfg.clone(),
@@ -610,7 +726,9 @@ struct CloseTask {
 
 impl CloseTask {
     async fn run(self) {
-        let Some(token) = self.state.config.default_bot_token.clone() else { return };
+        let Some(token) = self.state.config.default_bot_token.clone() else {
+            return;
+        };
         let channel = &self.ticket.channel_id;
 
         // Transcript first (best-effort), while the channel still has its history.
@@ -622,7 +740,13 @@ impl CloseTask {
 
         if self.cfg.close_mode == "lock" {
             // Keep the channel: rename, mute the opener, post the closed banner.
-            let _ = rest::rename_channel(&self.state.http, &token, channel, &format!("closed-{:04}", self.ticket.number)).await;
+            let _ = rest::rename_channel(
+                &self.state.http,
+                &token,
+                channel,
+                &format!("closed-{:04}", self.ticket.number),
+            )
+            .await;
             let _ = rest::set_overwrite(
                 &self.state.http,
                 &token,
@@ -634,7 +758,8 @@ impl CloseTask {
             )
             .await;
             let _ = self.state.store.set_status(channel, "locked");
-            let msg = discord::locked_message(&self.ticket.instance_id, &self.closer_id, &self.reason);
+            let msg =
+                discord::locked_message(&self.ticket.instance_id, &self.closer_id, &self.reason);
             let _ = rest::post_message(&self.state.http, &token, channel, &msg).await;
         } else {
             // Delete the channel outright.
@@ -647,7 +772,8 @@ impl CloseTask {
     }
 
     async fn write_transcript(&self, token: &str, log: &str) {
-        let raw = rest::fetch_recent_messages(&self.state.http, token, &self.ticket.channel_id, 3).await;
+        let raw =
+            rest::fetch_recent_messages(&self.state.http, token, &self.ticket.channel_id, 3).await;
         let lines: Vec<discord::TranscriptLine> = raw
             .iter()
             .map(|m| discord::TranscriptLine {
@@ -663,7 +789,11 @@ impl CloseTask {
             "\u{1F4DC} Transcript for #{:04} (closed by <@{}>{}).",
             self.ticket.number,
             self.closer_id,
-            if reason.is_empty() { String::new() } else { format!(" · {reason}") }
+            if reason.is_empty() {
+                String::new()
+            } else {
+                format!(" · {reason}")
+            }
         );
         let _ = rest::upload_transcript(
             &self.state.http,
@@ -684,18 +814,28 @@ fn handle_reopen(state: &AppState, interaction: &discord::Interaction, id: &str)
         Ok(c) => c,
         Err(msg) => return Json(discord::ephemeral_text(msg)).into_response(),
     };
-    if !discord::is_staff(interaction.actor_roles(), interaction.actor_permissions(), &cfg.staff_roles) {
+    if !discord::is_staff(
+        interaction.actor_roles(),
+        interaction.actor_permissions(),
+        &cfg.staff_roles,
+    ) {
         return Json(discord::ephemeral_text("Only staff can reopen tickets.")).into_response();
     }
     let Some(channel_id) = interaction.channel_id.as_deref() else {
-        return Json(discord::ephemeral_text("I couldn't tell which ticket this is.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell which ticket this is.",
+        ))
+        .into_response();
     };
     let ticket = match state.store.get_ticket(channel_id) {
         Ok(Some(t)) => t,
-        Ok(None) => return Json(discord::ephemeral_text("This ticket can't be reopened.")).into_response(),
+        Ok(None) => {
+            return Json(discord::ephemeral_text("This ticket can't be reopened.")).into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, "reopen lookup");
-            return Json(discord::ephemeral_text("Something went wrong on my end.")).into_response();
+            return Json(discord::ephemeral_text("Something went wrong on my end."))
+                .into_response();
         }
     };
     let task = ReopenTask {
@@ -717,7 +857,9 @@ struct ReopenTask {
 
 impl ReopenTask {
     async fn run(self) {
-        let Some(token) = self.state.config.default_bot_token.clone() else { return };
+        let Some(token) = self.state.config.default_bot_token.clone() else {
+            return;
+        };
         let channel = &self.ticket.channel_id;
         let _ = rest::set_overwrite(
             &self.state.http,
@@ -729,9 +871,19 @@ impl ReopenTask {
             0,
         )
         .await;
-        let _ = rest::rename_channel(&self.state.http, &token, channel, &format!("ticket-{:04}", self.ticket.number)).await;
+        let _ = rest::rename_channel(
+            &self.state.http,
+            &token,
+            channel,
+            &format!("ticket-{:04}", self.ticket.number),
+        )
+        .await;
         let _ = self.state.store.set_status(channel, "open");
-        let msg = discord::reopened_message(&self.ticket.instance_id, self.cfg.claim_enabled, &self.reopener_id);
+        let msg = discord::reopened_message(
+            &self.ticket.instance_id,
+            self.cfg.claim_enabled,
+            &self.reopener_id,
+        );
         let _ = rest::post_message(&self.state.http, &token, channel, &msg).await;
     }
 }
@@ -741,23 +893,35 @@ fn handle_delete(state: &AppState, interaction: &discord::Interaction, id: &str)
         Ok(c) => c,
         Err(msg) => return Json(discord::ephemeral_text(msg)).into_response(),
     };
-    if !discord::is_staff(interaction.actor_roles(), interaction.actor_permissions(), &cfg.staff_roles) {
+    if !discord::is_staff(
+        interaction.actor_roles(),
+        interaction.actor_permissions(),
+        &cfg.staff_roles,
+    ) {
         return Json(discord::ephemeral_text("Only staff can delete tickets.")).into_response();
     }
     let Some(channel_id) = interaction.channel_id.clone() else {
-        return Json(discord::ephemeral_text("I couldn't tell which ticket this is.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell which ticket this is.",
+        ))
+        .into_response();
     };
     let closer_name = interaction.actor_name();
     let state2 = state.clone();
     tokio::spawn(async move {
-        let Some(token) = state2.config.default_bot_token.clone() else { return };
+        let Some(token) = state2.config.default_bot_token.clone() else {
+            return;
+        };
         let _ = state2.store.delete_ticket(&channel_id);
         let reason = format!("Ticket deleted by {closer_name}");
         if let Err(e) = rest::delete_channel(&state2.http, &token, &channel_id, &reason).await {
             tracing::warn!(?e, "delete channel");
         }
     });
-    Json(discord::ephemeral_text("\u{1F5D1}\u{FE0F} Deleting this ticket…")).into_response()
+    Json(discord::ephemeral_text(
+        "\u{1F5D1}\u{FE0F} Deleting this ticket…",
+    ))
+    .into_response()
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -785,9 +949,17 @@ fn bad_request(message: String) -> Response {
 }
 
 fn not_found() -> Response {
-    (StatusCode::NOT_FOUND, Json(json!({ "error": "Unknown instance." }))).into_response()
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "Unknown instance." })),
+    )
+        .into_response()
 }
 
 fn storage_error() -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Storage error." }))).into_response()
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({ "error": "Storage error." })),
+    )
+        .into_response()
 }

@@ -42,7 +42,10 @@ pub fn verify_signature(
     timestamp: &str,
     body: &[u8],
 ) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex).ok().and_then(|b| b.try_into().ok()) {
+    let pk: [u8; 32] = match hex::decode(public_key_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -50,7 +53,10 @@ pub fn verify_signature(
         Ok(k) => k,
         Err(_) => return false,
     };
-    let sig: [u8; 64] = match hex::decode(signature_hex).ok().and_then(|b| b.try_into().ok()) {
+    let sig: [u8; 64] = match hex::decode(signature_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -71,7 +77,10 @@ pub fn verify_signature(
 /// bytes Discord signed; the secret only authenticates *which key to use*.
 /// Without a valid secret the header is ignored (None), so a caller reaching
 /// this service directly can never substitute its own key.
-pub fn attested_key<'h>(headers: &'h axum::http::HeaderMap, secret: Option<&str>) -> Option<&'h str> {
+pub fn attested_key<'h>(
+    headers: &'h axum::http::HeaderMap,
+    secret: Option<&str>,
+) -> Option<&'h str> {
     let secret = secret?;
     let supplied = headers.get("x-dweeb-forward-auth")?.to_str().ok()?;
     if !constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
@@ -325,7 +334,12 @@ pub fn ephemeral_text(content: &str) -> Value {
 /// a role.
 pub fn build_reply(cfg: &InstanceConfig, ctx: &PickContext) -> Value {
     let mut text = String::new();
-    if let Some(title) = cfg.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+    if let Some(title) = cfg
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
         text.push_str("### ");
         text.push_str(&substitute(title, ctx));
         text.push('\n');
@@ -383,13 +397,22 @@ mod tests {
     }
 
     fn user(id: &str) -> Pick {
-        Pick { kind: PickKind::User, id: id.into() }
+        Pick {
+            kind: PickKind::User,
+            id: id.into(),
+        }
     }
     fn role(id: &str) -> Pick {
-        Pick { kind: PickKind::Role, id: id.into() }
+        Pick {
+            kind: PickKind::Role,
+            id: id.into(),
+        }
     }
     fn channel(id: &str) -> Pick {
-        Pick { kind: PickKind::Channel, id: id.into() }
+        Pick {
+            kind: PickKind::Channel,
+            id: id.into(),
+        }
     }
 
     fn resolved_roles(ids: &[&str]) -> Resolved {
@@ -403,11 +426,32 @@ mod tests {
     // ── classify ──────────────────────────────────────────────────────────────
     #[test]
     fn classifies_each_select_kind_by_component_type() {
-        let ids = vec!["100000000000000000".to_string(), "200000000000000000".to_string()];
+        let ids = vec![
+            "100000000000000000".to_string(),
+            "200000000000000000".to_string(),
+        ];
         let none = Resolved::default();
-        assert_eq!(classify_picks(5, &ids, &none).iter().map(|p| p.kind).collect::<Vec<_>>(), vec![PickKind::User, PickKind::User]);
-        assert_eq!(classify_picks(6, &ids, &none).iter().map(|p| p.kind).collect::<Vec<_>>(), vec![PickKind::Role, PickKind::Role]);
-        assert_eq!(classify_picks(8, &ids, &none).iter().map(|p| p.kind).collect::<Vec<_>>(), vec![PickKind::Channel, PickKind::Channel]);
+        assert_eq!(
+            classify_picks(5, &ids, &none)
+                .iter()
+                .map(|p| p.kind)
+                .collect::<Vec<_>>(),
+            vec![PickKind::User, PickKind::User]
+        );
+        assert_eq!(
+            classify_picks(6, &ids, &none)
+                .iter()
+                .map(|p| p.kind)
+                .collect::<Vec<_>>(),
+            vec![PickKind::Role, PickKind::Role]
+        );
+        assert_eq!(
+            classify_picks(8, &ids, &none)
+                .iter()
+                .map(|p| p.kind)
+                .collect::<Vec<_>>(),
+            vec![PickKind::Channel, PickKind::Channel]
+        );
     }
 
     #[test]
@@ -424,7 +468,10 @@ mod tests {
 
     #[test]
     fn drops_non_snowflakes_and_unknown_component_types() {
-        let ids = vec!["not-a-snowflake".to_string(), "100000000000000000".to_string()];
+        let ids = vec![
+            "not-a-snowflake".to_string(),
+            "100000000000000000".to_string(),
+        ];
         assert_eq!(classify_picks(5, &ids, &Resolved::default()).len(), 1);
         // A component type that isn't one of our four selects yields nothing.
         assert!(classify_picks(2, &ids, &Resolved::default()).is_empty());
@@ -436,14 +483,20 @@ mod tests {
         assert_eq!(render_picks(&[]), "");
         assert_eq!(render_picks(&[user("1")]), "<@1>");
         assert_eq!(render_picks(&[user("1"), role("2")]), "<@1> and <@&2>");
-        assert_eq!(render_picks(&[user("1"), role("2"), channel("3")]), "<@1>, <@&2> and <#3>");
+        assert_eq!(
+            render_picks(&[user("1"), role("2"), channel("3")]),
+            "<@1>, <@&2> and <#3>"
+        );
     }
 
     // ── substitution ────────────────────────────────────────────────────────
     #[test]
     fn substitute_fills_each_token() {
         let c = ctx(vec![user("1"), user("2")]);
-        let out = substitute("{user} ({username}) picked {count}: {picks} in {server}", &c);
+        let out = substitute(
+            "{user} ({username}) picked {count}: {picks} in {server}",
+            &c,
+        );
         assert_eq!(out, "<@42> (Ada) picked 2: <@1> and <@2> in Cool Server");
     }
 
@@ -464,14 +517,26 @@ mod tests {
 
     #[test]
     fn reply_is_always_ephemeral_v2_and_neutralises_pings() {
-        let v = build_reply(&cfg(TARGET_USER, "You selected {picks}"), &ctx(vec![user("1"), user("2")]));
+        let v = build_reply(
+            &cfg(TARGET_USER, "You selected {picks}"),
+            &ctx(vec![user("1"), user("2")]),
+        );
         assert_eq!(v["type"], RESPONSE_CHANNEL_MESSAGE);
         // Every reply is private (ephemeral) + Components V2.
-        assert_eq!(v["data"]["flags"].as_u64().unwrap(), FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL);
+        assert_eq!(
+            v["data"]["flags"].as_u64().unwrap(),
+            FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL
+        );
         assert_eq!(v["data"]["components"][0]["type"], COMPONENT_CONTAINER);
         assert_eq!(body_text(&v), "You selected <@1> and <@2>");
         // No mention can ping: parse is empty and there is no allow-list.
-        assert_eq!(v["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            v["data"]["allowed_mentions"]["parse"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
         assert!(v["data"]["allowed_mentions"].get("users").is_none());
         assert!(v["data"]["allowed_mentions"].get("roles").is_none());
     }
@@ -480,13 +545,28 @@ mod tests {
     fn role_and_channel_picks_render_but_never_ping() {
         // Roles render as role mentions, channels as channel links — all inert
         // (ephemeral + parse:[]), whatever the target.
-        let roles_reply = build_reply(&cfg(TARGET_ROLE, "Picked {picks}"), &ctx(vec![role("2"), role("3")]));
+        let roles_reply = build_reply(
+            &cfg(TARGET_ROLE, "Picked {picks}"),
+            &ctx(vec![role("2"), role("3")]),
+        );
         assert_eq!(body_text(&roles_reply), "Picked <@&2> and <@&3>");
-        assert_eq!(roles_reply["data"]["flags"].as_u64().unwrap(), FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL);
+        assert_eq!(
+            roles_reply["data"]["flags"].as_u64().unwrap(),
+            FLAG_IS_COMPONENTS_V2 | FLAG_EPHEMERAL
+        );
 
-        let chan_reply = build_reply(&cfg(TARGET_CHANNEL, "Go to {picks}"), &ctx(vec![channel("2")]));
+        let chan_reply = build_reply(
+            &cfg(TARGET_CHANNEL, "Go to {picks}"),
+            &ctx(vec![channel("2")]),
+        );
         assert_eq!(body_text(&chan_reply), "Go to <#2>");
-        assert_eq!(chan_reply["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            chan_reply["data"]["allowed_mentions"]["parse"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[test]

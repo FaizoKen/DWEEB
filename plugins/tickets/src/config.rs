@@ -119,7 +119,9 @@ impl Config {
             .to_string();
 
         let discord_public_key = env::var("DISCORD_PUBLIC_KEY")
-            .map_err(|_| "DISCORD_PUBLIC_KEY is required (your Discord app's public key)".to_string())?
+            .map_err(|_| {
+                "DISCORD_PUBLIC_KEY is required (your Discord app's public key)".to_string()
+            })?
             .trim()
             .to_string();
 
@@ -132,7 +134,8 @@ impl Config {
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty());
 
-        let database_path = env::var("DATABASE_PATH").unwrap_or_else(|_| "./tickets.db".to_string());
+        let database_path =
+            env::var("DATABASE_PATH").unwrap_or_else(|_| "./tickets.db".to_string());
 
         let default_bot_token = env::var("BOT_TOKEN")
             .ok()
@@ -203,16 +206,25 @@ mod tests {
         let url = reqwest::Url::parse(&out).unwrap();
         // client_id / scope preserved verbatim…
         assert_eq!(
-            url.query_pairs().find(|(k, _)| k == "client_id").map(|(_, v)| v.into_owned()),
+            url.query_pairs()
+                .find(|(k, _)| k == "client_id")
+                .map(|(_, v)| v.into_owned()),
             Some("123".to_string())
         );
         assert_eq!(
-            url.query_pairs().find(|(k, _)| k == "scope").map(|(_, v)| v.into_owned()),
+            url.query_pairs()
+                .find(|(k, _)| k == "scope")
+                .map(|(_, v)| v.into_owned()),
             Some("bot".to_string())
         );
         // …and the union is appended, exactly once.
         assert_eq!(perms_of(&out).as_deref(), Some(UNION));
-        assert_eq!(url.query_pairs().filter(|(k, _)| k == "permissions").count(), 1);
+        assert_eq!(
+            url.query_pairs()
+                .filter(|(k, _)| k == "permissions")
+                .count(),
+            1
+        );
     }
 
     #[test]

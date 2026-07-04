@@ -124,8 +124,9 @@ pub async fn interactions(
     let (Some(signature), Some(timestamp)) = (signature, timestamp) else {
         return (StatusCode::UNAUTHORIZED, "missing signature").into_response();
     };
-    let key_hex = discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
-        .unwrap_or(&state.config.discord_public_key);
+    let key_hex =
+        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
+            .unwrap_or(&state.config.discord_public_key);
     if !discord::verify_signature(key_hex, signature, timestamp, &body) {
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
@@ -158,7 +159,8 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
         }
         Err(e) => {
             tracing::error!(error = %e, "component lookup");
-            return Json(discord::ephemeral_text("Something went wrong on my end.")).into_response();
+            return Json(discord::ephemeral_text("Something went wrong on my end."))
+                .into_response();
         }
     };
 
@@ -170,7 +172,10 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
     }
 
     let Some(user_id) = interaction.actor_id() else {
-        return Json(discord::ephemeral_text("I couldn't tell who picked — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell who picked — try again.",
+        ))
+        .into_response();
     };
     let server_name = if cfg.guild_name.trim().is_empty() {
         "the server".to_string()
@@ -202,7 +207,11 @@ fn bad_request(message: String) -> Response {
 }
 
 fn not_found() -> Response {
-    (StatusCode::NOT_FOUND, Json(json!({ "error": "Unknown instance." }))).into_response()
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "Unknown instance." })),
+    )
+        .into_response()
 }
 
 fn storage_error() -> Response {

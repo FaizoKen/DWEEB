@@ -64,8 +64,12 @@ const OVERWRITE_MEMBER: u8 = 1;
 
 /// What a member who can read+write a ticket is granted. Public so the reopen
 /// path can restore exactly this on the opener's overwrite.
-pub const PARTICIPANT_ALLOW: u64 =
-    VIEW_CHANNEL | SEND_MESSAGES | READ_MESSAGE_HISTORY | EMBED_LINKS | ATTACH_FILES | ADD_REACTIONS;
+pub const PARTICIPANT_ALLOW: u64 = VIEW_CHANNEL
+    | SEND_MESSAGES
+    | READ_MESSAGE_HISTORY
+    | EMBED_LINKS
+    | ATTACH_FILES
+    | ADD_REACTIONS;
 /// The bot also needs to manage the channel (rename / delete / edit overwrites).
 const BOT_ALLOW: u64 = PARTICIPANT_ALLOW | MANAGE_CHANNELS;
 /// On a *locked* ticket the opener keeps read access but loses the ability to
@@ -76,8 +80,16 @@ pub const LOCKED_OPENER_DENY: u64 = SEND_MESSAGES;
 /// Verify Discord's `X-Signature-Ed25519` over `timestamp || body`. Any
 /// malformed input fails closed (returns false). This MUST run on the raw body
 /// bytes, before JSON parsing.
-pub fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &str, body: &[u8]) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex).ok().and_then(|b| b.try_into().ok()) {
+pub fn verify_signature(
+    public_key_hex: &str,
+    signature_hex: &str,
+    timestamp: &str,
+    body: &[u8],
+) -> bool {
+    let pk: [u8; 32] = match hex::decode(public_key_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -85,7 +97,10 @@ pub fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &s
         Ok(k) => k,
         Err(_) => return false,
     };
-    let sig: [u8; 64] = match hex::decode(signature_hex).ok().and_then(|b| b.try_into().ok()) {
+    let sig: [u8; 64] = match hex::decode(signature_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -106,7 +121,10 @@ pub fn verify_signature(public_key_hex: &str, signature_hex: &str, timestamp: &s
 /// bytes Discord signed; the secret only authenticates *which key to use*.
 /// Without a valid secret the header is ignored (None), so a caller reaching
 /// this service directly can never substitute its own key.
-pub fn attested_key<'h>(headers: &'h axum::http::HeaderMap, secret: Option<&str>) -> Option<&'h str> {
+pub fn attested_key<'h>(
+    headers: &'h axum::http::HeaderMap,
+    secret: Option<&str>,
+) -> Option<&'h str> {
     let secret = secret?;
     let supplied = headers.get("x-dweeb-forward-auth")?.to_str().ok()?;
     if !constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
@@ -229,7 +247,10 @@ impl Interaction {
 
     /// The acting member's role ids (empty outside a guild).
     pub fn actor_roles(&self) -> &[String] {
-        self.member.as_ref().map(|m| m.roles.as_slice()).unwrap_or(&[])
+        self.member
+            .as_ref()
+            .map(|m| m.roles.as_slice())
+            .unwrap_or(&[])
     }
 
     /// The acting member's computed permission bits (0 if absent/unparsable).
@@ -292,20 +313,35 @@ pub const PREFIX: &str = "tickets:";
 pub enum Action {
     /// Panel button / select → start the open flow (topic, if any, comes from
     /// the select's submitted value, not the id).
-    Open { id: String },
+    Open {
+        id: String,
+    },
     /// Intake modal submitted → create the ticket with these answers. `topic` is
     /// carried here because a modal submit no longer sees the select's value.
-    Intake { id: String, topic: String },
+    Intake {
+        id: String,
+        topic: String,
+    },
     /// In-ticket: staff takes ownership.
-    Claim { id: String },
+    Claim {
+        id: String,
+    },
     /// In-ticket: begin closing (may open the reason modal first).
-    Close { id: String },
+    Close {
+        id: String,
+    },
     /// Reason modal submitted (or a direct close) → actually close.
-    DoClose { id: String },
+    DoClose {
+        id: String,
+    },
     /// On a locked ticket: bring it back.
-    Reopen { id: String },
+    Reopen {
+        id: String,
+    },
     /// On a locked ticket: delete it for good.
-    Delete { id: String },
+    Delete {
+        id: String,
+    },
     Unknown,
 }
 
@@ -356,9 +392,13 @@ pub fn is_staff(member_roles: &[String], member_perms: u64, staff_roles: &[Staff
 pub enum OpenGate {
     Allowed,
     /// The member already holds `max` open tickets.
-    AtLimit { max: u32 },
+    AtLimit {
+        max: u32,
+    },
     /// The member opened one too recently; they must wait `wait_secs` more.
-    Cooldown { wait_secs: u64 },
+    Cooldown {
+        wait_secs: u64,
+    },
 }
 
 /// Decide whether a member may open another ticket — pure, no I/O.
@@ -381,7 +421,9 @@ pub fn open_gate(
             let window_ms = cooldown_secs as i64 * 1000;
             if elapsed_ms < window_ms {
                 let wait = ((window_ms - elapsed_ms) as f64 / 1000.0).ceil() as u64;
-                return OpenGate::Cooldown { wait_secs: wait.max(1) };
+                return OpenGate::Cooldown {
+                    wait_secs: wait.max(1),
+                };
             }
         }
     }
@@ -718,7 +760,9 @@ pub fn followup_content(content: &str) -> Value {
 /// The ephemeral acknowledgement shown to the opener once the ticket exists.
 pub fn open_success_text(cfg: &InstanceConfig, channel_id: &str, ctx: &TemplateCtx) -> String {
     match (cfg.response.mode.as_str(), cfg.response.text.as_deref()) {
-        ("custom", Some(t)) if !t.trim().is_empty() => clamp(&render_template(t.trim(), ctx), MAX_CONTENT),
+        ("custom", Some(t)) if !t.trim().is_empty() => {
+            clamp(&render_template(t.trim(), ctx), MAX_CONTENT)
+        }
         _ => format!("\u{1F3AB} Opened your ticket: <#{channel_id}>"),
     }
 }
@@ -805,31 +849,59 @@ mod tests {
 
     fn staff(ids: &[&str]) -> Vec<StaffRole> {
         ids.iter()
-            .map(|id| StaffRole { id: id.to_string(), name: format!("Role {id}"), color: 0 })
+            .map(|id| StaffRole {
+                id: id.to_string(),
+                name: format!("Role {id}"),
+                color: 0,
+            })
             .collect()
     }
 
     // ── custom_id routing ──────────────────────────────────────────────────
     #[test]
     fn parse_action_round_trips_the_control_ids() {
-        assert_eq!(parse_action("tickets:open:abc"), Action::Open { id: "abc".into() });
-        assert_eq!(parse_action("tickets:claim:abc"), Action::Claim { id: "abc".into() });
-        assert_eq!(parse_action("tickets:close:abc"), Action::Close { id: "abc".into() });
-        assert_eq!(parse_action("tickets:doclose:abc"), Action::DoClose { id: "abc".into() });
-        assert_eq!(parse_action("tickets:reopen:abc"), Action::Reopen { id: "abc".into() });
-        assert_eq!(parse_action("tickets:delete:abc"), Action::Delete { id: "abc".into() });
+        assert_eq!(
+            parse_action("tickets:open:abc"),
+            Action::Open { id: "abc".into() }
+        );
+        assert_eq!(
+            parse_action("tickets:claim:abc"),
+            Action::Claim { id: "abc".into() }
+        );
+        assert_eq!(
+            parse_action("tickets:close:abc"),
+            Action::Close { id: "abc".into() }
+        );
+        assert_eq!(
+            parse_action("tickets:doclose:abc"),
+            Action::DoClose { id: "abc".into() }
+        );
+        assert_eq!(
+            parse_action("tickets:reopen:abc"),
+            Action::Reopen { id: "abc".into() }
+        );
+        assert_eq!(
+            parse_action("tickets:delete:abc"),
+            Action::Delete { id: "abc".into() }
+        );
     }
 
     #[test]
     fn parse_action_carries_the_intake_topic() {
         assert_eq!(
             parse_action("tickets:intake:abc:billing"),
-            Action::Intake { id: "abc".into(), topic: "billing".into() }
+            Action::Intake {
+                id: "abc".into(),
+                topic: "billing".into()
+            }
         );
         // No topic segment ⇒ empty topic, still valid.
         assert_eq!(
             parse_action("tickets:intake:abc"),
-            Action::Intake { id: "abc".into(), topic: String::new() }
+            Action::Intake {
+                id: "abc".into(),
+                topic: String::new()
+            }
         );
     }
 
@@ -868,9 +940,15 @@ mod tests {
         let g = open_gate(0, 0, Some(now - 10_000), now, 30);
         assert_eq!(g, OpenGate::Cooldown { wait_secs: 20 });
         // Past the window → allowed.
-        assert_eq!(open_gate(0, 0, Some(now - 31_000), now, 30), OpenGate::Allowed);
+        assert_eq!(
+            open_gate(0, 0, Some(now - 31_000), now, 30),
+            OpenGate::Allowed
+        );
         // Limit takes precedence over cooldown.
-        assert_eq!(open_gate(2, 2, Some(now), now, 30), OpenGate::AtLimit { max: 2 });
+        assert_eq!(
+            open_gate(2, 2, Some(now), now, 30),
+            OpenGate::AtLimit { max: 2 }
+        );
     }
 
     // ── channel naming ─────────────────────────────────────────────────────
@@ -882,7 +960,10 @@ mod tests {
 
     #[test]
     fn channel_name_username_is_slugged() {
-        assert_eq!(channel_name("username", 1, "Ada Lovelace"), "ticket-ada-lovelace");
+        assert_eq!(
+            channel_name("username", 1, "Ada Lovelace"),
+            "ticket-ada-lovelace"
+        );
         assert_eq!(channel_name("username", 1, "✨ emoji ✨"), "ticket-emoji");
         // Nothing usable falls back to a stable name, never empty.
         assert_eq!(channel_name("username", 1, "✨✨"), "ticket-user");
@@ -898,7 +979,10 @@ mod tests {
             topic: "Billing",
             staff_mentions: "<@&100>",
         };
-        let out = render_template("Hi {user} ({username}) re {topic} in {ticket} — {staff}", &ctx);
+        let out = render_template(
+            "Hi {user} ({username}) re {topic} in {ticket} — {staff}",
+            &ctx,
+        );
         assert_eq!(out, "Hi <@42> (Ada) re Billing in <#777> — <@&100>");
     }
 
@@ -972,8 +1056,14 @@ mod tests {
         assert!(msg["content"].as_str().unwrap().contains("<@42>"));
         // Opener pinged, staff not (ping_staff = false), @everyone never.
         assert_eq!(msg["allowed_mentions"]["users"][0], "42");
-        assert_eq!(msg["allowed_mentions"]["roles"].as_array().unwrap().len(), 0);
-        assert_eq!(msg["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            msg["allowed_mentions"]["roles"].as_array().unwrap().len(),
+            0
+        );
+        assert_eq!(
+            msg["allowed_mentions"]["parse"].as_array().unwrap().len(),
+            0
+        );
         // The control row has Close + Claim (not yet claimed).
         let buttons = &msg["components"][0]["components"];
         assert_eq!(buttons[0]["custom_id"], "tickets:close:abc");
@@ -985,7 +1075,13 @@ mod tests {
     fn welcome_can_ping_staff_roles_when_enabled() {
         let mut cfg = base_cfg();
         cfg.ping_staff = true;
-        let ctx = TemplateCtx { opener_id: "42", opener_name: "Ada", channel_id: "777", topic: "", staff_mentions: "<@&100>" };
+        let ctx = TemplateCtx {
+            opener_id: "42",
+            opener_name: "Ada",
+            channel_id: "777",
+            topic: "",
+            staff_mentions: "<@&100>",
+        };
         let msg = welcome_message(&cfg, "abc", &ctx);
         assert_eq!(msg["allowed_mentions"]["roles"][0], "100");
     }
@@ -1001,25 +1097,55 @@ mod tests {
     #[test]
     fn claimed_update_disables_claim_and_appends_line() {
         let v = claimed_update("abc", "Welcome!", "staff9");
-        assert!(v["data"]["content"].as_str().unwrap().contains("Claimed by <@staff9>"));
+        assert!(v["data"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Claimed by <@staff9>"));
         let claim = &v["data"]["components"][0]["components"][1];
         assert_eq!(claim["disabled"], true);
         // Never re-pings.
-        assert_eq!(v["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            v["data"]["allowed_mentions"]["parse"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     // ── modals ─────────────────────────────────────────────────────────────
     #[test]
     fn intake_modal_carries_fields_and_submit_id() {
         let fields = vec![
-            IntakeField { id: "f1".into(), label: "Subject".into(), style: "short".into(), required: true, placeholder: Some("e.g. refund".into()) },
-            IntakeField { id: "f2".into(), label: "Details".into(), style: "paragraph".into(), required: false, placeholder: None },
+            IntakeField {
+                id: "f1".into(),
+                label: "Subject".into(),
+                style: "short".into(),
+                required: true,
+                placeholder: Some("e.g. refund".into()),
+            },
+            IntakeField {
+                id: "f2".into(),
+                label: "Details".into(),
+                style: "paragraph".into(),
+                required: false,
+                placeholder: None,
+            },
         ];
         let v = intake_modal("tickets:intake:abc:billing", "Open a ticket", &fields);
         assert_eq!(v["data"]["custom_id"], "tickets:intake:abc:billing");
-        assert_eq!(v["data"]["components"][0]["components"][0]["custom_id"], "f1");
-        assert_eq!(v["data"]["components"][0]["components"][0]["required"], true);
-        assert_eq!(v["data"]["components"][1]["components"][0]["style"], TEXT_INPUT_PARAGRAPH);
+        assert_eq!(
+            v["data"]["components"][0]["components"][0]["custom_id"],
+            "f1"
+        );
+        assert_eq!(
+            v["data"]["components"][0]["components"][0]["required"],
+            true
+        );
+        assert_eq!(
+            v["data"]["components"][1]["components"][0]["style"],
+            TEXT_INPUT_PARAGRAPH
+        );
     }
 
     #[test]
@@ -1028,7 +1154,10 @@ mod tests {
             custom_id: Some("tickets:doclose:abc".into()),
             values: None,
             components: Some(vec![ModalRow {
-                components: vec![ModalRowChild { custom_id: Some("reason".into()), value: Some("spam".into()) }],
+                components: vec![ModalRowChild {
+                    custom_id: Some("reason".into()),
+                    value: Some("spam".into()),
+                }],
             }]),
         };
         assert_eq!(reason_from_modal(&data), "spam");
@@ -1037,36 +1166,71 @@ mod tests {
     #[test]
     fn intake_summary_labels_answers_and_dashes_blanks() {
         let fields = vec![
-            IntakeField { id: "f1".into(), label: "Subject".into(), style: "short".into(), required: true, placeholder: None },
-            IntakeField { id: "f2".into(), label: "Details".into(), style: "paragraph".into(), required: false, placeholder: None },
+            IntakeField {
+                id: "f1".into(),
+                label: "Subject".into(),
+                style: "short".into(),
+                required: true,
+                placeholder: None,
+            },
+            IntakeField {
+                id: "f2".into(),
+                label: "Details".into(),
+                style: "paragraph".into(),
+                required: false,
+                placeholder: None,
+            },
         ];
         let answers = vec![("f1".into(), "Refund".into()), ("f2".into(), "  ".into())];
         let msg = intake_summary_message(&fields, &answers);
         let content = msg["content"].as_str().unwrap();
         assert!(content.contains("**Subject**") && content.contains("Refund"));
         assert!(content.contains("**Details**") && content.contains('\u{2014}')); // blank → em dash
-        assert_eq!(msg["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            msg["allowed_mentions"]["parse"].as_array().unwrap().len(),
+            0
+        );
     }
 
     // ── replies ────────────────────────────────────────────────────────────
     #[test]
     fn open_success_summary_links_the_channel() {
         let cfg = base_cfg();
-        let ctx = TemplateCtx { opener_id: "42", opener_name: "Ada", channel_id: "777", topic: "", staff_mentions: "" };
+        let ctx = TemplateCtx {
+            opener_id: "42",
+            opener_name: "Ada",
+            channel_id: "777",
+            topic: "",
+            staff_mentions: "",
+        };
         assert!(open_success_text(&cfg, "777", &ctx).contains("<#777>"));
     }
 
     #[test]
     fn open_success_custom_renders_template() {
         let mut cfg = base_cfg();
-        cfg.response = ResponseDef { mode: "custom".into(), text: Some("See {ticket} 🎉".into()) };
-        let ctx = TemplateCtx { opener_id: "42", opener_name: "Ada", channel_id: "777", topic: "", staff_mentions: "" };
+        cfg.response = ResponseDef {
+            mode: "custom".into(),
+            text: Some("See {ticket} 🎉".into()),
+        };
+        let ctx = TemplateCtx {
+            opener_id: "42",
+            opener_name: "Ada",
+            channel_id: "777",
+            topic: "",
+            staff_mentions: "",
+        };
         assert_eq!(open_success_text(&cfg, "777", &ctx), "See <#777> 🎉");
     }
 
     #[test]
     fn topic_label_only_trusts_configured_values() {
-        let topics = vec![Topic { id: "t1".into(), label: "Billing".into(), emoji: None, description: None }];
+        let topics = vec![Topic {
+            id: "t1".into(),
+            label: "Billing".into(),
+            emoji: None,
+            description: None,
+        }];
         assert_eq!(topic_label(&topics, Some("t1")), "Billing");
         assert_eq!(topic_label(&topics, Some("evil")), ""); // unknown value → no label
         assert_eq!(topic_label(&topics, None), "");

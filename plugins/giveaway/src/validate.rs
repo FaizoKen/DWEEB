@@ -39,7 +39,9 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
         return Err("Give the giveaway a prize — what are people winning?".into());
     }
     if prize.chars().count() > MAX_PRIZE {
-        return Err(format!("The prize is too long (max {MAX_PRIZE} characters)."));
+        return Err(format!(
+            "The prize is too long (max {MAX_PRIZE} characters)."
+        ));
     }
 
     if cfg.winner_count < 1 {
@@ -51,7 +53,9 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
 
     if let Some(desc) = cfg.description.as_deref() {
         if desc.chars().count() > MAX_DESCRIPTION {
-            return Err(format!("The description is too long (max {MAX_DESCRIPTION} characters)."));
+            return Err(format!(
+                "The description is too long (max {MAX_DESCRIPTION} characters)."
+            ));
         }
     }
 
@@ -78,7 +82,9 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     if let Some(text) = cfg.announcement.as_deref() {
         let text = text.trim();
         if !text.is_empty() && text.chars().count() > MAX_ANNOUNCEMENT {
-            return Err(format!("The custom announcement is too long (max {MAX_ANNOUNCEMENT} characters)."));
+            return Err(format!(
+                "The custom announcement is too long (max {MAX_ANNOUNCEMENT} characters)."
+            ));
         }
     }
 
@@ -87,9 +93,13 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
         if !template.is_array() {
             return Err("The message template is malformed.".into());
         }
-        let len = serde_json::to_string(template).map(|s| s.len()).unwrap_or(usize::MAX);
+        let len = serde_json::to_string(template)
+            .map(|s| s.len())
+            .unwrap_or(usize::MAX);
         if len > MAX_TEMPLATE_BYTES {
-            return Err("This message is too large to keep a live placeholder template for.".into());
+            return Err(
+                "This message is too large to keep a live placeholder template for.".into(),
+            );
         }
     }
 

@@ -29,16 +29,22 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
 
     if let Some(title) = cfg.title.as_deref() {
         if title.chars().count() > MAX_TITLE {
-            return Err(format!("The heading is too long (max {MAX_TITLE} characters)."));
+            return Err(format!(
+                "The heading is too long (max {MAX_TITLE} characters)."
+            ));
         }
     }
 
     let body = cfg.body.trim();
     if body.is_empty() {
-        return Err("The reply message is empty — write what people should see when they pick.".into());
+        return Err(
+            "The reply message is empty — write what people should see when they pick.".into(),
+        );
     }
     if cfg.body.chars().count() > MAX_BODY {
-        return Err(format!("The reply is too long (max {MAX_BODY} characters)."));
+        return Err(format!(
+            "The reply is too long (max {MAX_BODY} characters)."
+        ));
     }
 
     Ok(())
@@ -66,7 +72,10 @@ mod tests {
     #[test]
     fn each_of_the_four_targets_is_valid() {
         for t in [TARGET_USER, TARGET_ROLE, TARGET_MENTIONABLE, TARGET_CHANNEL] {
-            assert!(validate_config(&cfg(t, "You picked {picks}.")).is_ok(), "{t}");
+            assert!(
+                validate_config(&cfg(t, "You picked {picks}.")).is_ok(),
+                "{t}"
+            );
         }
     }
 

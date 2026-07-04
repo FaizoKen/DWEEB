@@ -60,7 +60,10 @@ pub fn verify_signature(
     timestamp: &str,
     body: &[u8],
 ) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex).ok().and_then(|b| b.try_into().ok()) {
+    let pk: [u8; 32] = match hex::decode(public_key_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -68,7 +71,10 @@ pub fn verify_signature(
         Ok(k) => k,
         Err(_) => return false,
     };
-    let sig: [u8; 64] = match hex::decode(signature_hex).ok().and_then(|b| b.try_into().ok()) {
+    let sig: [u8; 64] = match hex::decode(signature_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -89,7 +95,10 @@ pub fn verify_signature(
 /// bytes Discord signed; the secret only authenticates *which key to use*.
 /// Without a valid secret the header is ignored (None), so a caller reaching
 /// this service directly can never substitute its own key.
-pub fn attested_key<'h>(headers: &'h axum::http::HeaderMap, secret: Option<&str>) -> Option<&'h str> {
+pub fn attested_key<'h>(
+    headers: &'h axum::http::HeaderMap,
+    secret: Option<&str>,
+) -> Option<&'h str> {
     let secret = secret?;
     let supplied = headers.get("x-dweeb-forward-auth")?.to_str().ok()?;
     if !constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
@@ -188,7 +197,10 @@ impl Interaction {
 
     /// The acting member's role ids (empty outside a guild).
     pub fn actor_roles(&self) -> &[String] {
-        self.member.as_ref().map(|m| m.roles.as_slice()).unwrap_or(&[])
+        self.member
+            .as_ref()
+            .map(|m| m.roles.as_slice())
+            .unwrap_or(&[])
     }
 
     /// The acting member's computed permission bits (0 if absent/unparsable).
@@ -220,16 +232,28 @@ pub const PREFIX: &str = "giveaway:";
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     /// The member-facing Enter button (the bound component).
-    Enter { id: String },
+    Enter {
+        id: String,
+    },
     /// Host panel: enter/leave as a participant.
-    Join { id: String },
-    Leave { id: String },
+    Join {
+        id: String,
+    },
+    Leave {
+        id: String,
+    },
     /// Host panel: draw winners now.
-    Draw { id: String },
+    Draw {
+        id: String,
+    },
     /// Host panel: reroll a fresh set of winners.
-    Reroll { id: String },
+    Reroll {
+        id: String,
+    },
     /// Host panel: call the giveaway off.
-    Cancel { id: String },
+    Cancel {
+        id: String,
+    },
     Unknown,
 }
 
@@ -244,7 +268,9 @@ pub fn parse_action(custom_id: &str) -> Action {
             if rest.is_empty() {
                 Action::Unknown
             } else {
-                Action::Enter { id: rest.to_string() }
+                Action::Enter {
+                    id: rest.to_string(),
+                }
             }
         }
         Some((verb, id)) => {
@@ -279,7 +305,11 @@ pub fn enter_id(id: &str) -> String {
 /// Whether the acting member is a host for this giveaway: holding a configured
 /// host role, or a server-management permission (Administrator or Manage Server,
 /// which always implies it).
-pub fn is_host(member_roles: &[String], member_perms: u64, host_roles: &[crate::store::RoleRef]) -> bool {
+pub fn is_host(
+    member_roles: &[String],
+    member_perms: u64,
+    host_roles: &[crate::store::RoleRef],
+) -> bool {
     if member_perms & (PERM_ADMINISTRATOR | PERM_MANAGE_GUILD) != 0 {
         return true;
     }
@@ -305,7 +335,9 @@ pub enum Eligibility {
     /// The member lacks the required role(s).
     MissingRoles,
     /// The member's account isn't old enough.
-    AccountTooNew { needed_days: u32 },
+    AccountTooNew {
+        needed_days: u32,
+    },
 }
 
 /// Decide whether a member may enter — pure, no I/O. All inputs come from the
@@ -345,7 +377,9 @@ pub fn check_eligibility(
         if let Some(created) = account_created_ms {
             let age_days = (now_ms.saturating_sub(created)) / MS_PER_DAY;
             if age_days < reqs.min_account_age_days as i64 {
-                return Eligibility::AccountTooNew { needed_days: reqs.min_account_age_days };
+                return Eligibility::AccountTooNew {
+                    needed_days: reqs.min_account_age_days,
+                };
             }
         }
     }
@@ -377,7 +411,11 @@ pub fn missing_roles_message(reqs: &Requirements) -> String {
 /// twice, and the result is exactly `min(n, pool.len())` long. Pure (the
 /// randomness is injected), so it is tested both for fairness invariants and,
 /// with a deterministic `pick`, for an exact outcome.
-pub fn choose_winners(pool: &[String], n: usize, mut pick: impl FnMut(usize) -> usize) -> Vec<String> {
+pub fn choose_winners(
+    pool: &[String],
+    n: usize,
+    mut pick: impl FnMut(usize) -> usize,
+) -> Vec<String> {
     let mut bag: Vec<String> = pool.to_vec();
     let take = n.min(bag.len());
     for i in 0..take {
@@ -401,7 +439,9 @@ fn strip_count_suffix(label: &str) -> &str {
         if t.ends_with(')') {
             let inner = &t[open + 2..t.len() - 1];
             if !inner.is_empty()
-                && inner.chars().all(|c| c.is_ascii_digit() || c == ',' || c == ' ')
+                && inner
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == ',' || c == ' ')
             {
                 return t[..open].trim_end();
             }
@@ -594,7 +634,8 @@ fn substitute_with(text: &str, mut resolve: impl FnMut(&str) -> Option<String>) 
 fn is_token(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 32
-        && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 /// Render the bound giveaway message from its stored `template` (the host's own
@@ -629,10 +670,18 @@ fn substitute_tree(v: &mut Value, vars: &RenderVars) {
         }
         Value::Object(o) => {
             // Compute first (ends the immutable borrow) then write.
-            if let Some(content) = o.get("content").and_then(Value::as_str).map(|s| substitute(s, vars)) {
+            if let Some(content) = o
+                .get("content")
+                .and_then(Value::as_str)
+                .map(|s| substitute(s, vars))
+            {
                 o.insert("content".into(), Value::String(content));
             }
-            if let Some(label) = o.get("label").and_then(Value::as_str).map(|s| substitute(s, vars)) {
+            if let Some(label) = o
+                .get("label")
+                .and_then(Value::as_str)
+                .map(|s| substitute(s, vars))
+            {
                 o.insert("label".into(), Value::String(label));
             }
             for val in o.values_mut() {
@@ -652,7 +701,12 @@ pub fn enter_button_label(template: &Value) -> Option<String> {
             Value::Array(a) => a.iter().find_map(walk),
             Value::Object(o) => {
                 if is_interactive_button(o) {
-                    return Some(o.get("label").and_then(Value::as_str).unwrap_or_default().to_string());
+                    return Some(
+                        o.get("label")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    );
                 }
                 o.values().find_map(walk)
             }
@@ -682,7 +736,14 @@ fn patch_button_with_id(
     label: Option<&str>,
     disabled: bool,
 ) -> bool {
-    fn walk(v: &mut Value, match_id: &str, new_id: &str, label: Option<&str>, disabled: bool, hit: &mut bool) {
+    fn walk(
+        v: &mut Value,
+        match_id: &str,
+        new_id: &str,
+        label: Option<&str>,
+        disabled: bool,
+        hit: &mut bool,
+    ) {
         match v {
             Value::Array(a) => {
                 for item in a.iter_mut() {
@@ -708,7 +769,12 @@ fn patch_button_with_id(
 
 /// Patch the first interactive button found (depth-first), pinning it to
 /// `new_id`. Returns whether one was patched.
-fn patch_first_interactive_button(tree: &mut Value, new_id: &str, label: Option<&str>, disabled: bool) -> bool {
+fn patch_first_interactive_button(
+    tree: &mut Value,
+    new_id: &str,
+    label: Option<&str>,
+    disabled: bool,
+) -> bool {
     match tree {
         Value::Array(a) => a
             .iter_mut()
@@ -811,7 +877,11 @@ pub fn already_in_panel(id: &str, count: i64) -> Value {
             "\u{2705} You're already entered \u{2014} you're 1 of **{}**. Good luck! \u{1F340}",
             commas(count)
         ),
-        vec![button(BUTTON_DANGER, "Leave giveaway", control_id("leave", id))],
+        vec![button(
+            BUTTON_DANGER,
+            "Leave giveaway",
+            control_id("leave", id),
+        )],
     )
 }
 
@@ -828,13 +898,27 @@ pub fn left_notice() -> Value {
 
 /// The host control panel (ephemeral), shown when a Manage-Server holder (or a
 /// configured host role) clicks Enter. Adapts to the giveaway's status.
-pub fn host_panel(id: &str, status: Status, entered: bool, entry_count: i64, winner_count: usize) -> Value {
+pub fn host_panel(
+    id: &str,
+    status: Status,
+    entered: bool,
+    entry_count: i64,
+    winner_count: usize,
+) -> Value {
     match status {
         Status::Open => {
             let join = if entered {
-                button(BUTTON_SECONDARY, "Leave as participant", control_id("leave", id))
+                button(
+                    BUTTON_SECONDARY,
+                    "Leave as participant",
+                    control_id("leave", id),
+                )
             } else {
-                button(BUTTON_SECONDARY, "Enter as participant", control_id("join", id))
+                button(
+                    BUTTON_SECONDARY,
+                    "Enter as participant",
+                    control_id("join", id),
+                )
             };
             ephemeral_with_buttons(
                 &format!(
@@ -851,13 +935,21 @@ pub fn host_panel(id: &str, status: Status, entered: bool, entry_count: i64, win
         Status::Ended => ephemeral_with_buttons(
             &format!(
                 "\u{1F3C1} **This giveaway has ended.** {} drawn. You can reroll for a fresh pick.",
-                if winner_count == 1 { "1 winner".to_string() } else { format!("{winner_count} winners") }
+                if winner_count == 1 {
+                    "1 winner".to_string()
+                } else {
+                    format!("{winner_count} winners")
+                }
             ),
-            vec![button(BUTTON_PRIMARY, "\u{1F501} Reroll", control_id("reroll", id))],
+            vec![button(
+                BUTTON_PRIMARY,
+                "\u{1F501} Reroll",
+                control_id("reroll", id),
+            )],
         ),
-        Status::Cancelled => {
-            ephemeral_text("\u{274C} This giveaway was cancelled \u{2014} there's nothing left to manage.")
-        }
+        Status::Cancelled => ephemeral_text(
+            "\u{274C} This giveaway was cancelled \u{2014} there's nothing left to manage.",
+        ),
     }
 }
 
@@ -930,7 +1022,7 @@ fn commas(n: i64) -> String {
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     let bytes = digits.as_bytes();
     for (i, b) in bytes.iter().enumerate() {
-        if i > 0 && (bytes.len() - i) % 3 == 0 {
+        if i > 0 && (bytes.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(*b as char);
@@ -954,7 +1046,11 @@ mod tests {
 
     fn roles(ids: &[&str]) -> Vec<RoleRef> {
         ids.iter()
-            .map(|id| RoleRef { id: id.to_string(), name: format!("Role {id}"), color: 0 })
+            .map(|id| RoleRef {
+                id: id.to_string(),
+                name: format!("Role {id}"),
+                color: 0,
+            })
             .collect()
     }
     fn ids(v: &[&str]) -> Vec<String> {
@@ -964,16 +1060,36 @@ mod tests {
     // ── custom_id routing ───────────────────────────────────────────────────
     #[test]
     fn parse_action_reads_the_bare_enter_button() {
-        assert_eq!(parse_action("giveaway:abc123"), Action::Enter { id: "abc123".into() });
+        assert_eq!(
+            parse_action("giveaway:abc123"),
+            Action::Enter {
+                id: "abc123".into()
+            }
+        );
     }
 
     #[test]
     fn parse_action_reads_the_host_controls() {
-        assert_eq!(parse_action("giveaway:draw:abc"), Action::Draw { id: "abc".into() });
-        assert_eq!(parse_action("giveaway:reroll:abc"), Action::Reroll { id: "abc".into() });
-        assert_eq!(parse_action("giveaway:cancel:abc"), Action::Cancel { id: "abc".into() });
-        assert_eq!(parse_action("giveaway:join:abc"), Action::Join { id: "abc".into() });
-        assert_eq!(parse_action("giveaway:leave:abc"), Action::Leave { id: "abc".into() });
+        assert_eq!(
+            parse_action("giveaway:draw:abc"),
+            Action::Draw { id: "abc".into() }
+        );
+        assert_eq!(
+            parse_action("giveaway:reroll:abc"),
+            Action::Reroll { id: "abc".into() }
+        );
+        assert_eq!(
+            parse_action("giveaway:cancel:abc"),
+            Action::Cancel { id: "abc".into() }
+        );
+        assert_eq!(
+            parse_action("giveaway:join:abc"),
+            Action::Join { id: "abc".into() }
+        );
+        assert_eq!(
+            parse_action("giveaway:leave:abc"),
+            Action::Leave { id: "abc".into() }
+        );
     }
 
     #[test]
@@ -1016,20 +1132,33 @@ mod tests {
 
     // ── eligibility ─────────────────────────────────────────────────────────
     fn reqs_role_any(ids_: &[&str]) -> Requirements {
-        Requirements { roles: roles(ids_), require_all: false, min_account_age_days: 0 }
+        Requirements {
+            roles: roles(ids_),
+            require_all: false,
+            min_account_age_days: 0,
+        }
     }
 
     #[test]
     fn open_giveaway_with_no_requirements_admits_anyone() {
         let r = Requirements::default();
-        assert_eq!(check_eligibility(Status::Open, None, 0, &[], None, &r), Eligibility::Ok);
+        assert_eq!(
+            check_eligibility(Status::Open, None, 0, &[], None, &r),
+            Eligibility::Ok
+        );
     }
 
     #[test]
     fn ended_or_cancelled_is_over() {
         let r = Requirements::default();
-        assert_eq!(check_eligibility(Status::Ended, None, 0, &[], None, &r), Eligibility::Over);
-        assert_eq!(check_eligibility(Status::Cancelled, None, 0, &[], None, &r), Eligibility::Over);
+        assert_eq!(
+            check_eligibility(Status::Ended, None, 0, &[], None, &r),
+            Eligibility::Over
+        );
+        assert_eq!(
+            check_eligibility(Status::Cancelled, None, 0, &[], None, &r),
+            Eligibility::Over
+        );
     }
 
     #[test]
@@ -1044,7 +1173,14 @@ mod tests {
         );
         // Before the deadline: still open.
         assert_eq!(
-            check_eligibility(Status::Open, Some(now_ms / 1000 + 100), now_ms, &[], None, &r),
+            check_eligibility(
+                Status::Open,
+                Some(now_ms / 1000 + 100),
+                now_ms,
+                &[],
+                None,
+                &r
+            ),
             Eligibility::Ok
         );
     }
@@ -1052,12 +1188,19 @@ mod tests {
     #[test]
     fn role_requirement_any_vs_all() {
         let any = reqs_role_any(&["a", "b"]);
-        assert_eq!(check_eligibility(Status::Open, None, 0, &ids(&["b"]), None, &any), Eligibility::Ok);
+        assert_eq!(
+            check_eligibility(Status::Open, None, 0, &ids(&["b"]), None, &any),
+            Eligibility::Ok
+        );
         assert_eq!(
             check_eligibility(Status::Open, None, 0, &ids(&["z"]), None, &any),
             Eligibility::MissingRoles
         );
-        let all = Requirements { roles: roles(&["a", "b"]), require_all: true, min_account_age_days: 0 };
+        let all = Requirements {
+            roles: roles(&["a", "b"]),
+            require_all: true,
+            min_account_age_days: 0,
+        };
         assert_eq!(
             check_eligibility(Status::Open, None, 0, &ids(&["a"]), None, &all),
             Eligibility::MissingRoles
@@ -1070,7 +1213,11 @@ mod tests {
 
     #[test]
     fn account_age_floor_blocks_new_accounts() {
-        let r = Requirements { roles: vec![], require_all: false, min_account_age_days: 7 };
+        let r = Requirements {
+            roles: vec![],
+            require_all: false,
+            min_account_age_days: 7,
+        };
         let now = 100 * MS_PER_DAY;
         // Created 3 days ago → too new.
         assert_eq!(
@@ -1079,11 +1226,21 @@ mod tests {
         );
         // Created 30 days ago → fine.
         assert_eq!(
-            check_eligibility(Status::Open, None, now, &[], Some(now - 30 * MS_PER_DAY), &r),
+            check_eligibility(
+                Status::Open,
+                None,
+                now,
+                &[],
+                Some(now - 30 * MS_PER_DAY),
+                &r
+            ),
             Eligibility::Ok
         );
         // Unparseable creation time can't be enforced → admitted, not walled out.
-        assert_eq!(check_eligibility(Status::Open, None, now, &[], None, &r), Eligibility::Ok);
+        assert_eq!(
+            check_eligibility(Status::Open, None, now, &[], None, &r),
+            Eligibility::Ok
+        );
     }
 
     #[test]
@@ -1091,7 +1248,11 @@ mod tests {
         assert!(missing_roles_message(&reqs_role_any(&["1"])).contains("<@&1>"));
         let m = missing_roles_message(&reqs_role_any(&["1", "2"]));
         assert!(m.contains("one of") && m.contains("<@&1>") && m.contains("<@&2>"));
-        let all = Requirements { roles: roles(&["1", "2"]), require_all: true, min_account_age_days: 0 };
+        let all = Requirements {
+            roles: roles(&["1", "2"]),
+            require_all: true,
+            min_account_age_days: 0,
+        };
         assert!(missing_roles_message(&all).contains("all of"));
     }
 
@@ -1154,7 +1315,10 @@ mod tests {
                 ]}
             ]}
         ]);
-        assert_eq!(find_button_label(&tree, "giveaway:xyz").as_deref(), Some("🎉 Enter"));
+        assert_eq!(
+            find_button_label(&tree, "giveaway:xyz").as_deref(),
+            Some("🎉 Enter")
+        );
         let out = restyle_button(&tree, "giveaway:xyz", Some("🎉 Enter (3)"), false);
         // The text display is preserved verbatim.
         assert_eq!(out[0]["components"][0]["content"], "Win a prize!");
@@ -1164,7 +1328,10 @@ mod tests {
         assert_eq!(btn["disabled"], false);
         // A non-matching custom_id leaves the tree alone.
         let untouched = restyle_button(&tree, "giveaway:nope", Some("x"), true);
-        assert_eq!(untouched[0]["components"][1]["components"][0]["label"], "🎉 Enter");
+        assert_eq!(
+            untouched[0]["components"][1]["components"][0]["label"],
+            "🎉 Enter"
+        );
     }
 
     #[test]
@@ -1182,7 +1349,10 @@ mod tests {
         assert_eq!(v["type"], RESPONSE_UPDATE_MESSAGE);
         assert_eq!(v["data"]["flags"], FLAG_IS_COMPONENTS_V2);
         assert!(v["data"].get("content").is_none()); // V2 forbids content
-        assert_eq!(v["data"]["components"][0]["components"][0]["label"], "Enter (1)");
+        assert_eq!(
+            v["data"]["components"][0]["components"][0]["label"],
+            "Enter (1)"
+        );
     }
 
     #[test]
@@ -1198,12 +1368,19 @@ mod tests {
         };
         let v = update_button_response(&msg, "giveaway:xyz", None, true).unwrap();
         assert_eq!(v["data"]["content"], "Giveaway!");
-        assert_eq!(v["data"]["components"][0]["components"][0]["disabled"], true);
+        assert_eq!(
+            v["data"]["components"][0]["components"][0]["disabled"],
+            true
+        );
     }
 
     #[test]
     fn update_button_response_is_none_without_components() {
-        let msg = MessageRef { content: Some("hi".into()), components: None, flags: None };
+        let msg = MessageRef {
+            content: Some("hi".into()),
+            components: None,
+            flags: None,
+        };
         assert!(update_button_response(&msg, "giveaway:xyz", None, false).is_none());
     }
 
@@ -1230,8 +1407,20 @@ mod tests {
         let text = ann_text(&v);
         assert!(text.contains("<@1>") && text.contains("<@2>") && text.contains("**Nitro**"));
         // allowed_mentions pings the two winners, nothing else.
-        assert_eq!(v["data"]["allowed_mentions"]["users"].as_array().unwrap().len(), 2);
-        assert_eq!(v["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            v["data"]["allowed_mentions"]["users"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            v["data"]["allowed_mentions"]["parse"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[test]
@@ -1242,7 +1431,11 @@ mod tests {
 
     #[test]
     fn announcement_custom_template_substitutes_placeholders() {
-        let v = announcement_message(&vars("Nitro", &["1"]), false, Some("GG {winners}, enjoy {prize}!"));
+        let v = announcement_message(
+            &vars("Nitro", &["1"]),
+            false,
+            Some("GG {winners}, enjoy {prize}!"),
+        );
         let text = ann_text(&v);
         assert!(text.contains("GG <@1>, enjoy Nitro!"));
     }
@@ -1279,7 +1472,10 @@ mod tests {
     fn substitute_resolves_known_tokens_and_keeps_unknown() {
         let v = open_vars("Nitro", 1234);
         assert_eq!(
-            substitute("Win {prize} · {entries} in · {winner_count} winner(s) · {status}", &v),
+            substitute(
+                "Win {prize} · {entries} in · {winner_count} winner(s) · {status}",
+                &v
+            ),
             "Win Nitro · 1,234 in · 2 winner(s) · open"
         );
         // Host renders as a mention; an unknown token is left verbatim.
@@ -1294,7 +1490,10 @@ mod tests {
         assert_eq!(substitute("Winners: {winners}", &v), "Winners: TBD");
         v.winners = ids(&["1", "2"]);
         v.status = Status::Ended;
-        assert_eq!(substitute("Winners: {winners}", &v), "Winners: <@1> and <@2>");
+        assert_eq!(
+            substitute("Winners: {winners}", &v),
+            "Winners: <@1> and <@2>"
+        );
     }
 
     #[test]
@@ -1353,7 +1552,13 @@ mod tests {
             status: Status::Ended,
             host_user_id: None,
         };
-        let once = render_bound_message(&tree, &drawn, "giveaway:abc", Some("🏁 Giveaway ended"), true);
+        let once = render_bound_message(
+            &tree,
+            &drawn,
+            "giveaway:abc",
+            Some("🏁 Giveaway ended"),
+            true,
+        );
         assert_eq!(
             once[0]["components"][0]["content"],
             "🎁 Win Nitro! Entered: 9. Winners: <@1> and <@2>."
@@ -1363,7 +1568,13 @@ mod tests {
         assert_eq!(btn["disabled"], true);
         // Rendering again from the same (raw-token) template yields the same
         // result — re-render never compounds, so a reroll just swaps the winners.
-        let twice = render_bound_message(&tree, &drawn, "giveaway:abc", Some("🏁 Giveaway ended"), true);
+        let twice = render_bound_message(
+            &tree,
+            &drawn,
+            "giveaway:abc",
+            Some("🏁 Giveaway ended"),
+            true,
+        );
         assert_eq!(once, twice);
     }
 
@@ -1385,7 +1596,10 @@ mod tests {
 
     #[test]
     fn enter_button_label_reads_the_lone_interactive_button() {
-        assert_eq!(enter_button_label(&sample_template()).as_deref(), Some("🎉 Enter"));
+        assert_eq!(
+            enter_button_label(&sample_template()).as_deref(),
+            Some("🎉 Enter")
+        );
         // A tree with only a link button (no custom_id) has no enter button.
         let link_only = json!([{ "type": 1, "components": [
             { "type": 2, "style": 5, "label": "Rules", "url": "https://x" }
@@ -1419,8 +1633,14 @@ mod tests {
         assert_eq!(v["type"], 7);
         assert_eq!(v["data"]["flags"], FLAG_IS_COMPONENTS_V2);
         assert!(v["data"].get("content").is_none()); // V2 forbids content
-        // A re-render never pings — even though a winner mention is now in the body.
-        assert_eq!(v["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+                                                     // A re-render never pings — even though a winner mention is now in the body.
+        assert_eq!(
+            v["data"]["allowed_mentions"]["parse"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
         assert!(v["data"]["allowed_mentions"].get("users").is_none());
     }
 }

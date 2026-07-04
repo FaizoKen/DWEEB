@@ -41,7 +41,10 @@ pub fn verify_signature(
     timestamp: &str,
     body: &[u8],
 ) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex).ok().and_then(|b| b.try_into().ok()) {
+    let pk: [u8; 32] = match hex::decode(public_key_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -49,7 +52,10 @@ pub fn verify_signature(
         Ok(k) => k,
         Err(_) => return false,
     };
-    let sig: [u8; 64] = match hex::decode(signature_hex).ok().and_then(|b| b.try_into().ok()) {
+    let sig: [u8; 64] = match hex::decode(signature_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+    {
         Some(arr) => arr,
         None => return false,
     };
@@ -70,7 +76,10 @@ pub fn verify_signature(
 /// bytes Discord signed; the secret only authenticates *which key to use*.
 /// Without a valid secret the header is ignored (None), so a caller reaching
 /// this service directly can never substitute its own key.
-pub fn attested_key<'h>(headers: &'h axum::http::HeaderMap, secret: Option<&str>) -> Option<&'h str> {
+pub fn attested_key<'h>(
+    headers: &'h axum::http::HeaderMap,
+    secret: Option<&str>,
+) -> Option<&'h str> {
     let secret = secret?;
     let supplied = headers.get("x-dweeb-forward-auth")?.to_str().ok()?;
     if !constant_time_eq(supplied.as_bytes(), secret.as_bytes()) {
@@ -153,7 +162,10 @@ impl Interaction {
 
     /// The clicking member's role ids (empty outside a guild).
     pub fn actor_roles(&self) -> &[String] {
-        self.member.as_ref().map(|m| m.roles.as_slice()).unwrap_or(&[])
+        self.member
+            .as_ref()
+            .map(|m| m.roles.as_slice())
+            .unwrap_or(&[])
     }
 
     pub fn custom_id(&self) -> &str {
@@ -271,7 +283,12 @@ pub fn build_reply(reply: &QuickReply, ctx: &ReplyContext) -> Value {
     }
 
     let mut text = String::new();
-    if let Some(title) = reply.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+    if let Some(title) = reply
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
         text.push_str("### ");
         text.push_str(&substitute(title, ctx));
         text.push('\n');
@@ -341,7 +358,10 @@ fn substitute_in_content(value: &mut Value, ctx: &ReplyContext) {
 /// to — names the gating role(s) so they know what they'd need. Always
 /// ephemeral, so a denial never clutters the channel.
 pub fn gate_denied(allowed_roles: &[RoleRef]) -> Value {
-    let mentions: Vec<String> = allowed_roles.iter().map(|r| format!("<@&{}>", r.id)).collect();
+    let mentions: Vec<String> = allowed_roles
+        .iter()
+        .map(|r| format!("<@&{}>", r.id))
+        .collect();
     let who = match mentions.as_slice() {
         [] => "members with the right role".to_string(), // unreachable (gate only set with roles)
         many => join_human(many),
@@ -380,7 +400,11 @@ mod tests {
 
     fn roles(ids: &[&str]) -> Vec<RoleRef> {
         ids.iter()
-            .map(|id| RoleRef { id: id.to_string(), name: format!("Role {id}"), color: 0 })
+            .map(|id| RoleRef {
+                id: id.to_string(),
+                name: format!("Role {id}"),
+                color: 0,
+            })
             .collect()
     }
 
@@ -460,7 +484,13 @@ mod tests {
         assert_eq!(v["data"]["components"][0]["type"], COMPONENT_CONTAINER);
         assert_eq!(body_text(&v), "Hello <@42>");
         // Only the clicker may be pinged; @everyone/role mentions are neutralised.
-        assert_eq!(v["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            v["data"]["allowed_mentions"]["parse"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
         assert_eq!(v["data"]["allowed_mentions"]["users"][0], "42");
     }
 
@@ -494,12 +524,20 @@ mod tests {
         }));
         let v = build_reply(&r, &ctx());
         // The saved layout is sent, with variables substituted in its content…
-        let content = v["data"]["components"][0]["components"][0]["content"].as_str().unwrap();
+        let content = v["data"]["components"][0]["components"][0]["content"]
+            .as_str()
+            .unwrap();
         assert_eq!(content, "Hi <@42> from Cool Server!");
         // …the typed body/title are not present…
         assert!(!serde_json::to_string(&v).unwrap().contains("ignored"));
         // …and mention safety still pins pings to the clicker.
-        assert_eq!(v["data"]["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            v["data"]["allowed_mentions"]["parse"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
         assert_eq!(v["data"]["allowed_mentions"]["users"][0], "42");
     }
 
@@ -507,7 +545,8 @@ mod tests {
     fn build_reply_public_saved_payload_keeps_only_the_v2_flag() {
         let mut r = reply("");
         r.ephemeral = false;
-        r.payload = Some(json!({ "components": [{ "type": COMPONENT_TEXT_DISPLAY, "content": "hi" }] }));
+        r.payload =
+            Some(json!({ "components": [{ "type": COMPONENT_TEXT_DISPLAY, "content": "hi" }] }));
         let v = build_reply(&r, &ctx());
         assert_eq!(v["data"]["flags"].as_u64().unwrap(), FLAG_IS_COMPONENTS_V2);
     }
@@ -555,6 +594,9 @@ mod tests {
     fn join_human_reads_naturally() {
         assert_eq!(join_human(&["A".into()]), "A");
         assert_eq!(join_human(&["A".into(), "B".into()]), "A or B");
-        assert_eq!(join_human(&["A".into(), "B".into(), "C".into()]), "A, B or C");
+        assert_eq!(
+            join_human(&["A".into(), "B".into(), "C".into()]),
+            "A, B or C"
+        );
     }
 }

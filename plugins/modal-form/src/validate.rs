@@ -13,8 +13,12 @@ use std::collections::HashSet;
 use crate::store::InstanceConfig;
 
 /// Discord hosts that serve incoming webhooks.
-const ALLOWED_WEBHOOK_HOSTS: &[&str] =
-    &["discord.com", "discordapp.com", "canary.discord.com", "ptb.discord.com"];
+const ALLOWED_WEBHOOK_HOSTS: &[&str] = &[
+    "discord.com",
+    "discordapp.com",
+    "canary.discord.com",
+    "ptb.discord.com",
+];
 
 /// Discord text-input ceiling for min/max length and prefilled values.
 const TEXT_INPUT_MAX: u32 = 4000;
@@ -105,7 +109,11 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
         return Err("Plain-text reply must be ≤ 2000 characters.".into());
     }
     if let Some(payload) = &cfg.reply.payload {
-        if serde_json::to_string(payload).map(|s| s.len()).unwrap_or(usize::MAX) > MAX_REPLY_BYTES {
+        if serde_json::to_string(payload)
+            .map(|s| s.len())
+            .unwrap_or(usize::MAX)
+            > MAX_REPLY_BYTES
+        {
             return Err("Reply message is too large.".into());
         }
     }
@@ -115,8 +123,8 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
 
 /// SSRF guard: only accept Discord incoming-webhook URLs as a forward target.
 pub fn validate_webhook(url: &str) -> Result<(), String> {
-    let parsed =
-        reqwest::Url::parse(url.trim()).map_err(|_| "Forward webhook must be a valid URL.".to_string())?;
+    let parsed = reqwest::Url::parse(url.trim())
+        .map_err(|_| "Forward webhook must be a valid URL.".to_string())?;
     if parsed.scheme() != "https" {
         return Err("Forward webhook must use https.".into());
     }
@@ -219,7 +227,10 @@ mod tests {
     #[test]
     fn reply_needs_text_or_payload() {
         let mut c = cfg(vec![field("f1")]);
-        c.reply = ReplyDef { payload: None, text: None };
+        c.reply = ReplyDef {
+            payload: None,
+            text: None,
+        };
         assert!(validate_config(&c).is_err());
         // A non-empty saved payload satisfies it even with no text.
         c.reply = ReplyDef {

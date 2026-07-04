@@ -126,14 +126,20 @@ pub struct ConnectRequest {
 /// host-role pickers. Never stores anything.
 pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectRequest>) -> Response {
     if !validate::is_snowflake(req.guild_id.trim()) {
-        return bad_request("That server id doesn't look right — it should be 17–20 digits.".into());
+        return bad_request(
+            "That server id doesn't look right — it should be 17–20 digits.".into(),
+        );
     }
     let Some(token) = state.config.default_bot_token.as_deref() else {
         return bad_request("This deployment has no giveaway bot configured, so role requirements can't be set up here.".into());
     };
     match crate::rest::connect(&state.http, token, req.guild_id.trim()).await {
         Ok(result) => Json(json!(result)).into_response(),
-        Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "error": e.message() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": e.message() })),
+        )
+            .into_response(),
     }
 }
 
@@ -141,7 +147,10 @@ pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectReque
 
 /// Create a new giveaway. Returns `{ id }`; the caller wraps it as
 /// `custom_id = "giveaway:<id>"`.
-pub async fn create_instance(State(state): State<AppState>, Json(cfg): Json<InstanceConfig>) -> Response {
+pub async fn create_instance(
+    State(state): State<AppState>,
+    Json(cfg): Json<InstanceConfig>,
+) -> Response {
     if let Err(e) = validate::validate_config(&cfg) {
         return bad_request(e);
     }
@@ -202,14 +211,23 @@ pub async fn get_instance(State(state): State<AppState>, Path(id): Path<String>)
 
 /// Discord interactions webhook. Verifies the signature on the raw body, then
 /// dispatches: PING → pong, component click → the giveaway action.
-pub async fn interactions(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let signature = headers.get("X-Signature-Ed25519").and_then(|v| v.to_str().ok());
-    let timestamp = headers.get("X-Signature-Timestamp").and_then(|v| v.to_str().ok());
+pub async fn interactions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let signature = headers
+        .get("X-Signature-Ed25519")
+        .and_then(|v| v.to_str().ok());
+    let timestamp = headers
+        .get("X-Signature-Timestamp")
+        .and_then(|v| v.to_str().ok());
     let (Some(signature), Some(timestamp)) = (signature, timestamp) else {
         return (StatusCode::UNAUTHORIZED, "missing signature").into_response();
     };
-    let key_hex = discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
-        .unwrap_or(&state.config.discord_public_key);
+    let key_hex =
+        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
+            .unwrap_or(&state.config.discord_public_key);
     if !discord::verify_signature(key_hex, signature, timestamp, &body) {
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
@@ -255,7 +273,9 @@ fn load_for_click(
     };
     match interaction.guild_id.as_deref() {
         Some(gid) if gid == g.config.guild_id => {}
-        Some(_) => return Err("This giveaway was set up for a different server, so it can't run here."),
+        Some(_) => {
+            return Err("This giveaway was set up for a different server, so it can't run here.")
+        }
         None => return Err("Use this inside the server, not in DMs."),
     }
     Ok(g)
@@ -271,16 +291,24 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
         Err(msg) => return Json(discord::ephemeral_text(msg)).into_response(),
     };
     let Some(uid) = interaction.actor_id() else {
-        return Json(discord::ephemeral_text("I couldn't tell who clicked — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell who clicked — try again.",
+        ))
+        .into_response();
     };
 
     // A host clicking Enter gets the control panel instead of entering — that's
     // how Draw / Reroll / Cancel are reached (the panel has an "enter as
     // participant" button for a host who also wants in).
-    if discord::is_host(interaction.actor_roles(), interaction.actor_permissions(), &g.config.host_roles) {
+    if discord::is_host(
+        interaction.actor_roles(),
+        interaction.actor_permissions(),
+        &g.config.host_roles,
+    ) {
         let entered = state.store.is_entered(id, uid).unwrap_or(false);
         let count = state.store.count_entries(id).unwrap_or(0);
-        let panel = discord::host_panel(id, g.status, entered, count, g.config.winner_count as usize);
+        let panel =
+            discord::host_panel(id, g.status, entered, count, g.config.winner_count as usize);
         // A host's click would otherwise spend its one reply on the (ephemeral)
         // panel and never touch the public message — so a giveaway only a host
         // ever clicks keeps its first-paint count / status forever. Instead,
@@ -289,7 +317,15 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
         // so the live count — and, post-draw, the winners + "ended" — land on the
         // message itself. Falls back to the panel as the direct reply when we
         // can't edit (no interaction token, or nothing editable).
-        return Json(host_enter_response(state, interaction, &g, id, count, panel)).into_response();
+        return Json(host_enter_response(
+            state,
+            interaction,
+            &g,
+            id,
+            count,
+            panel,
+        ))
+        .into_response();
     }
 
     let account_ms = discord::snowflake_to_unix_ms(uid);
@@ -353,7 +389,12 @@ fn handle_enter(state: &AppState, interaction: &discord::Interaction, id: &str) 
 /// click that finally refreshes the message after a draw, since a webhook message
 /// is editable only in reply to a click on it. Falls back to an ephemeral note if
 /// the message carried no components to edit.
-fn over_response(state: &AppState, interaction: &discord::Interaction, g: &Giveaway, id: &str) -> Response {
+fn over_response(
+    state: &AppState,
+    interaction: &discord::Interaction,
+    g: &Giveaway,
+    id: &str,
+) -> Response {
     let (label, note) = match g.status {
         Status::Cancelled => (
             LABEL_CANCELLED,
@@ -379,8 +420,15 @@ fn over_response(state: &AppState, interaction: &discord::Interaction, g: &Givea
             let count = state.store.count_entries(id).unwrap_or(0);
             let vars = render_vars(&g.config, count, g.winners.clone(), g.status);
             remember_refresher(state, interaction, id);
-            return Json(discord::update_message_from_template(msg, template, &vars, &enter, Some(label), true))
-                .into_response();
+            return Json(discord::update_message_from_template(
+                msg,
+                template,
+                &vars,
+                &enter,
+                Some(label),
+                true,
+            ))
+            .into_response();
         }
         if let Some(v) = discord::update_button_response(msg, &enter, Some(label), true) {
             remember_refresher(state, interaction, id);
@@ -393,13 +441,21 @@ fn over_response(state: &AppState, interaction: &discord::Interaction, g: &Givea
 /// Host panel "enter / leave as participant" (and the member-facing Leave button
 /// on the already-entered notice). Toggles the actor's own entry and updates the
 /// ephemeral panel in place.
-fn handle_toggle(state: &AppState, interaction: &discord::Interaction, id: &str, join: bool) -> Response {
+fn handle_toggle(
+    state: &AppState,
+    interaction: &discord::Interaction,
+    id: &str,
+    join: bool,
+) -> Response {
     let g = match load_for_click(state, interaction, id) {
         Ok(g) => g,
         Err(msg) => return Json(discord::ephemeral_text(msg)).into_response(),
     };
     let Some(uid) = interaction.actor_id() else {
-        return Json(discord::ephemeral_text("I couldn't tell who clicked — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell who clicked — try again.",
+        ))
+        .into_response();
     };
 
     if join {
@@ -408,12 +464,17 @@ fn handle_toggle(state: &AppState, interaction: &discord::Interaction, id: &str,
         let _ = state.store.leave(id, uid);
     }
 
-    let is_host = discord::is_host(interaction.actor_roles(), interaction.actor_permissions(), &g.config.host_roles);
+    let is_host = discord::is_host(
+        interaction.actor_roles(),
+        interaction.actor_permissions(),
+        &g.config.host_roles,
+    );
     if is_host {
         // Re-render the host panel in place (entered flag flipped).
         let entered = state.store.is_entered(id, uid).unwrap_or(join);
         let count = state.store.count_entries(id).unwrap_or(0);
-        let panel = discord::host_panel(id, g.status, entered, count, g.config.winner_count as usize);
+        let panel =
+            discord::host_panel(id, g.status, entered, count, g.config.winner_count as usize);
         Json(as_update(panel)).into_response()
     } else {
         // A plain member left via the already-entered notice.
@@ -425,12 +486,23 @@ fn handle_toggle(state: &AppState, interaction: &discord::Interaction, id: &str,
 
 /// Re-check that the actor is a host for this giveaway. Returns the deny reply
 /// when they aren't — never trust that only hosts can reach these custom_ids.
-fn require_host(state: &AppState, interaction: &discord::Interaction, id: &str) -> Result<Giveaway, Response> {
+// The Err *is* the HTTP reply, built at most once per denied click — boxing it
+// to shrink the variant would only add indirection.
+#[allow(clippy::result_large_err)]
+fn require_host(
+    state: &AppState,
+    interaction: &discord::Interaction,
+    id: &str,
+) -> Result<Giveaway, Response> {
     let g = match load_for_click(state, interaction, id) {
         Ok(g) => g,
         Err(msg) => return Err(Json(discord::ephemeral_text(msg)).into_response()),
     };
-    if !discord::is_host(interaction.actor_roles(), interaction.actor_permissions(), &g.config.host_roles) {
+    if !discord::is_host(
+        interaction.actor_roles(),
+        interaction.actor_permissions(),
+        &g.config.host_roles,
+    ) {
         return Err(Json(discord::ephemeral_text(
             "Only a server manager (or a configured host role) can do that.",
         ))
@@ -460,10 +532,13 @@ fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -
         .into_response();
     }
 
-    let winners = discord::choose_winners(&entrants, g.config.winner_count as usize, |bound| rand_below(bound));
+    let winners = discord::choose_winners(&entrants, g.config.winner_count as usize, rand_below);
     if let Err(e) = state.store.set_winners(id, &winners) {
         tracing::error!(error = %e, "set winners");
-        return Json(discord::ephemeral_text("Something went wrong drawing winners — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "Something went wrong drawing winners — try again.",
+        ))
+        .into_response();
     }
     maybe_dm_winners(state, &g.config, &winners);
 
@@ -476,7 +551,12 @@ fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -
     spawn_public_refresh(state, &ended, id, count);
 
     let vars = render_vars(&g.config, count, winners, Status::Ended);
-    Json(discord::announcement_message(&vars, false, g.config.announcement.as_deref())).into_response()
+    Json(discord::announcement_message(
+        &vars,
+        false,
+        g.config.announcement.as_deref(),
+    ))
+    .into_response()
 }
 
 fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
@@ -507,10 +587,13 @@ fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str)
         .into_response();
     }
 
-    let winners = discord::choose_winners(&pool, g.config.winner_count as usize, |bound| rand_below(bound));
+    let winners = discord::choose_winners(&pool, g.config.winner_count as usize, rand_below);
     if let Err(e) = state.store.set_winners(id, &winners) {
         tracing::error!(error = %e, "reroll set winners");
-        return Json(discord::ephemeral_text("Something went wrong rerolling — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "Something went wrong rerolling — try again.",
+        ))
+        .into_response();
     }
     maybe_dm_winners(state, &g.config, &winners);
 
@@ -521,7 +604,12 @@ fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str)
     spawn_public_refresh(state, &ended, id, entries);
 
     let vars = render_vars(&g.config, entries, winners, Status::Ended);
-    Json(discord::announcement_message(&vars, true, g.config.announcement.as_deref())).into_response()
+    Json(discord::announcement_message(
+        &vars,
+        true,
+        g.config.announcement.as_deref(),
+    ))
+    .into_response()
 }
 
 fn handle_cancel(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
@@ -530,16 +618,26 @@ fn handle_cancel(state: &AppState, interaction: &discord::Interaction, id: &str)
         Err(resp) => return resp,
     };
     if g.status == Status::Cancelled {
-        return Json(discord::ephemeral_text("This giveaway is already cancelled.")).into_response();
+        return Json(discord::ephemeral_text(
+            "This giveaway is already cancelled.",
+        ))
+        .into_response();
     }
     if let Err(e) = state.store.set_cancelled(id) {
         tracing::error!(error = %e, "cancel");
-        return Json(discord::ephemeral_text("Something went wrong cancelling — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "Something went wrong cancelling — try again.",
+        ))
+        .into_response();
     }
     // Refresh the public message to its cancelled state out of band (see the note
     // in `handle_draw`) — button disabled, status "cancelled".
     let count = state.store.count_entries(id).unwrap_or(0);
-    let cancelled = Giveaway { config: g.config.clone(), status: Status::Cancelled, winners: vec![] };
+    let cancelled = Giveaway {
+        config: g.config.clone(),
+        status: Status::Cancelled,
+        winners: vec![],
+    };
     spawn_public_refresh(state, &cancelled, id, count);
     // Tell everyone, publicly — entrants deserve to know it's off.
     Json(json!({
@@ -565,7 +663,12 @@ const LABEL_CANCELLED: &str = "\u{274C} Giveaway cancelled";
 /// carries — returned bare so it can also drive an out-of-band `@original` edit
 /// (the path that refreshes the message after a *host's* click). None when the
 /// message carried nothing editable (no stored template and no live components).
-fn live_message_data(g: &Giveaway, msg: &discord::MessageRef, id: &str, count: i64) -> Option<Value> {
+fn live_message_data(
+    g: &Giveaway,
+    msg: &discord::MessageRef,
+    id: &str,
+    count: i64,
+) -> Option<Value> {
     let enter = discord::enter_id(id);
     let vars = render_vars(&g.config, count, g.winners.clone(), g.status);
     let (label, disabled) = match g.status {
@@ -584,15 +687,23 @@ fn live_message_data(g: &Giveaway, msg: &discord::MessageRef, id: &str, count: i
                         .and_then(|c| discord::find_button_label(c, &enter))
                 })
                 .unwrap_or_else(|| "\u{1F389} Enter".to_string());
-            (discord::label_with_count(&discord::substitute(&base, &vars), count), false)
+            (
+                discord::label_with_count(&discord::substitute(&base, &vars), count),
+                false,
+            )
         }
         Status::Cancelled => (LABEL_CANCELLED.to_string(), true),
         Status::Ended => (LABEL_ENDED.to_string(), true),
     };
     let resp = match g.config.message_template.as_ref() {
-        Some(template) => {
-            discord::update_message_from_template(msg, template, &vars, &enter, Some(&label), disabled)
-        }
+        Some(template) => discord::update_message_from_template(
+            msg,
+            template,
+            &vars,
+            &enter,
+            Some(&label),
+            disabled,
+        ),
         None => discord::update_button_response(msg, &enter, Some(&label), disabled)?,
     };
     resp.get("data").cloned()
@@ -666,9 +777,9 @@ fn remember_refresher(state: &AppState, interaction: &discord::Interaction, id: 
 fn spawn_public_refresh(state: &AppState, g: &Giveaway, id: &str, count: i64) {
     let now = unix_millis();
     let captured = state.refreshers.lock().ok().and_then(|map| {
-        map.get(id).filter(|r| now - r.stored_at_ms < REFRESHER_TTL_MS).map(|r| {
-            (r.application_id.clone(), r.token.clone(), r.message.clone())
-        })
+        map.get(id)
+            .filter(|r| now - r.stored_at_ms < REFRESHER_TTL_MS)
+            .map(|r| (r.application_id.clone(), r.token.clone(), r.message.clone()))
     });
     let Some((app_id, token, message)) = captured else {
         return;
@@ -727,7 +838,12 @@ fn entry_count_update(
 
 /// Assemble the placeholder values for the giveaway's current state — the bridge
 /// from stored config + runtime to the pure renderer in `discord.rs`.
-fn render_vars(cfg: &InstanceConfig, entries: i64, winners: Vec<String>, status: Status) -> discord::RenderVars {
+fn render_vars(
+    cfg: &InstanceConfig,
+    entries: i64,
+    winners: Vec<String>,
+    status: Status,
+) -> discord::RenderVars {
     discord::RenderVars {
         prize: cfg.prize.clone(),
         entries,
@@ -743,7 +859,11 @@ fn render_vars(cfg: &InstanceConfig, entries: i64, winners: Vec<String>, status:
 /// renders the new state. Keeps `handle_draw` / `handle_reroll` from juggling a
 /// second store read.
 fn ended_giveaway(g: &Giveaway, winners: Vec<String>) -> Giveaway {
-    Giveaway { config: g.config.clone(), status: Status::Ended, winners }
+    Giveaway {
+        config: g.config.clone(),
+        status: Status::Ended,
+        winners,
+    }
 }
 
 /// Turn a freshly-built (type 4) ephemeral reply into an `UPDATE_MESSAGE` (type
@@ -767,7 +887,9 @@ fn maybe_dm_winners(state: &AppState, cfg: &InstanceConfig, winners: &[String]) 
     let content = discord::winner_dm_content(&cfg.prize);
     let winners = winners.to_vec();
     tokio::spawn(async move {
-        let futs = winners.iter().map(|w| crate::rest::dm_user(&http, &token, w, &content));
+        let futs = winners
+            .iter()
+            .map(|w| crate::rest::dm_user(&http, &token, w, &content));
         futures::future::join_all(futs).await;
     });
 }
@@ -808,11 +930,19 @@ fn bad_request(message: String) -> Response {
 }
 
 fn not_found() -> Response {
-    (StatusCode::NOT_FOUND, Json(json!({ "error": "Unknown instance." }))).into_response()
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "Unknown instance." })),
+    )
+        .into_response()
 }
 
 fn storage_error() -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Storage error." }))).into_response()
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({ "error": "Storage error." })),
+    )
+        .into_response()
 }
 
 #[cfg(test)]
@@ -922,7 +1052,10 @@ mod tests {
     fn entering_renders_placeholders_into_the_message_body_and_button() {
         let state = test_state();
         let id = "abc";
-        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        state
+            .store
+            .create(id, &config_with(Some(template(id))))
+            .unwrap();
 
         let resp = handle_component(&state, &enter_click(id, "555", "0", template(id)));
         let v = body_json(resp);
@@ -942,20 +1075,37 @@ mod tests {
     fn drawing_then_a_click_fills_the_winners_into_the_message() {
         let state = test_state();
         let id = "abc";
-        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        state
+            .store
+            .create(id, &config_with(Some(template(id))))
+            .unwrap();
         for u in ["100", "200", "300"] {
             state.store.enter(id, u).unwrap();
         }
 
         // A host draws — public announcement, winners recorded.
-        let drawn = body_json(handle_component(&state, &control_click(id, "draw", MANAGE_GUILD)));
+        let drawn = body_json(handle_component(
+            &state,
+            &control_click(id, "draw", MANAGE_GUILD),
+        ));
         assert_eq!(drawn["type"], 4);
-        let winner = state.store.get(id).unwrap().unwrap().winners.into_iter().next().unwrap();
+        let winner = state
+            .store
+            .get(id)
+            .unwrap()
+            .unwrap()
+            .winners
+            .into_iter()
+            .next()
+            .unwrap();
         assert!(["100", "200", "300"].contains(&winner.as_str()));
 
         // The next click on the original message refreshes it: winner mention in
         // the body, status ended, the Enter button disabled.
-        let over = body_json(handle_component(&state, &enter_click(id, "999", "0", template(id))));
+        let over = body_json(handle_component(
+            &state,
+            &enter_click(id, "999", "0", template(id)),
+        ));
         assert_eq!(over["type"], 7);
         let s = over.to_string();
         assert!(s.contains(&format!("<@{winner}>")), "{s}");
@@ -998,13 +1148,19 @@ mod tests {
     fn a_host_enter_click_refreshes_the_message_in_the_reply() {
         let state = test_state();
         let id = "abc";
-        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        state
+            .store
+            .create(id, &config_with(Some(template(id))))
+            .unwrap();
         state.store.enter(id, "100").unwrap();
         // With an interaction token, a manager's Enter click replies with an
         // UPDATE_MESSAGE that refreshes the public message (live count, status);
         // the control panel rides an ephemeral followup (skipped here — no async
         // runtime under the test executor — but the reply is what matters).
-        let resp = body_json(handle_component(&state, &host_enter_click(id, template(id))));
+        let resp = body_json(handle_component(
+            &state,
+            &host_enter_click(id, template(id)),
+        ));
         assert_eq!(resp["type"], 7);
         let s = resp.to_string();
         assert!(s.contains("In: 1"), "{s}");
@@ -1016,10 +1172,16 @@ mod tests {
     fn a_host_enter_click_without_a_token_falls_back_to_the_panel() {
         let state = test_state();
         let id = "abc";
-        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        state
+            .store
+            .create(id, &config_with(Some(template(id))))
+            .unwrap();
         // No interaction token (so we can't refresh the message) ⇒ reply with the
         // control panel directly, exactly as before the refresh existed.
-        let resp = body_json(handle_component(&state, &enter_click(id, "1", MANAGE_GUILD, template(id))));
+        let resp = body_json(handle_component(
+            &state,
+            &enter_click(id, "1", MANAGE_GUILD, template(id)),
+        ));
         assert_eq!(resp["type"], 4);
         assert!(resp.to_string().contains("Host controls"), "{resp}");
     }
@@ -1028,7 +1190,10 @@ mod tests {
     fn an_enter_click_captures_a_refresher_the_draw_can_reuse() {
         let state = test_state();
         let id = "abc";
-        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        state
+            .store
+            .create(id, &config_with(Some(template(id))))
+            .unwrap();
         state.store.enter(id, "100").unwrap();
 
         // A host opening the panel (token present) captures how to edit the
@@ -1057,13 +1222,19 @@ mod tests {
     fn drawing_after_a_captured_refresher_never_panics_without_a_runtime() {
         let state = test_state();
         let id = "abc";
-        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        state
+            .store
+            .create(id, &config_with(Some(template(id))))
+            .unwrap();
         state.store.enter(id, "100").unwrap();
         // Host opens the panel (captures a refresher), then draws: the out-of-band
         // public-message refresh is attempted but skipped for lack of an async
         // runtime under the test executor — the draw still answers normally.
         let _ = handle_component(&state, &host_enter_click(id, template(id)));
-        let drawn = body_json(handle_component(&state, &control_click(id, "draw", MANAGE_GUILD)));
+        let drawn = body_json(handle_component(
+            &state,
+            &control_click(id, "draw", MANAGE_GUILD),
+        ));
         assert_eq!(drawn["type"], 4); // public announcement
         assert!(drawn.to_string().contains("<@100>"), "{drawn}");
     }
@@ -1072,7 +1243,10 @@ mod tests {
     fn live_message_data_reflects_open_count_then_final_winners() {
         let state = test_state();
         let id = "abc";
-        state.store.create(id, &config_with(Some(template(id)))).unwrap();
+        state
+            .store
+            .create(id, &config_with(Some(template(id))))
+            .unwrap();
         let msg = discord::MessageRef {
             content: Some(String::new()),
             components: Some(template(id)),

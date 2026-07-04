@@ -115,11 +115,16 @@ pub async fn connect(
     guild_id: &str,
 ) -> Result<ConnectResult, ConnectError> {
     let me: SelfUser = get_json(http, token, &format!("{API_BASE}/users/@me")).await?;
-    let bot_name = me.global_name.clone().or(me.username.clone()).unwrap_or_else(|| "the bot".into());
+    let bot_name = me
+        .global_name
+        .clone()
+        .or(me.username.clone())
+        .unwrap_or_else(|| "the bot".into());
 
     // The guild doubles as our "is the bot in here?" probe (403/404 → not in).
     let guild: Guild = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}")).await?;
-    let roles: Vec<Role> = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/roles")).await?;
+    let roles: Vec<Role> =
+        get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/roles")).await?;
 
     // Drop @everyone (id == guild id) and managed (integration/booster) roles;
     // surface highest-first like the other plugins.

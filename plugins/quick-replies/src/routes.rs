@@ -80,16 +80,23 @@ pub struct ConnectRequest {
 /// Never stores anything — saving happens via `/api/instances`.
 pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectRequest>) -> Response {
     if !validate::is_snowflake(req.guild_id.trim()) {
-        return bad_request("That server id doesn't look right — it should be 17–20 digits.".into());
+        return bad_request(
+            "That server id doesn't look right — it should be 17–20 digits.".into(),
+        );
     }
     let Some(token) = state.config.default_bot_token.as_deref() else {
         return bad_request(
-            "This deployment has no shared bot configured, so role-gating can't be set up here.".into(),
+            "This deployment has no shared bot configured, so role-gating can't be set up here."
+                .into(),
         );
     };
     match rest::connect(&state.http, token, req.guild_id.trim()).await {
         Ok(result) => Json(json!(result)).into_response(),
-        Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "error": e.message() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": e.message() })),
+        )
+            .into_response(),
     }
 }
 
@@ -163,8 +170,9 @@ pub async fn interactions(
     let (Some(signature), Some(timestamp)) = (signature, timestamp) else {
         return (StatusCode::UNAUTHORIZED, "missing signature").into_response();
     };
-    let key_hex = discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
-        .unwrap_or(&state.config.discord_public_key);
+    let key_hex =
+        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
+            .unwrap_or(&state.config.discord_public_key);
     if !discord::verify_signature(key_hex, signature, timestamp, &body) {
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
@@ -197,7 +205,8 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
         }
         Err(e) => {
             tracing::error!(error = %e, "component lookup");
-            return Json(discord::ephemeral_text("Something went wrong on my end.")).into_response();
+            return Json(discord::ephemeral_text("Something went wrong on my end."))
+                .into_response();
         }
     };
 
@@ -229,7 +238,10 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
     }
 
     let Some(user_id) = interaction.actor_id() else {
-        return Json(discord::ephemeral_text("I couldn't tell who clicked — try again.")).into_response();
+        return Json(discord::ephemeral_text(
+            "I couldn't tell who clicked — try again.",
+        ))
+        .into_response();
     };
     let server_name = if cfg.guild_name.trim().is_empty() {
         "the server".to_string()
@@ -260,7 +272,11 @@ fn bad_request(message: String) -> Response {
 }
 
 fn not_found() -> Response {
-    (StatusCode::NOT_FOUND, Json(json!({ "error": "Unknown instance." }))).into_response()
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "Unknown instance." })),
+    )
+        .into_response()
 }
 
 fn storage_error() -> Response {

@@ -71,7 +71,11 @@ fn validate_reply(reply: &QuickReply, is_button: bool) -> Result<(), String> {
     if key_len == 0 || key_len > MAX_OPTION_FIELD {
         return Err("A reply key is missing or too long.".into());
     }
-    if !reply.key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+    if !reply
+        .key
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
         return Err("A reply key has invalid characters.".into());
     }
 
@@ -83,7 +87,9 @@ fn validate_reply(reply: &QuickReply, is_button: bool) -> Result<(), String> {
             return Err("Every topic needs a label for its dropdown option.".into());
         }
         if label.chars().count() > MAX_OPTION_FIELD {
-            return Err(format!("A topic label is too long (max {MAX_OPTION_FIELD} characters)."));
+            return Err(format!(
+                "A topic label is too long (max {MAX_OPTION_FIELD} characters)."
+            ));
         }
     }
 
@@ -102,13 +108,17 @@ fn validate_reply(reply: &QuickReply, is_button: bool) -> Result<(), String> {
 
     if let Some(desc) = reply.description.as_deref() {
         if desc.chars().count() > MAX_OPTION_FIELD {
-            return Err(format!("A topic description is too long (max {MAX_OPTION_FIELD} characters)."));
+            return Err(format!(
+                "A topic description is too long (max {MAX_OPTION_FIELD} characters)."
+            ));
         }
     }
 
     if let Some(title) = reply.title.as_deref() {
         if title.chars().count() > MAX_TITLE {
-            return Err(format!("A reply title is too long (max {MAX_TITLE} characters)."));
+            return Err(format!(
+                "A reply title is too long (max {MAX_TITLE} characters)."
+            ));
         }
     }
 
@@ -132,7 +142,11 @@ fn validate_reply(reply: &QuickReply, is_button: bool) -> Result<(), String> {
         return Err(format!("A reply is too long (max {MAX_BODY} characters)."));
     }
     if let Some(payload) = &reply.payload {
-        if serde_json::to_string(payload).map(|s| s.len()).unwrap_or(usize::MAX) > MAX_PAYLOAD_BYTES {
+        if serde_json::to_string(payload)
+            .map(|s| s.len())
+            .unwrap_or(usize::MAX)
+            > MAX_PAYLOAD_BYTES
+        {
             return Err("That saved message is too large to send.".into());
         }
     }
@@ -145,7 +159,9 @@ fn validate_reply(reply: &QuickReply, is_button: bool) -> Result<(), String> {
 /// and name length.
 fn validate_roles(roles: &[RoleRef]) -> Result<(), String> {
     if roles.len() > MAX_ROLES {
-        return Err(format!("Too many roles on one reply's gate (max {MAX_ROLES})."));
+        return Err(format!(
+            "Too many roles on one reply's gate (max {MAX_ROLES})."
+        ));
     }
     let mut seen = HashSet::new();
     for role in roles {
@@ -312,16 +328,28 @@ mod tests {
     #[test]
     fn validates_gate_roles() {
         let mut r = reply("k1", "a");
-        r.allowed_roles = vec![RoleRef { id: "nope".into(), name: "Bad".into(), color: 0 }];
+        r.allowed_roles = vec![RoleRef {
+            id: "nope".into(),
+            name: "Bad".into(),
+            color: 0,
+        }];
         assert!(validate_config(&cfg("button", vec![r])).is_err());
 
         let mut dup = reply("k1", "a");
-        let role = RoleRef { id: "123456789012345678".into(), name: "Sub".into(), color: 0 };
+        let role = RoleRef {
+            id: "123456789012345678".into(),
+            name: "Sub".into(),
+            color: 0,
+        };
         dup.allowed_roles = vec![role.clone(), role];
         assert!(validate_config(&cfg("button", vec![dup])).is_err());
 
         let mut ok = reply("k1", "a");
-        ok.allowed_roles = vec![RoleRef { id: "123456789012345678".into(), name: "Sub".into(), color: 0 }];
+        ok.allowed_roles = vec![RoleRef {
+            id: "123456789012345678".into(),
+            name: "Sub".into(),
+            color: 0,
+        }];
         assert!(validate_config(&cfg("button", vec![ok])).is_ok());
     }
 }

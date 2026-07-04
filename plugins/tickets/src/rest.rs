@@ -195,15 +195,28 @@ pub async fn connect(
     guild_id: &str,
 ) -> Result<ConnectResult, ConnectError> {
     let me: SelfUser = get_json(http, token, &format!("{API_BASE}/users/@me")).await?;
-    let bot_name = me.global_name.clone().or(me.username.clone()).unwrap_or_else(|| "the bot".into());
+    let bot_name = me
+        .global_name
+        .clone()
+        .or(me.username.clone())
+        .unwrap_or_else(|| "the bot".into());
 
     // The guild doubles as our "is the bot in here?" probe (403/404 → not in).
     let guild: Guild = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}")).await?;
-    let roles: Vec<Role> = get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/roles")).await?;
-    let channels: Vec<Channel> =
-        get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/channels")).await?;
-    let bot_member: BotMember =
-        get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/members/{}", me.id)).await?;
+    let roles: Vec<Role> =
+        get_json(http, token, &format!("{API_BASE}/guilds/{guild_id}/roles")).await?;
+    let channels: Vec<Channel> = get_json(
+        http,
+        token,
+        &format!("{API_BASE}/guilds/{guild_id}/channels"),
+    )
+    .await?;
+    let bot_member: BotMember = get_json(
+        http,
+        token,
+        &format!("{API_BASE}/guilds/{guild_id}/members/{}", me.id),
+    )
+    .await?;
 
     // Union the bot's role permissions to see what it can actually do.
     let mut bits: u64 = 0;
@@ -235,7 +248,11 @@ pub async fn connect(
     let mut categories: Vec<ChannelView> = Vec::new();
     let mut text_channels: Vec<ChannelView> = Vec::new();
     for c in channels {
-        let view = ChannelView { id: c.id, name: c.name, position: c.position };
+        let view = ChannelView {
+            id: c.id,
+            name: c.name,
+            position: c.position,
+        };
         match c.kind {
             CHANNEL_GUILD_CATEGORY => categories.push(view),
             CHANNEL_GUILD_TEXT => text_channels.push(view),
@@ -330,7 +347,10 @@ pub async fn create_channel(
     struct Created {
         id: String,
     }
-    resp.json::<Created>().await.map(|c| c.id).map_err(|_| RestError::Busy)
+    resp.json::<Created>()
+        .await
+        .map(|c| c.id)
+        .map_err(|_| RestError::Busy)
 }
 
 /// Post a message into a channel; returns the message id when Discord reports one.
@@ -390,7 +410,13 @@ pub async fn rename_channel(
     channel_id: &str,
     name: &str,
 ) -> Result<(), RestError> {
-    patch_channel(http, token, channel_id, &serde_json::json!({ "name": clamp(name, 100) })).await
+    patch_channel(
+        http,
+        token,
+        channel_id,
+        &serde_json::json!({ "name": clamp(name, 100) }),
+    )
+    .await
 }
 
 async fn patch_channel(
@@ -428,7 +454,9 @@ pub async fn set_overwrite(
     deny: u64,
 ) -> Result<(), RestError> {
     let resp = http
-        .put(format!("{API_BASE}/channels/{channel_id}/permissions/{target_id}"))
+        .put(format!(
+            "{API_BASE}/channels/{channel_id}/permissions/{target_id}"
+        ))
         .header("Authorization", auth(token))
         .json(&serde_json::json!({
             "type": kind,
@@ -463,7 +491,12 @@ pub async fn fetch_recent_messages(
         if let Some(b) = &before {
             url.push_str(&format!("&before={b}"));
         }
-        let resp = match http.get(&url).header("Authorization", auth(token)).send().await {
+        let resp = match http
+            .get(&url)
+            .header("Authorization", auth(token))
+            .send()
+            .await
+        {
             Ok(r) if r.status().is_success() => r,
             _ => break,
         };
@@ -475,7 +508,11 @@ pub async fn fetch_recent_messages(
         if raw.is_empty() {
             break;
         }
-        before = raw.last().and_then(|m| m.get("id")).and_then(|v| v.as_str()).map(String::from);
+        before = raw
+            .last()
+            .and_then(|m| m.get("id"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let n = raw.len();
         for m in raw {
             if let Ok(msg) = serde_json::from_value::<RawMessage>(m) {
