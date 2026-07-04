@@ -25,6 +25,7 @@ import {
   getStripe,
   isCheckoutConfigured,
   openBillingPortal,
+  type BillingInterval,
   type PaidTier,
 } from "@/core/plan/stripeApi";
 import type { PlanTier } from "@/core/guild/api";
@@ -33,14 +34,16 @@ import styles from "./PricingModal.module.css";
 interface TierDef {
   id: PlanTier;
   name: string;
-  price: string;
+  /** Display price per interval (annual = 2 months free). */
+  monthly: string;
+  yearly: string;
   tagline: string;
 }
 
 const TIERS: TierDef[] = [
-  { id: "free", name: "Free", price: "$0", tagline: "Build & send" },
-  { id: "plus", name: "Plus", price: "$5", tagline: "Automate & persist" },
-  { id: "pro", name: "Pro", price: "$10", tagline: "Run a community" },
+  { id: "free", name: "Free", monthly: "$0", yearly: "$0", tagline: "Build & send" },
+  { id: "plus", name: "Plus", monthly: "$5", yearly: "$50", tagline: "Automate & persist" },
+  { id: "pro", name: "Pro", monthly: "$10", yearly: "$100", tagline: "Run a community" },
 ];
 
 /** The metered quotas, in the shipped default numbers (`server/src/config.rs`). */
@@ -73,10 +76,12 @@ export function PricingModal() {
   const [starting, setStarting] = useState<PaidTier | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
   const [done, setDone] = useState(false);
+  // Billing interval the Upgrade buttons buy — set by the Monthly/Annual toggle.
+  const [period, setPeriod] = useState<BillingInterval>("month");
 
   const startCheckout = async (tier: PaidTier) => {
     setStarting(tier);
-    const res = await createCheckout(tier);
+    const res = await createCheckout(tier, period);
     setStarting(null);
     if (!res.ok) {
       pushToast(res.error, "error");
@@ -175,6 +180,26 @@ export function PricingModal() {
         ) : null}
       </p>
 
+      <div className={styles.periodToggle} role="group" aria-label="Billing interval">
+        <button
+          type="button"
+          className={cn(styles.periodBtn, period === "month" && styles.periodActive)}
+          aria-pressed={period === "month"}
+          onClick={() => setPeriod("month")}
+        >
+          Monthly
+        </button>
+        <button
+          type="button"
+          className={cn(styles.periodBtn, period === "year" && styles.periodActive)}
+          aria-pressed={period === "year"}
+          onClick={() => setPeriod("year")}
+        >
+          Annual
+          <span className={styles.periodSave}>2 months free</span>
+        </button>
+      </div>
+
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
@@ -191,8 +216,8 @@ export function PricingModal() {
                   >
                     <span className={styles.tierName}>{t.name}</span>
                     <span className={styles.tierPrice}>
-                      {t.price}
-                      <span className={styles.per}>/mo</span>
+                      {period === "year" ? t.yearly : t.monthly}
+                      <span className={styles.per}>{period === "year" ? "/yr" : "/mo"}</span>
                     </span>
                     <span className={styles.tierTagline}>{t.tagline}</span>
                     {currentTier === t.id ? (

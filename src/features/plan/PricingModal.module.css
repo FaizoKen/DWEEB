@@ -9,6 +9,41 @@
   font-weight: 600;
 }
 
+/* Monthly / Annual switch above the table. */
+.periodToggle {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0 0 14px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--app-bg-hover);
+}
+.periodBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text-muted);
+}
+.periodActive {
+  background: var(--app-bg-elevated);
+  color: var(--app-text);
+}
+.periodSave {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--app-accent);
+}
+
 /* Horizontal scroll container so the table never forces the page to scroll. */
 .tableWrap {
   overflow-x: auto;

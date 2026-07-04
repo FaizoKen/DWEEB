@@ -289,11 +289,13 @@ impl StripeClient {
         uid: &str,
         name: &str,
         tier: &str,
+        interval: &str,
     ) -> Result<String, String> {
+        let key = checkout_key(tier, interval);
         let price = self
             .checkout_price
-            .get(tier)
-            .ok_or_else(|| format!("no checkout price configured for tier '{tier}'"))?;
+            .get(&key)
+            .ok_or_else(|| format!("no checkout price configured for '{key}'"))?;
         let customer = self.get_or_create_customer(store, uid, name).await?;
         let mut form = vec![
             ("mode".into(), "subscription".into()),
@@ -567,6 +569,16 @@ fn id_of(v: &Value) -> Option<String> {
     }
 }
 
+/// The `stripe_checkout_price` map key for a (tier, interval): monthly is the
+/// bare tier, yearly appends `_year` (e.g. "pro" → monthly, "pro_year" → annual).
+fn checkout_key(tier: &str, interval: &str) -> String {
+    if interval == "year" {
+        format!("{tier}_year")
+    } else {
+        tier.to_string()
+    }
+}
+
 // ── Combined state (mirror + client) held in AppState ────────────────────────
 
 pub struct StripeState {
@@ -638,6 +650,9 @@ fn require_stripe(st: &AppState) -> Result<&std::sync::Arc<StripeState>, AppErro
 pub struct CheckoutBody {
     /// The DWEEB tier to buy: "plus" or "pro".
     pub tier: String,
+    /// Billing interval: "month" (default) or "year".
+    #[serde(default)]
+    pub interval: Option<String>,
 }
 
 /// `POST /api/stripe/checkout` `{ tier }` → `{ client_secret }` for the FE's
@@ -658,9 +673,22 @@ pub async fn checkout(
             retry_after: None,
         });
     }
+    let interval = body
+        .interval
+        .as_deref()
+        .unwrap_or("month")
+        .trim()
+        .to_lowercase();
+    if interval != "month" && interval != "year" {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "Unknown billing interval.".into(),
+            retry_after: None,
+        });
+    }
     let client_secret = stripe
         .client
-        .create_embedded_checkout(&stripe.store, &session.uid, &session.name, &tier)
+        .create_embedded_checkout(&stripe.store, &session.uid, &session.name, &tier, &interval)
         .await
         .map_err(|e| AppError::BadGateway(format!("Couldn't start checkout: {e}")))?;
     Ok((
@@ -822,6 +850,14 @@ mod tests {
         assert!(!f.5);
         // Not a subscription → None.
         assert!(extract_sub_fields(&json!({ "foo": 1 })).is_none());
+    }
+
+    #[test]
+    fn checkout_key_maps_tier_and_interval() {
+        assert_eq!(checkout_key("plus", "month"), "plus");
+        assert_eq!(checkout_key("pro", "month"), "pro");
+        assert_eq!(checkout_key("plus", "year"), "plus_year");
+        assert_eq!(checkout_key("pro", "year"), "pro_year");
     }
 
     #[test]

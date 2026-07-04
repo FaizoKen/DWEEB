@@ -33,17 +33,24 @@ export function isCheckoutConfigured(): boolean {
 /** A DWEEB tier that can be purchased. */
 export type PaidTier = "plus" | "pro";
 
+/** Billing interval for a subscription. */
+export type BillingInterval = "month" | "year";
+
 export type CheckoutResult = { ok: true; clientSecret: string } | { ok: false; error: string };
 
-/** `POST /api/stripe/checkout` `{ tier }` → the embedded Checkout client secret. */
-export async function createCheckout(tier: PaidTier): Promise<CheckoutResult> {
+/** `POST /api/stripe/checkout` `{ tier, interval }` → the embedded Checkout
+ *  client secret. `interval` defaults to monthly. */
+export async function createCheckout(
+  tier: PaidTier,
+  interval: BillingInterval = "month",
+): Promise<CheckoutResult> {
   let res: Response;
   try {
     res = await fetch(`${PROXY_BASE_URL}/api/stripe/checkout`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tier }),
+      body: JSON.stringify({ tier, interval }),
     });
   } catch {
     return { ok: false, error: "Couldn't reach the billing service." };

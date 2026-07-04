@@ -194,8 +194,9 @@ pub struct Config {
     /// price_id → entitlement slots: the shared-SKU map (the same prices
     /// RoleLogic sells). From `STRIPE_PRICE_SLOTS` (JSON `{price_id: slots}`).
     pub stripe_price_slots: HashMap<String, i64>,
-    /// DWEEB tier → the price id its in-app checkout buys (keys "plus"/"pro").
-    /// From `STRIPE_CHECKOUT_PRICE_PLUS` / `_PRO`.
+    /// (tier, interval) → the price id its in-app checkout buys. Keys are
+    /// "plus"/"pro" (monthly) and "plus_year"/"pro_year" (annual). From
+    /// `STRIPE_CHECKOUT_PRICE_PLUS[_YEAR]` / `_PRO[_YEAR]`.
     pub stripe_checkout_price: HashMap<String, String>,
     /// Optional fixed TaxRate id (`txr_…`) added on top at checkout (parity with
     /// RoleLogic's manual-tax path). None ⇒ no tax line.
@@ -306,12 +307,20 @@ impl Config {
         let stripe_price_slots = opt_env("STRIPE_PRICE_SLOTS")
             .and_then(|s| serde_json::from_str::<HashMap<String, i64>>(&s).ok())
             .unwrap_or_default();
+        // Keys are "plus"/"pro" (monthly) and "plus_year"/"pro_year" (annual);
+        // see `stripe::checkout_key`.
         let mut stripe_checkout_price = HashMap::new();
         if let Some(p) = opt_env("STRIPE_CHECKOUT_PRICE_PLUS") {
             stripe_checkout_price.insert("plus".to_string(), p);
         }
         if let Some(p) = opt_env("STRIPE_CHECKOUT_PRICE_PRO") {
             stripe_checkout_price.insert("pro".to_string(), p);
+        }
+        if let Some(p) = opt_env("STRIPE_CHECKOUT_PRICE_PLUS_YEAR") {
+            stripe_checkout_price.insert("plus_year".to_string(), p);
+        }
+        if let Some(p) = opt_env("STRIPE_CHECKOUT_PRICE_PRO_YEAR") {
+            stripe_checkout_price.insert("pro_year".to_string(), p);
         }
         let stripe_tax_rate_id = opt_env("STRIPE_TAX_RATE_ID");
         let stripe_db_path = opt_env("STRIPE_DB_PATH").unwrap_or_else(|| "stripe.db".to_string());
