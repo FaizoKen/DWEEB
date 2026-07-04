@@ -48,17 +48,25 @@ function devHttps(): ServerOptions["https"] {
 function buildCsp(inlineScriptHashes: readonly string[]): string {
   return [
     "default-src 'self'",
-    ["script-src 'self' https://www.googletagmanager.com", ...inlineScriptHashes].join(" "),
+    // `js.stripe.com` is the embedded Checkout / Elements library (loaded by
+    // @stripe/stripe-js in the pricing modal).
+    [
+      "script-src 'self' https://www.googletagmanager.com https://js.stripe.com",
+      ...inlineScriptHashes,
+    ].join(" "),
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' https: data: blob:",
     "media-src 'self' https: blob:",
     "font-src 'self' data:",
     // `wss:` covers the embedded Activity's collaboration WebSocket (rewritten to
     // a same-origin `/.proxy` socket inside Discord, but allowed broadly so a
-    // self-hosted proxy on any host works too).
+    // self-hosted proxy on any host works too). `https:` already covers Stripe's
+    // API + telemetry hosts (api.stripe.com, m.stripe.com, …).
     "connect-src 'self' https: wss:",
-    // Plugins render their config UI in iframes under *.dweeb.faizo.net.
-    "frame-src 'self' https://*.dweeb.faizo.net",
+    // Plugins render their config UI in iframes under *.dweeb.faizo.net; Stripe's
+    // embedded Checkout renders its payment form + 3-D Secure step in iframes from
+    // js.stripe.com / checkout.stripe.com / hooks.stripe.com.
+    "frame-src 'self' https://*.dweeb.faizo.net https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com",
     "base-uri 'self'",
     "form-action 'self'",
   ].join("; ");
