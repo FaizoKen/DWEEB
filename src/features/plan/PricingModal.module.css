@@ -9,6 +9,22 @@
   font-weight: 600;
 }
 
+/* "Already covered by another member" callout — steers a second mod away from
+   stacking a redundant subscription on a server someone else already pays for. */
+.coveredNote {
+  margin: 0 0 14px;
+  padding: 8px 11px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
+  background: color-mix(in srgb, var(--app-accent) 10%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+.coveredNote strong {
+  font-weight: 600;
+}
+
 /* Monthly / Annual switch above the table. */
 .periodToggle {
   display: inline-flex;

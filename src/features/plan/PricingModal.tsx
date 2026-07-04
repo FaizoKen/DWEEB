@@ -181,6 +181,12 @@ export function PricingModal() {
 
   const canManage = billing && subs != null && subs.length > 0;
   const canUpgradeHere = billing && !!guildId;
+  // Whether one of *my* subscriptions covers this server. If the server is
+  // already on a paid tier but none of my subs is bound to it, another member is
+  // paying — surfaced below so a second mod doesn't stack a redundant sub.
+  const iCoverThisServer = (subs ?? []).some((s) => s.guildId === guildId);
+  const coveredByOther =
+    subs != null && !!guildId && currentTier != null && currentTier !== "free" && !iCoverThisServer;
 
   return (
     <Modal
@@ -218,6 +224,13 @@ export function PricingModal() {
           <> Connect a server to upgrade it.</>
         ) : null}
       </p>
+
+      {coveredByOther ? (
+        <p className={styles.coveredNote}>
+          This server is already on <strong>{tierName(currentTier!)}</strong>, covered by another
+          member — you don’t need to buy it again (a second subscription would stack on top).
+        </p>
+      ) : null}
 
       <div className={styles.periodToggle} role="group" aria-label="Billing interval">
         <button

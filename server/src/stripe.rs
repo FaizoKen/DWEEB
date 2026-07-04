@@ -3,10 +3,12 @@
 //! Premium is sold **per Discord server** (MEE6/Dyno-style): a subscription is
 //! bound to one `guild_id` (stamped as subscription metadata at checkout) and
 //! grants that server its tier. DWEEB reads Stripe **directly** — its own
-//! embedded Checkout, its own webhook, its own local subscription mirror — using
-//! its own dedicated price IDs, so its billing is fully independent of the sibling
-//! RoleLogic app (RoleLogic being down never affects DWEEB). Stripe is the single
-//! source of truth.
+//! embedded Checkout, its own webhook, its own local subscription mirror. It
+//! shares the **same** Stripe account + price IDs as the sibling RoleLogic app on
+//! purpose: one subscription is recognised by both, so a single payment grants
+//! RoleLogic (per user) *and* DWEEB (per bound server) — a combined bundle. There
+//! is still **no runtime dependency** on RoleLogic (it being down never affects
+//! DWEEB). Stripe is the single source of truth.
 //!
 //! Entitlement flows per server: the webhook keeps the local `stripe_subscriptions`
 //! mirror current; [`StripeState::active_slots_for`] reads that mirror for a guild
