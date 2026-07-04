@@ -4,6 +4,12 @@ import { VitePWA } from "vite-plugin-pwa";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
+
+// Build version, read from package.json and injected as `__APP_VERSION__` so the
+// crash reporter (src/core/telemetry) can pin a report to a deploy. A literal
+// string, so it's inlined and tree-shakeable — no runtime `import` of the JSON.
+const APP_VERSION: string = createRequire(import.meta.url)("./package.json").version;
 
 // Serve the dev server over HTTPS when a locally-trusted cert is present.
 //
@@ -122,6 +128,9 @@ function injectSecurityMeta(): Plugin {
 // still publishes a 404.html copy of the shell so stray deep links load
 // the app.)
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [
     react(),
     injectSecurityMeta(),

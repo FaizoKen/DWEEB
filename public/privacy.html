@@ -149,7 +149,7 @@
     <main>
       <a class="back" href="/">← Back to DWEEB</a>
       <h1>Privacy Policy</h1>
-      <p class="meta">Last updated: 11 June 2026</p>
+      <p class="meta">Last updated: 4 July 2026</p>
 
       <div class="tldr">
         <strong>The short version.</strong> DWEEB runs in your browser. Your message
@@ -157,8 +157,9 @@
         local storage and are never uploaded to us. You don't need an account to use the
         editor. A few opt-in features talk to third parties only when you use them — signing in
         with Discord, the AI assistant, and any plugin you attach (which can receive
-        data such as a webhook URL you select for it). We use privacy-respecting analytics and do
-        not sell your data.
+        data such as a webhook URL you select for it). We use privacy-respecting analytics, and if
+        the app hits an unexpected error we send an automatic crash report that contains only
+        technical diagnostics — never your message content. We do not sell your data.
       </div>
 
       <p>
@@ -264,7 +265,23 @@
         >, a browser "Do Not Track" / privacy setting, or a content blocker.
       </p>
 
-      <h2>7. Hosting and server logs</h2>
+      <h2>7. Crash reports (diagnostics)</h2>
+      <p>
+        Because DWEEB runs entirely in your browser, a bug that breaks the editor is otherwise
+        invisible to us. When an unexpected runtime error occurs, DWEEB sends a small, automatic
+        <strong>crash report</strong> to our proxy so we can find and fix it. A report contains only
+        technical diagnostics: the error message and a few lines of the code stack trace, the app
+        version, and the page <em>path</em> (for example <code>/templates</code>). It
+        <strong>never includes your message content</strong> — in particular it never includes the
+        <code>#</code> hash fragment where a draft or share link lives — and it carries no account,
+        webhook URL, API key, or other input you typed. Reports are de-duplicated and rate-limited so
+        a single bug can't flood us, and they're written to our short-lived server logs, not a user
+        profile. Because they contain no personal data and are essential to keeping the app working,
+        crash reports aren't separately opt-in; if you'd rather send nothing at all, a content blocker
+        or "Do Not Track" setting that blocks requests to our proxy will suppress them.
+      </p>
+
+      <h2>8. Hosting and server logs</h2>
       <p>
         The site is hosted on GitHub Pages. Like most web infrastructure, our hosting and the
         Discord login proxy process technical data such as IP addresses to deliver the service,
@@ -272,7 +289,7 @@
         profiles.
       </p>
 
-      <h2>8. Cookies</h2>
+      <h2>9. Cookies</h2>
       <ul>
         <li>
           <strong>Session cookie</strong> — set only when you sign in with Discord (encrypted,
@@ -282,7 +299,7 @@
       </ul>
       <p class="muted">We do not use advertising or cross-site tracking cookies.</p>
 
-      <h2>9. Third-party services</h2>
+      <h2>10. Third-party services</h2>
       <p>DWEEB relies on these third parties, each with its own privacy policy:</p>
       <ul>
         <li><a href="https://discord.com/privacy" target="_blank" rel="noopener noreferrer">Discord</a> — webhooks, sign-in, and server data.</li>
@@ -292,7 +309,7 @@
         <li>Any plugin you choose to attach to a component — each runs as an independent service with its own privacy policy.</li>
       </ul>
 
-      <h2>10. Data retention</h2>
+      <h2>11. Data retention</h2>
       <p>
         Because most data lives in your browser, you control its retention — it persists until you
         clear it. The Discord session cookie expires automatically and on sign-out. Server-side
@@ -301,13 +318,13 @@
         after 7 days.
       </p>
 
-      <h2>11. Children</h2>
+      <h2>12. Children</h2>
       <p>
         DWEEB is not directed to children. You must meet Discord's minimum age requirement (at least
         13, or older where your local law requires) to use Discord-related features.
       </p>
 
-      <h2>12. Your rights</h2>
+      <h2>13. Your rights</h2>
       <p>
         Depending on where you live (e.g. under the GDPR or CCPA), you may have rights to access,
         correct, or delete personal data. In practice, most of your data is local and already under
@@ -316,14 +333,14 @@
         below.
       </p>
 
-      <h2>13. Changes to this policy</h2>
+      <h2>14. Changes to this policy</h2>
       <p>
         We may update this policy from time to time. Material changes will be reflected by updating
         the "Last updated" date above. Continued use of DWEEB after a change means you accept the
         revised policy.
       </p>
 
-      <h2>14. Contact</h2>
+      <h2>15. Contact</h2>
       <p>
         Questions about privacy? Email
         <a href="mailto:mail@faizo.net">mail@faizo.net</a> or join the

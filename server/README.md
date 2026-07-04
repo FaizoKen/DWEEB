@@ -55,6 +55,7 @@ be in.
 | POST   | `/api/guilds/:id/custom-apps/:application_id/webhook` | ✓ | `{ url }` — one-click `webhook.incoming` under that bot, using its stored secret |
 | POST   | `/api/shortlink`              | —    | `201 { id, expires_at }` — stores a share token for 7 days |
 | GET    | `/api/shortlink/:id`          | —    | `{ token }`, or 404 once expired/unknown |
+| POST   | `/api/telemetry/crash`        | —    | `204` — records a content-free frontend crash report to the log (target `web_crash`) |
 | POST   | `/api/schedules`              | opt. | `201 { id, manage_token, next_run_at }` — schedule a post (manage token returned once) |
 | GET    | `/api/schedules`              | ✓    | the signed-in user's schedules (cross-device) |
 | GET    | `/api/guilds/:id/schedules`   | ✓    | every schedule for a server (Manage Webhooks gated) |

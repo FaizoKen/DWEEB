@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { reportBoundaryError } from "@/core/telemetry/reporter";
 
 interface State {
   error: Error | null;
@@ -18,6 +19,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
 
   componentDidCatch(error: Error): void {
     console.error("[ErrorBoundary]", error);
+    // A boundary swallows the error before it reaches window.onerror, so report
+    // it here or it goes uncounted. Best-effort and self-gating.
+    reportBoundaryError(error);
   }
 
   private reset = () => {

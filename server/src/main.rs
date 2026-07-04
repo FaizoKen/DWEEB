@@ -29,6 +29,7 @@ mod seal;
 mod session;
 mod shortlink;
 mod singleflight;
+mod telemetry;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -339,6 +340,15 @@ async fn run() {
             post(shortlink_create).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route("/api/shortlink/:id", get(shortlink_resolve))
+        // Frontend crash telemetry: the browser's global error handlers beacon a
+        // content-free crash report (message, a few stack frames, version, URL
+        // path — never the `#hash` payload) so runtime errors in the wild are
+        // visible in the proxy logs. Unauthenticated by necessity (a crash can
+        // precede login) and bounded tight in the handler (see `telemetry`).
+        .route(
+            "/api/telemetry/crash",
+            post(telemetry::crash_report).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
+        )
         // Scheduled posts (opt-in; webhook + payload sealed at rest, fired by a
         // background worker). Create/list need only an optional session; per-row
         // management is authorized by a manage token or the owning account. The

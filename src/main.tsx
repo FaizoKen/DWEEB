@@ -2,7 +2,13 @@ import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { isActivityMode } from "@/core/activity/runtime";
+import { installCrashReporter } from "@/core/telemetry/reporter";
 import "@/styles/global.css";
+
+// Trap uncaught errors and dropped promises as early as possible — before either
+// surface boots — so a crash during startup is reported too. Self-gates to a
+// production build with a configured proxy; a no-op otherwise.
+installCrashReporter();
 
 // Discord launches the Activity at our domain root with `?frame_id=…` in the
 // query (the Developer Portal's Root Mapping points there). Detect that and boot

@@ -13,8 +13,12 @@ backend, no account, no database.
 your device and share links keep their data in the URL fragment — nothing is
 uploaded to us. The only data that leaves your browser is what you opt into
 sending: signing in with Discord, the AI assistant, or a plugin you attach.
-That makes DWEEB a security-conscious choice for sensitive announcements
-and for large communities and teams.
+The one exception is automatic: if the app hits an unexpected runtime error it
+sends a small, content-free **crash report** (the error message, a few stack
+frames, the version, and the URL path — never your message content or the
+`#`-fragment payload) so bugs in the wild are fixable. That makes DWEEB a
+security-conscious choice for sensitive announcements and for large communities
+and teams.
 
 DWEEB is **source-available** and **free for noncommercial use** under the
 [PolyForm Noncommercial License 1.0.0](LICENSE). The code lives on GitHub at

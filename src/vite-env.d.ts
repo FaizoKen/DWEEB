@@ -1,6 +1,10 @@
 /// <reference types="vite/client" />
 /// <reference types="vite-plugin-pwa/client" />
 
+// App build version, inlined at build time via Vite's `define` (see
+// vite.config.ts). Read by the crash reporter to pin a report to a deploy.
+declare const __APP_VERSION__: string;
+
 // Build-time configuration for the optional DWEEB proxy (see `server/` and
 // `.env.example`). Both are optional: with no base URL the guild features stay
 // dormant and the app behaves as a pure client-side builder.
