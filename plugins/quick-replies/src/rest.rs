@@ -163,7 +163,7 @@ pub async fn connect(
             managed: r.managed,
         })
         .collect();
-    role_views.sort_by(|a, b| b.position.cmp(&a.position));
+    role_views.sort_by_key(|r| std::cmp::Reverse(r.position));
 
     // Keep only usable custom emoji (real id, available); standard unicode emoji
     // (null id) are offered client-side, so we don't echo them here.

@@ -220,7 +220,7 @@ async fn run() {
         })
         .collect();
     // Longest prefix first, so "modalform-v2:" beats "modalform" if both exist.
-    routes.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    routes.sort_by_key(|r| std::cmp::Reverse(r.0.len()));
     for (prefix, base) in &routes {
         tracing::info!(prefix, upstream = %base, "route registered");
     }

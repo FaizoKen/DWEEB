@@ -139,7 +139,7 @@ pub async fn connect(
             managed: r.managed,
         })
         .collect();
-    role_views.sort_by(|a, b| b.position.cmp(&a.position));
+    role_views.sort_by_key(|r| std::cmp::Reverse(r.position));
 
     Ok(ConnectResult {
         guild_id: guild_id.to_string(),

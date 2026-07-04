@@ -243,7 +243,7 @@ pub async fn connect(
             mentionable: r.mentionable,
         })
         .collect();
-    role_views.sort_by(|a, b| b.position.cmp(&a.position));
+    role_views.sort_by_key(|r| std::cmp::Reverse(r.position));
 
     let mut categories: Vec<ChannelView> = Vec::new();
     let mut text_channels: Vec<ChannelView> = Vec::new();
@@ -259,8 +259,8 @@ pub async fn connect(
             _ => {}
         }
     }
-    categories.sort_by(|a, b| a.position.cmp(&b.position));
-    text_channels.sort_by(|a, b| a.position.cmp(&b.position));
+    categories.sort_by_key(|c| c.position);
+    text_channels.sort_by_key(|c| c.position);
 
     Ok(ConnectResult {
         guild_id: guild_id.to_string(),
