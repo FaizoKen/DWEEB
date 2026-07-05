@@ -349,18 +349,46 @@ export function CustomBotDialog({
             ) : null}
           </div>
 
+          {bots.suspended ? (
+            <p className={styles.pausedNote}>
+              {bots.suspended} {bots.suspended === 1 ? "bot is" : "bots are"} paused because{" "}
+              {guildName ?? "this server"} is over its current plan limit — their interactions stop
+              being served until you{" "}
+              <button
+                type="button"
+                className={styles.linkBtn}
+                onClick={() => {
+                  onClose();
+                  usePlanStore.getState().openPricing(guildId);
+                }}
+              >
+                upgrade
+              </button>
+              . Nothing was removed; upgrading restores the oldest ones first.
+            </p>
+          ) : null}
           {bots.items.length === 0 ? (
             <p className={styles.note}>None yet.</p>
           ) : (
             <ul className={styles.botList}>
               {bots.items.map((item) => (
-                <li key={item.application_id} className={styles.botItem}>
+                <li
+                  key={item.application_id}
+                  className={item.suspended ? styles.botItemPaused : styles.botItem}
+                >
                   <span className={styles.botText}>
                     <span className={styles.botNameRow}>
                       <span className={styles.botName}>
                         {item.name || `App ${item.application_id}`}
                       </span>
-                      {item.verified ? (
+                      {item.suspended ? (
+                        <span
+                          className={styles.chipWarn}
+                          title="Paused because this server is over its plan limit — upgrade to resume"
+                        >
+                          Paused
+                        </span>
+                      ) : item.verified ? (
                         <span
                           className={styles.chipOk}
                           title="DWEEB is receiving this app's interactions — it's wired up"

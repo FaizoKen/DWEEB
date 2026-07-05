@@ -363,11 +363,19 @@ async fn run() {
             "/permanent/:guild_id/:message_id",
             axum::routing::delete(permanent_remove),
         )
+        // Plan reconciliation: the proxy calls this on any entitlement change to
+        // pause the over-cap grants (downgrade) or revive them (re-upgrade),
+        // passing the guild's current cap as `?cap=N`.
+        .route("/permanent/:guild_id/reconcile", post(permanent_reconcile))
         // Custom-app registry, same trust chain as /permanent: proxy-only,
         // token-gated, and refused at the edge by Caddy.
         .route(
             "/custom-apps/:guild_id",
             get(custom_apps_list).post(custom_apps_add),
+        )
+        .route(
+            "/custom-apps/:guild_id/reconcile",
+            post(custom_apps_reconcile),
         )
         .route(
             "/custom-apps/:guild_id/:application_id",
@@ -809,6 +817,31 @@ async fn permanent_remove(
     }
 }
 
+/// `POST /permanent/:guild_id/reconcile?cap=N` — align the guild's grants with
+/// its current plan: keep the oldest `cap` active, pause the rest (or revive up
+/// to a raised cap). Idempotent, so the proxy can fire it on every entitlement
+/// change without tracking prior state.
+async fn permanent_reconcile(
+    State(app): State<Arc<App>>,
+    Path(guild_id): Path<String>,
+    RawQuery(raw): RawQuery,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
+        return denied;
+    }
+    let cap = cap_override(raw.as_deref(), app.permanent_slots);
+    match app.store.reconcile_permanent(&guild_id, cap) {
+        Ok((active, suspended)) => {
+            if suspended > 0 {
+                tracing::info!(guild = %guild_id, cap, active, suspended, "reconciled permanent slots");
+            }
+            Json(json!({ "cap": cap, "active": active, "suspended": suspended })).into_response()
+        }
+        Err(err) => internal_error(err),
+    }
+}
+
 // ── Custom-app registry API (called by the proxy) ───────────────────────────
 //
 // Same trust chain as /permanent: browser → proxy (Discord login + Manage
@@ -954,6 +987,52 @@ async fn custom_apps_remove(
     }
 }
 
+/// `POST /custom-apps/:guild_id/reconcile?cap=N` — align the guild's
+/// registrations with its current plan (oldest `cap` stay active). Suspended
+/// apps are pulled from the interaction verify map so their bots stop being
+/// served; revived ones are pushed back in. Idempotent.
+async fn custom_apps_reconcile(
+    State(app): State<Arc<App>>,
+    Path(guild_id): Path<String>,
+    RawQuery(raw): RawQuery,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
+        return denied;
+    }
+    let cap = cap_override(raw.as_deref(), app.custom_apps_cap);
+    let delta = match app.store.reconcile_custom_apps(&guild_id, cap) {
+        Ok(d) => d,
+        Err(err) => return internal_error(err),
+    };
+    if !delta.activate.is_empty() || !delta.suspend.is_empty() {
+        let mut keys = app.custom_keys.write().unwrap();
+        for app_id in &delta.suspend {
+            keys.remove(app_id);
+        }
+        for (app_id, public_key) in &delta.activate {
+            // Re-parse the stored key; skip any that no longer parse rather than
+            // poisoning the map (shouldn't happen — it verified at registration).
+            if let Some(key) = parse_verifying_key(public_key) {
+                keys.insert(app_id.clone(), (key, public_key.clone()));
+            }
+        }
+        tracing::info!(
+            guild = %guild_id,
+            cap,
+            activated = delta.activate.len(),
+            suspended = delta.suspend.len(),
+            "reconciled custom apps"
+        );
+    }
+    Json(json!({
+        "cap": cap,
+        "active": delta.active_count,
+        "suspended": delta.suspended_count,
+    }))
+    .into_response()
+}
+
 /// `GET /custom-apps/:guild_id/:application_id/secret` — the sealed client
 /// secret the proxy stored at registration (empty string when none). The
 /// ciphertext is opaque to this service; only the proxy holds the key.
@@ -982,7 +1061,11 @@ async fn custom_app_secret(
 fn custom_apps_json(rows: &[store::CustomAppRow], cap: u32) -> Json<Value> {
     Json(json!({
         "cap": cap,
-        "used": rows.len(),
+        // `used` counts only *active* registrations against the cap; suspended
+        // (over-cap) ones are reported separately so the dashboard can list them
+        // as paused without inflating the quota.
+        "used": rows.iter().filter(|r| !r.suspended).count(),
+        "suspended": rows.iter().filter(|r| r.suspended).count(),
         "items": rows.iter().map(|r| json!({
             "application_id": r.application_id,
             "name": r.name,
@@ -991,6 +1074,8 @@ fn custom_apps_json(rows: &[store::CustomAppRow], cap: u32) -> Json<Value> {
             // True once Discord has delivered a validly-signed interaction —
             // i.e. the owner finished the Interactions Endpoint URL step.
             "verified": r.verified_at.is_some(),
+            // Paused because the guild is over its plan cap — kept, not served.
+            "suspended": r.suspended,
         })).collect::<Vec<_>>(),
     }))
 }
@@ -1058,12 +1143,18 @@ fn cap_override(raw: Option<&str>, default: u32) -> u32 {
 fn slots_json(app: &App, rows: &[store::PermanentRow], cap: u32) -> Json<Value> {
     Json(json!({
         "cap": cap,
-        "used": rows.len(),
+        // Active grants only — suspended (over-cap) rows are surfaced separately
+        // so "used / cap" stays truthful after a downgrade.
+        "used": rows.iter().filter(|r| !r.suspended).count(),
+        "suspended": rows.iter().filter(|r| r.suspended).count(),
         "ttl_days": app.component_ttl_ms.map(|ms| ms / 86_400_000),
         "items": rows.iter().map(|r| json!({
             "message_id": r.message_id,
             "channel_id": r.channel_id,
             "added_at": r.added_at,
+            // Paused because the guild is over its plan cap — its components
+            // expire normally until the guild re-upgrades.
+            "suspended": r.suspended,
         })).collect::<Vec<_>>(),
     }))
 }

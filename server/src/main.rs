@@ -21,6 +21,7 @@ mod discord;
 mod entitlement;
 mod error;
 mod ratelimit;
+mod reconcile;
 mod routes;
 mod schedule;
 mod schedule_rule;

@@ -34,12 +34,21 @@ const STATUS_ORDER: Record<string, number> = {
   active: 0,
   sending: 0,
   paused: 1,
+  suspended: 1.5,
   failed: 2,
   done: 3,
 };
 
-/** Statuses that are still going to fire — everything else is terminal history. */
-const UPCOMING = new Set(["active", "sending", "paused"]);
+/** Statuses that are still going to fire (or will once resumed) — everything
+ *  else is terminal history. `suspended` is a plan-paused schedule (server over
+ *  its tier cap): it keeps its slot and resumes on re-upgrade, so it belongs
+ *  with the upcoming ones, not history. */
+const UPCOMING = new Set(["active", "sending", "paused", "suspended"]);
+
+/** The subset of live statuses that count against the per-server quota. A
+ *  `suspended` schedule is over-cap overflow, so it's deliberately excluded —
+ *  matching the backend, which never counts it toward the cap. */
+const QUOTA_COUNTED = new Set(["active", "sending", "paused"]);
 
 /** What the parent header needs to render the "used / cap" counter. */
 export interface ScheduleStats {
@@ -120,9 +129,11 @@ export function ScheduledList({
     onStats?.({
       total: list.length,
       // The per-server quota only counts live schedules *in this guild* — the
-      // merged list can also carry the user's schedules from other servers.
-      active: list.filter((s) => UPCOMING.has(s.status) && (!guildId || s.guild_id === guildId))
-        .length,
+      // merged list can also carry the user's schedules from other servers, and
+      // never the over-cap `suspended` overflow (see QUOTA_COUNTED).
+      active: list.filter(
+        (s) => QUOTA_COUNTED.has(s.status) && (!guildId || s.guild_id === guildId),
+      ).length,
       quota: guildQuota,
     });
     setLoading(false);
@@ -310,7 +321,11 @@ function ScheduleRow({
   onCancel: () => void;
   onLoad: () => void;
 }) {
-  const live = s.status === "active" || s.status === "sending" || s.status === "paused";
+  const live =
+    s.status === "active" ||
+    s.status === "sending" ||
+    s.status === "paused" ||
+    s.status === "suspended";
   const when = live ? s.next_run_at : (s.last_run_at ?? s.next_run_at);
   // A direct jump to the message the last run posted — only once we have all
   // three id parts (guild + channel/thread + message), captured at fire time.
@@ -323,11 +338,13 @@ function ScheduleRow({
       ? "Posted"
       : s.status === "failed"
         ? "Failed"
-        : s.status === "paused"
-          ? "Paused — was"
-          : "Posts";
+        : s.status === "suspended"
+          ? "Paused (plan limit) — was"
+          : s.status === "paused"
+            ? "Paused — was"
+            : "Posts";
   return (
-    <div className={cn(styles.item, dimmed && styles.itemDim)}>
+    <div className={cn(styles.item, (dimmed || s.status === "suspended") && styles.itemDim)}>
       <div className={styles.itemHead}>
         <span className={styles.itemTitle}>
           {s.title || s.dest_label || `Webhook ${s.webhook_id}`}
@@ -346,6 +363,11 @@ function ScheduleRow({
       <div className={styles.itemMeta}>
         {lead} {formatInstant(when, s.tz)}
       </div>
+      {s.status === "suspended" ? (
+        <div className={styles.itemNote}>
+          Won’t post — this server is over its plan limit. Upgrade to resume it.
+        </div>
+      ) : null}
       {s.last_error && s.status === "failed" ? (
         <div className={styles.itemError}>⚠ {s.last_error}</div>
       ) : null}
@@ -385,6 +407,7 @@ function ScheduleRow({
 function badgeClass(status: string): string {
   switch (status) {
     case "paused":
+    case "suspended":
       return styles.badgePaused!;
     case "done":
       return styles.badgeDone!;

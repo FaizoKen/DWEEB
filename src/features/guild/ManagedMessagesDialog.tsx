@@ -170,6 +170,24 @@ export function ManagedMessagesDialog({
             ) : null}
           </span>
         </div>
+        {slots.suspended ? (
+          <p className={styles.pausedNote}>
+            {slots.suspended} never-expire {slots.suspended === 1 ? "message is" : "messages are"}{" "}
+            paused because {guildName ?? "this server"} is over its current plan limit — their
+            buttons expire normally until you{" "}
+            <button
+              type="button"
+              className={styles.upgradeLink}
+              onClick={() => {
+                onClose();
+                usePlanStore.getState().openPricing(guildId);
+              }}
+            >
+              upgrade
+            </button>
+            . Nothing was deleted; upgrading restores the oldest ones first.
+          </p>
+        ) : null}
         {slots.items.length === 0 ? (
           <p className={styles.note}>None yet — turn on Never expire when posting.</p>
         ) : (
@@ -177,7 +195,10 @@ export function ManagedMessagesDialog({
             {slots.items.map((item, i) => {
               const url = `https://discord.com/channels/${guildId}/${item.channel_id}/${item.message_id}`;
               return (
-                <li key={item.message_id} className={styles.slotItem}>
+                <li
+                  key={item.message_id}
+                  className={item.suspended ? styles.slotItemPaused : styles.slotItem}
+                >
                   <a
                     className={styles.slotLink}
                     href={url}
@@ -189,6 +210,7 @@ export function ManagedMessagesDialog({
                   >
                     Message {i + 1} ↗
                   </a>
+                  {item.suspended ? <span className={styles.pausedBadge}>Paused</span> : null}
                   <span className={styles.slotMeta}>
                     added {new Date(item.added_at).toLocaleDateString([], { dateStyle: "medium" })}
                   </span>

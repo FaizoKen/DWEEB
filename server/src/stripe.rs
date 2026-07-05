@@ -648,8 +648,12 @@ impl StripeClient {
         serde_json::from_slice(payload).map_err(|e| e.to_string())
     }
 
-    /// Apply a verified event to the mirror. Idempotent (keyed upserts).
-    pub async fn handle_event(&self, store: &StripeStore, event: &Value) {
+    /// Apply a verified event to the mirror. Idempotent (keyed upserts). Returns
+    /// the `guild_id` the touched subscription is bound to, if any — the caller
+    /// uses it to reconcile that server's suspended slots against its new tier
+    /// (see [`crate::reconcile`]). `None` for events that touch no guild-bound
+    /// sub (a foreign/legacy sub, or an event type we don't mirror).
+    pub async fn handle_event(&self, store: &StripeStore, event: &Value) -> Option<String> {
         let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
         let obj = event
             .pointer("/data/object")
@@ -658,7 +662,7 @@ impl StripeClient {
         match kind {
             "checkout.session.completed" => {
                 if obj.get("mode").and_then(Value::as_str) != Some("subscription") {
-                    return;
+                    return None;
                 }
                 let uid = obj
                     .get("client_reference_id")
@@ -673,23 +677,23 @@ impl StripeClient {
                 }
                 if let Some(sub_id) = id_of(&obj["subscription"]) {
                     if let Ok(sub) = self.retrieve_subscription(&sub_id).await {
-                        self.upsert_from_sub(store, &sub, uid.as_deref()).await;
+                        return self.upsert_from_sub(store, &sub, uid.as_deref()).await;
                     }
                 }
+                None
             }
             "customer.subscription.created"
             | "customer.subscription.updated"
-            | "customer.subscription.deleted" => {
-                self.upsert_from_sub(store, &obj, None).await;
-            }
+            | "customer.subscription.deleted" => self.upsert_from_sub(store, &obj, None).await,
             "invoice.payment_failed" => {
                 if let Some(sub_id) = id_of(&obj["subscription"]) {
                     if let Ok(sub) = self.retrieve_subscription(&sub_id).await {
-                        self.upsert_from_sub(store, &sub, None).await;
+                        return self.upsert_from_sub(store, &sub, None).await;
                     }
                 }
+                None
             }
-            _ => {}
+            _ => None,
         }
     }
 
@@ -704,25 +708,31 @@ impl StripeClient {
         store.put_guild_checked(guild_id, unix_now());
     }
 
-    async fn upsert_from_sub(&self, store: &StripeStore, sub: &Value, fallback_uid: Option<&str>) {
-        let Some((id, customer_id, price_id, status, period_end, cancel, guild_id)) =
-            extract_sub_fields(sub)
-        else {
-            return;
-        };
+    /// Mirror one subscription, returning the `guild_id` it binds (for the
+    /// caller's reconcile). `None` when the sub isn't mirrorable or binds no
+    /// guild.
+    async fn upsert_from_sub(
+        &self,
+        store: &StripeStore,
+        sub: &Value,
+        fallback_uid: Option<&str>,
+    ) -> Option<String> {
+        let (id, customer_id, price_id, status, period_end, cancel, guild_id) =
+            extract_sub_fields(sub)?;
         if price_id.is_empty() {
-            return;
+            return None;
         }
         let uid = match self.resolve_user_id(sub, fallback_uid, &customer_id).await {
             Some(u) => u,
             None => {
                 tracing::warn!(%id, "stripe sub has no attributable discord user; skipping");
-                return;
+                return None;
             }
         };
         if !customer_id.is_empty() {
             store.put_customer(&uid, &customer_id, unix_now());
         }
+        let bound_guild = guild_id.clone();
         if let Err(e) = store.upsert_subscription(&SubRow {
             id,
             user_id: uid,
@@ -738,6 +748,7 @@ impl StripeClient {
         }) {
             tracing::warn!("stripe mirror upsert failed: {e}");
         }
+        bound_guild
     }
 
     async fn resolve_user_id(
@@ -1199,11 +1210,13 @@ pub async fn reassign(
         .map_err(|e| AppError::BadGateway(format!("Couldn't move the subscription: {e}")))?;
     // Start the cooldown from this explicit move (not the carry-over bind path).
     stripe.store.mark_reassigned(&sub_id);
-    // Both servers' tiers just changed — clear their cached entitlement.
+    // Both servers' tiers just changed — reconcile each (invalidates the cache and
+    // pauses/revives over-cap slots): the old server may drop below its usage, the
+    // new one may gain headroom to revive previously-suspended items.
     if let Some(prev) = prev.as_deref() {
-        st.entitlements.invalidate(prev);
+        crate::reconcile::reconcile_guild(&st, prev).await;
     }
-    st.entitlements.invalidate(&new_guild);
+    crate::reconcile::reconcile_guild(&st, &new_guild).await;
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(json!({ "ok": true, "guild_id": new_guild })),
@@ -1264,7 +1277,12 @@ pub async fn webhook(
             retry_after: None,
         }
     })?;
-    stripe.client.handle_event(&stripe.store, &event).await;
+    // Mirror the event, then reconcile the affected server's suspended slots so a
+    // downgrade/cancel pauses over-cap items (and a renewal/upgrade revives them)
+    // without waiting out the entitlement cache.
+    if let Some(guild) = stripe.client.handle_event(&stripe.store, &event).await {
+        crate::reconcile::reconcile_guild(&st, &guild).await;
+    }
     Ok(Json(json!({ "received": true })).into_response())
 }
 

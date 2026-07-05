@@ -264,6 +264,10 @@ export interface PermanentSlotItem {
   channel_id: string;
   /** Unix millis when the slot was granted. */
   added_at: number;
+  /** Paused because the server is over its current plan cap: the grant is kept
+   *  but its components expire normally until the server re-upgrades. Absent on
+   *  responses from a deployment without plan enforcement. */
+  suspended?: boolean;
 }
 
 /** A cap the proxy sends to mean "unlimited" (matches `UNLIMITED_SLOTS` in
@@ -280,7 +284,11 @@ export function isUnlimitedCap(cap: number): boolean {
 export interface PermanentSlots {
   /** Slots the server may hold. */
   cap: number;
+  /** Active grants (counts against `cap`). Excludes suspended ones. */
   used: number;
+  /** Grants paused because the server is over its plan cap — kept, not counted.
+   *  Absent when the deployment has no plan enforcement. */
+  suspended?: number;
   /** Days components stay clickable on ordinary messages; null = no expiry
    *  configured on this deployment (so permanence is moot). */
   ttl_days: number | null;
@@ -389,13 +397,21 @@ export interface CustomBotItem {
    *  this app — i.e. the owner finished pointing its Interactions Endpoint URL
    *  back at DWEEB with the right public key. Drives the "Connected" status. */
   verified: boolean;
+  /** Paused because the server is over its current plan cap: the registration is
+   *  kept but its bot's interactions stop being served until the server
+   *  re-upgrades. Absent without plan enforcement. */
+  suspended?: boolean;
 }
 
 /** A server's custom-bot state, as every custom-bot endpoint returns it. */
 export interface CustomBots {
   /** Registrations the server may hold. */
   cap: number;
+  /** Active registrations (counts against `cap`). Excludes suspended ones. */
   used: number;
+  /** Registrations paused because the server is over its plan cap. Absent when
+   *  the deployment has no plan enforcement. */
+  suspended?: number;
   items: CustomBotItem[];
 }
 

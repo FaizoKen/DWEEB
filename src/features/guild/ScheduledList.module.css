@@ -135,6 +135,12 @@
   color: rgb(255, 130, 130);
   line-height: 1.45;
 }
+/* A plan-paused (over-cap) schedule's "upgrade to resume" hint. */
+.itemNote {
+  font-size: 11px;
+  color: var(--app-warning-text, var(--app-text-muted));
+  line-height: 1.45;
+}
 .itemActions {
   display: flex;
   gap: 6px;

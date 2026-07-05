@@ -396,6 +396,63 @@ impl ScheduleStore {
         Ok(())
     }
 
+    /// Reconcile a server's scheduled posts against its plan `cap`: keep the
+    /// **oldest `cap`** live and suspend the rest, reviving any that now fit —
+    /// the mirror of the dispatcher's slot reconcile, and the anti-abuse point
+    /// for schedules. Only user-owned live rows move (`active`/`paused` ↔
+    /// `suspended`); an in-flight (`sending`) or terminal (`done`/`failed`) row
+    /// is left alone. A revived row keeps its original run time if still in the
+    /// future, else fires on the next tick — one catch-up post, exactly the
+    /// worker's existing catch-up policy. Idempotent: same cap ⇒ same state, so
+    /// it serves both the downgrade and the re-upgrade. Suspended rows don't
+    /// count toward the create quota (see `create_with_limit`), so a server can
+    /// always fill up to `cap` live schedules. Returns `(active, suspended)`.
+    pub fn reconcile_guild(&self, guild: &str, cap: i64) -> Result<(i64, i64), String> {
+        let conn = self.lock();
+        let now = unix_now();
+        let cap = cap.max(0);
+        // Suspend everything ranked at/after the cap. Ranking spans all live
+        // rows (active/paused/suspended) so the kept set is stable no matter the
+        // current suspension state; `-1` LIMIT = "all rows past the offset".
+        conn.execute(
+            "UPDATE scheduled_posts SET status='suspended', updated_at=?1 \
+             WHERE guild_id=?2 AND status IN ('active','paused') AND id IN ( \
+                 SELECT id FROM scheduled_posts \
+                 WHERE guild_id=?2 AND status IN ('active','paused','suspended') \
+                 ORDER BY created_at, id LIMIT -1 OFFSET ?3)",
+            params![now, guild, cap],
+        )
+        .map_err(e2s)?;
+        // Revive the oldest `cap` that were suspended. next_run_at = max(old, now)
+        // keeps a future run on time and lets a lapsed one fire next tick.
+        conn.execute(
+            "UPDATE scheduled_posts SET status='active', attempts=0, \
+             next_run_at=MAX(next_run_at, ?1), updated_at=?1 \
+             WHERE guild_id=?2 AND status='suspended' AND id IN ( \
+                 SELECT id FROM scheduled_posts \
+                 WHERE guild_id=?2 AND status IN ('active','paused','suspended') \
+                 ORDER BY created_at, id LIMIT ?3)",
+            params![now, guild, cap],
+        )
+        .map_err(e2s)?;
+        let active: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM scheduled_posts \
+                 WHERE guild_id=?1 AND status IN ('active','paused','sending')",
+                [guild],
+                |r| r.get(0),
+            )
+            .map_err(e2s)?;
+        let suspended: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM scheduled_posts WHERE guild_id=?1 AND status='suspended'",
+                [guild],
+                |r| r.get(0),
+            )
+            .map_err(e2s)?;
+        Ok((active, suspended))
+    }
+
     pub fn get(&self, id: &str) -> Result<Option<Row>, String> {
         let conn = self.lock();
         conn.query_row(
@@ -1022,6 +1079,15 @@ pub async fn schedule_patch(
     }
 
     if let Some(paused) = body.paused {
+        // A plan-suspended schedule (over the server's tier cap) can only be
+        // revived by re-upgrading — never by the owner toggling pause, which
+        // would defeat the quota. Editing its other fields stays allowed.
+        if row.status == "suspended" {
+            return Err(bad_request(
+                "This schedule is paused because the server is over its plan limit. \
+                 Upgrade the server to resume it.",
+            ));
+        }
         if paused {
             row.status = "paused".into();
         } else {
@@ -1304,6 +1370,41 @@ mod tests {
         assert_eq!(row.status, "active");
         assert_eq!(row.next_run_at, 5000);
         assert!(store.get("missing").unwrap().is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn reconcile_keeps_oldest_and_suspends_overflow() {
+        let (store, path) = temp_store_caps("reconcile", 100, 100);
+        for (i, id) in ["s0", "s1", "s2", "s3", "s4"].iter().enumerate() {
+            let mut s = sample(id, "111", 5000);
+            s.created_at = 1000 + i as i64; // ascending age → s0 oldest
+            store.create(&s).unwrap();
+        }
+        // Downgrade to cap 2 → oldest two stay, the rest are paused.
+        assert_eq!(store.reconcile_guild("guild-9", 2).unwrap(), (2, 3));
+        assert_eq!(store.get("s0").unwrap().unwrap().status, "active");
+        assert_eq!(store.get("s1").unwrap().unwrap().status, "active");
+        assert_eq!(store.get("s2").unwrap().unwrap().status, "suspended");
+        assert_eq!(store.get("s4").unwrap().unwrap().status, "suspended");
+
+        // Suspended rows don't count against the create quota, but the two live
+        // ones do — so a cap-2 create is correctly refused (no over-cap growth).
+        let mut extra = sample("s5", "111", 5000);
+        extra.created_at = 2000;
+        assert!(matches!(
+            store.create_with_limit(&extra, Some(2)),
+            Err(CreateError::PerGuildFull(2))
+        ));
+
+        // Re-upgrade to 4 → oldest four revive, one still paused.
+        assert_eq!(store.reconcile_guild("guild-9", 4).unwrap(), (4, 1));
+        assert_eq!(store.get("s3").unwrap().unwrap().status, "active");
+        assert_eq!(store.get("s4").unwrap().unwrap().status, "suspended");
+
+        // Unlimited → everything active again.
+        assert_eq!(store.reconcile_guild("guild-9", i64::MAX).unwrap(), (5, 0));
+        assert_eq!(store.get("s4").unwrap().unwrap().status, "active");
         let _ = std::fs::remove_file(path);
     }
 

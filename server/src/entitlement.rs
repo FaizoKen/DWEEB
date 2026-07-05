@@ -224,7 +224,13 @@ pub async fn guild_plan(
     // unbound sub. Only meaningful when billing is configured.
     if let Some(stripe) = &st.stripe {
         if stripe.claim_legacy_for_guild(&session.uid, &guild).await {
-            st.entitlements.invalidate(&guild);
+            // The server just gained floating premium — reconcile now to revive
+            // any items suspended under a lower tier (also invalidates the cache).
+            crate::reconcile::reconcile_guild(&st, &guild).await;
+        } else {
+            // Otherwise a throttled safety-net pass, self-healing a missed webhook
+            // (e.g. a downgrade that never reached us) without blocking this read.
+            crate::reconcile::reconcile_guild_lazy(&st, &guild);
         }
     }
     let tier = st.entitlements.tier_for(&guild).await;

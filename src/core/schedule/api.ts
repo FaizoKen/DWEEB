@@ -30,7 +30,9 @@ export interface ScheduleView {
   tz: string;
   recurrence: Recurrence;
   next_run_at: number;
-  status: "active" | "sending" | "done" | "failed" | "paused";
+  // `suspended` = plan-paused: the server is over its tier cap, so this schedule
+  // is kept but won't fire until it re-upgrades (see server/src/reconcile.rs).
+  status: "active" | "sending" | "done" | "failed" | "paused" | "suspended";
   attempts: number;
   last_status?: number | null;
   last_error?: string | null;

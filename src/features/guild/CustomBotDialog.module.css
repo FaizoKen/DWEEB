@@ -91,6 +91,29 @@
   border-top: 1px solid var(--app-border);
 }
 
+/* A plan-paused (over-cap) registration — dimmed but still manageable. */
+.botItemPaused {
+  composes: botItem;
+  opacity: 0.6;
+}
+
+.botItemPaused + .botItem,
+.botItem + .botItemPaused,
+.botItemPaused + .botItemPaused {
+  border-top: 1px solid var(--app-border);
+}
+
+/* Over-cap explainer above a list that has paused registrations. */
+.pausedNote {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--app-warning-soft);
+  color: var(--app-text-muted);
+}
+
 .botText {
   flex: 1;
   min-width: 0;

@@ -87,6 +87,42 @@
   border-top: 1px solid var(--app-border);
 }
 
+/* A row for a plan-paused (over-cap) grant — dimmed but still actionable. */
+.slotItemPaused {
+  composes: slotItem;
+  opacity: 0.6;
+}
+
+.slotItemPaused + .slotItem,
+.slotItem + .slotItemPaused,
+.slotItemPaused + .slotItemPaused {
+  border-top: 1px solid var(--app-border);
+}
+
+/* Small "Paused" pill next to a suspended item. */
+.pausedBadge {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: var(--app-warning-soft);
+  color: var(--app-warning-text);
+}
+
+/* The over-cap explainer above a list that has paused items. */
+.pausedNote {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--app-warning-bg, var(--app-bg-hover));
+  color: var(--app-text-muted);
+}
+
 .slotLink {
   flex: 1;
   min-width: 0;
