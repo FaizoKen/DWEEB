@@ -196,19 +196,6 @@
   color: var(--app-warning-text);
 }
 
-/* Cool-toned pill marking a link plugin — an external service reached by URL,
-   distinct from the amber "needs bot" tag on the interactive side. */
-.externalTag {
-  flex: none;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, #38bdf8 18%, transparent);
-  color: #38bdf8;
-}
 .rowDesc {
   font-size: 12px;
   color: var(--app-text-muted);

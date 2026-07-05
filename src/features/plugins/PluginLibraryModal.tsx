@@ -207,7 +207,9 @@ export function PluginLibraryModal({
           <span className={styles.rowText}>
             <span className={styles.rowNameLine}>
               <span className={styles.rowName}>{manifest.name}</span>
-              <span className={styles.externalTag}>External</span>
+              {/* No "External" tag — every row here sits under the "Link to a
+                  service" category, whose header already says these open an
+                  external page. Repeating it per row is noise. */}
               {/* Flags services a server manager must register with (once, on the
                   service's own dashboard) before the link works. */}
               {manifest.setupUrl ? <span className={styles.loginTag}>Needs setup</span> : null}
