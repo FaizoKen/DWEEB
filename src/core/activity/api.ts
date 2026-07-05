@@ -7,7 +7,7 @@
  */
 
 import { proxyFetch } from "@/core/net/proxyFetch";
-import type { PermanentSlots } from "@/core/guild/api";
+import type { PermanentSlots, PlanInfo } from "@/core/guild/api";
 
 /** Read the proxy's `{ error }` body for a failed call, with a sane fallback. */
 async function errorMessage(res: Response): Promise<string> {
@@ -108,6 +108,26 @@ export async function fetchActivityPermanentSlots(
     throw err;
   }
   return (await res.json()) as PermanentSlots;
+}
+
+/** `GET /api/activity/plan` — the destination server's tier + per-feature limits,
+ *  for the Activity's quiet plan indicator. The bearer-gated twin of the web
+ *  app's `/api/guilds/:id/plan`; returns the same `{ tier, limits, billing }`
+ *  shape. Resolves to null on any failure (feature off, not a member, network) —
+ *  the caller simply hides the indicator, so it never blocks the builder. */
+export async function fetchActivityPlan(
+  guildId: string,
+  signal?: AbortSignal,
+): Promise<PlanInfo | null> {
+  try {
+    const res = await proxyFetch(`/api/activity/plan?guild_id=${encodeURIComponent(guildId)}`, {
+      signal,
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as PlanInfo;
+  } catch {
+    return null;
+  }
 }
 
 /** Result of a successful restore: the raw Discord message to decode into the

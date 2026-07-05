@@ -41,6 +41,9 @@ import { GuildPicker, ServerGlyph, ServerGlyphSkeleton } from "./GuildPicker";
 import { RestoreDialog } from "./RestoreDialog";
 import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
+import { PlanBadge } from "./PlanBadge";
+import { fetchActivityPlan } from "@/core/activity/api";
+import type { PlanInfo } from "@/core/guild/api";
 import styles from "./ActivityBar.module.css";
 
 /** While the launching server is missing the bot, a safety-net poll re-checks on
@@ -185,6 +188,24 @@ export function ActivityBar() {
     };
   }, [isDm, addArm, refreshPostableGuilds]);
 
+  // The destination server's plan, for the quiet plan indicator (PlanBadge). A
+  // display-only read that fails soft — any error just leaves it null and the
+  // pill hidden, so it never intrudes on the builder. Reloads when the target
+  // server changes; a DM launch with no destination picked yet shows nothing.
+  const [plan, setPlan] = useState<PlanInfo | null>(null);
+  useEffect(() => {
+    if (!targetGuildId) {
+      setPlan(null);
+      return;
+    }
+    setPlan(null);
+    const ac = new AbortController();
+    void fetchActivityPlan(targetGuildId, ac.signal).then((p) => {
+      if (p) setPlan(p);
+    });
+    return () => ac.abort();
+  }, [targetGuildId]);
+
   // Destination channel name for the confirm/success dialogs — resolved from the
   // connected guild's channel map (the same source the picker reads).
   const connectedData = useGuildStore((s) => s.data);
@@ -302,6 +323,22 @@ export function ActivityBar() {
       </div>
 
       <div className={styles.right} data-compact={isPhone ? "" : undefined}>
+        {/* Quiet plan indicator, leading the utility cluster — a recessive pill
+            showing the server's tier, opening a popover with the limits + a
+            "see plans on web" hand-off. Hidden until a destination server is
+            known and the bot's in it (in the "Add DWEEB" state the bar is about
+            getting set up, not plans). See PlanBadge for the newcomer rationale. */}
+        {plan && !botMissing ? (
+          <>
+            <PlanBadge
+              plan={plan}
+              serverName={targetGuildMeta?.name}
+              onSeePlans={() => void openOnWeb()}
+            />
+            <span className={styles.sep} aria-hidden="true" />
+          </>
+        ) : null}
+
         {/* Utility actions — restoring a message DWEEB posted here and jumping to
             the full web app. Restore reads through the channel's webhook, so
             (like Post) it needs a destination and is gated on Manage Webhooks;

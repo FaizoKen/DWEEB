@@ -249,7 +249,7 @@ pub async fn guild_plan(
 }
 
 /// Present a limit for the FE: a positive number, or `null` for unlimited (`0`).
-fn lim(n: i64) -> Value {
+pub(crate) fn lim(n: i64) -> Value {
     if n <= 0 {
         Value::Null
     } else {

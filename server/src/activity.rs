@@ -588,6 +588,49 @@ pub async fn activity_permanent(
     relay_dispatcher(req).await
 }
 
+// ── Server plan (GET /api/activity/plan) ─────────────────────────────────────
+
+/// `GET /api/activity/plan?guild_id=<id>` — the destination server's tier,
+/// per-feature limits, and whether in-app billing is available, so the Activity
+/// can show a quiet plan indicator and a "see plans on web" hand-off.
+///
+/// The bearer twin of the web app's cookie-only `/api/guilds/:id/plan`; gated on
+/// plain MEMBERSHIP like the other Activity reads (any member may see which plan
+/// their server is on — it's display-only). Returns the exact same
+/// `{ tier, limits, billing }` shape the web FE already parses. Unlike the web
+/// handler it deliberately skips the Stripe legacy-claim/reconcile pass: that
+/// binds the caller's floating subscription to the server, which is an owner
+/// action, and this endpoint admits any member.
+pub async fn activity_plan(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Query(q): Query<PermanentQuery>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let guild = q.guild_id.trim().to_string();
+    if !is_snowflake(&guild) {
+        return Err(bad_request("guild_id must be a Discord id"));
+    }
+    authorize_activity_member(&st, session, &guild).await?;
+    let tier = st.entitlements.tier_for(&guild).await;
+    let limits = st.entitlements.limits_for(tier);
+    Ok(Json(json!({
+        "tier": tier.as_str(),
+        "limits": {
+            "schedules": crate::entitlement::lim(limits.schedules),
+            "permanent": crate::entitlement::lim(limits.permanent),
+            "custom_bots": crate::entitlement::lim(limits.custom_bots),
+            "coeditors": crate::entitlement::lim(limits.coeditors),
+        },
+        "billing": st.entitlements.enabled(),
+    }))
+    .into_response())
+}
+
 /// Find a DWEEB-owned incoming webhook in `channel_id` whose token we can post
 /// through. `prefer` names a specific webhook id to use when it's still valid
 /// (an edit naming the webhook that authored the message) — otherwise any

@@ -1,0 +1,112 @@
+/* The plan pill — deliberately recessive so it reads as a quiet status, not an
+   upgrade nag. Transparent until hovered; muted text at rest. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: var(--app-text-xs);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--app-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  appearance: none;
+}
+
+.pill:hover,
+.pill[aria-expanded="true"] {
+  color: var(--app-text);
+  background: var(--app-bg-subtle);
+}
+
+.pill svg {
+  flex: none;
+  opacity: 0.7;
+}
+
+/* Paid tiers get a subtle accent so premium feels acknowledged — still quiet. */
+.pillPaid {
+  color: var(--app-accent, rgb(120, 130, 255));
+}
+.pillPaid:hover,
+.pillPaid[aria-expanded="true"] {
+  color: var(--app-accent, rgb(120, 130, 255));
+  background: color-mix(in srgb, var(--app-accent, rgb(120, 130, 255)) 12%, transparent);
+}
+
+/* Popover header: server name + a tier chip. Padded to align with the menu's
+   own items (Menu.module.css uses 11px horizontal item padding). */
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 11px 3px;
+}
+
+.server {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--app-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tier {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  background: var(--app-bg-hover);
+}
+.tierPaid {
+  color: var(--app-accent, rgb(120, 130, 255));
+  background: color-mix(in srgb, var(--app-accent, rgb(120, 130, 255)) 16%, transparent);
+}
+
+.note {
+  margin: 0;
+  padding: 0 11px 6px;
+  font-size: var(--app-text-xs);
+  line-height: 1.4;
+  color: var(--app-text-muted);
+}
+
+.limits {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.limitRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 11px;
+  font-size: var(--app-text-xs);
+}
+
+.limitLabel {
+  color: var(--app-text-muted);
+}
+
+.limitVal {
+  flex: none;
+  font-weight: 600;
+  color: var(--app-text);
+}
