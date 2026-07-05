@@ -140,15 +140,18 @@
   border-radius: var(--app-radius-lg);
   background: color-mix(in srgb, var(--app-text) 3%, transparent);
 }
-/* The natural upgrade — a soft accent wash + lift. */
+/* The natural upgrade — the row's hero: accent ring, wash, and a real lift so it
+   clearly out-weighs every other card (including the current one). */
 .cardFeatured {
-  border-color: color-mix(in srgb, var(--app-accent) 45%, var(--app-border));
-  background: color-mix(in srgb, var(--app-accent) 8%, transparent);
-}
-/* The server's current tier — a solid accent ring. */
-.cardCurrent {
   border-color: var(--app-accent);
-  background: color-mix(in srgb, var(--app-accent) 12%, transparent);
+  background: color-mix(in srgb, var(--app-accent) 9%, transparent);
+  box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--app-accent) 55%, transparent);
+}
+/* The server's current tier — a quiet "you are here" marker. Deliberately
+   neutral (no accent) so it never competes with the featured upsell above. */
+.cardCurrent {
+  border-color: color-mix(in srgb, var(--app-text) 22%, var(--app-border));
+  background: color-mix(in srgb, var(--app-text) 4%, transparent);
 }
 
 .featTag {
@@ -178,6 +181,8 @@
   font-weight: 700;
   color: var(--app-text);
 }
+/* A passive status chip, not a call to action — muted/outlined so it reads as a
+   label, letting the accent "Most popular" tag be the eye-catcher on the row. */
 .currentPill {
   padding: 1px 7px;
   font-size: 9px;
@@ -185,8 +190,9 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   border-radius: 999px;
-  color: #fff;
-  background: var(--app-accent);
+  color: var(--app-text-muted);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
 }
 
 .cardPrice {
