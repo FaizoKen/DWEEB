@@ -91,10 +91,13 @@ export function PricingModal() {
   const [starting, setStarting] = useState<PaidTier | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
   const [done, setDone] = useState(false);
-  // What the completed purchase upgraded: the tier bought and the tier the server
-  // was on beforehand — captured at checkout start (before the plan reloads to the
-  // new tier) so the success screen can show the concrete before→after jump.
-  const purchaseRef = useRef<{ tier: PaidTier; from: PlanTier } | null>(null);
+  // What the completed purchase upgraded: the tier bought, its billing interval,
+  // and the tier the server was on beforehand — captured at checkout start (before
+  // the plan reloads to the new tier) so the success pass can show the concrete
+  // before→after jump and the right plan cadence.
+  const purchaseRef = useRef<{ tier: PaidTier; from: PlanTier; interval: BillingInterval } | null>(
+    null,
+  );
   // Billing interval the Upgrade buttons buy — set by the Monthly/Annual toggle.
   const [period, setPeriod] = useState<BillingInterval>("month");
 
@@ -127,7 +130,7 @@ export function PricingModal() {
     }
     // Snapshot the tier being left behind now — by the time checkout completes the
     // plan has reloaded to the new tier, and the success screen wants the "before".
-    purchaseRef.current = { tier, from: currentTier ?? "free" };
+    purchaseRef.current = { tier, from: currentTier ?? "free", interval: period };
     setCheckout({ tier, clientSecret: res.clientSecret });
   };
 
@@ -153,13 +156,17 @@ export function PricingModal() {
     else pushToast(res.error, "error");
   };
 
-  // Post-purchase success view — celebrate, then spell out exactly what the
-  // server just gained so the upgrade feels concrete instead of vague.
+  // Post-purchase success view — a "premium membership pass" for the server plus
+  // a receipt-style ledger of the exact before→after jumps, so the upgrade lands
+  // as something tangible rather than a vague confirmation.
   if (done) {
     const bought = purchaseRef.current;
     const newTier: PlanTier = bought?.tier ?? plan?.tier ?? "plus";
     const fromTier: PlanTier = bought?.from ?? "free";
+    const interval: BillingInterval = bought?.interval ?? "month";
     const isPro = newTier === "pro";
+    const animate = !prefersReducedMotion();
+    const serverName = server?.name ?? "Your server";
     return (
       <Modal
         open
@@ -172,64 +179,61 @@ export function PricingModal() {
         }
       >
         <div className={styles.success}>
-          <div className={cn(styles.successMedal, isPro && styles.successMedalPro)}>
-            <span className={styles.successMedalGlyph} aria-hidden="true">
-              {isPro ? "👑" : "⚡"}
-            </span>
+          <div className={styles.passWrap}>
+            <div className={cn(styles.pass, isPro && styles.passPro)}>
+              <span className={styles.passSheen} aria-hidden="true" />
+              <div className={styles.passTop}>
+                <span className={styles.passEyebrow}>DWEEB Premium</span>
+                <span className={styles.passGlyph} aria-hidden="true">
+                  {isPro ? "👑" : "⚡"}
+                </span>
+              </div>
+              <div className={styles.passMember}>
+                {server ? (
+                  <GuildGlyph guild={server} />
+                ) : (
+                  <span
+                    className={cn(styles.serverIcon, styles.serverIconFallback)}
+                    aria-hidden="true"
+                  >
+                    ★
+                  </span>
+                )}
+                <span className={styles.passMemberName}>{serverName}</span>
+              </div>
+              <div className={styles.passBottom}>
+                <span className={styles.passTier}>{tierName(newTier)}</span>
+                <span className={styles.passInterval}>
+                  {interval === "year" ? "Annual plan" : "Monthly plan"}
+                </span>
+              </div>
+            </div>
           </div>
 
-          <h3 className={styles.successHead}>
-            You’re on {tierName(newTier)}!{" "}
-            <span className={styles.successParty} aria-hidden="true">
+          <p className={styles.successLine}>
+            <span className={styles.successBang} aria-hidden="true">
               🎉
             </span>
-          </h3>
-          <p className={styles.successSub}>Thanks for subscribing — you’re all set.</p>
+            You’re all set — here’s everything <strong>{serverName}</strong> just unlocked.
+          </p>
 
-          {server ? (
-            <div className={styles.successServer}>
-              <GuildGlyph guild={server} />
-              <span className={styles.successServerName}>{server.name}</span>
-            </div>
-          ) : null}
-
-          <p className={styles.unlockTitle}>What you just unlocked</p>
-          <ul className={styles.unlockGrid}>
-            {ROWS.map((r) => {
-              const to = r.values[newTier];
-              const from = r.values[fromTier];
-              return (
-                <li key={r.label} className={styles.unlockItem}>
-                  <span
-                    className={cn(styles.unlockVal, to === "Unlimited" && styles.unlockUnlimited)}
-                  >
-                    {to}
-                  </span>
-                  <span className={styles.unlockLabel}>{r.label}</span>
-                  {to !== from ? <span className={styles.unlockDelta}>up from {from}</span> : null}
-                </li>
-              );
-            })}
+          <ul className={styles.perks}>
+            {ROWS.map((r, i) => (
+              <PerkRow
+                key={r.label}
+                label={r.label}
+                from={r.values[fromTier]}
+                to={r.values[newTier]}
+                animate={animate}
+                delay={280 + i * 90}
+              />
+            ))}
           </ul>
 
-          <div className={styles.successNotes}>
-            <p className={styles.successNote}>
-              <span aria-hidden="true">🔁</span>
-              <span>
-                Premium follows you — move it to another server anytime from <strong>Plans</strong>.
-              </span>
-            </p>
-            <p className={styles.successNote}>
-              <span aria-hidden="true">🧾</span>
-              <span>
-                Change or cancel whenever you like under <strong>Manage billing</strong> — nothing
-                is ever locked.
-              </span>
-            </p>
-            <p className={styles.successReflect}>
-              Your new limits are live now — it can take a moment to show everywhere.
-            </p>
-          </div>
+          <p className={styles.successFoot}>
+            Premium is bound to this server and <strong>moves with you</strong> — manage or cancel
+            anytime under Plans. New limits are live now; give it a moment to show everywhere.
+          </p>
         </div>
       </Modal>
     );
@@ -570,5 +574,91 @@ function GuildGlyph({ guild }: { guild: PickerGuild }) {
     <span className={cn(styles.serverIcon, styles.serverIconFallback)} aria-hidden="true">
       {guild.name.slice(0, 1).toUpperCase()}
     </span>
+  );
+}
+
+/** Whether the viewer asked for reduced motion — so the success-screen flourishes
+ *  (card flip, sheen, count-up) fall back to a static reveal. */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/** Count from `start` up to `target` once on mount (easeOutCubic), after `delayMs`
+ *  — so a limit visibly grows from the old value to the new one. Returns `target`
+ *  immediately when `animate` is false. */
+function useCountUp(
+  start: number,
+  target: number,
+  animate: boolean,
+  delayMs = 0,
+  durationMs = 850,
+): number {
+  const [val, setVal] = useState(animate ? start : target);
+  useEffect(() => {
+    if (!animate) {
+      setVal(target);
+      return;
+    }
+    let raf = 0;
+    const startAt = performance.now() + delayMs;
+    const step = (now: number) => {
+      if (now < startAt) {
+        raf = requestAnimationFrame(step);
+        return;
+      }
+      const t = Math.min(1, (now - startAt) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setVal(Math.round(start + (target - start) * eased));
+      if (t < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [start, target, animate, delayMs, durationMs]);
+  return val;
+}
+
+/** One line of the "what you unlocked" ledger: `label ···· old → new`, where the
+ *  finite new value counts up and "Unlimited" shows as ∞. Slides in on a stagger
+ *  (`delay`) that also gates the count-up so number and row appear together. */
+function PerkRow({
+  label,
+  from,
+  to,
+  animate,
+  delay,
+}: {
+  label: string;
+  from: string;
+  to: string;
+  animate: boolean;
+  delay: number;
+}) {
+  const isUnlimited = to === "Unlimited";
+  const fromNum = Number.isFinite(Number(from)) ? Number(from) : 0;
+  const counted = useCountUp(fromNum, isUnlimited ? 0 : Number(to), animate && !isUnlimited, delay);
+  const display = isUnlimited ? "∞" : String(counted);
+  const changed = from !== to;
+  return (
+    <li
+      className={styles.perk}
+      style={{ animationDelay: `${delay}ms` }}
+      aria-label={`${label}: ${isUnlimited ? "unlimited" : to}${changed ? `, up from ${from}` : ""}`}
+    >
+      <span className={styles.perkLabel}>{label}</span>
+      <span className={styles.perkLeader} aria-hidden="true" />
+      <span className={styles.perkVals} aria-hidden="true">
+        {changed ? (
+          <>
+            <span className={styles.perkFrom}>{from}</span>
+            <span className={styles.perkArrow}>→</span>
+          </>
+        ) : null}
+        <span className={cn(styles.perkTo, isUnlimited && styles.perkInfinite)}>{display}</span>
+      </span>
+    </li>
   );
 }
