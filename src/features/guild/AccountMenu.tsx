@@ -30,6 +30,7 @@ import { guildIconUrl, isValidGuildId, type AuthUser, type PickerGuild } from "@
 import { Menu } from "@/ui/Menu";
 import {
   CheckCircleIcon,
+  ChevronRightIcon,
   ClockIcon,
   LogInIcon,
   PlusIcon,
@@ -434,17 +435,24 @@ function AccountPanel({
                 <li className={styles.serverSubGroup}>
                   <button
                     type="button"
-                    className={styles.serverSubRow}
+                    className={cn(styles.serverSubRow, styles.plansRow)}
                     onClick={() => {
                       onClose();
                       openPricing(connectedId ?? "");
                     }}
                   >
-                    <SparkleIcon size={14} />
-                    <span>
-                      Plans
-                      {plan ? ` · ${plan.tier.charAt(0).toUpperCase()}${plan.tier.slice(1)}` : ""}
-                    </span>
+                    <SparkleIcon size={14} className={styles.plansSparkle} />
+                    <span className={styles.plansLabel}>Plans</span>
+                    {plan?.tier === "pro" ? (
+                      <span className={cn(styles.tierBadge, styles.tierPro)}>Pro</span>
+                    ) : plan?.tier === "plus" ? (
+                      <span className={cn(styles.tierBadge, styles.tierPlus)}>Plus</span>
+                    ) : (
+                      <span className={styles.upgradeBadge}>
+                        Upgrade
+                        <ChevronRightIcon size={12} />
+                      </span>
+                    )}
                   </button>
                   <button type="button" className={styles.serverSubRow} onClick={onManageMessages}>
                     <ClockIcon size={14} />

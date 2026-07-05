@@ -314,6 +314,116 @@
   background: var(--app-border-strong);
 }
 
+/* ── Plans sub-row (the engagement hook) ──────────────────────────────────
+ * Sits at the top of the per-server sub-group. Given a warmer accent-gradient
+ * wash, a twinkling sparkle, and a tier badge so it reads as the "premium" row
+ * rather than a plain setting — and, on the free tier, a shimmering "Upgrade"
+ * pill that draws the eye toward converting. */
+.plansRow {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--app-accent) 16%, transparent),
+    transparent 78%
+  );
+}
+.plansRow:hover {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--app-accent) 26%, transparent),
+    var(--app-accent-soft) 92%
+  );
+}
+.plansLabel {
+  font-weight: 600;
+}
+/* The sparkle glows in the accent colour (overriding the muted sub-row svg) and
+ * twinkles on a slow, offset loop so it catches the eye without nagging. */
+.plansRow .plansSparkle {
+  color: var(--app-accent);
+  animation: plansTwinkle 2.8s ease-in-out infinite;
+  transform-origin: center;
+}
+@keyframes plansTwinkle {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2) rotate(12deg);
+  }
+}
+
+/* Tier badge — a pill pushed to the row's trailing edge. */
+.tierBadge {
+  margin-left: auto;
+  flex: none;
+  padding: 1.5px 8px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  line-height: 1.5;
+  color: #fff;
+}
+.tierPlus {
+  background: var(--app-accent);
+}
+/* Pro gets a warm gold→coral gradient + faint glow so paying servers see a
+ * premium marker that reinforces the upgrade's value. */
+.tierPro {
+  color: #2a1a00;
+  background: linear-gradient(100deg, #ffd24a, #ffab2e 45%, #ff7a59);
+  box-shadow: 0 0 0 1px rgba(255, 180, 0, 0.35);
+}
+
+/* Free-tier call to action — a shimmering gradient pill with a nudge chevron.
+ * The moving gradient is the engagement cue; kept subtle so it invites rather
+ * than shouts. */
+.upgradeBadge {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 5px 2px 9px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(
+    100deg,
+    var(--app-accent) 0%,
+    #a855f7 25%,
+    var(--app-accent) 50%,
+    #a855f7 75%,
+    var(--app-accent) 100%
+  );
+  background-size: 220% 100%;
+  animation: upgradeShimmer 3.4s linear infinite;
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--app-accent) 45%, transparent);
+}
+.upgradeBadge svg {
+  color: currentColor;
+  opacity: 0.9;
+}
+@keyframes upgradeShimmer {
+  to {
+    background-position: -220% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plansRow .plansSparkle,
+  .upgradeBadge {
+    animation: none;
+  }
+}
+
 /* ── Footer actions (invite / refresh) ────────────────────────────────── */
 .actions {
   display: flex;
