@@ -47,7 +47,7 @@ use crate::discord::{DiscordUser, Webhook};
 use crate::error::AppError;
 use crate::routes::{
     authorize_activity_member, authorize_activity_webhooks, current_session, dispatcher_api,
-    ensure_channel_in_guild, is_snowflake, relay_dispatcher, AppState,
+    dispatcher_url_with_cap, ensure_channel_in_guild, is_snowflake, relay_dispatcher, AppState,
 };
 use crate::session::{now, Session};
 
@@ -528,9 +528,17 @@ async fn claim_permanent_slot(
     let Ok(api) = dispatcher_api(st) else {
         return PermanentClaim::Unavailable;
     };
+    // Enforce the destination server's *plan* cap, not the dispatcher's default:
+    // an upgraded server gets its raised slot count here just as it does on the
+    // web (see `routes::permanent_add`). Without this the claim silently caps at
+    // the free PERMANENT_SLOTS_PER_GUILD default.
+    let cap = st.entitlements.permanent_cap(guild).await;
     let req = api
         .http
-        .post(format!("{}/permanent/{guild}", api.base))
+        .post(dispatcher_url_with_cap(
+            format!("{}/permanent/{guild}", api.base),
+            cap,
+        ))
         .bearer_auth(&api.token)
         .json(&json!({
             "message_id": message_id,
@@ -581,9 +589,16 @@ pub async fn activity_permanent(
     }
     authorize_activity_webhooks(&st, session, &guild).await?;
     let api = dispatcher_api(&st)?;
+    // Report slots against the server's *plan* cap (same source the web app's
+    // `routes::permanent_list` uses), so an upgraded server shows its raised
+    // count instead of the dispatcher's free default.
+    let cap = st.entitlements.permanent_cap(&guild).await;
     let req = api
         .http
-        .get(format!("{}/permanent/{guild}", api.base))
+        .get(dispatcher_url_with_cap(
+            format!("{}/permanent/{guild}", api.base),
+            cap,
+        ))
         .bearer_auth(&api.token);
     relay_dispatcher(req).await
 }
