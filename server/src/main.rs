@@ -466,6 +466,10 @@ async fn run() {
             "/api/stripe/checkout",
             post(stripe::checkout).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
         )
+        .route(
+            "/api/stripe/sync",
+            post(stripe::sync).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
+        )
         .route("/api/stripe/subscriptions", get(stripe::subscriptions))
         .route(
             "/api/stripe/reassign",

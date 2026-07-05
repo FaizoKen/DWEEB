@@ -100,6 +100,24 @@ impl Entitlement {
         }
     }
 
+    /// The JSON body describing a tier (its per-tier limits + whether in-app
+    /// billing is available) — the `PlanInfo` shape the FE reads. Shared by
+    /// `GET /api/guilds/:id/plan` and the post-checkout sync so both return an
+    /// identical body. Unlimited limits are sent as JSON `null`.
+    pub fn plan_json(&self, tier: Tier) -> Value {
+        let limits = self.limits_for(tier);
+        json!({
+            "tier": tier.as_str(),
+            "limits": {
+                "schedules": lim(limits.schedules),
+                "permanent": lim(limits.permanent),
+                "custom_bots": lim(limits.custom_bots),
+                "coeditors": lim(limits.coeditors),
+            },
+            "billing": self.enabled(),
+        })
+    }
+
     /// A **server's** tier — derived from the subscriptions bound to it, MEE6/
     /// Dyno-style. Always answers (Free when unconfigured / no premium).
     pub async fn tier_for(&self, guild: &str) -> Tier {
@@ -234,18 +252,7 @@ pub async fn guild_plan(
         }
     }
     let tier = st.entitlements.tier_for(&guild).await;
-    let limits = st.entitlements.limits_for(tier);
-    Ok(Json(json!({
-        "tier": tier.as_str(),
-        "limits": {
-            "schedules": lim(limits.schedules),
-            "permanent": lim(limits.permanent),
-            "custom_bots": lim(limits.custom_bots),
-            "coeditors": lim(limits.coeditors),
-        },
-        "billing": st.entitlements.enabled(),
-    }))
-    .into_response())
+    Ok(Json(st.entitlements.plan_json(tier)).into_response())
 }
 
 /// Present a limit for the FE: a positive number, or `null` for unlimited (`0`).

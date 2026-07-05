@@ -1086,6 +1086,57 @@ pub async fn checkout(
         .into_response())
 }
 
+#[derive(Deserialize)]
+pub struct SyncBody {
+    /// The server whose just-completed purchase to pick up.
+    pub guild_id: String,
+}
+
+/// `POST /api/stripe/sync` `{ guild_id }` → the server's now-current plan.
+///
+/// The embedded Checkout's `onComplete` fires the moment payment succeeds —
+/// before (or racing) the `checkout.session.completed` webhook — and the lazy
+/// backfill is throttled, so a fresh purchase could otherwise take a long time
+/// (worst case, until the next 24h backfill) to reflect. This forces the pickup:
+/// it pulls the buyer's subscriptions **straight from Stripe** via the
+/// customer-list endpoint (strongly consistent — the sub created seconds ago,
+/// stamped with this `guild_id`, is already there, unlike the search-indexed
+/// backfill), mirrors them, reconciles the server (which also drops the tier
+/// cache), and returns its refreshed tier. Same gate as checkout: the caller must
+/// manage the server.
+pub async fn sync(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    Json(body): Json<SyncBody>,
+) -> Result<Response, AppError> {
+    let stripe = require_stripe(&st)?;
+    let guild = body.guild_id.trim().to_string();
+    if !crate::routes::is_snowflake(&guild) {
+        return Err(AppError::Status {
+            status: StatusCode::BAD_REQUEST,
+            message: "Pick a server.".into(),
+            retry_after: None,
+        });
+    }
+    let session = crate::routes::authorize_member(&st, &jar, &guild).await?;
+    // Pull the buyer's subscriptions from Stripe and mirror them now — the sub
+    // just created by checkout carries this guild in its metadata, so this binds
+    // it to the server regardless of webhook timing.
+    stripe
+        .client
+        .refresh_user_subscriptions(&stripe.store, &session.uid)
+        .await;
+    // Recompute the server's caps off the fresh mirror (this also invalidates the
+    // short tier cache) and revive anything suspended under the previous tier.
+    crate::reconcile::reconcile_guild(&st, &guild).await;
+    let tier = st.entitlements.tier_for(&guild).await;
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(st.entitlements.plan_json(tier)),
+    )
+        .into_response())
+}
+
 /// `GET /api/stripe/subscriptions` → the signed-in user's premium subscriptions,
 /// each with the server it's bound to and its DWEEB tier — the data behind the
 /// "your premium servers" list and the move-premium picker. Cookie-gated.

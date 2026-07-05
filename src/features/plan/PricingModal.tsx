@@ -29,6 +29,7 @@ import {
   isCheckoutConfigured,
   openBillingPortal,
   reassignSubscription,
+  syncCheckout,
   type BillingInterval,
   type PaidTier,
   type PremiumSubscription,
@@ -125,8 +126,16 @@ export function PricingModal() {
 
   const onComplete = () => {
     setDone(true);
-    if (guildId) void reloadPlan(guildId, true); // pull the new tier
-    loadSubs();
+    // Payment succeeded. Force the server to pick up the new subscription now
+    // (the webhook can lag or be blocked, and the backfill is throttled) *before*
+    // reloading the plan, so the new tier actually shows instead of the old one.
+    void (async () => {
+      if (guildId) {
+        await syncCheckout(guildId);
+        await reloadPlan(guildId, true);
+      }
+      loadSubs();
+    })();
   };
 
   const manageBilling = async () => {

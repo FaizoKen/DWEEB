@@ -67,6 +67,25 @@ export async function createCheckout(
   return { ok: true, clientSecret: data.client_secret };
 }
 
+/** `POST /api/stripe/sync` `{ guild_id }` — force the server to pick up a
+ *  just-completed purchase now, instead of waiting on the Stripe webhook (which
+ *  can lag or be blocked) or the throttled backfill. Called right after the
+ *  embedded Checkout's `onComplete`. Fails soft: `false` on any miss, and the
+ *  caller still reloads the plan (the webhook remains the backstop). */
+export async function syncCheckout(guildId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${PROXY_BASE_URL}/api/stripe/sync`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guild_id: guildId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** One of the signed-in user's premium subscriptions, from
  *  `GET /api/stripe/subscriptions`. Ownership (this user pays) is implied; the
  *  `guildId` is the server it currently grants premium to. */
