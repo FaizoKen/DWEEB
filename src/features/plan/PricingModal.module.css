@@ -295,6 +295,15 @@
   color: var(--app-text-muted);
 }
 
+/* Downgrade reassurance — a hair quieter than .included, so it reads as the
+   fine print it is. Preempts the "will I lose my stuff?" question. */
+.downgradeNote {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--app-text-subtle);
+}
+
 .serverIcon {
   width: 30px;
   height: 30px;

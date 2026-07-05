@@ -62,6 +62,11 @@ const ROWS: { label: string; values: Record<PlanTier, string> }[] = [
 const INCLUDED =
   "Every plan includes the full builder, all templates, unlimited webhooks, unlimited tickets, link plugins, and share links. Premium applies to one server — buy it again (or move it) for another.";
 
+// Reassurance for the downgrade/cancel path — nothing is destroyed, over-limit
+// items are just paused and auto-restored (see server/src/reconcile.rs).
+const DOWNGRADE_NOTE =
+  "Change or cancel anytime — nothing is deleted. If a server ends up over a lower plan’s limit, the extra items are paused (not removed) and come back automatically, oldest first, when you upgrade again.";
+
 const RANK: Record<PlanTier, number> = { free: 0, plus: 1, pro: 2 };
 
 function tierName(t: PlanTier): string {
@@ -301,6 +306,7 @@ export function PricingModal() {
       ) : null}
 
       <p className={styles.included}>{INCLUDED}</p>
+      <p className={styles.downgradeNote}>{DOWNGRADE_NOTE}</p>
     </Modal>
   );
 }
