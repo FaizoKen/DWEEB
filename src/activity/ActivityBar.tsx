@@ -11,7 +11,7 @@
  * just as useful in the room, and the proxy makes it a one-field action.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useActivityStore } from "@/core/activity/activityStore";
@@ -22,7 +22,6 @@ import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { pushToast } from "@/ui/Toast";
-import { useMediaQuery } from "@/features/preview/previewSheet";
 import {
   ExternalLinkIcon,
   GlobeIcon,
@@ -53,6 +52,12 @@ import styles from "./ActivityBar.module.css";
  *  focus/visibility re-checks and the manual button keep working past the cap. */
 const AUTO_RECHECK_INTERVAL_MS = 5_000;
 const AUTO_RECHECK_MAX_TICKS = 24; // ~2 minutes of polling
+
+/** Space (px) the destination cluster (server glyph + channel picker) needs to
+ *  stay readable. The fit check below collapses the utility actions into an
+ *  overflow menu once they'd squeeze the destination below this — so a long
+ *  channel name truncates gracefully instead of the whole row overflowing. */
+const LEFT_MIN_WIDTH = 150;
 
 /** A post the user has asked for but not yet confirmed (the pre-post dialog is
  *  open). `newCopy` marks the "New" button — a separate copy alongside the
@@ -93,11 +98,30 @@ export function ActivityBar() {
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
   const canPostToTarget = useActivityStore((s) => s.canPostToTarget);
 
-  // Below the phone breakpoint the bar can't fit every control at full size on
-  // one row, so the utility actions (restore, open-on-web, and — in the update
-  // state — view) fold into a single overflow menu and the secondary "New"
-  // button collapses to its icon. Wider windows keep everything inline.
-  const isPhone = useMediaQuery("(max-width: 560px)");
+  // When the bar can't fit every control at full size on one row the utility
+  // actions (restore, open-on-web, feedback, and — in the update state — view)
+  // fold into a single overflow menu and the secondary "New" button collapses to
+  // its icon; wider bars keep everything inline. Crucially this keys off the
+  // bar's *own* width, measured below, not the viewport: the bar lives in the
+  // editor pane, which is only half the window on desktop, so a viewport media
+  // query (the old approach) kept everything inline in a pane far too narrow for
+  // it — the destination got crushed and the actions overflowed. Mirrors the web
+  // builder's action bar (see `features/builder/Builder`).
+  const barRef = useRef<HTMLDivElement>(null);
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  // Bumped by the ResizeObserver whenever the bar's width changes, driving a
+  // fresh fit measurement. (Width only — collapsing changes the bar's content,
+  // not its width, so this never feeds back on itself.)
+  const [barWidth, setBarWidth] = useState(0);
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const ro = new ResizeObserver(() => setBarWidth(bar.clientWidth));
+    ro.observe(bar);
+    return () => ro.disconnect();
+  }, []);
 
   // A DM / group-DM launch has no guild of its own, so the user first picks a
   // destination *server* (DMs can't receive a webhook post), then a channel.
@@ -246,12 +270,41 @@ export function ActivityBar() {
     lastPost.channel_id === targetChannelId;
 
   // "View the posted message" belongs to the update state and only when posting
-  // here is actually possible — mirroring the desktop `canUpdate` arm below,
-  // where it sits inline. On a phone it rides in the overflow menu instead.
+  // here is actually possible — mirroring the wide-layout `canUpdate` arm below,
+  // where it sits inline. When compact it rides in the overflow menu instead.
   const showView = canUpdate && !botMissing && !blockedFromPosting;
-  // Undo/redo (and the overflow trigger) tighten to the small control size on a
-  // phone so the row keeps breathing room; full size on wider windows.
-  const iconSize = isPhone ? "sm" : "md";
+
+  // A signature of everything that changes the *inline* bar's width, so a state
+  // flip (Post↔Update revealing New/View, the plan pill appearing, feedback
+  // toggling) re-runs the fit measurement below — not just a raw width change.
+  const planVisible = !!(plan && !botMissing && targetGuildId);
+  const layoutKey = `${canUpdate}|${botMissing}|${blockedFromPosting}|${showView}|${planVisible}|${feedbackOn}|${isDm}`;
+
+  // Measure whether the inline layout fits, collapsing to compact when it can't.
+  // First optimistically restore the full row on any width/content change…
+  useLayoutEffect(() => {
+    setCompact(false);
+  }, [barWidth, layoutKey]);
+  // …then, before paint, check it against the bar's real width and collapse if
+  // the actions (their natural, never-shrinking width) would leave the
+  // destination less than a readable minimum. The right cluster is `flex:none`
+  // so its box width *is* its natural width; the left is allowed to truncate, so
+  // we reserve a fixed minimum for it rather than its content width. Runs in a
+  // layout effect so the collapse never flashes.
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    const right = rightRef.current;
+    if (!bar || !right || compact) return;
+    const cs = getComputedStyle(bar);
+    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    const gap = parseFloat(cs.columnGap) || 0;
+    const needed = right.getBoundingClientRect().width + LEFT_MIN_WIDTH + gap + padX;
+    if (needed > bar.clientWidth + 1) setCompact(true);
+  }, [compact, barWidth, layoutKey]);
+
+  // Undo/redo (and the overflow trigger) tighten to the small control size when
+  // compact so the row keeps breathing room; full size on wider bars.
+  const iconSize = compact ? "sm" : "md";
 
   // Run the confirmed post. `publish`/`update` resolve with the result on
   // success (null on failure, which they toast), so we only swap the confirm
@@ -274,8 +327,8 @@ export function ActivityBar() {
   };
 
   return (
-    <div className={styles.bar}>
-      <div className={styles.left}>
+    <div ref={barRef} className={styles.bar} data-compact={compact ? "" : undefined}>
+      <div ref={leftRef} className={styles.left}>
         {/* Server indicator, left corner — which server the post lands in. On a
             DM launch it's the destination picker, collapsed to the chosen
             server's icon + dropdown arrow (or a "Pick a server" prompt before
@@ -323,7 +376,7 @@ export function ActivityBar() {
         ) : null}
       </div>
 
-      <div className={styles.right} data-compact={isPhone ? "" : undefined}>
+      <div ref={rightRef} className={styles.right}>
         {/* Quiet plan indicator, leading the utility cluster — a recessive pill
             showing the server's tier, opening a popover with the limits + a
             "see plans on web" hand-off. Hidden until a destination server is
@@ -346,11 +399,11 @@ export function ActivityBar() {
             "Open on web" hands the current draft to the web app for what the
             embedded surface omits (scheduling, saved messages, account).
 
-            On a phone the bar can't hold every control at full size on one line,
-            so these fold into a single overflow menu — which also absorbs the
-            update state's "View" — keeping the row to the destination, undo/redo,
-            and the primary action. Wider windows show them inline. */}
-        {isPhone ? (
+            When the bar is too narrow to hold every control at full size, these
+            fold into a single overflow menu — which also absorbs the update
+            state's "View" — keeping the row to the destination, undo/redo, and
+            the primary action. Wider bars show them inline. */}
+        {compact ? (
           <Menu
             align="end"
             trigger={
@@ -480,9 +533,9 @@ export function ActivityBar() {
         ) : canUpdate ? (
           <>
             {/* The iframe can't open discord.com itself; openLastPost routes
-                through the SDK (see activityStore). On a phone this moves into
-                the overflow menu above, so it's only inline on wider windows. */}
-            {!isPhone ? (
+                through the SDK (see activityStore). When compact this moves into
+                the overflow menu above, so it's only inline on wider bars. */}
+            {!compact ? (
               <IconButton label="View the posted message" onClick={() => void openLastPost()}>
                 <ExternalLinkIcon />
               </IconButton>

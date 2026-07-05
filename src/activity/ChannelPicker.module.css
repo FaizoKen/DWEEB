@@ -10,6 +10,9 @@
   align-items: center;
   gap: 4px;
   max-width: 240px;
+  /* Let the chip shrink below its content in a tight pane so the name truncates
+     (below) instead of overflowing the bar. */
+  min-width: 0;
   padding: 4px 8px;
   border: 1px solid transparent;
   border-radius: var(--app-radius-sm);
@@ -43,6 +46,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* min-width:0 lets this flex item shrink so the ellipsis engages instead of the
+     name pushing past the chip's max-width. */
+  min-width: 0;
 }
 
 .chevron {
