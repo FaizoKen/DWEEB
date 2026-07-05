@@ -1,6 +1,10 @@
 /* Cinematic backdrop — darker than the standard modal scrim so the film reads
    like a theatre, and above the Template Gallery's overlay (`--app-z-tooltip`)
-   since on a first visit the film opens right on top of it. */
+   since on a first visit the film opens right on top of it.
+
+   No backdrop blur here: re-blurring the whole app on every composited frame
+   is exactly what makes video playback feel heavy on phones, and even on
+   desktop it buys little over a slightly deeper plain scrim. */
 .backdrop {
   position: fixed;
   inset: 0;
@@ -9,9 +13,7 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(3, 4, 8, 0.78);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(3, 4, 8, 0.88);
   animation: welcomeFade 200ms ease-out both;
 }
 
@@ -69,7 +71,9 @@
 }
 
 /* One obvious tap for sound while the film autoplays muted. Sits above the
-   video but clear of the native controls strip at the bottom. */
+   video but clear of the native controls strip at the bottom. Solid surface,
+   no backdrop-filter — a blur that samples a playing video re-renders every
+   frame and taxes phone GPUs for no visible gain over plain dark. */
 .soundPill {
   position: absolute;
   top: 12px;
@@ -77,13 +81,11 @@
   padding: 8px 14px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 999px;
-  background: rgba(8, 10, 16, 0.72);
+  background: rgba(8, 10, 16, 0.85);
   color: #fff;
   font-size: var(--app-text-sm);
   font-weight: 600;
   cursor: pointer;
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
   animation: welcomeFade 200ms ease-out 400ms both;
 }
 .soundPill:hover {
@@ -91,7 +93,8 @@
 }
 
 /* Floating close on the film's top-right corner — the only chrome above the
-   footer, styled like the sound pill so it reads as part of the player. */
+   footer, styled like the sound pill so it reads as part of the player.
+   Solid surface for the same per-frame compositing reason as the pill. */
 .closeFloat {
   position: absolute;
   top: 12px;
@@ -102,14 +105,12 @@
   height: 34px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 999px;
-  background: rgba(8, 10, 16, 0.72);
+  background: rgba(8, 10, 16, 0.85);
   color: #fff;
   cursor: pointer;
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
 }
 .closeFloat:hover {
-  background: rgba(24, 28, 40, 0.85);
+  background: rgba(24, 28, 40, 0.95);
 }
 
 .footer {
