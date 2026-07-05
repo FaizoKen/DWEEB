@@ -23,7 +23,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/ui/Button";
-import { CloseIcon, SendIcon } from "@/ui/Icon";
+import { CloseIcon } from "@/ui/Icon";
 import { useWelcomeStore } from "./welcomeStore";
 import styles from "./WelcomeVideo.module.css";
 
@@ -123,11 +123,12 @@ export function WelcomeVideo() {
         </div>
 
         <footer className={styles.footer}>
-          <div className={styles.heading}>
-            <h2 className={styles.title}>DWEEB introduction</h2>
-            <p className={styles.hint}>Replay any time from More ▸ “Watch the intro”.</p>
-          </div>
-          <Button variant="primary" size="sm" leadingIcon={<SendIcon />} onClick={close}>
+          {/* One slim row: title left, CTA right. The replay path lives on the
+              title's hover tooltip instead of a second line of copy. */}
+          <h2 className={styles.title} title="Replay any time from More ▸ “Watch the intro”">
+            DWEEB introduction
+          </h2>
+          <Button variant="primary" size="sm" onClick={close}>
             Get started
           </Button>
         </footer>
