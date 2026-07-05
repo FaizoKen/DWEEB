@@ -65,7 +65,7 @@ export function useWelcomeAutoOpen(): void {
     // "announce" — pre-film user: one quiet pointer at the replayable film.
     const t = setTimeout(() => {
       writeWelcomeRecord("announced");
-      pushToast('New: a 90-second intro film — find "Watch the intro" under More.', "info");
+      pushToast('New: an intro film — find "Watch the intro" under More.', "info");
     }, ANNOUNCE_DELAY_MS);
     return () => clearTimeout(t);
   }, [decision]);

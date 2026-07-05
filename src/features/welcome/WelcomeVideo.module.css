@@ -36,47 +36,17 @@
   max-width: min(440px, 94vw);
 }
 
-.header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px 10px;
-}
-
 .heading {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .title {
   margin: 0;
-  font-size: var(--app-text-lg, 17px);
+  font-size: var(--app-text-md, 15px);
   font-weight: 700;
-  color: var(--app-text);
-}
-
-.subtitle {
-  margin: 0;
-  font-size: var(--app-text-sm);
-  color: var(--app-text-muted);
-}
-
-.close {
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: var(--app-radius-sm);
-  background: none;
-  color: var(--app-text-muted);
-  cursor: pointer;
-}
-.close:hover {
-  background: var(--app-accent-soft);
   color: var(--app-text);
 }
 
@@ -93,7 +63,7 @@
   display: block;
   width: 100%;
   height: 100%;
-  max-height: calc(94dvh - 130px); /* panel minus header + footer chrome */
+  max-height: calc(94dvh - 70px); /* panel minus the footer's chrome */
   aspect-ratio: 16 / 9;
   object-fit: contain;
 }
@@ -120,6 +90,28 @@
   animation: welcomeFade 200ms ease-out 400ms both;
 }
 .soundPill:hover {
+  background: rgba(24, 28, 40, 0.85);
+}
+
+/* Floating close on the film's top-right corner — the only chrome above the
+   footer, styled like the sound pill so it reads as part of the player. */
+.closeFloat {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(8, 10, 16, 0.72);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.closeFloat:hover {
   background: rgba(24, 28, 40, 0.85);
 }
 

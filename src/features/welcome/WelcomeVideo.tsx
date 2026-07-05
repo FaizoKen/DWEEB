@@ -86,21 +86,14 @@ export function WelcomeVideo() {
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Meet DWEEB — a 90-second intro"
+        aria-label="DWEEB introduction"
         tabIndex={-1}
         className={styles.panel}
         data-orientation={cut === VERTICAL ? "portrait" : "landscape"}
       >
-        <header className={styles.header}>
-          <div className={styles.heading}>
-            <h2 className={styles.title}>Meet DWEEB</h2>
-            <p className={styles.subtitle}>Everything it does, in 90 seconds.</p>
-          </div>
-          <button type="button" className={styles.close} onClick={close} aria-label="Close intro">
-            <CloseIcon size={20} />
-          </button>
-        </header>
-
+        {/* No header chrome — the film runs edge-to-edge and the footer carries
+            the title + CTA. Closing stays one tap away: the floating ✕ on the
+            video corner, Esc, the backdrop, or "Get started". */}
         <div className={styles.stage}>
           <video
             ref={videoRef}
@@ -119,10 +112,21 @@ export function WelcomeVideo() {
               🔊 Tap for sound
             </button>
           ) : null}
+          <button
+            type="button"
+            className={styles.closeFloat}
+            onClick={close}
+            aria-label="Close intro"
+          >
+            <CloseIcon size={18} />
+          </button>
         </div>
 
         <footer className={styles.footer}>
-          <span className={styles.hint}>Replay any time from More ▸ “Watch the intro”.</span>
+          <div className={styles.heading}>
+            <h2 className={styles.title}>DWEEB introduction</h2>
+            <p className={styles.hint}>Replay any time from More ▸ “Watch the intro”.</p>
+          </div>
           <Button variant="primary" size="sm" leadingIcon={<SendIcon />} onClick={close}>
             Get started
           </Button>
