@@ -14,7 +14,7 @@
  * mounts it lazily.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EmbeddedCheckout, EmbeddedCheckoutProvider } from "@stripe/react-stripe-js";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -91,6 +91,10 @@ export function PricingModal() {
   const [starting, setStarting] = useState<PaidTier | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
   const [done, setDone] = useState(false);
+  // What the completed purchase upgraded: the tier bought and the tier the server
+  // was on beforehand — captured at checkout start (before the plan reloads to the
+  // new tier) so the success screen can show the concrete before→after jump.
+  const purchaseRef = useRef<{ tier: PaidTier; from: PlanTier } | null>(null);
   // Billing interval the Upgrade buttons buy — set by the Monthly/Annual toggle.
   const [period, setPeriod] = useState<BillingInterval>("month");
 
@@ -121,6 +125,9 @@ export function PricingModal() {
       pushToast(res.error, "error");
       return;
     }
+    // Snapshot the tier being left behind now — by the time checkout completes the
+    // plan has reloaded to the new tier, and the success screen wants the "before".
+    purchaseRef.current = { tier, from: currentTier ?? "free" };
     setCheckout({ tier, clientSecret: res.clientSecret });
   };
 
@@ -146,24 +153,84 @@ export function PricingModal() {
     else pushToast(res.error, "error");
   };
 
-  // Post-purchase success view.
+  // Post-purchase success view — celebrate, then spell out exactly what the
+  // server just gained so the upgrade feels concrete instead of vague.
   if (done) {
+    const bought = purchaseRef.current;
+    const newTier: PlanTier = bought?.tier ?? plan?.tier ?? "plus";
+    const fromTier: PlanTier = bought?.from ?? "free";
+    const isPro = newTier === "pro";
     return (
       <Modal
         open
         onClose={close}
-        size="sm"
-        title="You’re upgraded 🎉"
+        title="Purchase complete"
         footer={
           <Button variant="primary" onClick={close}>
-            Done
+            Start using {tierName(newTier)}
           </Button>
         }
       >
-        <p className={styles.lead}>
-          Thanks for subscribing! {server ? <strong>{server.name}</strong> : "This server"}’s new
-          limits are active now — it can take a moment to reflect everywhere.
-        </p>
+        <div className={styles.success}>
+          <div className={cn(styles.successMedal, isPro && styles.successMedalPro)}>
+            <span className={styles.successMedalGlyph} aria-hidden="true">
+              {isPro ? "👑" : "⚡"}
+            </span>
+          </div>
+
+          <h3 className={styles.successHead}>
+            You’re on {tierName(newTier)}!{" "}
+            <span className={styles.successParty} aria-hidden="true">
+              🎉
+            </span>
+          </h3>
+          <p className={styles.successSub}>Thanks for subscribing — you’re all set.</p>
+
+          {server ? (
+            <div className={styles.successServer}>
+              <GuildGlyph guild={server} />
+              <span className={styles.successServerName}>{server.name}</span>
+            </div>
+          ) : null}
+
+          <p className={styles.unlockTitle}>What you just unlocked</p>
+          <ul className={styles.unlockGrid}>
+            {ROWS.map((r) => {
+              const to = r.values[newTier];
+              const from = r.values[fromTier];
+              return (
+                <li key={r.label} className={styles.unlockItem}>
+                  <span
+                    className={cn(styles.unlockVal, to === "Unlimited" && styles.unlockUnlimited)}
+                  >
+                    {to}
+                  </span>
+                  <span className={styles.unlockLabel}>{r.label}</span>
+                  {to !== from ? <span className={styles.unlockDelta}>up from {from}</span> : null}
+                </li>
+              );
+            })}
+          </ul>
+
+          <div className={styles.successNotes}>
+            <p className={styles.successNote}>
+              <span aria-hidden="true">🔁</span>
+              <span>
+                Premium follows you — move it to another server anytime from <strong>Plans</strong>.
+              </span>
+            </p>
+            <p className={styles.successNote}>
+              <span aria-hidden="true">🧾</span>
+              <span>
+                Change or cancel whenever you like under <strong>Manage billing</strong> — nothing
+                is ever locked.
+              </span>
+            </p>
+            <p className={styles.successReflect}>
+              Your new limits are live now — it can take a moment to show everywhere.
+            </p>
+          </div>
+        </div>
       </Modal>
     );
   }
