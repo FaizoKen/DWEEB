@@ -276,8 +276,10 @@ export function PricingModal() {
               tier={t}
               period={period}
               isCurrent={currentTier === t.id}
-              // Highlight the natural upgrade, unless it's already the current tier.
-              featured={t.id === "plus" && currentTier !== "plus"}
+              // Highlight the natural upgrade (Plus) only while it's actually an
+              // upgrade — i.e. the server is still on Free. Once it's on any paid
+              // tier (Plus or Pro), the "Most popular" nudge is just noise.
+              featured={t.id === "plus" && RANK[currentTier ?? "free"] < RANK.plus}
               canBuy={canBuy}
               starting={starting === t.id}
               disabled={starting !== null}
