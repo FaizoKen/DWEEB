@@ -61,6 +61,8 @@ export function SavedMessagesMenu() {
             trailingIcon={<ChevronDownIcon />}
             collapseLabel
             title="Save the current message locally, browse saved messages and templates in the gallery, or clear the current message"
+            // Anchor for the onboarding tour's templates step (see steps.ts).
+            data-tour="saved"
           >
             Saved
           </Button>

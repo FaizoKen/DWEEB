@@ -47,6 +47,16 @@ function readLastAutoOpen(): number | null {
 }
 
 /**
+ * Whether any earlier session auto-opened the gallery. The onboarding tour's
+ * gate uses this as "evidence of prior use": a user with a stamp predates the
+ * tour (or has at least seen the landing screen before) and shouldn't be
+ * auto-toured like a newcomer.
+ */
+export function hasGalleryEverAutoOpened(): boolean {
+  return readLastAutoOpen() !== null;
+}
+
+/**
  * Whether the gallery should auto-open on this load. Pure read — call
  * `markGalleryAutoOpened()` separately when actually opening so the cooldown
  * starts ticking.

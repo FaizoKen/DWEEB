@@ -23,6 +23,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Builder } from "@/features/builder/Builder";
 import { SendCoachMark } from "@/features/builder/SendCoachMark";
+import { TutorialTour } from "@/features/tutorial/TutorialTour";
+import { useTutorialAutoStart } from "@/features/tutorial/useTutorialAutoStart";
+import { tourClaimsSpotlight } from "@/features/tutorial/tutorialStore";
 import { Preview } from "@/features/preview/Preview";
 import { MiniPreview } from "@/features/preview/MiniPreview";
 import {
@@ -102,6 +105,9 @@ export function App() {
   useKeyboardShortcuts();
   useAutoSaveDraft();
   useAttachmentGc();
+  // First-visit onboarding: starts the guided tour once the landing gallery
+  // (and any template setup) has closed; see the hook for the full sequencing.
+  useTutorialAutoStart();
 
   // The Share dialog is shared by every editor CTA; `shareInitialTab` picks
   // which panel each entry point lands on so each button feels dedicated even
@@ -283,6 +289,10 @@ export function App() {
   // depends on the nudge token firing.
   useEffect(() => {
     if (sendNudge === 0) return;
+    // When the onboarding tour is about to run (or running), leave the sheet
+    // down — its first step spotlights the editor tree, which the sheet would
+    // cover, and its preview step points at the sheet's own FAB anyway.
+    if (tourClaimsSpotlight()) return;
     if (window.matchMedia(MOBILE_SHEET_QUERY).matches) setPreviewOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sendNudge]);
@@ -341,6 +351,7 @@ export function App() {
           className="app-shell__pane app-shell__pane--preview"
           aria-label="Message preview"
           aria-hidden={previewOpen ? undefined : "true"}
+          data-tour="preview-pane"
         >
           {!isMobileSheet || previewMounted ? (
             <Preview onClose={closePreview} swipeProps={swipeProps} />
@@ -371,6 +382,7 @@ export function App() {
                 className="preview-fab"
                 onClick={() => setPreviewOpen(true)}
                 aria-label="Show preview"
+                data-tour="preview-fab"
               >
                 <EyeIcon size={18} />
                 <span>Preview</span>
@@ -382,6 +394,7 @@ export function App() {
               className="ai-fab"
               onClick={openAiWithPreview}
               aria-label="Open the AI assistant"
+              data-tour="ai"
             >
               <SparkleIcon size={20} />
               <span>AI Assistant</span>
@@ -434,6 +447,7 @@ export function App() {
           </Suspense>
         ) : null}
         <SendCoachMark />
+        <TutorialTour />
         <UpdatePrompt />
         <ToastViewport />
       </div>

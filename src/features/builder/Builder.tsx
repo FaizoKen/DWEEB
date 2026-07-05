@@ -16,6 +16,7 @@ import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
 import {
   ChevronDownIcon,
+  CompassIcon,
   DownloadIcon,
   HistoryIcon,
   InfoIcon,
@@ -36,6 +37,7 @@ import { activityLaunchUrl, isProxyConfigured } from "@/core/guild/config";
 import { isFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
+import { useTutorialStore } from "@/features/tutorial/tutorialStore";
 import styles from "./Builder.module.css";
 
 interface BuilderProps {
@@ -245,6 +247,17 @@ function ActionBar({
                 }}
               >
                 About
+              </MenuItem>
+              <MenuItem
+                icon={<CompassIcon />}
+                onSelect={() => {
+                  close();
+                  // Replay the onboarding tour on demand — always available, so
+                  // skipping it on the first visit is never a one-way door.
+                  useTutorialStore.getState().start("manual");
+                }}
+              >
+                Take the tour
               </MenuItem>
               {isFeedbackConfigured() ? (
                 <MenuItem

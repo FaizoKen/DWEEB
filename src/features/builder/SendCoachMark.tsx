@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
+import { tourClaimsSpotlight } from "@/features/tutorial/tutorialStore";
 import styles from "./SendCoachMark.module.css";
 
 /** An on-screen box, in viewport coordinates. */
@@ -57,6 +58,10 @@ export function SendCoachMark() {
   // viewport.
   useEffect(() => {
     if (token === 0) return;
+    // On a first visit the onboarding tour is about to run (or running) and its
+    // final step spotlights Send with the same guidance — one spotlight at a
+    // time. Later nudges (tour finished or skipped) behave normally.
+    if (tourClaimsSpotlight()) return;
     const el = document.getElementById(SEND_BUTTON_ID);
     if (!el) return;
     const r = el.getBoundingClientRect();
