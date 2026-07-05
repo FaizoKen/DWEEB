@@ -432,6 +432,20 @@ function AccountPanel({
                   obvious these actions apply to that guild — per-guild slots/bots. */}
               {g.id === connectedId ? (
                 <li className={styles.serverSubGroup}>
+                  <button
+                    type="button"
+                    className={styles.serverSubRow}
+                    onClick={() => {
+                      onClose();
+                      openPricing(connectedId ?? "");
+                    }}
+                  >
+                    <SparkleIcon size={14} />
+                    <span>
+                      Plans
+                      {plan ? ` · ${plan.tier.charAt(0).toUpperCase()}${plan.tier.slice(1)}` : ""}
+                    </span>
+                  </button>
                   <button type="button" className={styles.serverSubRow} onClick={onManageMessages}>
                     <ClockIcon size={14} />
                     <span>Managed messages</span>
@@ -448,19 +462,6 @@ function AccountPanel({
       )}
 
       <div className={styles.actions}>
-        <button
-          type="button"
-          className={styles.actionRow}
-          onClick={() => {
-            onClose();
-            openPricing(connectedId ?? "");
-          }}
-        >
-          <SparkleIcon size={16} />
-          <span>
-            Plans{plan ? ` · ${plan.tier.charAt(0).toUpperCase()}${plan.tier.slice(1)}` : ""}
-          </span>
-        </button>
         {invite ? (
           <a
             className={styles.actionRow}
