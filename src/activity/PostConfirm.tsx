@@ -177,7 +177,7 @@ function PermanentOptIn({
 }) {
   const slotsFull = slots.used >= slots.cap;
   const sub = slotsFull
-    ? `All ${slots.cap} never-expire slots are in use — free one on the web`
+    ? `All ${slots.cap} never-expire slots are in use — free one or upgrade for more on the web`
     : `Buttons & selects keep working · ${slots.used}/${slots.cap} slots used`;
 
   return (

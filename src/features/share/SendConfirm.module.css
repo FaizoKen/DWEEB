@@ -178,9 +178,13 @@
   color: var(--app-text-muted);
 }
 
-/* "Free a slot" hand-off shown under the locked switch when slots are full. */
+/* Slots-full actions under the locked switch — Upgrade (primary) + Free a slot
+   (secondary), side by side, wrapping on a narrow modal. */
 .permanentAction {
   margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* Plugin-routing verdicts. "Foreign" (the owning app will eat every click —

@@ -127,6 +127,8 @@ import {
 } from "@/core/guild/api";
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
+import { usePlanStore } from "@/core/plan/planStore";
+import { isCheckoutConfigured } from "@/core/plan/stripeApi";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
@@ -673,6 +675,18 @@ export function SendPanel({
     }
   };
 
+  // The positive counterpart to "Free a slot": drop the send stack and open the
+  // pricing modal for this server. Raising the tier lifts the never-expire cap
+  // (Plus 25, Pro unlimited), so the next send has a free slot to claim. Only
+  // offered when Stripe checkout is configured for this deployment.
+  const handleUpgradeSlots = () => {
+    setConfirmOpen(false);
+    onCloseDialog?.();
+    if (knownGuildId) {
+      usePlanStore.getState().openPricing(knownGuildId);
+    }
+  };
+
   const permanentOption =
     confirmSlots != null && confirmSlots.ttl_days !== null
       ? {
@@ -683,6 +697,8 @@ export function SendPanel({
           onChange: setMakePermanent,
           slotsFull,
           onManageSlots: slotsFull ? handleManageSlots : undefined,
+          onUpgrade:
+            slotsFull && knownGuildId && isCheckoutConfigured() ? handleUpgradeSlots : undefined,
         }
       : undefined;
 

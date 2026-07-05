@@ -167,6 +167,14 @@ export interface SendConfirmProps {
      * `slotsFull`.
      */
     onManageSlots?: () => void;
+    /**
+     * The slots-full *upgrade* path — the positive alternative to freeing a
+     * slot: closes the send stack and opens the pricing modal for this server
+     * (paid tiers raise the never-expire cap: Plus 25, Pro unlimited). Only
+     * rendered when `slotsFull` *and* billing is available; undefined on
+     * deployments without Stripe, where freeing a slot is the only option.
+     */
+    onUpgrade?: () => void;
   };
   /**
    * The confirmed send is in flight. The confirm button shows a spinner and is
@@ -280,10 +288,13 @@ function PermanentOptIn({
   option: NonNullable<SendConfirmProps["permanentOption"]>;
   busy: boolean;
 }) {
-  const { used, cap, alreadyPermanent, checked, onChange, slotsFull, onManageSlots } = option;
+  const { used, cap, alreadyPermanent, checked, onChange, slotsFull, onManageSlots, onUpgrade } =
+    option;
 
   const sub = slotsFull
-    ? `All ${cap} never-expire slots are used by other messages — free one to use it here`
+    ? onUpgrade
+      ? `All ${cap} never-expire slots are in use — upgrade for more, or free one to use it here`
+      : `All ${cap} never-expire slots are used by other messages — free one to use it here`
     : alreadyPermanent && !checked
       ? "Frees its slot — buttons & selects will expire"
       : `Buttons & selects keep working · ${used}/${cap} slots used`;
@@ -304,17 +315,33 @@ function PermanentOptIn({
           />
         ) : null}
       </div>
-      {slotsFull && onManageSlots ? (
+      {slotsFull && (onUpgrade || onManageSlots) ? (
         <div className={styles.permanentAction}>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={busy}
-            title="Closes this dialog and opens Managed messages — the send isn't lost, your message and webhook stay in the panel"
-            onClick={onManageSlots}
-          >
-            Free a slot…
-          </Button>
+          {/* Upgrade is the primary, positive path (raises the cap for every
+              future message); freeing a slot stays as the secondary escape for
+              users who don't want to pay. */}
+          {onUpgrade ? (
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={busy}
+              title="Plus lifts this to 25 never-expire messages; Pro makes it unlimited"
+              onClick={onUpgrade}
+            >
+              Upgrade for more
+            </Button>
+          ) : null}
+          {onManageSlots ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              title="Closes this dialog and opens Managed messages — the send isn't lost, your message and webhook stay in the panel"
+              onClick={onManageSlots}
+            >
+              Free a slot…
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </div>
