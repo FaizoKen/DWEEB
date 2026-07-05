@@ -93,7 +93,9 @@ export function PlanBadge({
                   onSeePlans();
                 }}
               >
-                {plan.tier === "pro" ? "Manage plan on web" : "See all plans on web"}
+                {/* Pro is the top tier — nothing to upgrade to, so it manages
+                    billing instead; every lower tier gets the upsell. */}
+                {plan.tier === "pro" ? "Manage plan" : "Upgrade"}
               </MenuItem>
             </>
           ) : null}

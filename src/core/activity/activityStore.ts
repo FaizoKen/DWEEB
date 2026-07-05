@@ -175,6 +175,11 @@ interface ActivityState {
    *  saved messages — the features the embedded surface omits). Opens the public
    *  site with the draft carried in a share link. */
   openOnWeb(): Promise<void>;
+  /** Open the web app's pricing page for a specific server. Embedded checkout is
+   *  impossible (the Activity sandbox can't run Stripe), so upgrading happens on
+   *  the site: this hands off to `/?plans=<guildId>`, which opens the pricing
+   *  modal scoped to that server (signing the user in first if needed). */
+  openPlansOnWeb(guildId: string): Promise<void>;
   /** Open Discord's "Add to Server" flow for the launching guild so the user can
    *  add the missing DWEEB bot (see {@link botMissing}). Routes through the host
    *  SDK — the sandboxed iframe can't open discord.com itself — and pre-selects
@@ -633,6 +638,25 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     } catch {
       // The web app / dev URL-override aren't sandboxed, so a plain open works
       // there when the SDK path can't (a real in-Discord Activity needs the SDK).
+      try {
+        window.open(url, "_blank", "noopener");
+      } catch {
+        /* nothing more we can do */
+      }
+    }
+  },
+
+  async openPlansOnWeb(guildId: string) {
+    // Deep-link the web app straight to this server's pricing modal. No draft is
+    // carried — upgrading is a side-trip; the draft stays live here (and in the
+    // server-side collab room) for when they return.
+    const url = `${WEB_APP_BASE_URL}/?plans=${encodeURIComponent(guildId)}`;
+    try {
+      // The sandboxed iframe can't navigate to the site itself — hand the link to
+      // the host client (same path as "Open on web").
+      await openExternalLink(url);
+    } catch {
+      // The web app / dev URL-override aren't sandboxed, so a plain open works.
       try {
         window.open(url, "_blank", "noopener");
       } catch {

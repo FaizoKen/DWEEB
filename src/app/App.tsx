@@ -92,11 +92,13 @@ import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAutoSaveDraft } from "./useAutoSaveDraft";
 import { useAttachmentGc } from "./useAttachmentGc";
 import { useTemplateDeepLink, readTemplateParam } from "./useTemplateDeepLink";
+import { usePlansDeepLink, readPlansParam } from "./usePlansDeepLink";
 
 export function App() {
   useShareUrlBootstrap();
   useDraftOriginBootstrap();
   useTemplateDeepLink();
+  usePlansDeepLink();
   useKeyboardShortcuts();
   useAutoSaveDraft();
   useAttachmentGc();
@@ -266,6 +268,9 @@ export function App() {
     // CTA) loads that template straight into the editor — don't shove the
     // gallery in front of it.
     if (readTemplateParam(window.location.search)) return;
+    // A `?plans=` deep link (the Activity's "Upgrade" hand-off) opens the pricing
+    // modal — don't also throw the gallery in front of it.
+    if (readPlansParam(window.location.search)) return;
     if (!shouldAutoOpenGallery()) return;
     markGalleryAutoOpened();
     openGallery();

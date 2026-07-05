@@ -87,6 +87,7 @@ export function ActivityBar() {
   const update = useActivityStore((s) => s.update);
   const openLastPost = useActivityStore((s) => s.openLastPost);
   const openOnWeb = useActivityStore((s) => s.openOnWeb);
+  const openPlansOnWeb = useActivityStore((s) => s.openPlansOnWeb);
   const lastPost = useActivityStore((s) => s.lastPost);
   const targetChannelId = useActivityStore((s) => s.targetChannelId);
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
@@ -328,12 +329,12 @@ export function ActivityBar() {
             "see plans on web" hand-off. Hidden until a destination server is
             known and the bot's in it (in the "Add DWEEB" state the bar is about
             getting set up, not plans). See PlanBadge for the newcomer rationale. */}
-        {plan && !botMissing ? (
+        {plan && !botMissing && targetGuildId ? (
           <>
             <PlanBadge
               plan={plan}
               serverName={targetGuildMeta?.name}
-              onSeePlans={() => void openOnWeb()}
+              onSeePlans={() => void openPlansOnWeb(targetGuildId)}
             />
             <span className={styles.sep} aria-hidden="true" />
           </>
