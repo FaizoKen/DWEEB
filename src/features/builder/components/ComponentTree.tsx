@@ -384,9 +384,7 @@ export function ComponentTree() {
   return (
     <ValidationContext.Provider value={validation}>
       <DragContext.Provider value={dragSession}>
-        {/* data-tour: the onboarding tour's "blocks" step spotlights the whole
-            tree pane (see features/tutorial/steps.ts). */}
-        <div className={styles.tree} data-tour="tree">
+        <div className={styles.tree}>
           <div ref={scrollRef} className={styles.scroll}>
             <PostedMessageBanner />
             <MetaHeader />

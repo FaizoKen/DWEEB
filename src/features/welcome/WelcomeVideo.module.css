@@ -1,0 +1,176 @@
+/* Cinematic backdrop — darker than the standard modal scrim so the film reads
+   like a theatre, and above the Template Gallery's overlay (`--app-z-tooltip`)
+   since on a first visit the film opens right on top of it. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--app-z-tooltip) + 20);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(3, 4, 8, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: welcomeFade 200ms ease-out both;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  max-width: min(960px, 94vw);
+  width: 100%;
+  max-height: 94dvh;
+  border-radius: var(--app-radius-lg);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow-lg);
+  outline: none;
+  overflow: hidden;
+  animation: welcomeIn 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* The vertical cut is a phone-shaped stage — cap the panel's width so the
+   9:16 video (bounded by the viewport height) isn't flanked by dead space. */
+.panel[data-orientation="portrait"] {
+  max-width: min(440px, 94vw);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 10px;
+}
+
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--app-text-lg, 17px);
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+.subtitle {
+  margin: 0;
+  font-size: var(--app-text-sm);
+  color: var(--app-text-muted);
+}
+
+.close {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: none;
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+.close:hover {
+  background: var(--app-accent-soft);
+  color: var(--app-text);
+}
+
+/* Video stage. The aspect-ratio reserves the box before any video data
+   arrives, so the panel never jumps; `min-height: 0` lets the flex column
+   shrink the stage rather than overflow the viewport. */
+.stage {
+  position: relative;
+  min-height: 0;
+  background: #000;
+}
+
+.video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: calc(94dvh - 130px); /* panel minus header + footer chrome */
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
+.panel[data-orientation="portrait"] .video {
+  aspect-ratio: 9 / 16;
+}
+
+/* One obvious tap for sound while the film autoplays muted. Sits above the
+   video but clear of the native controls strip at the bottom. */
+.soundPill {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(8, 10, 16, 0.72);
+  color: #fff;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: welcomeFade 200ms ease-out 400ms both;
+}
+.soundPill:hover {
+  background: rgba(24, 28, 40, 0.85);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.hint {
+  font-size: var(--app-text-sm);
+  color: var(--app-text-muted);
+}
+
+@keyframes welcomeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes welcomeFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .panel,
+  .soundPill {
+    animation: none;
+  }
+}
+
+/* Phones: let the panel own nearly the whole screen and drop the hint so the
+   footer stays one row. */
+@media (max-width: 520px) {
+  .backdrop {
+    padding: 10px;
+  }
+  .hint {
+    display: none;
+  }
+}

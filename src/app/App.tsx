@@ -23,9 +23,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Builder } from "@/features/builder/Builder";
 import { SendCoachMark } from "@/features/builder/SendCoachMark";
-import { TutorialTour } from "@/features/tutorial/TutorialTour";
-import { useTutorialAutoStart } from "@/features/tutorial/useTutorialAutoStart";
-import { tourClaimsSpotlight } from "@/features/tutorial/tutorialStore";
+import { useWelcomeAutoOpen } from "@/features/welcome/useWelcomeAutoOpen";
+import { useWelcomeStore } from "@/features/welcome/welcomeStore";
 import { Preview } from "@/features/preview/Preview";
 import { MiniPreview } from "@/features/preview/MiniPreview";
 import {
@@ -67,6 +66,9 @@ const CollaborateDialog = lazy(() =>
 const PricingModal = lazy(() =>
   import("@/features/plan/PricingModal").then((m) => ({ default: m.PricingModal })),
 );
+const WelcomeVideo = lazy(() =>
+  import("@/features/welcome/WelcomeVideo").then((m) => ({ default: m.WelcomeVideo })),
+);
 import { ToastViewport, pushToast } from "@/ui/Toast";
 import { EyeIcon, SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
@@ -105,9 +107,9 @@ export function App() {
   useKeyboardShortcuts();
   useAutoSaveDraft();
   useAttachmentGc();
-  // First-visit onboarding: starts the guided tour once the landing gallery
-  // (and any template setup) has closed; see the hook for the full sequencing.
-  useTutorialAutoStart();
+  // First-visit onboarding: plays the intro film once, layered over the
+  // landing gallery; see the hook for the gating.
+  useWelcomeAutoOpen();
 
   // The Share dialog is shared by every editor CTA; `shareInitialTab` picks
   // which panel each entry point lands on so each button feels dedicated even
@@ -179,6 +181,11 @@ export function App() {
   // menu. Mints a voice-channel Activity invite so a group co-edits in one shared
   // instance. Mounted lazily only while open.
   const collaborateOpen = useCollaborateStore((s) => s.open);
+
+  // The intro film — auto-played once for brand-new users (layered over the
+  // landing gallery) and replayable from the "More" menu. Mounted lazily only
+  // while open so the video modal never weighs on the initial bundle.
+  const welcomeOpen = useWelcomeStore((s) => s.open);
 
   // Guided setup for an interactive template the gallery just applied: wires its
   // paired plugin(s), then closes, leaving the editor in front.
@@ -289,10 +296,6 @@ export function App() {
   // depends on the nudge token firing.
   useEffect(() => {
     if (sendNudge === 0) return;
-    // When the onboarding tour is about to run (or running), leave the sheet
-    // down — its first step spotlights the editor tree, which the sheet would
-    // cover, and its preview step points at the sheet's own FAB anyway.
-    if (tourClaimsSpotlight()) return;
     if (window.matchMedia(MOBILE_SHEET_QUERY).matches) setPreviewOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sendNudge]);
@@ -351,7 +354,6 @@ export function App() {
           className="app-shell__pane app-shell__pane--preview"
           aria-label="Message preview"
           aria-hidden={previewOpen ? undefined : "true"}
-          data-tour="preview-pane"
         >
           {!isMobileSheet || previewMounted ? (
             <Preview onClose={closePreview} swipeProps={swipeProps} />
@@ -382,7 +384,6 @@ export function App() {
                 className="preview-fab"
                 onClick={() => setPreviewOpen(true)}
                 aria-label="Show preview"
-                data-tour="preview-fab"
               >
                 <EyeIcon size={18} />
                 <span>Preview</span>
@@ -394,7 +395,6 @@ export function App() {
               className="ai-fab"
               onClick={openAiWithPreview}
               aria-label="Open the AI assistant"
-              data-tour="ai"
             >
               <SparkleIcon size={20} />
               <span>AI Assistant</span>
@@ -446,8 +446,12 @@ export function App() {
             <CollaborateDialog />
           </Suspense>
         ) : null}
+        {welcomeOpen ? (
+          <Suspense fallback={null}>
+            <WelcomeVideo />
+          </Suspense>
+        ) : null}
         <SendCoachMark />
-        <TutorialTour />
         <UpdatePrompt />
         <ToastViewport />
       </div>

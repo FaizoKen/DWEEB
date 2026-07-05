@@ -47,10 +47,10 @@ function readLastAutoOpen(): number | null {
 }
 
 /**
- * Whether any earlier session auto-opened the gallery. The onboarding tour's
- * gate uses this as "evidence of prior use": a user with a stamp predates the
- * tour (or has at least seen the landing screen before) and shouldn't be
- * auto-toured like a newcomer.
+ * Whether any earlier session auto-opened the gallery. The intro film's gate
+ * (`features/welcome`) uses this as "evidence of prior use": a user with a
+ * stamp predates the film (or has at least seen the landing screen before)
+ * and shouldn't be auto-played it like a newcomer.
  */
 export function hasGalleryEverAutoOpened(): boolean {
   return readLastAutoOpen() !== null;
