@@ -39,6 +39,22 @@ const WEBHOOK_STATE_PREFIX: &str = "whk_";
 /// in a second encrypted cookie (see `webhook_custom_start`).
 const CUSTOM_WEBHOOK_STATE_PREFIX: &str = "cwh_";
 
+/// The embedded Activity's "connect your bot" variant of the custom-app
+/// `webhook.incoming` flow. It runs in the user's *external* browser (the host
+/// opens it from the sandboxed iframe), which carries none of our cookies — so
+/// instead of the cookie pair the whole flow context (credentials, destination
+/// guild, expiry) travels sealed inside the `state` value itself (AES-GCM
+/// under the proxy's key; see `seal::seal_state`). The callback authenticates
+/// the flow by opening it: an unopenable, expired, or replayed-into-the-wrong-
+/// guild state is refused. The captured webhook is stored server-side (sealed,
+/// in the dispatcher registry) rather than handed to the browser — it's the
+/// credential the Activity's post/update path uses.
+const ACTIVITY_WEBHOOK_STATE_PREFIX: &str = "awh_";
+
+/// How long an Activity connect `state` stays valid — mirrors the 10-minute
+/// cookie the web flow parks its credentials in.
+const ACTIVITY_STATE_TTL_SECS: i64 = 600;
+
 /// `GET /auth/login` — set a CSRF `state` cookie and bounce to Discord.
 pub async fn login(State(st): State<AppState>, jar: PrivateCookieJar) -> impl IntoResponse {
     let cfg = &st.config;
@@ -119,7 +135,38 @@ pub async fn custom_bot_webhook_start(
 
     // Fetch the sealed secret from the registry (guild-scoped, so the
     // authorization above maps one-to-one) and open it with our key.
-    let api = crate::routes::dispatcher_api(&st)?;
+    let client_secret = open_custom_app_secret(&st, &guild, &application_id).await?;
+
+    let state = format!("{CUSTOM_WEBHOOK_STATE_PREFIX}{}", random_token());
+    // A Discord app's OAuth client id IS its application id.
+    let url = webhook_authorize_url(
+        &application_id,
+        &cfg.oauth_redirect_url,
+        &state,
+        Some(guild.as_str()),
+    );
+    let creds = CustomAppCreds {
+        client_id: application_id,
+        client_secret,
+    };
+    let creds_json = serde_json::to_string(&creds)
+        .map_err(|e| AppError::Internal(format!("serialize creds: {e}")))?;
+    let jar = jar
+        .add(build_state_cookie(cfg, &state))
+        .add(build_custom_app_cookie(cfg, &creds_json));
+    Ok((jar, Json(json!({ "url": url }))).into_response())
+}
+
+/// Fetch a registered custom app's sealed client secret from the dispatcher
+/// registry and open it with this proxy's key. The caller has already
+/// authorized the user for `guild`; the registry read is guild-scoped so that
+/// authorization maps one-to-one. Errors are user-facing and actionable.
+pub(crate) async fn open_custom_app_secret(
+    st: &AppState,
+    guild: &str,
+    application_id: &str,
+) -> Result<String, AppError> {
+    let api = crate::routes::dispatcher_api(st)?;
     let resp = api
         .http
         .get(format!(
@@ -168,25 +215,54 @@ pub async fn custom_bot_webhook_start(
             retry_after: None,
         });
     };
+    Ok(client_secret)
+}
 
-    let state = format!("{CUSTOM_WEBHOOK_STATE_PREFIX}{}", random_token());
-    // A Discord app's OAuth client id IS its application id.
-    let url = webhook_authorize_url(
-        &application_id,
-        &cfg.oauth_redirect_url,
+/// The Activity connect flow's context, sealed into the OAuth `state` value
+/// (see [`ACTIVITY_WEBHOOK_STATE_PREFIX`]). Short keys keep the resulting URL
+/// parameter compact. Never logged.
+#[derive(serde::Serialize, Deserialize)]
+struct ActivityConnectState {
+    /// Destination guild the connect was authorized for — the callback refuses
+    /// a webhook created anywhere else.
+    g: String,
+    /// The custom application id (a Discord app's OAuth client id IS its
+    /// application id).
+    a: String,
+    /// The app's client secret, carried for the code exchange.
+    s: String,
+    /// Unix seconds after which this state is dead.
+    x: i64,
+}
+
+/// Build the authorize URL for the embedded Activity's "connect your bot"
+/// flow: Discord's `webhook.incoming` consent under the guild's custom app,
+/// with the flow context sealed into `state` (the external browser that
+/// completes it carries none of our cookies). The caller (see
+/// `activity::activity_connect_bot`) has already gated the user on Manage
+/// Webhooks in `guild`.
+pub(crate) async fn activity_connect_authorize_url(
+    st: &AppState,
+    guild: &str,
+    application_id: &str,
+) -> Result<String, AppError> {
+    let client_secret = open_custom_app_secret(st, guild, application_id).await?;
+    let payload = serde_json::to_string(&ActivityConnectState {
+        g: guild.to_string(),
+        a: application_id.to_string(),
+        s: client_secret,
+        x: now() + ACTIVITY_STATE_TTL_SECS,
+    })
+    .map_err(|e| AppError::Internal(format!("serialize connect state: {e}")))?;
+    let sealed = crate::seal::seal_state(&st.key, &payload)
+        .ok_or_else(|| AppError::Internal("couldn't seal the connect state".into()))?;
+    let state = format!("{ACTIVITY_WEBHOOK_STATE_PREFIX}{sealed}");
+    Ok(webhook_authorize_url(
+        application_id,
+        &st.config.oauth_redirect_url,
         &state,
-        Some(guild.as_str()),
-    );
-    let creds = CustomAppCreds {
-        client_id: application_id,
-        client_secret,
-    };
-    let creds_json = serde_json::to_string(&creds)
-        .map_err(|e| AppError::Internal(format!("serialize creds: {e}")))?;
-    let jar = jar
-        .add(build_state_cookie(cfg, &state))
-        .add(build_custom_app_cookie(cfg, &creds_json));
-    Ok((jar, Json(json!({ "url": url }))).into_response())
+        Some(guild),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -217,6 +293,15 @@ pub async fn callback(
             .clone()
             .or_else(|| jar.get(STATE_COOKIE).map(|c| c.value().to_string()))
             .unwrap_or_default();
+        // An Activity connect flow ends on a standalone page, not the builder —
+        // it runs in the user's external browser, where the Activity isn't.
+        if flow_state.starts_with(ACTIVITY_WEBHOOK_STATE_PREFIX) {
+            return Ok(activity_connect_page(
+                false,
+                "Nothing was connected",
+                "The authorization was cancelled. You can close this tab, return to Discord, and try again from the post dialog.",
+            ));
+        }
         let marker = if flow_state.starts_with(WEBHOOK_STATE_PREFIX)
             || flow_state.starts_with(CUSTOM_WEBHOOK_STATE_PREFIX)
         {
@@ -228,6 +313,21 @@ pub async fn callback(
             .add(clear_state_cookie(cfg))
             .add(clear_custom_app_cookie(cfg));
         return Ok((jar, Redirect::to(&format!("{}#{marker}", cfg.frontend_url))).into_response());
+    }
+
+    // Activity "connect your bot" flow: it completes in the user's external
+    // browser, which carries none of our cookies, so it's authenticated by the
+    // sealed `state` itself (AEAD under the proxy's key, expiry-bounded, guild-
+    // pinned) — checked *instead of* the cookie CSRF below. The captured
+    // webhook stays server-side; the page only says how it went.
+    if q.state
+        .as_deref()
+        .unwrap_or_default()
+        .starts_with(ACTIVITY_WEBHOOK_STATE_PREFIX)
+    {
+        let state = q.state.unwrap_or_default();
+        let code = q.code.unwrap_or_default();
+        return Ok(activity_connect_callback(&st, &state, &code).await);
     }
 
     // CSRF: the round-tripped `state` must equal the one we stored at /login.
@@ -478,6 +578,145 @@ async fn resolve_guild_name(
         }
     }
     st.discord.guild_name(gid).await
+}
+
+/// Finish an Activity "connect your bot" flow: open + verify the sealed
+/// `state`, exchange the code under the custom app's credentials, refuse a
+/// webhook that landed outside the pinned guild, then seal the webhook token
+/// and store it on the app's dispatcher-registry row. Always answers with the
+/// standalone result page — this tab belongs to the user's external browser;
+/// the Activity itself learns the outcome by re-reading the identity list.
+async fn activity_connect_callback(st: &AppState, state: &str, code: &str) -> Response {
+    let sealed = &state[ACTIVITY_WEBHOOK_STATE_PREFIX.len()..];
+    let ctx = crate::seal::open_state(&st.key, sealed)
+        .and_then(|payload| serde_json::from_str::<ActivityConnectState>(&payload).ok());
+    let Some(ctx) = ctx else {
+        return activity_connect_page(
+            false,
+            "This link can't be verified",
+            "The connect link is damaged or wasn't issued by this DWEEB. Return to Discord and start again from the post dialog.",
+        );
+    };
+    if now() > ctx.x {
+        return activity_connect_page(
+            false,
+            "This link has expired",
+            "Connect links are valid for 10 minutes. Return to Discord and start again from the post dialog.",
+        );
+    }
+    let exchanged = st
+        .discord
+        .exchange_code(&ctx.a, &ctx.s, code, &st.config.oauth_redirect_url)
+        .await;
+    let Ok(token) = exchanged else {
+        // Almost always a stale client secret or a missing redirect URI on the
+        // user's app — their fix, not ours, so say so without leaking detail.
+        tracing::warn!("activity connect exchange failed");
+        return activity_connect_page(
+            false,
+            "Discord refused the authorization",
+            "Check that the app's client secret registered with DWEEB is current and that DWEEB's callback URL is listed under the app's OAuth2 → Redirects, then try again.",
+        );
+    };
+    let webhook = token
+        .webhook
+        .and_then(|w| match (w.id, w.token, w.channel_id) {
+            (Some(id), Some(tok), Some(channel)) if !id.is_empty() && !tok.is_empty() => {
+                Some((id, tok, channel, w.guild_id))
+            }
+            _ => None,
+        });
+    let Some((hook_id, hook_token, channel_id, guild_id)) = webhook else {
+        return activity_connect_page(
+            false,
+            "No webhook came back",
+            "Discord completed the authorization but returned no webhook. Return to Discord and try again.",
+        );
+    };
+    if guild_id.as_deref() != Some(ctx.g.as_str()) {
+        // Created in some other server — refuse it, and best-effort remove the
+        // stray webhook so nothing half-connected is left behind.
+        let _ = st
+            .discord
+            .delete_webhook_by_token(&hook_id, &hook_token)
+            .await;
+        return activity_connect_page(
+            false,
+            "That was a different server",
+            "The webhook was authorized in another server, so nothing was connected. Try again and keep the pre-selected server in Discord's dialog.",
+        );
+    }
+    let Some(token_enc) = crate::seal::seal_hook(&st.key, &hook_token) else {
+        return activity_connect_page(
+            false,
+            "Something went wrong on our side",
+            "The webhook credential couldn't be secured, so nothing was stored. Please try again.",
+        );
+    };
+    match crate::activity::store_activity_hook(st, &ctx.g, &ctx.a, &hook_id, &channel_id, &token_enc)
+        .await
+    {
+        Ok(()) => activity_connect_page(
+            true,
+            "Your bot is connected",
+            "You can close this tab and return to Discord — pick your bot under “Post as” and post away. Posts will appear under your bot in any channel you choose.",
+        ),
+        Err(err) => {
+            tracing::warn!("activity connect store failed: {err}");
+            // Nothing will ever use the webhook we just minted — best-effort
+            // remove it so nothing half-connected lingers in the server.
+            let _ = st
+                .discord
+                .delete_webhook_by_token(&hook_id, &hook_token)
+                .await;
+            activity_connect_page(
+                false,
+                "The connection couldn't be saved",
+                "The webhook was created but couldn't be stored — the app may have been unregistered meanwhile. Return to Discord and try again.",
+            )
+        }
+    }
+}
+
+/// The standalone result page for an Activity connect flow. Self-contained
+/// (inline styles, no external assets) because it renders in whatever browser
+/// Discord handed the flow to. `title`/`detail` are always our own static
+/// strings — nothing user-controlled is echoed.
+fn activity_connect_page(ok: bool, title: &str, detail: &str) -> Response {
+    let (icon, accent) = if ok {
+        ("✓", "#3ba55d")
+    } else {
+        ("✕", "#ed4245")
+    };
+    let html = format!(
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{title} · DWEEB</title>
+<style>
+  body{{margin:0;display:grid;place-items:center;min-height:100vh;background:#1e1f22;
+       color:#dbdee1;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}}
+  main{{max-width:26rem;padding:2.5rem 1.5rem;text-align:center}}
+  .icon{{display:inline-grid;place-items:center;width:3.25rem;height:3.25rem;border-radius:50%;
+        background:{accent};color:#fff;font-size:1.6rem;font-weight:700;margin-bottom:1rem}}
+  h1{{font-size:1.15rem;margin:0 0 .5rem;color:#f2f3f5}}
+  p{{margin:0;color:#b5bac1}}
+  .brand{{margin-top:2rem;font-size:.8rem;letter-spacing:.08em;color:#80848e}}
+</style></head><body><main>
+<span class="icon" aria-hidden="true">{icon}</span>
+<h1>{title}</h1>
+<p>{detail}</p>
+<div class="brand">DWEEB</div>
+</main></body></html>"#
+    );
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
+        html,
+    )
+        .into_response()
 }
 
 /// 16 random bytes as lowercase hex — an unguessable CSRF `state` token.

@@ -310,12 +310,13 @@ export function ActivityBar() {
   // success (null on failure, which they toast), so we only swap the confirm
   // dialog for the success one when something actually landed; a failure leaves
   // the confirm open so the user can retry. `makePermanent` (the confirm's
-  // "Never expire" choice) only applies to a new post — an update keeps whatever
-  // slot the message already holds.
-  const confirmPost = async (makePermanent: boolean) => {
+  // "Never expire" choice) and `postAs` (its "Post as" choice — a connected
+  // custom bot, or null for DWEEB) only apply to a new post — an update keeps
+  // the message's slot and rides the identity that authored it.
+  const confirmPost = async (makePermanent: boolean, postAs: string | null) => {
     if (!pending) return;
     const { mode } = pending;
-    const result = mode === "update" ? await update() : await publish(makePermanent);
+    const result = mode === "update" ? await update() : await publish(makePermanent, postAs);
     if (result) {
       setPending(null);
       setPosted({
@@ -598,7 +599,7 @@ export function ActivityBar() {
         guildId={targetGuildId}
         channelName={channelName}
         busy={publishing}
-        onConfirm={(makePermanent) => void confirmPost(makePermanent)}
+        onConfirm={(makePermanent, postAs) => void confirmPost(makePermanent, postAs)}
         onCancel={() => setPending(null)}
         onManageOnWeb={() => void openOnWeb()}
       />

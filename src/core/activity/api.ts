@@ -40,14 +40,16 @@ export async function exchangeCode(code: string): Promise<string> {
 }
 
 /** Result of a successful publish/update: the message + a jump link. `webhook_id`
- *  identifies the DWEEB webhook that posted it, so a later edit targets exactly
- *  that one (see {@link editPostedMessage}). */
+ *  identifies the webhook that posted it, so a later edit targets exactly that
+ *  one (see {@link editPostedMessage}); `application_id` names the custom bot it
+ *  was posted as (null/absent = DWEEB), so the edit rides the same identity. */
 export interface ActivityPostResult {
   message_id: string;
   channel_id: string;
   guild_id: string;
   url: string | null;
   webhook_id?: string;
+  application_id?: string | null;
   /** True when a never-expire slot was claimed for this post (the user opted in
    *  and it succeeded). Absent/false on an ordinary post. */
   permanent?: boolean;
@@ -56,15 +58,18 @@ export interface ActivityPostResult {
   permanent_error?: string | null;
 }
 
-/** `POST /api/activity/post` — post the built message into the channel through a
- *  DWEEB-owned webhook (the proxy reuses or creates one). When `makePermanent` is
- *  set the proxy also spends a never-expire slot on the new message (best-effort;
- *  reported back via `permanent` / `permanent_error`). */
+/** `POST /api/activity/post` — post the built message into the channel. By
+ *  default through a DWEEB-owned webhook (the proxy reuses or creates one);
+ *  with `applicationId` set, through that custom bot's connected Activity
+ *  webhook instead, so the message appears under the server's own bot. When
+ *  `makePermanent` is set the proxy also spends a never-expire slot on the new
+ *  message (best-effort; reported back via `permanent` / `permanent_error`). */
 export async function publishToChannel(
   guildId: string,
   channelId: string,
   message: unknown,
   makePermanent = false,
+  applicationId: string | null = null,
 ): Promise<ActivityPostResult> {
   let res: Response;
   try {
@@ -76,6 +81,7 @@ export async function publishToChannel(
         channel_id: channelId,
         message,
         make_permanent: makePermanent,
+        application_id: applicationId ?? "",
       }),
     });
   } catch {
@@ -83,6 +89,66 @@ export async function publishToChannel(
   }
   if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as ActivityPostResult;
+}
+
+/** One identity the Activity can post as: DWEEB itself, or a registered custom
+ *  bot. A custom bot is pickable when `ready` (its Activity webhook is
+ *  connected); otherwise `can_connect` says whether the one-time connect flow
+ *  is available (a client secret is on file — without it, registering again on
+ *  the web with the secret is the fix). */
+export type ActivityIdentity =
+  | { kind: "dweeb" }
+  | {
+      kind: "custom";
+      application_id: string;
+      name: string;
+      ready: boolean;
+      can_connect: boolean;
+    };
+
+/** `GET /api/activity/identities` — who the Activity can post as in the
+ *  destination server. Always includes DWEEB; custom bots appear when the
+ *  server has registered any. Gated like the post itself (Manage Webhooks). */
+export async function fetchActivityIdentities(
+  guildId: string,
+  signal?: AbortSignal,
+): Promise<ActivityIdentity[]> {
+  let res: Response;
+  try {
+    res = await proxyFetch(`/api/activity/identities?guild_id=${encodeURIComponent(guildId)}`, {
+      signal,
+    });
+  } catch {
+    throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
+  }
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const body = (await res.json()) as { identities?: ActivityIdentity[] };
+  return body.identities ?? [{ kind: "dweeb" }];
+}
+
+/** `POST /api/activity/connect-bot` — mint the authorize URL for the one-time
+ *  "connect your bot" flow. The caller opens it externally (the sandboxed
+ *  iframe can't navigate to discord.com); once the user approves, the proxy
+ *  captures the webhook server-side and the bot turns `ready` in
+ *  {@link fetchActivityIdentities}. */
+export async function startConnectCustomBot(
+  guildId: string,
+  applicationId: string,
+): Promise<string> {
+  let res: Response;
+  try {
+    res = await proxyFetch("/api/activity/connect-bot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guild_id: guildId, application_id: applicationId }),
+    });
+  } catch {
+    throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
+  }
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const body = (await res.json()) as { url?: string };
+  if (!body.url) throw new Error("The server returned an unexpected response.");
+  return body.url;
 }
 
 /** `GET /api/activity/permanent` — never-expire slot usage for the destination
@@ -162,15 +228,18 @@ export async function restorePostedMessage(
 }
 
 /** `POST /api/activity/edit` — PATCH a message previously posted from this
- *  Activity, through the same DWEEB-owned webhook. `webhookId` names the exact
- *  webhook to edit through (from the original post); the proxy still re-verifies
- *  it's DWEEB-owned in the channel before editing. */
+ *  Activity, through the same webhook that authored it. `webhookId` names the
+ *  exact webhook (from the original post); `applicationId` names the custom bot
+ *  the message was posted as (null = DWEEB), so the proxy edits through that
+ *  bot's connected Activity webhook. Either way the webhook is re-verified
+ *  server-side before the edit. */
 export async function editPostedMessage(
   guildId: string,
   channelId: string,
   messageId: string,
   webhookId: string,
   message: unknown,
+  applicationId: string | null = null,
 ): Promise<ActivityPostResult> {
   let res: Response;
   try {
@@ -182,6 +251,7 @@ export async function editPostedMessage(
         channel_id: channelId,
         message_id: messageId,
         webhook_id: webhookId,
+        application_id: applicationId ?? "",
         message,
       }),
     });

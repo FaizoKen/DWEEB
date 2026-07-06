@@ -183,6 +183,8 @@ pub struct TokenResponse {
 /// The webhook returned by a `webhook.incoming` token exchange. `url` is the
 /// full execute URL (`…/webhooks/{id}/{token}`); `channel_id`/`guild_id` let us
 /// best-effort resolve human names so same-named webhooks stay distinguishable.
+/// `id`/`token` are the same credential split out — what the Activity connect
+/// flow stores (sealed) so the proxy can post/edit through this webhook later.
 #[derive(Deserialize)]
 pub struct IncomingWebhook {
     #[serde(default)]
@@ -191,6 +193,10 @@ pub struct IncomingWebhook {
     pub channel_id: Option<String>,
     #[serde(default)]
     pub guild_id: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 /// The signed-in user, from `GET /users/@me`.
@@ -446,6 +452,51 @@ impl Discord {
     // is granted a never-expire slot (see `routes::permanent_reenable`). No
     // `bot_sem` permit: a webhook token is a different credential on its own
     // rate-limit buckets, so it never draws on the shared bot budget.
+
+    /// Fetch a webhook itself by id + token — no bot permission involved, the
+    /// token is the credential. What the Activity's custom-bot path uses to
+    /// learn the webhook's *current* channel before posting/editing through
+    /// it. `Ok(None)` when Discord no longer honours the pair (the webhook was
+    /// deleted, or the token rotated) — the signal to drop the stored
+    /// credential and ask the user to reconnect.
+    pub async fn webhook_by_token(
+        &self,
+        webhook_id: &str,
+        token: &str,
+    ) -> Result<Option<Webhook>, AppError> {
+        let url = format!("{API_BASE}/webhooks/{webhook_id}/{token}");
+        let resp = send_with_retry(self.http.get(&url))
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        if resp.status().is_success() {
+            return resp.json::<Webhook>().await.map(Some).map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
+        }
+        if matches!(resp.status().as_u16(), 401 | 403 | 404) {
+            return Ok(None);
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
+    /// Delete a webhook by id + token — no bot permission involved. Used to
+    /// clean up a webhook the Activity connect flow refuses (created in the
+    /// wrong server), so nothing half-connected lingers. Best-effort at the
+    /// call sites; a 404 (already gone) counts as done.
+    pub async fn delete_webhook_by_token(
+        &self,
+        webhook_id: &str,
+        token: &str,
+    ) -> Result<(), AppError> {
+        let url = format!("{API_BASE}/webhooks/{webhook_id}/{token}");
+        let resp = send_with_retry(self.http.delete(&url))
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        if resp.status().is_success() || resp.status() == StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        Err(webhook_error_from(resp).await)
+    }
 
     /// Fetch a webhook's own message by id, with the webhook token. `Ok(None)`
     /// when this webhook didn't author it (404) — the signal to try the next

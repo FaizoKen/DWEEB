@@ -47,6 +47,8 @@ destination differs:
         ├── POST /api/activity/post    message → posted to the chosen channel via a DWEEB webhook (Bearer)
         ├── POST /api/activity/edit    message → PATCH a message already posted, via the same webhook (Bearer)
         ├── POST /api/activity/restore message id → the message DWEEB posted, read back via the same webhook (Bearer)
+        ├── GET  /api/activity/identities    who this server can post as: DWEEB + its custom bots (Bearer)
+        ├── POST /api/activity/connect-bot   authorize URL for the one-time custom-bot connect flow (Bearer)
         └── WS   /api/activity/room/:instance   draft + presence relay
 ```
 
@@ -97,6 +99,50 @@ The Activity also sets a best-effort **rich presence** ("Building a message") vi
 `setActivity`. That command needs the `rpc.activities.write` scope, which the
 handshake deliberately does **not** request (a new scope risks breaking the
 `prompt:"none"` authorize), so it silently no-ops unless the scope is granted.
+
+### Post as the server's own bot (custom bots)
+
+A server that registered a **custom bot** (web app → account menu → Custom bot)
+can post and update from the Activity *as that bot*: the pre-post confirm gains a
+**Post as** row — `DWEEB` and each registered bot — and the message lands under
+the bot's identity, with its components routed to that app (which the dispatcher
+serves, so DWEEB plugins keep working on it).
+
+The mechanism is a per-bot **Activity webhook**. Discord only reveals a webhook's
+execute token to the app that owns it, so DWEEB's bot can never recover a
+custom-bot webhook the way it does its own — on the web that token lives in the
+creating browser's history, which a sandboxed iframe doesn't have. Instead:
+
+- **Connect once** — tapping *Connect \<bot\>* in the Post as row asks the proxy
+  for an authorize URL (`POST /api/activity/connect-bot`) and opens it in the
+  user's external browser via `openExternalLink`. That browser carries none of
+  our cookies, so the flow's context (custom app credentials, destination guild,
+  10-minute expiry) travels **sealed inside the OAuth `state` itself** (AES-GCM
+  under the proxy key, its own AAD domain). Discord shows its `webhook.incoming`
+  consent under the *custom* app; the callback opens the state, refuses a webhook
+  created outside the pinned guild (best-effort deleting the stray), seals the
+  webhook token, and stores it on the app's row in the dispatcher registry —
+  right next to the sealed client secret. The browser tab gets a small
+  "connected — return to Discord" page; the dialog polls the identity list and
+  auto-selects the bot when it turns ready.
+- **Post anywhere** — one webhook serves the whole server. Before each use the
+  proxy reads the webhook's live channel (`GET /webhooks/{id}/{token}`) and, when
+  the destination differs, **moves it there** with the bot's Manage Webhooks
+  (an incoming webhook is re-pointable at any channel in its guild), then
+  executes with the webhook's own token. Updates and Restore bring the webhook
+  back to the message's channel the same way first, since Discord resolves
+  webhook-message reads/edits within the webhook's current channel.
+- **Identity sticks to the message** — `lastPost` carries `application_id`, so
+  Update always rides the identity that authored the message, regardless of the
+  current Post as selection (which only applies to a new post / new copy).
+
+Failure modes stay actionable: a webhook deleted in Discord (or sealed under a
+rotated `SESSION_SECRET`) is dropped from the registry and the post errors with
+"reconnect it from the post dialog"; a bot registered without a client secret
+shows a disabled pill pointing at re-registering on the web; a plan-suspended
+bot is excluded from the list and refused server-side. The web app's own
+custom-bot webhooks are untouched — the Activity never captures or moves them
+(a scheduled post may pin one to a channel), only its own dedicated webhook.
 
 ## One-time setup
 

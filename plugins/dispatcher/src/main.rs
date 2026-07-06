@@ -387,6 +387,15 @@ async fn run() {
             "/custom-apps/:guild_id/:application_id/secret",
             get(custom_app_secret),
         )
+        // The Activity webhook attached to a registration: the app-owned
+        // incoming webhook the embedded Activity posts through. Its token is
+        // sealed by the proxy — opaque ciphertext here, like the secret.
+        .route(
+            "/custom-apps/:guild_id/:application_id/hook",
+            get(custom_app_hook_get)
+                .put(custom_app_hook_put)
+                .delete(custom_app_hook_delete),
+        )
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(app);
 
@@ -1055,6 +1064,101 @@ async fn custom_app_secret(
     }
 }
 
+/// `GET /custom-apps/:guild_id/:application_id/hook` — the Activity webhook
+/// stored on the registration. Two distinct 404s: `not_registered` (no such
+/// app in this guild) and `no_hook` (registered, nothing connected yet).
+/// The token is proxy-sealed ciphertext; only the proxy can open it.
+async fn custom_app_hook_get(
+    State(app): State<Arc<App>>,
+    Path((guild_id, application_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id, &application_id]) {
+        return denied;
+    }
+    match app.store.custom_app_hook(&guild_id, &application_id) {
+        Ok(Some(hook)) if !hook.hook_id.is_empty() => Json(json!({
+            "hook_id": hook.hook_id,
+            "channel_id": hook.channel_id,
+            "token_enc": hook.token_enc,
+            "suspended": hook.suspended,
+        }))
+        .into_response(),
+        Ok(Some(_)) => (StatusCode::NOT_FOUND, Json(json!({ "error": "no_hook" }))).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_registered" })),
+        )
+            .into_response(),
+        Err(err) => internal_error(err),
+    }
+}
+
+/// `PUT /custom-apps/:guild_id/:application_id/hook`
+/// `{ hook_id, channel_id, token_enc }` — attach (or replace) the Activity
+/// webhook on the registration. The proxy calls this after the one-time
+/// connect flow captures the webhook, and again after moving it between
+/// channels (to keep `channel_id` roughly current).
+async fn custom_app_hook_put(
+    State(app): State<Arc<App>>,
+    Path((guild_id, application_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id, &application_id]) {
+        return denied;
+    }
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return bad_request("body must be JSON"),
+    };
+    let field = |k: &str| parsed.get(k).and_then(Value::as_str).unwrap_or_default();
+    let hook_id = field("hook_id");
+    let channel_id = field("channel_id");
+    let token_enc = field("token_enc");
+    if !is_snowflake(hook_id) || !is_snowflake(channel_id) {
+        return bad_request("hook_id and channel_id must be snowflakes");
+    }
+    if token_enc.is_empty() || token_enc.len() > 2048 {
+        return bad_request("token_enc must be non-empty sealed ciphertext");
+    }
+    match app
+        .store
+        .custom_app_hook_set(&guild_id, &application_id, hook_id, channel_id, token_enc)
+    {
+        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_registered" })),
+        )
+            .into_response(),
+        Err(err) => internal_error(err),
+    }
+}
+
+/// `DELETE /custom-apps/:guild_id/:application_id/hook` — drop the stored
+/// Activity webhook (Discord reported it gone, or its sealed token is no
+/// longer openable). The registration itself is untouched. Clearing an
+/// already-empty hook is fine — the goal state is reached either way.
+async fn custom_app_hook_delete(
+    State(app): State<Arc<App>>,
+    Path((guild_id, application_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(denied) = deny_internal(&app, &headers, &[&guild_id, &application_id]) {
+        return denied;
+    }
+    match app.store.custom_app_hook_clear(&guild_id, &application_id) {
+        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_registered" })),
+        )
+            .into_response(),
+        Err(err) => internal_error(err),
+    }
+}
+
 /// The registry state every custom-app response carries. `cap` comes from the
 /// deployment env today; a per-guild plan lookup can replace it later without
 /// touching this shape.
@@ -1076,6 +1180,9 @@ fn custom_apps_json(rows: &[store::CustomAppRow], cap: u32) -> Json<Value> {
             "verified": r.verified_at.is_some(),
             // Paused because the guild is over its plan cap — kept, not served.
             "suspended": r.suspended,
+            // True when an Activity webhook is connected — the embedded
+            // Activity can post/update under this bot right away.
+            "has_hook": r.has_hook,
         })).collect::<Vec<_>>(),
     }))
 }

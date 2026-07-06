@@ -20,19 +20,33 @@
  * runs `publish()` / `update()` and, on success, opens `PostSuccess`.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useRoleInfo } from "@/core/guild/guildStore";
 import { summarizePings, type PingSummary } from "@/core/schema/mentions";
 import { inspectCapabilities } from "@/core/schema/capability";
 import type { PickerGuild, PermanentSlots } from "@/core/guild/api";
-import { fetchActivityPermanentSlots } from "@/core/activity/api";
+import {
+  fetchActivityIdentities,
+  fetchActivityPermanentSlots,
+  startConnectCustomBot,
+  type ActivityIdentity,
+} from "@/core/activity/api";
+import { openExternalLink } from "@/core/activity/sdk";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { Switch } from "@/ui/Switch";
+import { pushToast } from "@/ui/Toast";
 import { SendIcon, RefreshIcon } from "@/ui/Icon";
 import { ServerGlyph } from "./GuildPicker";
 import styles from "./PostConfirm.module.css";
+
+/** How the connect-flow poll paces itself while the user finishes Discord's
+ *  consent in their external browser: check every few seconds, bounded so an
+ *  abandoned flow doesn't poll the proxy forever (focus/visibility re-checks
+ *  keep working past the cap, and re-tapping Connect re-arms). */
+const CONNECT_POLL_INTERVAL_MS = 4_000;
+const CONNECT_POLL_MAX_TICKS = 45; // ~3 minutes
 
 export interface PostConfirmProps {
   open: boolean;
@@ -53,8 +67,10 @@ export interface PostConfirmProps {
   /** True while the confirmed post is in flight — drives the button spinner. */
   busy?: boolean;
   /** Confirm the post. `makePermanent` carries the "Never expire" choice (always
-   *  false unless the toggle was shown and switched on). */
-  onConfirm: (makePermanent: boolean) => void;
+   *  false unless the toggle was shown and switched on); `postAs` carries the
+   *  "Post as" choice — a connected custom bot's application id, or null for
+   *  DWEEB (always null unless the picker was shown). */
+  onConfirm: (makePermanent: boolean, postAs: string | null) => void;
   onCancel: () => void;
   /** Hand off to the full web app — used by the "Manage on web" action when every
    *  never-expire slot is taken (managing/freeing slots lives on the web). */
@@ -261,6 +277,111 @@ export function PostConfirm({
   // components (ttl_days set) — otherwise there's nothing to keep alive.
   const showPermanent = offersPermanent && slots != null && slots.ttl_days !== null;
 
+  // "Post as" — DWEEB or one of the server's registered custom bots. Only a
+  // brand-new post chooses an identity (an update rides whatever authored the
+  // message), and the row renders only when the server actually has custom
+  // bots — everyone else sees the dialog exactly as before. Like the web app's
+  // Send panel, a ready custom bot is pre-selected until the user picks
+  // (posting under your own bot is the nicer outcome); a fetch failure just
+  // hides the row and the post goes out as DWEEB.
+  const offersIdentity = open && mode === "new" && !!guildId;
+  const [identities, setIdentities] = useState<ActivityIdentity[] | null>(null);
+  const [postAs, setPostAs] = useState<string | null>(null);
+  const identityTouched = useRef(false);
+  // The bot whose connect flow is running in the user's external browser —
+  // drives the "waiting" pill state and the readiness poll below.
+  const [connecting, setConnecting] = useState<string | null>(null);
+  useEffect(() => {
+    if (!offersIdentity || !guildId) return;
+    setIdentities(null);
+    setPostAs(null);
+    setConnecting(null);
+    identityTouched.current = false;
+    const ac = new AbortController();
+    fetchActivityIdentities(guildId, ac.signal)
+      .then((ids) => {
+        setIdentities(ids);
+        if (!identityTouched.current) {
+          const ready = ids.find((i) => i.kind === "custom" && i.ready);
+          if (ready?.kind === "custom") setPostAs(ready.application_id);
+        }
+      })
+      .catch(() => {
+        // 501/403/network/abort — leave the row hidden; posting proceeds as DWEEB.
+      });
+    return () => ac.abort();
+  }, [offersIdentity, guildId]);
+
+  // While a connect flow is out in the external browser, watch for the bot
+  // turning ready: re-check on focus/visibility (the user returning) plus a
+  // bounded poll for clients that don't fire those events. Finding it ready
+  // auto-selects the bot — the whole point of the trip.
+  useEffect(() => {
+    if (!connecting || !guildId) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const ids = await fetchActivityIdentities(guildId);
+        if (cancelled) return;
+        setIdentities(ids);
+        const bot = ids.find((i) => i.kind === "custom" && i.application_id === connecting);
+        if (bot?.kind === "custom" && bot.ready) {
+          setConnecting(null);
+          setPostAs(bot.application_id);
+          identityTouched.current = true;
+          pushToast(`${bot.name || "Your bot"} is connected — posting as it now ✓`, "success");
+        }
+      } catch {
+        /* transient — keep waiting */
+      }
+    };
+    const onFocus = () => void check();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void check();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    let ticks = 0;
+    const poll = window.setInterval(() => {
+      if (++ticks > CONNECT_POLL_MAX_TICKS) {
+        window.clearInterval(poll);
+        return;
+      }
+      void check();
+    }, CONNECT_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(poll);
+    };
+  }, [connecting, guildId]);
+
+  // Start the one-time connect flow for a registered-but-unconnected bot: the
+  // proxy mints the authorize URL and the host opens it externally (the
+  // sandboxed iframe can't navigate to discord.com itself).
+  const connectBot = async (applicationId: string) => {
+    if (!guildId) return;
+    try {
+      const url = await startConnectCustomBot(guildId, applicationId);
+      try {
+        await openExternalLink(url);
+      } catch {
+        // The web app / dev URL-override aren't sandboxed, so a plain open
+        // works there when the SDK path can't.
+        window.open(url, "_blank", "noopener");
+      }
+      setConnecting(applicationId);
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : "Couldn't start connecting the bot.", "error");
+    }
+  };
+
+  const customIdentities = (identities ?? []).filter(
+    (i): i is Extract<ActivityIdentity, { kind: "custom" }> => i.kind === "custom",
+  );
+  const showIdentity = offersIdentity && customIdentities.length > 0;
+
   const title =
     mode === "update"
       ? "Update this message?"
@@ -297,7 +418,9 @@ export function PostConfirm({
           <Button
             variant="primary"
             size="sm"
-            onClick={() => onConfirm(showPermanent ? makePermanent : false)}
+            onClick={() =>
+              onConfirm(showPermanent ? makePermanent : false, showIdentity ? postAs : null)
+            }
             disabled={busy}
             leadingIcon={
               busy ? (
@@ -335,6 +458,69 @@ export function PostConfirm({
             <dt>Channel</dt>
             <dd>
               <span className={styles.destName}>#{channelName}</span>
+            </dd>
+          </div>
+        ) : null}
+        {showIdentity ? (
+          <div className={styles.fact}>
+            <dt>Post as</dt>
+            <dd>
+              <div className={styles.idPills} role="group" aria-label="Post as">
+                <button
+                  type="button"
+                  className={styles.idPill}
+                  data-active={postAs === null ? "" : undefined}
+                  disabled={busy}
+                  onClick={() => {
+                    identityTouched.current = true;
+                    setPostAs(null);
+                  }}
+                >
+                  DWEEB
+                </button>
+                {customIdentities.map((bot) => {
+                  const name = bot.name || "Custom bot";
+                  if (bot.ready) {
+                    return (
+                      <button
+                        key={bot.application_id}
+                        type="button"
+                        className={styles.idPill}
+                        data-active={postAs === bot.application_id ? "" : undefined}
+                        disabled={busy}
+                        onClick={() => {
+                          identityTouched.current = true;
+                          setPostAs(bot.application_id);
+                        }}
+                      >
+                        {name}
+                      </button>
+                    );
+                  }
+                  const waiting = connecting === bot.application_id;
+                  return (
+                    <button
+                      key={bot.application_id}
+                      type="button"
+                      className={styles.idPillConnect}
+                      disabled={busy || waiting || !bot.can_connect}
+                      title={
+                        bot.can_connect
+                          ? `Connect ${name} once, then post as it in any channel`
+                          : `Register ${name} again on the web with its client secret to enable this`
+                      }
+                      onClick={() => void connectBot(bot.application_id)}
+                    >
+                      {waiting ? `Connecting ${name}…` : `Connect ${name} ↗`}
+                    </button>
+                  );
+                })}
+              </div>
+              {connecting ? (
+                <p className={styles.idHint}>
+                  Approve it in the window that opened — this updates by itself.
+                </p>
+              ) : null}
             </dd>
           </div>
         ) : null}

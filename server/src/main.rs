@@ -426,6 +426,21 @@ async fn run() {
             "/api/activity/restore",
             post(activity::activity_restore).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
+        // Posting identities for the destination guild — DWEEB plus registered
+        // custom bots and their connect state — so the pre-post confirm can
+        // offer "Post as". Bearer-gated read, same Manage-Webhooks gate as post.
+        .route(
+            "/api/activity/identities",
+            get(activity::activity_identities),
+        )
+        // Mint the authorize URL for the one-time "connect your bot" flow (an
+        // app-owned webhook the Activity then posts through). The body is two
+        // ids, so it's bounded tight like the token call.
+        .route(
+            "/api/activity/connect-bot",
+            post(activity::activity_connect_bot)
+                .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
         // Never-expire slot state for the destination guild, so the pre-post
         // confirm can offer the "Never expire" toggle. Bearer-gated read (the
         // cookie-only guild endpoint can't serve the Activity).

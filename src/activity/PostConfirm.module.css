@@ -68,6 +68,64 @@
   align-self: center;
 }
 
+/* "Post as" identity pills — DWEEB vs the server's own bot(s). Rendered as a
+   fact row so the dialog keeps its Server / Channel / Post as rhythm. */
+.idPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.idPill,
+.idPillConnect {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-subtle);
+  color: var(--app-text);
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.idPill:hover:not(:disabled),
+.idPillConnect:hover:not(:disabled) {
+  border-color: var(--app-accent);
+}
+
+.idPill[data-active] {
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+  color: #fff;
+}
+
+/* A registered bot that still needs its one-time connect — dashed so it reads
+   as an action, not a live choice. */
+.idPillConnect {
+  border-style: dashed;
+  color: var(--app-text-muted);
+}
+
+.idPill:disabled,
+.idPillConnect:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.idHint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+
 /* Whole-message-replace heads-up shown only in update mode. */
 .replaceNote {
   margin: 0 0 14px;

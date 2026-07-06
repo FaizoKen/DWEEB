@@ -62,6 +62,26 @@ pub struct CustomAppRow {
     /// is kept but pulled from the interaction verify map, so its bot stops
     /// being served until the guild re-upgrades.
     pub suspended: bool,
+    /// Whether an Activity webhook is on file for this app — the app-owned
+    /// incoming webhook (token proxy-sealed, see [`CustomAppHook`]) that lets
+    /// the embedded Activity post/update under this bot's identity. The
+    /// credential itself is never listed.
+    pub has_hook: bool,
+}
+
+/// The Activity webhook stored on a custom-app registration: an incoming
+/// webhook owned by *that* app, captured by the proxy during the one-time
+/// `webhook.incoming` connect flow. `token_enc` is sealed under the proxy's
+/// key — opaque ciphertext here, exactly like the client secret — and
+/// `channel_id` is only the channel it was last seen in (the proxy re-reads
+/// the live channel from Discord before every use).
+pub struct CustomAppHook {
+    pub hook_id: String,
+    pub channel_id: String,
+    pub token_enc: String,
+    /// Mirrors the registration's plan-suspension state so the proxy can
+    /// refuse posting under an over-cap bot without a second lookup.
+    pub suspended: bool,
 }
 
 /// The verify-map deltas a [`Store::reconcile_custom_apps`] pass produced, so the
@@ -138,6 +158,22 @@ impl Store {
         );
         let _ = conn.execute(
             "ALTER TABLE custom_apps ADD COLUMN suspended_at INTEGER",
+            [],
+        );
+        // Migration for the Activity webhook (see [`CustomAppHook`]): the
+        // app-owned incoming webhook the embedded Activity posts through.
+        // Empty strings = none connected. Same expected duplicate-column error
+        // on an already-migrated file.
+        let _ = conn.execute(
+            "ALTER TABLE custom_apps ADD COLUMN hook_id TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE custom_apps ADD COLUMN hook_channel_id TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE custom_apps ADD COLUMN hook_token_enc TEXT NOT NULL DEFAULT ''",
             [],
         );
         Ok(Self {
@@ -267,7 +303,8 @@ impl Store {
     pub fn custom_apps_list(&self, guild_id: &str) -> rusqlite::Result<Vec<CustomAppRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT application_id, name, added_at, client_secret_enc <> '', verified_at, suspended_at
+            "SELECT application_id, name, added_at, client_secret_enc <> '', verified_at, suspended_at,
+                    hook_id <> ''
              FROM custom_apps WHERE guild_id = ?1 ORDER BY added_at",
         )?;
         let rows = stmt
@@ -279,10 +316,75 @@ impl Store {
                     has_secret: r.get(3)?,
                     verified_at: r.get(4)?,
                     suspended: r.get::<_, Option<i64>>(5)?.is_some(),
+                    has_hook: r.get(6)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
+    }
+
+    // ── Activity webhook (per registration) ────────────────────────────────
+
+    /// The Activity webhook stored on one of the guild's apps. `None` when the
+    /// app isn't registered to that guild; a hook with an empty `hook_id` when
+    /// it is but nothing is connected yet (the caller distinguishes the two).
+    pub fn custom_app_hook(
+        &self,
+        guild_id: &str,
+        application_id: &str,
+    ) -> rusqlite::Result<Option<CustomAppHook>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT hook_id, hook_channel_id, hook_token_enc, suspended_at
+             FROM custom_apps WHERE application_id = ?1 AND guild_id = ?2",
+            (application_id, guild_id),
+            |r| {
+                Ok(CustomAppHook {
+                    hook_id: r.get(0)?,
+                    channel_id: r.get(1)?,
+                    token_enc: r.get(2)?,
+                    suspended: r.get::<_, Option<i64>>(3)?.is_some(),
+                })
+            },
+        )
+        .optional()
+    }
+
+    /// Store (or replace) the Activity webhook on one of the guild's apps.
+    /// False when the app isn't registered to that guild — the credential is
+    /// only ever attached to an existing registration, never creates one.
+    pub fn custom_app_hook_set(
+        &self,
+        guild_id: &str,
+        application_id: &str,
+        hook_id: &str,
+        channel_id: &str,
+        token_enc: &str,
+    ) -> rusqlite::Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE custom_apps SET hook_id = ?1, hook_channel_id = ?2, hook_token_enc = ?3
+             WHERE application_id = ?4 AND guild_id = ?5",
+            (hook_id, channel_id, token_enc, application_id, guild_id),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Drop the Activity webhook from one of the guild's apps (the proxy calls
+    /// this when Discord reports the webhook gone, or its sealed token can no
+    /// longer be opened). False when the app isn't registered to that guild.
+    pub fn custom_app_hook_clear(
+        &self,
+        guild_id: &str,
+        application_id: &str,
+    ) -> rusqlite::Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE custom_apps SET hook_id = '', hook_channel_id = '', hook_token_enc = ''
+             WHERE application_id = ?1 AND guild_id = ?2",
+            (application_id, guild_id),
+        )?;
+        Ok(n > 0)
     }
 
     /// Record the first validly-signed interaction seen for an app. Writes only
@@ -636,5 +738,71 @@ mod tests {
         assert_eq!(revived, vec!["101".to_string(), "102".to_string()]);
         assert!(d.suspend.is_empty());
         assert_eq!(s.custom_apps_all().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn custom_app_hook_roundtrip_and_scoping() {
+        let s = store();
+        let key = "a".repeat(64);
+        assert!(matches!(
+            s.custom_app_add("g1", "100", &key, "bot", "", "u", 1000)
+                .unwrap(),
+            AddApp::Added
+        ));
+
+        // Unregistered app / wrong guild → no row at all.
+        assert!(s.custom_app_hook("g1", "999").unwrap().is_none());
+        assert!(s.custom_app_hook("g2", "100").unwrap().is_none());
+        // Setting a hook never creates a registration.
+        assert!(!s
+            .custom_app_hook_set("g2", "100", "555", "42", "enc")
+            .unwrap());
+        assert!(!s
+            .custom_app_hook_set("g1", "999", "555", "42", "enc")
+            .unwrap());
+
+        // Registered but nothing connected yet → empty hook fields.
+        let empty = s.custom_app_hook("g1", "100").unwrap().unwrap();
+        assert_eq!(empty.hook_id, "");
+        assert!(!s.custom_apps_list("g1").unwrap()[0].has_hook);
+
+        // Connect, read back, and the list reflects it.
+        assert!(s
+            .custom_app_hook_set("g1", "100", "555", "42", "enc")
+            .unwrap());
+        let hook = s.custom_app_hook("g1", "100").unwrap().unwrap();
+        assert_eq!(
+            (
+                hook.hook_id.as_str(),
+                hook.channel_id.as_str(),
+                hook.token_enc.as_str()
+            ),
+            ("555", "42", "enc")
+        );
+        assert!(!hook.suspended);
+        assert!(s.custom_apps_list("g1").unwrap()[0].has_hook);
+
+        // Suspension state rides along on the hook read.
+        s.reconcile_custom_apps("g1", 0).unwrap();
+        assert!(s.custom_app_hook("g1", "100").unwrap().unwrap().suspended);
+        s.reconcile_custom_apps("g1", 1).unwrap();
+
+        // Re-registering the same app keeps the connected hook.
+        assert!(matches!(
+            s.custom_app_add("g1", "100", &key, "bot2", "sec", "u", 1000)
+                .unwrap(),
+            AddApp::Added
+        ));
+        assert_eq!(
+            s.custom_app_hook("g1", "100").unwrap().unwrap().hook_id,
+            "555"
+        );
+
+        // Clear drops the credential but keeps the registration; unregistering
+        // removes the row (and the hook with it).
+        assert!(s.custom_app_hook_clear("g1", "100").unwrap());
+        assert_eq!(s.custom_app_hook("g1", "100").unwrap().unwrap().hook_id, "");
+        assert!(s.custom_app_remove("g1", "100").unwrap());
+        assert!(s.custom_app_hook("g1", "100").unwrap().is_none());
     }
 }

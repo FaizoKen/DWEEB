@@ -387,6 +387,11 @@ pub struct PostBody {
     /// honoured for a message that actually has components — see the claim below.
     #[serde(default)]
     make_permanent: bool,
+    /// Post under one of the server's registered custom bots instead of DWEEB:
+    /// the app's id, whose Activity webhook was connected beforehand (see the
+    /// custom-bot section below). Empty/absent = the standard DWEEB identity.
+    #[serde(default)]
+    application_id: String,
 }
 
 /// `POST /api/activity/post` `{ guild_id, channel_id, message }` — post the
@@ -413,27 +418,39 @@ pub async fn activity_post(
     if !body.message.is_object() {
         return Err(bad_request("message must be a JSON object"));
     }
+    let custom_app = parse_application_id(&body.application_id)?;
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
 
-    // Reuse a DWEEB-owned incoming webhook already in the channel (so we don't
-    // spawn duplicates, and never hijack a third party's hook); otherwise mint
-    // one. Either way the post carries DWEEB's component routing.
-    let (webhook_id, token) = match dweeb_webhook_in_channel(&st, &guild, &channel_id, None).await?
-    {
-        Some(found) => found,
-        None => {
-            let reason = format!("Created via DWEEB Activity by {}", session.uid);
-            let w = st
-                .discord
-                .create_webhook(&channel_id, "DWEEB", None, Some(&reason))
-                .await?;
-            let token = w.token.ok_or_else(|| {
-                AppError::BadGateway("Discord created a webhook without a token.".into())
-            })?;
-            (w.id, token)
+    let (webhook_id, token) = match custom_app.as_deref() {
+        // Post as one of the server's own bots: through its connected Activity
+        // webhook, brought to the destination channel first. The message then
+        // carries the custom app's component routing — which the dispatcher
+        // serves too, so plugins keep working.
+        Some(app) => {
+            let hook = require_custom_hook(&st, &guild, app).await?;
+            ensure_custom_hook_in_channel(&st, &guild, app, &hook, &channel_id).await?;
+            (hook.webhook_id, hook.token)
         }
+        // Standard identity: reuse a DWEEB-owned incoming webhook already in
+        // the channel (so we don't spawn duplicates, and never hijack a third
+        // party's hook); otherwise mint one. Either way the post carries
+        // DWEEB's component routing.
+        None => match dweeb_webhook_in_channel(&st, &guild, &channel_id, None).await? {
+            Some(found) => found,
+            None => {
+                let reason = format!("Created via DWEEB Activity by {}", session.uid);
+                let w = st
+                    .discord
+                    .create_webhook(&channel_id, "DWEEB", None, Some(&reason))
+                    .await?;
+                let token = w.token.ok_or_else(|| {
+                    AppError::BadGateway("Discord created a webhook without a token.".into())
+                })?;
+                (w.id, token)
+            }
+        },
     };
 
     let created = st
@@ -492,6 +509,9 @@ pub async fn activity_post(
         // The webhook that authored the message — the FE passes it back to
         // `activity_edit` so an update targets exactly this one.
         "webhook_id": webhook_id,
+        // Which custom bot authored the post (null for DWEEB) — the FE carries
+        // it into `activity_edit` so the update rides the same identity.
+        "application_id": custom_app,
         // Never-expire outcome for the success dialog's receipt. `permanent` is
         // true only when a slot was actually claimed; `permanent_error` carries a
         // user-facing reason when the user asked but it couldn't be granted.
@@ -499,6 +519,18 @@ pub async fn activity_post(
         "permanent_error": permanent_error,
     }))
     .into_response())
+}
+
+/// Parse an optional custom-app id off a post/edit body: empty/absent means
+/// the standard DWEEB identity, anything else must be a snowflake.
+fn parse_application_id(raw: &str) -> Result<Option<String>, AppError> {
+    match raw.trim() {
+        "" => Ok(None),
+        id if is_snowflake(id) => Ok(Some(id.to_string())),
+        _ => Err(bad_request(
+            "application_id must be a Discord application id",
+        )),
+    }
 }
 
 /// Outcome of a best-effort never-expire claim made right after a post.
@@ -646,6 +678,401 @@ pub async fn activity_plan(
     .into_response())
 }
 
+// ── Custom-bot identities (post as the server's own bot) ────────────────────
+//
+// A guild may register its own Discord application (`routes.rs` custom apps)
+// so the dispatcher serves its interactions. The embedded Activity can also
+// POST/PATCH **as** that bot: a one-time connect flow (see `auth.rs`,
+// `ACTIVITY_WEBHOOK_STATE_PREFIX`) captures an app-owned incoming webhook and
+// stores its token — sealed under this proxy's key — on the app's dispatcher-
+// registry row. One webhook serves the whole server: before each use the
+// proxy re-reads its live channel and, when the destination differs, moves it
+// there with the bot's Manage Webhooks (an incoming webhook is re-pointable
+// at any channel in its guild), then posts/edits with the webhook's own
+// token. Messages appear under the server's bot, and their components route
+// to that app — which the dispatcher serves, so DWEEB plugins keep working.
+
+/// A stored Activity webhook, opened and ready to use.
+struct CustomHook {
+    webhook_id: String,
+    token: String,
+    /// The sealed token exactly as stored — kept so a channel move can write
+    /// the registry row back without resealing.
+    token_enc: String,
+}
+
+/// Outcome of looking up a custom bot's Activity webhook.
+enum CustomHookState {
+    Ready(CustomHook),
+    /// Registered, but no Activity webhook is connected (or the stored one
+    /// became unusable and was dropped).
+    Missing,
+    /// Registration paused: the server is over its plan's custom-bot cap.
+    Suspended,
+    /// The app isn't registered as a custom bot for this guild at all.
+    NotRegistered,
+}
+
+/// Read a custom bot's stored Activity webhook from the dispatcher registry
+/// and open its sealed token. A token sealed under a rotated key is dropped
+/// (best-effort) and reported as [`CustomHookState::Missing`], so the user is
+/// asked to reconnect rather than shown an opaque failure.
+async fn fetch_custom_hook(
+    st: &AppState,
+    guild: &str,
+    application_id: &str,
+) -> Result<CustomHookState, AppError> {
+    let api = dispatcher_api(st)?;
+    let resp = api
+        .http
+        .get(format!(
+            "{}/custom-apps/{guild}/{application_id}/hook",
+            api.base
+        ))
+        .bearer_auth(&api.token)
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't reach the dispatcher: {e}")))?;
+    match resp.status().as_u16() {
+        200 => {
+            let v = resp
+                .json::<Value>()
+                .await
+                .map_err(|e| AppError::BadGateway(format!("unexpected registry response: {e}")))?;
+            if v.get("suspended").and_then(Value::as_bool).unwrap_or(false) {
+                return Ok(CustomHookState::Suspended);
+            }
+            let hook_id = v
+                .get("hook_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let token_enc = v
+                .get("token_enc")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if hook_id.is_empty() || token_enc.is_empty() {
+                return Ok(CustomHookState::Missing);
+            }
+            match crate::seal::open_hook(&st.key, &token_enc) {
+                Some(token) => Ok(CustomHookState::Ready(CustomHook {
+                    webhook_id: hook_id,
+                    token,
+                    token_enc,
+                })),
+                None => {
+                    // Sealed under a key we no longer hold (SESSION_SECRET
+                    // rotation) — unusable forever, so drop it now.
+                    clear_activity_hook(st, guild, application_id).await;
+                    Ok(CustomHookState::Missing)
+                }
+            }
+        }
+        404 => {
+            let v = resp.json::<Value>().await.unwrap_or(Value::Null);
+            match v.get("error").and_then(Value::as_str) {
+                Some("no_hook") => Ok(CustomHookState::Missing),
+                _ => Ok(CustomHookState::NotRegistered),
+            }
+        }
+        _ => Err(AppError::BadGateway(
+            "The custom-bot registry answered unexpectedly.".into(),
+        )),
+    }
+}
+
+/// Store (or refresh) a custom bot's Activity webhook on its registry row.
+/// Called from the connect flow's callback (`auth.rs`) with a freshly sealed
+/// token, and after a channel move to keep the row's channel note current.
+pub(crate) async fn store_activity_hook(
+    st: &AppState,
+    guild: &str,
+    application_id: &str,
+    hook_id: &str,
+    channel_id: &str,
+    token_enc: &str,
+) -> Result<(), AppError> {
+    let api = dispatcher_api(st)?;
+    let resp = api
+        .http
+        .put(format!(
+            "{}/custom-apps/{guild}/{application_id}/hook",
+            api.base
+        ))
+        .bearer_auth(&api.token)
+        .json(&json!({
+            "hook_id": hook_id,
+            "channel_id": channel_id,
+            "token_enc": token_enc,
+        }))
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("couldn't reach the dispatcher: {e}")))?;
+    if resp.status().is_success() {
+        return Ok(());
+    }
+    if resp.status().as_u16() == 404 {
+        return Err(AppError::Status {
+            status: StatusCode::NOT_FOUND,
+            message: "That app isn't registered as a custom bot for this server.".into(),
+            retry_after: None,
+        });
+    }
+    Err(AppError::BadGateway(
+        "The custom-bot registry answered unexpectedly.".into(),
+    ))
+}
+
+/// Best-effort: drop a stored Activity webhook the proxy can no longer use
+/// (deleted at Discord, or sealed under a rotated key). A failure only means
+/// the next attempt re-discovers the same dead end.
+async fn clear_activity_hook(st: &AppState, guild: &str, application_id: &str) {
+    let Ok(api) = dispatcher_api(st) else { return };
+    let _ = api
+        .http
+        .delete(format!(
+            "{}/custom-apps/{guild}/{application_id}/hook",
+            api.base
+        ))
+        .bearer_auth(&api.token)
+        .send()
+        .await;
+}
+
+/// Resolve a ready-to-use custom hook for a post/edit, mapping every
+/// non-ready state to an actionable, user-facing error.
+async fn require_custom_hook(
+    st: &AppState,
+    guild: &str,
+    application_id: &str,
+) -> Result<CustomHook, AppError> {
+    match fetch_custom_hook(st, guild, application_id).await? {
+        CustomHookState::Ready(hook) => Ok(hook),
+        CustomHookState::Missing => Err(AppError::Status {
+            status: StatusCode::CONFLICT,
+            message: "This bot isn't connected to the Activity yet — connect it from the post \
+                      dialog, then try again."
+                .into(),
+            retry_after: None,
+        }),
+        CustomHookState::Suspended => Err(AppError::Forbidden(
+            "This custom bot is paused because the server is over its plan's custom-bot limit — \
+             upgrade the server's plan on the web, or post as DWEEB."
+                .into(),
+        )),
+        CustomHookState::NotRegistered => Err(AppError::Status {
+            status: StatusCode::NOT_FOUND,
+            message: "That app isn't registered as a custom bot for this server.".into(),
+            retry_after: None,
+        }),
+    }
+}
+
+/// Make sure the custom hook currently sits in `channel_id`, moving it there
+/// with the bot's Manage Webhooks when it doesn't. Discord resolves webhook
+/// posts *and* webhook-message reads/edits within the webhook's current
+/// channel, so every custom-bot use runs through here first. A webhook
+/// Discord no longer honours is dropped from the registry with a clear
+/// "reconnect it" error.
+async fn ensure_custom_hook_in_channel(
+    st: &AppState,
+    guild: &str,
+    application_id: &str,
+    hook: &CustomHook,
+    channel_id: &str,
+) -> Result<(), AppError> {
+    let live = st
+        .discord
+        .webhook_by_token(&hook.webhook_id, &hook.token)
+        .await?
+        // Gone at Discord, or (paranoia — a webhook can't change guilds)
+        // somehow not this server's: treat both as unusable.
+        .filter(|w| w.guild_id.as_deref() == Some(guild));
+    let Some(live) = live else {
+        clear_activity_hook(st, guild, application_id).await;
+        return Err(AppError::Status {
+            status: StatusCode::CONFLICT,
+            message: "This bot's Activity webhook is gone — it may have been deleted in Discord. \
+                      Reconnect it from the post dialog, then try again."
+                .into(),
+            retry_after: None,
+        });
+    };
+    if live.channel_id.as_deref() != Some(channel_id) {
+        st.discord
+            .modify_webhook(
+                &hook.webhook_id,
+                None,
+                None,
+                Some(channel_id),
+                Some("Moved by DWEEB Activity to post as this server's bot"),
+            )
+            .await?;
+        // Keep the registry's channel note current — best-effort, the live
+        // channel is re-read from Discord on every use anyway.
+        let _ = store_activity_hook(
+            st,
+            guild,
+            application_id,
+            &hook.webhook_id,
+            channel_id,
+            &hook.token_enc,
+        )
+        .await;
+    }
+    Ok(())
+}
+
+/// The guild's custom bots that have an Activity webhook connected and aren't
+/// plan-suspended — restore's candidate authors. Empty when the dispatcher is
+/// off or unreachable (restore then covers DWEEB's own webhooks only).
+async fn custom_apps_with_hooks(st: &AppState, guild: &str) -> Vec<String> {
+    let Ok(api) = dispatcher_api(st) else {
+        return Vec::new();
+    };
+    let cap = st.entitlements.custom_bots_cap(guild).await;
+    let resp = api
+        .http
+        .get(dispatcher_url_with_cap(
+            format!("{}/custom-apps/{guild}", api.base),
+            cap,
+        ))
+        .bearer_auth(&api.token)
+        .send()
+        .await;
+    let Ok(resp) = resp else { return Vec::new() };
+    if !resp.status().is_success() {
+        return Vec::new();
+    }
+    let Ok(v) = resp.json::<Value>().await else {
+        return Vec::new();
+    };
+    v.get("items")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|i| {
+                    i.get("has_hook").and_then(Value::as_bool).unwrap_or(false)
+                        && !i.get("suspended").and_then(Value::as_bool).unwrap_or(false)
+                })
+                .filter_map(|i| i.get("application_id").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// ── Identities (GET /api/activity/identities) ───────────────────────────────
+
+/// `GET /api/activity/identities?guild_id=<id>` — who the Activity can post
+/// as in the destination server: always DWEEB, plus each registered (non-
+/// suspended) custom bot. `ready` means an Activity webhook is connected and
+/// the bot is pickable right away; `can_connect` means the one-time connect
+/// flow is available (a client secret is on file). Gated like the post itself
+/// (Manage Webhooks), since this list exists purely to pick a posting
+/// identity. Deployments without the dispatcher just get DWEEB.
+pub async fn activity_identities(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Query(q): Query<PermanentQuery>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let guild = q.guild_id.trim().to_string();
+    if !is_snowflake(&guild) {
+        return Err(bad_request("guild_id must be a Discord id"));
+    }
+    authorize_activity_webhooks(&st, session, &guild).await?;
+
+    let mut identities = vec![json!({ "kind": "dweeb" })];
+    if let Ok(api) = dispatcher_api(&st) {
+        let cap = st.entitlements.custom_bots_cap(&guild).await;
+        let resp = api
+            .http
+            .get(dispatcher_url_with_cap(
+                format!("{}/custom-apps/{guild}", api.base),
+                cap,
+            ))
+            .bearer_auth(&api.token)
+            .send()
+            .await;
+        // Registry problems degrade to "no custom bots" — the standard DWEEB
+        // identity must never be blocked by the registry being down.
+        let items = match resp {
+            Ok(resp) if resp.status().is_success() => resp.json::<Value>().await.ok(),
+            _ => None,
+        };
+        if let Some(items) = items
+            .as_ref()
+            .and_then(|v| v.get("items"))
+            .and_then(Value::as_array)
+        {
+            for item in items {
+                if item
+                    .get("suspended")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                identities.push(json!({
+                    "kind": "custom",
+                    "application_id": item.get("application_id").and_then(Value::as_str).unwrap_or_default(),
+                    "name": item.get("name").and_then(Value::as_str).unwrap_or_default(),
+                    "ready": item.get("has_hook").and_then(Value::as_bool).unwrap_or(false),
+                    "can_connect": item.get("has_secret").and_then(Value::as_bool).unwrap_or(false),
+                }));
+            }
+        }
+    }
+    Ok(Json(json!({ "identities": identities })).into_response())
+}
+
+// ── Connect a custom bot (POST /api/activity/connect-bot) ───────────────────
+
+#[derive(Deserialize)]
+pub struct ConnectBotBody {
+    #[serde(default)]
+    guild_id: String,
+    #[serde(default)]
+    application_id: String,
+}
+
+/// `POST /api/activity/connect-bot` `{ guild_id, application_id }` — mint the
+/// authorize URL for the one-time "connect your bot" flow. The Activity opens
+/// it in the user's external browser (the sandboxed iframe can't navigate to
+/// discord.com); Discord shows its `webhook.incoming` consent under the
+/// custom app, and the callback captures + stores the webhook server-side
+/// (see `auth.rs`). The flow context rides sealed inside the URL's `state`,
+/// so no cookie has to survive the browser hop. Gated on Manage Webhooks like
+/// the posting this enables.
+pub async fn activity_connect_bot(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Json(body): Json<ConnectBotBody>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let guild = body.guild_id.trim().to_string();
+    let application_id = body.application_id.trim().to_string();
+    if !is_snowflake(&guild) || !is_snowflake(&application_id) {
+        return Err(bad_request(
+            "guild_id and application_id must be Discord ids",
+        ));
+    }
+    authorize_activity_webhooks(&st, session, &guild).await?;
+    let url = crate::auth::activity_connect_authorize_url(&st, &guild, &application_id).await?;
+    Ok(Json(json!({ "url": url })).into_response())
+}
+
 /// Find a DWEEB-owned incoming webhook in `channel_id` whose token we can post
 /// through. `prefer` names a specific webhook id to use when it's still valid
 /// (an edit naming the webhook that authored the message) — otherwise any
@@ -696,6 +1123,11 @@ pub struct EditBody {
     /// server-side before use, so a forged id can't redirect the edit.
     #[serde(default)]
     webhook_id: String,
+    /// The custom bot that authored the message (from the post response), when
+    /// it wasn't DWEEB — the edit then rides that bot's connected Activity
+    /// webhook. Empty/absent = the standard DWEEB path.
+    #[serde(default)]
+    application_id: String,
     /// The wire payload the browser rebuilt (components + flags + username/avatar).
     message: Value,
 }
@@ -733,15 +1165,38 @@ pub async fn activity_edit(
         id if is_snowflake(id) => Some(id),
         _ => return Err(bad_request("webhook_id must be a Discord id")),
     };
+    let custom_app = parse_application_id(&body.application_id)?;
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
 
-    let (webhook_id, token) = dweeb_webhook_in_channel(&st, &guild, &channel_id, prefer)
-        .await?
-        .ok_or_else(|| {
-            bad_request("Couldn't find the DWEEB webhook that posted this message — post it again.")
-        })?;
+    let (webhook_id, token) = match custom_app.as_deref() {
+        // The message was posted as one of the server's own bots: edit through
+        // its connected Activity webhook, brought back to the message's channel
+        // first (Discord resolves webhook-message edits within the webhook's
+        // current channel).
+        Some(app) => {
+            let hook = require_custom_hook(&st, &guild, app).await?;
+            // Only the webhook that authored a message can edit it. A stored
+            // hook that no longer matches the author (it was reconnected since
+            // the post) can't succeed — say so instead of relaying Discord's
+            // opaque unknown-message error.
+            if prefer.is_some_and(|id| id != hook.webhook_id) {
+                return Err(bad_request(
+                    "This message was posted through a webhook that's since been replaced — it can't be updated anymore. Post it again.",
+                ));
+            }
+            ensure_custom_hook_in_channel(&st, &guild, app, &hook, &channel_id).await?;
+            (hook.webhook_id, hook.token)
+        }
+        None => dweeb_webhook_in_channel(&st, &guild, &channel_id, prefer)
+            .await?
+            .ok_or_else(|| {
+                bad_request(
+                    "Couldn't find the DWEEB webhook that posted this message — post it again.",
+                )
+            })?,
+    };
 
     st.discord
         .edit_webhook_message(&webhook_id, &token, &message_id, body.message)
@@ -753,6 +1208,7 @@ pub async fn activity_edit(
         "guild_id": guild,
         "url": format!("https://discord.com/channels/{guild}/{channel_id}/{message_id}"),
         "webhook_id": webhook_id,
+        "application_id": custom_app,
     }))
     .into_response())
 }
@@ -807,25 +1263,67 @@ pub async fn activity_restore(
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
 
-    let (webhook_id, token) = dweeb_webhook_in_channel(&st, &guild, &channel_id, None)
-        .await?
-        .ok_or_else(|| {
+    // Candidate authors, DWEEB's own webhook first (it never has to be moved).
+    // Then each connected custom bot: its roaming Activity webhook may need to
+    // be brought back to this channel before Discord will return the message
+    // (webhook-message reads resolve within the webhook's current channel).
+    // Discord only returns a message to the webhook that authored it, so a
+    // wrong candidate is a clean miss, never a leak.
+    let mut found: Option<(Value, String, Option<String>)> = None;
+    let mut had_candidate = false;
+    if let Some((webhook_id, token)) =
+        dweeb_webhook_in_channel(&st, &guild, &channel_id, None).await?
+    {
+        had_candidate = true;
+        if let Some(m) = st
+            .discord
+            .webhook_message(&webhook_id, &token, &message_id)
+            .await?
+        {
+            found = Some((m, webhook_id, None));
+        }
+    }
+    if found.is_none() {
+        for app in custom_apps_with_hooks(&st, &guild).await {
+            let Ok(CustomHookState::Ready(hook)) = fetch_custom_hook(&st, &guild, &app).await
+            else {
+                continue;
+            };
+            had_candidate = true;
+            // A hook that turns out dead (or unmovable) just drops out of the
+            // candidate set — restore reports "not found" rather than erroring.
+            if ensure_custom_hook_in_channel(&st, &guild, &app, &hook, &channel_id)
+                .await
+                .is_err()
+            {
+                continue;
+            }
+            if let Some(m) = st
+                .discord
+                .webhook_message(&hook.webhook_id, &hook.token, &message_id)
+                .await?
+            {
+                found = Some((m, hook.webhook_id, Some(app)));
+                break;
+            }
+        }
+    }
+    let Some((message, webhook_id, application_id)) = found else {
+        return Err(if had_candidate {
+            AppError::Status {
+                status: StatusCode::NOT_FOUND,
+                message: "Discord couldn't find that message under this server's DWEEB or \
+                          connected-bot webhooks. Only a message posted through them can be \
+                          restored."
+                    .into(),
+                retry_after: None,
+            }
+        } else {
             bad_request(
-                "DWEEB hasn't posted in this channel yet — only messages DWEEB posted here can be restored.",
+                "DWEEB hasn't posted in this channel yet — only messages DWEEB (or a connected custom bot) posted here can be restored.",
             )
-        })?;
-
-    let message = st
-        .discord
-        .webhook_message(&webhook_id, &token, &message_id)
-        .await?
-        .ok_or_else(|| AppError::Status {
-            status: StatusCode::NOT_FOUND,
-            message: "Discord couldn't find that message under DWEEB's webhook. Only a message \
-                      DWEEB posted in this channel can be restored."
-                .into(),
-            retry_after: None,
-        })?;
+        });
+    };
 
     Ok(Json(json!({
         // The raw Discord message — the browser decodes it into the editor.
@@ -836,6 +1334,9 @@ pub async fn activity_restore(
         "url": format!("https://discord.com/channels/{guild}/{channel_id}/{message_id}"),
         // Same webhook id `post` returns, so a follow-up edit targets this hook.
         "webhook_id": webhook_id,
+        // The custom bot that authored it (null for DWEEB), so a follow-up
+        // update rides the same identity.
+        "application_id": application_id,
     }))
     .into_response())
 }

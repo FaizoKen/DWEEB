@@ -152,8 +152,9 @@ interface ActivityState {
    *  caller can pop the success dialog, or null when it was guarded/failed (the
    *  failure is surfaced as a toast). `makePermanent` asks the proxy to also spend
    *  a never-expire slot on the new message (best-effort; the result reports how
-   *  it went). */
-  publish(makePermanent?: boolean): Promise<ActivityPostResult | null>;
+   *  it went). `applicationId` posts as one of the server's connected custom bots
+   *  instead of DWEEB (the confirm dialog's "Post as" choice); null = DWEEB. */
+  publish(makePermanent?: boolean, applicationId?: string | null): Promise<ActivityPostResult | null>;
   /** PATCH the message last posted from this Activity with the current draft.
    *  Only meaningful while {@link lastPost} matches the chosen destination.
    *  Returns the result on success / null on failure, like {@link publish}. */
@@ -438,7 +439,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 
-  async publish(makePermanent = false) {
+  async publish(makePermanent = false, applicationId: string | null = null) {
     const guildId = get().targetGuildId;
     if (!guildId) {
       pushToast("Pick a server to post to first.", "error");
@@ -466,7 +467,13 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ publishing: true });
     try {
       const payload = buildWirePayload(message);
-      const result = await publishToChannel(guildId, channelId, payload, makePermanent);
+      const result = await publishToChannel(
+        guildId,
+        channelId,
+        payload,
+        makePermanent,
+        applicationId,
+      );
       set({ lastPost: result });
       // Success is surfaced by the post-success dialog (see ActivityBar), so no
       // toast here — the two would be redundant.
@@ -498,12 +505,15 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ publishing: true });
     try {
       const payload = buildWirePayload(message);
+      // The update rides whichever identity authored the message — the
+      // webhook (and custom bot, when it was one) from the original post.
       const result = await editPostedMessage(
         last.guild_id,
         last.channel_id,
         last.message_id,
         last.webhook_id ?? "",
         payload,
+        last.application_id ?? null,
       );
       set({ lastPost: result });
       // The post-success dialog confirms it (see ActivityBar) — skip the toast.
@@ -542,8 +552,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       // everyone in the room (a top-level structural change, so a full snapshot).
       useMessageStore.getState().replaceMessage(decoded);
       // Wire the toolbar to update THIS message: `lastPost` carries the webhook
-      // that authored it, so the next edit PATCHes it in place instead of posting
-      // a copy (same affordance a fresh post leaves behind).
+      // (and the custom bot, when one authored it) so the next edit PATCHes it
+      // in place under the same identity instead of posting a copy (same
+      // affordance a fresh post leaves behind).
       set({
         lastPost: {
           message_id: result.message_id,
@@ -551,6 +562,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
           guild_id: result.guild_id,
           url: result.url,
           webhook_id: result.webhook_id,
+          application_id: result.application_id ?? null,
         },
       });
       const validation = validateMessage(decoded);
