@@ -1,6 +1,7 @@
 .icon,
 .iconBuiltin,
-.iconFallback {
+.iconFallback,
+.iconEmoji {
   flex: none;
   width: 28px;
   height: 28px;
@@ -10,11 +11,17 @@
   object-fit: cover;
 }
 .iconBuiltin,
-.iconFallback {
+.iconFallback,
+.iconEmoji {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--app-border);
+}
+.iconEmoji {
+  font-size: 16px;
+  line-height: 1;
+  background: var(--app-bg-subtle);
 }
 .iconBuiltin svg {
   width: 16px;

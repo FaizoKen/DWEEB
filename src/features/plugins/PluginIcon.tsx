@@ -3,25 +3,37 @@
  * library rows.
  *
  * Resolution order: the per-instance summary icon, then the manifest's icon
- * URL, then a built-in inline SVG for curated plugins, then a monogram. The
- * built-in SVGs ship in the bundle so the picker paints instantly with no
- * network fetch; a manifest icon still wins so a plugin keeps owning its
- * branding. Unknown plugins get a monogram tinted by a hue derived from their
- * id, so every row stays visually distinct without any per-plugin code.
+ * URL, then a built-in inline SVG for curated plugins, then the manifest's
+ * default emoji, then a monogram. The built-in SVGs ship in the bundle so the
+ * picker paints instantly with no network fetch; a manifest icon still wins so
+ * a plugin keeps owning its branding. Unknown plugins get a monogram tinted by
+ * a hue derived from their id, so every row stays visually distinct without any
+ * per-plugin code.
+ *
+ * The icon URL is a remote image, and it doesn't always load: inside the Discord
+ * Activity the sandboxed iframe only proxies our own host, so a link plugin's
+ * icon on another host (e.g. `rolelogic.faizo.net`) is blocked by CSP — and any
+ * host can be down or slow. Rather than leave a broken-image glyph, a failed
+ * load falls through to the same offline chain (built-in SVG → default emoji →
+ * monogram), all of which paint with no network. That makes the Activity show a
+ * clean, on-brand mark instead of a torn-image icon.
  */
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import styles from "./PluginIcon.module.css";
 
 /**
  * The display identity an icon needs — structurally satisfied by both manifest
  * kinds (the interactive `PluginManifest` and the URL-based
- * `LinkPluginManifest`), so one icon serves every library row and chip.
+ * `LinkPluginManifest`), so one icon serves every library row and chip. Both
+ * kinds carry an optional `defaultEmoji`, used as the offline fallback mark when
+ * a remote `icon` can't load.
  */
 export interface PluginIconSource {
   id: string;
   name: string;
   icon?: string;
+  defaultEmoji?: string;
 }
 
 /** Bundled 24×24 stroke icons for the curated plugins, keyed by manifest id. */
@@ -112,7 +124,13 @@ export function PluginIcon({
   summaryIcon?: string;
 }) {
   const src = summaryIcon ?? manifest.icon;
-  if (src) {
+  // Whether the remote image failed to load — then we render the offline chain
+  // instead of a broken-image glyph. Reset when `src` changes so switching the
+  // chip's plugin re-attempts the new URL rather than staying failed.
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+
+  if (src && !failed) {
     return (
       <img
         className={styles.icon}
@@ -123,10 +141,20 @@ export function PluginIcon({
         height={28}
         loading="lazy"
         decoding="async"
+        onError={() => setFailed(true)}
       />
     );
   }
 
+  return offlineFallback(manifest);
+}
+
+/**
+ * The no-network icon: a built-in SVG for a curated plugin, else the manifest's
+ * default emoji, else a hue-tinted monogram. Used both when a plugin has no
+ * remote icon and when its remote icon fails to load (see the component doc).
+ */
+function offlineFallback(manifest: PluginIconSource): ReactNode {
   const builtin = BUILTIN_ICONS[manifest.id];
   if (builtin) {
     return (
@@ -149,7 +177,17 @@ export function PluginIcon({
     );
   }
 
-  // Fallback monogram from the plugin name, hue-tinted per id.
+  // A link plugin's brand emoji (🌍, 🗳️, ⚔️…) — a clean, on-brand mark when the
+  // remote icon can't load, and nicer than a bare monogram.
+  if (manifest.defaultEmoji) {
+    return (
+      <span className={styles.iconEmoji} aria-hidden>
+        {manifest.defaultEmoji}
+      </span>
+    );
+  }
+
+  // Last resort: a monogram from the plugin name, hue-tinted per id.
   const hue = hueOf(manifest.id);
   return (
     <span
