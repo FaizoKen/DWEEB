@@ -643,17 +643,33 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   async openOnWeb() {
     const token = encodeShare(useMessageStore.getState().message);
+    // Carry the server this draft is bound to (the launching guild, or the
+    // destination the user picked on a DM launch). The web app parks it as a
+    // pending guild and — once the visitor's Discord sign-in resolves there —
+    // auto-connects the editor straight to that server, so "Open on web" lands
+    // back on the same Discord server you were building for (its roles/channels/
+    // mentions resolve) instead of whatever server the browser last used. It's
+    // best-effort: a signed-out visitor just keeps the parked hint, and a
+    // non-member's connect fails quietly. Rides in the hash (`g=`), so it stays
+    // client-side and is readable before a short-link token is even fetched —
+    // see `readShareGuildFromHash` / `pendingGuild.ts` / the AccountMenu.
+    const guildId = get().targetGuildId ?? get().context?.guildId ?? null;
+    const guildHash = guildId ? `&g=${encodeURIComponent(guildId)}` : "";
     // Carry the draft in the share hash so the web app opens with it loaded —
     // and the contents stay client-side (the hash never reaches our server).
-    const hashUrl = `${WEB_APP_BASE_URL}/#s=${token}`;
+    const hashUrl = `${WEB_APP_BASE_URL}/#s=${token}${guildHash}`;
     let url = hashUrl;
     // A very large draft makes that hash URL too long for the host to open
     // reliably; fall back to an opt-in short link (uploads the snapshot, auto-
     // deletes server-side after 7 days) built against the *site* origin — the
-    // short-link client's own builder would use the sandbox origin instead.
+    // short-link client's own builder would use the sandbox origin instead. The
+    // server hint still rides in the hash (read client-side before the token is
+    // fetched), so the auto-connect works on this path too.
     if (hashUrl.length > WEB_HANDOFF_MAX_URL && isShortLinkConfigured()) {
       const short = await createShortLink(token);
-      if (short.ok) url = `${WEB_APP_BASE_URL}/s/${short.id}`;
+      if (short.ok) {
+        url = `${WEB_APP_BASE_URL}/s/${short.id}${guildId ? `#g=${encodeURIComponent(guildId)}` : ""}`;
+      }
     }
     try {
       // The sandboxed iframe can't navigate to the site itself — hand the link
