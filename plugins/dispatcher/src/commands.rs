@@ -310,7 +310,7 @@ fn message_info(app: &App, interaction: &Value) -> Response {
     let mut button = None;
     if let (Some(guild_id), Some(_)) = (guild_id, app.component_ttl_ms) {
         if let Ok(rows) = app.store.list(guild_id) {
-            lines.push(slots_line(rows.len(), app.permanent_slots));
+            lines.push(slots_line(rows.len(), app.permanent_cap_for(guild_id)));
         }
         let permissions: u128 = interaction
             .pointer("/member/permissions")
@@ -425,7 +425,7 @@ fn toggle_permanent(
         channel_id,
         message_id,
         added_by,
-        app.permanent_slots,
+        app.permanent_cap_for(guild_id),
     ) {
         // Newly permanent: revive anything the TTL gate disabled while the
         // message was expiring. The dispatcher can't edit the posted message
@@ -481,7 +481,7 @@ fn refresh_info_reply(
     let slots = app
         .store
         .list(guild_id)
-        .map(|rows| slots_line(rows.len(), app.permanent_slots))
+        .map(|rows| slots_line(rows.len(), app.permanent_cap_for(guild_id)))
         .ok();
     let patched: Vec<&str> = text
         .lines()
@@ -1102,7 +1102,11 @@ async fn create_short_link(app: &App, raw_token: &str) -> Option<String> {
 
 fn usage_suffix(app: &App, guild_id: &str) -> String {
     match app.store.list(guild_id) {
-        Ok(rows) => format!(" ({}/{} slots used.)", rows.len(), app.permanent_slots),
+        Ok(rows) => format!(
+            " ({}/{} slots used.)",
+            rows.len(),
+            app.permanent_cap_for(guild_id)
+        ),
         Err(_) => String::new(),
     }
 }

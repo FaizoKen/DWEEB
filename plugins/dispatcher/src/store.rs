@@ -135,7 +135,14 @@ impl Store {
                  added_at          INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_custom_apps_guild
-                 ON custom_apps (guild_id);",
+                 ON custom_apps (guild_id);
+             CREATE TABLE IF NOT EXISTS guild_caps (
+                 guild_id   TEXT NOT NULL,
+                 feature    TEXT NOT NULL,
+                 cap        INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL,
+                 PRIMARY KEY (guild_id, feature)
+             );",
         )?;
         // Migration for databases created before the client-secret column.
         // The duplicate-column error on an already-migrated file is expected.
@@ -280,6 +287,51 @@ impl Store {
             (message_id, guild_id),
         )?;
         Ok(n > 0)
+    }
+
+    // ── Per-guild plan caps ──────────────────────────────────────────────────
+    //
+    // The proxy owns entitlement (Stripe); it passes the guild's plan cap as
+    // `?cap=N` on every capped management call and reconcile. We remember it here
+    // so the ONE path that never reaches the proxy — the Message Info "never
+    // expire" toggle, a Discord interaction that lands straight on this service —
+    // can still honour the guild's plan instead of this deployment's env default.
+
+    /// Remember the plan cap the proxy last asserted for `guild_id` + `feature`
+    /// (`"permanent"` / `"custom_apps"`). Only rewrites when the value actually
+    /// changed, so a run of identical caps (every dashboard load re-sends one)
+    /// doesn't churn the WAL.
+    pub fn set_guild_cap(&self, guild_id: &str, feature: &str, cap: u32) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO guild_caps (guild_id, feature, cap, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(guild_id, feature) DO UPDATE
+                 SET cap = excluded.cap, updated_at = excluded.updated_at
+                 WHERE guild_caps.cap <> excluded.cap",
+            (guild_id, feature, cap, unix_millis()),
+        )?;
+        Ok(())
+    }
+
+    /// The plan cap last asserted by the proxy for `guild_id` + `feature`, or
+    /// `None` when none has been recorded — a standalone (plan-disabled) proxy,
+    /// or a guild the proxy hasn't reported on since it upgraded. The caller then
+    /// falls back to the env default. A read error is treated as "unknown" too,
+    /// so a storage hiccup can never grant more than the safe default.
+    pub fn guild_cap(&self, guild_id: &str, feature: &str) -> Option<u32> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT cap FROM guild_caps WHERE guild_id = ?1 AND feature = ?2",
+            (guild_id, feature),
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+        .unwrap_or_else(|err| {
+            tracing::error!(%err, "guild cap lookup failed");
+            None
+        })
+        .map(|c| c.max(0) as u32)
     }
 
     // ── Custom apps ─────────────────────────────────────────────────────────
@@ -738,6 +790,27 @@ mod tests {
         assert_eq!(revived, vec!["101".to_string(), "102".to_string()]);
         assert!(d.suspend.is_empty());
         assert_eq!(s.custom_apps_all().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn guild_cap_roundtrips_and_is_scoped_by_feature_and_guild() {
+        let s = store();
+        // Nothing recorded yet → unknown, so the caller uses its env default.
+        assert_eq!(s.guild_cap("g1", "permanent"), None);
+
+        // The proxy pushes a plan cap; we remember it per guild + feature.
+        s.set_guild_cap("g1", "permanent", 25).unwrap();
+        assert_eq!(s.guild_cap("g1", "permanent"), Some(25));
+        // A different feature and a different guild are independent.
+        assert_eq!(s.guild_cap("g1", "custom_apps"), None);
+        assert_eq!(s.guild_cap("g2", "permanent"), None);
+
+        // A later push (e.g. an upgrade) overwrites in place.
+        s.set_guild_cap("g1", "permanent", 1_000_000).unwrap();
+        assert_eq!(s.guild_cap("g1", "permanent"), Some(1_000_000));
+        // A downgrade lowers it again — the Discord-direct path then caps lower.
+        s.set_guild_cap("g1", "permanent", 5).unwrap();
+        assert_eq!(s.guild_cap("g1", "permanent"), Some(5));
     }
 
     #[test]

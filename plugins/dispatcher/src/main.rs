@@ -30,16 +30,21 @@
 //! component is disabled, so a message left behind by an uninstalled plugin
 //! stops generating traffic after its first click.
 //!
-//! Each guild gets PERMANENT_SLOTS_PER_GUILD exemptions, managed two ways:
-//! from the DWEEB dashboard — the proxy authenticates the user (Discord
-//! login plus Manage Server on the guild) and calls the token-gated
-//! /permanent API here, which owns the slots in SQLite — or from Discord,
-//! via the toggle button on the "Message Info" context-menu reply
-//! (commands.rs re-checks Manage Server against member.permissions).
-//! Granting a slot also asks the proxy (SERVER_URL, same shared token in
-//! reverse) to switch any TTL-disabled components back on, since the proxy
-//! holds the webhook token needed to edit the posted message and this service
-//! doesn't — see `App::trigger_reenable`.
+//! Each guild gets a cap of exemptions, managed two ways: from the DWEEB
+//! dashboard — the proxy authenticates the user (Discord login plus Manage
+//! Server on the guild) and calls the token-gated /permanent API here, which
+//! owns the slots in SQLite — or from Discord, via the toggle button on the
+//! "Message Info" context-menu reply (commands.rs re-checks Manage Server
+//! against member.permissions). The cap is the guild's plan tier: the proxy
+//! (which owns entitlement) passes it as `?cap=N` on every /permanent call, and
+//! we remember the last one per guild so the Discord toggle — which never
+//! reaches the proxy — honours the plan too, falling back to
+//! PERMANENT_SLOTS_PER_GUILD only when no plan cap is on record (a standalone
+//! deployment, or a guild not yet seen since it upgraded). See `capped` /
+//! `App::permanent_cap_for`. Granting a slot also asks the proxy (SERVER_URL,
+//! same shared token in reverse) to switch any TTL-disabled components back on,
+//! since the proxy holds the webhook token needed to edit the posted message and
+//! this service doesn't — see `App::trigger_reenable`.
 //!
 //! Custom apps: a guild may also register its OWN Discord application(s) —
 //! CUSTOM_APPS_PER_GUILD each, default 1 (per-guild plan caps can replace the
@@ -113,6 +118,10 @@ const FLAG_EPHEMERAL: u64 = 1 << 6; // 64
 const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15; // 32768
 /// First millisecond of 2015 — the epoch Discord snowflakes count from.
 const DISCORD_EPOCH_MS: u64 = 1_420_070_400_000;
+/// Feature keys under which the proxy-asserted per-guild plan cap is remembered
+/// (see [`capped`] / [`store::Store::guild_cap`]).
+const CAP_PERMANENT: &str = "permanent";
+const CAP_CUSTOM_APPS: &str = "custom_apps";
 /// Discord snowflakes are 17–20 digits today; accept a small range with slack.
 fn is_snowflake(s: &str) -> bool {
     (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
@@ -135,9 +144,10 @@ struct App {
     /// path touches SQLite at most once per app (the first time we see it),
     /// then never again. Empty at boot; the DB write is idempotent regardless.
     custom_verified: RwLock<HashSet<String>>,
-    /// Custom-app registrations each guild may hold. Today a deployment-wide
-    /// env; per-guild plan caps can replace this without changing the API
-    /// (every response already carries `cap`).
+    /// Default custom-app registrations a guild may hold — the `CUSTOM_APPS_PER_GUILD`
+    /// env. The proxy overrides it per request with the guild's plan cap (`?cap=N`,
+    /// remembered per guild by [`capped`]); this value is the floor a standalone
+    /// (plan-disabled) deployment, or a not-yet-seen guild, falls back to.
     custom_apps_cap: u32,
     /// Shared secret that vouches for the forwarded verifying-key header to
     /// plugins. `None` = header not sent (custom-app clicks then fail the
@@ -148,7 +158,11 @@ struct App {
     /// How long a component stays clickable after its message was sent.
     /// `None` = never expires (COMPONENT_TTL_DAYS=0).
     component_ttl_ms: Option<u64>,
-    /// TTL-exempt messages each guild may hold at once.
+    /// Default TTL-exempt messages a guild may hold at once — the
+    /// `PERMANENT_SLOTS_PER_GUILD` env. The proxy overrides it per request with
+    /// the guild's plan cap (`?cap=N`); the Discord-direct Message Info toggle,
+    /// which never reaches the proxy, reads the remembered plan cap and falls
+    /// back to this only when none is on record (see [`App::permanent_cap_for`]).
     permanent_slots: u32,
     /// Which messages are TTL-exempt + the custom-app registry.
     store: store::Store,
@@ -469,6 +483,19 @@ impl App {
         }
     }
 
+    /// The never-expire slot cap to enforce for a guild on the **Discord-direct**
+    /// path — the Message Info "never expire" toggle. That click lands straight on
+    /// this service, bypassing the proxy, so there's no `?cap=N` to read; instead
+    /// use the plan cap the proxy last pushed for this guild ([`capped`]), and
+    /// fall back to the deployment env default when none is on record (a
+    /// standalone deployment, or a guild not yet seen since it upgraded). Without
+    /// this, an upgraded server's toggle would silently cap at the free default.
+    fn permanent_cap_for(&self, guild_id: &str) -> u32 {
+        self.store
+            .guild_cap(guild_id, CAP_PERMANENT)
+            .unwrap_or(self.permanent_slots)
+    }
+
     /// Best-effort: ask the proxy to re-enable any components the TTL gate
     /// disabled on `message_id`, now that it holds a never-expire slot. The
     /// dispatcher can't edit the posted message itself — the grant click lands on
@@ -747,7 +774,13 @@ async fn permanent_list(
     if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
         return denied;
     }
-    let cap = cap_override(raw.as_deref(), app.permanent_slots);
+    let cap = capped(
+        &app,
+        &guild_id,
+        raw.as_deref(),
+        CAP_PERMANENT,
+        app.permanent_slots,
+    );
     match app.store.list(&guild_id) {
         Ok(rows) => slots_json(&app, &rows, cap).into_response(),
         Err(err) => internal_error(err),
@@ -777,7 +810,13 @@ async fn permanent_add(
         return bad_request("message_id and channel_id must be snowflakes");
     }
 
-    let cap = cap_override(raw.as_deref(), app.permanent_slots);
+    let cap = capped(
+        &app,
+        &guild_id,
+        raw.as_deref(),
+        CAP_PERMANENT,
+        app.permanent_slots,
+    );
     let added = app
         .store
         .add(&guild_id, channel_id, message_id, added_by, cap);
@@ -819,7 +858,13 @@ async fn permanent_remove(
         )
             .into_response();
     }
-    let cap = cap_override(raw.as_deref(), app.permanent_slots);
+    let cap = capped(
+        &app,
+        &guild_id,
+        raw.as_deref(),
+        CAP_PERMANENT,
+        app.permanent_slots,
+    );
     match app.store.list(&guild_id) {
         Ok(rows) => slots_json(&app, &rows, cap).into_response(),
         Err(err) => internal_error(err),
@@ -839,7 +884,13 @@ async fn permanent_reconcile(
     if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
         return denied;
     }
-    let cap = cap_override(raw.as_deref(), app.permanent_slots);
+    let cap = capped(
+        &app,
+        &guild_id,
+        raw.as_deref(),
+        CAP_PERMANENT,
+        app.permanent_slots,
+    );
     match app.store.reconcile_permanent(&guild_id, cap) {
         Ok((active, suspended)) => {
             if suspended > 0 {
@@ -868,7 +919,13 @@ async fn custom_apps_list(
     if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
         return denied;
     }
-    let cap = cap_override(raw.as_deref(), app.custom_apps_cap);
+    let cap = capped(
+        &app,
+        &guild_id,
+        raw.as_deref(),
+        CAP_CUSTOM_APPS,
+        app.custom_apps_cap,
+    );
     match app.store.custom_apps_list(&guild_id) {
         Ok(rows) => custom_apps_json(&rows, cap).into_response(),
         Err(err) => internal_error(err),
@@ -924,7 +981,13 @@ async fn custom_apps_add(
         .take(100)
         .collect();
 
-    let cap = cap_override(raw.as_deref(), app.custom_apps_cap);
+    let cap = capped(
+        &app,
+        &guild_id,
+        raw.as_deref(),
+        CAP_CUSTOM_APPS,
+        app.custom_apps_cap,
+    );
     let added = app.store.custom_app_add(
         &guild_id,
         application_id,
@@ -989,7 +1052,13 @@ async fn custom_apps_remove(
     // Forget the in-memory "already persisted" guard too, so a later
     // re-registration of the same id starts unverified and re-checks.
     app.custom_verified.write().unwrap().remove(&application_id);
-    let cap = cap_override(raw.as_deref(), app.custom_apps_cap);
+    let cap = capped(
+        &app,
+        &guild_id,
+        raw.as_deref(),
+        CAP_CUSTOM_APPS,
+        app.custom_apps_cap,
+    );
     match app.store.custom_apps_list(&guild_id) {
         Ok(rows) => custom_apps_json(&rows, cap).into_response(),
         Err(err) => internal_error(err),
@@ -1009,7 +1078,13 @@ async fn custom_apps_reconcile(
     if let Some(denied) = deny_internal(&app, &headers, &[&guild_id]) {
         return denied;
     }
-    let cap = cap_override(raw.as_deref(), app.custom_apps_cap);
+    let cap = capped(
+        &app,
+        &guild_id,
+        raw.as_deref(),
+        CAP_CUSTOM_APPS,
+        app.custom_apps_cap,
+    );
     let delta = match app.store.reconcile_custom_apps(&guild_id, cap) {
         Ok(d) => d,
         Err(err) => return internal_error(err),
@@ -1227,20 +1302,42 @@ fn deny_internal(app: &App, headers: &HeaderMap, ids: &[&str]) -> Option<Respons
     None
 }
 
-/// The effective per-guild cap for a management request: the `?cap=N` the proxy
-/// passes (the caller's plan tier) when present, else this deployment's env
-/// default. Keeping the plan lookup in the proxy lets this service stay a dumb
-/// enforcer of a provided number — no plan awareness here.
-fn cap_override(raw: Option<&str>, default: u32) -> u32 {
-    let Some(q) = raw else { return default };
+/// The `?cap=N` the proxy passes (the caller's plan tier), if present. `None`
+/// when the query carries no parseable `cap` — a standalone / plan-disabled
+/// call, where the caller falls back to the deployment env default.
+fn explicit_cap(raw: Option<&str>) -> Option<u32> {
+    let q = raw?;
     for pair in q.split('&') {
         if let Some(v) = pair.strip_prefix("cap=") {
             if let Ok(n) = v.parse::<u32>() {
-                return n;
+                return Some(n);
             }
         }
     }
-    default
+    None
+}
+
+/// The effective per-guild cap for a management request — the `?cap=N` the proxy
+/// passes (the caller's plan tier) when present, else this deployment's env
+/// `default` — while also **remembering** a proxy-asserted cap for this guild +
+/// `feature`. Keeping the plan lookup in the proxy lets this service stay a dumb
+/// enforcer of a provided number; recording it lets the Discord-direct
+/// never-expire toggle — which never passes through the proxy, so carries no
+/// `?cap=` — still honour the guild's plan (see [`App::permanent_cap_for`]). The
+/// proxy only sends `?cap=N` when plan entitlement is on, so a standalone
+/// deployment records nothing and the env `default` keeps ruling everywhere.
+/// Persisting is best-effort: a write failure just leaves that path on the last
+/// known (or default) cap.
+fn capped(app: &App, guild_id: &str, raw: Option<&str>, feature: &str, default: u32) -> u32 {
+    match explicit_cap(raw) {
+        Some(cap) => {
+            if let Err(err) = app.store.set_guild_cap(guild_id, feature, cap) {
+                tracing::warn!(guild = %guild_id, feature, %err, "couldn't persist plan cap");
+            }
+            cap
+        }
+        None => default,
+    }
 }
 
 /// The slot state every management response carries. `ttl_days` is null when
