@@ -688,7 +688,7 @@ async fn activity_connect_callback(st: &AppState, state: &str, code: &str) -> Re
             activity_connect_page(
                 true,
                 "Bot connected",
-                "It's already selected back in Discord — you can close this tab.",
+                "It's already selected back in Discord.",
             )
         }
         Err(err) => {
@@ -714,22 +714,33 @@ async fn activity_connect_callback(st: &AppState, state: &str, code: &str) -> Re
 /// strings — nothing user-controlled is echoed.
 ///
 /// On success the Activity has already updated itself over the room socket, so
-/// this tab is pure confirmation — it best-effort **auto-closes** so there's
-/// nothing to read or dismiss. `window.close()` only works on a script-opened
-/// window, which this usually isn't, so it's a nicety, not a guarantee: the
-/// "you can close this tab" copy is what actually carries. An error page never
-/// auto-closes — the user needs to read what went wrong.
+/// this tab is pure confirmation — it runs a short, **visible** countdown and
+/// then best-effort closes. The countdown keeps the user informed rather than
+/// having the tab vanish (or silently fail to). `window.close()` only works on
+/// a script-opened window, which this usually isn't; when it can't, the
+/// countdown line falls back to "You can close this tab now" so there's always
+/// a clear next step. An error page shows no countdown — the user needs to read
+/// what went wrong and act on it.
 fn activity_connect_page(ok: bool, title: &str, detail: &str) -> Response {
     let (icon, accent) = if ok {
         ("✓", "#3ba55d")
     } else {
         ("✕", "#ed4245")
     };
-    // Give the eye a moment to register "connected", then try to close.
-    let auto_close = if ok {
-        "<script>setTimeout(function(){try{window.close()}catch(e){}},900)</script>"
+    // Success only: a live countdown line + the script that drives it. Starts at
+    // 3s (server-rendered so it reads correctly even before the script runs),
+    // ticks down, then attempts to close. If the tab is still here a beat later
+    // (close was blocked), it says so instead of leaving the user guessing.
+    let (countdown, auto_close) = if ok {
+        (
+            "<p class=\"cd\" id=\"cd\">This tab closes in 3…</p>",
+            "<script>(function(){var n=3,el=document.getElementById('cd');\
+var t=setInterval(function(){n--;if(el)el.textContent=n>0?('This tab closes in '+n+'…'):'Closing…';\
+if(n>0)return;clearInterval(t);try{window.close()}catch(e){}\
+setTimeout(function(){if(el)el.textContent='You can close this tab now.'},500)},1000)})()</script>",
+        )
     } else {
-        ""
+        ("", "")
     };
     let html = format!(
         r#"<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -744,11 +755,13 @@ fn activity_connect_page(ok: bool, title: &str, detail: &str) -> Response {
         background:{accent};color:#fff;font-size:1.6rem;font-weight:700;margin-bottom:1rem}}
   h1{{font-size:1.15rem;margin:0 0 .5rem;color:#f2f3f5}}
   p{{margin:0;color:#b5bac1}}
+  .cd{{margin-top:1rem;font-size:.85rem;color:#80848e}}
   .brand{{margin-top:2rem;font-size:.8rem;letter-spacing:.08em;color:#80848e}}
 </style></head><body><main>
 <span class="icon" aria-hidden="true">{icon}</span>
 <h1>{title}</h1>
 <p>{detail}</p>
+{countdown}
 <div class="brand">DWEEB</div>
 </main>{auto_close}</body></html>"#
     );
