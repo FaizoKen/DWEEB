@@ -10,16 +10,23 @@
  * a hue derived from their id, so every row stays visually distinct without any
  * per-plugin code.
  *
- * The icon URL is a remote image, and it doesn't always load: inside the Discord
- * Activity the sandboxed iframe only proxies our own host, so a link plugin's
- * icon on another host (e.g. `rolelogic.faizo.net`) is blocked by CSP — and any
- * host can be down or slow. Rather than leave a broken-image glyph, a failed
- * load falls through to the same offline chain (built-in SVG → default emoji →
- * monogram), all of which paint with no network. That makes the Activity show a
- * clean, on-brand mark instead of a torn-image icon.
+ * The icon URL is a remote image. Inside a production Discord Activity the
+ * sandboxed `…discordsays.com` iframe's CSP blocks arbitrary `<img>` hosts, and
+ * element loads (unlike `fetch`/XHR) aren't caught by the SDK's
+ * `patchUrlMappings` — so a link plugin's icon on another host (e.g.
+ * `rolelogic.faizo.net`) would be blocked and paint a torn-image glyph. We route
+ * it through the proxy's image endpoint via {@link proxiedMediaUrl}, exactly as
+ * every preview renderer does, so the real branded icon loads inside the Activity
+ * (and is a no-op on the web app, where it already loads directly).
+ *
+ * The `onError` fallback stays as a safety net for a host that's genuinely down
+ * or slow: a failed load falls through to the offline chain (built-in SVG →
+ * default emoji → monogram), all of which paint with no network, so the picker
+ * shows a clean, on-brand mark instead of a torn-image icon.
  */
 
 import { useEffect, useState, type ReactNode } from "react";
+import { proxiedMediaUrl } from "@/core/activity/runtime";
 import styles from "./PluginIcon.module.css";
 
 /**
@@ -123,7 +130,10 @@ export function PluginIcon({
   manifest: PluginIconSource;
   summaryIcon?: string;
 }) {
-  const src = summaryIcon ?? manifest.icon;
+  // Route the remote icon through the Activity image proxy so it loads inside the
+  // sandboxed iframe (see the module doc); a no-op on the web app and in dev.
+  const rawSrc = summaryIcon ?? manifest.icon;
+  const src = rawSrc ? proxiedMediaUrl(rawSrc) : undefined;
   // Whether the remote image failed to load — then we render the offline chain
   // instead of a broken-image glyph. Reset when `src` changes so switching the
   // chip's plugin re-attempts the new URL rather than staying failed.
