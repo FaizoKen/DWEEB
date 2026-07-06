@@ -129,18 +129,25 @@ export async function fetchActivityIdentities(
 /** `POST /api/activity/connect-bot` — mint the authorize URL for the one-time
  *  "connect your bot" flow. The caller opens it externally (the sandboxed
  *  iframe can't navigate to discord.com); once the user approves, the proxy
- *  captures the webhook server-side and the bot turns `ready` in
- *  {@link fetchActivityIdentities}. */
+ *  captures the webhook server-side and pushes a `bot_connected` frame into
+ *  this `instanceId`'s collab room, so the dialog selects the bot the instant
+ *  OAuth completes (it also flips `ready` in {@link fetchActivityIdentities}
+ *  as a fallback). */
 export async function startConnectCustomBot(
   guildId: string,
   applicationId: string,
+  instanceId: string,
 ): Promise<string> {
   let res: Response;
   try {
     res = await proxyFetch("/api/activity/connect-bot", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ guild_id: guildId, application_id: applicationId }),
+      body: JSON.stringify({
+        guild_id: guildId,
+        application_id: applicationId,
+        instance_id: instanceId,
+      }),
     });
   } catch {
     throw new Error("Couldn't reach DWEEB. Check your connection and try again.");

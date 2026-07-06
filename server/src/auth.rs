@@ -233,18 +233,28 @@ struct ActivityConnectState {
     s: String,
     /// Unix seconds after which this state is dead.
     x: i64,
+    /// The Activity instance the connect was started from, so the callback can
+    /// push a `bot_connected` frame straight into that live collaboration room
+    /// (see `activity::ActivityRooms::notify`) — the Activity learns it's ready
+    /// the instant OAuth completes, without polling or a focus event the
+    /// sandboxed iframe may never see. Empty when unknown (then no push; the
+    /// dialog's fallback re-check still catches it).
+    #[serde(default)]
+    i: String,
 }
 
 /// Build the authorize URL for the embedded Activity's "connect your bot"
 /// flow: Discord's `webhook.incoming` consent under the guild's custom app,
 /// with the flow context sealed into `state` (the external browser that
-/// completes it carries none of our cookies). The caller (see
-/// `activity::activity_connect_bot`) has already gated the user on Manage
-/// Webhooks in `guild`.
+/// completes it carries none of our cookies). `instance` is the Activity
+/// instance the connect began in, threaded through so the callback can notify
+/// its live room. The caller (see `activity::activity_connect_bot`) has
+/// already gated the user on Manage Webhooks in `guild`.
 pub(crate) async fn activity_connect_authorize_url(
     st: &AppState,
     guild: &str,
     application_id: &str,
+    instance: &str,
 ) -> Result<String, AppError> {
     let client_secret = open_custom_app_secret(st, guild, application_id).await?;
     let payload = serde_json::to_string(&ActivityConnectState {
@@ -252,6 +262,7 @@ pub(crate) async fn activity_connect_authorize_url(
         a: application_id.to_string(),
         s: client_secret,
         x: now() + ACTIVITY_STATE_TTL_SECS,
+        i: instance.to_string(),
     })
     .map_err(|e| AppError::Internal(format!("serialize connect state: {e}")))?;
     let sealed = crate::seal::seal_state(&st.key, &payload)
@@ -653,14 +664,33 @@ async fn activity_connect_callback(st: &AppState, state: &str, code: &str) -> Re
             "The webhook credential couldn't be secured, so nothing was stored. Please try again.",
         );
     };
-    match crate::activity::store_activity_hook(st, &ctx.g, &ctx.a, &hook_id, &channel_id, &token_enc)
-        .await
+    match crate::activity::store_activity_hook(
+        st,
+        &ctx.g,
+        &ctx.a,
+        &hook_id,
+        &channel_id,
+        &token_enc,
+    )
+    .await
     {
-        Ok(()) => activity_connect_page(
-            true,
-            "Your bot is connected",
-            "You can close this tab and return to Discord — pick your bot under “Post as” and post away. Posts will appear under your bot in any channel you choose.",
-        ),
+        Ok(()) => {
+            // Tell the live Activity room the bot is ready, so its "Post as"
+            // dialog selects it the instant this returns — no polling, no focus
+            // event needed. Best-effort: the room may have closed, or the flow
+            // began outside one (`i` empty); the dialog's own re-check covers it.
+            if !ctx.i.is_empty() {
+                st.activity_rooms.notify(
+                    &ctx.i,
+                    json!({ "type": "bot_connected", "application_id": ctx.a }).to_string(),
+                );
+            }
+            activity_connect_page(
+                true,
+                "Your bot is connected",
+                "You can close this tab and return to Discord — it's already selected under “Post as”. Posts will appear under your bot in any channel you choose.",
+            )
+        }
         Err(err) => {
             tracing::warn!("activity connect store failed: {err}");
             // Nothing will ever use the webhook we just minted — best-effort

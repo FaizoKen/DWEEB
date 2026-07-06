@@ -59,6 +59,11 @@ interface StartOptions {
    *  server refused the socket. `cap` is that limit. Editing continues solo, and
    *  we stop retrying (a reconnect would just be refused again). */
   onRoomFull?: (cap: number) => void;
+  /** A custom bot's one-time connect flow just completed (server-authored push
+   *  from the connect callback), so it's now ready to post as. Carries the
+   *  application id. Delivered over the live socket, so it lands even while the
+   *  Activity is backgrounded during the external-browser OAuth. */
+  onBotConnected?: (applicationId: string) => void;
 }
 
 const SEND_DEBOUNCE_MS = 180;
@@ -256,6 +261,14 @@ function handleFrame(frame: Record<string, unknown>): void {
     stopped = true;
     opts?.onConnectedChange?.(false);
     opts?.onRoomFull?.(typeof frame.cap === "number" ? frame.cap : 0);
+    return;
+  }
+  if (type === "bot_connected") {
+    // Server-authored: a custom bot's connect flow finished, so it's ready to
+    // post as. No `cid` (it's not a peer relay), so it's handled before the
+    // echo guard below.
+    const appId = typeof frame.application_id === "string" ? frame.application_id : "";
+    if (appId) opts?.onBotConnected?.(appId);
     return;
   }
   // Ignore the echo of our own frames.

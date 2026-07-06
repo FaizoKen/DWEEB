@@ -114,17 +114,25 @@ custom-bot webhook the way it does its own — on the web that token lives in th
 creating browser's history, which a sandboxed iframe doesn't have. Instead:
 
 - **Connect once** — tapping *Connect \<bot\>* in the Post as row asks the proxy
-  for an authorize URL (`POST /api/activity/connect-bot`) and opens it in the
-  user's external browser via `openExternalLink`. That browser carries none of
-  our cookies, so the flow's context (custom app credentials, destination guild,
-  10-minute expiry) travels **sealed inside the OAuth `state` itself** (AES-GCM
-  under the proxy key, its own AAD domain). Discord shows its `webhook.incoming`
+  for an authorize URL (`POST /api/activity/connect-bot`, carrying the Activity
+  `instance_id`) and opens it in the user's external browser via
+  `openExternalLink`. That browser carries none of our cookies, so the flow's
+  context (custom app credentials, destination guild, 10-minute expiry, and that
+  instance id) travels **sealed inside the OAuth `state` itself** (AES-GCM under
+  the proxy key, its own AAD domain). Discord shows its `webhook.incoming`
   consent under the *custom* app; the callback opens the state, refuses a webhook
   created outside the pinned guild (best-effort deleting the stray), seals the
   webhook token, and stores it on the app's row in the dispatcher registry —
-  right next to the sealed client secret. The browser tab gets a small
-  "connected — return to Discord" page; the dialog polls the identity list and
-  auto-selects the bot when it turns ready.
+  right next to the sealed client secret.
+- **The Activity finds out instantly** — the callback then pushes a
+  `{ type: "bot_connected", application_id }` frame straight into that instance's
+  live collaboration room (`ActivityRooms::notify`). WebSocket messages are
+  delivered even to a backgrounded iframe, so the dialog selects the bot the
+  moment OAuth completes — no polling, and no dependence on a focus/visibility
+  event the sandboxed iframe often never sees when you switch back from a
+  separate browser window (the friction that used to force a close-and-reopen of
+  the dialog). A focus/visibility re-fetch remains only as a fallback for a push
+  missed during a socket reconnect; reopening the dialog also re-reads fresh.
 - **Post anywhere** — one webhook serves the whole server. Before each use the
   proxy reads the webhook's live channel (`GET /webhooks/{id}/{token}`) and, when
   the destination differs, **moves it there** with the bot's Manage Webhooks

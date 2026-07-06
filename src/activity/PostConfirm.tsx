@@ -22,6 +22,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useActivityStore } from "@/core/activity/activityStore";
 import { useRoleInfo } from "@/core/guild/guildStore";
 import { summarizePings, type PingSummary } from "@/core/schema/mentions";
 import { inspectCapabilities } from "@/core/schema/capability";
@@ -40,13 +41,6 @@ import { pushToast } from "@/ui/Toast";
 import { SendIcon, RefreshIcon } from "@/ui/Icon";
 import { ServerGlyph } from "./GuildPicker";
 import styles from "./PostConfirm.module.css";
-
-/** How the connect-flow poll paces itself while the user finishes Discord's
- *  consent in their external browser: check every few seconds, bounded so an
- *  abandoned flow doesn't poll the proxy forever (focus/visibility re-checks
- *  keep working past the cap, and re-tapping Connect re-arms). */
-const CONNECT_POLL_INTERVAL_MS = 4_000;
-const CONNECT_POLL_MAX_TICKS = 45; // ~3 minutes
 
 export interface PostConfirmProps {
   open: boolean;
@@ -288,15 +282,19 @@ export function PostConfirm({
   const [identities, setIdentities] = useState<ActivityIdentity[] | null>(null);
   const [postAs, setPostAs] = useState<string | null>(null);
   const identityTouched = useRef(false);
-  // The bot whose connect flow is running in the user's external browser —
-  // drives the "waiting" pill state and the readiness poll below.
+  // The bot whose connect flow is out in the user's external browser — drives
+  // the "waiting" pill until the server says it's ready.
   const [connecting, setConnecting] = useState<string | null>(null);
+  // De-dupe: the bot we've already adopted this open, so the live push and the
+  // focus fallback can't both select + toast for the same connect.
+  const adoptedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!offersIdentity || !guildId) return;
     setIdentities(null);
     setPostAs(null);
     setConnecting(null);
     identityTouched.current = false;
+    adoptedRef.current = null;
     const ac = new AbortController();
     fetchActivityIdentities(guildId, ac.signal)
       .then((ids) => {
@@ -312,10 +310,42 @@ export function PostConfirm({
     return () => ac.abort();
   }, [offersIdentity, guildId]);
 
-  // While a connect flow is out in the external browser, watch for the bot
-  // turning ready: re-check on focus/visibility (the user returning) plus a
-  // bounded poll for clients that don't fire those events. Finding it ready
-  // auto-selects the bot — the whole point of the trip.
+  // The instant path: the connect callback pushes a `bot_connected` frame down
+  // the live collab socket (see activityStore), which lands even while the
+  // Activity is backgrounded during the external-browser OAuth. Consume it —
+  // mark the bot selectable for everyone in the room, and, for whoever kicked
+  // off *this* connect, select it and confirm. No polling, no focus event, no
+  // reopening the dialog.
+  const connectedBot = useActivityStore((s) => s.connectedBot);
+  const clearConnectedBot = useActivityStore((s) => s.clearConnectedBot);
+  useEffect(() => {
+    const appId = connectedBot;
+    if (!appId) return;
+    clearConnectedBot();
+    // Flip the bot to ready in our list so its pill becomes selectable.
+    setIdentities((prev) =>
+      prev
+        ? prev.map((i) =>
+            i.kind === "custom" && i.application_id === appId ? { ...i, ready: true } : i,
+          )
+        : prev,
+    );
+    // Only the initiator (whose pill is mid-connect for this app) auto-selects.
+    if (connecting === appId && adoptedRef.current !== appId) {
+      adoptedRef.current = appId;
+      setConnecting(null);
+      setPostAs(appId);
+      identityTouched.current = true;
+      const bot = identities?.find((i) => i.kind === "custom" && i.application_id === appId);
+      const name = bot?.kind === "custom" ? bot.name : "";
+      pushToast(`${name || "Your bot"} is connected — posting as it now ✓`, "success");
+    }
+  }, [connectedBot, connecting, identities, clearConnectedBot]);
+
+  // Fallback for the rare missed push (socket reconnecting at that instant):
+  // while a connect is out, re-check on the user returning to the Activity.
+  // Cheap and event-driven — no interval, since the push covers the timing and
+  // a backgrounded iframe's timers are unreliable anyway.
   useEffect(() => {
     if (!connecting || !guildId) return;
     let cancelled = false;
@@ -325,14 +355,15 @@ export function PostConfirm({
         if (cancelled) return;
         setIdentities(ids);
         const bot = ids.find((i) => i.kind === "custom" && i.application_id === connecting);
-        if (bot?.kind === "custom" && bot.ready) {
+        if (bot?.kind === "custom" && bot.ready && adoptedRef.current !== connecting) {
+          adoptedRef.current = connecting;
           setConnecting(null);
           setPostAs(bot.application_id);
           identityTouched.current = true;
           pushToast(`${bot.name || "Your bot"} is connected — posting as it now ✓`, "success");
         }
       } catch {
-        /* transient — keep waiting */
+        /* transient — the push is the primary path */
       }
     };
     const onFocus = () => void check();
@@ -341,29 +372,22 @@ export function PostConfirm({
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", onFocus);
-    let ticks = 0;
-    const poll = window.setInterval(() => {
-      if (++ticks > CONNECT_POLL_MAX_TICKS) {
-        window.clearInterval(poll);
-        return;
-      }
-      void check();
-    }, CONNECT_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onFocus);
-      window.clearInterval(poll);
     };
   }, [connecting, guildId]);
 
   // Start the one-time connect flow for a registered-but-unconnected bot: the
   // proxy mints the authorize URL and the host opens it externally (the
-  // sandboxed iframe can't navigate to discord.com itself).
+  // sandboxed iframe can't navigate to discord.com itself). The instance id
+  // lets the callback push completion back over the room socket.
+  const instanceId = useActivityStore((s) => s.context?.instanceId ?? "");
   const connectBot = async (applicationId: string) => {
     if (!guildId) return;
     try {
-      const url = await startConnectCustomBot(guildId, applicationId);
+      const url = await startConnectCustomBot(guildId, applicationId, instanceId);
       try {
         await openExternalLink(url);
       } catch {

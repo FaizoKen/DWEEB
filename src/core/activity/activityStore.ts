@@ -134,6 +134,12 @@ interface ActivityState {
    *  lists servers that already have the bot) and while presence is still unknown
    *  (we stay optimistic then — the proxy is the real guard). */
   botMissing: boolean;
+  /** An application id the server just confirmed connected as a custom bot (a
+   *  live push from the connect callback over the collab socket). The post
+   *  dialog consumes it — selecting the bot the instant OAuth completes, without
+   *  polling or a focus event — then clears it via {@link clearConnectedBot}.
+   *  Null when there's nothing pending. */
+  connectedBot: string | null;
   /** Whether the signed-in user holds Manage Webhooks in {@link targetGuildId} —
    *  the gate `activity_post` enforces server-side. `null` while it's still being
    *  determined (a server launch's guild meta hasn't loaded yet, or it couldn't be
@@ -206,6 +212,8 @@ interface ActivityState {
    *  it in (no loading flash) — used after {@link addServer} so a just-added
    *  server slots into the already-open picker. Failures keep the current list. */
   refreshPostableGuilds(): Promise<void>;
+  /** Clear {@link connectedBot} once the post dialog has consumed the push. */
+  clearConnectedBot(): void;
   /** Re-point `publish()` at a different channel in the target guild. */
   setTargetChannel(channelId: string): void;
   /** Pick the destination server (DM launch): loads its channels + preview data
@@ -256,6 +264,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   targetGuildMetaLoading: false,
   botMissing: false,
   canPostToTarget: null,
+  connectedBot: null,
 
   async init() {
     if (initialised) return;
@@ -421,6 +430,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
               : "This collaboration room is full. You can keep editing on your own.",
             "info",
           ),
+        // A custom bot's connect flow finished — surface it so the post dialog
+        // selects it right away (see PostConfirm's consume effect).
+        onBotConnected: (applicationId) => set({ connectedBot: applicationId }),
       });
     } catch (e) {
       stopCollab();
@@ -745,6 +757,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     } catch {
       /* transient — keep whatever's already listed */
     }
+  },
+
+  clearConnectedBot() {
+    if (get().connectedBot !== null) set({ connectedBot: null });
   },
 
   setTargetChannel(channelId) {

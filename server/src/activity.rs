@@ -1041,6 +1041,12 @@ pub struct ConnectBotBody {
     guild_id: String,
     #[serde(default)]
     application_id: String,
+    /// The Activity instance to notify when the connect completes, so the room
+    /// hears about it over the live socket (see `ActivityRooms::notify`).
+    /// Optional — an empty/absent id just skips the push and leans on the
+    /// dialog's own re-check.
+    #[serde(default)]
+    instance_id: String,
 }
 
 /// `POST /api/activity/connect-bot` `{ guild_id, application_id }` — mint the
@@ -1068,8 +1074,17 @@ pub async fn activity_connect_bot(
             "guild_id and application_id must be Discord ids",
         ));
     }
+    // The instance id only steers the completion push, so a malformed one is
+    // simply dropped (no push) rather than failing the connect.
+    let instance = body.instance_id.trim();
+    let instance = if valid_instance(instance) {
+        instance
+    } else {
+        ""
+    };
     authorize_activity_webhooks(&st, session, &guild).await?;
-    let url = crate::auth::activity_connect_authorize_url(&st, &guild, &application_id).await?;
+    let url =
+        crate::auth::activity_connect_authorize_url(&st, &guild, &application_id, instance).await?;
     Ok(Json(json!({ "url": url })).into_response())
 }
 
@@ -1928,6 +1943,20 @@ impl ActivityRooms {
         drop(map);
         let _ = tx.send(roster);
         Joined::Ok { tx, rx, is_first }
+    }
+
+    /// Push a server-authored frame into `instance`'s room, reaching every
+    /// connected participant's socket. Best-effort: a no-op when the room isn't
+    /// live (nobody connected) or the lock is poisoned. Unlike a peer relay this
+    /// carries no `cid`, so clients treat it as authoritative. Used by the
+    /// custom-bot connect callback to announce a freshly connected bot.
+    pub(crate) fn notify(&self, instance: &str, msg: String) {
+        let Ok(map) = self.inner.lock() else {
+            return;
+        };
+        if let Some(room) = map.get(instance) {
+            let _ = room.tx.send(msg);
+        }
     }
 
     /// Drop one of `uid`'s connections from `instance`; remove the participant
