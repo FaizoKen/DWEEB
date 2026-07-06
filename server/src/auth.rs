@@ -687,8 +687,8 @@ async fn activity_connect_callback(st: &AppState, state: &str, code: &str) -> Re
             }
             activity_connect_page(
                 true,
-                "Your bot is connected",
-                "You can close this tab and return to Discord — it's already selected under “Post as”. Posts will appear under your bot in any channel you choose.",
+                "Bot connected",
+                "It's already selected back in Discord — you can close this tab.",
             )
         }
         Err(err) => {
@@ -712,11 +712,24 @@ async fn activity_connect_callback(st: &AppState, state: &str, code: &str) -> Re
 /// (inline styles, no external assets) because it renders in whatever browser
 /// Discord handed the flow to. `title`/`detail` are always our own static
 /// strings — nothing user-controlled is echoed.
+///
+/// On success the Activity has already updated itself over the room socket, so
+/// this tab is pure confirmation — it best-effort **auto-closes** so there's
+/// nothing to read or dismiss. `window.close()` only works on a script-opened
+/// window, which this usually isn't, so it's a nicety, not a guarantee: the
+/// "you can close this tab" copy is what actually carries. An error page never
+/// auto-closes — the user needs to read what went wrong.
 fn activity_connect_page(ok: bool, title: &str, detail: &str) -> Response {
     let (icon, accent) = if ok {
         ("✓", "#3ba55d")
     } else {
         ("✕", "#ed4245")
+    };
+    // Give the eye a moment to register "connected", then try to close.
+    let auto_close = if ok {
+        "<script>setTimeout(function(){try{window.close()}catch(e){}},900)</script>"
+    } else {
+        ""
     };
     let html = format!(
         r#"<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -737,7 +750,7 @@ fn activity_connect_page(ok: bool, title: &str, detail: &str) -> Response {
 <h1>{title}</h1>
 <p>{detail}</p>
 <div class="brand">DWEEB</div>
-</main></body></html>"#
+</main>{auto_close}</body></html>"#
     );
     (
         [

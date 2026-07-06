@@ -133,6 +133,13 @@ creating browser's history, which a sandboxed iframe doesn't have. Instead:
   separate browser window (the friction that used to force a close-and-reopen of
   the dialog). A focus/visibility re-fetch remains only as a fallback for a push
   missed during a socket reconnect; reopening the dialog also re-reads fresh.
+  Because the Activity has already updated itself, the browser tab is pure
+  confirmation: its success page best-effort auto-closes (`window.close()`, a
+  nicety since it usually isn't a script-opened window) and just says "you can
+  close this tab" — nothing to return to. Only the OAuth *authorize* step still
+  needs the external browser, and can't be avoided: the sandboxed iframe can't
+  run an OAuth flow, and it must authorize the *custom* app (not DWEEB), which
+  the Embedded SDK's `authorize` can't do.
 - **Post anywhere** — one webhook serves the whole server. Before each use the
   proxy reads the webhook's live channel (`GET /webhooks/{id}/{token}`) and, when
   the destination differs, **moves it there** with the bot's Manage Webhooks
