@@ -16,6 +16,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { guildIconUrl, type PickerGuild } from "@/core/guild/api";
+import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import { CheckCircleIcon, ChevronDownIcon, CompassIcon, PlusIcon, SearchIcon } from "@/ui/Icon";
 import channelStyles from "./ChannelPicker.module.css";
 import styles from "./GuildPicker.module.css";
@@ -59,6 +60,13 @@ export function GuildPicker({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  // Centre the already-picked server in the list each time the panel opens, so
+  // it's visible rather than buried below the fold. The panel mounts a render
+  // after `open` (its position is measured in an effect), which the hook waits
+  // out; re-arming on `open` makes it fire again on every reopen.
+  const listRef = useRef<HTMLUListElement>(null);
+  const activeRowRef = useRef<HTMLLIElement>(null);
+  useScrollActiveIntoView(listRef, activeRowRef, [open]);
 
   const selected = selectedId ? guilds.find((g) => g.id === selectedId) : undefined;
   const label = selected?.name ?? "Pick a server";
@@ -174,11 +182,11 @@ export function GuildPicker({
               ) : filtered.length === 0 ? (
                 <p className={channelStyles.note}>No servers match that search.</p>
               ) : (
-                <ul className={`${channelStyles.list} ${styles.guildList}`}>
+                <ul className={`${channelStyles.list} ${styles.guildList}`} ref={listRef}>
                   {filtered.map((g) => {
                     const active = g.id === selectedId;
                     return (
-                      <li key={g.id}>
+                      <li key={g.id} ref={active ? activeRowRef : undefined}>
                         <button
                           type="button"
                           role="option"

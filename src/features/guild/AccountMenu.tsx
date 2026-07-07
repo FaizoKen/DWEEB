@@ -12,7 +12,7 @@
  * when a proxy base URL is configured; the caller guards on that.
  */
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { usePlanStore } from "@/core/plan/planStore";
@@ -40,6 +40,7 @@ import {
   UserIcon,
 } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
+import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import { ManagedMessagesDialog } from "./ManagedMessagesDialog";
 import { CustomBotDialog } from "./CustomBotDialog";
 import styles from "./AccountMenu.module.css";
@@ -380,6 +381,14 @@ function AccountPanel({
     .sort((a, b) => a.name.localeCompare(b.name));
   const invite = botInviteUrl();
 
+  // Bring the connected server's row into view when the menu opens, so which one
+  // is active is obvious even when it sorts below the fold in a long list. Once
+  // only (empty deps): the panel remounts on each open, and the always-running
+  // check waits out the render(s) until the list and active row have mounted.
+  const listRef = useRef<HTMLUListElement>(null);
+  const activeRowRef = useRef<HTMLLIElement>(null);
+  useScrollActiveIntoView(listRef, activeRowRef, []);
+
   // Switching servers keeps the menu open — the row's meta (roles · channels ·
   // emoji) fills in as the data loads, and the "Managed messages" sub-row
   // moves under the new selection, so the click has visible feedback in place.
@@ -425,10 +434,15 @@ function AccountPanel({
           No servers with the DWEEB bot yet. Add it to a server you manage to load its data.
         </p>
       ) : (
-        <ul className={styles.serverList}>
+        <ul className={styles.serverList} ref={listRef}>
           {botGuilds.map((g) => (
             <Fragment key={g.id}>
-              <ServerRow guild={g} active={g.id === connectedId} onPick={() => onPick(g.id)} />
+              <ServerRow
+                guild={g}
+                active={g.id === connectedId}
+                rowRef={g.id === connectedId ? activeRowRef : undefined}
+                onPick={() => onPick(g.id)}
+              />
               {/* Connected to the active server's row by a tree line so it's
                   obvious these actions apply to that guild — per-guild slots/bots. */}
               {g.id === connectedId ? (
@@ -501,10 +515,13 @@ function AccountPanel({
 function ServerRow({
   guild,
   active,
+  rowRef,
   onPick,
 }: {
   guild: PickerGuild;
   active: boolean;
+  /** Attached to the active row so the list can scroll it into view on open. */
+  rowRef?: RefObject<HTMLLIElement>;
   onPick: () => void;
 }) {
   const status = useGuildStore((s) => s.status);
@@ -513,7 +530,7 @@ function ServerRow({
   const loaded = active && data?.guildId === guild.id ? data : null;
 
   return (
-    <li>
+    <li ref={rowRef}>
       <button
         type="button"
         className={cn(styles.serverRow, active && styles.serverRowActive)}

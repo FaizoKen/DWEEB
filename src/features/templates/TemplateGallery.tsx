@@ -36,6 +36,7 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
 import { recordOrigin, usePostedMessagesStore } from "@/core/state/postedMessagesStore";
 import { useAuthStore } from "@/core/auth/authStore";
+import { useGuildStore } from "@/core/guild/guildStore";
 import { guildIconUrl } from "@/core/guild/api";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { loadDraftMessage } from "@/core/state/draftStorage";
@@ -50,6 +51,7 @@ import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
 import { CloseIcon, PlusIcon, PuzzleIcon, SearchIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
+import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import { useTemplateGalleryStore } from "./templateGalleryStore";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateGallery.module.css";
@@ -141,6 +143,8 @@ export function TemplateGallery() {
   // store, so the Posted-tab section headers can show a real server glyph. Keyed
   // by id for a cheap per-section lookup; absent when the user isn't a member.
   const authGuilds = useAuthStore((s) => s.guilds);
+  // The connected server — its Posted-tab section is scrolled into view on open.
+  const connectedGuildId = useGuildStore((s) => s.guildId);
   const guildIconById = useMemo(() => {
     const map = new Map<string, string | null>();
     for (const g of authGuilds) map.set(g.id, g.icon);
@@ -159,6 +163,10 @@ export function TemplateGallery() {
     name: string;
   } | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  // Scroll the connected server's Posted-tab section into view — the scrollable
+  // body and the active section it should land on.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const activeSectionRef = useRef<HTMLElement>(null);
 
   // Focus search on open so a user can start typing immediately.
   useEffect(() => {
@@ -438,6 +446,12 @@ export function TemplateGallery() {
     return sections;
   }, [filter, query, shown]);
 
+  // On the Posted tab, land on the server you're connected to — its section is
+  // usually the one you came to update. Re-runs when the tab changes (so it also
+  // fires if you switch to Posted after opening) or the connected server does;
+  // does nothing when that server has no posted messages (no section to hit).
+  useScrollActiveIntoView(bodyRef, activeSectionRef, [filter, connectedGuildId], "start");
+
   const startBlank = () => {
     clearAll();
     closeGallery();
@@ -550,7 +564,7 @@ export function TemplateGallery() {
             </div>
           </header>
 
-          <div className={styles.body}>
+          <div className={styles.body} ref={bodyRef}>
             {shown.length === 0 ? (
               <div className={styles.empty}>
                 <SearchIcon size={28} aria-hidden />
@@ -569,7 +583,11 @@ export function TemplateGallery() {
             ) : postedSections ? (
               <div className={styles.sections}>
                 {postedSections.map((section) => (
-                  <section key={section.key} className={styles.section}>
+                  <section
+                    key={section.key}
+                    className={styles.section}
+                    ref={section.guildId === connectedGuildId ? activeSectionRef : undefined}
+                  >
                     <div className={styles.sectionHeader}>
                       <ServerIcon
                         guildId={section.guildId}

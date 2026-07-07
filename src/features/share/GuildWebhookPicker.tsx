@@ -57,6 +57,7 @@ import {
 } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
+import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import styles from "./GuildWebhookPicker.module.css";
 
 /** Channel types that can host a webhook: text, announcement, forum, media. */
@@ -249,22 +250,11 @@ export function GuildWebhookPicker({
   );
 
   // On open, centre the selected row in its list so the user sees what's already
-  // chosen. Runs once, the moment the active row and its scroll container are
-  // both mounted (channel/webhook data can arrive after mount). Scrolls only the
-  // list itself — never the surrounding dialog.
-  const scrolledToSelectionRef = useRef(false);
-  useEffect(() => {
-    if (scrolledToSelectionRef.current) return;
-    const list = listRef.current;
-    const row = activeRowRef.current;
-    if (!list || !row) return;
-    scrolledToSelectionRef.current = true;
-    const lr = list.getBoundingClientRect();
-    const rr = row.getBoundingClientRect();
-    // Centre the row in the list's viewport; the browser clamps the result, so a
-    // short (non-scrolling) list stays exactly where it is.
-    list.scrollTop += rr.top - lr.top - (lr.height - rr.height) / 2;
-  }, [activeChannelId, activeId, status]);
+  // chosen — the moment the active row and its scroll container are both mounted
+  // (channel/webhook data can arrive after mount). Once only (empty deps): the
+  // dialog remounts on each open, and we don't want to yank the list when the
+  // selection later changes. Scrolls only the list itself, never the dialog.
+  useScrollActiveIntoView(listRef, activeRowRef, []);
 
   // Registered custom bots for this server. Their webhooks route components back
   // to DWEEB too, so the user can post under one (the preferred identity) and we
