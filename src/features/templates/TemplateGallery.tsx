@@ -352,11 +352,14 @@ export function TemplateGallery() {
     [replaceMessage, closeGallery],
   );
 
-  // Chip row: All, then Posted and Saved (each only when there are any), then a
-  // single Template chip for the whole curated set (categories no longer split).
+  // Chip row: Posted and Saved (each only when there are any), then a single
+  // Template chip for the whole curated set (categories no longer split). There
+  // is no "All" chip — it read as redundant/messy next to the real categories.
+  // "All" survives as the *default* (unfiltered) view: on open nothing is
+  // pressed and the combined grid shows, and re-clicking the active chip toggles
+  // back to it.
   const filters: Filter[] = useMemo(
     () => [
-      "All",
       ...(postedCards.length ? [POSTED_FILTER] : []),
       ...(savedCards.length ? [SAVED_FILTER] : []),
       ...(templateCards.length ? [TEMPLATE_FILTER] : []),
@@ -365,9 +368,10 @@ export function TemplateGallery() {
   );
 
   // If the active filter disappears (e.g. last saved message removed), fall back
-  // to All so the grid never looks empty for a stale reason.
+  // to All so the grid never looks empty for a stale reason. "All" is never in
+  // `filters` (it has no chip), so exempt it — it's the valid default view.
   useEffect(() => {
-    if (!filters.includes(filter)) setFilter("All");
+    if (filter !== "All" && !filters.includes(filter)) setFilter("All");
   }, [filters, filter]);
 
   const shown = useMemo(() => {
@@ -555,7 +559,7 @@ export function TemplateGallery() {
                     ]
                       .filter(Boolean)
                       .join(" ")}
-                    onClick={() => setFilter(f)}
+                    onClick={() => setFilter((cur) => (cur === f ? "All" : f))}
                   >
                     {f}
                   </button>
