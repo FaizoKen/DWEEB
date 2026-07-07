@@ -45,10 +45,10 @@ import { TextInput } from "@/ui/TextInput";
 import { IconButton } from "@/ui/IconButton";
 import {
   AlertTriangleIcon,
+  ChannelTypeIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  HashIcon,
   PencilIcon,
   PlusIcon,
   RefreshIcon,
@@ -209,6 +209,10 @@ export function GuildWebhookPicker({
   const channelsLoaded = guildData?.guildId === connectedId;
   const channelName = (id: string | null): string | undefined =>
     id && channelsLoaded ? guildData?.channelById[id]?.name : undefined;
+  // Discord channel `type` for the right glyph, defaulting to text (`#`) when the
+  // channel isn't in the loaded server (e.g. a cross-server webhook in restore).
+  const channelType = (id: string | null): number =>
+    (id && channelsLoaded ? guildData?.channelById[id]?.type : undefined) ?? 0;
   const webhookChannels: GuildChannel[] = useMemo(
     () =>
       (channelsLoaded ? guildData!.channels : [])
@@ -590,7 +594,7 @@ export function GuildWebhookPicker({
                   {crossServer ? <span className={styles.altServerChip}>other server</span> : null}
                 </span>
                 <span className={styles.rowDest}>
-                  <HashIcon size={11} />
+                  <ChannelTypeIcon type={channelType(selectedEntry.channelId ?? null)} size={11} />
                   {selectedChannelLabel ?? "unknown channel"}
                   {selectedGuildName ? <> · {selectedGuildName}</> : null}
                 </span>
@@ -648,7 +652,7 @@ export function GuildWebhookPicker({
                       ) : null}
                     </span>
                     <span className={styles.rowDest}>
-                      <HashIcon size={11} />
+                      <ChannelTypeIcon type={channelType(w.channel_id)} size={11} />
                       {channelName(w.channel_id) ?? w.channel_id ?? "unknown channel"}
                     </span>
                   </span>
@@ -802,7 +806,7 @@ export function GuildWebhookPicker({
                       <li key={w.id} className={styles.purgeItem}>
                         <span className={styles.purgeName}>{w.name || "(unnamed)"}</span>
                         <span className={styles.purgeDest}>
-                          <HashIcon size={11} />
+                          <ChannelTypeIcon type={channelType(w.channel_id)} size={11} />
                           {channelName(w.channel_id) ?? w.channel_id ?? "?"}
                         </span>
                       </li>
@@ -874,7 +878,7 @@ export function GuildWebhookPicker({
                             />
                           </span>
                           <span className={styles.rowDest}>
-                            <HashIcon size={11} />
+                            <ChannelTypeIcon type={channelType(w.channel_id)} size={11} />
                             {channelName(w.channel_id) ?? w.channel_id ?? "unknown channel"}
                           </span>
                         </span>
@@ -1089,7 +1093,7 @@ function ChannelRow({
       onClick={onPick}
     >
       <span className={styles.channelHash} aria-hidden>
-        <HashIcon size={15} />
+        <ChannelTypeIcon type={c.type} size={15} />
       </span>
       <span className={styles.channelName}>{c.name}</span>
       {busy ? (

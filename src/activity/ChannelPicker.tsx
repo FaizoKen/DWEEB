@@ -18,7 +18,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useGuildStore } from "@/core/guild/guildStore";
 import type { GuildChannel } from "@/core/guild/types";
-import { CheckCircleIcon, ChevronDownIcon, HashIcon, SearchIcon } from "@/ui/Icon";
+import { ChannelTypeIcon, CheckCircleIcon, ChevronDownIcon, SearchIcon } from "@/ui/Icon";
 import styles from "./ChannelPicker.module.css";
 
 /** Channel types that can host a webhook: text, announcement, forum, media —
@@ -181,7 +181,7 @@ export function ChannelPicker({
         aria-expanded={open}
         title={triggerTitle}
       >
-        <HashIcon size={16} />
+        <ChannelTypeIcon type={selected?.type ?? 0} size={16} />
         <span className={styles.triggerName}>{label}</span>
         <ChevronDownIcon size={14} className={styles.chevron} />
       </button>
@@ -234,7 +234,11 @@ export function ChannelPicker({
                                 data-active={active ? "" : undefined}
                                 onClick={() => pick(c.id)}
                               >
-                                <HashIcon size={15} className={styles.rowHash} />
+                                <ChannelTypeIcon
+                                  type={c.type}
+                                  size={15}
+                                  className={styles.rowHash}
+                                />
                                 <span className={styles.rowName}>{c.name}</span>
                                 {active ? (
                                   <CheckCircleIcon size={15} className={styles.check} />

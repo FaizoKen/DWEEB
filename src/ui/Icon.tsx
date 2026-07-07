@@ -499,6 +499,75 @@ export const HashIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+/** Megaphone — an announcement (news) channel. */
+export const AnnouncementIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="m3 11 18-5v12L3 13" />
+    <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+  </svg>
+);
+
+/** Stacked chat bubbles — a forum channel. */
+export const ForumIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
+    <path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+  </svg>
+);
+
+/** Framed picture — a media channel. */
+export const MediaIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="9" cy="9" r="2" />
+    <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
+  </svg>
+);
+
+/** Speaker with sound waves — a voice channel. */
+export const VoiceIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <path d="M11 5 6 9H2v6h4l5 4z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+    <path d="M19 5a10 10 0 0 1 0 14" />
+  </svg>
+);
+
+/** Microphone on a stand — a stage channel. */
+export const StageIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8" />
+  </svg>
+);
+
+/**
+ * The glyph Discord shows for a channel of the given `type`: announcement,
+ * forum, media, voice, and stage each get their own icon; everything else
+ * (text and any unknown type) falls back to the slanted hashtag. Used by the
+ * channel pickers so a list isn't all `#`.
+ */
+export const ChannelTypeIcon = ({
+  type,
+  size = 16,
+  ...rest
+}: Omit<IconProps, "type"> & { type: number }) => {
+  switch (type) {
+    case 2:
+      return <VoiceIcon size={size} {...rest} />;
+    case 5:
+      return <AnnouncementIcon size={size} {...rest} />;
+    case 13:
+      return <StageIcon size={size} {...rest} />;
+    case 15:
+      return <ForumIcon size={size} {...rest} />;
+    case 16:
+      return <MediaIcon size={size} {...rest} />;
+    default:
+      return <HashIcon size={size} {...rest} />;
+  }
+};
+
 /** Curly braces — inserting a plugin placeholder token like `{prize}`. */
 export const BracesIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
