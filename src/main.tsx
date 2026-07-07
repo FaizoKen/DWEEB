@@ -61,6 +61,15 @@ async function bootWeb(): Promise<void> {
     return;
   }
 
+  // Start listening for the browser's PWA install signal as early as the real
+  // app boot allows — before the app chunk mounts. Chromium fires
+  // `beforeinstallprompt` only after the manifest + service worker are verified
+  // (which happens well after this runs), and capturing it lets the Builder's
+  // "Install app" menu replay the real native dialog on demand (see
+  // core/pwa/installPrompt). A no-op on browsers that never fire it.
+  const { captureInstallPrompt } = await import("@/core/pwa/installPrompt");
+  captureInstallPrompt();
+
   // Register the precache service worker (production only — the dev SW would
   // fight HMR). A new deploy installs in the background and waits (see the
   // `registerType: "prompt"` rationale in vite.config.ts), so this never

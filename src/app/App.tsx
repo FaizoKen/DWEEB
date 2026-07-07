@@ -63,6 +63,9 @@ const CollaborateDialog = lazy(() =>
     default: m.CollaborateDialog,
   })),
 );
+const InstallDialog = lazy(() =>
+  import("@/features/install/InstallDialog").then((m) => ({ default: m.InstallDialog })),
+);
 const PricingModal = lazy(() =>
   import("@/features/plan/PricingModal").then((m) => ({ default: m.PricingModal })),
 );
@@ -89,6 +92,7 @@ import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { usePlanStore } from "@/core/plan/planStore";
 import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
+import { useInstallStore } from "@/features/install/installStore";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
@@ -181,6 +185,11 @@ export function App() {
   // menu. Mints a voice-channel Activity invite so a group co-edits in one shared
   // instance. Mounted lazily only while open.
   const collaborateOpen = useCollaborateStore((s) => s.open);
+
+  // The "Install app" dialog — summoned from the Builder's "More" menu. Replays
+  // the captured native PWA prompt on Chromium, or shows per-platform manual
+  // steps elsewhere. Mounted lazily only while open.
+  const installOpen = useInstallStore((s) => s.open);
 
   // The intro film — auto-played once for brand-new users (layered over the
   // landing gallery) and replayable from the "More" menu. Mounted lazily only
@@ -444,6 +453,11 @@ export function App() {
         {collaborateOpen ? (
           <Suspense fallback={null}>
             <CollaborateDialog />
+          </Suspense>
+        ) : null}
+        {installOpen ? (
+          <Suspense fallback={null}>
+            <InstallDialog />
           </Suspense>
         ) : null}
         {welcomeOpen ? (

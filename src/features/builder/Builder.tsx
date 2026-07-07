@@ -20,6 +20,7 @@ import {
   FilmIcon,
   HistoryIcon,
   InfoIcon,
+  InstallIcon,
   PencilIcon,
   RedoIcon,
   SendIcon,
@@ -37,6 +38,8 @@ import { activityLaunchUrl, isProxyConfigured } from "@/core/guild/config";
 import { isFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
+import { useInstallStore } from "@/features/install/installStore";
+import { useInstallState } from "@/features/install/useInstallState";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
 import styles from "./Builder.module.css";
 
@@ -111,6 +114,12 @@ function ActionBar({
 
   const openFeedback = useFeedbackStore((s) => s.openFeedback);
   const openCollaborate = useCollaborateStore((s) => s.openCollaborate);
+  const openInstall = useInstallStore((s) => s.openInstall);
+  // Hide the install entry once we're already running as the installed app —
+  // there's nothing left to install. Every browser (installable or not) still
+  // sees it otherwise: the dialog either replays the native prompt or shows
+  // per-platform steps.
+  const { installed } = useInstallState();
 
   // Real-time co-editing lives only in the embedded Discord Activity; offer a
   // hand-off to it when a backend + app id are configured (both are required for
@@ -259,6 +268,20 @@ function ActionBar({
               >
                 Watch the intro
               </MenuItem>
+              {installed ? null : (
+                <MenuItem
+                  icon={<InstallIcon />}
+                  onSelect={() => {
+                    close();
+                    // Opens the install dialog, which replays the captured
+                    // native PWA prompt on Chromium or shows per-platform steps
+                    // elsewhere (see InstallDialog).
+                    openInstall();
+                  }}
+                >
+                  Install app
+                </MenuItem>
+              )}
               {isFeedbackConfigured() ? (
                 <MenuItem
                   icon={<SupportIcon />}

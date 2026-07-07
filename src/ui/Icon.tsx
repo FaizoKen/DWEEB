@@ -139,6 +139,18 @@ export const UploadIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+// A phone with an arrow dropping into it — "install DWEEB onto your device".
+// Distinct from DownloadIcon (a file-download tray) so the install entry point
+// reads as add-to-device rather than save-a-file.
+export const InstallIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <rect x="6" y="2" width="12" height="20" rx="2" />
+    <path d="M10 18.5h4" />
+    <path d="M12 7v5" />
+    <path d="M9.5 9.5 12 12l2.5-2.5" />
+  </svg>
+);
+
 export const HistoryIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
