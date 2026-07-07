@@ -7,6 +7,9 @@
   z-index: var(--app-z-modal);
 }
 
+/* Two panes side by side: the scrollable list and the fixed preview. The
+ * menu itself never scrolls — a max-height clamp squeezes the list column,
+ * which scrolls internally, while the preview stays put. */
 .menu {
   /* One step brighter than --app-bg-elevated (the builder pane) so the
    * popover floats clearly instead of blending into the editor. */
@@ -14,10 +17,10 @@
   border: 1px solid var(--app-border-strong);
   border-radius: var(--app-radius);
   box-shadow: var(--app-shadow-lg);
-  padding: 4px;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  width: min(460px, calc(100vw - 16px));
+  overflow: hidden;
+  outline: none;
   transform-origin: top center;
   animation: menuIn 140ms cubic-bezier(0.16, 1, 0.3, 1);
   will-change: transform, opacity;
@@ -30,18 +33,53 @@
   transform-origin: bottom center;
 }
 
+.list {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  overflow-y: auto;
+}
+
+/* A labelled category run inside the list ("Structure", "Content"…). */
+.shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shelfLabel {
+  padding: 6px 8px 2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--app-text-subtle);
+  user-select: none;
+}
+.shelf + .shelf .shelfLabel {
+  margin-top: 4px;
+}
+
 .item {
+  position: relative;
   display: grid;
   grid-template-columns: 28px 1fr;
   align-items: center;
   gap: 8px;
-  padding: 8px 8px;
+  padding: 7px 8px;
   border-radius: var(--app-radius-sm);
   text-align: left;
   color: var(--app-text);
   transition: background 120ms ease;
 }
-.item:hover {
+/* data-active marks the row the preview pane is describing — it follows
+ * hover and keyboard focus, and lingers after the pointer leaves so the
+ * pane never points at nothing. */
+.item:hover,
+.item[data-active] {
   background: var(--app-bg-active);
 }
 
@@ -98,7 +136,8 @@
     color 120ms ease;
 }
 
-.item:hover .itemGlyph {
+.item:hover .itemGlyph,
+.item[data-active] .itemGlyph {
   border-color: var(--app-border-strong);
   color: var(--app-text);
 }
@@ -113,9 +152,72 @@
   font-weight: 500;
 }
 
+/* The preview pane carries each row's description, so in the two-pane layout
+ * the in-row copy is visually hidden (kept for screen readers — the pane is
+ * aria-hidden). The narrow-viewport block below restores it when the pane
+ * is gone. */
 .itemSub {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
   font-size: 11px;
   color: var(--app-text-muted);
+}
+
+/* ── Preview pane ────────────────────────────────────────────────────── */
+
+.previewPane {
+  flex: 0 0 218px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--app-bg-subtle);
+  border-left: 1px solid var(--app-border);
+  overflow: hidden;
+}
+
+.previewTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.previewDesc {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+
+.previewKeys {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 10.5px;
+  color: var(--app-text-subtle);
+  user-select: none;
+}
+
+/* Narrow viewports (phone / small Activity iframe): drop the preview pane,
+ * shrink to a compact single-column menu, and bring the row descriptions
+ * back so nothing is lost. */
+@media (max-width: 599px) {
+  .menu {
+    width: min(320px, calc(100vw - 16px));
+  }
+  .previewPane {
+    display: none;
+  }
+  .itemSub {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
 }
 
 @keyframes menuIn {
