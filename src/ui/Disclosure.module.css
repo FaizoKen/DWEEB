@@ -1,0 +1,46 @@
+.summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  font-size: var(--app-text-xs);
+  font-weight: 600;
+  color: var(--app-text-muted);
+  border-radius: var(--app-radius-sm);
+}
+
+/* Safari draws its default triangle through this pseudo even with
+   list-style unset. */
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Same chevron convention as the tree's disclosure rows: points right when
+   collapsed, down when expanded. */
+.summary::before {
+  content: "▾";
+  font-size: 10px;
+  transition: transform 150ms ease;
+  transform: rotate(-90deg);
+}
+.disclosure[open] > .summary::before {
+  transform: none;
+}
+
+.summary:hover {
+  color: var(--app-text);
+}
+.summary:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-3);
+  margin-top: var(--app-space-3);
+}

@@ -1,7 +1,7 @@
 import { useMessageStore } from "@/core/state/messageStore";
-import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import type { ThumbnailComponent, UnfurledMediaItem } from "@/core/schema/types";
+import { Disclosure } from "@/ui/Disclosure";
 import { Field } from "@/ui/Field";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
@@ -15,7 +15,6 @@ interface Props {
 
 export function ThumbnailInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
-  const advancedMode = useUiPrefs((s) => s.advancedMode);
   const placeholders = useMessagePlaceholders();
 
   const setMedia = (partial: Partial<UnfurledMediaItem>) => {
@@ -35,14 +34,7 @@ export function ThumbnailInspector({ node }: Props) {
           })
         }
       />
-      <Field
-        label="Image URL"
-        hint={
-          advancedMode
-            ? "https:// or attachment://filename. Leave blank when using an attachment_id."
-            : "Paste a direct image link (https://…)."
-        }
-      >
+      <Field label="Image URL" hint="Paste a direct image link (https://…).">
         {(id) => (
           <PlaceholderInput
             id={id}
@@ -52,7 +44,7 @@ export function ThumbnailInspector({ node }: Props) {
           />
         )}
       </Field>
-      {advancedMode ? (
+      <Disclosure label="Advanced media options">
         <Field
           label="Attachment ID (optional)"
           hint="Discord snowflake. Use instead of URL to reference an already-uploaded file."
@@ -72,7 +64,7 @@ export function ThumbnailInspector({ node }: Props) {
             />
           )}
         </Field>
-      ) : null}
+      </Disclosure>
       <Field label="Alt text">
         {(id) => (
           <PlaceholderInput

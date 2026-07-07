@@ -9,8 +9,8 @@
  * needs, and it bounds the storage footprint.
  *
  * Mirrors the conservative localStorage pattern used elsewhere in the app
- * (`prefsStorage`, `settingsStorage`): a versioned key, a parse that never
- * throws, and a graceful no-op when storage is unavailable or quota-limited.
+ * (`settingsStorage`): a versioned key, a parse that never throws, and a
+ * graceful no-op when storage is unavailable or quota-limited.
  */
 
 import type { GuildData } from "./types";

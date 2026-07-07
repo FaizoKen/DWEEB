@@ -14,7 +14,7 @@
  * via `targets.matchPlugin`.
  *
  * Versioned key + safe parse + graceful storage failure, mirroring
- * `prefsStorage.ts`.
+ * `src/core/ai/settingsStorage.ts`.
  */
 
 import type { PluginSummary } from "@/core/plugins/protocol";

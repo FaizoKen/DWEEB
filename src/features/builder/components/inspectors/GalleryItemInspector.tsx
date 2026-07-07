@@ -8,9 +8,9 @@
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
-import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import type { EditorId, MediaGalleryItem } from "@/core/schema/types";
+import { Disclosure } from "@/ui/Disclosure";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
 import { PlaceholderInput } from "@/ui/PlaceholderInput";
@@ -28,7 +28,6 @@ interface Props {
 
 export function GalleryItemInspector({ galleryId, item }: Props) {
   const patchItem = useMessageStore((s) => s.patchGalleryItem);
-  const advancedMode = useUiPrefs((s) => s.advancedMode);
   const placeholders = useMessagePlaceholders();
   const issues = useNodeIssues(item._id);
 
@@ -44,14 +43,7 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
           })
         }
       />
-      <Field
-        label="URL"
-        hint={
-          advancedMode
-            ? "https:// or attachment://filename"
-            : "Paste a direct image or video link (https://…)."
-        }
-      >
+      <Field label="URL" hint="Paste a direct image or video link (https://…).">
         {(id) => (
           <PlaceholderInput
             id={id}
@@ -65,7 +57,7 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
           />
         )}
       </Field>
-      {advancedMode ? (
+      <Disclosure label="Advanced media options">
         <Field
           label="Attachment ID (optional)"
           hint="Reference an already-uploaded attachment by snowflake."
@@ -88,7 +80,7 @@ export function GalleryItemInspector({ galleryId, item }: Props) {
             />
           )}
         </Field>
-      ) : null}
+      </Disclosure>
       <Field label="Alt text">
         {(id) => (
           <PlaceholderInput

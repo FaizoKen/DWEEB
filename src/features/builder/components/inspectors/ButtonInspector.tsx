@@ -8,7 +8,6 @@
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
-import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import { LINK_PLUGINS } from "@/core/plugins/registry";
 import { matchLinkPlugin } from "@/core/plugins/linkManifest";
@@ -46,7 +45,6 @@ const STYLE_OPTIONS: Array<{ value: ButtonStyleValue; label: string }> = [
 export function ButtonInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
   const replace = useMessageStore((s) => s.replaceNode);
-  const advancedMode = useUiPrefs((s) => s.advancedMode);
   const placeholders = useMessagePlaceholders();
   // The link plugin owning this button's URL (by template-prefix match), if
   // any — recomputed from the URL alone, same as custom_id plugin bindings.
@@ -162,7 +160,6 @@ export function ButtonInspector({ node }: Props) {
       {node.style !== ButtonStyle.Premium ? (
         <EmojiField
           emoji={node.emoji}
-          advancedMode={advancedMode}
           onChange={(emoji) => patch<EmojiEditableButton>(node._id, { emoji })}
         />
       ) : null}

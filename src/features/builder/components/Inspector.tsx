@@ -9,12 +9,12 @@
 
 import type { CSSProperties } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
-import { useUiPrefs } from "@/core/state/uiPrefs";
 import { findById } from "@/core/schema/traversal";
 import { ComponentType, type AnyComponent } from "@/core/schema/types";
 import { useNodeIssues } from "@/features/builder/useValidation";
 import { useNodeEditors, type NodeEditor } from "@/core/activity/presence";
 import { Avatar } from "@/activity/Avatar";
+import { Disclosure } from "@/ui/Disclosure";
 import { IssueList } from "./ValidationIssues";
 import { TextDisplayInspector } from "./inspectors/TextDisplayInspector";
 import { ContainerInspector } from "./inspectors/ContainerInspector";
@@ -37,7 +37,6 @@ import styles from "./Inspector.module.css";
 export function Inspector() {
   const selectedId = useMessageStore((s) => s.selectedId);
   const message = useMessageStore((s) => s.message);
-  const advancedMode = useUiPrefs((s) => s.advancedMode);
 
   const location = selectedId ? findById(message, selectedId) : null;
   const node = location?.node;
@@ -74,9 +73,12 @@ export function Inspector() {
             it's enforced (and explained) at the Send gate. */}
         <PluginPanel node={node} />
         {renderInspector(node)}
-        {/* The per-component Discord id is a power-user concern — only surface
-            it in Advanced mode. The value (if any) persists regardless. */}
-        {advancedMode ? <ComponentIdField node={node} /> : null}
+        {/* The per-component Discord id is a power-user concern — parked
+            behind a collapsed disclosure. The value (if any) persists
+            regardless. */}
+        <Disclosure>
+          <ComponentIdField node={node} />
+        </Disclosure>
       </div>
     </div>
   );

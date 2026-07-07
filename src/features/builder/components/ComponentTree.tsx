@@ -65,7 +65,7 @@ import { IconButton } from "@/ui/IconButton";
 import { PlaceholderInput } from "@/ui/PlaceholderInput";
 import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { AddComponentMenu, type AddMenuNode } from "./AddComponentMenu";
-import { AdvancedMessageOptions } from "./AdvancedMessageOptions";
+import { MessageOptions } from "./MessageOptions";
 import { PostedMessageBanner } from "../PostedMessageBanner";
 import {
   ArrowDownIcon,
@@ -525,7 +525,7 @@ function MetaHeader() {
           )}
         </Field>
       </div>
-      <AdvancedMessageOptions />
+      <MessageOptions />
       <div className={styles.metaFooter}>
         <div className={styles.stats}>
           <StatPill

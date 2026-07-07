@@ -12,7 +12,6 @@
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
-import { useUiPrefs } from "@/core/state/uiPrefs";
 import { LIMITS } from "@/core/schema/limits";
 import type { StringSelectComponent, StringSelectOption } from "@/core/schema/types";
 import { useAttachedPlugin } from "@/features/plugins/useAttachedPlugin";
@@ -32,7 +31,6 @@ interface Props {
 
 export function StringSelectInspector({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
-  const advancedMode = useUiPrefs((s) => s.advancedMode);
   const placeholders = useMessagePlaceholders();
   const attachedPlugin = useAttachedPlugin(node);
 
@@ -136,7 +134,6 @@ export function StringSelectInspector({ node }: Props) {
             </Field>
             <EmojiField
               emoji={opt.emoji}
-              advancedMode={advancedMode}
               onChange={(emoji) => updateOption(i, { ...opt, emoji })}
             />
             <Field label="Value" hint="Sent to your bot when the option is picked.">

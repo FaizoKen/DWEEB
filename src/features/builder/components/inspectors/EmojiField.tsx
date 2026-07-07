@@ -2,8 +2,8 @@
  * Reusable emoji editor for the two things Discord lets carry a `PartialEmoji`:
  * a **button** and a **string-select option**. Both store the same
  * `{ id?, name?, animated? }` shape, so the token parsing, the cross-server
- * picker, and the advanced id/animated controls are identical — this is the one
- * place that knows how to edit one.
+ * picker, and the raw id/animated controls (behind a collapsed disclosure)
+ * are identical — this is the one place that knows how to edit one.
  *
  * Discord's `PartialEmoji` covers two distinct cases:
  *  - Unicode emoji (🔥): `{ name: "🔥" }` — no id. The glyph lives in `name`.
@@ -17,6 +17,7 @@
  */
 
 import type { PartialEmoji } from "@/core/schema/types";
+import { Disclosure } from "@/ui/Disclosure";
 import { Field } from "@/ui/Field";
 import { Menu } from "@/ui/Menu";
 import { Switch } from "@/ui/Switch";
@@ -29,11 +30,9 @@ interface Props {
   emoji: PartialEmoji | undefined;
   /** Called with the cleaned emoji, or `undefined` when it's been emptied. */
   onChange: (emoji: PartialEmoji | undefined) => void;
-  /** Reveal the raw id / animated controls (off in simple mode). */
-  advancedMode: boolean;
 }
 
-export function EmojiField({ emoji: current, onChange, advancedMode }: Props) {
+export function EmojiField({ emoji: current, onChange }: Props) {
   const emoji = current ?? {};
 
   // Normalise on every edit: drop empty fields, omit `animated` unless set, and
@@ -104,7 +103,7 @@ export function EmojiField({ emoji: current, onChange, advancedMode }: Props) {
           </div>
         )}
       </Field>
-      {advancedMode ? (
+      <Disclosure label="Advanced emoji options">
         <Field label="Custom emoji ID" hint="Required for guild emoji; leave blank for unicode.">
           {(id) => (
             <TextInput
@@ -118,14 +117,14 @@ export function EmojiField({ emoji: current, onChange, advancedMode }: Props) {
             />
           )}
         </Field>
-      ) : null}
-      {advancedMode && emoji.id ? (
-        <Switch
-          checked={emoji.animated ?? false}
-          onChange={(e) => setEmoji({ ...emoji, animated: e.currentTarget.checked || undefined })}
-          label="Animated (GIF)"
-        />
-      ) : null}
+        {emoji.id ? (
+          <Switch
+            checked={emoji.animated ?? false}
+            onChange={(e) => setEmoji({ ...emoji, animated: e.currentTarget.checked || undefined })}
+            label="Animated (GIF)"
+          />
+        ) : null}
+      </Disclosure>
     </>
   );
 }

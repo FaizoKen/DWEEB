@@ -658,31 +658,27 @@
   box-shadow: var(--app-shadow-lg);
 }
 
-.advanced {
+/* Message-level options card below the tree: two disclosure lanes share the
+   header row — Notification on the left, Forum on the right — and the open
+   lane's settings expand below at full width. */
+.options {
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
   background: var(--app-bg-subtle);
   overflow: hidden;
 }
 
-/* Header lane: the "Message options" disclosure button on the left fills the
-   row; the Advanced toggle rides along on the right. The collapsible body sits
-   below at full width, so expanding never leaves a dead column beside it. */
-.advancedHeader {
-  display: flex;
-  align-items: center;
-  gap: var(--app-space-2);
+.optionsTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
 }
 
-.advancedSummary {
-  flex: 1 1 auto;
+.optionsTab {
   min-width: 0;
   cursor: pointer;
   padding: 11px 13px;
   font-size: var(--app-text-sm);
   font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
   color: var(--app-text);
   user-select: none;
   background: none;
@@ -692,28 +688,31 @@
   align-items: center;
   gap: 8px;
 }
-.advancedSummary:focus-visible {
-  outline: none;
-  box-shadow: var(--app-focus-ring);
+.optionsTab + .optionsTab {
+  border-left: 1px solid var(--app-border);
 }
-/* Chevron sits on the left, hugging the label, so the right edge stays clear
-   for the Advanced toggle. Points right when collapsed, down when expanded. */
-.advancedSummary::before {
+.optionsTab:focus-visible {
+  outline: none;
+  /* Inset so the ring isn't clipped by the card's overflow: hidden. */
+  box-shadow: inset var(--app-focus-ring);
+}
+/* Subtle fill marks which lane the expanded body belongs to. */
+.optionsTab[aria-expanded="true"] {
+  background: var(--app-bg-input);
+}
+/* Chevron points right when collapsed, down when expanded. */
+.optionsTab::before {
   content: "▾";
   font-size: 11px;
   color: var(--app-text-muted);
   transition: transform 150ms ease;
-}
-.advancedSummary[aria-expanded="false"]::before {
   transform: rotate(-90deg);
 }
-
-.advancedToggle {
-  flex: 0 0 auto;
-  margin-right: 13px;
+.optionsTab[aria-expanded="true"]::before {
+  transform: none;
 }
 
-.advancedBody {
+.optionsBody {
   padding: 13px;
   display: flex;
   flex-direction: column;
