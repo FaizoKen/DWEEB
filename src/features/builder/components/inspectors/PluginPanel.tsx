@@ -29,6 +29,7 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { usePluginRegistry } from "@/core/state/pluginRegistryStore";
+import { isActivityMode, openExternalUrl } from "@/core/activity/runtime";
 import {
   clearPluginSummary,
   getPluginSummary,
@@ -556,6 +557,9 @@ function LinkAttachedChip({
   onDetach: () => void;
 }) {
   const by = manifest.publisher ?? manifest.name;
+  // Captured as locals so the click handlers close over a definite string (the
+  // guards below already narrow them, but TS won't carry that into a callback).
+  const { setupUrl, homepage } = manifest;
   return (
     <>
       <div className={styles.chip}>
@@ -568,12 +572,11 @@ function LinkAttachedChip({
           <span className={styles.chipMeta}>via {by} — external link service</span>
         </div>
         <div className={styles.chipActions}>
-          {manifest.setupUrl ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => window.open(manifest.setupUrl, "_blank", "noopener,noreferrer")}
-            >
+          {setupUrl ? (
+            // `openExternalUrl`, not a raw `window.open`: inside the Activity's
+            // sandboxed iframe a `window.open` is silently blocked, so the link
+            // has to go through the host SDK (this panel renders on both surfaces).
+            <Button size="sm" variant="secondary" onClick={() => void openExternalUrl(setupUrl)}>
               Set up
             </Button>
           ) : null}
@@ -585,12 +588,26 @@ function LinkAttachedChip({
       {/* DWEEB can't verify the external service's per-server state, so the one
           thing that can go quietly wrong — posting the button before the server
           is registered — is called out persistently, not just in the library. */}
-      {manifest.setupUrl ? (
+      {setupUrl ? (
         <p className={styles.muted}>
           {manifest.setupHint ??
             `The link only works once your server is set up with ${by} — “Set up” takes you there.`}{" "}
-          {manifest.homepage ? (
-            <a className={styles.link} href={manifest.homepage} target="_blank" rel="noreferrer">
+          {homepage ? (
+            <a
+              className={styles.link}
+              href={homepage}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => {
+                // Keep the real anchor for the web app (right-click, a11y), but in
+                // the Activity a target="_blank" navigation is blocked — intercept
+                // and hand the URL to the Discord client instead.
+                if (isActivityMode()) {
+                  e.preventDefault();
+                  void openExternalUrl(homepage);
+                }
+              }}
+            >
               Learn more
             </a>
           ) : null}

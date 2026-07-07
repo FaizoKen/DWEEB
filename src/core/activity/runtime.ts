@@ -104,6 +104,41 @@ export function proxiedPluginConfigUrl(configUrl: string): string {
   return `${PROXY_MAPPING_PREFIX}/api/activity/plugin?url=${encodeURIComponent(configUrl)}`;
 }
 
+/**
+ * Open an external URL from either surface, correctly.
+ *
+ * In the web app a plain `window.open` is all that's needed. Inside the
+ * sandboxed Activity iframe (`…discordsays.com`) that navigation is blocked by
+ * the host CSP — a `window.open` / `target="_blank"` link silently does nothing —
+ * so the URL has to be handed to the Discord client through the Embedded App
+ * SDK's `openExternalLink` instead (the same path `openLastPost` / `openOnWeb`
+ * take). The SDK is only pulled in — via a dynamic import, so it never lands in
+ * the web app's initial bundle (the whole reason this module is SDK-free) — when
+ * we're actually embedded, and we fall back to `window.open` if the SDK path
+ * fails (the dev URL-override runs on plain localhost, where the command has no
+ * host to reach). A failure to open is swallowed — there's no better recourse.
+ *
+ * This is the shared seam for external links in components rendered on *both*
+ * surfaces (e.g. a link plugin's "Set up" in the builder's Action panel).
+ */
+export async function openExternalUrl(url: string): Promise<void> {
+  if (isActivityMode()) {
+    try {
+      const { openExternalLink } = await import("./sdk");
+      await openExternalLink(url);
+      return;
+    } catch {
+      // Fall through to a plain open — dev URL-override / a client without the
+      // command — mirroring the fallback the Activity store uses everywhere.
+    }
+  }
+  try {
+    window.open(url, "_blank", "noopener,noreferrer");
+  } catch {
+    /* nothing more we can do */
+  }
+}
+
 let accessToken: string | null = null;
 
 /** Store (or clear) the Discord access token the proxy bearer-authenticates with.
