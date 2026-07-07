@@ -1,9 +1,11 @@
 /**
  * Message-level controls outside the main component tree: one card with two
- * disclosure lanes side by side — "Notification" (delivery behaviour + mention
- * safety) and "Forum" (fields Discord only honours on forum/media channels).
- * Clicking a lane expands its settings below; at most one lane is open, so the
- * card stays a single compact row until it's needed.
+ * disclosure lanes side by side — "Notifications" (delivery behaviour + mention
+ * safety) and "Forum post" (fields Discord only honours on forum/media
+ * channels). Each lane carries an icon + a plain-language subtitle so the
+ * collapsed card explains itself, and lights up an accent dot when it holds a
+ * non-default setting. Clicking a lane expands its settings below; at most one
+ * lane is open, so the card stays a single compact row until it's needed.
  *
  * Notable webhook-specific restrictions we surface inline (and again in the
  * Send panel's pre-flight check via `inspectCapabilities`):
@@ -30,6 +32,7 @@ import { Field } from "@/ui/Field";
 import { Switch } from "@/ui/Switch";
 import { TextInput } from "@/ui/TextInput";
 import { TextArea } from "@/ui/TextArea";
+import { BellIcon, ChevronDownIcon, ForumIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
 import styles from "./ComponentTree.module.css";
 
@@ -55,6 +58,16 @@ export function MessageOptions() {
     setOpenSection((current) => (current === section ? null : section));
 
   const am = message.allowed_mentions;
+
+  // Whether each lane holds any non-default setting — drives the "configured"
+  // dot + accent so the collapsed card tells you at a glance what you've touched.
+  const notificationActive =
+    (message.suppress_notifications ?? false) ||
+    (message.tts ?? false) ||
+    (am != null &&
+      ((am.parse?.length ?? 0) > 0 || (am.roles?.length ?? 0) > 0 || (am.users?.length ?? 0) > 0));
+  const forumActive =
+    (message.thread_name?.trim().length ?? 0) > 0 || (message.applied_tags?.length ?? 0) > 0;
 
   const setParseKind = (kind: MentionKind, on: boolean) => {
     const parse = new Set<MentionKind>(am?.parse ?? []);
@@ -84,19 +97,41 @@ export function MessageOptions() {
       <div className={styles.optionsTabs}>
         <button
           type="button"
-          className={styles.optionsTab}
+          className={cn(styles.optionsTab, notificationActive && styles.optionsTabActive)}
           aria-expanded={openSection === "notification"}
           onClick={() => toggleSection("notification")}
         >
-          Notification
+          <span className={styles.optionsTabIcon}>
+            <BellIcon size={16} />
+          </span>
+          <span className={styles.optionsTabText}>
+            <span className={styles.optionsTabTitle}>
+              Notifications
+              {notificationActive ? (
+                <span className={styles.optionsTabDot} aria-hidden="true" />
+              ) : null}
+            </span>
+            <span className={styles.optionsTabSub}>Silent send &amp; who gets pinged</span>
+          </span>
+          <ChevronDownIcon size={15} className={styles.optionsTabChevron} aria-hidden="true" />
         </button>
         <button
           type="button"
-          className={styles.optionsTab}
+          className={cn(styles.optionsTab, forumActive && styles.optionsTabActive)}
           aria-expanded={openSection === "forum"}
           onClick={() => toggleSection("forum")}
         >
-          Forum
+          <span className={styles.optionsTabIcon}>
+            <ForumIcon size={16} />
+          </span>
+          <span className={styles.optionsTabText}>
+            <span className={styles.optionsTabTitle}>
+              Forum post
+              {forumActive ? <span className={styles.optionsTabDot} aria-hidden="true" /> : null}
+            </span>
+            <span className={styles.optionsTabSub}>Thread title &amp; tags</span>
+          </span>
+          <ChevronDownIcon size={15} className={styles.optionsTabChevron} aria-hidden="true" />
         </button>
       </div>
 

@@ -677,8 +677,6 @@
   min-width: 0;
   cursor: pointer;
   padding: 11px 13px;
-  font-size: var(--app-text-sm);
-  font-weight: 600;
   color: var(--app-text);
   user-select: none;
   background: none;
@@ -686,7 +684,11 @@
   text-align: left;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  transition: background 120ms ease;
+}
+.optionsTab:hover {
+  background: var(--app-bg-input);
 }
 .optionsTab + .optionsTab {
   border-left: 1px solid var(--app-border);
@@ -700,16 +702,82 @@
 .optionsTab[aria-expanded="true"] {
   background: var(--app-bg-input);
 }
-/* Chevron points right when collapsed, down when expanded. */
-.optionsTab::before {
-  content: "▾";
-  font-size: 11px;
+
+/* Rounded icon tile — lights up in the accent when the lane holds a setting. */
+.optionsTabIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
   color: var(--app-text-muted);
-  transition: transform 150ms ease;
-  transform: rotate(-90deg);
+  transition:
+    color 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
 }
-.optionsTab[aria-expanded="true"]::before {
+.optionsTabActive .optionsTabIcon {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+  color: var(--app-text);
+}
+
+.optionsTabText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.optionsTabTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--app-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.optionsTabSub {
+  font-size: var(--app-text-xs);
+  color: var(--app-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Accent dot next to the title when the lane has non-default settings. */
+.optionsTabDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--app-accent);
+}
+/* Chevron points right when collapsed, down when expanded. */
+.optionsTabChevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--app-text-muted);
+  transform: rotate(-90deg);
+  transition: transform 150ms ease;
+}
+.optionsTab[aria-expanded="true"] .optionsTabChevron {
   transform: none;
+}
+
+/* Narrow panels can't fit two rich lanes side by side — stack them. */
+@media (max-width: 560px) {
+  .optionsTabs {
+    grid-template-columns: 1fr;
+  }
+  .optionsTab + .optionsTab {
+    border-left: 0;
+    border-top: 1px solid var(--app-border);
+  }
 }
 
 .optionsBody {
