@@ -97,6 +97,13 @@ interface ActivityState {
    *  picture window. In that mode the surface drops the editor and shows only a
    *  full-bleed, live message preview (see ActivityApp). */
   pipMode: boolean;
+  /** True once the shared editor has settled into its real starting content: the
+   *  room's in-progress draft has synced in (via collab's `onHydrated`), or — for
+   *  a fresh room where none is coming — a short grace has elapsed. The shell
+   *  holds a builder skeleton until this trips (see ActivityApp), so a joiner
+   *  never sees the fresh-open default flash before the room's draft replaces it.
+   *  Independent of the guild-data gate, which the shell folds in alongside. */
+  hydrated: boolean;
   participants: CollabParticipant[];
   collabConnected: boolean;
   publishing: boolean;
@@ -160,7 +167,10 @@ interface ActivityState {
    *  a never-expire slot on the new message (best-effort; the result reports how
    *  it went). `applicationId` posts as one of the server's connected custom bots
    *  instead of DWEEB (the confirm dialog's "Post as" choice); null = DWEEB. */
-  publish(makePermanent?: boolean, applicationId?: string | null): Promise<ActivityPostResult | null>;
+  publish(
+    makePermanent?: boolean,
+    applicationId?: string | null,
+  ): Promise<ActivityPostResult | null>;
   /** PATCH the message last posted from this Activity with the current draft.
    *  Only meaningful while {@link lastPost} matches the chosen destination.
    *  Returns the result on success / null on failure, like {@link publish}. */
@@ -236,6 +246,13 @@ const AUTHORIZE_TIMEOUT_MS = 25_000;
 const EXCHANGE_TIMEOUT_MS = 20_000;
 const AUTHENTICATE_TIMEOUT_MS = 20_000;
 
+/** How long the shell waits for the room's initial draft before revealing the
+ *  builder anyway. An inbound draft (collab's `onHydrated`) reveals sooner; this
+ *  only bounds the brand-new-room case, where nothing is coming to sync — short
+ *  enough that a fresh room doesn't sit on a skeleton, long enough to catch the
+ *  usual hello→draft round-trip so a joiner reveals with the real content. */
+const HYDRATE_GRACE_MS = 800;
+
 /** Above this hash-URL length the "Open on web" hand-off uploads the draft as a
  *  short link instead, so the host's external-link open never chokes on a huge
  *  URL. Small drafts stay fully client-side in the hash (nothing uploaded). */
@@ -251,6 +268,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   user: null,
   platform: null,
   pipMode: false,
+  hydrated: false,
   participants: [],
   collabConnected: false,
   publishing: false,
@@ -287,6 +305,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       set({
         status: "ready",
         step: "done",
+        // The override can't reach the proxy, so no collab room / guild bootstrap
+        // runs — there's nothing to sync in. Reveal the builder straight away
+        // rather than sitting on the skeleton until its grace/cap timer fires.
+        hydrated: true,
         context: mock.context,
         user: mock.user,
         platform: mock.platform,
@@ -433,7 +455,20 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         // A custom bot's connect flow finished — surface it so the post dialog
         // selects it right away (see PostConfirm's consume effect).
         onBotConnected: (applicationId) => set({ connectedBot: applicationId }),
+        // The room handed us its in-progress draft — the editor now holds real
+        // content, so let the shell reveal the builder (see `hydrated`).
+        onHydrated: () => {
+          if (!get().hydrated) set({ hydrated: true });
+        },
       });
+
+      // Fallback reveal: a brand-new room has no draft to sync, so `onHydrated`
+      // never fires — flip `hydrated` after a short grace so the builder doesn't
+      // sit behind the skeleton waiting for a frame that isn't coming. Idempotent
+      // with the callback above (whichever happens first wins).
+      window.setTimeout(() => {
+        if (!get().hydrated) set({ hydrated: true });
+      }, HYDRATE_GRACE_MS);
     } catch (e) {
       stopCollab();
       const message =

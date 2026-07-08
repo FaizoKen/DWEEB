@@ -64,6 +64,13 @@ interface StartOptions {
    *  application id. Delivered over the live socket, so it lands even while the
    *  Activity is backgrounded during the external-browser OAuth. */
   onBotConnected?: (applicationId: string) => void;
+  /** The room's starting content has arrived — fired once, the first time we
+   *  adopt a full-message draft from the room (a latecomer's `hello` reply, or
+   *  the server's `resume` of a persisted draft). Lets the shell reveal the
+   *  builder only once the real draft is in place, instead of flashing the
+   *  fresh-open default first. Never fires for a brand-new room where nothing's
+   *  coming — the shell falls back to a short grace timer for that case. */
+  onHydrated?: () => void;
 }
 
 const SEND_DEBOUNCE_MS = 180;
@@ -116,6 +123,13 @@ let currentTarget: string | null = null;
  * brief drop can't revert the room to the ≤throttle-stale stored copy.
  */
 let diverged = false;
+/**
+ * Whether we've announced the room's initial-draft settle (see `onHydrated`).
+ * Fired once per session, the first time we adopt a full-message draft from the
+ * room, so the shell can reveal the builder with the real content already in
+ * place. Reset on each `startCollab`.
+ */
+let hydratedFired = false;
 let opts: StartOptions | null = null;
 
 /** Open the room socket and start syncing the message store. Idempotent-ish:
@@ -130,6 +144,7 @@ export function startCollab(options: StartOptions): void {
   currentTarget = options.targetChannelId;
   currentFocus = useMessageStore.getState().selectedId;
   diverged = false;
+  hydratedFired = false;
   subscribeStore();
   subscribeSelection();
   connect();
@@ -338,6 +353,14 @@ function handleFrame(frame: Record<string, unknown>): void {
  *  data-loss bug. When nothing is pending this reduces to adopting the peer's
  *  state verbatim, exactly as before. */
 function applyFull(message: WebhookMessage): void {
+  // The room just handed us a full draft — its real starting content is now in
+  // hand, so tell the shell it can reveal the builder (once, on the first such
+  // frame; later structural drafts don't re-fire it).
+  if (!hydratedFired) {
+    hydratedFired = true;
+    opts?.onHydrated?.();
+  }
+
   const ours = useMessageStore.getState().message;
   const pending = lastSent ? diffMessage(lastSent, ours) : [];
 

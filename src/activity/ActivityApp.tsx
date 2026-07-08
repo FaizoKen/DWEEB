@@ -30,10 +30,18 @@ import {
   type ActivityStatus,
   type ActivityStep,
 } from "@/core/activity/activityStore";
+import { useGuildStore } from "@/core/guild/guildStore";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { ActivityBar } from "./ActivityBar";
+import { BuilderSkeleton } from "./BuilderSkeleton";
 import { PresenceDock } from "./PresenceDock";
 import styles from "./ActivityApp.module.css";
+
+/** Hard ceiling on the post-handshake hydration hold: if the room draft and/or
+ *  guild data are still settling after this, reveal the builder anyway rather
+ *  than sit on the skeleton — the last few names just resolve in place. A clean
+ *  loading skeleton for a beat beats an indefinite one. */
+const MAX_HYDRATE_MS = 4000;
 
 // Lazy — the feedback form (and its transport) only loads when someone opens it,
 // so it never weighs on the Activity's first paint. Mirrors the web `App`.
@@ -48,6 +56,43 @@ export function ActivityApp() {
   const platform = useActivityStore((s) => s.platform);
   const pipMode = useActivityStore((s) => s.pipMode);
   const init = useActivityStore((s) => s.init);
+
+  // ── Post-handshake hydration gate ────────────────────────────────────────
+  // The handshake going `ready` only means we're signed in — the shared editor
+  // isn't settled yet: the collab room's in-progress draft is still syncing in,
+  // and (on a server launch) the guild's channels/roles/emoji are still loading.
+  // Rendering the live builder now would flash the fresh-open default, an empty
+  // channel picker, and unresolved mentions before they pop into place. So we
+  // hold a builder-shaped skeleton until both settle, then latch `revealed` on
+  // for good (it never flips back — a later guild switch on a DM launch mustn't
+  // re-trigger the skeleton).
+  const hydrated = useActivityStore((s) => s.hydrated);
+  const targetGuildId = useActivityStore((s) => s.targetGuildId);
+  const botMissing = useActivityStore((s) => s.botMissing);
+  const isDm = useActivityStore((s) => s.context != null && s.context.guildId == null);
+  const guildStatus = useGuildStore((s) => s.status);
+  const guildDataId = useGuildStore((s) => s.data?.guildId ?? null);
+
+  // Guild data is "settled" when there's nothing to wait for (a DM launch hasn't
+  // picked a server yet; a bot-less server won't bootstrap; dev builds have no
+  // proxy) or the target guild's bootstrap has finished — ready with matching
+  // data, or errored (we still reveal; the toast already explained it).
+  const guildSettled =
+    !import.meta.env.PROD || isDm || botMissing || !targetGuildId
+      ? true
+      : (guildStatus === "ready" && guildDataId === targetGuildId) || guildStatus === "error";
+
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    if (revealed || status !== "ready") return;
+    if (hydrated && guildSettled) setRevealed(true);
+  }, [revealed, status, hydrated, guildSettled]);
+  // Safety net: never let the skeleton outlast the hard ceiling, whatever's slow.
+  useEffect(() => {
+    if (revealed || status !== "ready") return;
+    const t = window.setTimeout(() => setRevealed(true), MAX_HYDRATE_MS);
+    return () => window.clearTimeout(t);
+  }, [revealed, status]);
   // Feedback form open state — mounted lazily below only while open (like the web
   // app), summoned from the bar's "Send feedback" action.
   const feedbackOpen = useFeedbackStore((s) => s.open);
@@ -96,6 +141,14 @@ export function ActivityApp() {
         <ToastViewport />
       </div>
     );
+  }
+
+  // Signed in, but the shared editor hasn't settled yet — hold the builder
+  // skeleton (see the hydration gate above) so the real content fades in already
+  // populated instead of flashing defaults. The preview column is dropped in the
+  // mobile-sheet layout, where it's an off-screen sheet.
+  if (!revealed) {
+    return <BuilderSkeleton platform={platform} showPreview={!isMobileSheet} />;
   }
 
   return (
