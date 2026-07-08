@@ -409,7 +409,7 @@
   z-index: 1;
 }
 
-.serverLibraryBadge {
+.serverLibraryButton {
   position: absolute;
   top: 10px;
   left: 10px;
@@ -428,11 +428,70 @@
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   overflow: hidden;
-  pointer-events: none;
+  cursor: pointer;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    color 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
 }
 
-.serverLibraryBadge svg {
+.serverLibraryButton svg {
   flex-shrink: 0;
+}
+
+.serverLibraryButton[data-mode="save"] {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+
+.card:hover .serverLibraryButton[data-mode="save"],
+.card:focus-within .serverLibraryButton[data-mode="save"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.serverLibraryButton[data-mode="save"]:hover:not([aria-disabled="true"]) {
+  color: #fff;
+  background: color-mix(in srgb, #3ba55d 38%, rgba(24, 31, 56, 0.92));
+  border-color: color-mix(in srgb, #3ba55d 62%, transparent);
+}
+
+.serverLibraryButton[data-mode="remove"]:hover:not([aria-disabled="true"]) {
+  color: var(--app-danger);
+  background: rgba(28, 10, 12, 0.88);
+  border-color: color-mix(in srgb, var(--app-danger) 55%, transparent);
+}
+
+.serverLibraryButton[data-mode="saving"] {
+  cursor: progress;
+}
+
+.serverLibraryButton[aria-disabled="true"] {
+  cursor: progress;
+}
+
+.serverLibraryButton:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+.serverLibraryActionMark {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  color: #fff;
+  background: #3ba55d;
+  border: 1px solid rgba(10, 11, 15, 0.9);
 }
 
 .botBadge {
@@ -826,6 +885,10 @@
   /* No hover on touch — keep the delete button visible so it's reachable. */
   .cardDelete {
     opacity: 1;
+  }
+  .serverLibraryButton[data-mode="save"] {
+    opacity: 1;
+    transform: none;
   }
   .footerHint {
     display: none;

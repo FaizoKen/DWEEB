@@ -81,6 +81,19 @@ type Filter = typeof POSTED_FILTER | typeof SAVED_FILTER | typeof TEMPLATE_FILTE
 
 const ACCENT_TEAL = 0x1abc9c;
 const ACCENT_GREEN = 0x3ba55d;
+const MAX_LIBRARY_TITLE_CHARS = 100;
+
+function libraryDraftTitle(name: string): string {
+  const trimmed = name.trim() || "Untitled message";
+  return [...trimmed].slice(0, MAX_LIBRARY_TITLE_CHARS).join("");
+}
+
+type ServerLibraryCardAction = {
+  kind: "save" | "saving" | "remove";
+  label: string;
+  title: string;
+  onClick?: () => void;
+};
 
 /** One renderable card — a continue draft, a posted message, a saved message,
  *  or a template. */
@@ -108,8 +121,10 @@ interface CardData {
   guildId?: string;
   guildName?: string;
   onPick: () => void;
-  /** Saved only — remove this entry; drives the card's delete affordance. */
+  /** Local saved/posted only: remove this entry from the local list. */
   onDelete?: () => void;
+  /** Top-left stack action for saving/removing this card in the server library. */
+  serverLibraryAction?: ServerLibraryCardAction;
   /** Extra status pills after the badge — the library's derived labels
    *  ("Never expires", "Buttons expired", "Shared"). */
   tags?: { text: string; tone: "ok" | "warn" | "info" }[];
@@ -159,6 +174,10 @@ export function TemplateGallery() {
     for (const g of authGuilds) map.set(g.id, g.icon);
     return map;
   }, [authGuilds]);
+  const connectedGuildName = useMemo(
+    () => authGuilds.find((g) => g.id === connectedGuildId)?.name,
+    [authGuilds, connectedGuildId],
+  );
 
   const [query, setQuery] = useState("");
   // Seeded once from the store so callers can deep-link straight to "Saved";
@@ -172,6 +191,8 @@ export function TemplateGallery() {
     name: string;
     /** Library only — the server the entry belongs to. */
     guildId?: string;
+    /** Source card whose save-to-library copy is being removed. */
+    sourceKey?: string;
   } | null>(null);
 
   // The connected server's shared library (posted messages + server drafts),
@@ -183,7 +204,12 @@ export function TemplateGallery() {
   const libUsed = useLibraryStore((s) => s.used);
   const libQuota = useLibraryStore((s) => s.quota);
   const libLoaded = useLibraryStore((s) => s.loaded);
+  const saveLibraryDraft = useLibraryStore((s) => s.saveDraft);
   const removeLibrary = useLibraryStore((s) => s.remove);
+  const [savingLibraryKeys, setSavingLibraryKeys] = useState<Set<string>>(() => new Set());
+  const [libraryCopies, setLibraryCopies] = useState<
+    Record<string, { guildId: string; id: string }>
+  >({});
   useEffect(() => {
     if (libraryOn && connectedGuildId) {
       void useLibraryStore.getState().refresh(connectedGuildId);
@@ -235,6 +261,86 @@ export function TemplateGallery() {
     return () => window.removeEventListener("keydown", onKey);
   }, [closeGallery]);
 
+  const canSaveToServerLibrary =
+    libraryOn && !!connectedGuildId && libGuild === connectedGuildId && libLoaded;
+
+  const saveCardToLibrary = useCallback(
+    async (key: string, name: string, message: WebhookMessage) => {
+      if (!connectedGuildId) return;
+      setSavingLibraryKeys((prev) => {
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      });
+      const title = libraryDraftTitle(name);
+      try {
+        const res = await saveLibraryDraft(connectedGuildId, title, message);
+        if (res.ok) {
+          setLibraryCopies((prev) => ({
+            ...prev,
+            [key]: { guildId: res.entry.guild_id, id: res.entry.id },
+          }));
+          pushToast(`Saved "${title}" to the ${connectedGuildName ?? "server"} library`, "success");
+        } else {
+          pushToast(res.error, "error");
+        }
+      } catch {
+        pushToast("Couldn't reach the server library.", "error");
+      } finally {
+        setSavingLibraryKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
+    },
+    [connectedGuildId, connectedGuildName, saveLibraryDraft],
+  );
+
+  const serverLibraryActionFor = useCallback(
+    (key: string, name: string, message: WebhookMessage): ServerLibraryCardAction | undefined => {
+      const copy = libraryCopies[key];
+      const title = libraryDraftTitle(name);
+      if (copy && copy.guildId === connectedGuildId) {
+        return {
+          kind: "remove",
+          label: `Remove "${title}" from the ${connectedGuildName ?? "server"} library`,
+          title: "Remove from server library",
+          onClick: () =>
+            setPendingDelete({
+              kind: "library",
+              id: copy.id,
+              guildId: copy.guildId,
+              name: title,
+              sourceKey: key,
+            }),
+        };
+      }
+      if (savingLibraryKeys.has(key)) {
+        return {
+          kind: "saving",
+          label: `Saving "${title}" to the server library`,
+          title: "Saving to server library",
+        };
+      }
+      if (!canSaveToServerLibrary) return undefined;
+      return {
+        kind: "save",
+        label: `Save "${title}" to the ${connectedGuildName ?? "server"} library`,
+        title: "Save to server library",
+        onClick: () => void saveCardToLibrary(key, title, message),
+      };
+    },
+    [
+      canSaveToServerLibrary,
+      connectedGuildId,
+      connectedGuildName,
+      libraryCopies,
+      saveCardToLibrary,
+      savingLibraryKeys,
+    ],
+  );
+
   // Saved messages, re-hydrated to editable form for their thumbnails. Skips any
   // entry whose payload won't parse (an older/corrupt record) rather than throw.
   const savedMessages = useMemo(
@@ -262,6 +368,7 @@ export function TemplateGallery() {
         savedAt: entry.savedAt,
         badge: "Saved",
         searchText: collectSearchText(message),
+        serverLibraryAction: serverLibraryActionFor(entry.id, entry.name, message),
         onPick: () => {
           replaceMessage(message);
           closeGallery();
@@ -269,7 +376,7 @@ export function TemplateGallery() {
         },
         onDelete: () => setPendingDelete({ kind: "saved", id: entry.id, name: entry.name }),
       })),
-    [savedMessages, replaceMessage, closeGallery],
+    [savedMessages, replaceMessage, closeGallery, serverLibraryActionFor],
   );
 
   // The connected server's library entries (only when the loaded library
@@ -291,11 +398,6 @@ export function TemplateGallery() {
     () => new Set((permanent?.items ?? []).filter((i) => !i.suspended).map((i) => i.message_id)),
     [permanent],
   );
-  const connectedGuildName = useMemo(
-    () => authGuilds.find((g) => g.id === connectedGuildId)?.name,
-    [authGuilds, connectedGuildId],
-  );
-
   const { libraryPostedCards, libraryDraftCards } = useMemo(() => {
     const posted: CardData[] = [];
     const drafts: CardData[] = [];
@@ -319,12 +421,13 @@ export function TemplateGallery() {
         }
       }
       const origin = libraryEntryOrigin(entry);
+      const displayName =
+        entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft");
       const card: CardData = {
         kind: isPosted ? "posted" : "saved",
         key: `lib:${entry.id}`,
         emoji: isPosted ? "📤" : "🔖",
-        name:
-          entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft"),
+        name: displayName,
         description: isPosted
           ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · in the ${
               connectedGuildName ?? "server"
@@ -339,6 +442,18 @@ export function TemplateGallery() {
         guildName: connectedGuildName,
         tags,
         searchText: collectSearchText(message),
+        serverLibraryAction: {
+          kind: "remove",
+          label: `Remove "${displayName}" from the server library`,
+          title: "Remove from server library",
+          onClick: () =>
+            setPendingDelete({
+              kind: "library",
+              id: entry.id,
+              guildId: entry.guild_id,
+              name: displayName,
+            }),
+        },
         onPick: () => {
           if (origin) {
             // Posted with its webhook intact: restore content *and* origin so
@@ -360,13 +475,6 @@ export function TemplateGallery() {
           }
           closeGallery();
         },
-        onDelete: () =>
-          setPendingDelete({
-            kind: "library",
-            id: entry.id,
-            guildId: entry.guild_id,
-            name: entry.title?.trim() || entry.dest_label || "this entry",
-          }),
       };
       (isPosted ? posted : drafts).push(card);
     }
@@ -405,11 +513,12 @@ export function TemplateGallery() {
         const where = entry.channelName
           ? `#${entry.channelName}${entry.guildName ? ` · ${entry.guildName}` : ""}`
           : entry.guildName;
+        const name = entry.channelName ? `#${entry.channelName}` : "Posted message";
         return {
           kind: "posted",
           key: entry.id,
           emoji: "📤",
-          name: entry.channelName ? `#${entry.channelName}` : "Posted message",
+          name,
           description: where
             ? `Posted to ${where}. Reload to edit and update it in place.`
             : "A message you posted. Reload to edit and update it in place.",
@@ -420,6 +529,7 @@ export function TemplateGallery() {
           guildId: entry.guildId,
           guildName: entry.guildName,
           searchText: collectSearchText(message),
+          serverLibraryAction: serverLibraryActionFor(entry.id, name, message),
           onPick: () => {
             // Restore content *and* origin — the Send panel reads the origin and
             // flips to "Update existing" with the webhook + message id prefilled.
@@ -438,7 +548,7 @@ export function TemplateGallery() {
             setPendingDelete({ kind: "posted", id: entry.id, name: where ?? "this message" }),
         };
       }),
-    [postedMessages, replaceMessageFromRestore, closeGallery],
+    [postedMessages, replaceMessageFromRestore, closeGallery, serverLibraryActionFor],
   );
 
   // The merged decks the chips/sections read: the connected server's shared
@@ -467,6 +577,7 @@ export function TemplateGallery() {
         requiresBot: t.requiresBot,
         pairsWith: t.pairsWith,
         searchText: collectSearchText(t.message),
+        serverLibraryAction: serverLibraryActionFor(t.id, t.name, t.message),
         onPick: () => {
           replaceMessage(t.message);
           closeGallery();
@@ -489,7 +600,7 @@ export function TemplateGallery() {
           }
         },
       })),
-    [replaceMessage, closeGallery],
+    [replaceMessage, closeGallery, serverLibraryActionFor],
   );
 
   // Chip row: Posted and Saved (each only when there are any), then a single
@@ -566,8 +677,16 @@ export function TemplateGallery() {
   const confirmDelete = () => {
     if (!pendingDelete) return;
     if (pendingDelete.kind === "library" && pendingDelete.guildId) {
-      const { guildId, id } = pendingDelete;
+      const { guildId, id, sourceKey } = pendingDelete;
       void removeLibrary(guildId, id).then((ok) => {
+        if (ok && sourceKey) {
+          setLibraryCopies((prev) => {
+            if (!prev[sourceKey]) return prev;
+            const next = { ...prev };
+            delete next[sourceKey];
+            return next;
+          });
+        }
         pushToast(
           ok ? "Removed from the server library" : "Couldn't remove it — try again.",
           ok ? "info" : "error",
@@ -842,12 +961,30 @@ function ServerIcon({
   );
 }
 
-function ServerLibraryIndicator() {
-  const label = "Saved in this server's library";
+function ServerLibraryActionButton({ action }: { action: ServerLibraryCardAction }) {
+  const disabled = action.kind === "saving" || !action.onClick;
+  const label = action.label;
   return (
-    <span className={styles.serverLibraryBadge} title={label} aria-label={label}>
+    <button
+      type="button"
+      className={styles.serverLibraryButton}
+      data-mode={action.kind}
+      aria-disabled={disabled ? "true" : undefined}
+      tabIndex={disabled ? -1 : undefined}
+      title={action.title}
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled) action.onClick?.();
+      }}
+    >
       <ServerStackIcon size={16} aria-hidden />
-    </span>
+      {action.kind === "save" ? (
+        <span className={styles.serverLibraryActionMark} aria-hidden>
+          <PlusIcon size={10} />
+        </span>
+      ) : null}
+    </button>
   );
 }
 
@@ -905,7 +1042,9 @@ function GalleryCard({ card }: { card: CardData }) {
       <div className={styles.cardPreview}>
         <TemplateThumbnail message={card.message} />
         <div className={styles.cardFade} aria-hidden />
-        {isServerLibrary ? <ServerLibraryIndicator /> : null}
+        {card.serverLibraryAction ? (
+          <ServerLibraryActionButton action={card.serverLibraryAction} />
+        ) : null}
         {card.onDelete ? (
           <button
             type="button"
@@ -931,10 +1070,10 @@ function GalleryCard({ card }: { card: CardData }) {
         <div className={styles.cardHover} aria-hidden>
           <span className={styles.useBtn}>
             {card.kind === "posted"
-                ? "Edit & update →"
-                : card.kind === "saved"
-                  ? "Load message →"
-                  : "Use this template →"}
+              ? "Edit & update →"
+              : card.kind === "saved"
+                ? "Load message →"
+                : "Use this template →"}
           </span>
         </div>
       </div>
