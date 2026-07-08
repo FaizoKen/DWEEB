@@ -666,6 +666,10 @@
   border-radius: var(--app-radius);
   background: var(--app-bg-subtle);
   overflow: hidden;
+  /* Query against the card's own width (not the viewport) so the two lanes
+     stay side by side whenever this panel can fit them — even when it's much
+     narrower than the window. */
+  container: options / inline-size;
 }
 
 .optionsTabs {
@@ -769,8 +773,25 @@
   transform: none;
 }
 
-/* Narrow panels can't fit two rich lanes side by side — stack them. */
-@media (max-width: 560px) {
+/* Keep both lanes on one row as long as the card can hold them. When the
+   subtitle no longer fits, drop it and tighten the lane instead of stacking —
+   the icon + title still say what each lane is. */
+@container options (max-width: 440px) {
+  .optionsTab {
+    padding: 9px 10px;
+    gap: 8px;
+  }
+  .optionsTabIcon {
+    width: 26px;
+    height: 26px;
+  }
+  .optionsTabSub {
+    display: none;
+  }
+}
+
+/* Only stack when even the compact single-line layout would overflow. */
+@container options (max-width: 250px) {
   .optionsTabs {
     grid-template-columns: 1fr;
   }
