@@ -64,12 +64,12 @@ interface StartOptions {
    *  application id. Delivered over the live socket, so it lands even while the
    *  Activity is backgrounded during the external-browser OAuth. */
   onBotConnected?: (applicationId: string) => void;
-  /** The room's starting content has arrived — fired once, the first time we
-   *  adopt a full-message draft from the room (a latecomer's `hello` reply, or
-   *  the server's `resume` of a persisted draft). Lets the shell reveal the
-   *  builder only once the real draft is in place, instead of flashing the
-   *  fresh-open default first. Never fires for a brand-new room where nothing's
-   *  coming — the shell falls back to a short grace timer for that case. */
+  /** The room's starting content has settled — fired once. Either we adopted a
+   *  full-message draft from the room (a latecomer's `hello` reply, or the
+   *  server's `resume` of a persisted draft) and it's now in the store, or — for a
+   *  brand-new room where nothing's coming — a grace armed on socket connect
+   *  elapsed. Lets the shell reveal the editor only once its real starting content
+   *  is in place, never flashing the fresh-open default first. */
   onHydrated?: () => void;
 }
 
@@ -82,12 +82,19 @@ const RECONNECT_MAX_MS = 15000;
  *  heartbeat, not a sync channel (peers already have the live state via patches),
  *  so a few seconds of lag on the stored copy is fine. */
 const SNAPSHOT_THROTTLE_MS = 4000;
+/** How long after the socket CONNECTS we wait for the room's initial draft before
+ *  revealing the editor anyway (see `onHydrated`). A room with a draft answers our
+ *  `hello` well within this; a brand-new room sends nothing, so this bounds the
+ *  wait for that case. Timed from connect — not launch — so a slow socket can't
+ *  reveal the fresh-open default before a draft has had a chance to arrive. */
+const HYDRATE_GRACE_MS = 700;
 
 let socket: WebSocket | null = null;
 let unsubStore: (() => void) | null = null;
 let unsubSelection: (() => void) | null = null;
 let sendTimer: ReturnType<typeof setTimeout> | null = null;
 let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+let hydrateGraceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSnapshotAt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
@@ -174,9 +181,11 @@ export function stopCollab(): void {
   if (sendTimer) clearTimeout(sendTimer);
   if (snapshotTimer) clearTimeout(snapshotTimer);
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (hydrateGraceTimer) clearTimeout(hydrateGraceTimer);
   sendTimer = null;
   snapshotTimer = null;
   reconnectTimer = null;
+  hydrateGraceTimer = null;
   unsubStore?.();
   unsubStore = null;
   unsubSelection?.();
@@ -232,6 +241,14 @@ function connect(): void {
     // Re-announce where we're editing so a reconnect restores our presence ring
     // for everyone (peers dropped it when our socket closed).
     if (currentFocus) sendFocus(currentFocus);
+    // Arm the fresh-room reveal fallback: if no draft answers our `hello` within
+    // the grace, reveal the editor anyway (nothing's coming). Started here, on
+    // connect, so the wait is measured from when a draft could actually arrive.
+    // A draft landing first cancels it (see `signalHydrated`); on a reconnect
+    // it's already fired, so the guard skips re-arming.
+    if (!hydratedFired && !hydrateGraceTimer) {
+      hydrateGraceTimer = setTimeout(signalHydrated, HYDRATE_GRACE_MS);
+    }
   };
 
   ws.onmessage = (ev: MessageEvent) => {
@@ -340,6 +357,20 @@ function handleFrame(frame: Record<string, unknown>): void {
   }
 }
 
+/** Tell the shell the room's initial content has settled, exactly once — the
+ *  first time we take in a full draft (from `applyFull`) or, for a fresh room,
+ *  when the connect grace elapses with nothing received. Clears the grace timer
+ *  so the two paths can't double-fire. */
+function signalHydrated(): void {
+  if (hydratedFired) return;
+  hydratedFired = true;
+  if (hydrateGraceTimer) {
+    clearTimeout(hydrateGraceTimer);
+    hydrateGraceTimer = null;
+  }
+  opts?.onHydrated?.();
+}
+
 /** Adopt a peer's full-message snapshot (latecomer sync, a top-level structural
  *  change, or a reconnect peer answering our `hello`) — but reconcile it with any
  *  local edits we haven't managed to broadcast yet, so an inbound full message
@@ -353,14 +384,6 @@ function handleFrame(frame: Record<string, unknown>): void {
  *  data-loss bug. When nothing is pending this reduces to adopting the peer's
  *  state verbatim, exactly as before. */
 function applyFull(message: WebhookMessage): void {
-  // The room just handed us a full draft — its real starting content is now in
-  // hand, so tell the shell it can reveal the builder (once, on the first such
-  // frame; later structural drafts don't re-fire it).
-  if (!hydratedFired) {
-    hydratedFired = true;
-    opts?.onHydrated?.();
-  }
-
   const ours = useMessageStore.getState().message;
   const pending = lastSent ? diffMessage(lastSent, ours) : [];
 
@@ -373,6 +396,9 @@ function applyFull(message: WebhookMessage): void {
     lastSent = message;
     diverged = true;
     scheduleSync();
+    // We received the room's draft (kept ours for a structural conflict, but the
+    // initial sync is settled) — safe to reveal.
+    signalHydrated();
     return;
   }
 
@@ -383,6 +409,12 @@ function applyFull(message: WebhookMessage): void {
   } finally {
     applyingRemote = false;
   }
+  // The store now holds the room's draft — reveal the shell AFTER that write, not
+  // before, so the component list appears with the real message already in place.
+  // Flipping the reveal first (as an earlier version did) leaves one frame where
+  // the tree is shown but still holds the fresh-open default — the flash we're
+  // avoiding.
+  signalHydrated();
   // Baseline is the peer's frame; any reapplied local ops remain a pending diff
   // against it, so the next sync re-broadcasts our surviving edits to the room.
   lastSent = message;

@@ -247,13 +247,6 @@ const AUTHORIZE_TIMEOUT_MS = 25_000;
 const EXCHANGE_TIMEOUT_MS = 20_000;
 const AUTHENTICATE_TIMEOUT_MS = 20_000;
 
-/** How long the shell waits for the room's initial draft before revealing the
- *  builder anyway. An inbound draft (collab's `onHydrated`) reveals sooner; this
- *  only bounds the brand-new-room case, where nothing is coming to sync — short
- *  enough that a fresh room doesn't sit on a skeleton, long enough to catch the
- *  usual hello→draft round-trip so a joiner reveals with the real content. */
-const HYDRATE_GRACE_MS = 800;
-
 /** Above this hash-URL length the "Open on web" hand-off uploads the draft as a
  *  short link instead, so the host's external-link open never chokes on a huge
  *  URL. Small drafts stay fully client-side in the hash (nothing uploaded). */
@@ -456,20 +449,17 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         // A custom bot's connect flow finished — surface it so the post dialog
         // selects it right away (see PostConfirm's consume effect).
         onBotConnected: (applicationId) => set({ connectedBot: applicationId }),
-        // The room handed us its in-progress draft — the editor now holds real
-        // content, so let the shell reveal the builder (see `hydrated`).
+        // The room's initial content has settled — its in-progress draft synced
+        // in, or (a fresh room) the connect grace elapsed with nothing coming.
+        // Either way the editor now holds its real starting message, so let the
+        // shell reveal the component list (see `hydrated`). Collab owns the timing
+        // — it fires this after writing the draft to the store and, for a fresh
+        // room, off a grace armed on socket connect (not launch), so a slow socket
+        // can't reveal the fresh-open default before a draft arrives.
         onHydrated: () => {
           if (!get().hydrated) set({ hydrated: true });
         },
       });
-
-      // Fallback reveal: a brand-new room has no draft to sync, so `onHydrated`
-      // never fires — flip `hydrated` after a short grace so the builder doesn't
-      // sit behind the skeleton waiting for a frame that isn't coming. Idempotent
-      // with the callback above (whichever happens first wins).
-      window.setTimeout(() => {
-        if (!get().hydrated) set({ hydrated: true });
-      }, HYDRATE_GRACE_MS);
     } catch (e) {
       stopCollab();
       const message =
