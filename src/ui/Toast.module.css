@@ -2,7 +2,9 @@
   position: fixed;
   top: 16px;
   right: 16px;
-  z-index: var(--app-z-tooltip);
+  /* Toasts are global feedback, so keep them above full-screen overlays that
+     also live on the tooltip/modal layers, including gallery confirm dialogs. */
+  z-index: calc(var(--app-z-tooltip) + 30);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
