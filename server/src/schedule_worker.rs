@@ -54,6 +54,7 @@ pub fn spawn(
     http: reqwest::Client,
     dispatcher: Option<Arc<DispatcherApi>>,
     entitlements: Arc<crate::entitlement::Entitlement>,
+    library: Option<Arc<crate::library::LibraryStore>>,
     tick_secs: u64,
     lease_secs: i64,
     batch: usize,
@@ -74,6 +75,7 @@ pub fn spawn(
                 &http,
                 dispatcher.as_ref(),
                 &entitlements,
+                library.as_ref(),
                 lease_secs,
                 batch,
             )
@@ -97,12 +99,14 @@ pub fn spawn(
 }
 
 /// Claim and process one batch of due schedules.
+#[allow(clippy::too_many_arguments)]
 async fn drain_once(
     store: &Arc<ScheduleStore>,
     key: &Key,
     http: &reqwest::Client,
     dispatcher: Option<&Arc<DispatcherApi>>,
     entitlements: &Arc<crate::entitlement::Entitlement>,
+    library: Option<&Arc<crate::library::LibraryStore>>,
     lease_secs: i64,
     batch: usize,
 ) -> Result<(), String> {
@@ -112,7 +116,17 @@ async fn drain_once(
         .await
         .map_err(|e| e.to_string())??;
     for job in jobs {
-        process(store, key, http, dispatcher, entitlements, job, now).await;
+        process(
+            store,
+            key,
+            http,
+            dispatcher,
+            entitlements,
+            library,
+            job,
+            now,
+        )
+        .await;
     }
     Ok(())
 }
@@ -125,6 +139,7 @@ async fn process(
     http: &reqwest::Client,
     dispatcher: Option<&Arc<DispatcherApi>>,
     entitlements: &Arc<crate::entitlement::Entitlement>,
+    library: Option<&Arc<crate::library::LibraryStore>>,
     job: ClaimedJob,
     now: i64,
 ) {
@@ -202,6 +217,26 @@ async fn process(
                     channel_id.as_deref(),
                 )
                 .await;
+                // Land the post in the server's message library too (best-effort),
+                // so a fired schedule shows up on the shared shelf like any other
+                // posted message. Reuses the row's sealed payload/webhook as-is.
+                if let (Some(guild), Some(mid)) = (&job.guild_id, msg_id.as_deref()) {
+                    crate::library::record_fired_schedule(
+                        library,
+                        entitlements,
+                        guild,
+                        channel_id.as_deref(),
+                        mid,
+                        &job.payload_sealed,
+                        &job.webhook_sealed,
+                        &job.webhook_id,
+                        job.thread_id.as_deref(),
+                        job.title.as_deref(),
+                        job.dest_label.as_deref(),
+                        job.owner_user_id.as_deref(),
+                    )
+                    .await;
+                }
                 let next = compute_next(&job, now);
                 success(
                     store,
@@ -478,6 +513,8 @@ mod tests {
             guild_id: None,
             make_permanent: false,
             owner_user_id: None,
+            title: None,
+            dest_label: None,
         };
         assert_eq!(compute_next(&once, 1000), None);
 

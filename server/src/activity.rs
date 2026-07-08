@@ -501,6 +501,26 @@ pub async fn activity_post(
         (false, Value::Null)
     };
 
+    // Land the post in the server's message library (best-effort, logged-only
+    // failure): the Activity has no browser-local posted list, so this shared
+    // record is what lets either surface reload the message later and update it
+    // in place. The execute URL is sealed at rest by the library store.
+    crate::library::record_posted_best_effort(
+        &st,
+        &guild,
+        Some(&channel_id),
+        &message_id,
+        None,
+        Some(&format!(
+            "https://discord.com/api/webhooks/{webhook_id}/{token}"
+        )),
+        &body.message,
+        None,
+        None,
+        &session.uid,
+    )
+    .await;
+
     Ok(Json(json!({
         "message_id": message_id,
         "channel_id": channel_id,
@@ -1214,8 +1234,26 @@ pub async fn activity_edit(
     };
 
     st.discord
-        .edit_webhook_message(&webhook_id, &token, &message_id, body.message)
+        .edit_webhook_message(&webhook_id, &token, &message_id, body.message.clone())
         .await?;
+
+    // Refresh the message's library entry (or create one, for a message posted
+    // before the library existed) so the shared shelf tracks the live content.
+    crate::library::record_posted_best_effort(
+        &st,
+        &guild,
+        Some(&channel_id),
+        &message_id,
+        None,
+        Some(&format!(
+            "https://discord.com/api/webhooks/{webhook_id}/{token}"
+        )),
+        &body.message,
+        None,
+        None,
+        &session.uid,
+    )
+    .await;
 
     Ok(Json(json!({
         "message_id": message_id,

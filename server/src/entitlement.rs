@@ -113,6 +113,7 @@ impl Entitlement {
                 "permanent": lim(limits.permanent),
                 "custom_bots": lim(limits.custom_bots),
                 "coeditors": lim(limits.coeditors),
+                "library": lim(limits.library),
             },
             "billing": self.enabled(),
         })
@@ -132,6 +133,16 @@ impl Entitlement {
         }
         let tier = self.tier_for(guild).await;
         Some(unlimited_to_max(self.limits_for(tier).schedules))
+    }
+
+    /// A server's message-library quota, honouring its tier. `None` when
+    /// disabled (caller uses its store default). Unlimited → `i64::MAX`.
+    pub async fn library_limit(&self, guild: &str) -> Option<i64> {
+        if !self.enabled() {
+            return None;
+        }
+        let tier = self.tier_for(guild).await;
+        Some(unlimited_to_max(self.limits_for(tier).library))
     }
 
     /// A server's never-expire slot cap for the dispatcher, or `None` when

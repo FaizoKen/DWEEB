@@ -112,6 +112,13 @@ services:
       # redeploy; best-effort, so an unwritable path just disables resume rather
       # than failing boot. Rows are swept after ACTIVITY_DRAFT_RETENTION_DAYS.
       ACTIVITY_DRAFT_DB_PATH: ${ACTIVITY_DRAFT_DB_PATH:-/data/activity-drafts.db}
+      # The per-server message library (posted messages + saved drafts, shared
+      # by the web app and the embedded Activity) lives in its own SQLite file
+      # on the SAME proxy_data volume — a saved message is a promise to keep it.
+      # Payloads + webhook URLs are sealed at rest under SESSION_SECRET. Set
+      # LIBRARY_ENABLED=false to disable (the endpoints answer 501); per-server
+      # caps come from the plan tiers (or LIBRARY_MAX_PER_GUILD standalone).
+      LIBRARY_DB_PATH: ${LIBRARY_DB_PATH:-/data/library.db}
     volumes:
       # The proxy's only state: the SQLite file with the opt-in share short
       # links (auto-expiring, default 7 days).

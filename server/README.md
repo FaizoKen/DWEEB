@@ -124,6 +124,35 @@ cap (`SCHEDULE_MAX_ENTRIES`), a horizon (`SCHEDULE_MAX_HORIZON_DAYS`), and a
 payload size limit. Set `SCHEDULES_ENABLED=false` to disable the feature (the
 endpoints answer 501 and the worker never starts).
 
+### Message library (per server)
+
+The **library** (`library.rs`) is the server-side twin of the builder's
+browser-local posted/saved stores: one shared, labelled shelf of messages per
+Discord server, readable and writable by anyone holding **Manage Webhooks**
+there — from the web app (cookie session) *and* the embedded Activity (bearer),
+via `GET/POST /api/guilds/:id/library` + `PATCH/DELETE …/library/:entry`.
+
+Rows carry a `label`: **`posted`** (a live Discord message, upserted by its
+message id so re-posting refreshes one entry instead of duplicating — and it
+keeps the sealed webhook execute URL, so a later load can update the message in
+place) or **`draft`** (pure content, saved deliberately). Posted entries are
+recorded automatically: the web Send panel mirrors each successful send, the
+Activity's server-side publish/edit handlers record their posts, and the
+schedule worker records each fired schedule (reusing the row's already-sealed
+payload/webhook). Scheduled and never-expire status are *derived* client-side
+from their own APIs — never duplicated here.
+
+Payloads and webhook URLs are **sealed at rest** like a schedule's
+(AES-256-GCM under `SESSION_SECRET`), in their own SQLite file
+(`LIBRARY_DB_PATH`, on the `proxy_data` volume). The per-server cap is the plan
+gate (`PLAN_*_LIBRARY`: Free 10 / Plus 100 / Pro unlimited; standalone
+deployments use `LIBRARY_MAX_PER_GUILD`), and quota only ever gates *creation* —
+a downgraded server keeps every entry readable. Auto-records at quota are
+silently skipped (a send must never look failed because the shelf is full).
+`LIBRARY_MAX_ENTRIES` bounds total disk use; `LIBRARY_ENABLED=false` turns the
+feature off (the endpoints answer 501 and both frontends fall back to
+browser-local storage).
+
 ### Creating a webhook (`webhook.incoming`)
 
 `/auth/webhook` starts Discord's **`webhook.incoming`** OAuth flow: Discord shows

@@ -26,6 +26,8 @@ pub struct TierLimits {
     pub custom_bots: i64,
     /// Concurrent live co-editors in an Activity collaboration room.
     pub coeditors: i64,
+    /// Message-library entries (per server).
+    pub library: i64,
 }
 
 /// The Free / Plus / Pro quota table read by `entitlement.rs`.
@@ -170,6 +172,22 @@ pub struct Config {
     /// the worker sweeps it.
     pub schedule_retention_days: i64,
 
+    // ── Message library ────────────────────────────────────────────────────
+    /// Master switch for the per-server message library. False ⇒ the
+    /// `/api/guilds/:id/library` endpoints answer 501 and both frontends fall
+    /// back to browser-local storage only. Default on — like schedules it
+    /// needs no secret beyond SESSION_SECRET, which sealing already requires.
+    pub library_enabled: bool,
+    /// SQLite file the library lives in. Must sit on persistent storage — a
+    /// saved message is a promise to keep it, so it has to survive a redeploy.
+    pub library_db_path: String,
+    /// Creation answers 503 once this many entries are stored (existing ones
+    /// stay readable); bounds worst-case disk use under abuse.
+    pub library_max_entries: u64,
+    /// Max entries per server when plan entitlement is disabled — the
+    /// standalone default the tier limits override.
+    pub library_max_per_guild: u64,
+
     // ── Permanent component slots ──────────────────────────────────────────
     /// Base URL of the interactions dispatcher's internal API (compose-network
     /// address, e.g. `http://dispatcher:8095`). Together with
@@ -299,6 +317,12 @@ impl Config {
         let scheduler_batch = parse_or("SCHEDULER_BATCH", 25);
         let schedule_retention_days = parse_or("SCHEDULE_RETENTION_DAYS", 7);
 
+        let library_enabled = parse_bool("LIBRARY_ENABLED", true);
+        let library_db_path =
+            opt_env("LIBRARY_DB_PATH").unwrap_or_else(|| "library.db".to_string());
+        let library_max_entries = parse_or("LIBRARY_MAX_ENTRIES", 100_000);
+        let library_max_per_guild = parse_or("LIBRARY_MAX_PER_GUILD", 100);
+
         let dispatcher_url = opt_env("DISPATCHER_URL").map(|u| u.trim_end_matches('/').to_string());
         let dispatcher_token = opt_env("DISPATCHER_API_TOKEN");
 
@@ -332,12 +356,14 @@ impl Config {
                 permanent: parse_or("PLAN_FREE_PERMANENT", 5),
                 custom_bots: parse_or("PLAN_FREE_CUSTOM_BOTS", 1),
                 coeditors: parse_or("PLAN_FREE_COEDITORS", 2),
+                library: parse_or("PLAN_FREE_LIBRARY", 10),
             },
             plus: TierLimits {
                 schedules: parse_or("PLAN_PLUS_SCHEDULES", 30),
                 permanent: parse_or("PLAN_PLUS_PERMANENT", 25),
                 custom_bots: parse_or("PLAN_PLUS_CUSTOM_BOTS", 2),
                 coeditors: parse_or("PLAN_PLUS_COEDITORS", 6),
+                library: parse_or("PLAN_PLUS_LIBRARY", 100),
             },
             pro: TierLimits {
                 // 0 = unlimited (mapped to i64::MAX at each gate).
@@ -345,6 +371,7 @@ impl Config {
                 permanent: parse_or("PLAN_PRO_PERMANENT", 0),
                 custom_bots: parse_or("PLAN_PRO_CUSTOM_BOTS", 5),
                 coeditors: parse_or("PLAN_PRO_COEDITORS", 25),
+                library: parse_or("PLAN_PRO_LIBRARY", 0),
             },
         };
 
@@ -386,6 +413,10 @@ impl Config {
             scheduler_lease_secs,
             scheduler_batch,
             schedule_retention_days,
+            library_enabled,
+            library_db_path,
+            library_max_entries,
+            library_max_per_guild,
             dispatcher_url,
             dispatcher_token,
             stripe_secret_key,

@@ -46,6 +46,8 @@ import {
   restorePostedMessage,
   type ActivityPostResult,
 } from "./api";
+import { libraryEntryMessage } from "@/core/library/libraryStore";
+import type { LibraryEntryView } from "@/core/library/api";
 import { startCollab, stopCollab, broadcastTarget, type CollabParticipant } from "./collab";
 import { setActivityToken } from "./runtime";
 import { startHandshakeTrace } from "./telemetry";
@@ -182,6 +184,12 @@ interface ActivityState {
    *  the editor is wired to update that message in place ({@link lastPost}).
    *  Throws with a user-facing message on failure so the caller can surface it. */
   restore(input: string): Promise<void>;
+  /** Load a server-library entry into the shared editor (collab broadcasts it
+   *  to the room). A posted entry in the target server also re-wires the
+   *  toolbar to update that live message in place ({@link lastPost}), exactly
+   *  like a restore. Returns false when the entry's payload couldn't be read
+   *  (an unopenable seal), so the caller can say so. */
+  loadLibraryEntry(entry: LibraryEntryView): boolean;
   /** Open the last posted message in Discord (the sandboxed iframe can't
    *  navigate to discord.com itself, so this goes through the SDK). */
   openLastPost(): Promise<void>;
@@ -615,6 +623,45 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     } finally {
       set({ restoring: false });
     }
+  },
+
+  loadLibraryEntry(entry) {
+    const message = libraryEntryMessage(entry);
+    if (!message) return false;
+    // Load it into the shared editor — collab broadcasts the new draft to
+    // everyone in the room, exactly like a restore.
+    useMessageStore.getState().replaceMessage(message);
+    // A posted entry that lives in the target server re-wires the toolbar to
+    // update the live message in place. The Update button lights up once the
+    // room's destination channel matches the message's channel (same rule as
+    // after a fresh post); a draft just loads content.
+    if (
+      entry.label === "posted" &&
+      entry.message_id &&
+      entry.channel_id &&
+      entry.guild_id === get().targetGuildId
+    ) {
+      set({
+        lastPost: {
+          message_id: entry.message_id,
+          channel_id: entry.channel_id,
+          guild_id: entry.guild_id,
+          url: `https://discord.com/channels/${entry.guild_id}/${entry.channel_id}/${entry.message_id}`,
+          webhook_id: entry.webhook_id ?? undefined,
+          application_id: null,
+        },
+      });
+      const onTarget = entry.channel_id === get().targetChannelId;
+      pushToast(
+        onTarget
+          ? "Loaded from the library. Edits will update this message ✓"
+          : "Loaded from the library — switch to its channel to update it in place.",
+        "success",
+      );
+    } else {
+      pushToast("Loaded from the server library.", "success");
+    }
+    return true;
   },
 
   async openLastPost() {

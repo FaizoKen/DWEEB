@@ -23,6 +23,7 @@ import { IconButton } from "@/ui/IconButton";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { pushToast } from "@/ui/Toast";
 import {
+  BookmarkIcon,
   ExternalLinkIcon,
   GlobeIcon,
   HistoryIcon,
@@ -37,6 +38,7 @@ import {
 } from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
 import { GuildPicker, ServerGlyph, ServerGlyphSkeleton } from "./GuildPicker";
+import { LibraryDialog } from "./LibraryDialog";
 import { RestoreDialog } from "./RestoreDialog";
 import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
@@ -239,6 +241,9 @@ export function ActivityBar() {
     : undefined;
 
   const [restoreOpen, setRestoreOpen] = useState(false);
+  // The server-library "Start a message" dialog. Reads the same Manage-Webhooks
+  // gate as Restore (the proxy enforces it), so it shares the disabled states.
+  const [libraryOpen, setLibraryOpen] = useState(false);
   // The pre-post confirm dialog: non-null while a post awaits confirmation. The
   // actual POST/PATCH runs from `confirmPost` once the user confirms.
   const [pending, setPending] = useState<PendingPost | null>(null);
@@ -427,6 +432,16 @@ export function ActivityBar() {
                   </MenuItem>
                 ) : null}
                 <MenuItem
+                  icon={<BookmarkIcon size={16} />}
+                  disabled={!targetGuildId || blockedFromPosting || botMissing}
+                  onSelect={() => {
+                    close();
+                    setLibraryOpen(true);
+                  }}
+                >
+                  Start a message
+                </MenuItem>
+                <MenuItem
                   icon={<HistoryIcon size={16} />}
                   disabled={noDestination || blockedFromPosting || botMissing}
                   onSelect={() => {
@@ -461,6 +476,20 @@ export function ActivityBar() {
           </Menu>
         ) : (
           <>
+            <IconButton
+              label={
+                botMissing
+                  ? "Add DWEEB to this server first to open its message library"
+                  : blockedFromPosting
+                    ? blockedReason
+                    : "Start a message — this server's message library"
+              }
+              onClick={() => setLibraryOpen(true)}
+              disabled={!targetGuildId || blockedFromPosting || botMissing}
+            >
+              <BookmarkIcon />
+            </IconButton>
+
             <IconButton
               label={
                 botMissing
@@ -590,6 +619,7 @@ export function ActivityBar() {
       </div>
 
       <RestoreDialog open={restoreOpen} onClose={() => setRestoreOpen(false)} />
+      <LibraryDialog open={libraryOpen} onClose={() => setLibraryOpen(false)} />
 
       <PostConfirm
         open={pending != null}

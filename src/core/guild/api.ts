@@ -149,6 +149,8 @@ export interface PlanLimits {
   permanent: number | null;
   custom_bots: number | null;
   coeditors: number | null;
+  /** Message-library entries per server. */
+  library: number | null;
 }
 
 /** A server's plan, from `GET /api/guilds/:id/plan`. */

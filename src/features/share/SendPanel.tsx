@@ -82,6 +82,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { usePostedMessagesStore } from "@/core/state/postedMessagesStore";
+import { useLibraryStore } from "@/core/library/libraryStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
@@ -1155,6 +1156,21 @@ export function SendPanel({
             webhookAvatar: resolvedAvatar ?? knownAvatar,
             message,
           });
+          // Mirror the record into the destination server's shared library
+          // (label "posted", upserted by message id) so teammates — and the
+          // embedded Activity — see it too. Fire-and-forget: the send already
+          // landed, so a full library / expired session never surfaces here;
+          // the local record above remains the offline fallback.
+          if (effGuildId) {
+            void useLibraryStore.getState().recordPosted(effGuildId, {
+              messageId: postedMessageId,
+              webhookUrl: parsedUrl.url,
+              channelId: effChannelId,
+              threadId: effThreadId || undefined,
+              destLabel: effChannelName ? `#${effChannelName}` : undefined,
+              message,
+            });
+          }
         }
 
         // A thread post lives under the thread id, which Discord uses as the

@@ -1,0 +1,108 @@
+.lead {
+  margin: 0 0 var(--app-space-4);
+  color: var(--app-text-muted);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+}
+
+.lead strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+/* Loading / empty placeholder. */
+.state {
+  padding: var(--app-space-5) var(--app-space-3);
+  text-align: center;
+  color: var(--app-text-subtle);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* The shelf can hold up to the plan quota — keep the dialog usable. */
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--app-radius);
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  color: var(--app-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.row:hover {
+  background: var(--app-bg-hover);
+}
+.row:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+.rowEmoji {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rowTitle {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowSub {
+  font-size: var(--app-text-xs);
+  color: var(--app-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowBadge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--app-text-subtle);
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+}
+.rowBadge[data-label="posted"] {
+  color: #3ba55d;
+  border-color: color-mix(in srgb, #3ba55d 40%, transparent);
+  background: color-mix(in srgb, #3ba55d 10%, transparent);
+}
+
+/* Footer usage meter, left of the "Start blank" action. */
+.meter {
+  margin-right: auto;
+  align-self: center;
+  font-size: var(--app-text-xs);
+  color: var(--app-text-subtle);
+}

@@ -29,6 +29,7 @@ export function tierLabel(tier: PlanTier): string {
 const LIMIT_ROWS: { key: keyof PlanInfo["limits"]; label: string }[] = [
   { key: "schedules", label: "Scheduled posts" },
   { key: "permanent", label: "Never-expire panels" },
+  { key: "library", label: "Library messages" },
   { key: "custom_bots", label: "Custom bots" },
   { key: "coeditors", label: "Live co-editors" },
 ];

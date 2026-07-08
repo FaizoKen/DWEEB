@@ -597,6 +597,29 @@
   color: var(--app-text-subtle);
 }
 
+/* Derived status pills on server-library cards ("Never expires", "Buttons
+ * expired") — same chip geometry as the badge, tinted by tone. */
+.cardTag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--app-text-subtle);
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+}
+.cardTag[data-tone="ok"] {
+  color: #3ba55d;
+  border-color: color-mix(in srgb, #3ba55d 40%, transparent);
+  background: color-mix(in srgb, #3ba55d 10%, transparent);
+}
+.cardTag[data-tone="warn"] {
+  color: #d83c3e;
+  border-color: color-mix(in srgb, #d83c3e 40%, transparent);
+  background: color-mix(in srgb, #d83c3e 10%, transparent);
+}
+
 /* The Continue card is the primary "resume" action — give its text section a
  * soft accent-tinted background so it reads as distinct from the template cards
  * without any extra border or glow. */
@@ -670,6 +693,31 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Server-library usage meter + hand-off to Managed messages: a quiet text
+ * button between the hint and the primary footer action. */
+.libraryMeter {
+  flex-shrink: 0;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--app-radius);
+  background: transparent;
+  border: 1px solid var(--app-border);
+  color: var(--app-text-subtle);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease;
+}
+.libraryMeter:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.libraryMeter:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
 }
 
 .blankBtn {

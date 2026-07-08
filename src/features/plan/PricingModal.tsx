@@ -56,6 +56,7 @@ const TIERS: TierDef[] = [
 const ROWS: { label: string; values: Record<PlanTier, string> }[] = [
   { label: "Scheduled posts", values: { free: "3", plus: "30", pro: "Unlimited" } },
   { label: "Never-expire panels", values: { free: "5", plus: "25", pro: "Unlimited" } },
+  { label: "Library messages", values: { free: "10", plus: "100", pro: "Unlimited" } },
   { label: "Custom bots", values: { free: "1", plus: "2", pro: "5" } },
   { label: "Live co-editors", values: { free: "2", plus: "6", pro: "25" } },
 ];

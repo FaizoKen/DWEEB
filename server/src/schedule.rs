@@ -150,6 +150,10 @@ pub struct ClaimedJob {
     pub make_permanent: bool,
     /// The signed-in creator, recorded as `added_by` on the slot grant (audit).
     pub owner_user_id: Option<String>,
+    /// Title + destination label, carried into the message-library entry the
+    /// worker records after a successful send (display-only).
+    pub title: Option<String>,
+    pub dest_label: Option<String>,
 }
 
 /// Everything `create` needs (secrets already sealed by the handler).
@@ -582,7 +586,7 @@ impl ScheduleStore {
                 .query_row(
                     "SELECT id, webhook_id, webhook_sealed, thread_id, payload_sealed, tz, \
                      recurrence_json, end_at, max_runs, runs_count, attempts, guild_id, \
-                     make_permanent, owner_user_id \
+                     make_permanent, owner_user_id, title, dest_label \
                      FROM scheduled_posts WHERE id=?1",
                     [id],
                     |r| {
@@ -601,6 +605,8 @@ impl ScheduleStore {
                             guild_id: r.get(11)?,
                             make_permanent: r.get::<_, i64>(12)? != 0,
                             owner_user_id: r.get(13)?,
+                            title: r.get(14)?,
+                            dest_label: r.get(15)?,
                         })
                     },
                 )
@@ -1300,7 +1306,8 @@ pub fn unix_now() -> i64 {
 }
 
 /// Unbiased random base62 string (rejection sampling, like the short-link ids).
-fn random_base62(len: usize) -> Option<String> {
+/// Shared with the message library's entry ids.
+pub(crate) fn random_base62(len: usize) -> Option<String> {
     let max = 256 - (256 % ALPHABET.len());
     let mut out = String::with_capacity(len);
     while out.len() < len {

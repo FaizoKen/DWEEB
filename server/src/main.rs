@@ -20,6 +20,7 @@ mod config;
 mod discord;
 mod entitlement;
 mod error;
+mod library;
 mod ratelimit;
 mod reconcile;
 mod routes;
@@ -240,6 +241,31 @@ async fn run() {
         });
     }
 
+    // Per-server message library: a small SQLite file on the same persistent
+    // volume (a saved message is a promise to keep it). Boot fails loudly if it
+    // can't be opened — a deployment that accepts library entries has to be able
+    // to keep them. No sweeper: entries live until their owner deletes them,
+    // bounded by the per-server quota and the global cap. Opened before the
+    // schedule worker so a fired schedule can auto-record its post here.
+    let library = if config.library_enabled {
+        match library::LibraryStore::open(
+            &config.library_db_path,
+            config.library_max_entries,
+            config.library_max_per_guild,
+        ) {
+            Ok(store) => {
+                tracing::info!(db = %config.library_db_path, "message library enabled");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                eprintln!("library store error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     // Scheduled posts: a small SQLite file on the same persistent volume as the
     // short links (a schedule is a promise to post later, so it must outlive a
     // redeploy). Boot fails loudly if it can't be opened — a deployment that
@@ -286,6 +312,9 @@ async fn run() {
             // Consulted at fire time so a make-permanent schedule respects the
             // owner's plan tier when spending a never-expire slot.
             entitlements.clone(),
+            // A fired schedule's post lands in the server's message library too
+            // (best-effort), so "what did the scheduler send?" has one answer.
+            library.clone(),
             config.scheduler_tick_secs,
             config.scheduler_lease_secs,
             config.scheduler_batch,
@@ -349,6 +378,7 @@ async fn run() {
         schedules,
         activity_rooms: Arc::new(crate::activity::ActivityRooms::new()),
         activity_drafts,
+        library,
         entitlements,
         stripe,
         key,
@@ -404,6 +434,22 @@ async fn run() {
         .route(
             "/api/guilds/:guild_id/schedules",
             get(schedule_list_for_guild),
+        )
+        // Per-server message library (Manage Webhooks gated, cookie OR Activity
+        // bearer): the shared shelf of posted messages + saved drafts both the
+        // web app and the embedded Activity read. The body limit matches the
+        // schedule endpoints — a maxed-out message plus envelope fits well within.
+        .route(
+            "/api/guilds/:guild_id/library",
+            get(library::library_list)
+                .post(library::library_create)
+                .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
+        .route(
+            "/api/guilds/:guild_id/library/:id",
+            patch(library::library_patch)
+                .delete(library::library_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
         )
         // Embedded Discord Activity: SDK token exchange, server-side publish,
         // and the real-time collaboration room (see `activity.rs`). The token +

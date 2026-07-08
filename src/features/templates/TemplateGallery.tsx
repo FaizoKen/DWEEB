@@ -37,7 +37,15 @@ import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
 import { recordOrigin, usePostedMessagesStore } from "@/core/state/postedMessagesStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
-import { guildIconUrl } from "@/core/guild/api";
+import { fetchPermanentSlots, guildIconUrl, type PermanentSlots } from "@/core/guild/api";
+import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
+import { isLibraryConfigured } from "@/core/library/api";
+import {
+  libraryEntryMessage,
+  libraryEntryOrigin,
+  useLibraryStore,
+} from "@/core/library/libraryStore";
+import { interactiveComponents } from "@/core/plugins/targets";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { loadDraftMessage } from "@/core/state/draftStorage";
 import { attachEditorFields } from "@/core/serialization/normalize";
@@ -104,6 +112,9 @@ interface CardData {
   onPick: () => void;
   /** Saved only — remove this entry; drives the card's delete affordance. */
   onDelete?: () => void;
+  /** Extra status pills after the badge — the library's derived labels
+   *  ("Never expires", "Buttons expired", "Shared"). */
+  tags?: { text: string; tone: "ok" | "warn" | "info" }[];
   /** Lowercased text pulled from the message body (content, labels, …) so the
    *  card is findable by what the message says, not just its name. Precomputed
    *  when the card is built so search stays cheap per keystroke. */
@@ -158,10 +169,44 @@ export function TemplateGallery() {
     () => useTemplateGalleryStore.getState().initialFilter,
   );
   const [pendingDelete, setPendingDelete] = useState<{
-    kind: "saved" | "posted";
+    kind: "saved" | "posted" | "library";
     id: string;
     name: string;
+    /** Library only — the server the entry belongs to. */
+    guildId?: string;
   } | null>(null);
+
+  // The connected server's shared library (posted messages + server drafts),
+  // refreshed on open / when the connected server changes. Fails soft: a signed-
+  // out user or a member without Manage Webhooks simply sees no server section.
+  const libraryOn = isLibraryConfigured();
+  const libEntries = useLibraryStore((s) => s.entries);
+  const libGuild = useLibraryStore((s) => s.guildId);
+  const libUsed = useLibraryStore((s) => s.used);
+  const libQuota = useLibraryStore((s) => s.quota);
+  const libLoaded = useLibraryStore((s) => s.loaded);
+  const removeLibrary = useLibraryStore((s) => s.remove);
+  useEffect(() => {
+    if (libraryOn && connectedGuildId) {
+      void useLibraryStore.getState().refresh(connectedGuildId);
+    }
+  }, [libraryOn, connectedGuildId]);
+
+  // Never-expire slot state for the connected server, so library cards can
+  // carry "Never expires" / "Buttons expired" labels. Display-only and
+  // fail-soft (a 501/403 just hides the labels).
+  const [permanent, setPermanent] = useState<PermanentSlots | null>(null);
+  useEffect(() => {
+    if (!libraryOn || !connectedGuildId) {
+      setPermanent(null);
+      return;
+    }
+    const ac = new AbortController();
+    fetchPermanentSlots(connectedGuildId, ac.signal)
+      .then(setPermanent)
+      .catch(() => setPermanent(null));
+    return () => ac.abort();
+  }, [libraryOn, connectedGuildId]);
   const searchRef = useRef<HTMLInputElement | null>(null);
   // Scroll the connected server's Posted-tab section into view — the scrollable
   // body and the active section it should land on.
@@ -232,7 +277,7 @@ export function TemplateGallery() {
     [draft, closeGallery],
   );
 
-  const savedCards: CardData[] = useMemo(
+  const localSavedCards: CardData[] = useMemo(
     () =>
       savedMessages.map(({ entry, message }) => ({
         kind: "saved",
@@ -255,23 +300,133 @@ export function TemplateGallery() {
     [savedMessages, replaceMessage, closeGallery],
   );
 
+  // The connected server's library entries (only when the loaded library
+  // actually matches the connected server — a switch mid-load must not show the
+  // previous server's shelf), split by label and re-hydrated like the local
+  // stores. Message ids already on the shelf suppress the local duplicates
+  // below: the server copy is fresher (it upserts on every send from any
+  // device) and shared, so it wins.
+  const serverEntries = useMemo(
+    () => (libGuild && libGuild === connectedGuildId ? libEntries : []),
+    [libGuild, connectedGuildId, libEntries],
+  );
+  const libraryMessageIds = useMemo(
+    () => new Set(serverEntries.map((e) => e.message_id).filter(Boolean) as string[]),
+    [serverEntries],
+  );
+  // Active never-expire grants, for the "Never expires" tag.
+  const permanentIds = useMemo(
+    () => new Set((permanent?.items ?? []).filter((i) => !i.suspended).map((i) => i.message_id)),
+    [permanent],
+  );
+  const connectedGuildName = useMemo(
+    () => authGuilds.find((g) => g.id === connectedGuildId)?.name,
+    [authGuilds, connectedGuildId],
+  );
+
+  const { libraryPostedCards, libraryDraftCards } = useMemo(() => {
+    const posted: CardData[] = [];
+    const drafts: CardData[] = [];
+    for (const entry of serverEntries) {
+      const message = libraryEntryMessage(entry);
+      if (!message) continue;
+      const isPosted = entry.label === "posted";
+      // Derived labels: never-expire state from the permanent-slot API, and
+      // "buttons expired" for an interactive message older than the component
+      // TTL without a slot. Both display-only and best-effort.
+      const tags: CardData["tags"] = [];
+      if (isPosted && entry.message_id) {
+        if (permanentIds.has(entry.message_id)) {
+          tags.push({ text: "Never expires", tone: "ok" });
+        } else if (
+          permanent?.ttl_days != null &&
+          interactiveComponents(message).length > 0 &&
+          Date.now() - entry.updated_at * 1000 > permanent.ttl_days * 86_400_000
+        ) {
+          tags.push({ text: "Buttons expired", tone: "warn" });
+        }
+      }
+      const origin = libraryEntryOrigin(entry);
+      const card: CardData = {
+        kind: isPosted ? "posted" : "saved",
+        key: `lib:${entry.id}`,
+        emoji: isPosted ? "📤" : "🔖",
+        name:
+          entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft"),
+        description: isPosted
+          ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · in the ${
+              connectedGuildName ?? "server"
+            } library, visible to this server's managers.`
+          : `A draft in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`,
+        message,
+        accent: isPosted ? ACCENT_GREEN : ACCENT_TEAL,
+        savedAt: entry.updated_at * 1000,
+        badge: isPosted ? "Posted" : "Server draft",
+        guildId: entry.guild_id,
+        guildName: connectedGuildName,
+        tags,
+        searchText: collectSearchText(message),
+        onPick: () => {
+          if (origin) {
+            // Posted with its webhook intact: restore content *and* origin so
+            // the Send panel flips to "Update existing".
+            replaceMessageFromRestore(message, origin);
+            alignConnectedGuild(entry.guild_id);
+            pushToast(
+              "Loaded from the server library — edits will update the original.",
+              "success",
+            );
+          } else {
+            replaceMessage(message);
+            pushToast(
+              isPosted
+                ? "Loaded from the server library (content only — sending posts a new copy)."
+                : "Loaded from the server library.",
+              "success",
+            );
+          }
+          closeGallery();
+        },
+        onDelete: () =>
+          setPendingDelete({
+            kind: "library",
+            id: entry.id,
+            guildId: entry.guild_id,
+            name: entry.title?.trim() || entry.dest_label || "this entry",
+          }),
+      };
+      (isPosted ? posted : drafts).push(card);
+    }
+    return { libraryPostedCards: posted, libraryDraftCards: drafts };
+  }, [
+    serverEntries,
+    permanentIds,
+    permanent,
+    connectedGuildName,
+    replaceMessage,
+    replaceMessageFromRestore,
+    closeGallery,
+  ]);
+
   // Posted messages, re-hydrated for their thumbnails (same skip-on-corrupt
   // guard as saved). Each carries the origin that lets a reload default the Send
   // panel to "Update existing", so editing then re-sending updates the live
-  // message in place — no manual webhook + message-id paste.
+  // message in place — no manual webhook + message-id paste. Records the server
+  // library already covers are suppressed (see `libraryMessageIds`).
   const postedMessages = useMemo(
     () =>
       postedEntries.flatMap((e) => {
+        if (libraryMessageIds.has(e.messageId)) return [];
         try {
           return [{ entry: e, message: attachEditorFields(e.payload) }];
         } catch {
           return [];
         }
       }),
-    [postedEntries],
+    [postedEntries, libraryMessageIds],
   );
 
-  const postedCards: CardData[] = useMemo(
+  const localPostedCards: CardData[] = useMemo(
     () =>
       postedMessages.map(({ entry, message }) => {
         const where = entry.channelName
@@ -311,6 +466,18 @@ export function TemplateGallery() {
         };
       }),
     [postedMessages, replaceMessageFromRestore, closeGallery],
+  );
+
+  // The merged decks the chips/sections read: the connected server's shared
+  // shelf first (it's the fresher, cross-device record), then the local-only
+  // remainder.
+  const postedCards: CardData[] = useMemo(
+    () => [...libraryPostedCards, ...localPostedCards],
+    [libraryPostedCards, localPostedCards],
+  );
+  const savedCards: CardData[] = useMemo(
+    () => [...libraryDraftCards, ...localSavedCards],
+    [libraryDraftCards, localSavedCards],
   );
 
   const templateCards: CardData[] = useMemo(
@@ -464,7 +631,15 @@ export function TemplateGallery() {
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
-    if (pendingDelete.kind === "posted") {
+    if (pendingDelete.kind === "library" && pendingDelete.guildId) {
+      const { guildId, id } = pendingDelete;
+      void removeLibrary(guildId, id).then((ok) => {
+        pushToast(
+          ok ? "Removed from the server library" : "Couldn't remove it — try again.",
+          ok ? "info" : "error",
+        );
+      });
+    } else if (pendingDelete.kind === "posted") {
       removePosted(pendingDelete.id);
       pushToast("Removed from your posted messages", "info");
     } else {
@@ -644,6 +819,24 @@ export function TemplateGallery() {
               {shown.length} {shown.length === 1 ? "result" : "results"} · reopen this any time from
               the toolbar
             </span>
+            {/* The connected server's library usage + a hand-off to the full
+                management dialog (scheduled posts, never-expire slots). Shown
+                only once the shelf actually loaded for this server, so a
+                non-manager never sees a meter for a list they can't read. */}
+            {connectedGuildId && libGuild === connectedGuildId && libLoaded ? (
+              <button
+                type="button"
+                className={styles.libraryMeter}
+                onClick={() => {
+                  closeGallery();
+                  useManagedMessagesStore.getState().open(connectedGuildId, connectedGuildName);
+                }}
+                title="Open Managed messages — scheduled posts, never-expire slots, and more"
+              >
+                Server library: {libUsed}
+                {libQuota != null ? ` / ${libQuota}` : ""} · Manage
+              </button>
+            ) : null}
             <button type="button" className={styles.blankBtn} onClick={startBlank}>
               <PlusIcon size={16} />
               Start from scratch
@@ -656,7 +849,11 @@ export function TemplateGallery() {
         open={!!pendingDelete}
         onClose={() => setPendingDelete(null)}
         title={
-          pendingDelete?.kind === "posted" ? "Remove posted message?" : "Delete saved message?"
+          pendingDelete?.kind === "library"
+            ? "Remove from the server library?"
+            : pendingDelete?.kind === "posted"
+              ? "Remove posted message?"
+              : "Delete saved message?"
         }
         size="sm"
         // The gallery overlay sits at --app-z-tooltip; lift the confirm above it
@@ -665,7 +862,13 @@ export function TemplateGallery() {
       >
         <div className={styles.confirmBody}>
           <p className={styles.confirmText}>
-            {pendingDelete?.kind === "posted" ? (
+            {pendingDelete?.kind === "library" ? (
+              <>
+                Remove <strong>{pendingDelete?.name}</strong> from the server library? Everyone
+                managing this server loses this entry (a posted message stays live on Discord). This
+                can't be undone.
+              </>
+            ) : pendingDelete?.kind === "posted" ? (
               <>
                 Remove <strong>{pendingDelete?.name}</strong> from this list? It only forgets the
                 local shortcut — the message stays live on Discord, and you can still edit it via
@@ -687,7 +890,7 @@ export function TemplateGallery() {
               leadingIcon={<TrashIcon />}
               onClick={confirmDelete}
             >
-              {pendingDelete?.kind === "posted" ? "Remove" : "Delete"}
+              {pendingDelete?.kind === "saved" ? "Delete" : "Remove"}
             </Button>
           </div>
         </div>
@@ -823,6 +1026,11 @@ function GalleryCard({ card }: { card: CardData }) {
           ) : (
             <>
               <span className={styles.cardCategory}>{card.badge}</span>
+              {card.tags?.map((t) => (
+                <span key={t.text} className={styles.cardTag} data-tone={t.tone}>
+                  {t.text}
+                </span>
+              ))}
               {card.savedAt !== undefined ? (
                 <span className={styles.cardTime}>{formatRelative(card.savedAt)}</span>
               ) : null}
