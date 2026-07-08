@@ -5,11 +5,11 @@
  * choice instead of a cold editor. It blends three sources into one
  * app-store-style grid:
  *
- *  - **Continue** — a pinned card for the auto-saved draft, so returning users
- *    resume their last message in one click.
+ *  - **Posted** — messages already sent through DWEEB, ready to reload and
+ *    update in place.
  *  - **Saved** — the user's named, stashed messages (a dedicated category), so
  *    reusable messages are reachable without digging through the Saved menu.
- *  - **Templates** — the curated starting points, browsable by category.
+ *  - **Templates** — the curated starting points.
  *
  * Every card carries a **live, faithful thumbnail** — the real `Preview`
  * renderer scaled down and made `inert`, so what you see is exactly what you'll
@@ -17,8 +17,8 @@
  * "Bot needed" and name the plugin they pair with.
  *
  * Picking a template or saved message replaces the editor wholesale (fresh ids,
- * undoable) and closes the gallery; "Continue" just closes it (the editor
- * already holds the draft). Rendered into a portal so it overlays the whole app.
+ * undoable) and closes the gallery. Rendered into a portal so it overlays the
+ * whole app.
  */
 
 import {
@@ -47,7 +47,6 @@ import {
 } from "@/core/library/libraryStore";
 import { interactiveComponents } from "@/core/plugins/targets";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
-import { loadDraftMessage } from "@/core/state/draftStorage";
 import { attachEditorFields } from "@/core/serialization/normalize";
 import { TEMPLATES, type MessageTemplate, type TemplateCategory } from "@/data/presets";
 import type { WebhookMessage } from "@/core/schema/types";
@@ -64,32 +63,21 @@ import { useTemplateGalleryStore } from "./templateGalleryStore";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateGallery.module.css";
 
-/** The chip row's four buckets: everything, then the user's own posted/saved
- *  messages, then all curated templates collapsed into one. Templates keep their
- *  per-card category label, but the chips no longer split by category. */
+/** The chip row's buckets: the user's own posted/saved messages, then all
+ *  curated templates collapsed into one. Templates keep their per-card category
+ *  label, but the chips no longer split by category. */
 const SAVED_FILTER = "Saved" as const;
 const POSTED_FILTER = "Posted" as const;
 const TEMPLATE_FILTER = "Template" as const;
-type Filter = "All" | typeof POSTED_FILTER | typeof SAVED_FILTER | typeof TEMPLATE_FILTER;
+type Filter = typeof POSTED_FILTER | typeof SAVED_FILTER | typeof TEMPLATE_FILTER;
 
-const ACCENT_BLURPLE = 0x5865f2;
 const ACCENT_TEAL = 0x1abc9c;
 const ACCENT_GREEN = 0x3ba55d;
-
-/** How many posted cards surface in the "All" view before the rest are left to
- *  the dedicated "Posted" chip — keeps templates from being buried for someone
- *  who sends a lot. */
-const POSTED_IN_ALL = 6;
-
-/** How many saved cards surface in the "All" view before the rest are left to
- *  the dedicated "Saved" chip — same buries-the-templates guard as posted, for
- *  someone with a large library. */
-const SAVED_IN_ALL = 6;
 
 /** One renderable card — a continue draft, a posted message, a saved message,
  *  or a template. */
 interface CardData {
-  kind: "continue" | "posted" | "saved" | "template";
+  kind: "posted" | "saved" | "template";
   key: string;
   emoji: string;
   name: string;
@@ -100,9 +88,9 @@ interface CardData {
   category?: TemplateCategory;
   requiresBot?: boolean;
   pairsWith?: string;
-  /** Continue / saved only — "last edited" stamp shown as a relative time. */
+  /** Saved / posted only — "last edited" stamp shown as a relative time. */
   savedAt?: number;
-  /** Continue / saved only — the small pill shown in place of a category. */
+  /** Saved / posted only — the small pill shown in place of a category. */
   badge?: string;
   /** Posted only — the home server, used to bucket posted cards under per-server
    *  section headers. `guildId` is the stable group key; `guildName` is the
@@ -237,11 +225,6 @@ export function TemplateGallery() {
     return () => window.removeEventListener("keydown", onKey);
   }, [closeGallery]);
 
-  // The auto-saved draft, hydrated once on open. Present only for a returning
-  // user who has edited (or applied a template) before — a true first visit has
-  // none, so the Continue card simply doesn't appear.
-  const draft = useMemo(() => loadDraftMessage(), []);
-
   // Saved messages, re-hydrated to editable form for their thumbnails. Skips any
   // entry whose payload won't parse (an older/corrupt record) rather than throw.
   const savedMessages = useMemo(
@@ -254,27 +237,6 @@ export function TemplateGallery() {
         }
       }),
     [savedEntries],
-  );
-
-  const continueCard: CardData | null = useMemo(
-    () =>
-      draft
-        ? {
-            kind: "continue",
-            key: "__continue",
-            emoji: "📝",
-            name: "Continue where you left off",
-            description: "Pick up your last message right where you left it.",
-            message: draft.message,
-            accent: ACCENT_BLURPLE,
-            savedAt: draft.savedAt,
-            badge: "Recent",
-            searchText: collectSearchText(draft.message),
-            // The editor already holds this draft (store bootstrap) — just close.
-            onPick: () => closeGallery(),
-          }
-        : null,
-    [draft, closeGallery],
   );
 
   const localSavedCards: CardData[] = useMemo(
@@ -520,11 +482,7 @@ export function TemplateGallery() {
   );
 
   // Chip row: Posted and Saved (each only when there are any), then a single
-  // Template chip for the whole curated set (categories no longer split). There
-  // is no "All" chip — it read as redundant/messy next to the real categories.
-  // "All" survives as the *default* (unfiltered) view: on open nothing is
-  // pressed and the combined grid shows, and re-clicking the active chip toggles
-  // back to it.
+  // Template chip for the whole curated set (categories no longer split).
   const filters: Filter[] = useMemo(
     () => [
       ...(postedCards.length ? [POSTED_FILTER] : []),
@@ -533,43 +491,28 @@ export function TemplateGallery() {
     ],
     [postedCards.length, savedCards.length, templateCards.length],
   );
+  const firstFilter = filters[0] ?? TEMPLATE_FILTER;
+  const activeFilter = filters.includes(filter) ? filter : firstFilter;
 
-  // If the active filter disappears (e.g. last saved message removed), fall back
-  // to All so the grid never looks empty for a stale reason. "All" is never in
-  // `filters` (it has no chip), so exempt it — it's the valid default view.
+  // If the requested filter disappears (e.g. last saved message removed), fall
+  // through to the first real chip so the gallery never opens on a combined view.
   useEffect(() => {
-    if (filter !== "All" && !filters.includes(filter)) setFilter("All");
-  }, [filters, filter]);
+    if (filter !== activeFilter) setFilter(activeFilter);
+  }, [activeFilter, filter]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     let base: CardData[];
-    if (filter === POSTED_FILTER) {
+    if (activeFilter === POSTED_FILTER) {
       base = postedCards;
-    } else if (filter === SAVED_FILTER) {
+    } else if (activeFilter === SAVED_FILTER) {
       base = savedCards;
-    } else if (filter === "All") {
-      base = q
-        ? // A search from All spans every starting point — the messages you've
-          // posted and saved included, not just templates — so nothing is hidden
-          // behind a chip or the posted cap.
-          [...(continueCard ? [continueCard] : []), ...postedCards, ...savedCards, ...templateCards]
-        : // Idle: recent activity first — the draft, then a capped slice of the
-          // user's own messages (posted, then saved) so they're reachable from
-          // All without burying the curated templates that follow. Each kind
-          // keeps its own chip for the full, uncapped list.
-          [
-            ...(continueCard ? [continueCard] : []),
-            ...postedCards.slice(0, POSTED_IN_ALL),
-            ...savedCards.slice(0, SAVED_IN_ALL),
-            ...templateCards,
-          ];
     } else {
       // TEMPLATE_FILTER — the whole curated set, no per-category split.
       base = templateCards;
     }
     return q ? base.filter((c) => haystack(c).includes(q)) : base;
-  }, [filter, query, continueCard, postedCards, savedCards, templateCards]);
+  }, [activeFilter, query, postedCards, savedCards, templateCards]);
 
   // On the dedicated Posted tab (idle, not searching), bucket the cards under
   // per-server headers — "where did I post this" is how sent messages are
@@ -579,7 +522,7 @@ export function TemplateGallery() {
   // vanishing. Map insertion order keeps sections newest-post-first (shown is
   // already newest-first), matching the flat view's ordering.
   const postedSections = useMemo(() => {
-    if (filter !== POSTED_FILTER || query.trim()) return null;
+    if (activeFilter !== POSTED_FILTER || query.trim()) return null;
     const groups = new Map<
       string,
       { key: string; guildId?: string; name: string; cards: CardData[] }
@@ -595,33 +538,13 @@ export function TemplateGallery() {
     }
     if (groups.size < 2) return null;
     return [...groups.values()];
-  }, [filter, query, shown]);
-
-  // On the All tab (idle, not searching), split the flat list into two labelled
-  // groups: the user's own work ("Your messages" — the draft, posted, and saved
-  // cards) above the curated set ("Templates"). Makes the divide between "pick up
-  // your own message" and "start from a DWEEB template" explicit. Only when the
-  // user actually has messages of their own; on a first visit (templates only) a
-  // lone "Templates" header would be noise, so we fall back to the flat grid.
-  const allSections = useMemo(() => {
-    if (filter !== "All" || query.trim()) return null;
-    const mine = shown.filter((c) => c.kind !== "template");
-    if (!mine.length) return null;
-    const templates = shown.filter((c) => c.kind === "template");
-    const sections: { key: string; icon: string; name: string; cards: CardData[] }[] = [
-      { key: "mine", icon: "🗂️", name: "Your messages", cards: mine },
-    ];
-    if (templates.length) {
-      sections.push({ key: "templates", icon: "✨", name: "Templates", cards: templates });
-    }
-    return sections;
-  }, [filter, query, shown]);
+  }, [activeFilter, query, shown]);
 
   // On the Posted tab, land on the server you're connected to — its section is
   // usually the one you came to update. Re-runs when the tab changes (so it also
   // fires if you switch to Posted after opening) or the connected server does;
   // does nothing when that server has no posted messages (no section to hit).
-  useScrollActiveIntoView(bodyRef, activeSectionRef, [filter, connectedGuildId], "start");
+  useScrollActiveIntoView(bodyRef, activeSectionRef, [activeFilter, connectedGuildId], "start");
 
   const startBlank = () => {
     clearAll();
@@ -671,7 +594,7 @@ export function TemplateGallery() {
                   Start a message
                 </h2>
                 <p className={styles.subtitle}>
-                  Continue your last message, reuse a saved one, or pick a template — everything is
+                  Reload a posted message, reuse a saved one, or pick a template — everything is
                   fully editable.
                 </p>
               </div>
@@ -696,7 +619,7 @@ export function TemplateGallery() {
                   value={query}
                   onChange={(e) => setQuery(e.currentTarget.value)}
                   placeholder={
-                    postedCards.length || savedCards.length || continueCard
+                    postedCards.length || savedCards.length
                       ? "Search your messages & templates…"
                       : `Search ${TEMPLATES.length} templates…`
                   }
@@ -722,7 +645,7 @@ export function TemplateGallery() {
                   <button
                     key={f}
                     type="button"
-                    aria-pressed={filter === f}
+                    aria-pressed={activeFilter === f}
                     className={[
                       styles.chip,
                       // The Saved/Posted pseudo-categories carry their own tints
@@ -730,11 +653,11 @@ export function TemplateGallery() {
                       // curated template categories.
                       f === SAVED_FILTER ? styles.chipSaved : "",
                       f === POSTED_FILTER ? styles.chipPosted : "",
-                      filter === f ? styles.chipActive : "",
+                      activeFilter === f ? styles.chipActive : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
-                    onClick={() => setFilter((cur) => (cur === f ? "All" : f))}
+                    onClick={() => setFilter(f)}
                   >
                     {f}
                   </button>
@@ -753,10 +676,9 @@ export function TemplateGallery() {
                   className={styles.emptyReset}
                   onClick={() => {
                     setQuery("");
-                    setFilter("All");
                   }}
                 >
-                  Clear filters
+                  Clear search
                 </button>
               </div>
             ) : postedSections ? (
@@ -784,27 +706,6 @@ export function TemplateGallery() {
                   </section>
                 ))}
               </div>
-            ) : allSections ? (
-              <div className={styles.sections}>
-                {allSections.map((section) => (
-                  <section key={section.key} className={styles.section}>
-                    <div className={styles.sectionHeader}>
-                      <span className={styles.sectionLabelIcon} aria-hidden>
-                        {section.icon}
-                      </span>
-                      <span className={styles.sectionName}>{section.name}</span>
-                      <span className={`${styles.sectionCount} ${styles.sectionCountNeutral}`}>
-                        {section.cards.length}
-                      </span>
-                    </div>
-                    <div className={styles.grid}>
-                      {section.cards.map((c) => (
-                        <GalleryCard key={c.key} card={c} />
-                      ))}
-                    </div>
-                  </section>
-                ))}
-              </div>
             ) : (
               <div className={styles.grid}>
                 {shown.map((c) => (
@@ -816,8 +717,7 @@ export function TemplateGallery() {
 
           <footer className={styles.footer}>
             <span className={styles.footerHint}>
-              {shown.length} {shown.length === 1 ? "result" : "results"} · reopen this any time from
-              the toolbar
+              {shown.length} {shown.length === 1 ? "result" : "results"}
             </span>
             {/* The connected server's library usage + a hand-off to the full
                 management dialog (scheduled posts, never-expire slots). Shown
@@ -996,9 +896,7 @@ function GalleryCard({ card }: { card: CardData }) {
         ) : null}
         <div className={styles.cardHover} aria-hidden>
           <span className={styles.useBtn}>
-            {card.kind === "continue"
-              ? "Continue →"
-              : card.kind === "posted"
+            {card.kind === "posted"
                 ? "Edit & update →"
                 : card.kind === "saved"
                   ? "Load message →"

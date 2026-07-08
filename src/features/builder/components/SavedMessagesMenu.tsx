@@ -7,8 +7,8 @@
  *    configured and a server is connected) so teammates and the embedded
  *    Activity can pick it up too.
  *  - Wipe the editor back to an empty message.
- *  - Jump to the full-screen gallery, where saved messages are browsed, loaded,
- *    and deleted alongside the templates.
+ *  - Jump to the full-screen gallery for posted or saved messages when those
+ *    lists exist.
  *
  * A short naming dialog appears when the user picks either save action.
  */
@@ -33,7 +33,6 @@ import {
   GlobeIcon,
   SaveIcon,
   SendIcon,
-  TemplateIcon,
   TrashIcon,
 } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
@@ -146,15 +145,6 @@ export function SavedMessagesMenu() {
                 Saved messages ({entries.length})
               </MenuItem>
             ) : null}
-            <MenuItem
-              icon={<TemplateIcon />}
-              onSelect={() => {
-                close();
-                openGallery();
-              }}
-            >
-              Browse gallery…
-            </MenuItem>
             <MenuItem
               icon={<TrashIcon />}
               onSelect={() => {
