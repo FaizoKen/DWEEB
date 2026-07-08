@@ -30,9 +30,9 @@ import { TextInput } from "@/ui/TextInput";
 import {
   BookmarkIcon,
   ChevronDownIcon,
-  GlobeIcon,
   SaveIcon,
   SendIcon,
+  ServerStackIcon,
   TrashIcon,
 } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
@@ -114,7 +114,7 @@ export function SavedMessagesMenu() {
             </MenuItem>
             {serverSaveAvailable ? (
               <MenuItem
-                icon={<GlobeIcon />}
+                icon={<ServerStackIcon />}
                 onSelect={() => {
                   close();
                   setSaveMode("server");

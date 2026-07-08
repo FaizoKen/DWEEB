@@ -112,12 +112,11 @@ export const GlobeIcon = ({ size = 16, ...rest }: IconProps) => (
 /** Stacked servers — shared server-side storage / server library. */
 export const ServerStackIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
-    <rect x="4" y="4" width="16" height="5" rx="1.5" />
-    <rect x="4" y="9.5" width="16" height="5" rx="1.5" />
-    <rect x="4" y="15" width="16" height="5" rx="1.5" />
-    <circle cx="7.25" cy="6.5" r="0.65" fill="currentColor" stroke="none" />
-    <circle cx="7.25" cy="12" r="0.65" fill="currentColor" stroke="none" />
-    <circle cx="7.25" cy="17.5" r="0.65" fill="currentColor" stroke="none" />
+    <path d="M12 3.25 4.5 7 12 10.75 19.5 7 12 3.25z" />
+    <path d="m4.5 11.25 7.5 3.75 7.5-3.75" />
+    <path d="m4.5 15.75 7.5 3.75 7.5-3.75" />
+    <path d="M4.5 7v4.25L12 15l7.5-3.75V7" />
+    <path d="M4.5 11.25v4.5L12 19.5l7.5-3.75v-4.5" />
   </svg>
 );
 
