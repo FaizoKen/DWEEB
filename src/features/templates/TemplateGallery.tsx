@@ -56,7 +56,15 @@ import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { Preview } from "@/features/preview/Preview";
 import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
-import { CloseIcon, PlusIcon, PuzzleIcon, SearchIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
+import {
+  CloseIcon,
+  GlobeIcon,
+  PlusIcon,
+  PuzzleIcon,
+  SearchIcon,
+  SparkleIcon,
+  TrashIcon,
+} from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import { useTemplateGalleryStore } from "./templateGalleryStore";
@@ -92,6 +100,8 @@ interface CardData {
   savedAt?: number;
   /** Saved / posted only — the small pill shown in place of a category. */
   badge?: string;
+  /** True when this card came from the connected server's shared library. */
+  storedInServerLibrary?: boolean;
   /** Posted only — the home server, used to bucket posted cards under per-server
    *  section headers. `guildId` is the stable group key; `guildName` is the
    *  label. Either can be absent on older records / non-guild webhooks. */
@@ -324,6 +334,7 @@ export function TemplateGallery() {
         accent: isPosted ? ACCENT_GREEN : ACCENT_TEAL,
         savedAt: entry.updated_at * 1000,
         badge: isPosted ? "Posted" : "Server draft",
+        storedInServerLibrary: true,
         guildId: entry.guild_id,
         guildName: connectedGuildName,
         tags,
@@ -853,21 +864,47 @@ function GalleryCard({ card }: { card: CardData }) {
       : "var(--app-accent)";
 
   const isTemplate = card.kind === "template";
+  const isServerLibrary = card.storedInServerLibrary === true;
+  const cardLabel = isTemplate
+    ? `Start from the ${card.name} template`
+    : isServerLibrary
+      ? `${card.name}, saved in the server library`
+      : card.name;
+  const deleteLabel = isServerLibrary
+    ? `Remove "${card.name}" from the server library`
+    : card.kind === "posted"
+      ? `Remove posted message "${card.name}"`
+      : `Delete saved message "${card.name}"`;
+  const deleteTitle = isServerLibrary
+    ? "Remove from server library"
+    : card.kind === "posted"
+      ? "Remove from posted messages"
+      : "Delete saved message";
 
   return (
     <div
       className={styles.card}
       data-kind={card.kind}
+      data-server-library={isServerLibrary ? "" : undefined}
       role="button"
       tabIndex={0}
       onClick={card.onPick}
       onKeyDown={onKeyDown}
-      aria-label={isTemplate ? `Start from the ${card.name} template` : `${card.name}`}
+      aria-label={cardLabel}
       style={{ "--card-accent": accent } as CSSProperties}
     >
       <div className={styles.cardPreview}>
         <TemplateThumbnail message={card.message} />
         <div className={styles.cardFade} aria-hidden />
+        {isServerLibrary ? (
+          <span
+            className={styles.serverLibraryBadge}
+            title="Saved in this server's shared library"
+          >
+            <GlobeIcon size={12} aria-hidden />
+            Server library
+          </span>
+        ) : null}
         {card.onDelete ? (
           <button
             type="button"
@@ -876,12 +913,8 @@ function GalleryCard({ card }: { card: CardData }) {
               e.stopPropagation();
               card.onDelete?.();
             }}
-            aria-label={
-              card.kind === "posted"
-                ? `Remove posted message "${card.name}"`
-                : `Delete saved message "${card.name}"`
-            }
-            title={card.kind === "posted" ? "Remove from posted messages" : "Delete saved message"}
+            aria-label={deleteLabel}
+            title={deleteTitle}
           >
             <TrashIcon size={15} />
           </button>
@@ -930,6 +963,11 @@ function GalleryCard({ card }: { card: CardData }) {
           ) : (
             <>
               <span className={styles.cardCategory}>{card.badge}</span>
+              {isServerLibrary ? (
+                <span className={styles.cardTag} data-tone="info">
+                  Server library
+                </span>
+              ) : null}
               {card.tags?.map((t) => (
                 <span key={t.text} className={styles.cardTag} data-tone={t.tone}>
                   {t.text}
