@@ -416,24 +416,18 @@
   z-index: 4;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  max-width: calc(100% - 56px);
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 999px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 10px;
   color: #dbe4ff;
   background: rgba(24, 31, 56, 0.86);
   border: 1px solid rgba(105, 123, 255, 0.45);
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   pointer-events: none;
 }
 
@@ -629,11 +623,6 @@
   color: #3ba55d;
   border-color: color-mix(in srgb, #3ba55d 40%, transparent);
   background: color-mix(in srgb, #3ba55d 10%, transparent);
-}
-.cardTag[data-tone="info"] {
-  color: #8ea0ff;
-  border-color: color-mix(in srgb, #5865f2 42%, transparent);
-  background: color-mix(in srgb, #5865f2 12%, transparent);
 }
 .cardTag[data-tone="warn"] {
   color: #d83c3e;

@@ -58,10 +58,10 @@ import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
 import {
   CloseIcon,
-  GlobeIcon,
   PlusIcon,
   PuzzleIcon,
   SearchIcon,
+  ServerStackIcon,
   SparkleIcon,
   TrashIcon,
 } from "@/ui/Icon";
@@ -842,6 +842,15 @@ function ServerIcon({
   );
 }
 
+function ServerLibraryIndicator() {
+  const label = "Saved in this server's library";
+  return (
+    <span className={styles.serverLibraryBadge} title={label} aria-label={label}>
+      <ServerStackIcon size={16} aria-hidden />
+    </span>
+  );
+}
+
 function GalleryCard({ card }: { card: CardData }) {
   const onKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -896,15 +905,7 @@ function GalleryCard({ card }: { card: CardData }) {
       <div className={styles.cardPreview}>
         <TemplateThumbnail message={card.message} />
         <div className={styles.cardFade} aria-hidden />
-        {isServerLibrary ? (
-          <span
-            className={styles.serverLibraryBadge}
-            title="Saved in this server's shared library"
-          >
-            <GlobeIcon size={12} aria-hidden />
-            Server library
-          </span>
-        ) : null}
+        {isServerLibrary ? <ServerLibraryIndicator /> : null}
         {card.onDelete ? (
           <button
             type="button"
@@ -963,11 +964,6 @@ function GalleryCard({ card }: { card: CardData }) {
           ) : (
             <>
               <span className={styles.cardCategory}>{card.badge}</span>
-              {isServerLibrary ? (
-                <span className={styles.cardTag} data-tone="info">
-                  Server library
-                </span>
-              ) : null}
               {card.tags?.map((t) => (
                 <span key={t.text} className={styles.cardTag} data-tone={t.tone}>
                   {t.text}

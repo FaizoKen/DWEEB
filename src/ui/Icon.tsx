@@ -109,6 +109,18 @@ export const GlobeIcon = ({ size = 16, ...rest }: IconProps) => (
   </svg>
 );
 
+/** Stacked servers — shared server-side storage / server library. */
+export const ServerStackIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg {...base(size)} {...rest}>
+    <rect x="4" y="4" width="16" height="5" rx="1.5" />
+    <rect x="4" y="9.5" width="16" height="5" rx="1.5" />
+    <rect x="4" y="15" width="16" height="5" rx="1.5" />
+    <circle cx="7.25" cy="6.5" r="0.65" fill="currentColor" stroke="none" />
+    <circle cx="7.25" cy="12" r="0.65" fill="currentColor" stroke="none" />
+    <circle cx="7.25" cy="17.5" r="0.65" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 export const UndoIcon = ({ size = 16, ...rest }: IconProps) => (
   <svg {...base(size)} {...rest}>
     <path d="M3 7v6h6" />
