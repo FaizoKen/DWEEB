@@ -146,9 +146,14 @@ Payloads and webhook URLs are **sealed at rest** like a schedule's
 (AES-256-GCM under `SESSION_SECRET`), in their own SQLite file
 (`LIBRARY_DB_PATH`, on the `proxy_data` volume). The per-server cap is the plan
 gate (`PLAN_*_LIBRARY`: Free 10 / Plus 100 / Pro unlimited; standalone
-deployments use `LIBRARY_MAX_PER_GUILD`), and quota only ever gates *creation* —
-a downgraded server keeps every entry readable. Auto-records at quota are
-silently skipped (a send must never look failed because the shelf is full).
+deployments use `LIBRARY_MAX_PER_GUILD`). A downgraded server keeps every
+stored entry readable and deletable, but while it holds **more** entries than
+its cap the shelf is *content-frozen*: creates, posted-row refreshes, and
+`PATCH`es carrying a new payload all answer 409 (rename/relabel stay allowed).
+Without the freeze, surplus rows from a paid month would work as rotating
+storage — keep 500 entries on Free and rewrite their content forever.
+Auto-records at/over quota are silently skipped (a send must never look failed
+because the shelf is full).
 `LIBRARY_MAX_ENTRIES` bounds total disk use; `LIBRARY_ENABLED=false` turns the
 feature off (the endpoints answer 501 and both frontends fall back to
 browser-local storage).

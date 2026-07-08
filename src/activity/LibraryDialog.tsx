@@ -80,8 +80,20 @@ export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () =>
       size="sm"
       footer={
         <>
-          <span className={styles.meter}>
-            {ready ? `${used}${quota != null ? ` / ${quota}` : ""} in the library` : ""}
+          <span
+            className={styles.meter}
+            data-over={ready && quota != null && used > quota ? "" : undefined}
+            title={
+              ready && quota != null && used > quota
+                ? "Over the plan's library limit — entries stay readable, but new posts won't be recorded and content can't be changed until the server deletes down to the limit or upgrades."
+                : undefined
+            }
+          >
+            {ready
+              ? quota != null && used > quota
+                ? `${used} / ${quota} — over the plan limit`
+                : `${used}${quota != null ? ` / ${quota}` : ""} in the library`
+              : ""}
           </span>
           <Button variant="secondary" size="sm" leadingIcon={<PlusIcon />} onClick={startBlank}>
             Start blank

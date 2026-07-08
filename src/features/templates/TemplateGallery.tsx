@@ -827,14 +827,20 @@ export function TemplateGallery() {
               <button
                 type="button"
                 className={styles.libraryMeter}
+                data-over={libQuota != null && libUsed > libQuota ? "" : undefined}
                 onClick={() => {
                   closeGallery();
                   useManagedMessagesStore.getState().open(connectedGuildId, connectedGuildName);
                 }}
-                title="Open Managed messages — scheduled posts, never-expire slots, and more"
+                title={
+                  libQuota != null && libUsed > libQuota
+                    ? "Over the plan's library limit — entries stay readable, but content can't be changed until you delete down to the limit or upgrade."
+                    : "Open Managed messages — scheduled posts, never-expire slots, and more"
+                }
               >
                 Server library: {libUsed}
-                {libQuota != null ? ` / ${libQuota}` : ""} · Manage
+                {libQuota != null ? ` / ${libQuota}` : ""}
+                {libQuota != null && libUsed > libQuota ? " · over limit" : " · Manage"}
               </button>
             ) : null}
             <button type="button" className={styles.blankBtn} onClick={startBlank}>

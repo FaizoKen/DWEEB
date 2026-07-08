@@ -208,13 +208,20 @@ impl LibraryStore {
 
     /// Insert `n`, or — when it's a posted entry whose `message_id` already has
     /// a row in the guild — refresh that row in place (re-posting or updating a
-    /// live message must never pile up duplicates, and, like the activity-draft
-    /// store, an update doesn't grow the table so it bypasses the caps).
+    /// live message must never pile up duplicates; an update doesn't grow the
+    /// table, so within quota it bypasses the caps).
     /// Returns the entry's id (existing on refresh, `n_id` on insert).
     ///
     /// The per-guild cap is `limit_override` when given (the destination
     /// server's plan-tier limit) or the store default; the global cap always
-    /// applies.
+    /// applies to inserts.
+    ///
+    /// **Over-quota content freeze**: while the server holds *more* entries than
+    /// its cap (it filled up on a higher tier, then downgraded), refreshes are
+    /// refused too, not just inserts. Otherwise the surplus rows would work as
+    /// rotating storage — keep 500 entries from a paid month and rewrite their
+    /// content forever on Free. Entries stay readable/deletable regardless; at
+    /// or under the cap refreshes behave as before.
     pub fn upsert(
         &self,
         n: &NewEntry,
@@ -223,6 +230,14 @@ impl LibraryStore {
         limit_override: Option<i64>,
     ) -> Result<String, CreateError> {
         let conn = self.lock();
+        let cap = limit_override.unwrap_or(self.max_per_guild);
+        let in_guild: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM library_messages WHERE guild_id=?1",
+                [&n.guild_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| CreateError::Storage(e.to_string()))?;
         if n.label == "posted" {
             if let Some(mid) = &n.message_id {
                 let existing: Option<String> = conn
@@ -234,6 +249,9 @@ impl LibraryStore {
                     .optional()
                     .map_err(|e| CreateError::Storage(e.to_string()))?;
                 if let Some(id) = existing {
+                    if in_guild > cap {
+                        return Err(CreateError::PerGuildFull(cap));
+                    }
                     conn.execute(
                         "UPDATE library_messages SET label='posted', payload_sealed=?2, \
                          webhook_sealed=COALESCE(?3, webhook_sealed), \
@@ -262,14 +280,6 @@ impl LibraryStore {
         if self.count.load(Ordering::Relaxed) >= self.max_entries {
             return Err(CreateError::Full);
         }
-        let cap = limit_override.unwrap_or(self.max_per_guild);
-        let in_guild: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM library_messages WHERE guild_id=?1",
-                [&n.guild_id],
-                |r| r.get(0),
-            )
-            .map_err(|e| CreateError::Storage(e.to_string()))?;
         if in_guild >= cap {
             return Err(CreateError::PerGuildFull(cap));
         }
@@ -364,6 +374,14 @@ impl LibraryStore {
             self.count.fetch_sub(n as i64, Ordering::Relaxed);
         }
         Ok(n > 0)
+    }
+
+    /// Whether a server holds *more* entries than its cap — the over-quota
+    /// content-freeze condition (see [`upsert`]). Exactly at the cap is fine:
+    /// the stored set is what the plan allows, only growth beyond it isn't.
+    pub fn over_cap(&self, guild: &str, limit_override: Option<i64>) -> Result<bool, String> {
+        let cap = limit_override.unwrap_or(self.max_per_guild);
+        Ok(self.count_for_guild(guild)? > cap)
     }
 
     /// How many entries a server holds (the list's `used` figure).
@@ -685,6 +703,24 @@ pub async fn library_patch(
         .map_err(AppError::Internal)?
         .ok_or_else(not_found)?;
 
+    // Over-quota content freeze (the PATCH twin of the `upsert` refresh gate):
+    // while the server holds more entries than its plan cap, rewriting an
+    // entry's *content* is refused — otherwise a downgraded server's surplus
+    // rows would work as rotating storage. Rename/relabel stay allowed (they
+    // change no content), as do reading and deleting.
+    if body.payload.is_some() {
+        let limit_override = st.entitlements.library_limit(&guild).await;
+        let s = Arc::clone(&store);
+        let g = guild.clone();
+        let over = tokio::task::spawn_blocking(move || s.over_cap(&g, limit_override))
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .map_err(AppError::Internal)?;
+        if over {
+            return Err(over_quota(limit_override.unwrap_or(store.max_per_guild())));
+        }
+    }
+
     if let Some(label) = body.label {
         if !LABELS.contains(&label.as_str()) {
             return Err(bad_request("label must be \"posted\" or \"draft\""));
@@ -815,6 +851,20 @@ fn not_found() -> AppError {
     AppError::Status {
         status: StatusCode::NOT_FOUND,
         message: "No such library entry.".into(),
+        retry_after: None,
+    }
+}
+
+/// The over-quota content-freeze refusal (never reached on an unlimited cap —
+/// `over_cap` can't be true there).
+fn over_quota(limit: i64) -> AppError {
+    AppError::Status {
+        status: StatusCode::CONFLICT,
+        message: format!(
+            "This server holds more library messages than its plan allows ({limit}) — content is \
+             read-only until you delete down to the limit or upgrade. Renaming and deleting still \
+             work."
+        ),
         retry_after: None,
     }
 }
@@ -959,6 +1009,71 @@ mod tests {
         store
             .upsert(&entry("g1", "posted", Some("m1")), "id-c", 1, None)
             .expect_err("insert of a new posted row is still capped");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn over_cap_freezes_posted_refreshes_but_at_cap_is_fine() {
+        let (store, path) = temp_store("freeze", 100, 10);
+        // Fill three rows under a generous (paid-tier) override.
+        for (i, mid) in ["m1", "m2", "m3"].iter().enumerate() {
+            store
+                .upsert(
+                    &entry("g1", "posted", Some(mid)),
+                    &format!("id-fill-{i}"),
+                    1_000,
+                    Some(10),
+                )
+                .unwrap();
+        }
+        // Downgraded to a cap of 3 — exactly AT the cap, refreshing stays fine.
+        let mut refreshed = entry("g1", "posted", Some("m1"));
+        refreshed.payload_sealed = "sealed-v2".into();
+        store
+            .upsert(&refreshed, "id-refresh-a", 2_000, Some(3))
+            .unwrap();
+        // Downgraded further to a cap of 2 — now OVER the cap: the refresh is
+        // refused (rotating-storage guard), carrying the cap for the message.
+        match store.upsert(&refreshed, "id-refresh-b", 3_000, Some(2)) {
+            Err(CreateError::PerGuildFull(2)) => {}
+            other => panic!("expected PerGuildFull(2), got {other:?}"),
+        }
+        // The frozen row kept its at-cap content, and nothing was deleted.
+        let rows = store.list_for_guild("g1", 100).unwrap();
+        assert_eq!(rows.len(), 3);
+        let m1 = rows.iter().find(|r| r.message_id.as_deref() == Some("m1"));
+        assert_eq!(m1.unwrap().payload_sealed, "sealed-v2");
+        // Deleting is the way back under quota — then refreshes work again.
+        let victim = rows
+            .iter()
+            .find(|r| r.message_id.as_deref() == Some("m3"))
+            .unwrap()
+            .id
+            .clone();
+        assert!(store.delete("g1", &victim).unwrap());
+        store
+            .upsert(&refreshed, "id-refresh-c", 4_000, Some(2))
+            .unwrap();
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn over_cap_reports_strictly_over() {
+        let (store, path) = temp_store("overcap", 100, 2);
+        store
+            .upsert(&entry("g1", "draft", None), "id-a", 1, None)
+            .unwrap();
+        store
+            .upsert(&entry("g1", "draft", None), "id-b", 1, None)
+            .unwrap();
+        // Exactly at the store-default cap (2): not over.
+        assert!(!store.over_cap("g1", None).unwrap());
+        // A downgrade override below the held count: over.
+        assert!(store.over_cap("g1", Some(1)).unwrap());
+        // Unlimited (i64::MAX, what the entitlement hands over for Pro): never.
+        assert!(!store.over_cap("g1", Some(i64::MAX)).unwrap());
+        // An empty guild is never over.
+        assert!(!store.over_cap("g2", Some(1)).unwrap());
         let _ = std::fs::remove_file(path);
     }
 

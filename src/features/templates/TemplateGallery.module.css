@@ -719,6 +719,13 @@
   outline: none;
   box-shadow: var(--app-focus-ring);
 }
+/* Over the plan's library limit — the shelf is content-frozen (see the server's
+ * over-quota guard); tint the meter so the state is visible at a glance. */
+.libraryMeter[data-over] {
+  color: #d83c3e;
+  border-color: color-mix(in srgb, #d83c3e 40%, transparent);
+  background: color-mix(in srgb, #d83c3e 8%, transparent);
+}
 
 .blankBtn {
   display: inline-flex;

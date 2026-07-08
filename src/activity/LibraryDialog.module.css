@@ -106,3 +106,7 @@
   font-size: var(--app-text-xs);
   color: var(--app-text-subtle);
 }
+/* Over the plan's library limit — the shelf is content-frozen server-side. */
+.meter[data-over] {
+  color: #d83c3e;
+}
