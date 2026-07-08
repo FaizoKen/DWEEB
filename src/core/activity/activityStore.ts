@@ -99,10 +99,11 @@ interface ActivityState {
   pipMode: boolean;
   /** True once the shared editor has settled into its real starting content: the
    *  room's in-progress draft has synced in (via collab's `onHydrated`), or — for
-   *  a fresh room where none is coming — a short grace has elapsed. The shell
-   *  holds a builder skeleton until this trips (see ActivityApp), so a joiner
-   *  never sees the fresh-open default flash before the room's draft replaces it.
-   *  Independent of the guild-data gate, which the shell folds in alongside. */
+   *  a fresh room where none is coming — a short grace has elapsed. The component
+   *  list (and mobile mini-preview) hold a skeleton until this trips (see
+   *  ActivityApp), so a joiner never sees the fresh-open default flash before the
+   *  room's draft replaces it — while the bar/frame render live immediately. The
+   *  preview additionally waits on the guild-data gate, folded in by the shell. */
   hydrated: boolean;
   participants: CollabParticipant[];
   collabConnected: boolean;

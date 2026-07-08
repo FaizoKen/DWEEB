@@ -33,14 +33,14 @@ import {
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { ActivityBar } from "./ActivityBar";
-import { BuilderSkeleton } from "./BuilderSkeleton";
+import { TreeSkeleton, PreviewSkeleton } from "./Skeletons";
 import { PresenceDock } from "./PresenceDock";
 import styles from "./ActivityApp.module.css";
 
-/** Hard ceiling on the post-handshake hydration hold: if the room draft and/or
- *  guild data are still settling after this, reveal the builder anyway rather
- *  than sit on the skeleton — the last few names just resolve in place. A clean
- *  loading skeleton for a beat beats an indefinite one. */
+/** Hard ceiling on the per-region loading hold: if the room draft and/or guild
+ *  data are still settling after this, drop the skeletons and show the live
+ *  content anyway — the last few names just resolve in place. A clean placeholder
+ *  for a beat beats an indefinite one. */
 const MAX_HYDRATE_MS = 4000;
 
 // Lazy — the feedback form (and its transport) only loads when someone opens it,
@@ -57,15 +57,14 @@ export function ActivityApp() {
   const pipMode = useActivityStore((s) => s.pipMode);
   const init = useActivityStore((s) => s.init);
 
-  // ── Post-handshake hydration gate ────────────────────────────────────────
-  // The handshake going `ready` only means we're signed in — the shared editor
-  // isn't settled yet: the collab room's in-progress draft is still syncing in,
-  // and (on a server launch) the guild's channels/roles/emoji are still loading.
-  // Rendering the live builder now would flash the fresh-open default, an empty
-  // channel picker, and unresolved mentions before they pop into place. So we
-  // hold a builder-shaped skeleton until both settle, then latch `revealed` on
-  // for good (it never flips back — a later guild switch on a DM launch mustn't
-  // re-trigger the skeleton).
+  // ── Per-region loading (app-shell pattern) ───────────────────────────────
+  // The handshake going `ready` only means we're signed in; the shell (bar +
+  // panes) renders for real right away so the app *looks* loaded. But two regions
+  // are still fetching, and showing them live would flash the wrong thing: the
+  // component list would render the fresh-open default before the collab room's
+  // draft syncs in, and the preview would render with raw, unresolved mentions
+  // before the guild's channels/roles/emoji arrive. So *only those two regions*
+  // wear a skeleton until their own data is ready — everything else is instant.
   const hydrated = useActivityStore((s) => s.hydrated);
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
   const botMissing = useActivityStore((s) => s.botMissing);
@@ -76,23 +75,34 @@ export function ActivityApp() {
   // Guild data is "settled" when there's nothing to wait for (a DM launch hasn't
   // picked a server yet; a bot-less server won't bootstrap; dev builds have no
   // proxy) or the target guild's bootstrap has finished — ready with matching
-  // data, or errored (we still reveal; the toast already explained it).
+  // data, or errored (we still show; the toast already explained it).
   const guildSettled =
     !import.meta.env.PROD || isDm || botMissing || !targetGuildId
       ? true
       : (guildStatus === "ready" && guildDataId === targetGuildId) || guildStatus === "error";
 
-  const [revealed, setRevealed] = useState(false);
+  // A hard-ceiling escape hatch, so a slow/stuck fetch can never leave a region
+  // skeletoned forever — after this it shows live regardless.
+  const [capReached, setCapReached] = useState(false);
   useEffect(() => {
-    if (revealed || status !== "ready") return;
-    if (hydrated && guildSettled) setRevealed(true);
-  }, [revealed, status, hydrated, guildSettled]);
-  // Safety net: never let the skeleton outlast the hard ceiling, whatever's slow.
-  useEffect(() => {
-    if (revealed || status !== "ready") return;
-    const t = window.setTimeout(() => setRevealed(true), MAX_HYDRATE_MS);
+    if (capReached || status !== "ready") return;
+    const t = window.setTimeout(() => setCapReached(true), MAX_HYDRATE_MS);
     return () => window.clearTimeout(t);
-  }, [revealed, status]);
+  }, [capReached, status]);
+
+  // The component list needs only the synced draft. `hydrated` is a one-way latch
+  // (collab's first draft, or a short grace for a fresh room), so this is
+  // monotonic — no flip-back once the tree is live.
+  const treeReady = hydrated || capReached;
+  // The preview additionally needs guild resolve-data. `guildSettled` can bounce
+  // (a background guild refresh flips status to "loading"), so latch this once
+  // true to keep a routine refresh from re-skeletoning a live preview.
+  const [previewReady, setPreviewReady] = useState(false);
+  useEffect(() => {
+    if (previewReady) return;
+    if ((hydrated && guildSettled) || capReached) setPreviewReady(true);
+  }, [previewReady, hydrated, guildSettled, capReached]);
+
   // Feedback form open state — mounted lazily below only while open (like the web
   // app), summoned from the bar's "Send feedback" action.
   const feedbackOpen = useFeedbackStore((s) => s.open);
@@ -135,20 +145,10 @@ export function ActivityApp() {
   if (pipMode) {
     return (
       <div className={styles.app} data-platform={platform ?? undefined} data-pip="true">
-        <div className={styles.pipPreview}>
-          <Preview />
-        </div>
+        <div className={styles.pipPreview}>{previewReady ? <Preview /> : <PreviewSkeleton />}</div>
         <ToastViewport />
       </div>
     );
-  }
-
-  // Signed in, but the shared editor hasn't settled yet — hold the builder
-  // skeleton (see the hydration gate above) so the real content fades in already
-  // populated instead of flashing defaults. The preview column is dropped in the
-  // mobile-sheet layout, where it's an off-screen sheet.
-  if (!revealed) {
-    return <BuilderSkeleton platform={platform} showPreview={!isMobileSheet} />;
   }
 
   return (
@@ -159,8 +159,11 @@ export function ActivityApp() {
     >
       <div className={styles.panes}>
         <section className={styles.editor} aria-label="Component builder">
+          {/* The bar is real immediately — only the component list below waits on
+              the synced draft, so it holds a skeleton until the room's message
+              arrives instead of flashing the fresh-open default. */}
           <ActivityBar />
-          <ComponentTree />
+          {treeReady ? <ComponentTree /> : <TreeSkeleton />}
         </section>
         {/* Dismiss scrim for the mobile preview sheet — catches taps on the
             builder peeking above the sheet so they close it. Inert on desktop,
@@ -172,8 +175,15 @@ export function ActivityApp() {
           aria-label="Message preview"
           aria-hidden={isMobileSheet && !previewOpen ? "true" : undefined}
         >
+          {/* The preview waits on the draft *and* the guild's mention/emoji data,
+              so it holds a skeleton until both are ready rather than rendering
+              raw, unresolved mentions. */}
           {!isMobileSheet || previewMounted ? (
-            <Preview onClose={closePreview} swipeProps={swipeProps} />
+            previewReady ? (
+              <Preview onClose={closePreview} swipeProps={swipeProps} />
+            ) : (
+              <PreviewSkeleton />
+            )
           ) : null}
           {/* Presence dock floated in the preview pane's bottom-right corner
               (like the web app's AI FAB), so it sits at the bottom under the
@@ -191,10 +201,12 @@ export function ActivityApp() {
       {/* Mobile: the preview is a bottom sheet, so the presence dock can't live
           under it — float it in the bottom-right corner, directly *under* the
           live mini preview (the mini preview stands in for the message here).
-          Hidden while the sheet is open (it would cover it). */}
+          Hidden while the sheet is open (it would cover it). The mini is the
+          only preview visible on mobile, so gate it on the same draft the tree
+          waits for — it pops in with real content, not the fresh-open default. */}
       {isMobileSheet && !previewOpen ? (
         <div className="fab-stack">
-          <MiniPreview onOpen={() => setPreviewOpen(true)} />
+          {treeReady ? <MiniPreview onOpen={() => setPreviewOpen(true)} /> : null}
           <PresenceDock />
         </div>
       ) : null}

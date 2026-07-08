@@ -95,6 +95,11 @@ export function ChannelPicker({
 
   const selected = selectedId ? data?.channelById[selectedId] : undefined;
   const label = selected?.name ?? (selectedId ? "this channel" : "Pick a channel");
+  // A server launch seeds `selectedId` (the launching channel) before its name is
+  // known — the guild's channel list is still loading. Rather than flash the
+  // generic "this channel" and then swap to the real name, hold a small skeleton
+  // in the label's place until it resolves.
+  const nameLoading = loading && !!selectedId && !selected;
 
   // On a server launch the destination is room-wide, so spell that out in the
   // trigger's tooltip — picking a channel moves it for everyone, not just you.
@@ -182,7 +187,11 @@ export function ChannelPicker({
         title={triggerTitle}
       >
         <ChannelTypeIcon type={selected?.type ?? 0} size={16} />
-        <span className={styles.triggerName}>{label}</span>
+        {nameLoading ? (
+          <span className={styles.triggerNameSkeleton} aria-hidden="true" />
+        ) : (
+          <span className={styles.triggerName}>{label}</span>
+        )}
         <ChevronDownIcon size={14} className={styles.chevron} />
       </button>
 

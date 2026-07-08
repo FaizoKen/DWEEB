@@ -56,6 +56,36 @@
   flex: none;
 }
 
+/* Stand-in for the channel name while the guild's channel list loads — a small
+   breathing bar sized like a short name, matching the app's other skeletons so
+   the destination chip doesn't flash a placeholder word then swap. */
+.triggerNameSkeleton {
+  display: inline-block;
+  flex: none;
+  width: 84px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--app-bg-active);
+  animation: channelNameBreathe 1.6s ease-in-out infinite;
+}
+
+@keyframes channelNameBreathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .triggerNameSkeleton {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
 /* Phone: keep a long channel name from eating the row — cap it tighter than the
    desktop 240px so the destination truncates early and leaves the toolbar's
    actions room to stay on one line. */
