@@ -17,6 +17,7 @@ import {
   SeparatorSpacing,
   type WebhookMessage,
 } from "@/core/schema/types";
+import { DEFAULT_MEDIA } from "@/core/media/defaultMedia";
 import { newId } from "@/lib/id";
 
 const id = newId;
@@ -63,7 +64,7 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
           accessory: {
             _id: id(),
             type: ComponentType.Thumbnail,
-            media: { url: "https://picsum.photos/seed/dweeb-card/256/256" },
+            media: { url: DEFAULT_MEDIA.thumbnail },
             description: "Thumbnail accessory",
           },
         },
@@ -92,17 +93,17 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
           items: [
             {
               _id: id(),
-              media: { url: "https://picsum.photos/seed/dweeb-g1/800/450" },
+              media: { url: DEFAULT_MEDIA.showcaseGallery1 },
               description: "Media galleries hold up to 10 images or clips",
             },
             {
               _id: id(),
-              media: { url: "https://picsum.photos/seed/dweeb-g2/800/450" },
+              media: { url: DEFAULT_MEDIA.showcaseGallery2 },
               description: "Give every item its own description…",
             },
             {
               _id: id(),
-              media: { url: "https://picsum.photos/seed/dweeb-g3/800/450" },
+              media: { url: DEFAULT_MEDIA.showcaseGallery3 },
               description: "…or mark any one of them as a spoiler",
             },
           ],

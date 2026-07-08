@@ -8,6 +8,7 @@
  */
 
 import { newId } from "@/lib/id";
+import { DEFAULT_MEDIA } from "@/core/media/defaultMedia";
 import {
   ButtonStyle,
   ComponentType,
@@ -74,7 +75,7 @@ export function createThumbnail(): ThumbnailComponent {
   return {
     _id: newId(),
     type: ComponentType.Thumbnail,
-    media: { url: "https://placehold.co/256x256/5865F2/ffffff/png?text=Thumb" },
+    media: { url: DEFAULT_MEDIA.thumbnail },
   };
 }
 
@@ -91,7 +92,7 @@ export function createSection(): SectionComponent {
 export function createGalleryItem(): MediaGalleryItem {
   return {
     _id: newId(),
-    media: { url: "https://placehold.co/600x400/5865F2/ffffff/png?text=Image" },
+    media: { url: DEFAULT_MEDIA.gallery },
   };
 }
 

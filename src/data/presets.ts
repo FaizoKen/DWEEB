@@ -24,6 +24,7 @@ import {
   SeparatorSpacing,
   type WebhookMessage,
 } from "@/core/schema/types";
+import { DEFAULT_MEDIA } from "@/core/media/defaultMedia";
 import { newId } from "@/lib/id";
 import { SHOWCASE_MESSAGE } from "./showcase";
 
@@ -165,7 +166,7 @@ const WELCOME_MESSAGE: WebhookMessage = {
           items: [
             {
               _id: id(),
-              media: { url: "https://picsum.photos/seed/wb-welcome/900/300" },
+              media: { url: DEFAULT_MEDIA.welcomeBanner },
               description: "Welcome banner",
             },
           ],
@@ -1112,7 +1113,7 @@ const ANNOUNCEMENT_MESSAGE: WebhookMessage = {
       items: [
         {
           _id: id(),
-          media: { url: "https://picsum.photos/seed/wb-banner/900/320" },
+          media: { url: DEFAULT_MEDIA.announcementBanner },
           description: "Announcement banner",
         },
       ],
@@ -1618,7 +1619,7 @@ const EVENT_MESSAGE: WebhookMessage = {
           accessory: {
             _id: id(),
             type: ComponentType.Thumbnail,
-            media: { url: "https://picsum.photos/seed/wb-event/256/256" },
+            media: { url: DEFAULT_MEDIA.eventThumb },
             description: "Event cover",
           },
         },
@@ -1739,7 +1740,7 @@ const GIVEAWAY_BUTTON_MESSAGE: WebhookMessage = {
           accessory: {
             _id: id(),
             type: ComponentType.Thumbnail,
-            media: { url: "https://picsum.photos/seed/wb-nitro/256/256" },
+            media: { url: DEFAULT_MEDIA.giveawayPrize },
             description: "Prize",
           },
         },
@@ -1991,7 +1992,7 @@ const PRODUCT_MESSAGE: WebhookMessage = {
           accessory: {
             _id: id(),
             type: ComponentType.Thumbnail,
-            media: { url: "https://picsum.photos/seed/wb-product/256/256" },
+            media: { url: DEFAULT_MEDIA.productHoodie },
             description: "Aurora Hoodie",
           },
         },
@@ -2187,22 +2188,22 @@ const SPOTLIGHT_MESSAGE: WebhookMessage = {
       items: [
         {
           _id: id(),
-          media: { url: "https://picsum.photos/seed/wb-sp1/500/500" },
+          media: { url: DEFAULT_MEDIA.spotlight1 },
           description: "Featured work 1",
         },
         {
           _id: id(),
-          media: { url: "https://picsum.photos/seed/wb-sp2/500/500" },
+          media: { url: DEFAULT_MEDIA.spotlight2 },
           description: "Featured work 2",
         },
         {
           _id: id(),
-          media: { url: "https://picsum.photos/seed/wb-sp3/500/500" },
+          media: { url: DEFAULT_MEDIA.spotlight3 },
           description: "Featured work 3",
         },
         {
           _id: id(),
-          media: { url: "https://picsum.photos/seed/wb-sp4/500/500" },
+          media: { url: DEFAULT_MEDIA.spotlight4 },
           description: "Featured work 4",
         },
       ],
