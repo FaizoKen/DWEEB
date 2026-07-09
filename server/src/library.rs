@@ -33,15 +33,20 @@
 //!    through DWEEB (`TierLimits::library_posted`). It syncs automatically —
 //!    recording a post past the window evicts the oldest entry instead of
 //!    failing, so the history is always current and auto-record can't be
-//!    starved by a full shelf. Entries can't be created by hand (a posted row
-//!    always names a real Discord message) and their content can't be edited
-//!    (it mirrors what was actually sent); deleting one is allowed, so a
-//!    sensitive record doesn't have to wait to age out.
+//!    starved by a full shelf. Never-expire messages are the exception: their
+//!    ids (fetched from the dispatcher's permanent slots, see
+//!    [`permanent_message_ids`]) ride above the window — never evicted and not
+//!    counted against it — so pinning a message on Discord also pins its
+//!    history record. Entries can't be created by hand (a posted row always
+//!    names a real Discord message) and their content can't be edited (it
+//!    mirrors what was actually sent); deleting one is allowed, so a sensitive
+//!    record doesn't have to wait to age out.
 //!  - `draft` is the *curated shelf*: every entry was a deliberate save, gated
 //!    on the plan cap (`TierLimits::library`) — full means full, delete or
 //!    upgrade. Quota only ever gates creation; a downgraded server keeps every
 //!    stored draft readable.
 
+use std::collections::HashSet;
 use std::path::Path as FsPath;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -250,12 +255,19 @@ impl LibraryStore {
     ///    its next post. Draft rows are never touched by eviction.
     ///  - **draft** is a hard cap: at the cap, the insert is refused with
     ///    [`CreateError::PerGuildFull`]. Posted rows don't count against it.
+    ///
+    /// `protected` is the guild's never-expire message ids (from the
+    /// dispatcher's permanent slots): those posted rows sit *above* the window
+    /// — never evicted, and not consuming its slots — so marking a message
+    /// never-expire also pins its history record. Only consulted on posted
+    /// inserts; pass an empty set for drafts.
     pub fn upsert(
         &self,
         n: &NewEntry,
         n_id: &str,
         now: i64,
         limit_override: Option<i64>,
+        protected: &HashSet<String>,
     ) -> Result<String, CreateError> {
         let conn = self.lock();
         if n.label == "posted" {
@@ -339,16 +351,37 @@ impl LibraryStore {
                 // Trim the history to its window, newest first (rowid breaks
                 // same-second ties in insertion order). Runs after the insert
                 // so "window = N" always means "the N most recent posts,
-                // including this one".
-                let evicted = conn
-                    .execute(
-                        "DELETE FROM library_messages WHERE guild_id=?1 AND label='posted' \
-                         AND id NOT IN (SELECT id FROM library_messages \
+                // including this one". Walked in Rust rather than one DELETE so
+                // `protected` rows (never-expire messages) can be skipped —
+                // they neither evict nor count; the per-guild set is small
+                // (window + permanent slots), so this stays cheap.
+                let rows: Vec<(String, Option<String>)> = {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT id, message_id FROM library_messages \
                              WHERE guild_id=?1 AND label='posted' \
-                             ORDER BY updated_at DESC, rowid DESC LIMIT ?2)",
-                        params![n.guild_id, window.max(0)],
-                    )
-                    .map_err(|e| CreateError::Storage(e.to_string()))?;
+                             ORDER BY updated_at DESC, rowid DESC",
+                        )
+                        .map_err(|e| CreateError::Storage(e.to_string()))?;
+                    let iter = stmt
+                        .query_map([&n.guild_id], |r| Ok((r.get(0)?, r.get(1)?)))
+                        .map_err(|e| CreateError::Storage(e.to_string()))?;
+                    iter.collect::<rusqlite::Result<_>>()
+                        .map_err(|e| CreateError::Storage(e.to_string()))?
+                };
+                let mut kept: i64 = 0;
+                let mut evicted: usize = 0;
+                for (id, mid) in rows {
+                    if mid.is_some_and(|m| protected.contains(&m)) {
+                        continue;
+                    }
+                    kept += 1;
+                    if kept > window.max(0) {
+                        evicted += conn
+                            .execute("DELETE FROM library_messages WHERE id=?1", [&id])
+                            .map_err(|e| CreateError::Storage(e.to_string()))?;
+                    }
+                }
                 if evicted > 0 {
                     self.count.fetch_sub(evicted as i64, Ordering::Relaxed);
                 }
@@ -456,6 +489,54 @@ fn e2s<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+// ── Never-expire protection ──────────────────────────────────────────────────
+
+/// The guild's never-expire message ids, from the dispatcher (the permanent
+/// slots' owner) — the posted rows the rolling window must not evict, so
+/// marking a message never-expire also pins its library record. Suspended
+/// grants (over a downgraded plan cap) are included: the grant still exists
+/// and upgrading restores it, so its history shouldn't roll off meanwhile.
+/// Best-effort: no dispatcher configured, or any error, degrades to an empty
+/// set — plain window behaviour, never a failed record.
+pub async fn permanent_message_ids(
+    dispatcher: Option<&Arc<crate::routes::DispatcherApi>>,
+    guild: &str,
+) -> HashSet<String> {
+    let Some(api) = dispatcher else {
+        return HashSet::new();
+    };
+    let resp = match api
+        .http
+        .get(format!("{}/permanent/{guild}", api.base))
+        .bearer_auth(&api.token)
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => {
+            tracing::warn!(target: "library", status = %r.status(), "permanent lookup failed");
+            return HashSet::new();
+        }
+        Err(e) => {
+            tracing::warn!(target: "library", "permanent lookup unreachable: {e}");
+            return HashSet::new();
+        }
+    };
+    let Ok(v) = resp.json::<Value>().await else {
+        return HashSet::new();
+    };
+    v.get("items")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|i| i.get("message_id").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // ── Auto-record (best-effort, off the critical path) ─────────────────────────
 
 /// Record a message the proxy itself just posted (the Activity's publish/update,
@@ -504,13 +585,16 @@ pub async fn record_posted_best_effort(
         created_by: created_by.to_string(),
     };
     let limit_override = st.entitlements.library_posted_limit(guild).await;
+    let protected = permanent_message_ids(st.dispatcher.as_ref(), guild).await;
     let store = Arc::clone(store);
     let id = match random_id() {
         Some(id) => id,
         None => return,
     };
     let now = unix_now();
-    let res = tokio::task::spawn_blocking(move || store.upsert(&n, &id, now, limit_override)).await;
+    let res =
+        tokio::task::spawn_blocking(move || store.upsert(&n, &id, now, limit_override, &protected))
+            .await;
     match res {
         Ok(Ok(_)) => {}
         // The posted window evicts instead of filling, so only the global
@@ -533,6 +617,7 @@ pub async fn record_posted_best_effort(
 pub async fn record_fired_schedule(
     library: Option<&Arc<LibraryStore>>,
     entitlements: &Arc<crate::entitlement::Entitlement>,
+    dispatcher: Option<&Arc<crate::routes::DispatcherApi>>,
     guild: &str,
     channel_id: Option<&str>,
     message_id: &str,
@@ -566,10 +651,13 @@ pub async fn record_fired_schedule(
         created_by: created_by.unwrap_or("schedule").to_string(),
     };
     let limit_override = entitlements.library_posted_limit(guild).await;
+    let protected = permanent_message_ids(dispatcher, guild).await;
     let Some(id) = random_id() else { return };
     let now = unix_now();
     let store = Arc::clone(store);
-    let res = tokio::task::spawn_blocking(move || store.upsert(&n, &id, now, limit_override)).await;
+    let res =
+        tokio::task::spawn_blocking(move || store.upsert(&n, &id, now, limit_override, &protected))
+            .await;
     match res {
         Ok(Ok(_)) => {}
         Ok(Err(CreateError::PerGuildFull(_))) | Ok(Err(CreateError::Full)) => {}
@@ -728,18 +816,23 @@ pub async fn library_create(
         created_by: session.uid,
     };
     // The override is the plan cap for *this entry's bucket* — the posted
-    // window or the draft quota.
-    let limit_override = if n.label == "posted" {
-        st.entitlements.library_posted_limit(&guild).await
+    // window or the draft quota. Posted inserts also carry the guild's
+    // never-expire ids so the window trim can't roll a pinned message off.
+    let (limit_override, protected) = if n.label == "posted" {
+        (
+            st.entitlements.library_posted_limit(&guild).await,
+            permanent_message_ids(st.dispatcher.as_ref(), &guild).await,
+        )
     } else {
-        st.entitlements.library_limit(&guild).await
+        (st.entitlements.library_limit(&guild).await, HashSet::new())
     };
     let id = random_id().ok_or_else(|| AppError::Internal("rng".into()))?;
     let now = unix_now();
     let s = Arc::clone(&store);
-    let res = tokio::task::spawn_blocking(move || s.upsert(&n, &id, now, limit_override))
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let res =
+        tokio::task::spawn_blocking(move || s.upsert(&n, &id, now, limit_override, &protected))
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
     match res {
         Ok(stored_id) => {
             let g = guild.clone();
@@ -1025,12 +1118,28 @@ mod tests {
         }
     }
 
+    /// `upsert` with no never-expire pins — what most tests exercise.
+    fn upsert(
+        store: &LibraryStore,
+        n: &NewEntry,
+        n_id: &str,
+        now: i64,
+        limit_override: Option<i64>,
+    ) -> Result<String, CreateError> {
+        store.upsert(n, n_id, now, limit_override, &HashSet::new())
+    }
+
     #[test]
     fn insert_list_get_delete_roundtrip() {
         let (store, path) = temp_store("roundtrip", 100, 10, 10);
-        let id = store
-            .upsert(&entry("g1", "draft", None), "aaaaaaaaaa", 1_000, None)
-            .unwrap();
+        let id = upsert(
+            &store,
+            &entry("g1", "draft", None),
+            "aaaaaaaaaa",
+            1_000,
+            None,
+        )
+        .unwrap();
         assert_eq!(id, "aaaaaaaaaa");
         let rows = store.list_for_guild("g1", 100).unwrap();
         assert_eq!(rows.len(), 1);
@@ -1047,45 +1156,43 @@ mod tests {
     #[test]
     fn posted_upserts_by_message_id() {
         let (store, path) = temp_store("upsert", 100, 10, 10);
-        let first = store
-            .upsert(
-                &entry("g1", "posted", Some("m1")),
-                "id-first-x",
-                1_000,
-                None,
-            )
-            .unwrap();
+        let first = upsert(
+            &store,
+            &entry("g1", "posted", Some("m1")),
+            "id-first-x",
+            1_000,
+            None,
+        )
+        .unwrap();
         // Same guild + message: refreshes the one row, keeps its id — even
         // under a window override the guild currently exceeds.
         let mut refreshed = entry("g1", "posted", Some("m1"));
         refreshed.payload_sealed = "sealed-v2".into();
-        let second = store
-            .upsert(&refreshed, "id-second-x", 2_000, Some(1))
-            .unwrap();
+        let second = upsert(&store, &refreshed, "id-second-x", 2_000, Some(1)).unwrap();
         assert_eq!(first, second);
         let rows = store.list_for_guild("g1", 100).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].payload_sealed, "sealed-v2");
         assert_eq!(rows[0].updated_at, 2_000);
         // A different message in the same guild is a fresh row.
-        store
-            .upsert(
-                &entry("g1", "posted", Some("m2")),
-                "id-third-xx",
-                3_000,
-                None,
-            )
-            .unwrap();
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m2")),
+            "id-third-xx",
+            3_000,
+            None,
+        )
+        .unwrap();
         assert_eq!(store.counts_for_guild("g1").unwrap(), (2, 0));
         // The same message id in a DIFFERENT guild is independent.
-        store
-            .upsert(
-                &entry("g2", "posted", Some("m1")),
-                "id-fourth-x",
-                3_000,
-                None,
-            )
-            .unwrap();
+        upsert(
+            &store,
+            &entry("g2", "posted", Some("m1")),
+            "id-fourth-x",
+            3_000,
+            None,
+        )
+        .unwrap();
         assert_eq!(store.counts_for_guild("g2").unwrap(), (1, 0));
         let _ = std::fs::remove_file(path);
     }
@@ -1094,35 +1201,21 @@ mod tests {
     fn draft_cap_gates_drafts_only() {
         let (store, path) = temp_store("quota", 100, 2, 10);
         // Posted history never counts against the draft cap.
-        store
-            .upsert(&entry("g1", "posted", Some("m1")), "id-p1", 1, None)
-            .unwrap();
-        store
-            .upsert(&entry("g1", "posted", Some("m2")), "id-p2", 1, None)
-            .unwrap();
-        store
-            .upsert(&entry("g1", "draft", None), "id-a", 1, None)
-            .unwrap();
-        store
-            .upsert(&entry("g1", "draft", None), "id-b", 1, None)
-            .unwrap();
+        upsert(&store, &entry("g1", "posted", Some("m1")), "id-p1", 1, None).unwrap();
+        upsert(&store, &entry("g1", "posted", Some("m2")), "id-p2", 1, None).unwrap();
+        upsert(&store, &entry("g1", "draft", None), "id-a", 1, None).unwrap();
+        upsert(&store, &entry("g1", "draft", None), "id-b", 1, None).unwrap();
         // Store default (2 drafts) reached → third draft is rejected with the cap.
-        match store.upsert(&entry("g1", "draft", None), "id-c", 1, None) {
+        match upsert(&store, &entry("g1", "draft", None), "id-c", 1, None) {
             Err(CreateError::PerGuildFull(2)) => {}
             other => panic!("expected PerGuildFull(2), got {other:?}"),
         }
         // A plan override raises it.
-        store
-            .upsert(&entry("g1", "draft", None), "id-c", 1, Some(3))
-            .unwrap();
+        upsert(&store, &entry("g1", "draft", None), "id-c", 1, Some(3)).unwrap();
         // Another guild is unaffected.
-        store
-            .upsert(&entry("g2", "draft", None), "id-d", 1, None)
-            .unwrap();
+        upsert(&store, &entry("g2", "draft", None), "id-d", 1, None).unwrap();
         // And the full draft shelf never blocks recording a post.
-        store
-            .upsert(&entry("g1", "posted", Some("m3")), "id-p3", 2, None)
-            .unwrap();
+        upsert(&store, &entry("g1", "posted", Some("m3")), "id-p3", 2, None).unwrap();
         assert_eq!(store.counts_for_guild("g1").unwrap(), (3, 3));
         let _ = std::fs::remove_file(path);
     }
@@ -1130,20 +1223,33 @@ mod tests {
     #[test]
     fn posted_window_evicts_oldest_and_leaves_drafts() {
         let (store, path) = temp_store("window", 100, 10, 2);
-        store
-            .upsert(&entry("g1", "draft", None), "id-draft-a", 500, None)
-            .unwrap();
-        store
-            .upsert(&entry("g1", "posted", Some("m1")), "id-p1", 1_000, None)
-            .unwrap();
-        store
-            .upsert(&entry("g1", "posted", Some("m2")), "id-p2", 2_000, None)
-            .unwrap();
+        upsert(&store, &entry("g1", "draft", None), "id-draft-a", 500, None).unwrap();
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m1")),
+            "id-p1",
+            1_000,
+            None,
+        )
+        .unwrap();
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m2")),
+            "id-p2",
+            2_000,
+            None,
+        )
+        .unwrap();
         // Third post past the window of 2: recorded, the OLDEST post evicted,
         // the draft untouched.
-        store
-            .upsert(&entry("g1", "posted", Some("m3")), "id-p3", 3_000, None)
-            .unwrap();
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m3")),
+            "id-p3",
+            3_000,
+            None,
+        )
+        .unwrap();
         assert_eq!(store.counts_for_guild("g1").unwrap(), (2, 1));
         let rows = store.list_for_guild("g1", 100).unwrap();
         let message_ids: Vec<_> = rows.iter().filter_map(|r| r.message_id.clone()).collect();
@@ -1152,19 +1258,24 @@ mod tests {
         assert!(!message_ids.contains(&"m1".to_string()));
         // Refreshing an existing post bumps it to the front of the window
         // instead of consuming a slot.
-        store
-            .upsert(
-                &entry("g1", "posted", Some("m2")),
-                "id-refresh",
-                4_000,
-                None,
-            )
-            .unwrap();
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m2")),
+            "id-refresh",
+            4_000,
+            None,
+        )
+        .unwrap();
         assert_eq!(store.counts_for_guild("g1").unwrap(), (2, 1));
         // A downgrade (window 2 → 1) trims on the NEXT post, not before.
-        store
-            .upsert(&entry("g1", "posted", Some("m4")), "id-p4", 5_000, Some(1))
-            .unwrap();
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m4")),
+            "id-p4",
+            5_000,
+            Some(1),
+        )
+        .unwrap();
         let rows = store.list_for_guild("g1", 100).unwrap();
         let posted: Vec<_> = rows.iter().filter(|r| r.label == "posted").collect();
         assert_eq!(posted.len(), 1);
@@ -1175,17 +1286,94 @@ mod tests {
     }
 
     #[test]
+    fn never_expire_posts_ride_above_the_window() {
+        let (store, path) = temp_store("pinned", 100, 10, 2);
+        let pins: HashSet<String> = ["m1".to_string()].into();
+        store
+            .upsert(
+                &entry("g1", "posted", Some("m1")),
+                "id-p1",
+                1_000,
+                None,
+                &pins,
+            )
+            .unwrap();
+        store
+            .upsert(
+                &entry("g1", "posted", Some("m2")),
+                "id-p2",
+                2_000,
+                None,
+                &pins,
+            )
+            .unwrap();
+        store
+            .upsert(
+                &entry("g1", "posted", Some("m3")),
+                "id-p3",
+                3_000,
+                None,
+                &pins,
+            )
+            .unwrap();
+        // m1 is the oldest but pinned: it neither evicts nor occupies a window
+        // slot, so the window of 2 holds m2 + m3 and nothing was trimmed.
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (3, 0));
+        // The next post past the window evicts the oldest UNPINNED row (m2).
+        store
+            .upsert(
+                &entry("g1", "posted", Some("m4")),
+                "id-p4",
+                4_000,
+                None,
+                &pins,
+            )
+            .unwrap();
+        let message_ids: Vec<_> = store
+            .list_for_guild("g1", 100)
+            .unwrap()
+            .iter()
+            .filter_map(|r| r.message_id.clone())
+            .collect();
+        assert!(message_ids.contains(&"m1".to_string()));
+        assert!(!message_ids.contains(&"m2".to_string()));
+        assert!(message_ids.contains(&"m3".to_string()));
+        assert!(message_ids.contains(&"m4".to_string()));
+        // Once the pin is gone (slot freed), the row rejoins the window and the
+        // next post trims it like any other.
+        store
+            .upsert(
+                &entry("g1", "posted", Some("m5")),
+                "id-p5",
+                5_000,
+                None,
+                &HashSet::new(),
+            )
+            .unwrap();
+        let message_ids: Vec<_> = store
+            .list_for_guild("g1", 100)
+            .unwrap()
+            .iter()
+            .filter_map(|r| r.message_id.clone())
+            .collect();
+        assert_eq!(message_ids.len(), 2);
+        assert!(message_ids.contains(&"m4".to_string()));
+        assert!(message_ids.contains(&"m5".to_string()));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn unlimited_window_never_evicts() {
         let (store, path) = temp_store("nowindow", 100, 10, 1);
         for (i, mid) in ["m1", "m2", "m3"].iter().enumerate() {
-            store
-                .upsert(
-                    &entry("g1", "posted", Some(mid)),
-                    &format!("id-fill-{i}"),
-                    1_000 + i as i64,
-                    Some(i64::MAX),
-                )
-                .unwrap();
+            upsert(
+                &store,
+                &entry("g1", "posted", Some(mid)),
+                &format!("id-fill-{i}"),
+                1_000 + i as i64,
+                Some(i64::MAX),
+            )
+            .unwrap();
         }
         assert_eq!(store.counts_for_guild("g1").unwrap(), (3, 0));
         let _ = std::fs::remove_file(path);
@@ -1194,17 +1382,14 @@ mod tests {
     #[test]
     fn global_cap_answers_full() {
         let (store, path) = temp_store("full", 1, 10, 10);
-        store
-            .upsert(&entry("g1", "draft", None), "id-a", 1, None)
-            .unwrap();
-        match store.upsert(&entry("g2", "draft", None), "id-b", 1, None) {
+        upsert(&store, &entry("g1", "draft", None), "id-a", 1, None).unwrap();
+        match upsert(&store, &entry("g2", "draft", None), "id-b", 1, None) {
             Err(CreateError::Full) => {}
             other => panic!("expected Full, got {other:?}"),
         }
         // A new posted row (no existing message to refresh) is still capped —
         // the global bound protects the disk, unlike the per-guild window.
-        store
-            .upsert(&entry("g1", "posted", Some("m1")), "id-c", 1, None)
+        upsert(&store, &entry("g1", "posted", Some("m1")), "id-c", 1, None)
             .expect_err("insert of a new posted row is still capped");
         let _ = std::fs::remove_file(path);
     }
@@ -1212,15 +1397,9 @@ mod tests {
     #[test]
     fn drafts_over_cap_ignores_posted_rows() {
         let (store, path) = temp_store("overcap", 100, 2, 10);
-        store
-            .upsert(&entry("g1", "posted", Some("m1")), "id-p1", 1, None)
-            .unwrap();
-        store
-            .upsert(&entry("g1", "draft", None), "id-a", 1, None)
-            .unwrap();
-        store
-            .upsert(&entry("g1", "draft", None), "id-b", 1, None)
-            .unwrap();
+        upsert(&store, &entry("g1", "posted", Some("m1")), "id-p1", 1, None).unwrap();
+        upsert(&store, &entry("g1", "draft", None), "id-a", 1, None).unwrap();
+        upsert(&store, &entry("g1", "draft", None), "id-b", 1, None).unwrap();
         // Exactly at the store-default draft cap (2): not over — the posted
         // row doesn't count.
         assert!(!store.drafts_over_cap("g1", None).unwrap());
@@ -1236,9 +1415,14 @@ mod tests {
     #[test]
     fn save_updates_everything_editable() {
         let (store, path) = temp_store("save", 100, 10, 10);
-        let id = store
-            .upsert(&entry("g1", "posted", Some("m1")), "id-a", 1_000, None)
-            .unwrap();
+        let id = upsert(
+            &store,
+            &entry("g1", "posted", Some("m1")),
+            "id-a",
+            1_000,
+            None,
+        )
+        .unwrap();
         let mut row = store.get("g1", &id).unwrap().unwrap();
         row.title = Some("Renamed".into());
         store.save(&row, 2_000).unwrap();

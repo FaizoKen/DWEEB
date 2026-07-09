@@ -8,14 +8,13 @@
 .note {
   margin: 0;
   font-size: 12px;
+  line-height: 1.5;
   color: var(--app-text-subtle);
 }
 
-.error {
-  margin: 10px 0 0;
-  font-size: var(--app-text-xs);
-  line-height: 1.5;
-  color: var(--app-danger-text);
+/* The "never-expire moved" hand-off button, on its own row under the note. */
+.handoff {
+  margin-top: 10px;
 }
 
 /* Group heading: title on the left, optional usage chip on the right. */
@@ -66,111 +65,9 @@
   text-decoration: underline;
 }
 
-/* Message rows (both groups) — one line: link · meta · action. */
-.slotList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.slotItem {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 32px;
-  padding: 3px 0;
-}
-
-.slotItem + .slotItem {
-  border-top: 1px solid var(--app-border);
-}
-
-/* A row for a plan-paused (over-cap) grant — dimmed but still actionable. */
-.slotItemPaused {
-  composes: slotItem;
-  opacity: 0.6;
-}
-
-.slotItemPaused + .slotItem,
-.slotItem + .slotItemPaused,
-.slotItemPaused + .slotItemPaused {
-  border-top: 1px solid var(--app-border);
-}
-
-/* Small "Paused" pill next to a suspended item. */
-.pausedBadge {
-  flex: none;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  background: var(--app-warning-soft);
-  color: var(--app-warning-text);
-}
-
-/* The over-cap explainer above a list that has paused items. */
-.pausedNote {
-  margin: 0 0 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 11px;
-  line-height: 1.5;
-  background: var(--app-warning-bg, var(--app-bg-hover));
-  color: var(--app-text-muted);
-}
-
-.slotLink {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--app-text-sm);
-  color: var(--app-accent-text);
-  text-decoration: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.slotLink:hover {
-  text-decoration: underline;
-}
-
-.slotMeta {
-  flex: none;
-  font-size: 11px;
-  color: var(--app-text-subtle);
-  white-space: nowrap;
-}
-
-/* Scheduled-posts block — its own section below the never-expire slots. */
+/* Scheduled-posts block — separated from the never-expire hand-off above. */
 .scheduledSection {
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--app-border);
-}
-
-/* "Where this data lives" — the storage-model explainer, collapsed by default. */
-.storage {
-  margin: 14px 0 0;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--app-text-muted);
-}
-
-.storage summary {
-  cursor: pointer;
-  width: fit-content;
-  color: var(--app-text-subtle);
-  user-select: none;
-}
-
-.storage summary:hover {
-  color: var(--app-text);
-}
-
-.storage p {
-  margin: 6px 0 0;
 }

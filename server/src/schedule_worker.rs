@@ -224,6 +224,7 @@ async fn process(
                     crate::library::record_fired_schedule(
                         library,
                         entitlements,
+                        dispatcher,
                         guild,
                         channel_id.as_deref(),
                         mid,

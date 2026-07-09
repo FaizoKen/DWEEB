@@ -26,8 +26,8 @@
  * permanent" switch claims a slot — or, when the update target already holds
  * one, starts on and releases it when turned off. When every slot is taken
  * the switch gives way to a "Free a slot" button that closes the whole send
- * stack (confirm + Share dialog) and opens the "Managed messages" dialog,
- * which owns slot freeing. The claim/release runs right after the
+ * stack (confirm + Share dialog) and opens the gallery's Posted tab, where
+ * slots are freed on the messages' cards. The claim/release runs right after the
  * send succeeds — permanence is keyed to the message id, which only exists
  * then — and never fails the send; the success dialog shows a read-only
  * receipt of the final state, with any failure attached.
@@ -127,6 +127,8 @@ import {
 } from "@/core/guild/api";
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
+import { alignConnectedGuild } from "@/core/guild/originGuild";
+import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { usePlanStore } from "@/core/plan/planStore";
 import { isCheckoutConfigured } from "@/core/plan/stripeApi";
 import { Button } from "@/ui/Button";
@@ -255,7 +257,7 @@ export function SendPanel({
   /**
    * Closes the Share dialog hosting this panel. Used by the confirm's
    * "Free a slot" hand-off, which drops the whole send stack before opening
-   * the "Managed messages" dialog.
+   * the gallery's Posted tab.
    */
   onCloseDialog?: () => void;
 } = {}) {
@@ -651,7 +653,7 @@ export function SendPanel({
   // What the confirm dialog renders. Hidden when expiry is off on this
   // deployment (nothing to decide) or the slot state never loaded; when every
   // slot is taken by other messages the switch gives way to a "Free a slot"
-  // button that hands off to the "Managed messages" dialog (below).
+  // button that hands off to the gallery's Posted tab (below).
   const targetAlreadyPermanent =
     updateTargetId != null &&
     confirmSlots != null &&
@@ -661,15 +663,15 @@ export function SendPanel({
 
   // "Free a slot" on the confirm's locked switch: abandon the pending send,
   // drop the whole dialog stack (confirm + Share dialog), and open the
-  // "Managed messages" dialog for the webhook's server — the only place
-  // slots are freed. Nothing is lost: the editor keeps the message and this
-  // panel stays mounted, so clicking Send again picks up where it left off.
+  // gallery's Posted tab for the webhook's server — slots are freed right on
+  // the posted messages' cards there. Nothing is lost: the editor keeps the
+  // message and this panel stays mounted, so clicking Send again picks up
+  // where it left off.
   const handleManageSlots = () => {
     setConfirmOpen(false);
     onCloseDialog?.();
-    if (knownGuildId) {
-      useManagedMessagesStore.getState().open(knownGuildId, knownGuildName);
-    }
+    if (knownGuildId) alignConnectedGuild(knownGuildId);
+    useTemplateGalleryStore.getState().openGallery("Posted");
   };
 
   // The positive counterpart to "Free a slot": drop the send stack and open the
@@ -1176,7 +1178,7 @@ export function SendPanel({
               if (claim.full) {
                 // Slots filled up between the confirm fetch and now.
                 permanentError =
-                  "All never-expire slots were taken in the meantime — free one under Managed messages in the account menu, then update the message to try again.";
+                  "All never-expire slots were taken in the meantime — free one from a posted message's card in Start a message, then update the message to try again.";
               } else {
                 isPermanent = true;
               }

@@ -540,6 +540,146 @@
   background: color-mix(in srgb, #d83c3e 10%, transparent);
 }
 
+/* ── Never-expire slot management (Posted tab) ─────────────────────────────
+ * The on-card assign/free control shares the tag-pill silhouette so the meta
+ * row stays one visual line, but reads as pressable (border, hover). */
+.slotBtn {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  color: var(--app-text-muted);
+  background: transparent;
+  border: 1px solid var(--app-border-strong);
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+.slotBtn:hover:not(:disabled) {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.slotBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.slotBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+.slotBtn[data-kind="assign"] {
+  color: #3ba55d;
+  border-color: color-mix(in srgb, #3ba55d 45%, transparent);
+}
+.slotBtn[data-kind="assign"]:hover:not(:disabled) {
+  color: #3ba55d;
+  background: color-mix(in srgb, #3ba55d 10%, transparent);
+}
+
+/* Slot usage strip pinned above the Posted grid: usage line, optional paused
+ * note, and the orphaned-slot recovery list. */
+.slotStrip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-subtle);
+}
+.slotStripHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.slotStripText {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.slotStripText strong {
+  color: var(--app-text);
+}
+.slotStripUpgrade {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-accent);
+}
+.slotStripUpgrade:hover {
+  text-decoration: underline;
+}
+.slotStripNote {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--app-text-subtle);
+}
+
+/* Orphaned never-expire slots — rows mirroring the old Managed-messages list:
+ * link · meta · action. */
+.orphanBlock {
+  border-top: 1px solid var(--app-border);
+  padding-top: 6px;
+}
+.orphanList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.orphanItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 2px 0;
+}
+.orphanItem + .orphanItem {
+  border-top: 1px solid var(--app-border);
+}
+.orphanLink {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--app-text-sm);
+  color: var(--app-accent-text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orphanLink:hover {
+  text-decoration: underline;
+}
+.orphanPaused {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: var(--app-warning-soft);
+  color: var(--app-warning-text);
+}
+.orphanMeta {
+  flex: none;
+  font-size: 11px;
+  color: var(--app-text-subtle);
+  white-space: nowrap;
+}
+
 /* The Continue card is the primary "resume" action — give its text section a
  * soft accent-tinted background so it reads as distinct from the template cards
  * without any extra border or glow. */

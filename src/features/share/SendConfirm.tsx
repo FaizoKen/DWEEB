@@ -18,10 +18,10 @@
  * runs right after the send succeeds — permanence is keyed to the message id,
  * which only exists once Discord accepts the message, so it can never happen
  * here. When every slot is taken by other messages the switch gives way to
- * a "Free a slot" button that hands off to the "Managed messages" dialog,
- * which owns slot freeing — closing this dialog and the Share dialog around
- * it (the pending send is abandoned, but the panel keeps its inputs). The
- * post-send dialog only *reports* the final state.
+ * a "Free a slot" button that hands off to the gallery's Posted tab, where
+ * slots are freed on the messages' cards — closing this dialog and the Share
+ * dialog around it (the pending send is abandoned, but the panel keeps its
+ * inputs). The post-send dialog only *reports* the final state.
  *
  * The dialog is presentational: it owns no send logic. Confirming closes it and
  * hands back to the Send panel, which runs the existing verify + send flow
@@ -156,13 +156,13 @@ export interface SendConfirmProps {
     onChange: (checked: boolean) => void;
     /**
      * Every slot is taken by *other* messages: the switch gives way to a
-     * "Free a slot" button that hands off to the "Managed messages" dialog,
-     * where a slot can be freed.
+     * "Free a slot" button that hands off to the gallery's Posted tab, where
+     * a slot can be freed on a message's card.
      */
     slotsFull: boolean;
     /**
      * The slots-full hand-off: closes the whole send stack (this dialog and
-     * the Share dialog hosting it) and opens "Managed messages" for the
+     * the Share dialog hosting it) and opens the gallery's Posted tab for the
      * webhook's server. Only meaningful — and only rendered — when
      * `slotsFull`.
      */
@@ -336,7 +336,7 @@ function PermanentOptIn({
               size="sm"
               variant="secondary"
               disabled={busy}
-              title="Closes this dialog and opens Managed messages — the send isn't lost, your message and webhook stay in the panel"
+              title="Closes this dialog and opens the posted-messages gallery, where each card has a Free slot button — the send isn't lost, your message and webhook stay in the panel"
               onClick={onManageSlots}
             >
               Free a slot…

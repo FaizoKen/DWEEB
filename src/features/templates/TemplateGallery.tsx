@@ -8,6 +8,10 @@
  *  - **Posted** — the connected server's shared library history (messages sent
  *    through DWEEB, recorded server-side), ready to reload and update in
  *    place. Server-only by design: nothing posted is kept in this browser.
+ *    This tab is also the never-expire manager: each card carries an
+ *    assign/free slot control, the tab header shows slot usage, and slots
+ *    whose message left the history are listed for recovery (freeing one is
+ *    the only way to reclaim a slot held by a deleted message).
  *  - **Saved** — the user's named, stashed messages (a dedicated category), so
  *    reusable messages are reachable without digging through the Saved menu.
  *  - **Templates** — the curated starting points.
@@ -37,8 +41,16 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
-import { fetchPermanentSlots, type PermanentSlots } from "@/core/guild/api";
+import {
+  addPermanentMessage,
+  fetchPermanentSlots,
+  isUnlimitedCap,
+  removePermanentMessage,
+  type PermanentSlots,
+} from "@/core/guild/api";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
+import { usePlanStore } from "@/core/plan/planStore";
+import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import { isLibraryConfigured } from "@/core/library/api";
 import {
   libraryEntryMessage,
@@ -105,6 +117,9 @@ interface CardData {
   /** Extra status pills after the badge — the library's derived labels
    *  ("Never expires", "Buttons expired", "Shared"). */
   tags?: { text: string; tone: "ok" | "warn" | "info" }[];
+  /** Posted only — the never-expire slot control rendered on the card:
+   *  claim a slot ("assign") or give one back ("free"). */
+  slot?: { kind: "assign" | "free"; busy: boolean; title: string; run: () => void };
   /** Lowercased text pulled from the message body (content, labels, …) so the
    *  card is findable by what the message says, not just its name. Precomputed
    *  when the card is built so search stays cheap per keystroke. */
@@ -159,6 +174,9 @@ export function TemplateGallery() {
     name: string;
     /** Library only — the server the entry belongs to. */
     guildId?: string;
+    /** Library only — the entry holds a never-expire slot, which removing the
+     *  history record does NOT free (the confirm says so). */
+    neverExpires?: boolean;
   } | null>(null);
 
   // The connected server's shared library (posted messages + server drafts),
@@ -177,10 +195,13 @@ export function TemplateGallery() {
     }
   }, [libraryOn, connectedGuildId]);
 
-  // Never-expire slot state for the connected server, so library cards can
-  // carry "Never expires" / "Buttons expired" labels. Display-only and
-  // fail-soft (a 501/403 just hides the labels).
+  // Never-expire slot state for the connected server. This is the slots'
+  // management surface: posted cards carry an "assign / free" control and the
+  // Posted tab shows usage + any slots whose message isn't in this history.
+  // Fail-soft: a 501 (feature off) or 403 (no Manage Server) just hides it
+  // all, leaving the gallery a plain shelf.
   const [permanent, setPermanent] = useState<PermanentSlots | null>(null);
+  const [slotBusy, setSlotBusy] = useState(false);
   useEffect(() => {
     if (!libraryOn || !connectedGuildId) {
       setPermanent(null);
@@ -192,6 +213,51 @@ export function TemplateGallery() {
       .catch(() => setPermanent(null));
     return () => ac.abort();
   }, [libraryOn, connectedGuildId]);
+
+  // Claim a never-expire slot for a posted message, straight from its card.
+  // Always asks the server (idempotent, and the local `used/cap` may be stale);
+  // a 409 "all slots taken" comes back with the fresh state instead of throwing.
+  const assignNeverExpire = useCallback(
+    async (messageId: string, channelId: string) => {
+      if (!connectedGuildId) return;
+      setSlotBusy(true);
+      try {
+        const res = await addPermanentMessage(connectedGuildId, messageId, channelId);
+        setPermanent(res.slots);
+        if (res.full) {
+          pushToast(
+            `All ${res.slots.cap} never-expire slots are in use — free one here, or upgrade the server's plan for more.`,
+            "error",
+          );
+        } else {
+          pushToast("Never expire is on — buttons & selects keep working.", "success");
+        }
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : String(e), "error");
+      } finally {
+        setSlotBusy(false);
+      }
+    },
+    [connectedGuildId],
+  );
+
+  // Give a slot back. The message returns to the expiry clock, counted from
+  // its send date — an old message's buttons may expire right away.
+  const freeNeverExpire = useCallback(
+    async (messageId: string) => {
+      if (!connectedGuildId) return;
+      setSlotBusy(true);
+      try {
+        setPermanent(await removePermanentMessage(connectedGuildId, messageId));
+        pushToast("Slot freed — the message is back on the expiry clock.", "info");
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : String(e), "error");
+      } finally {
+        setSlotBusy(false);
+      }
+    },
+    [connectedGuildId],
+  );
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   // Focus search on open so a user can start typing immediately.
@@ -264,11 +330,19 @@ export function TemplateGallery() {
     () => (libGuild && libGuild === connectedGuildId ? libEntries : []),
     [libGuild, connectedGuildId, libEntries],
   );
-  // Active never-expire grants, for the "Never expires" tag.
+  // Never-expire grants: every held slot (freeing a paused one is valid), and
+  // the active subset for the "Never expires" tag.
+  const grantIds = useMemo(
+    () => new Set((permanent?.items ?? []).map((i) => i.message_id)),
+    [permanent],
+  );
   const permanentIds = useMemo(
     () => new Set((permanent?.items ?? []).filter((i) => !i.suspended).map((i) => i.message_id)),
     [permanent],
   );
+  // Whether the slot controls render at all: the feature is on (ttl set), the
+  // slot state loaded (i.e. this user may manage it), and a server is connected.
+  const canManageSlots = permanent != null && permanent.ttl_days != null && !!connectedGuildId;
   const { libraryPostedCards, libraryDraftCards } = useMemo(() => {
     const posted: CardData[] = [];
     const drafts: CardData[] = [];
@@ -276,6 +350,8 @@ export function TemplateGallery() {
       const message = libraryEntryMessage(entry);
       if (!message) continue;
       const isPosted = entry.label === "posted";
+      const interactive = interactiveComponents(message).length > 0;
+      const holdsSlot = isPosted && !!entry.message_id && grantIds.has(entry.message_id);
       // Derived labels: never-expire state from the permanent-slot API, and
       // "buttons expired" for an interactive message older than the component
       // TTL without a slot. Both display-only and best-effort.
@@ -283,12 +359,40 @@ export function TemplateGallery() {
       if (isPosted && entry.message_id) {
         if (permanentIds.has(entry.message_id)) {
           tags.push({ text: "Never expires", tone: "ok" });
+        } else if (holdsSlot) {
+          // Granted but paused: the server is over its downgraded plan cap.
+          tags.push({ text: "Never-expire paused", tone: "warn" });
         } else if (
           permanent?.ttl_days != null &&
-          interactiveComponents(message).length > 0 &&
+          interactive &&
           Date.now() - entry.updated_at * 1000 > permanent.ttl_days * 86_400_000
         ) {
           tags.push({ text: "Buttons expired", tone: "warn" });
+        }
+      }
+      // The on-card slot control: free the held slot, or claim one for an
+      // interactive message (a message without components has nothing to keep
+      // alive, so it gets no assign button).
+      let slot: CardData["slot"];
+      if (canManageSlots && isPosted && entry.message_id) {
+        const messageId = entry.message_id;
+        if (holdsSlot) {
+          slot = {
+            kind: "free",
+            busy: slotBusy,
+            title:
+              "Puts the message back on the expiry clock, counted from its send date — older messages may expire right away. It also rejoins the posted history's rolling window.",
+            run: () => void freeNeverExpire(messageId),
+          };
+        } else if (interactive && entry.channel_id) {
+          const channelId = entry.channel_id;
+          slot = {
+            kind: "assign",
+            busy: slotBusy,
+            title:
+              "Spends one of the server's never-expire slots so this message's buttons & selects keep working — and it stops rolling off this history.",
+            run: () => void assignNeverExpire(messageId, channelId),
+          };
         }
       }
       const origin = libraryEntryOrigin(entry);
@@ -300,9 +404,11 @@ export function TemplateGallery() {
         emoji: isPosted ? "📤" : "🔖",
         name: displayName,
         description: isPosted
-          ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
-              connectedGuildName ?? "server"
-            } history — it rolls off as newer posts land. Load it and save it to keep it.`
+          ? holdsSlot
+            ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · never-expire keeps it out of the rolling history window, so it stays here until you free the slot.`
+            : `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
+                connectedGuildName ?? "server"
+              } history — it rolls off as newer posts land. Load it and save it to keep it.`
           : `A saved message in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`,
         message,
         accent: isPosted ? ACCENT_GREEN : ACCENT_TEAL,
@@ -310,6 +416,7 @@ export function TemplateGallery() {
         badge: isPosted ? "Posted" : "Server draft",
         storedInServerLibrary: true,
         tags,
+        slot,
         searchText: collectSearchText(message),
         onDelete: () =>
           setPendingDelete({
@@ -317,6 +424,7 @@ export function TemplateGallery() {
             id: entry.id,
             guildId: entry.guild_id,
             name: displayName,
+            neverExpires: holdsSlot,
           }),
         onPick: () => {
           if (origin) {
@@ -345,8 +453,13 @@ export function TemplateGallery() {
     return { libraryPostedCards: posted, libraryDraftCards: drafts };
   }, [
     serverEntries,
+    grantIds,
     permanentIds,
     permanent,
+    canManageSlots,
+    slotBusy,
+    assignNeverExpire,
+    freeNeverExpire,
     connectedGuildName,
     replaceMessage,
     replaceMessageFromRestore,
@@ -360,6 +473,31 @@ export function TemplateGallery() {
   // in.
   const postedCards = libraryPostedCards;
   const savedCards = localSavedCards;
+
+  // Never-expire slots pointing at messages this history doesn't hold — posted
+  // before the library existed, evicted before pinning kept them, or their
+  // record was deleted (on the shelf or on Discord). Without a card there'd be
+  // nowhere to free them, so the Posted tab lists them separately; otherwise a
+  // slot held by a vanished message would leak forever.
+  // Gated on the library having LOADED for this server — before that, every
+  // slot would look orphaned for a moment.
+  const orphanSlots = useMemo(() => {
+    if (!permanent || !libLoaded || libGuild !== connectedGuildId) return [];
+    const inHistory = new Set(
+      serverEntries.filter((e) => e.label === "posted" && e.message_id).map((e) => e.message_id),
+    );
+    return permanent.items.filter((i) => !inHistory.has(i.message_id));
+  }, [permanent, serverEntries, libLoaded, libGuild, connectedGuildId]);
+
+  // Pinned posted entries sit above the rolling window server-side, so the
+  // footer's "last N of M" figure counts only the rows the window governs.
+  const pinnedPostedCount = useMemo(
+    () =>
+      serverEntries.filter(
+        (e) => e.label === "posted" && e.message_id && grantIds.has(e.message_id),
+      ).length,
+    [serverEntries, grantIds],
+  );
 
   const templateCards: CardData[] = useMemo(
     () =>
@@ -402,15 +540,23 @@ export function TemplateGallery() {
 
   // Chip row: Posted, the two draft shelves (this browser / server library —
   // each only when there are any), then a single Template chip for the whole
-  // curated set (categories no longer split).
+  // curated set (categories no longer split). Posted also shows when the only
+  // thing to manage is orphaned never-expire slots — with no card holding
+  // them, this tab's strip is the one place they can still be freed.
   const filters: Filter[] = useMemo(
     () => [
-      ...(postedCards.length ? [POSTED_FILTER] : []),
+      ...(postedCards.length || orphanSlots.length ? [POSTED_FILTER] : []),
       ...(savedCards.length ? [SAVED_FILTER] : []),
       ...(libraryDraftCards.length ? [SERVER_DRAFTS_FILTER] : []),
       ...(templateCards.length ? [TEMPLATE_FILTER] : []),
     ],
-    [postedCards.length, savedCards.length, libraryDraftCards.length, templateCards.length],
+    [
+      postedCards.length,
+      orphanSlots.length,
+      savedCards.length,
+      libraryDraftCards.length,
+      templateCards.length,
+    ],
   );
   const firstFilter = filters[0] ?? TEMPLATE_FILTER;
   const activeFilter = filters.includes(filter) ? filter : firstFilter;
@@ -564,19 +710,112 @@ export function TemplateGallery() {
           </header>
 
           <div className={styles.body}>
+            {/* The Posted tab doubles as the never-expire slot manager: usage,
+                the upgrade path when full, and any slots whose message has no
+                card here (nothing else could free those). Hidden when the
+                feature is off or this user can't manage the server's slots. */}
+            {activeFilter === POSTED_FILTER && canManageSlots && permanent ? (
+              <div className={styles.slotStrip}>
+                <div className={styles.slotStripHead}>
+                  <span className={styles.slotStripText}>
+                    <strong>Never expire:</strong>{" "}
+                    {isUnlimitedCap(permanent.cap)
+                      ? `${permanent.used} used`
+                      : `${permanent.used}/${permanent.cap} slots used`}
+                    {" · "}buttons &amp; selects stop working {permanent.ttl_days} days after
+                    sending unless the message holds a slot — assign or free one right on its card.
+                  </span>
+                  {!isUnlimitedCap(permanent.cap) && permanent.used >= permanent.cap ? (
+                    <button
+                      type="button"
+                      className={styles.slotStripUpgrade}
+                      onClick={() => {
+                        closeGallery();
+                        if (connectedGuildId) usePlanStore.getState().openPricing(connectedGuildId);
+                      }}
+                    >
+                      Upgrade for more
+                    </button>
+                  ) : null}
+                </div>
+                {permanent.suspended ? (
+                  <p className={styles.slotStripNote}>
+                    {permanent.suspended} never-expire{" "}
+                    {permanent.suspended === 1 ? "message is" : "messages are"} paused — the server
+                    holds more than its current plan allows. Nothing was deleted; upgrading restores
+                    the oldest ones first.
+                  </p>
+                ) : null}
+                {orphanSlots.length > 0 ? (
+                  <div className={styles.orphanBlock}>
+                    <p className={styles.slotStripNote}>
+                      {orphanSlots.length === 1
+                        ? "1 never-expire slot points at a message"
+                        : `${orphanSlots.length} never-expire slots point at messages`}{" "}
+                      that {orphanSlots.length === 1 ? "isn't" : "aren't"} in this history — free
+                      {orphanSlots.length === 1 ? " it" : " them"} here if the message is gone.
+                    </p>
+                    <ul className={styles.orphanList}>
+                      {orphanSlots.map((item) => {
+                        const url = `https://discord.com/channels/${connectedGuildId}/${item.channel_id}/${item.message_id}`;
+                        return (
+                          <li key={item.message_id} className={styles.orphanItem}>
+                            <a
+                              className={styles.orphanLink}
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(ev) => handleDiscordLinkClick(ev, url)}
+                            >
+                              Open on Discord ↗
+                            </a>
+                            {item.suspended ? (
+                              <span className={styles.orphanPaused}>Paused</span>
+                            ) : null}
+                            <span className={styles.orphanMeta}>
+                              added{" "}
+                              {new Date(item.added_at).toLocaleDateString([], {
+                                dateStyle: "medium",
+                              })}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={slotBusy}
+                              title="Puts the message back on the expiry clock, counted from its send date"
+                              onClick={() => void freeNeverExpire(item.message_id)}
+                            >
+                              Free slot
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {shown.length === 0 ? (
               <div className={styles.empty}>
                 <SearchIcon size={28} aria-hidden />
-                <p className={styles.emptyTitle}>No matches for “{query.trim()}”.</p>
-                <button
-                  type="button"
-                  className={styles.emptyReset}
-                  onClick={() => {
-                    setQuery("");
-                  }}
-                >
-                  Clear search
-                </button>
+                {query.trim() ? (
+                  <>
+                    <p className={styles.emptyTitle}>No matches for “{query.trim()}”.</p>
+                    <button
+                      type="button"
+                      className={styles.emptyReset}
+                      onClick={() => {
+                        setQuery("");
+                      }}
+                    >
+                      Clear search
+                    </button>
+                  </>
+                ) : (
+                  // Reachable on the Posted tab when it exists only for the
+                  // orphaned-slot strip above — no posted cards to show yet.
+                  <p className={styles.emptyTitle}>No posted messages in this history yet.</p>
+                )}
               </div>
             ) : (
               <div className={styles.grid}>
@@ -609,11 +848,12 @@ export function TemplateGallery() {
                 title={
                   libDrafts.quota != null && libDrafts.used > libDrafts.quota
                     ? "More saved messages than the plan allows — they stay readable, but content can't be changed until you delete down to the limit or upgrade."
-                    : "Posted messages sync automatically (the newest posts, oldest roll off); saved messages are yours to add and remove. Open Managed messages for scheduled posts, never-expire slots, and more."
+                    : "Posted messages sync automatically (the newest posts, oldest roll off; never-expire messages stay put). Saved messages are yours to add and remove. Open Managed messages for scheduled posts."
                 }
               >
-                Posted: last {libPosted.used}
+                Posted: last {Math.max(0, libPosted.used - pinnedPostedCount)}
                 {libPosted.quota != null ? ` of ${libPosted.quota}` : ""}
+                {pinnedPostedCount > 0 ? ` (+${pinnedPostedCount} pinned)` : ""}
                 {" · Saved: "}
                 {libDrafts.used}
                 {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
@@ -650,6 +890,13 @@ export function TemplateGallery() {
                 Remove <strong>{pendingDelete?.name}</strong> from the server library? Everyone
                 managing this server loses this entry (a posted message stays live on Discord). This
                 can't be undone.
+                {pendingDelete?.neverExpires ? (
+                  <>
+                    {" "}
+                    Its never-expire slot stays claimed — free it from its card first if you want
+                    the slot back.
+                  </>
+                ) : null}
               </>
             ) : (
               <>
@@ -788,6 +1035,23 @@ function GalleryCard({ card }: { card: CardData }) {
                   {t.text}
                 </span>
               ))}
+              {card.slot ? (
+                <button
+                  type="button"
+                  className={styles.slotBtn}
+                  data-kind={card.slot.kind}
+                  disabled={card.slot.busy}
+                  title={card.slot.title}
+                  onClick={(e) => {
+                    // A real <button> inside the card's div-with-role — the
+                    // click must not also load the message into the editor.
+                    e.stopPropagation();
+                    card.slot?.run();
+                  }}
+                >
+                  {card.slot.kind === "free" ? "Free slot" : "Never expire"}
+                </button>
+              ) : null}
               {card.savedAt !== undefined ? (
                 <span className={styles.cardTime}>{formatRelative(card.savedAt)}</span>
               ) : null}
