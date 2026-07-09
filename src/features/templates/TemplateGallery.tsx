@@ -56,44 +56,29 @@ import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { Preview } from "@/features/preview/Preview";
 import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
-import {
-  CloseIcon,
-  PlusIcon,
-  PuzzleIcon,
-  SearchIcon,
-  ServerStackIcon,
-  SparkleIcon,
-  TrashIcon,
-} from "@/ui/Icon";
+import { CloseIcon, PlusIcon, PuzzleIcon, SearchIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import { useTemplateGalleryStore } from "./templateGalleryStore";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateGallery.module.css";
 
-/** The chip row's buckets: the user's own posted/saved messages, then all
- *  curated templates collapsed into one. Templates keep their per-card category
- *  label, but the chips no longer split by category. */
+/** The chip row's buckets: the user's own posted messages, their two draft
+ *  shelves (this browser's saves and the server library's shared drafts), then
+ *  all curated templates collapsed into one. Templates keep their per-card
+ *  category label, but the chips no longer split by category. */
 const SAVED_FILTER = "Saved" as const;
+const SERVER_DRAFTS_FILTER = "Server drafts" as const;
 const POSTED_FILTER = "Posted" as const;
 const TEMPLATE_FILTER = "Template" as const;
-type Filter = typeof POSTED_FILTER | typeof SAVED_FILTER | typeof TEMPLATE_FILTER;
+type Filter =
+  | typeof POSTED_FILTER
+  | typeof SAVED_FILTER
+  | typeof SERVER_DRAFTS_FILTER
+  | typeof TEMPLATE_FILTER;
 
 const ACCENT_TEAL = 0x1abc9c;
 const ACCENT_GREEN = 0x3ba55d;
-const MAX_LIBRARY_TITLE_CHARS = 100;
-
-function libraryDraftTitle(name: string): string {
-  const trimmed = name.trim() || "Untitled message";
-  return [...trimmed].slice(0, MAX_LIBRARY_TITLE_CHARS).join("");
-}
-
-type ServerLibraryCardAction = {
-  kind: "save" | "saving" | "remove";
-  label: string;
-  title: string;
-  onClick?: () => void;
-};
 
 /** One renderable card — a continue draft, a posted message, a saved message,
  *  or a template. */
@@ -121,10 +106,8 @@ interface CardData {
   guildId?: string;
   guildName?: string;
   onPick: () => void;
-  /** Local saved/posted only: remove this entry from the local list. */
+  /** Remove this entry from its list (local store or server library). */
   onDelete?: () => void;
-  /** Top-left stack action for saving/removing this card in the server library. */
-  serverLibraryAction?: ServerLibraryCardAction;
   /** Extra status pills after the badge — the library's derived labels
    *  ("Never expires", "Buttons expired", "Shared"). */
   tags?: { text: string; tone: "ok" | "warn" | "info" }[];
@@ -191,8 +174,6 @@ export function TemplateGallery() {
     name: string;
     /** Library only — the server the entry belongs to. */
     guildId?: string;
-    /** Source card whose save-to-library copy is being removed. */
-    sourceKey?: string;
   } | null>(null);
 
   // The connected server's shared library (posted messages + server drafts),
@@ -204,12 +185,7 @@ export function TemplateGallery() {
   const libPosted = useLibraryStore((s) => s.posted);
   const libDrafts = useLibraryStore((s) => s.drafts);
   const libLoaded = useLibraryStore((s) => s.loaded);
-  const saveLibraryDraft = useLibraryStore((s) => s.saveDraft);
   const removeLibrary = useLibraryStore((s) => s.remove);
-  const [savingLibraryKeys, setSavingLibraryKeys] = useState<Set<string>>(() => new Set());
-  const [libraryCopies, setLibraryCopies] = useState<
-    Record<string, { guildId: string; id: string }>
-  >({});
   useEffect(() => {
     if (libraryOn && connectedGuildId) {
       void useLibraryStore.getState().refresh(connectedGuildId);
@@ -261,86 +237,6 @@ export function TemplateGallery() {
     return () => window.removeEventListener("keydown", onKey);
   }, [closeGallery]);
 
-  const canSaveToServerLibrary =
-    libraryOn && !!connectedGuildId && libGuild === connectedGuildId && libLoaded;
-
-  const saveCardToLibrary = useCallback(
-    async (key: string, name: string, message: WebhookMessage) => {
-      if (!connectedGuildId) return;
-      setSavingLibraryKeys((prev) => {
-        const next = new Set(prev);
-        next.add(key);
-        return next;
-      });
-      const title = libraryDraftTitle(name);
-      try {
-        const res = await saveLibraryDraft(connectedGuildId, title, message);
-        if (res.ok) {
-          setLibraryCopies((prev) => ({
-            ...prev,
-            [key]: { guildId: res.entry.guild_id, id: res.entry.id },
-          }));
-          pushToast(`Saved "${title}" to the ${connectedGuildName ?? "server"} library`, "success");
-        } else {
-          pushToast(res.error, "error");
-        }
-      } catch {
-        pushToast("Couldn't reach the server library.", "error");
-      } finally {
-        setSavingLibraryKeys((prev) => {
-          const next = new Set(prev);
-          next.delete(key);
-          return next;
-        });
-      }
-    },
-    [connectedGuildId, connectedGuildName, saveLibraryDraft],
-  );
-
-  const serverLibraryActionFor = useCallback(
-    (key: string, name: string, message: WebhookMessage): ServerLibraryCardAction | undefined => {
-      const copy = libraryCopies[key];
-      const title = libraryDraftTitle(name);
-      if (copy && copy.guildId === connectedGuildId) {
-        return {
-          kind: "remove",
-          label: `Remove "${title}" from the ${connectedGuildName ?? "server"} library`,
-          title: "Remove from server library",
-          onClick: () =>
-            setPendingDelete({
-              kind: "library",
-              id: copy.id,
-              guildId: copy.guildId,
-              name: title,
-              sourceKey: key,
-            }),
-        };
-      }
-      if (savingLibraryKeys.has(key)) {
-        return {
-          kind: "saving",
-          label: `Saving "${title}" to the server library`,
-          title: "Saving to server library",
-        };
-      }
-      if (!canSaveToServerLibrary) return undefined;
-      return {
-        kind: "save",
-        label: `Save "${title}" to the ${connectedGuildName ?? "server"} library`,
-        title: "Save to server library",
-        onClick: () => void saveCardToLibrary(key, title, message),
-      };
-    },
-    [
-      canSaveToServerLibrary,
-      connectedGuildId,
-      connectedGuildName,
-      libraryCopies,
-      saveCardToLibrary,
-      savingLibraryKeys,
-    ],
-  );
-
   // Saved messages, re-hydrated to editable form for their thumbnails. Skips any
   // entry whose payload won't parse (an older/corrupt record) rather than throw.
   const savedMessages = useMemo(
@@ -362,13 +258,12 @@ export function TemplateGallery() {
         key: entry.id,
         emoji: "🔖",
         name: entry.name,
-        description: "One of your saved messages.",
+        description: "Saved in this browser — only visible on this device.",
         message,
         accent: ACCENT_TEAL,
         savedAt: entry.savedAt,
         badge: "Saved",
         searchText: collectSearchText(message),
-        serverLibraryAction: serverLibraryActionFor(entry.id, entry.name, message),
         onPick: () => {
           replaceMessage(message);
           closeGallery();
@@ -376,7 +271,7 @@ export function TemplateGallery() {
         },
         onDelete: () => setPendingDelete({ kind: "saved", id: entry.id, name: entry.name }),
       })),
-    [savedMessages, replaceMessage, closeGallery, serverLibraryActionFor],
+    [savedMessages, replaceMessage, closeGallery],
   );
 
   // The connected server's library entries (only when the loaded library
@@ -431,7 +326,7 @@ export function TemplateGallery() {
         description: isPosted
           ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
               connectedGuildName ?? "server"
-            } history — it rolls off as newer posts land, so keep a copy to hold on to it.`
+            } history — it rolls off as newer posts land. Load it and save it to keep it.`
           : `A saved message in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`,
         message,
         accent: isPosted ? ACCENT_GREEN : ACCENT_TEAL,
@@ -442,12 +337,6 @@ export function TemplateGallery() {
         guildName: connectedGuildName,
         tags,
         searchText: collectSearchText(message),
-        // The posted history is sync-only — its stack action saves a lasting
-        // COPY to the saved shelf (the record itself rolls off with time);
-        // a saved message IS the copy, so it only offers deletion.
-        serverLibraryAction: isPosted
-          ? serverLibraryActionFor(`lib:${entry.id}`, displayName, message)
-          : undefined,
         onDelete: () =>
           setPendingDelete({
             kind: "library",
@@ -488,7 +377,6 @@ export function TemplateGallery() {
     replaceMessage,
     replaceMessageFromRestore,
     closeGallery,
-    serverLibraryActionFor,
   ]);
 
   // Posted messages, re-hydrated for their thumbnails (same skip-on-corrupt
@@ -531,7 +419,6 @@ export function TemplateGallery() {
           guildId: entry.guildId,
           guildName: entry.guildName,
           searchText: collectSearchText(message),
-          serverLibraryAction: serverLibraryActionFor(entry.id, name, message),
           onPick: () => {
             // Restore content *and* origin — the Send panel reads the origin and
             // flips to "Update existing" with the webhook + message id prefilled.
@@ -550,20 +437,18 @@ export function TemplateGallery() {
             setPendingDelete({ kind: "posted", id: entry.id, name: where ?? "this message" }),
         };
       }),
-    [postedMessages, replaceMessageFromRestore, closeGallery, serverLibraryActionFor],
+    [postedMessages, replaceMessageFromRestore, closeGallery],
   );
 
-  // The merged decks the chips/sections read: the connected server's shared
-  // shelf first (it's the fresher, cross-device record), then the local-only
-  // remainder.
+  // The Posted deck merges the connected server's shared history (the fresher,
+  // cross-device record) with the local-only remainder. Drafts stay SEPARATE:
+  // "Saved" is this browser's private stash, "Server drafts" is the shared
+  // library shelf — mixing them hid which one a card actually lived in.
   const postedCards: CardData[] = useMemo(
     () => [...libraryPostedCards, ...localPostedCards],
     [libraryPostedCards, localPostedCards],
   );
-  const savedCards: CardData[] = useMemo(
-    () => [...libraryDraftCards, ...localSavedCards],
-    [libraryDraftCards, localSavedCards],
-  );
+  const savedCards = localSavedCards;
 
   const templateCards: CardData[] = useMemo(
     () =>
@@ -579,7 +464,6 @@ export function TemplateGallery() {
         requiresBot: t.requiresBot,
         pairsWith: t.pairsWith,
         searchText: collectSearchText(t.message),
-        serverLibraryAction: serverLibraryActionFor(t.id, t.name, t.message),
         onPick: () => {
           replaceMessage(t.message);
           closeGallery();
@@ -602,18 +486,20 @@ export function TemplateGallery() {
           }
         },
       })),
-    [replaceMessage, closeGallery, serverLibraryActionFor],
+    [replaceMessage, closeGallery],
   );
 
-  // Chip row: Posted and Saved (each only when there are any), then a single
-  // Template chip for the whole curated set (categories no longer split).
+  // Chip row: Posted, the two draft shelves (this browser / server library —
+  // each only when there are any), then a single Template chip for the whole
+  // curated set (categories no longer split).
   const filters: Filter[] = useMemo(
     () => [
       ...(postedCards.length ? [POSTED_FILTER] : []),
       ...(savedCards.length ? [SAVED_FILTER] : []),
+      ...(libraryDraftCards.length ? [SERVER_DRAFTS_FILTER] : []),
       ...(templateCards.length ? [TEMPLATE_FILTER] : []),
     ],
-    [postedCards.length, savedCards.length, templateCards.length],
+    [postedCards.length, savedCards.length, libraryDraftCards.length, templateCards.length],
   );
   const firstFilter = filters[0] ?? TEMPLATE_FILTER;
   const activeFilter = filters.includes(filter) ? filter : firstFilter;
@@ -631,12 +517,14 @@ export function TemplateGallery() {
       base = postedCards;
     } else if (activeFilter === SAVED_FILTER) {
       base = savedCards;
+    } else if (activeFilter === SERVER_DRAFTS_FILTER) {
+      base = libraryDraftCards;
     } else {
       // TEMPLATE_FILTER — the whole curated set, no per-category split.
       base = templateCards;
     }
     return q ? base.filter((c) => haystack(c).includes(q)) : base;
-  }, [activeFilter, query, postedCards, savedCards, templateCards]);
+  }, [activeFilter, query, postedCards, savedCards, libraryDraftCards, templateCards]);
 
   // On the dedicated Posted tab (idle, not searching), bucket the cards under
   // per-server headers — "where did I post this" is how sent messages are
@@ -679,16 +567,8 @@ export function TemplateGallery() {
   const confirmDelete = () => {
     if (!pendingDelete) return;
     if (pendingDelete.kind === "library" && pendingDelete.guildId) {
-      const { guildId, id, sourceKey } = pendingDelete;
+      const { guildId, id } = pendingDelete;
       void removeLibrary(guildId, id).then((ok) => {
-        if (ok && sourceKey) {
-          setLibraryCopies((prev) => {
-            if (!prev[sourceKey]) return prev;
-            const next = { ...prev };
-            delete next[sourceKey];
-            return next;
-          });
-        }
         pushToast(
           ok ? "Removed from the server library" : "Couldn't remove it — try again.",
           ok ? "info" : "error",
@@ -783,7 +663,7 @@ export function TemplateGallery() {
                       // The Saved/Posted pseudo-categories carry their own tints
                       // (teal / green) so a user's own messages stand out from the
                       // curated template categories.
-                      f === SAVED_FILTER ? styles.chipSaved : "",
+                      f === SAVED_FILTER || f === SERVER_DRAFTS_FILTER ? styles.chipSaved : "",
                       f === POSTED_FILTER ? styles.chipPosted : "",
                       activeFilter === f ? styles.chipActive : "",
                     ]
@@ -970,33 +850,6 @@ function ServerIcon({
   );
 }
 
-function ServerLibraryActionButton({ action }: { action: ServerLibraryCardAction }) {
-  const disabled = action.kind === "saving" || !action.onClick;
-  const label = action.label;
-  return (
-    <button
-      type="button"
-      className={styles.serverLibraryButton}
-      data-mode={action.kind}
-      aria-disabled={disabled ? "true" : undefined}
-      tabIndex={disabled ? -1 : undefined}
-      title={action.title}
-      aria-label={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!disabled) action.onClick?.();
-      }}
-    >
-      <ServerStackIcon size={16} aria-hidden />
-      {action.kind === "save" ? (
-        <span className={styles.serverLibraryActionMark} aria-hidden>
-          <PlusIcon size={10} />
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
 function GalleryCard({ card }: { card: CardData }) {
   const onKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1051,9 +904,6 @@ function GalleryCard({ card }: { card: CardData }) {
       <div className={styles.cardPreview}>
         <TemplateThumbnail message={card.message} />
         <div className={styles.cardFade} aria-hidden />
-        {card.serverLibraryAction ? (
-          <ServerLibraryActionButton action={card.serverLibraryAction} />
-        ) : null}
         {card.onDelete ? (
           <button
             type="button"

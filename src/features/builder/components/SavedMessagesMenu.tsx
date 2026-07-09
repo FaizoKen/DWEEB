@@ -27,7 +27,14 @@ import { Field } from "@/ui/Field";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { Modal } from "@/ui/Modal";
 import { TextInput } from "@/ui/TextInput";
-import { BookmarkIcon, ChevronDownIcon, SaveIcon, SendIcon, TrashIcon } from "@/ui/Icon";
+import {
+  BookmarkIcon,
+  ChevronDownIcon,
+  SaveIcon,
+  SendIcon,
+  ServerStackIcon,
+  TrashIcon,
+} from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import styles from "./SavedMessagesMenu.module.css";
 
@@ -53,6 +60,13 @@ export function SavedMessagesMenu() {
   const serverSaveAvailable = isLibraryConfigured() && !!connectedGuildId && signedIn;
   const connectedGuildName = useAuthStore(
     (s) => s.guilds.find((g) => g.id === connectedGuildId)?.name,
+  );
+
+  // Server drafts saved in the connected server's shared library, for the
+  // gallery jump. Zero until the library has loaded for this server (the
+  // gallery / send flow refreshes it), so the item simply appears once known.
+  const serverDraftCount = useLibraryStore((s) =>
+    s.guildId === connectedGuildId ? s.entries.filter((e) => e.label === "draft").length : 0,
   );
 
   const [saveOpen, setSaveOpen] = useState(false);
@@ -125,6 +139,17 @@ export function SavedMessagesMenu() {
                 }}
               >
                 Saved messages ({entries.length})
+              </MenuItem>
+            ) : null}
+            {serverDraftCount > 0 ? (
+              <MenuItem
+                icon={<ServerStackIcon />}
+                onSelect={() => {
+                  close();
+                  openGallery("Server drafts");
+                }}
+              >
+                Server drafts ({serverDraftCount})
               </MenuItem>
             ) : null}
             <MenuItem

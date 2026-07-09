@@ -15,10 +15,11 @@
 import { create } from "zustand";
 
 /** Which chip the gallery lands on when opened. Callers that want the user's
- *  saved messages front-and-centre pass "Saved", posted messages pass "Posted",
- *  and templates pass "Template". When omitted, the gallery asks for Posted and
- *  falls through to the first chip that actually has cards. */
-export type GalleryInitialFilter = "Posted" | "Saved" | "Template";
+ *  browser-local saves front-and-centre pass "Saved", the shared library's
+ *  drafts "Server drafts", posted messages "Posted", and templates "Template".
+ *  When omitted, the gallery asks for Posted and falls through to the first
+ *  chip that actually has cards. */
+export type GalleryInitialFilter = "Posted" | "Saved" | "Server drafts" | "Template";
 
 interface TemplateGalleryState {
   open: boolean;
