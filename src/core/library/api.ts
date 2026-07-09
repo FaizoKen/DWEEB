@@ -2,8 +2,9 @@
  * Client for the proxy's per-server message library
  * (`server/src/library.rs`).
  *
- * The library is the server-side twin of the browser-local posted/saved
- * stores: one shared, labelled shelf of messages per Discord server, readable
+ * The library is one shared, labelled shelf of messages per Discord server —
+ * the sole home of posted history (nothing posted is kept in the browser) and
+ * the server-side twin of the browser-local saved store. It's readable
  * and writable by anyone holding Manage Webhooks there — from the web app
  * (cookie session) *and* the embedded Activity (bearer token), which is why
  * every call rides {@link proxyFetch}.

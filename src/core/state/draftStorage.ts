@@ -12,7 +12,8 @@
  *    home guild) when the draft is editing a message that was already posted, so
  *    a reopened session can re-link "Update existing" + the origin-guild banner.
  *    The webhook token is deliberately NOT stored here — it's recovered from the
- *    posted-messages store (which holds it) by matching the message id on boot.
+ *    server library's posted entry (which holds it) by matching the message id
+ *    on boot (see `useDraftOriginBootstrap`).
  *
  * What does NOT get saved:
  *  - Webhook URLs (those are credentials and live in `webhook/history.ts`,
@@ -32,8 +33,8 @@ const STORAGE_KEY = "dweeb.draft.v1";
 /**
  * Non-credential pointer back to the posted message a draft is editing. Carries
  * only public identifiers — no webhook token — so persisting it adds no new
- * credential to the draft. On boot the token is recovered from the
- * posted-messages store by matching {@link messageId}.
+ * credential to the draft. On boot the token is recovered from the server
+ * library's posted entry by matching {@link messageId}.
  */
 export interface DraftOrigin {
   /** Discord message snowflake — the key used to recover the webhook token. */

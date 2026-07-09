@@ -81,7 +81,6 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
-import { usePostedMessagesStore } from "@/core/state/postedMessagesStore";
 import { useLibraryStore } from "@/core/library/libraryStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
@@ -263,9 +262,6 @@ export function SendPanel({
   const message = useMessageStore((s) => s.message);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
   const setRestoreOrigin = useMessageStore((s) => s.setRestoreOrigin);
-  // Records every successful send so the message reappears on the "Start a
-  // message" gallery, reloadable with its update-in-place origin intact.
-  const recordPosted = usePostedMessagesStore((s) => s.record);
 
   // Prefill from a just-created webhook (the `webhook.incoming` return) first,
   // else the restore origin; otherwise start empty.
@@ -1138,29 +1134,11 @@ export function SendPanel({
             guildId: effGuildId,
             guildName: effGuildName,
           });
-          // Persist it to the "Start a message" gallery so it's reloadable in a
-          // later session — picking the card restores this same origin, no manual
-          // webhook + message-id paste. Stores the editor message (raw
-          // placeholder tokens preserved), keyed by the message id so an update
-          // refreshes the one record instead of adding a duplicate.
-          recordPosted({
-            messageId: postedMessageId,
-            webhookUrl: parsedUrl.url,
-            webhookId: parsedUrl.id,
-            threadId: effThreadId || undefined,
-            guildId: effGuildId,
-            channelId: effChannelId,
-            guildName: effGuildName,
-            channelName: effChannelName,
-            webhookName: resolvedName ?? knownName,
-            webhookAvatar: resolvedAvatar ?? knownAvatar,
-            message,
-          });
-          // Mirror the record into the destination server's shared library
-          // (label "posted", upserted by message id) so teammates — and the
-          // embedded Activity — see it too. Fire-and-forget: the send already
-          // landed, so a full library / expired session never surfaces here;
-          // the local record above remains the offline fallback.
+          // Record it in the destination server's shared library (label
+          // "posted", upserted by message id) — the single source the "Start a
+          // message" gallery reads posted history from, shared with teammates
+          // and the embedded Activity. Fire-and-forget: the send already
+          // landed, so a full library / expired session never surfaces here.
           if (effGuildId) {
             void useLibraryStore.getState().recordPosted(effGuildId, {
               messageId: postedMessageId,

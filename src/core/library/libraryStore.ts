@@ -167,8 +167,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const merged = mergeEntry(get(), res.entry);
       if (merged) set(merged);
     }
-    // Quota-full / signed-out / network trouble: silently keep the local
-    // record only. The send already landed; the library is best-effort.
+    // Quota-full / signed-out / network trouble: silently drop the record.
+    // The send already landed; the library is best-effort.
   },
 
   async saveDraft(guildId, title, message) {

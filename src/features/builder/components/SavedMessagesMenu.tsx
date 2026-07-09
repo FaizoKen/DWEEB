@@ -15,7 +15,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { normalizeSavedMessageName, useSavedMessagesStore } from "@/core/state/savedMessagesStore";
-import { usePostedMessagesStore } from "@/core/state/postedMessagesStore";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
@@ -48,7 +47,6 @@ export function SavedMessagesMenu() {
 
   const entries = useSavedMessagesStore((s) => s.entries);
   const saveEntry = useSavedMessagesStore((s) => s.save);
-  const postedEntries = usePostedMessagesStore((s) => s.entries);
 
   const openGallery = useTemplateGalleryStore((s) => s.openGallery);
 
@@ -62,9 +60,14 @@ export function SavedMessagesMenu() {
     (s) => s.guilds.find((g) => g.id === connectedGuildId)?.name,
   );
 
-  // Server drafts saved in the connected server's shared library, for the
-  // gallery jump. Zero until the library has loaded for this server (the
-  // gallery / send flow refreshes it), so the item simply appears once known.
+  // Posted history + server drafts from the connected server's shared library,
+  // for the gallery jumps. Posted messages live only there (nothing is kept in
+  // this browser), so both counts are zero until the library has loaded for
+  // this server (the gallery / send flow refreshes it) — the items simply
+  // appear once known.
+  const serverPostedCount = useLibraryStore((s) =>
+    s.guildId === connectedGuildId ? s.entries.filter((e) => e.label === "posted").length : 0,
+  );
   const serverDraftCount = useLibraryStore((s) =>
     s.guildId === connectedGuildId ? s.entries.filter((e) => e.label === "draft").length : 0,
   );
@@ -119,7 +122,7 @@ export function SavedMessagesMenu() {
             >
               Save current message…
             </MenuItem>
-            {postedEntries.length > 0 ? (
+            {serverPostedCount > 0 ? (
               <MenuItem
                 icon={<SendIcon />}
                 onSelect={() => {
@@ -127,7 +130,7 @@ export function SavedMessagesMenu() {
                   openGallery("Posted");
                 }}
               >
-                Posted messages ({postedEntries.length})
+                Posted messages ({serverPostedCount})
               </MenuItem>
             ) : null}
             {entries.length > 0 ? (

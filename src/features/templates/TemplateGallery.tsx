@@ -5,8 +5,9 @@
  * choice instead of a cold editor. It blends three sources into one
  * app-store-style grid:
  *
- *  - **Posted** — messages already sent through DWEEB, ready to reload and
- *    update in place.
+ *  - **Posted** — the connected server's shared library history (messages sent
+ *    through DWEEB, recorded server-side), ready to reload and update in
+ *    place. Server-only by design: nothing posted is kept in this browser.
  *  - **Saved** — the user's named, stashed messages (a dedicated category), so
  *    reusable messages are reachable without digging through the Saved menu.
  *  - **Templates** — the curated starting points.
@@ -34,10 +35,9 @@ import {
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
-import { recordOrigin, usePostedMessagesStore } from "@/core/state/postedMessagesStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
-import { fetchPermanentSlots, guildIconUrl, type PermanentSlots } from "@/core/guild/api";
+import { fetchPermanentSlots, type PermanentSlots } from "@/core/guild/api";
 import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { isLibraryConfigured } from "@/core/library/api";
 import {
@@ -58,7 +58,6 @@ import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
 import { CloseIcon, PlusIcon, PuzzleIcon, SearchIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
-import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import { useTemplateGalleryStore } from "./templateGalleryStore";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateGallery.module.css";
@@ -100,11 +99,6 @@ interface CardData {
   badge?: string;
   /** True when this card came from the connected server's shared library. */
   storedInServerLibrary?: boolean;
-  /** Posted only — the home server, used to bucket posted cards under per-server
-   *  section headers. `guildId` is the stable group key; `guildName` is the
-   *  label. Either can be absent on older records / non-guild webhooks. */
-  guildId?: string;
-  guildName?: string;
   onPick: () => void;
   /** Remove this entry from its list (local store or server library). */
   onDelete?: () => void;
@@ -144,19 +138,10 @@ export function TemplateGallery() {
   const closeGallery = useTemplateGalleryStore((s) => s.closeGallery);
   const savedEntries = useSavedMessagesStore((s) => s.entries);
   const removeEntry = useSavedMessagesStore((s) => s.remove);
-  const postedEntries = usePostedMessagesStore((s) => s.entries);
-  const removePosted = usePostedMessagesStore((s) => s.remove);
-  // The signed-in user's servers carry the icon hash the posted records don't
-  // store, so the Posted-tab section headers can show a real server glyph. Keyed
-  // by id for a cheap per-section lookup; absent when the user isn't a member.
+  // The signed-in user's servers, for the connected server's display name.
   const authGuilds = useAuthStore((s) => s.guilds);
-  // The connected server — its Posted-tab section is scrolled into view on open.
+  // The connected server — whose library the Posted tab shows.
   const connectedGuildId = useGuildStore((s) => s.guildId);
-  const guildIconById = useMemo(() => {
-    const map = new Map<string, string | null>();
-    for (const g of authGuilds) map.set(g.id, g.icon);
-    return map;
-  }, [authGuilds]);
   const connectedGuildName = useMemo(
     () => authGuilds.find((g) => g.id === connectedGuildId)?.name,
     [authGuilds, connectedGuildId],
@@ -169,7 +154,7 @@ export function TemplateGallery() {
     () => useTemplateGalleryStore.getState().initialFilter,
   );
   const [pendingDelete, setPendingDelete] = useState<{
-    kind: "saved" | "posted" | "library";
+    kind: "saved" | "library";
     id: string;
     name: string;
     /** Library only — the server the entry belongs to. */
@@ -208,10 +193,6 @@ export function TemplateGallery() {
     return () => ac.abort();
   }, [libraryOn, connectedGuildId]);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  // Scroll the connected server's Posted-tab section into view — the scrollable
-  // body and the active section it should land on.
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const activeSectionRef = useRef<HTMLElement>(null);
 
   // Focus search on open so a user can start typing immediately.
   useEffect(() => {
@@ -277,16 +258,11 @@ export function TemplateGallery() {
   // The connected server's library entries (only when the loaded library
   // actually matches the connected server — a switch mid-load must not show the
   // previous server's shelf), split by label and re-hydrated like the local
-  // stores. Message ids already on the shelf suppress the local duplicates
-  // below: the server copy is fresher (it upserts on every send from any
-  // device) and shared, so it wins.
+  // saved store. This is the only source of posted history: every send records
+  // straight to the server library, nothing posted is kept in this browser.
   const serverEntries = useMemo(
     () => (libGuild && libGuild === connectedGuildId ? libEntries : []),
     [libGuild, connectedGuildId, libEntries],
-  );
-  const libraryMessageIds = useMemo(
-    () => new Set(serverEntries.map((e) => e.message_id).filter(Boolean) as string[]),
-    [serverEntries],
   );
   // Active never-expire grants, for the "Never expires" tag.
   const permanentIds = useMemo(
@@ -333,8 +309,6 @@ export function TemplateGallery() {
         savedAt: entry.updated_at * 1000,
         badge: isPosted ? "Posted" : "Server draft",
         storedInServerLibrary: true,
-        guildId: entry.guild_id,
-        guildName: connectedGuildName,
         tags,
         searchText: collectSearchText(message),
         onDelete: () =>
@@ -379,75 +353,12 @@ export function TemplateGallery() {
     closeGallery,
   ]);
 
-  // Posted messages, re-hydrated for their thumbnails (same skip-on-corrupt
-  // guard as saved). Each carries the origin that lets a reload default the Send
-  // panel to "Update existing", so editing then re-sending updates the live
-  // message in place — no manual webhook + message-id paste. Records the server
-  // library already covers are suppressed (see `libraryMessageIds`).
-  const postedMessages = useMemo(
-    () =>
-      postedEntries.flatMap((e) => {
-        if (libraryMessageIds.has(e.messageId)) return [];
-        try {
-          return [{ entry: e, message: attachEditorFields(e.payload) }];
-        } catch {
-          return [];
-        }
-      }),
-    [postedEntries, libraryMessageIds],
-  );
-
-  const localPostedCards: CardData[] = useMemo(
-    () =>
-      postedMessages.map(({ entry, message }) => {
-        const where = entry.channelName
-          ? `#${entry.channelName}${entry.guildName ? ` · ${entry.guildName}` : ""}`
-          : entry.guildName;
-        const name = entry.channelName ? `#${entry.channelName}` : "Posted message";
-        return {
-          kind: "posted",
-          key: entry.id,
-          emoji: "📤",
-          name,
-          description: where
-            ? `Posted to ${where}. Reload to edit and update it in place.`
-            : "A message you posted. Reload to edit and update it in place.",
-          message,
-          accent: ACCENT_GREEN,
-          savedAt: entry.postedAt,
-          badge: "Posted",
-          guildId: entry.guildId,
-          guildName: entry.guildName,
-          searchText: collectSearchText(message),
-          onPick: () => {
-            // Restore content *and* origin — the Send panel reads the origin and
-            // flips to "Update existing" with the webhook + message id prefilled.
-            replaceMessageFromRestore(message, recordOrigin(entry));
-            // Re-align the connected guild to where this message lives, when the
-            // user belongs to that server, so the preview's mentions/channels/
-            // emoji resolve to the right names instead of placeholders. The
-            // switch is visible (the guild selector updates) and never changes
-            // where an update lands. When they aren't a member, the editor's
-            // mismatch banner explains the placeholder names instead.
-            alignConnectedGuild(entry.guildId);
-            closeGallery();
-            pushToast("Loaded your posted message — edits will update the original.", "success");
-          },
-          onDelete: () =>
-            setPendingDelete({ kind: "posted", id: entry.id, name: where ?? "this message" }),
-        };
-      }),
-    [postedMessages, replaceMessageFromRestore, closeGallery],
-  );
-
-  // The Posted deck merges the connected server's shared history (the fresher,
-  // cross-device record) with the local-only remainder. Drafts stay SEPARATE:
-  // "Saved" is this browser's private stash, "Server drafts" is the shared
-  // library shelf — mixing them hid which one a card actually lived in.
-  const postedCards: CardData[] = useMemo(
-    () => [...libraryPostedCards, ...localPostedCards],
-    [libraryPostedCards, localPostedCards],
-  );
+  // The Posted deck IS the connected server's shared history — server-fed only,
+  // so what you see is exactly what the library holds, on every device. Drafts
+  // stay SEPARATE: "Saved" is this browser's private stash, "Server drafts" is
+  // the shared library shelf — mixing them hid which one a card actually lived
+  // in.
+  const postedCards = libraryPostedCards;
   const savedCards = localSavedCards;
 
   const templateCards: CardData[] = useMemo(
@@ -504,11 +415,20 @@ export function TemplateGallery() {
   const firstFilter = filters[0] ?? TEMPLATE_FILTER;
   const activeFilter = filters.includes(filter) ? filter : firstFilter;
 
+  // Posted history is server-fed, so on a cold open the library hasn't
+  // answered yet and the Posted/Server-drafts chips don't exist *yet* — that's
+  // not the same as the tab being empty. Hold a requested library-backed
+  // filter until the load settles so the gallery can land on it once the
+  // entries arrive, instead of falling through to Templates on every open.
+  const libraryPending =
+    libraryOn && !!connectedGuildId && !(libGuild === connectedGuildId && libLoaded);
+
   // If the requested filter disappears (e.g. last saved message removed), fall
   // through to the first real chip so the gallery never opens on a combined view.
   useEffect(() => {
+    if (libraryPending && (filter === POSTED_FILTER || filter === SERVER_DRAFTS_FILTER)) return;
     if (filter !== activeFilter) setFilter(activeFilter);
-  }, [activeFilter, filter]);
+  }, [activeFilter, filter, libraryPending]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -526,38 +446,6 @@ export function TemplateGallery() {
     return q ? base.filter((c) => haystack(c).includes(q)) : base;
   }, [activeFilter, query, postedCards, savedCards, libraryDraftCards, templateCards]);
 
-  // On the dedicated Posted tab (idle, not searching), bucket the cards under
-  // per-server headers — "where did I post this" is how sent messages are
-  // actually remembered. Only when 2+ distinct servers are present; a single
-  // header would just be noise, so we fall back to the flat grid. Records with
-  // no resolved server collect under one "Other servers" bucket rather than
-  // vanishing. Map insertion order keeps sections newest-post-first (shown is
-  // already newest-first), matching the flat view's ordering.
-  const postedSections = useMemo(() => {
-    if (activeFilter !== POSTED_FILTER || query.trim()) return null;
-    const groups = new Map<
-      string,
-      { key: string; guildId?: string; name: string; cards: CardData[] }
-    >();
-    for (const c of shown) {
-      const key = c.guildId ?? c.guildName ?? "__unknown";
-      let group = groups.get(key);
-      if (!group) {
-        group = { key, guildId: c.guildId, name: c.guildName ?? "Other servers", cards: [] };
-        groups.set(key, group);
-      }
-      group.cards.push(c);
-    }
-    if (groups.size < 2) return null;
-    return [...groups.values()];
-  }, [activeFilter, query, shown]);
-
-  // On the Posted tab, land on the server you're connected to — its section is
-  // usually the one you came to update. Re-runs when the tab changes (so it also
-  // fires if you switch to Posted after opening) or the connected server does;
-  // does nothing when that server has no posted messages (no section to hit).
-  useScrollActiveIntoView(bodyRef, activeSectionRef, [activeFilter, connectedGuildId], "start");
-
   const startBlank = () => {
     clearAll();
     closeGallery();
@@ -574,9 +462,6 @@ export function TemplateGallery() {
           ok ? "info" : "error",
         );
       });
-    } else if (pendingDelete.kind === "posted") {
-      removePosted(pendingDelete.id);
-      pushToast("Removed from your posted messages", "info");
     } else {
       removeEntry(pendingDelete.id);
       pushToast(`Deleted "${pendingDelete.name}"`, "info");
@@ -678,7 +563,7 @@ export function TemplateGallery() {
             </div>
           </header>
 
-          <div className={styles.body} ref={bodyRef}>
+          <div className={styles.body}>
             {shown.length === 0 ? (
               <div className={styles.empty}>
                 <SearchIcon size={28} aria-hidden />
@@ -692,31 +577,6 @@ export function TemplateGallery() {
                 >
                   Clear search
                 </button>
-              </div>
-            ) : postedSections ? (
-              <div className={styles.sections}>
-                {postedSections.map((section) => (
-                  <section
-                    key={section.key}
-                    className={styles.section}
-                    ref={section.guildId === connectedGuildId ? activeSectionRef : undefined}
-                  >
-                    <div className={styles.sectionHeader}>
-                      <ServerIcon
-                        guildId={section.guildId}
-                        name={section.name}
-                        iconHash={section.guildId ? guildIconById.get(section.guildId) : undefined}
-                      />
-                      <span className={styles.sectionName}>{section.name}</span>
-                      <span className={styles.sectionCount}>{section.cards.length}</span>
-                    </div>
-                    <div className={styles.grid}>
-                      {section.cards.map((c) => (
-                        <GalleryCard key={c.key} card={c} />
-                      ))}
-                    </div>
-                  </section>
-                ))}
               </div>
             ) : (
               <div className={styles.grid}>
@@ -776,9 +636,7 @@ export function TemplateGallery() {
         title={
           pendingDelete?.kind === "library"
             ? "Remove from the server library?"
-            : pendingDelete?.kind === "posted"
-              ? "Remove posted message?"
-              : "Delete saved message?"
+            : "Delete saved message?"
         }
         size="sm"
         // The gallery overlay sits at --app-z-tooltip; lift the confirm above it
@@ -792,12 +650,6 @@ export function TemplateGallery() {
                 Remove <strong>{pendingDelete?.name}</strong> from the server library? Everyone
                 managing this server loses this entry (a posted message stays live on Discord). This
                 can't be undone.
-              </>
-            ) : pendingDelete?.kind === "posted" ? (
-              <>
-                Remove <strong>{pendingDelete?.name}</strong> from this list? It only forgets the
-                local shortcut — the message stays live on Discord, and you can still edit it via
-                Restore.
               </>
             ) : (
               <>
@@ -822,31 +674,6 @@ export function TemplateGallery() {
       </Modal>
     </>,
     document.body,
-  );
-}
-
-/** Small server glyph for a Posted-tab section header. Uses the real Discord
- *  icon when the user belongs to that server (so its icon hash is known via the
- *  auth guild list), otherwise a coloured initial — the same fallback the
- *  account menu's server rows use. The "Other servers" bucket has no id, so it
- *  too lands on the initial of its label. */
-function ServerIcon({
-  guildId,
-  name,
-  iconHash,
-}: {
-  guildId?: string;
-  name: string;
-  iconHash?: string | null;
-}) {
-  const url = guildId && iconHash ? guildIconUrl(guildId, iconHash, 32) : null;
-  if (url) {
-    return <img className={styles.sectionIcon} src={url} alt="" loading="lazy" />;
-  }
-  return (
-    <span className={`${styles.sectionIcon} ${styles.sectionIconFallback}`} aria-hidden>
-      {name.slice(0, 1).toUpperCase()}
-    </span>
   );
 }
 
@@ -880,14 +707,8 @@ function GalleryCard({ card }: { card: CardData }) {
       : card.name;
   const deleteLabel = isServerLibrary
     ? `Remove "${card.name}" from the server library`
-    : card.kind === "posted"
-      ? `Remove posted message "${card.name}"`
-      : `Delete saved message "${card.name}"`;
-  const deleteTitle = isServerLibrary
-    ? "Remove from server library"
-    : card.kind === "posted"
-      ? "Remove from posted messages"
-      : "Delete saved message";
+    : `Delete saved message "${card.name}"`;
+  const deleteTitle = isServerLibrary ? "Remove from server library" : "Delete saved message";
 
   return (
     <div
