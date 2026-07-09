@@ -46,8 +46,8 @@ export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () =>
   const libGuild = useLibraryStore((s) => s.guildId);
   const loading = useLibraryStore((s) => s.loading);
   const loaded = useLibraryStore((s) => s.loaded);
-  const used = useLibraryStore((s) => s.used);
-  const quota = useLibraryStore((s) => s.quota);
+  const posted = useLibraryStore((s) => s.posted);
+  const drafts = useLibraryStore((s) => s.drafts);
 
   // (Re)load the target server's shelf each time the dialog opens — posts from
   // teammates or the web app should show up without a relaunch.
@@ -82,17 +82,19 @@ export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () =>
         <>
           <span
             className={styles.meter}
-            data-over={ready && quota != null && used > quota ? "" : undefined}
+            data-over={ready && drafts.quota != null && drafts.used > drafts.quota ? "" : undefined}
             title={
-              ready && quota != null && used > quota
-                ? "Over the plan's library limit — entries stay readable, but new posts won't be recorded and content can't be changed until the server deletes down to the limit or upgrades."
-                : undefined
+              ready && drafts.quota != null && drafts.used > drafts.quota
+                ? "More saved messages than the plan allows — they stay readable, but their content can't be changed until the server deletes down to the limit or upgrades."
+                : ready
+                  ? "Posted messages sync automatically (the newest posts, oldest roll off); saved messages are kept until someone removes them."
+                  : undefined
             }
           >
             {ready
-              ? quota != null && used > quota
-                ? `${used} / ${quota} — over the plan limit`
-                : `${used}${quota != null ? ` / ${quota}` : ""} in the library`
+              ? `Posted: last ${posted.used}${posted.quota != null ? ` of ${posted.quota}` : ""} · Saved: ${drafts.used}${
+                  drafts.quota != null ? ` / ${drafts.quota}` : ""
+                }${drafts.quota != null && drafts.used > drafts.quota ? " — over the plan limit" : ""}`
               : ""}
           </span>
           <Button variant="secondary" size="sm" leadingIcon={<PlusIcon />} onClick={startBlank}>
@@ -102,9 +104,9 @@ export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () =>
       }
     >
       <p className={styles.lead}>
-        Messages saved for this server — posted ones reload ready to{" "}
-        <strong>update in place</strong>, drafts load as a fresh start. Everyone who manages this
-        server shares this list.
+        This server's latest posts sync here automatically and reload ready to{" "}
+        <strong>update in place</strong>; saved messages load as a fresh start. Everyone who manages
+        this server shares this list.
       </p>
 
       {!ready || (loading && items.length === 0) ? (

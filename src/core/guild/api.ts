@@ -149,8 +149,12 @@ export interface PlanLimits {
   permanent: number | null;
   custom_bots: number | null;
   coeditors: number | null;
-  /** Message-library entries per server. */
+  /** Saved library messages per server (hard cap). */
   library: number | null;
+  /** Posted-history window per server: how many auto-recorded posts the
+   *  library keeps before the oldest rolls off. Absent from a proxy that
+   *  predates the posted/saved split. */
+  library_posted?: number | null;
 }
 
 /** A server's plan, from `GET /api/guilds/:id/plan`. */

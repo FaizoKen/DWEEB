@@ -61,13 +61,27 @@ export interface LibraryCreateInput {
 }
 
 export interface LibraryPatchInput {
-  label?: LibraryLabel;
   title?: string;
+  /** Drafts only — a posted entry's content mirrors what was sent (400). */
   payload?: unknown;
 }
 
+/** Usage of one quota bucket. The two labels are quota'd separately: posted is
+ *  a rolling history window (recording past it evicts the oldest, so it can't
+ *  fill up), drafts are a hard cap (full = save refused). `quota` null =
+ *  unlimited. */
+export interface LibraryBucketUsage {
+  used: number;
+  quota: number | null;
+}
+
 export type LibraryListResult =
-  | { ok: true; items: LibraryEntryView[]; used: number; quota: number | null }
+  | {
+      ok: true;
+      items: LibraryEntryView[];
+      posted: LibraryBucketUsage;
+      drafts: LibraryBucketUsage;
+    }
   | { ok: false; error: string; status: number };
 
 export type LibraryEntryResult =
@@ -81,8 +95,9 @@ async function readError(res: Response): Promise<string> {
   return data?.error ?? `Server returned ${res.status}.`;
 }
 
-/** The server's library: entries (newest touched first), usage, and the
- *  per-server quota (`null` = unlimited). Needs Manage Webhooks in the guild. */
+/** The server's library: entries (newest touched first) and the per-bucket
+ *  usage (posted history window / saved-draft quota). Needs Manage Webhooks in
+ *  the guild. */
 export async function listLibrary(guildId: string): Promise<LibraryListResult> {
   if (!isLibraryConfigured()) {
     return {
@@ -100,14 +115,24 @@ export async function listLibrary(guildId: string): Promise<LibraryListResult> {
   if (!res.ok) return { ok: false, error: await readError(res), status: res.status };
   const data = (await res.json().catch(() => null)) as {
     items?: LibraryEntryView[];
-    used?: number;
-    quota?: number | null;
+    posted?: Partial<LibraryBucketUsage> | null;
+    drafts?: Partial<LibraryBucketUsage> | null;
   } | null;
+  const items = data?.items ?? [];
+  // A proxy that predates the split sends no buckets — derive the counts from
+  // the items and treat the caps as unknown (unlimited) until it's upgraded.
+  const bucket = (
+    sent: Partial<LibraryBucketUsage> | null | undefined,
+    label: LibraryLabel,
+  ): LibraryBucketUsage => ({
+    used: sent?.used ?? items.filter((e) => e.label === label).length,
+    quota: sent?.quota ?? null,
+  });
   return {
     ok: true,
-    items: data?.items ?? [],
-    used: data?.used ?? data?.items?.length ?? 0,
-    quota: data?.quota ?? null,
+    items,
+    posted: bucket(data?.posted, "posted"),
+    drafts: bucket(data?.drafts, "draft"),
   };
 }
 
@@ -140,7 +165,7 @@ export async function createLibraryEntry(
   return { ok: true, entry };
 }
 
-/** Rename, relabel, or save new content over an entry. */
+/** Rename an entry, or save new content over a draft. */
 export async function updateLibraryEntry(
   guildId: string,
   id: string,

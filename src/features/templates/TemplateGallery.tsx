@@ -201,8 +201,8 @@ export function TemplateGallery() {
   const libraryOn = isLibraryConfigured();
   const libEntries = useLibraryStore((s) => s.entries);
   const libGuild = useLibraryStore((s) => s.guildId);
-  const libUsed = useLibraryStore((s) => s.used);
-  const libQuota = useLibraryStore((s) => s.quota);
+  const libPosted = useLibraryStore((s) => s.posted);
+  const libDrafts = useLibraryStore((s) => s.drafts);
   const libLoaded = useLibraryStore((s) => s.loaded);
   const saveLibraryDraft = useLibraryStore((s) => s.saveDraft);
   const removeLibrary = useLibraryStore((s) => s.remove);
@@ -429,10 +429,10 @@ export function TemplateGallery() {
         emoji: isPosted ? "📤" : "🔖",
         name: displayName,
         description: isPosted
-          ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · in the ${
+          ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
               connectedGuildName ?? "server"
-            } library, visible to this server's managers.`
-          : `A draft in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`,
+            } history — it rolls off as newer posts land, so keep a copy to hold on to it.`
+          : `A saved message in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`,
         message,
         accent: isPosted ? ACCENT_GREEN : ACCENT_TEAL,
         savedAt: entry.updated_at * 1000,
@@ -442,18 +442,19 @@ export function TemplateGallery() {
         guildName: connectedGuildName,
         tags,
         searchText: collectSearchText(message),
-        serverLibraryAction: {
-          kind: "remove",
-          label: `Remove "${displayName}" from the server library`,
-          title: "Remove from server library",
-          onClick: () =>
-            setPendingDelete({
-              kind: "library",
-              id: entry.id,
-              guildId: entry.guild_id,
-              name: displayName,
-            }),
-        },
+        // The posted history is sync-only — its stack action saves a lasting
+        // COPY to the saved shelf (the record itself rolls off with time);
+        // a saved message IS the copy, so it only offers deletion.
+        serverLibraryAction: isPosted
+          ? serverLibraryActionFor(`lib:${entry.id}`, displayName, message)
+          : undefined,
+        onDelete: () =>
+          setPendingDelete({
+            kind: "library",
+            id: entry.id,
+            guildId: entry.guild_id,
+            name: displayName,
+          }),
         onPick: () => {
           if (origin) {
             // Posted with its webhook intact: restore content *and* origin so
@@ -487,6 +488,7 @@ export function TemplateGallery() {
     replaceMessage,
     replaceMessageFromRestore,
     closeGallery,
+    serverLibraryActionFor,
   ]);
 
   // Posted messages, re-hydrated for their thumbnails (same skip-on-corrupt
@@ -857,20 +859,27 @@ export function TemplateGallery() {
               <button
                 type="button"
                 className={styles.libraryMeter}
-                data-over={libQuota != null && libUsed > libQuota ? "" : undefined}
+                data-over={
+                  libDrafts.quota != null && libDrafts.used > libDrafts.quota ? "" : undefined
+                }
                 onClick={() => {
                   closeGallery();
                   useManagedMessagesStore.getState().open(connectedGuildId, connectedGuildName);
                 }}
                 title={
-                  libQuota != null && libUsed > libQuota
-                    ? "Over the plan's library limit — entries stay readable, but content can't be changed until you delete down to the limit or upgrade."
-                    : "Open Managed messages — scheduled posts, never-expire slots, and more"
+                  libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                    ? "More saved messages than the plan allows — they stay readable, but content can't be changed until you delete down to the limit or upgrade."
+                    : "Posted messages sync automatically (the newest posts, oldest roll off); saved messages are yours to add and remove. Open Managed messages for scheduled posts, never-expire slots, and more."
                 }
               >
-                Server library: {libUsed}
-                {libQuota != null ? ` / ${libQuota}` : ""}
-                {libQuota != null && libUsed > libQuota ? " · over limit" : " · Manage"}
+                Posted: last {libPosted.used}
+                {libPosted.quota != null ? ` of ${libPosted.quota}` : ""}
+                {" · Saved: "}
+                {libDrafts.used}
+                {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
+                {libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                  ? " · over limit"
+                  : " · Manage"}
               </button>
             ) : null}
             <button type="button" className={styles.blankBtn} onClick={startBlank}>

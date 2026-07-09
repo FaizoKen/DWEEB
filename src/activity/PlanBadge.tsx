@@ -29,13 +29,14 @@ export function tierLabel(tier: PlanTier): string {
 const LIMIT_ROWS: { key: keyof PlanInfo["limits"]; label: string }[] = [
   { key: "schedules", label: "Scheduled posts" },
   { key: "permanent", label: "Never-expire panels" },
-  { key: "library", label: "Library messages" },
+  { key: "library", label: "Saved messages" },
+  { key: "library_posted", label: "Posted history" },
   { key: "custom_bots", label: "Custom bots" },
   { key: "coeditors", label: "Live co-editors" },
 ];
 
 /** A limit value for display: a number, or "Unlimited" for the null (0/∞) case. */
-function limitText(v: number | null): string {
+function limitText(v: number | null | undefined): string {
   return v == null ? "Unlimited" : String(v);
 }
 

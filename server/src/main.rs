@@ -244,14 +244,16 @@ async fn run() {
     // Per-server message library: a small SQLite file on the same persistent
     // volume (a saved message is a promise to keep it). Boot fails loudly if it
     // can't be opened — a deployment that accepts library entries has to be able
-    // to keep them. No sweeper: entries live until their owner deletes them,
-    // bounded by the per-server quota and the global cap. Opened before the
-    // schedule worker so a fired schedule can auto-record its post here.
+    // to keep them. No sweeper: drafts live until their owner deletes them
+    // (bounded by the draft quota), posted history rolls over at its window,
+    // and the global cap bounds the whole file. Opened before the schedule
+    // worker so a fired schedule can auto-record its post here.
     let library = if config.library_enabled {
         match library::LibraryStore::open(
             &config.library_db_path,
             config.library_max_entries,
             config.library_max_per_guild,
+            config.library_posted_per_guild,
         ) {
             Ok(store) => {
                 tracing::info!(db = %config.library_db_path, "message library enabled");

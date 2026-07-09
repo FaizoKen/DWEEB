@@ -26,9 +26,21 @@
 //! here — the frontend derives those labels from the existing schedule and
 //! permanent-slot APIs, so there's one source of truth per feature.
 //!
-//! The per-server entry cap is the plan gate (`TierLimits::library`): Free
-//! servers get a small shelf, paid tiers raise it. Quota only ever gates
-//! *creation* — a downgraded server keeps every stored entry readable.
+//! The two labels are quota'd **independently**, because they mean different
+//! things:
+//!
+//!  - `posted` is *history*: a rolling window of the last N messages sent
+//!    through DWEEB (`TierLimits::library_posted`). It syncs automatically —
+//!    recording a post past the window evicts the oldest entry instead of
+//!    failing, so the history is always current and auto-record can't be
+//!    starved by a full shelf. Entries can't be created by hand (a posted row
+//!    always names a real Discord message) and their content can't be edited
+//!    (it mirrors what was actually sent); deleting one is allowed, so a
+//!    sensitive record doesn't have to wait to age out.
+//!  - `draft` is the *curated shelf*: every entry was a deliberate save, gated
+//!    on the plan cap (`TierLimits::library`) — full means full, delete or
+//!    upgrade. Quota only ever gates creation; a downgraded server keeps every
+//!    stored draft readable.
 
 use std::path::Path as FsPath;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -129,7 +141,8 @@ pub struct NewEntry {
 pub enum CreateError {
     /// Global row cap reached — answer 503, existing entries stay readable.
     Full,
-    /// Per-server quota reached (carries the limit for the message) — 409.
+    /// Per-server draft quota reached (carries the limit for the message) —
+    /// 409. Never raised for posted entries: their window evicts instead.
     PerGuildFull(i64),
     Storage(String),
 }
@@ -139,16 +152,24 @@ pub enum CreateError {
 pub struct LibraryStore {
     conn: Mutex<Connection>,
     max_entries: i64,
-    /// Max entries per server when plan entitlement is disabled — the
+    /// Max saved drafts per server when plan entitlement is disabled — the
     /// standalone-deployment default the tier limits override.
-    max_per_guild: i64,
+    max_drafts_per_guild: i64,
+    /// Posted-history window per server when plan entitlement is disabled —
+    /// how many auto-recorded posts a server keeps before eviction.
+    posted_per_guild: i64,
     /// Approximate total row count, kept in step with inserts/deletes so the
     /// global cap check is a load, not a `COUNT(*)`.
     count: AtomicI64,
 }
 
 impl LibraryStore {
-    pub fn open(path: &str, max_entries: u64, max_per_guild: u64) -> Result<Self, String> {
+    pub fn open(
+        path: &str,
+        max_entries: u64,
+        max_drafts_per_guild: u64,
+        posted_per_guild: u64,
+    ) -> Result<Self, String> {
         if let Some(parent) = FsPath::new(path).parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
@@ -191,7 +212,8 @@ impl LibraryStore {
         Ok(LibraryStore {
             conn: Mutex::new(conn),
             max_entries: max_entries as i64,
-            max_per_guild: max_per_guild as i64,
+            max_drafts_per_guild: max_drafts_per_guild as i64,
+            posted_per_guild: posted_per_guild as i64,
             count: AtomicI64::new(count),
         })
     }
@@ -200,28 +222,34 @@ impl LibraryStore {
         self.conn.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// The standalone per-server quota, surfaced so the list can show
+    /// The standalone per-server draft quota, surfaced so the list can show
     /// "used / cap" exactly the way the create path enforces it.
-    pub fn max_per_guild(&self) -> i64 {
-        self.max_per_guild
+    pub fn max_drafts_per_guild(&self) -> i64 {
+        self.max_drafts_per_guild
+    }
+
+    /// The standalone posted-history window (see [`Self::open`]).
+    pub fn posted_per_guild(&self) -> i64 {
+        self.posted_per_guild
     }
 
     /// Insert `n`, or — when it's a posted entry whose `message_id` already has
-    /// a row in the guild — refresh that row in place (re-posting or updating a
-    /// live message must never pile up duplicates; an update doesn't grow the
-    /// table, so within quota it bypasses the caps).
+    /// a posted row in the guild — refresh that row in place (re-posting or
+    /// updating a live message must never pile up duplicates).
     /// Returns the entry's id (existing on refresh, `n_id` on insert).
     ///
-    /// The per-guild cap is `limit_override` when given (the destination
-    /// server's plan-tier limit) or the store default; the global cap always
-    /// applies to inserts.
+    /// `limit_override` is the destination server's plan-tier cap **for `n`'s
+    /// label** (the posted window or the draft quota), falling back to the
+    /// matching store default; the global cap always applies to inserts. The
+    /// two labels enforce it differently:
     ///
-    /// **Over-quota content freeze**: while the server holds *more* entries than
-    /// its cap (it filled up on a higher tier, then downgraded), refreshes are
-    /// refused too, not just inserts. Otherwise the surplus rows would work as
-    /// rotating storage — keep 500 entries from a paid month and rewrite their
-    /// content forever on Free. Entries stay readable/deletable regardless; at
-    /// or under the cap refreshes behave as before.
+    ///  - **posted** is a rolling history window: a refresh is never gated (it
+    ///    doesn't grow anything), and an insert past the window *evicts the
+    ///    oldest posted rows* instead of failing — so recording a post always
+    ///    succeeds and a downgraded server's surplus history simply trims on
+    ///    its next post. Draft rows are never touched by eviction.
+    ///  - **draft** is a hard cap: at the cap, the insert is refused with
+    ///    [`CreateError::PerGuildFull`]. Posted rows don't count against it.
     pub fn upsert(
         &self,
         n: &NewEntry,
@@ -230,30 +258,20 @@ impl LibraryStore {
         limit_override: Option<i64>,
     ) -> Result<String, CreateError> {
         let conn = self.lock();
-        let cap = limit_override.unwrap_or(self.max_per_guild);
-        let in_guild: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM library_messages WHERE guild_id=?1",
-                [&n.guild_id],
-                |r| r.get(0),
-            )
-            .map_err(|e| CreateError::Storage(e.to_string()))?;
         if n.label == "posted" {
             if let Some(mid) = &n.message_id {
                 let existing: Option<String> = conn
                     .query_row(
-                        "SELECT id FROM library_messages WHERE guild_id=?1 AND message_id=?2",
+                        "SELECT id FROM library_messages \
+                         WHERE guild_id=?1 AND message_id=?2 AND label='posted'",
                         params![n.guild_id, mid],
                         |r| r.get(0),
                     )
                     .optional()
                     .map_err(|e| CreateError::Storage(e.to_string()))?;
                 if let Some(id) = existing {
-                    if in_guild > cap {
-                        return Err(CreateError::PerGuildFull(cap));
-                    }
                     conn.execute(
-                        "UPDATE library_messages SET label='posted', payload_sealed=?2, \
+                        "UPDATE library_messages SET payload_sealed=?2, \
                          webhook_sealed=COALESCE(?3, webhook_sealed), \
                          webhook_id=COALESCE(?4, webhook_id), \
                          channel_id=COALESCE(?5, channel_id), thread_id=?6, \
@@ -276,12 +294,21 @@ impl LibraryStore {
                     return Ok(id);
                 }
             }
+        } else {
+            let cap = limit_override.unwrap_or(self.max_drafts_per_guild);
+            let drafts_in_guild: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM library_messages WHERE guild_id=?1 AND label='draft'",
+                    [&n.guild_id],
+                    |r| r.get(0),
+                )
+                .map_err(|e| CreateError::Storage(e.to_string()))?;
+            if drafts_in_guild >= cap {
+                return Err(CreateError::PerGuildFull(cap));
+            }
         }
         if self.count.load(Ordering::Relaxed) >= self.max_entries {
             return Err(CreateError::Full);
-        }
-        if in_guild >= cap {
-            return Err(CreateError::PerGuildFull(cap));
         }
         conn.execute(
             "INSERT INTO library_messages \
@@ -306,6 +333,27 @@ impl LibraryStore {
         )
         .map_err(|e| CreateError::Storage(e.to_string()))?;
         self.count.fetch_add(1, Ordering::Relaxed);
+        if n.label == "posted" {
+            let window = limit_override.unwrap_or(self.posted_per_guild);
+            if window < i64::MAX {
+                // Trim the history to its window, newest first (rowid breaks
+                // same-second ties in insertion order). Runs after the insert
+                // so "window = N" always means "the N most recent posts,
+                // including this one".
+                let evicted = conn
+                    .execute(
+                        "DELETE FROM library_messages WHERE guild_id=?1 AND label='posted' \
+                         AND id NOT IN (SELECT id FROM library_messages \
+                             WHERE guild_id=?1 AND label='posted' \
+                             ORDER BY updated_at DESC, rowid DESC LIMIT ?2)",
+                        params![n.guild_id, window.max(0)],
+                    )
+                    .map_err(|e| CreateError::Storage(e.to_string()))?;
+                if evicted > 0 {
+                    self.count.fetch_sub(evicted as i64, Ordering::Relaxed);
+                }
+            }
+        }
         Ok(n_id.to_string())
     }
 
@@ -376,21 +424,29 @@ impl LibraryStore {
         Ok(n > 0)
     }
 
-    /// Whether a server holds *more* entries than its cap — the over-quota
-    /// content-freeze condition (see [`upsert`]). Exactly at the cap is fine:
-    /// the stored set is what the plan allows, only growth beyond it isn't.
-    pub fn over_cap(&self, guild: &str, limit_override: Option<i64>) -> Result<bool, String> {
-        let cap = limit_override.unwrap_or(self.max_per_guild);
-        Ok(self.count_for_guild(guild)? > cap)
+    /// Whether a server holds *more drafts* than its cap — the over-quota
+    /// content-freeze condition (see [`Self::upsert`]). Exactly at the cap is
+    /// fine: the stored set is what the plan allows, only growth beyond it
+    /// isn't. Posted rows never count — their window self-corrects by
+    /// eviction, so there's nothing to freeze.
+    pub fn drafts_over_cap(
+        &self,
+        guild: &str,
+        limit_override: Option<i64>,
+    ) -> Result<bool, String> {
+        let cap = limit_override.unwrap_or(self.max_drafts_per_guild);
+        Ok(self.counts_for_guild(guild)?.1 > cap)
     }
 
-    /// How many entries a server holds (the list's `used` figure).
-    pub fn count_for_guild(&self, guild: &str) -> Result<i64, String> {
+    /// How many entries a server holds, as `(posted, drafts)` — the list's
+    /// per-bucket `used` figures.
+    pub fn counts_for_guild(&self, guild: &str) -> Result<(i64, i64), String> {
         let conn = self.lock();
         conn.query_row(
-            "SELECT COUNT(*) FROM library_messages WHERE guild_id=?1",
+            "SELECT COALESCE(SUM(label='posted'),0), COALESCE(SUM(label='draft'),0) \
+             FROM library_messages WHERE guild_id=?1",
             [guild],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(e2s)
     }
@@ -447,7 +503,7 @@ pub async fn record_posted_best_effort(
         dest_label: dest_label.map(str::to_string),
         created_by: created_by.to_string(),
     };
-    let limit_override = st.entitlements.library_limit(guild).await;
+    let limit_override = st.entitlements.library_posted_limit(guild).await;
     let store = Arc::clone(store);
     let id = match random_id() {
         Some(id) => id,
@@ -457,8 +513,9 @@ pub async fn record_posted_best_effort(
     let res = tokio::task::spawn_blocking(move || store.upsert(&n, &id, now, limit_override)).await;
     match res {
         Ok(Ok(_)) => {}
-        // Quota/capacity is an expected steady state, not an error — the send
-        // itself succeeded, the library just didn't grow.
+        // The posted window evicts instead of filling, so only the global
+        // capacity cap can still refuse — an expected steady state, not an
+        // error (the send itself succeeded).
         Ok(Err(CreateError::PerGuildFull(_))) | Ok(Err(CreateError::Full)) => {}
         Ok(Err(CreateError::Storage(e))) => {
             tracing::warn!(target: "library", "auto-record failed: {e}");
@@ -508,7 +565,7 @@ pub async fn record_fired_schedule(
         // marker so the row still says where it came from.
         created_by: created_by.unwrap_or("schedule").to_string(),
     };
-    let limit_override = entitlements.library_limit(guild).await;
+    let limit_override = entitlements.library_posted_limit(guild).await;
     let Some(id) = random_id() else { return };
     let now = unix_now();
     let store = Arc::clone(store);
@@ -546,8 +603,6 @@ pub struct CreateBody {
 #[derive(Deserialize)]
 pub struct PatchBody {
     #[serde(default)]
-    pub label: Option<String>,
-    #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
     pub payload: Option<Value>,
@@ -567,7 +622,14 @@ pub async fn library_list(
     let store = store(&st)?;
     let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
     authorize_activity_webhooks(&st, session, &guild).await?;
-    let quota = quota_json(&st, store.as_ref(), &guild).await;
+    let posted_cap = posted_cap(&st, store.as_ref(), &guild).await;
+    let draft_cap = draft_cap(&st, store.as_ref(), &guild).await;
+    let g = guild.clone();
+    let s = Arc::clone(&store);
+    let (posted_used, draft_used) = tokio::task::spawn_blocking(move || s.counts_for_guild(&g))
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .map_err(AppError::Internal)?;
     let g = guild.clone();
     let rows = tokio::task::spawn_blocking(move || store.list_for_guild(&g, LIST_LIMIT))
         .await
@@ -576,14 +638,27 @@ pub async fn library_list(
     let items: Vec<Value> = rows.iter().map(|r| view(&st, r)).collect();
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
-        Json(json!({ "items": items, "used": rows.len(), "quota": quota })),
+        // `used`/`quota` are the pre-split totals kept for cached frontends;
+        // the buckets are the real contract (quota `null` = unlimited).
+        Json(json!({
+            "items": items,
+            "used": rows.len(),
+            "quota": match (posted_cap, draft_cap) {
+                (Some(p), Some(d)) => json!(p + d),
+                _ => Value::Null,
+            },
+            "posted": { "used": posted_used, "quota": cap_json(posted_cap) },
+            "drafts": { "used": draft_used, "quota": cap_json(draft_cap) },
+        })),
     )
         .into_response())
 }
 
-/// `POST /api/guilds/:guild_id/library` — store a message. A `posted` entry
-/// with a `message_id` upserts (re-posting refreshes its one row); everything
-/// else inserts, gated on the server's plan quota.
+/// `POST /api/guilds/:guild_id/library` — store a message. A `posted` entry is
+/// the record of a real Discord message (its `message_id` is required) and
+/// upserts into the rolling history window — re-posting refreshes its one row,
+/// a new post past the window evicts the oldest. A `draft` inserts, gated on
+/// the server's plan quota.
 pub async fn library_create(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
@@ -597,6 +672,14 @@ pub async fn library_create(
 
     if !LABELS.contains(&body.label.as_str()) {
         return Err(bad_request("label must be \"posted\" or \"draft\""));
+    }
+    // The posted history records what was actually sent — an entry that names
+    // no Discord message can't be one, and letting it through would make the
+    // sync-only history hand-curated.
+    if body.label == "posted" && body.message_id.as_deref().unwrap_or("").is_empty() {
+        return Err(bad_request(
+            "a posted entry records a sent message and needs its message_id — save a draft instead",
+        ));
     }
     validate_payload(&body.payload).map_err(bad_request_s)?;
     if let Some(t) = &body.title {
@@ -644,7 +727,13 @@ pub async fn library_create(
         dest_label: body.dest_label.filter(|l| !l.trim().is_empty()),
         created_by: session.uid,
     };
-    let limit_override = st.entitlements.library_limit(&guild).await;
+    // The override is the plan cap for *this entry's bucket* — the posted
+    // window or the draft quota.
+    let limit_override = if n.label == "posted" {
+        st.entitlements.library_posted_limit(&guild).await
+    } else {
+        st.entitlements.library_limit(&guild).await
+    };
     let id = random_id().ok_or_else(|| AppError::Internal("rng".into()))?;
     let now = unix_now();
     let s = Arc::clone(&store);
@@ -674,7 +763,7 @@ pub async fn library_create(
         Err(CreateError::PerGuildFull(limit)) => Err(AppError::Status {
             status: StatusCode::CONFLICT,
             message: format!(
-                "This server's library is full ({limit} messages) — delete one to add another, or upgrade the server's plan for more space."
+                "This server's saved messages are full ({limit}) — remove one to save another, or upgrade the server's plan for more space."
             ),
             retry_after: None,
         }),
@@ -682,8 +771,10 @@ pub async fn library_create(
     }
 }
 
-/// `PATCH /api/guilds/:guild_id/library/:id` — rename, relabel, or save new
-/// content over an entry.
+/// `PATCH /api/guilds/:guild_id/library/:id` — rename an entry, or save new
+/// content over a draft. Labels are fixed at creation (history stays history,
+/// drafts stay drafts), and a posted entry's content is read-only — it mirrors
+/// what was actually sent, so the only way to change it is to send again.
 pub async fn library_patch(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
@@ -703,30 +794,33 @@ pub async fn library_patch(
         .map_err(AppError::Internal)?
         .ok_or_else(not_found)?;
 
-    // Over-quota content freeze (the PATCH twin of the `upsert` refresh gate):
-    // while the server holds more entries than its plan cap, rewriting an
-    // entry's *content* is refused — otherwise a downgraded server's surplus
-    // rows would work as rotating storage. Rename/relabel stay allowed (they
-    // change no content), as do reading and deleting.
     if body.payload.is_some() {
+        // History is sync-only: a posted entry's content mirrors the sent
+        // message and can't be rewritten by hand.
+        if row.label == "posted" {
+            return Err(bad_request(
+                "a posted entry's content syncs from what was sent and can't be edited — save a draft instead",
+            ));
+        }
+        // Over-quota content freeze (the PATCH twin of the create gate): while
+        // the server holds more drafts than its plan cap, rewriting a draft's
+        // *content* is refused — otherwise a downgraded server's surplus rows
+        // would work as rotating storage. Renaming stays allowed (it changes
+        // no content), as do reading and deleting.
         let limit_override = st.entitlements.library_limit(&guild).await;
         let s = Arc::clone(&store);
         let g = guild.clone();
-        let over = tokio::task::spawn_blocking(move || s.over_cap(&g, limit_override))
+        let over = tokio::task::spawn_blocking(move || s.drafts_over_cap(&g, limit_override))
             .await
             .map_err(|e| AppError::Internal(e.to_string()))?
             .map_err(AppError::Internal)?;
         if over {
-            return Err(over_quota(limit_override.unwrap_or(store.max_per_guild())));
+            return Err(over_quota(
+                limit_override.unwrap_or(store.max_drafts_per_guild()),
+            ));
         }
     }
 
-    if let Some(label) = body.label {
-        if !LABELS.contains(&label.as_str()) {
-            return Err(bad_request("label must be \"posted\" or \"draft\""));
-        }
-        row.label = label;
-    }
     if let Some(title) = body.title {
         validate_title(&title).map_err(bad_request_s)?;
         row.title = Some(title).filter(|t| !t.trim().is_empty());
@@ -801,18 +895,32 @@ fn view(st: &AppState, r: &Row) -> Value {
     })
 }
 
-/// The per-server quota as the list reports it: the plan-tier cap when
-/// entitlement is on (unlimited → JSON `null`), else the store default —
-/// mirroring `schedule_list_for_guild`.
-async fn quota_json(st: &AppState, store: &LibraryStore, guild: &str) -> Value {
-    if st.entitlements.enabled() {
-        match st.entitlements.library_limit(guild).await {
-            Some(n) if n == i64::MAX => Value::Null,
-            Some(n) => json!(n),
-            None => json!(store.max_per_guild()),
-        }
-    } else {
-        json!(store.max_per_guild())
+/// A server's posted-history window as the list reports it: the plan-tier cap
+/// when entitlement is on, else the store default. `None` = unlimited.
+async fn posted_cap(st: &AppState, store: &LibraryStore, guild: &str) -> Option<i64> {
+    let cap = st
+        .entitlements
+        .library_posted_limit(guild)
+        .await
+        .unwrap_or(store.posted_per_guild());
+    (cap != i64::MAX).then_some(cap)
+}
+
+/// A server's saved-draft quota as the list reports it. `None` = unlimited.
+async fn draft_cap(st: &AppState, store: &LibraryStore, guild: &str) -> Option<i64> {
+    let cap = st
+        .entitlements
+        .library_limit(guild)
+        .await
+        .unwrap_or(store.max_drafts_per_guild());
+    (cap != i64::MAX).then_some(cap)
+}
+
+/// A cap as the API reports it: the number, or JSON `null` for unlimited.
+fn cap_json(cap: Option<i64>) -> Value {
+    match cap {
+        Some(n) => json!(n),
+        None => Value::Null,
     }
 }
 
@@ -856,14 +964,14 @@ fn not_found() -> AppError {
 }
 
 /// The over-quota content-freeze refusal (never reached on an unlimited cap —
-/// `over_cap` can't be true there).
+/// `drafts_over_cap` can't be true there).
 fn over_quota(limit: i64) -> AppError {
     AppError::Status {
         status: StatusCode::CONFLICT,
         message: format!(
-            "This server holds more library messages than its plan allows ({limit}) — content is \
-             read-only until you delete down to the limit or upgrade. Renaming and deleting still \
-             work."
+            "This server holds more saved messages than its plan allows ({limit}) — their content \
+             is read-only until you delete down to the limit or upgrade. Renaming and deleting \
+             still work."
         ),
         retry_after: None,
     }
@@ -878,14 +986,25 @@ fn random_id() -> Option<String> {
 mod tests {
     use super::*;
 
-    fn temp_store(tag: &str, max: u64, per_guild: u64) -> (LibraryStore, std::path::PathBuf) {
+    fn temp_store(
+        tag: &str,
+        max: u64,
+        drafts_per_guild: u64,
+        posted_per_guild: u64,
+    ) -> (LibraryStore, std::path::PathBuf) {
         let path = std::env::temp_dir().join(format!(
             "dweeb-library-test-{}-{tag}.db",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);
         (
-            LibraryStore::open(path.to_str().unwrap(), max, per_guild).unwrap(),
+            LibraryStore::open(
+                path.to_str().unwrap(),
+                max,
+                drafts_per_guild,
+                posted_per_guild,
+            )
+            .unwrap(),
             path,
         )
     }
@@ -908,7 +1027,7 @@ mod tests {
 
     #[test]
     fn insert_list_get_delete_roundtrip() {
-        let (store, path) = temp_store("roundtrip", 100, 10);
+        let (store, path) = temp_store("roundtrip", 100, 10, 10);
         let id = store
             .upsert(&entry("g1", "draft", None), "aaaaaaaaaa", 1_000, None)
             .unwrap();
@@ -921,13 +1040,13 @@ mod tests {
         assert!(store.get("g2", &id).unwrap().is_none());
         assert!(store.delete("g1", &id).unwrap());
         assert!(!store.delete("g1", &id).unwrap());
-        assert_eq!(store.count_for_guild("g1").unwrap(), 0);
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (0, 0));
         let _ = std::fs::remove_file(path);
     }
 
     #[test]
     fn posted_upserts_by_message_id() {
-        let (store, path) = temp_store("upsert", 100, 10);
+        let (store, path) = temp_store("upsert", 100, 10, 10);
         let first = store
             .upsert(
                 &entry("g1", "posted", Some("m1")),
@@ -936,7 +1055,8 @@ mod tests {
                 None,
             )
             .unwrap();
-        // Same guild + message: refreshes the one row, keeps its id, ignores caps.
+        // Same guild + message: refreshes the one row, keeps its id — even
+        // under a window override the guild currently exceeds.
         let mut refreshed = entry("g1", "posted", Some("m1"));
         refreshed.payload_sealed = "sealed-v2".into();
         let second = store
@@ -956,7 +1076,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(store.count_for_guild("g1").unwrap(), 2);
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (2, 0));
         // The same message id in a DIFFERENT guild is independent.
         store
             .upsert(
@@ -966,20 +1086,27 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(store.count_for_guild("g2").unwrap(), 1);
+        assert_eq!(store.counts_for_guild("g2").unwrap(), (1, 0));
         let _ = std::fs::remove_file(path);
     }
 
     #[test]
-    fn per_guild_quota_gates_inserts_only() {
-        let (store, path) = temp_store("quota", 100, 2);
+    fn draft_cap_gates_drafts_only() {
+        let (store, path) = temp_store("quota", 100, 2, 10);
+        // Posted history never counts against the draft cap.
+        store
+            .upsert(&entry("g1", "posted", Some("m1")), "id-p1", 1, None)
+            .unwrap();
+        store
+            .upsert(&entry("g1", "posted", Some("m2")), "id-p2", 1, None)
+            .unwrap();
         store
             .upsert(&entry("g1", "draft", None), "id-a", 1, None)
             .unwrap();
         store
             .upsert(&entry("g1", "draft", None), "id-b", 1, None)
             .unwrap();
-        // Store default (2) reached → third insert is rejected with the cap.
+        // Store default (2 drafts) reached → third draft is rejected with the cap.
         match store.upsert(&entry("g1", "draft", None), "id-c", 1, None) {
             Err(CreateError::PerGuildFull(2)) => {}
             other => panic!("expected PerGuildFull(2), got {other:?}"),
@@ -992,12 +1119,81 @@ mod tests {
         store
             .upsert(&entry("g2", "draft", None), "id-d", 1, None)
             .unwrap();
+        // And the full draft shelf never blocks recording a post.
+        store
+            .upsert(&entry("g1", "posted", Some("m3")), "id-p3", 2, None)
+            .unwrap();
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (3, 3));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn posted_window_evicts_oldest_and_leaves_drafts() {
+        let (store, path) = temp_store("window", 100, 10, 2);
+        store
+            .upsert(&entry("g1", "draft", None), "id-draft-a", 500, None)
+            .unwrap();
+        store
+            .upsert(&entry("g1", "posted", Some("m1")), "id-p1", 1_000, None)
+            .unwrap();
+        store
+            .upsert(&entry("g1", "posted", Some("m2")), "id-p2", 2_000, None)
+            .unwrap();
+        // Third post past the window of 2: recorded, the OLDEST post evicted,
+        // the draft untouched.
+        store
+            .upsert(&entry("g1", "posted", Some("m3")), "id-p3", 3_000, None)
+            .unwrap();
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (2, 1));
+        let rows = store.list_for_guild("g1", 100).unwrap();
+        let message_ids: Vec<_> = rows.iter().filter_map(|r| r.message_id.clone()).collect();
+        assert!(message_ids.contains(&"m2".to_string()));
+        assert!(message_ids.contains(&"m3".to_string()));
+        assert!(!message_ids.contains(&"m1".to_string()));
+        // Refreshing an existing post bumps it to the front of the window
+        // instead of consuming a slot.
+        store
+            .upsert(
+                &entry("g1", "posted", Some("m2")),
+                "id-refresh",
+                4_000,
+                None,
+            )
+            .unwrap();
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (2, 1));
+        // A downgrade (window 2 → 1) trims on the NEXT post, not before.
+        store
+            .upsert(&entry("g1", "posted", Some("m4")), "id-p4", 5_000, Some(1))
+            .unwrap();
+        let rows = store.list_for_guild("g1", 100).unwrap();
+        let posted: Vec<_> = rows.iter().filter(|r| r.label == "posted").collect();
+        assert_eq!(posted.len(), 1);
+        assert_eq!(posted[0].message_id.as_deref(), Some("m4"));
+        // The eviction kept the global counter honest: 1 posted + 1 draft.
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (1, 1));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn unlimited_window_never_evicts() {
+        let (store, path) = temp_store("nowindow", 100, 10, 1);
+        for (i, mid) in ["m1", "m2", "m3"].iter().enumerate() {
+            store
+                .upsert(
+                    &entry("g1", "posted", Some(mid)),
+                    &format!("id-fill-{i}"),
+                    1_000 + i as i64,
+                    Some(i64::MAX),
+                )
+                .unwrap();
+        }
+        assert_eq!(store.counts_for_guild("g1").unwrap(), (3, 0));
         let _ = std::fs::remove_file(path);
     }
 
     #[test]
     fn global_cap_answers_full() {
-        let (store, path) = temp_store("full", 1, 10);
+        let (store, path) = temp_store("full", 1, 10, 10);
         store
             .upsert(&entry("g1", "draft", None), "id-a", 1, None)
             .unwrap();
@@ -1005,7 +1201,8 @@ mod tests {
             Err(CreateError::Full) => {}
             other => panic!("expected Full, got {other:?}"),
         }
-        // A new posted row (no existing message to refresh) is still capped.
+        // A new posted row (no existing message to refresh) is still capped —
+        // the global bound protects the disk, unlike the per-guild window.
         store
             .upsert(&entry("g1", "posted", Some("m1")), "id-c", 1, None)
             .expect_err("insert of a new posted row is still capped");
@@ -1013,82 +1210,39 @@ mod tests {
     }
 
     #[test]
-    fn over_cap_freezes_posted_refreshes_but_at_cap_is_fine() {
-        let (store, path) = temp_store("freeze", 100, 10);
-        // Fill three rows under a generous (paid-tier) override.
-        for (i, mid) in ["m1", "m2", "m3"].iter().enumerate() {
-            store
-                .upsert(
-                    &entry("g1", "posted", Some(mid)),
-                    &format!("id-fill-{i}"),
-                    1_000,
-                    Some(10),
-                )
-                .unwrap();
-        }
-        // Downgraded to a cap of 3 — exactly AT the cap, refreshing stays fine.
-        let mut refreshed = entry("g1", "posted", Some("m1"));
-        refreshed.payload_sealed = "sealed-v2".into();
+    fn drafts_over_cap_ignores_posted_rows() {
+        let (store, path) = temp_store("overcap", 100, 2, 10);
         store
-            .upsert(&refreshed, "id-refresh-a", 2_000, Some(3))
+            .upsert(&entry("g1", "posted", Some("m1")), "id-p1", 1, None)
             .unwrap();
-        // Downgraded further to a cap of 2 — now OVER the cap: the refresh is
-        // refused (rotating-storage guard), carrying the cap for the message.
-        match store.upsert(&refreshed, "id-refresh-b", 3_000, Some(2)) {
-            Err(CreateError::PerGuildFull(2)) => {}
-            other => panic!("expected PerGuildFull(2), got {other:?}"),
-        }
-        // The frozen row kept its at-cap content, and nothing was deleted.
-        let rows = store.list_for_guild("g1", 100).unwrap();
-        assert_eq!(rows.len(), 3);
-        let m1 = rows.iter().find(|r| r.message_id.as_deref() == Some("m1"));
-        assert_eq!(m1.unwrap().payload_sealed, "sealed-v2");
-        // Deleting is the way back under quota — then refreshes work again.
-        let victim = rows
-            .iter()
-            .find(|r| r.message_id.as_deref() == Some("m3"))
-            .unwrap()
-            .id
-            .clone();
-        assert!(store.delete("g1", &victim).unwrap());
-        store
-            .upsert(&refreshed, "id-refresh-c", 4_000, Some(2))
-            .unwrap();
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn over_cap_reports_strictly_over() {
-        let (store, path) = temp_store("overcap", 100, 2);
         store
             .upsert(&entry("g1", "draft", None), "id-a", 1, None)
             .unwrap();
         store
             .upsert(&entry("g1", "draft", None), "id-b", 1, None)
             .unwrap();
-        // Exactly at the store-default cap (2): not over.
-        assert!(!store.over_cap("g1", None).unwrap());
-        // A downgrade override below the held count: over.
-        assert!(store.over_cap("g1", Some(1)).unwrap());
+        // Exactly at the store-default draft cap (2): not over — the posted
+        // row doesn't count.
+        assert!(!store.drafts_over_cap("g1", None).unwrap());
+        // A downgrade override below the held draft count: over.
+        assert!(store.drafts_over_cap("g1", Some(1)).unwrap());
         // Unlimited (i64::MAX, what the entitlement hands over for Pro): never.
-        assert!(!store.over_cap("g1", Some(i64::MAX)).unwrap());
+        assert!(!store.drafts_over_cap("g1", Some(i64::MAX)).unwrap());
         // An empty guild is never over.
-        assert!(!store.over_cap("g2", Some(1)).unwrap());
+        assert!(!store.drafts_over_cap("g2", Some(1)).unwrap());
         let _ = std::fs::remove_file(path);
     }
 
     #[test]
     fn save_updates_everything_editable() {
-        let (store, path) = temp_store("save", 100, 10);
+        let (store, path) = temp_store("save", 100, 10, 10);
         let id = store
             .upsert(&entry("g1", "posted", Some("m1")), "id-a", 1_000, None)
             .unwrap();
         let mut row = store.get("g1", &id).unwrap().unwrap();
-        row.label = "draft".into();
         row.title = Some("Renamed".into());
         store.save(&row, 2_000).unwrap();
         let back = store.get("g1", &id).unwrap().unwrap();
-        assert_eq!(back.label, "draft");
         assert_eq!(back.title.as_deref(), Some("Renamed"));
         assert_eq!(back.updated_at, 2_000);
         let _ = std::fs::remove_file(path);

@@ -22,6 +22,7 @@ import {
   isLibraryConfigured,
   listLibrary,
   updateLibraryEntry,
+  type LibraryBucketUsage,
   type LibraryEntryResult,
   type LibraryEntryView,
 } from "./api";
@@ -40,9 +41,13 @@ interface LibraryState {
   /** The server whose library is loaded (null = nothing loaded yet). */
   guildId: string | null;
   entries: LibraryEntryView[];
-  used: number;
-  /** Per-server entry cap; null = unlimited (or not loaded yet). */
-  quota: number | null;
+  /** Posted-history usage: a rolling "last N posts" window that syncs itself
+   *  (recording past it evicts the oldest), so `used` can't exceed `quota`
+   *  for long. `quota` null = unlimited (or not loaded yet). */
+  posted: LibraryBucketUsage;
+  /** Saved-draft usage: a hard cap — at `quota`, saves are refused until an
+   *  entry is removed or the plan is upgraded. */
+  drafts: LibraryBucketUsage;
   loading: boolean;
   /** Last load error, for the gallery's quiet failure note. 403 (no Manage
    *  Webhooks) is normal for a non-manager and stored as null. */
@@ -62,24 +67,47 @@ interface LibraryState {
 }
 
 /** Merge an upserted entry into the loaded list (newest first), if the list
- *  currently shows that guild. */
+ *  currently shows that guild. Bumps the entry's own bucket on a fresh insert
+ *  and — for posted entries — mirrors the server's rolling window by dropping
+ *  the oldest posted entries past the quota, so the local list matches what a
+ *  reload would show without refetching. */
 function mergeEntry(
-  state: Pick<LibraryState, "guildId" | "entries" | "used">,
+  state: Pick<LibraryState, "guildId" | "entries" | "posted" | "drafts">,
   entry: LibraryEntryView,
 ): Partial<LibraryState> | null {
   if (state.guildId !== entry.guild_id) return null;
   const existed = state.entries.some((e) => e.id === entry.id);
-  return {
-    entries: [entry, ...state.entries.filter((e) => e.id !== entry.id)],
-    used: existed ? state.used : state.used + 1,
-  };
+  let entries = [entry, ...state.entries.filter((e) => e.id !== entry.id)];
+  let posted = state.posted;
+  let drafts = state.drafts;
+  if (entry.label === "posted") {
+    if (!existed) posted = { ...posted, used: posted.used + 1 };
+    if (posted.quota != null && posted.used > posted.quota) {
+      // Evict oldest-first, exactly like the server (entries are newest-first).
+      let surplus = posted.used - posted.quota;
+      entries = [...entries]
+        .reverse()
+        .filter((e) => {
+          if (e.label !== "posted" || surplus === 0) return true;
+          surplus -= 1;
+          return false;
+        })
+        .reverse();
+      posted = { ...posted, used: posted.quota };
+    }
+  } else if (!existed) {
+    drafts = { ...drafts, used: drafts.used + 1 };
+  }
+  return { entries, posted, drafts };
 }
+
+const EMPTY_BUCKET: LibraryBucketUsage = { used: 0, quota: null };
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   guildId: null,
   entries: [],
-  used: 0,
-  quota: null,
+  posted: EMPTY_BUCKET,
+  drafts: EMPTY_BUCKET,
   loading: false,
   error: null,
   loaded: false,
@@ -89,7 +117,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Reset when switching servers so stale entries never flash under the new
     // server's header; a same-server refresh keeps the list up while loading.
     if (get().guildId !== guildId) {
-      set({ guildId, entries: [], used: 0, quota: null, loaded: false, error: null });
+      set({
+        guildId,
+        entries: [],
+        posted: EMPTY_BUCKET,
+        drafts: EMPTY_BUCKET,
+        loaded: false,
+        error: null,
+      });
     }
     set({ loading: true });
     const res = await listLibrary(guildId);
@@ -99,8 +134,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (res.ok) {
       set({
         entries: res.items,
-        used: res.used,
-        quota: res.quota,
+        posted: res.posted,
+        drafts: res.drafts,
         loading: false,
         loaded: true,
         error: null,
@@ -160,11 +195,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   async remove(guildId, id) {
     const res = await deleteLibraryEntry(guildId, id);
     if (res.ok && get().guildId === guildId) {
-      const had = get().entries.some((e) => e.id === id);
-      set({
+      const removed = get().entries.find((e) => e.id === id);
+      const patch: Partial<LibraryState> = {
         entries: get().entries.filter((e) => e.id !== id),
-        used: had ? Math.max(0, get().used - 1) : get().used,
-      });
+      };
+      if (removed?.label === "posted") {
+        patch.posted = { ...get().posted, used: Math.max(0, get().posted.used - 1) };
+      } else if (removed) {
+        patch.drafts = { ...get().drafts, used: Math.max(0, get().drafts.used - 1) };
+      }
+      set(patch);
     }
     return res.ok;
   },

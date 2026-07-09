@@ -26,8 +26,11 @@ pub struct TierLimits {
     pub custom_bots: i64,
     /// Concurrent live co-editors in an Activity collaboration room.
     pub coeditors: i64,
-    /// Message-library entries (per server).
+    /// Deliberately saved library drafts (per server) — the curated shelf.
     pub library: i64,
+    /// Posted-message history window (per server): the library keeps the last
+    /// N posted messages, auto-recorded and auto-evicted oldest-first.
+    pub library_posted: i64,
 }
 
 /// The Free / Plus / Pro quota table read by `entitlement.rs`.
@@ -184,9 +187,13 @@ pub struct Config {
     /// Creation answers 503 once this many entries are stored (existing ones
     /// stay readable); bounds worst-case disk use under abuse.
     pub library_max_entries: u64,
-    /// Max entries per server when plan entitlement is disabled — the
+    /// Max saved drafts per server when plan entitlement is disabled — the
     /// standalone default the tier limits override.
     pub library_max_per_guild: u64,
+    /// Posted-history window per server when plan entitlement is disabled —
+    /// how many auto-recorded posted messages a server keeps before the oldest
+    /// is evicted.
+    pub library_posted_per_guild: u64,
 
     // ── Permanent component slots ──────────────────────────────────────────
     /// Base URL of the interactions dispatcher's internal API (compose-network
@@ -322,6 +329,7 @@ impl Config {
             opt_env("LIBRARY_DB_PATH").unwrap_or_else(|| "library.db".to_string());
         let library_max_entries = parse_or("LIBRARY_MAX_ENTRIES", 100_000);
         let library_max_per_guild = parse_or("LIBRARY_MAX_PER_GUILD", 100);
+        let library_posted_per_guild = parse_or("LIBRARY_POSTED_PER_GUILD", 100);
 
         let dispatcher_url = opt_env("DISPATCHER_URL").map(|u| u.trim_end_matches('/').to_string());
         let dispatcher_token = opt_env("DISPATCHER_API_TOKEN");
@@ -357,6 +365,7 @@ impl Config {
                 custom_bots: parse_or("PLAN_FREE_CUSTOM_BOTS", 1),
                 coeditors: parse_or("PLAN_FREE_COEDITORS", 2),
                 library: parse_or("PLAN_FREE_LIBRARY", 10),
+                library_posted: parse_or("PLAN_FREE_LIBRARY_POSTED", 10),
             },
             plus: TierLimits {
                 schedules: parse_or("PLAN_PLUS_SCHEDULES", 30),
@@ -364,6 +373,7 @@ impl Config {
                 custom_bots: parse_or("PLAN_PLUS_CUSTOM_BOTS", 2),
                 coeditors: parse_or("PLAN_PLUS_COEDITORS", 6),
                 library: parse_or("PLAN_PLUS_LIBRARY", 100),
+                library_posted: parse_or("PLAN_PLUS_LIBRARY_POSTED", 100),
             },
             pro: TierLimits {
                 // 0 = unlimited (mapped to i64::MAX at each gate).
@@ -372,6 +382,7 @@ impl Config {
                 custom_bots: parse_or("PLAN_PRO_CUSTOM_BOTS", 5),
                 coeditors: parse_or("PLAN_PRO_COEDITORS", 25),
                 library: parse_or("PLAN_PRO_LIBRARY", 0),
+                library_posted: parse_or("PLAN_PRO_LIBRARY_POSTED", 0),
             },
         };
 
@@ -417,6 +428,7 @@ impl Config {
             library_db_path,
             library_max_entries,
             library_max_per_guild,
+            library_posted_per_guild,
             dispatcher_url,
             dispatcher_token,
             stripe_secret_key,
