@@ -6,6 +6,9 @@
   /* Let the button keep its width; the name ellipsises before the chip grows. */
   flex: 1 1 auto;
 }
+.identity[data-compact] {
+  flex: none;
+}
 
 .icon {
   flex: none;

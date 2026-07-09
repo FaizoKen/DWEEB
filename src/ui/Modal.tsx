@@ -6,7 +6,10 @@ import styles from "./Modal.module.css";
 interface ModalProps {
   open: boolean;
   onClose: () => void;
-  title: string;
+  /** Header content. Use `ariaLabel` whenever this isn't plain text. */
+  title: ReactNode;
+  /** Accessible dialog name when the header is not a plain-text title. */
+  ariaLabel?: string;
   /** Optional footer area (typically holds buttons). */
   footer?: ReactNode;
   /** "sm" renders a compact centered dialog that stays small on mobile. */
@@ -30,6 +33,7 @@ export function Modal({
   open,
   onClose,
   title,
+  ariaLabel,
   footer,
   size = "md",
   backdropStyle,
@@ -69,7 +73,7 @@ export function Modal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-label={ariaLabel ?? (typeof title === "string" ? title : "Dialog")}
         tabIndex={-1}
         className={cn(styles.dialog, size === "sm" && styles.dialogSm)}
       >

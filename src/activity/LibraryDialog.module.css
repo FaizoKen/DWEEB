@@ -1,37 +1,12 @@
-.serverIdentity {
-  display: flex;
+.modalTitle {
+  display: inline-flex;
   align-items: center;
-  gap: 9px;
-  min-width: 0;
-  margin: 0 0 var(--app-space-3);
-  padding: 8px 10px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius);
-  background: var(--app-bg-input);
+  gap: 8px;
 }
 
-.serverIdentityText {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.2;
-}
-
-.serverIdentityLabel {
-  color: var(--app-text-subtle);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.serverIdentityName {
-  overflow: hidden;
-  color: var(--app-text);
-  font-size: var(--app-text-sm);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.serverIcon {
+  display: inline-flex;
+  flex: none;
 }
 
 .lead {

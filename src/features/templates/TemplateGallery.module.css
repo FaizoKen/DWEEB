@@ -80,17 +80,13 @@
   max-width: 60ch;
 }
 
-/* Keep the server context in the header: Posted, Scheduled, and server-draft
- * shelves belong to one Discord server, while local saves and templates do not.
- * The shared identity component supplies the real guild icon and a resilient
- * initial-letter fallback. */
-.serverIdentity {
-  width: min(100%, 300px);
-  margin-top: 10px;
-  padding: 6px 8px;
-  border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
-  border-radius: var(--app-radius);
-  background: color-mix(in srgb, var(--app-bg-input) 62%, transparent);
+/* A compact server cue sits beside the close control, so the directory retains
+ * its server context without adding another line to the header. */
+.headerActions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
 }
 
 .close {

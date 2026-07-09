@@ -78,7 +78,24 @@ export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () =>
     <Modal
       open={open}
       onClose={onClose}
-      title="Message directory"
+      title={
+        <span className={styles.modalTitle}>
+          <span>Message directory</span>
+          {targetGuildMeta ? (
+            <span
+              className={styles.serverIcon}
+              role="img"
+              aria-label={`Discord server: ${targetGuildMeta.name}`}
+              title={`Discord server: ${targetGuildMeta.name}`}
+            >
+              <ServerGlyph guild={targetGuildMeta} size={20} />
+            </span>
+          ) : null}
+        </span>
+      }
+      ariaLabel={
+        targetGuildMeta ? `Message directory for ${targetGuildMeta.name}` : "Message directory"
+      }
       size="sm"
       footer={
         <>
@@ -105,18 +122,6 @@ export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () =>
         </>
       }
     >
-      {targetGuildMeta ? (
-        <div
-          className={styles.serverIdentity}
-          title={`Message directory for ${targetGuildMeta.name}`}
-        >
-          <ServerGlyph guild={targetGuildMeta} size={28} />
-          <span className={styles.serverIdentityText}>
-            <span className={styles.serverIdentityLabel}>Discord server</span>
-            <span className={styles.serverIdentityName}>{targetGuildMeta.name}</span>
-          </span>
-        </div>
-      ) : null}
       <p className={styles.lead}>
         This server's latest posts sync here automatically and reload ready to{" "}
         <strong>update in place</strong>; saved messages load as a fresh start. Everyone who manages

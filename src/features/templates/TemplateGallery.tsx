@@ -753,24 +753,25 @@ export function TemplateGallery() {
                   Reload a posted message, reuse a saved one, or pick a template — everything is
                   fully editable.
                 </p>
-                {connectedGuildName ? (
-                  <div className={styles.serverIdentity}>
-                    <GuildIdentity
-                      guildId={connectedGuildId}
-                      fallbackName={connectedGuildName}
-                      label="Discord server"
-                    />
-                  </div>
-                ) : null}
               </div>
-              <button
-                type="button"
-                className={styles.close}
-                onClick={closeGallery}
-                aria-label="Close message directory"
-              >
-                <CloseIcon size={20} />
-              </button>
+              <div className={styles.headerActions}>
+                {connectedGuildName ? (
+                  <GuildIdentity
+                    guildId={connectedGuildId}
+                    fallbackName={connectedGuildName}
+                    label="Discord server"
+                    compact
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  className={styles.close}
+                  onClick={closeGallery}
+                  aria-label="Close message directory"
+                >
+                  <CloseIcon size={20} />
+                </button>
+              </div>
             </div>
 
             <div className={styles.controls}>
