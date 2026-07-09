@@ -138,7 +138,7 @@ interface CardData {
   /** Posted only — the never-expire toggle chip at the preview's top-left.
    *  One control carries both the status and the action: "off" is a
    *  hover-revealed "+ Never expire" (claims a slot), "on"/"paused" are
-   *  always-visible status chips whose hover flips to "Free slot". */
+   *  always-visible status chips whose hover flips to "- Never expire". */
   pin?: { state: "on" | "off" | "paused"; busy: boolean; title: string; run: () => void };
   /** Lowercased text pulled from the message body (content, labels, …) so the
    *  card is findable by what the message says, not just its name. Precomputed
@@ -1180,7 +1180,7 @@ function GalleryCard({ card }: { card: CardData }) {
           // The never-expire toggle, top-left of the preview (delete sits
           // top-right). One chip = state AND action: "off" is a hover-revealed
           // "+ Never expire"; "on"/"paused" stay visible as status and flip
-          // their label to "Free slot" on hover.
+          // their label to "- Never expire" on hover.
           <button
             type="button"
             className={styles.pinToggle}
@@ -1203,7 +1203,7 @@ function GalleryCard({ card }: { card: CardData }) {
                   : "+ Never expire"}
             </span>
             {card.pin.state !== "off" ? (
-              <span className={styles.pinLabelHover}>Free slot</span>
+              <span className={styles.pinLabelHover}>- Never expire</span>
             ) : null}
           </button>
         ) : null}
