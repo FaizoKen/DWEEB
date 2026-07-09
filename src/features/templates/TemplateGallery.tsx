@@ -744,9 +744,18 @@ export function TemplateGallery() {
             <div className={styles.headingRow}>
               <div className={styles.heading}>
                 <h2 className={styles.title}>
-                  <span className={styles.titleSpark} aria-hidden>
-                    <SparkleIcon size={17} />
-                  </span>
+                  {connectedGuildName ? (
+                    <GuildIdentity
+                      guildId={connectedGuildId}
+                      fallbackName={connectedGuildName}
+                      label="Discord server"
+                      compact
+                    />
+                  ) : (
+                    <span className={styles.titleSpark} aria-hidden>
+                      <SparkleIcon size={17} />
+                    </span>
+                  )}
                   Message directory
                 </h2>
                 <p className={styles.subtitle}>
@@ -754,24 +763,14 @@ export function TemplateGallery() {
                   fully editable.
                 </p>
               </div>
-              <div className={styles.headerActions}>
-                {connectedGuildName ? (
-                  <GuildIdentity
-                    guildId={connectedGuildId}
-                    fallbackName={connectedGuildName}
-                    label="Discord server"
-                    compact
-                  />
-                ) : null}
-                <button
-                  type="button"
-                  className={styles.close}
-                  onClick={closeGallery}
-                  aria-label="Close message directory"
-                >
-                  <CloseIcon size={20} />
-                </button>
-              </div>
+              <button
+                type="button"
+                className={styles.close}
+                onClick={closeGallery}
+                aria-label="Close message directory"
+              >
+                <CloseIcon size={20} />
+              </button>
             </div>
 
             <div className={styles.controls}>

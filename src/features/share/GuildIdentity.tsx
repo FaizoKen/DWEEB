@@ -40,8 +40,9 @@ export function GuildIdentity({
   // Discord's CDN only serves power-of-two sizes — 64 stays crisp on retina for
   // the 24px chip (36 would 400 as an invalid resource).
   const iconUrl = guild ? guildIconUrl(guild.id, guild.icon, 64) : null;
+  const Root = compact ? "span" : "div";
   return (
-    <div
+    <Root
       className={styles.identity}
       data-compact={compact ? "" : undefined}
       title={`${label} ${name}`}
@@ -61,6 +62,6 @@ export function GuildIdentity({
           <span className={styles.name}>{name}</span>
         </span>
       ) : null}
-    </div>
+    </Root>
   );
 }
