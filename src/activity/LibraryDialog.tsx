@@ -20,6 +20,7 @@ import { useActivityStore } from "@/core/activity/activityStore";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useLibraryStore } from "@/core/library/libraryStore";
 import type { LibraryEntryView } from "@/core/library/api";
+import { ServerGlyph } from "./GuildPicker";
 import styles from "./LibraryDialog.module.css";
 
 /** Compact "2m ago" / "3d ago" stamp (input: unix seconds). */
@@ -39,6 +40,7 @@ function formatRelative(unixSecs: number): string {
 
 export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const targetGuildId = useActivityStore((s) => s.targetGuildId);
+  const targetGuildMeta = useActivityStore((s) => s.targetGuildMeta);
   const loadEntry = useActivityStore((s) => s.loadLibraryEntry);
   const clearAll = useMessageStore((s) => s.clearAll);
 
@@ -103,6 +105,18 @@ export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () =>
         </>
       }
     >
+      {targetGuildMeta ? (
+        <div
+          className={styles.serverIdentity}
+          title={`Message directory for ${targetGuildMeta.name}`}
+        >
+          <ServerGlyph guild={targetGuildMeta} size={28} />
+          <span className={styles.serverIdentityText}>
+            <span className={styles.serverIdentityLabel}>Discord server</span>
+            <span className={styles.serverIdentityName}>{targetGuildMeta.name}</span>
+          </span>
+        </div>
+      ) : null}
       <p className={styles.lead}>
         This server's latest posts sync here automatically and reload ready to{" "}
         <strong>update in place</strong>; saved messages load as a fresh start. Everyone who manages

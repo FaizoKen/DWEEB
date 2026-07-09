@@ -73,6 +73,7 @@ import { collectSearchText } from "@/core/schema/traversal";
 import { isRegisteredPluginId } from "@/core/plugins/registry";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
 import { Preview } from "@/features/preview/Preview";
+import { GuildIdentity } from "@/features/share/GuildIdentity";
 import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
 import { CloseIcon, PlusIcon, PuzzleIcon, SearchIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
@@ -752,6 +753,15 @@ export function TemplateGallery() {
                   Reload a posted message, reuse a saved one, or pick a template — everything is
                   fully editable.
                 </p>
+                {connectedGuildName ? (
+                  <div className={styles.serverIdentity}>
+                    <GuildIdentity
+                      guildId={connectedGuildId}
+                      fallbackName={connectedGuildName}
+                      label="Discord server"
+                    />
+                  </div>
+                ) : null}
               </div>
               <button
                 type="button"
