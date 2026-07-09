@@ -540,42 +540,88 @@
   background: color-mix(in srgb, #d83c3e 10%, transparent);
 }
 
-/* ── Never-expire slot management (Posted tab) ─────────────────────────────
- * The on-card assign/free control shares the tag-pill silhouette so the meta
- * row stays one visual line, but reads as pressable (border, hover). */
-.slotBtn {
-  padding: 2px 8px;
+/* ── Never-expire toggle (Posted cards) ────────────────────────────────────
+ * One chip at the preview's top-left carries both the state and the action —
+ * so there's never a status pill AND a button to tell apart. Overlay styling
+ * matches the corner delete button / bot badge (dark translucent, blurred). */
+.pinToggle {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
   cursor: pointer;
   color: var(--app-text-muted);
-  background: transparent;
-  border: 1px solid var(--app-border-strong);
+  background: rgba(10, 11, 15, 0.7);
+  border: 1px solid var(--app-border);
+  backdrop-filter: blur(2px);
   transition:
+    opacity 140ms ease,
     background 120ms ease,
-    color 120ms ease;
+    color 120ms ease,
+    border-color 120ms ease;
 }
-.slotBtn:hover:not(:disabled) {
-  background: var(--app-bg-hover);
-  color: var(--app-text);
-}
-.slotBtn:disabled {
+.pinToggle:disabled {
   opacity: 0.5;
   cursor: default;
 }
-.slotBtn:focus-visible {
+.pinToggle:focus-visible {
+  opacity: 1;
   outline: none;
   box-shadow: var(--app-focus-ring);
 }
-.slotBtn[data-kind="assign"] {
-  color: #3ba55d;
-  border-color: color-mix(in srgb, #3ba55d 45%, transparent);
+
+/* OFF is pure action — hidden until the card is hovered, like delete. */
+.pinToggle[data-state="off"] {
+  opacity: 0;
 }
-.slotBtn[data-kind="assign"]:hover:not(:disabled) {
+.card:hover .pinToggle[data-state="off"],
+.card:focus-within .pinToggle[data-state="off"] {
+  opacity: 1;
+}
+.pinToggle[data-state="off"]:hover:not(:disabled) {
   color: #3ba55d;
-  background: color-mix(in srgb, #3ba55d 10%, transparent);
+  border-color: color-mix(in srgb, #3ba55d 55%, transparent);
+  background: rgba(12, 24, 16, 0.85);
+}
+
+/* ON is status — always visible, unmistakably green. */
+.pinToggle[data-state="on"] {
+  color: #fff;
+  background: color-mix(in srgb, #3ba55d 80%, #06130a);
+  border-color: color-mix(in srgb, #3ba55d 60%, transparent);
+}
+
+/* PAUSED (over the plan cap) — always visible, amber like the bot badge. */
+.pinToggle[data-state="paused"] {
+  color: var(--app-warning-text);
+  background: rgba(20, 16, 8, 0.82);
+  border: 1px solid rgba(240, 178, 50, 0.4);
+}
+
+/* Hovering a held slot reveals the release action in place. */
+.pinLabelHover {
+  display: none;
+}
+.pinToggle[data-state="on"]:hover:not(:disabled),
+.pinToggle[data-state="paused"]:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(60, 14, 16, 0.88);
+  border-color: color-mix(in srgb, var(--app-danger) 55%, transparent);
+}
+.pinToggle[data-state="on"]:hover:not(:disabled) .pinLabel,
+.pinToggle[data-state="paused"]:hover:not(:disabled) .pinLabel {
+  display: none;
+}
+.pinToggle[data-state="on"]:hover:not(:disabled) .pinLabelHover,
+.pinToggle[data-state="paused"]:hover:not(:disabled) .pinLabelHover {
+  display: inline;
 }
 
 /* Slot usage strip pinned above the Posted grid: usage line, optional paused
@@ -873,8 +919,10 @@
   .cardPreview {
     height: 184px;
   }
-  /* No hover on touch — keep the delete button visible so it's reachable. */
-  .cardDelete {
+  /* No hover on touch — keep the delete button and the never-expire toggle's
+   * "off" state visible so they're reachable. */
+  .cardDelete,
+  .pinToggle[data-state="off"] {
     opacity: 1;
   }
   .footerHint {

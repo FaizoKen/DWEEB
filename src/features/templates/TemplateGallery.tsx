@@ -115,11 +115,13 @@ interface CardData {
   /** Remove this entry from its list (local store or server library). */
   onDelete?: () => void;
   /** Extra status pills after the badge — the library's derived labels
-   *  ("Never expires", "Buttons expired", "Shared"). */
+   *  ("Buttons expired"). */
   tags?: { text: string; tone: "ok" | "warn" | "info" }[];
-  /** Posted only — the never-expire slot control rendered on the card:
-   *  claim a slot ("assign") or give one back ("free"). */
-  slot?: { kind: "assign" | "free"; busy: boolean; title: string; run: () => void };
+  /** Posted only — the never-expire toggle chip at the preview's top-left.
+   *  One control carries both the status and the action: "off" is a
+   *  hover-revealed "+ Never expire" (claims a slot), "on"/"paused" are
+   *  always-visible status chips whose hover flips to "Free slot". */
+  pin?: { state: "on" | "off" | "paused"; busy: boolean; title: string; run: () => void };
   /** Lowercased text pulled from the message body (content, labels, …) so the
    *  card is findable by what the message says, not just its name. Precomputed
    *  when the card is built so search stays cheap per keystroke. */
@@ -352,45 +354,44 @@ export function TemplateGallery() {
       const isPosted = entry.label === "posted";
       const interactive = interactiveComponents(message).length > 0;
       const holdsSlot = isPosted && !!entry.message_id && grantIds.has(entry.message_id);
-      // Derived labels: never-expire state from the permanent-slot API, and
-      // "buttons expired" for an interactive message older than the component
-      // TTL without a slot. Both display-only and best-effort.
+      // "Buttons expired" — an interactive message older than the component
+      // TTL without a slot. Display-only and best-effort. (Never-expire state
+      // lives entirely in the pin chip below — no duplicate meta-row pill.)
       const tags: CardData["tags"] = [];
-      if (isPosted && entry.message_id) {
-        if (permanentIds.has(entry.message_id)) {
-          tags.push({ text: "Never expires", tone: "ok" });
-        } else if (holdsSlot) {
-          // Granted but paused: the server is over its downgraded plan cap.
-          tags.push({ text: "Never-expire paused", tone: "warn" });
-        } else if (
-          permanent?.ttl_days != null &&
-          interactive &&
-          Date.now() - entry.updated_at * 1000 > permanent.ttl_days * 86_400_000
-        ) {
-          tags.push({ text: "Buttons expired", tone: "warn" });
-        }
+      if (
+        isPosted &&
+        entry.message_id &&
+        !holdsSlot &&
+        permanent?.ttl_days != null &&
+        interactive &&
+        Date.now() - entry.updated_at * 1000 > permanent.ttl_days * 86_400_000
+      ) {
+        tags.push({ text: "Buttons expired", tone: "warn" });
       }
-      // The on-card slot control: free the held slot, or claim one for an
-      // interactive message (a message without components has nothing to keep
-      // alive, so it gets no assign button).
-      let slot: CardData["slot"];
+      // The pin chip: ONE control that both shows never-expire state and
+      // toggles it. Held slots (even plan-paused ones) free on click; an
+      // interactive message without a slot offers to claim one (a message
+      // with no components has nothing to keep alive, so no chip).
+      let pin: CardData["pin"];
       if (canManageSlots && isPosted && entry.message_id) {
         const messageId = entry.message_id;
         if (holdsSlot) {
-          slot = {
-            kind: "free",
+          const paused = !permanentIds.has(messageId);
+          pin = {
+            state: paused ? "paused" : "on",
             busy: slotBusy,
-            title:
-              "Puts the message back on the expiry clock, counted from its send date — older messages may expire right away. It also rejoins the posted history's rolling window.",
+            title: paused
+              ? "Never expire is paused — the server holds more never-expire messages than its plan allows. Click to free the slot."
+              : "This message never expires and stays in this history. Click to free the slot — it goes back on the expiry clock, counted from its send date.",
             run: () => void freeNeverExpire(messageId),
           };
         } else if (interactive && entry.channel_id) {
           const channelId = entry.channel_id;
-          slot = {
-            kind: "assign",
+          pin = {
+            state: "off",
             busy: slotBusy,
             title:
-              "Spends one of the server's never-expire slots so this message's buttons & selects keep working — and it stops rolling off this history.",
+              "Keep this message's buttons & selects working forever — uses one of the server's never-expire slots and keeps it in this history.",
             run: () => void assignNeverExpire(messageId, channelId),
           };
         }
@@ -416,7 +417,7 @@ export function TemplateGallery() {
         badge: isPosted ? "Posted" : "Server draft",
         storedInServerLibrary: true,
         tags,
-        slot,
+        pin,
         searchText: collectSearchText(message),
         onDelete: () =>
           setPendingDelete({
@@ -972,6 +973,37 @@ function GalleryCard({ card }: { card: CardData }) {
       <div className={styles.cardPreview}>
         <TemplateThumbnail message={card.message} />
         <div className={styles.cardFade} aria-hidden />
+        {card.pin ? (
+          // The never-expire toggle, top-left of the preview (delete sits
+          // top-right). One chip = state AND action: "off" is a hover-revealed
+          // "+ Never expire"; "on"/"paused" stay visible as status and flip
+          // their label to "Free slot" on hover.
+          <button
+            type="button"
+            className={styles.pinToggle}
+            data-state={card.pin.state}
+            disabled={card.pin.busy}
+            title={card.pin.title}
+            aria-pressed={card.pin.state !== "off"}
+            onClick={(e) => {
+              // A real <button> inside the card's div-with-role — the click
+              // must not also load the message into the editor.
+              e.stopPropagation();
+              card.pin?.run();
+            }}
+          >
+            <span className={styles.pinLabel}>
+              {card.pin.state === "on"
+                ? "✓ Never expires"
+                : card.pin.state === "paused"
+                  ? "Never expire · paused"
+                  : "+ Never expire"}
+            </span>
+            {card.pin.state !== "off" ? (
+              <span className={styles.pinLabelHover}>Free slot</span>
+            ) : null}
+          </button>
+        ) : null}
         {card.onDelete ? (
           <button
             type="button"
@@ -1035,23 +1067,6 @@ function GalleryCard({ card }: { card: CardData }) {
                   {t.text}
                 </span>
               ))}
-              {card.slot ? (
-                <button
-                  type="button"
-                  className={styles.slotBtn}
-                  data-kind={card.slot.kind}
-                  disabled={card.slot.busy}
-                  title={card.slot.title}
-                  onClick={(e) => {
-                    // A real <button> inside the card's div-with-role — the
-                    // click must not also load the message into the editor.
-                    e.stopPropagation();
-                    card.slot?.run();
-                  }}
-                >
-                  {card.slot.kind === "free" ? "Free slot" : "Never expire"}
-                </button>
-              ) : null}
               {card.savedAt !== undefined ? (
                 <span className={styles.cardTime}>{formatRelative(card.savedAt)}</span>
               ) : null}
