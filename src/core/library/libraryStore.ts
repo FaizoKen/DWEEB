@@ -2,7 +2,7 @@
  * Server message library — client-side state.
  *
  * Holds one server's library at a time (the connected / target guild): the
- * gallery and the Activity's "Start a message" dialog both show the library of
+ * gallery and the Activity's "Message directory" dialog both show the library of
  * wherever the user is currently working, so there's no need to cache every
  * server. Switching guilds just refreshes.
  *

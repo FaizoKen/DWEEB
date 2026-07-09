@@ -442,7 +442,7 @@ fn toggle_permanent(
         }
         Ok(crate::store::Add::Full) => ephemeral(&format!(
             "Every never-expire slot is taken.{} Release one from a never-expire message's \
-             **Message Info** button, or from the dashboard's *Start a message → Posted* tab.",
+             **Message Info** button, or from the dashboard's *Message directory → Posted* tab.",
             usage_suffix(app, guild_id)
         )),
         Err(err) => storage_error(err),

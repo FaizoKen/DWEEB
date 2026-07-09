@@ -1,5 +1,5 @@
 /**
- * "Start a message" dialog — the embedded surface's entry into the server's
+ * "Message directory" dialog — the embedded surface's entry into the server's
  * message library.
  *
  * The web app has a full-screen gallery (templates + local saves + the shared
@@ -76,7 +76,7 @@ export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () =>
     <Modal
       open={open}
       onClose={onClose}
-      title="Start a message"
+      title="Message directory"
       size="sm"
       footer={
         <>

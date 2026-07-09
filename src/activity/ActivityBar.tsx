@@ -241,7 +241,7 @@ export function ActivityBar() {
     : undefined;
 
   const [restoreOpen, setRestoreOpen] = useState(false);
-  // The server-library "Start a message" dialog. Reads the same Manage-Webhooks
+  // The server-library "Message directory" dialog. Reads the same Manage-Webhooks
   // gate as Restore (the proxy enforces it), so it shares the disabled states.
   const [libraryOpen, setLibraryOpen] = useState(false);
   // The pre-post confirm dialog: non-null while a post awaits confirmation. The
@@ -439,7 +439,7 @@ export function ActivityBar() {
                     setLibraryOpen(true);
                   }}
                 >
-                  Start a message
+                  Message directory
                 </MenuItem>
                 <MenuItem
                   icon={<HistoryIcon size={16} />}
@@ -482,7 +482,7 @@ export function ActivityBar() {
                   ? "Add DWEEB to this server first to open its message library"
                   : blockedFromPosting
                     ? blockedReason
-                    : "Start a message — this server's message library"
+                    : "Message directory — this server's message library"
               }
               onClick={() => setLibraryOpen(true)}
               disabled={!targetGuildId || blockedFromPosting || botMissing}

@@ -733,7 +733,7 @@ export function TemplateGallery() {
         className={styles.backdrop}
         role="dialog"
         aria-modal="true"
-        aria-label="Start a message"
+        aria-label="Message directory"
         onMouseDown={(e) => {
           if (e.target === e.currentTarget) closeGallery();
         }}
@@ -746,7 +746,7 @@ export function TemplateGallery() {
                   <span className={styles.titleSpark} aria-hidden>
                     <SparkleIcon size={17} />
                   </span>
-                  Start a message
+                  Message directory
                 </h2>
                 <p className={styles.subtitle}>
                   Reload a posted message, reuse a saved one, or pick a template — everything is
@@ -757,7 +757,7 @@ export function TemplateGallery() {
                 type="button"
                 className={styles.close}
                 onClick={closeGallery}
-                aria-label="Close template gallery"
+                aria-label="Close message directory"
               >
                 <CloseIcon size={20} />
               </button>

@@ -397,7 +397,7 @@ That half lives entirely in your service and is outside DWEEB's scope.
 > **Each guild can exempt 2 messages** (`PERMANENT_SLOTS_PER_GUILD`),
 > managed from the dashboard: the pre-send confirmation offers
 > **Make permanent** to a signed-in user who manages the server, and the
-> gallery's **Start a message → Posted** tab carries an assign/free
+> gallery's **Message directory → Posted** tab carries an assign/free
 > control on every posted card (plus a recovery list for slots whose
 > message has left the history). Making a message never-expire also **switches its disabled
 > components back on** — the dispatcher asks the proxy (which holds the

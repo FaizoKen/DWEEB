@@ -2,7 +2,7 @@
  * Posted-message link indicator.
  *
  * When the editor is linked to a message that's already live on Discord —
- * loaded via Restore, reopened from the "Start a message" gallery, or
+ * loaded via Restore, reopened from the "Message directory" gallery, or
  * re-targeted right after a successful send — the toolbar's primary action
  * becomes "Update" and the next post PATCHes that message in place instead of
  * posting a new one (see {@link RestoredOrigin}). That binding is otherwise

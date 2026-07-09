@@ -1,5 +1,5 @@
 /**
- * Data hook for the "Start a message" gallery's **Scheduled** tab.
+ * Data hook for the "Message directory" gallery's **Scheduled** tab.
  *
  * Owns the same merged view the old "Managed messages" dialog built — every
  * schedule this browser created (local manage-token registry) plus, when signed

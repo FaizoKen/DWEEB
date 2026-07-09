@@ -1,6 +1,6 @@
 /**
  * The Scheduled tab's **history** section, rendered below the upcoming
- * preview-card grid in the "Start a message" gallery.
+ * preview-card grid in the "Message directory" gallery.
  *
  * Upcoming schedules are shown as normal gallery cards (with live previews) by
  * `TemplateGallery`; posted / failed ones can't be — the server deletes a

@@ -3,7 +3,7 @@
  *
  * On a genuine first visit the film opens right on top of the landing Template
  * Gallery (its overlay sits above the gallery's), so closing it lands the user
- * exactly where the first-visit flow already starts: "Start a message". No
+ * exactly where the first-visit flow already starts: "Message directory". No
  * sequencing dance is needed — the film is the front layer, everything else
  * proceeds untouched beneath it.
  *
