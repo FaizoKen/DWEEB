@@ -22,3 +22,50 @@
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* Destination toggle — "this browser" vs "server library". Mirrors the Send
+   panel's now/schedule radiogroup so the two feel like one family. */
+.destToggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+@media (max-width: 480px) {
+  .destToggle {
+    grid-template-columns: 1fr;
+  }
+}
+.destOption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  color: var(--app-text);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.destOption:hover {
+  background: var(--app-bg-hover);
+  border-color: var(--app-border-strong);
+}
+.destOption strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.destOption span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+  line-height: 1.4;
+}
+.destOptionActive,
+.destOptionActive:hover {
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent);
+}

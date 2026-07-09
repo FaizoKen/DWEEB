@@ -1,16 +1,15 @@
 /**
  * "Saved" dropdown — replaces the old Reset button.
  *
- * Four jobs:
- *  - Stash the current message under a user-supplied name (localStorage).
- *  - Save it to the connected server's shared library (when a proxy is
- *    configured and a server is connected) so teammates and the embedded
- *    Activity can pick it up too.
+ * Three jobs:
+ *  - Stash the current message under a user-supplied name. A short naming
+ *    dialog appears; when the connected server has a shared library (proxy
+ *    configured + server connected + signed in) that dialog also offers a
+ *    destination toggle — this browser's localStorage, or the server library
+ *    that teammates and the embedded Activity can pick up too.
  *  - Wipe the editor back to an empty message.
  *  - Jump to the full-screen gallery for posted or saved messages when those
  *    lists exist.
- *
- * A short naming dialog appears when the user picks either save action.
  */
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -22,19 +21,13 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isLibraryConfigured } from "@/core/library/api";
 import { useLibraryStore } from "@/core/library/libraryStore";
+import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { Modal } from "@/ui/Modal";
 import { TextInput } from "@/ui/TextInput";
-import {
-  BookmarkIcon,
-  ChevronDownIcon,
-  SaveIcon,
-  SendIcon,
-  ServerStackIcon,
-  TrashIcon,
-} from "@/ui/Icon";
+import { BookmarkIcon, ChevronDownIcon, SaveIcon, SendIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import styles from "./SavedMessagesMenu.module.css";
 
@@ -62,10 +55,10 @@ export function SavedMessagesMenu() {
     (s) => s.guilds.find((g) => g.id === connectedGuildId)?.name,
   );
 
-  const [saveMode, setSaveMode] = useState<SaveMode | null>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
 
-  const handleSave = async (name: string): Promise<string | null> => {
-    if (saveMode === "server" && connectedGuildId) {
+  const handleSave = async (name: string, destination: SaveMode): Promise<string | null> => {
+    if (destination === "server" && connectedGuildId) {
       const res = await useLibraryStore
         .getState()
         .saveDraft(connectedGuildId, name, currentMessage);
@@ -74,12 +67,12 @@ export function SavedMessagesMenu() {
         // dialog open with the reason so a retry/upgrade path is visible.
         return res.error;
       }
-      setSaveMode(null);
+      setSaveOpen(false);
       pushToast(`Saved "${name}" to the ${connectedGuildName ?? "server"} library`, "success");
       return null;
     }
     saveEntry(name, currentMessage);
-    setSaveMode(null);
+    setSaveOpen(false);
     pushToast(`Saved "${name}"`, "success");
     return null;
   };
@@ -107,22 +100,11 @@ export function SavedMessagesMenu() {
               icon={<SaveIcon />}
               onSelect={() => {
                 close();
-                setSaveMode("local");
+                setSaveOpen(true);
               }}
             >
               Save current message…
             </MenuItem>
-            {serverSaveAvailable ? (
-              <MenuItem
-                icon={<ServerStackIcon />}
-                onSelect={() => {
-                  close();
-                  setSaveMode("server");
-                }}
-              >
-                Save to server library…
-              </MenuItem>
-            ) : null}
             {postedEntries.length > 0 ? (
               <MenuItem
                 icon={<SendIcon />}
@@ -159,11 +141,11 @@ export function SavedMessagesMenu() {
       </Menu>
 
       <SaveMessageDialog
-        open={saveMode !== null}
-        mode={saveMode ?? "local"}
+        open={saveOpen}
+        serverSaveAvailable={serverSaveAvailable}
         serverName={connectedGuildName}
         existingNames={entries.map((e) => e.name)}
-        onCancel={() => setSaveMode(null)}
+        onCancel={() => setSaveOpen(false)}
         onSave={handleSave}
       />
     </>
@@ -172,25 +154,29 @@ export function SavedMessagesMenu() {
 
 interface SaveMessageDialogProps {
   open: boolean;
-  mode: SaveMode;
+  /** Whether the connected server exposes a shared library. When true the
+   *  dialog shows a destination toggle; when false it only saves to this
+   *  browser. */
+  serverSaveAvailable: boolean;
   /** Connected server's name, for the server-save wording. */
   serverName?: string;
   existingNames: string[];
   onCancel: () => void;
   /** Resolves with an error message to keep the dialog open, or null on
    *  success (the caller closes it). */
-  onSave: (name: string) => Promise<string | null>;
+  onSave: (name: string, destination: SaveMode) => Promise<string | null>;
 }
 
 function SaveMessageDialog({
   open,
-  mode,
+  serverSaveAvailable,
   serverName,
   existingNames,
   onCancel,
   onSave,
 }: SaveMessageDialogProps) {
   const [name, setName] = useState("");
+  const [destination, setDestination] = useState<SaveMode>("local");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -199,6 +185,7 @@ function SaveMessageDialog({
   useEffect(() => {
     if (open) {
       setName("");
+      setDestination("local");
       setError(null);
       setBusy(false);
       // Modal grabs focus on its dialog by default; defer so we win.
@@ -215,31 +202,61 @@ function SaveMessageDialog({
       setError("Give this message a name to save it.");
       return;
     }
-    if (mode === "local" && existingNames.some((n) => n.toLowerCase() === trimmed.toLowerCase())) {
+    if (
+      destination === "local" &&
+      existingNames.some((n) => n.toLowerCase() === trimmed.toLowerCase())
+    ) {
       setError("You already have a saved message with that name.");
       return;
     }
     setBusy(true);
-    void onSave(trimmed).then((err) => {
+    void onSave(trimmed, destination).then((err) => {
       setBusy(false);
       if (err) setError(err);
     });
   };
 
   return (
-    <Modal
-      open={open}
-      onClose={onCancel}
-      title={mode === "server" ? "Save to server library" : "Save message"}
-      size="sm"
-    >
+    <Modal open={open} onClose={onCancel} title="Save message" size="sm">
       <form className={styles.saveForm} onSubmit={submit}>
+        {serverSaveAvailable ? (
+          <div className={styles.destToggle} role="radiogroup" aria-label="Where to save">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={destination === "local"}
+              className={cn(styles.destOption, destination === "local" && styles.destOptionActive)}
+              onClick={() => {
+                setDestination("local");
+                setError(null);
+              }}
+            >
+              <strong>This browser</strong>
+              <span>Saved on this device only.</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={destination === "server"}
+              className={cn(styles.destOption, destination === "server" && styles.destOptionActive)}
+              onClick={() => {
+                setDestination("server");
+                setError(null);
+              }}
+            >
+              <strong>Server library</strong>
+              <span>Shared in {serverName ?? "this server"}.</span>
+            </button>
+          </div>
+        ) : null}
         <Field
           label="Name"
           hint={
-            mode === "server"
+            destination === "server"
               ? `Saved as a draft in the ${serverName ?? "server"} library — visible to everyone who manages that server, from the web app and the Discord Activity.`
-              : "A short label so you can find this message again. Stored locally in your browser."
+              : serverSaveAvailable
+                ? "A short label so you can find this message again."
+                : "A short label so you can find this message again. Stored locally in your browser."
           }
           error={error}
         >
