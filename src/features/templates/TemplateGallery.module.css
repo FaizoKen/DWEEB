@@ -251,6 +251,24 @@
   color: #fff;
 }
 
+/* The "Scheduled" pseudo-category points at the server's upcoming timed posts,
+ * so it carries an indigo/blurple tint (matching the schedule status badge) —
+ * "queued" — distinct from the past-tense green Posted chip. */
+.chipScheduled:not(.chipActive) {
+  color: #97a0ff;
+  border-color: color-mix(in srgb, #5865f2 40%, var(--app-border));
+  background: color-mix(in srgb, #5865f2 14%, var(--app-bg-input));
+}
+.chipScheduled:not(.chipActive):hover {
+  color: #b8bfff;
+  background: color-mix(in srgb, #5865f2 22%, var(--app-bg-input));
+}
+.chipScheduled.chipActive {
+  background: #5865f2;
+  border-color: #5865f2;
+  color: #fff;
+}
+
 /* ── Body grid ──────────────────────────────────────────────────────────── */
 .body {
   flex: 1;
@@ -264,6 +282,23 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
   gap: 18px;
+}
+
+/* A quiet inline note where the grid would be — e.g. the Scheduled tab has no
+ * upcoming posts but its history section still renders below. */
+.emptyInline {
+  margin: 0;
+  padding: 8px 2px 4px;
+  font-size: var(--app-text-sm);
+  color: var(--app-text-subtle);
+}
+
+/* Separates the Scheduled tab's posted/failed history rows from the upcoming
+ * preview grid above them. */
+.scheduleHistoryWrap {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--app-border);
 }
 
 /* ── Card ───────────────────────────────────────────────────────────────── */
@@ -343,6 +378,34 @@
   background: linear-gradient(to top, var(--app-bg-subtle), transparent);
   pointer-events: none;
   z-index: 1;
+}
+
+/* Stand-in for the live thumbnail on a scheduled card whose message hasn't
+ * loaded yet (or has none to show) — fills the same preview window calmly. */
+.thumbPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  font-size: var(--app-text-sm);
+  color: var(--app-text-subtle);
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--app-bg-subtle),
+    var(--app-bg-subtle) 10px,
+    var(--app-bg) 10px,
+    var(--app-bg) 20px
+  );
+}
+.thumbPlaceholderIcon {
+  font-size: 24px;
+  line-height: 1;
+  opacity: 0.7;
 }
 
 .botBadge {
@@ -801,10 +864,13 @@
   white-space: nowrap;
 }
 
-/* Server-library usage meter + hand-off to Managed messages: a quiet text
- * button between the hint and the primary footer action. */
+/* Server-library usage read-out: a quiet pill between the hint and the primary
+ * footer action. Now a static <span> (management moved into the gallery's
+ * tabs), so it doesn't invite a click. */
 .libraryMeter {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
   height: 36px;
   padding: 0 12px;
   border-radius: var(--app-radius);
@@ -813,17 +879,7 @@
   color: var(--app-text-subtle);
   font-size: var(--app-text-sm);
   font-weight: 500;
-  cursor: pointer;
   white-space: nowrap;
-  transition: background 120ms ease;
-}
-.libraryMeter:hover {
-  background: var(--app-bg-hover);
-  color: var(--app-text);
-}
-.libraryMeter:focus-visible {
-  outline: none;
-  box-shadow: var(--app-focus-ring);
 }
 /* Over the plan's library limit — the shelf is content-frozen (see the server's
  * over-quota guard); tint the meter so the state is visible at a glance. */

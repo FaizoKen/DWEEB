@@ -8,7 +8,7 @@
  * preview sheet so the message is visible before they tap Send.
  *
  * A tiny global store keeps this off prop chains, mirroring the other
- * cross-feature openers (`templateGalleryStore`, `managedMessagesStore`).
+ * cross-feature openers (e.g. `templateGalleryStore`).
  */
 
 import { create } from "zustand";

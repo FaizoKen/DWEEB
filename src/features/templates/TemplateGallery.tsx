@@ -12,6 +12,10 @@
  *    assign/free slot control, the tab header shows slot usage, and slots
  *    whose message left the history are listed for recovery (freeing one is
  *    the only way to reclaim a slot held by a deleted message).
+ *  - **Scheduled** — the connected server's upcoming one-time posts, each with a
+ *    live preview: load one back into the editor, cancel it, or manage the
+ *    posted/failed history — all inline (this replaced the old "Managed
+ *    messages" dialog). Payloads are fetched lazily, only while the tab is open.
  *  - **Saved** — the user's named, stashed messages (a dedicated category), so
  *    reusable messages are reachable without digging through the Saved menu.
  *  - **Templates** — the curated starting points.
@@ -48,7 +52,6 @@ import {
   removePermanentMessage,
   type PermanentSlots,
 } from "@/core/guild/api";
-import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { usePlanStore } from "@/core/plan/planStore";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import { isLibraryConfigured } from "@/core/library/api";
@@ -60,6 +63,10 @@ import {
 import { interactiveComponents } from "@/core/plugins/targets";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { attachEditorFields } from "@/core/serialization/normalize";
+import { isScheduleConfigured, type ScheduleView } from "@/core/schedule/api";
+import { useScheduledPosts } from "@/core/schedule/useScheduledPosts";
+import { formatInstant } from "@/core/schedule/recurrence";
+import { validateMessage } from "@/core/schema/validation";
 import { TEMPLATES, type MessageTemplate, type TemplateCategory } from "@/data/presets";
 import type { WebhookMessage } from "@/core/schema/types";
 import { collectSearchText } from "@/core/schema/traversal";
@@ -70,6 +77,7 @@ import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
 import { CloseIcon, PlusIcon, PuzzleIcon, SearchIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
+import { ScheduleHistory } from "./GalleryScheduled";
 import { useTemplateGalleryStore } from "./templateGalleryStore";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateGallery.module.css";
@@ -81,25 +89,32 @@ import styles from "./TemplateGallery.module.css";
 const SAVED_FILTER = "Saved" as const;
 const SERVER_DRAFTS_FILTER = "Server drafts" as const;
 const POSTED_FILTER = "Posted" as const;
+const SCHEDULED_FILTER = "Scheduled" as const;
 const TEMPLATE_FILTER = "Template" as const;
 type Filter =
   | typeof POSTED_FILTER
+  | typeof SCHEDULED_FILTER
   | typeof SAVED_FILTER
   | typeof SERVER_DRAFTS_FILTER
   | typeof TEMPLATE_FILTER;
 
 const ACCENT_TEAL = 0x1abc9c;
 const ACCENT_GREEN = 0x3ba55d;
+const ACCENT_INDIGO = 0x5865f2;
 
-/** One renderable card — a continue draft, a posted message, a saved message,
- *  or a template. */
+/** One renderable card — a posted message, a saved message, an upcoming
+ *  scheduled post, or a template. */
 interface CardData {
-  kind: "posted" | "saved" | "template";
+  kind: "posted" | "saved" | "scheduled" | "template";
   key: string;
   emoji: string;
   name: string;
   description: string;
-  message: WebhookMessage;
+  /** Absent on a scheduled card whose payload hasn't loaded (or has no
+   *  message) — the card then shows a placeholder in place of the thumbnail. */
+  message?: WebhookMessage;
+  /** Scheduled only — the preview payload is still being fetched. */
+  previewPending?: boolean;
   accent?: number;
   /** Template only — drives the category chip + the search haystack. */
   category?: TemplateCategory;
@@ -107,6 +122,9 @@ interface CardData {
   pairsWith?: string;
   /** Saved / posted only — "last edited" stamp shown as a relative time. */
   savedAt?: number;
+  /** Overrides the relative-time stamp with a literal meta string (scheduled
+   *  cards show their fire time in the schedule's own timezone). */
+  metaText?: string;
   /** Saved / posted only — the small pill shown in place of a category. */
   badge?: string;
   /** True when this card came from the connected server's shared library. */
@@ -171,7 +189,7 @@ export function TemplateGallery() {
     () => useTemplateGalleryStore.getState().initialFilter,
   );
   const [pendingDelete, setPendingDelete] = useState<{
-    kind: "saved" | "library";
+    kind: "saved" | "library" | "scheduled";
     id: string;
     name: string;
     /** Library only — the server the entry belongs to. */
@@ -179,7 +197,19 @@ export function TemplateGallery() {
     /** Library only — the entry holds a never-expire slot, which removing the
      *  history record does NOT free (the confirm says so). */
     neverExpires?: boolean;
+    /** Scheduled only — the schedule the confirm cancels. */
+    schedule?: ScheduleView;
   } | null>(null);
+
+  // The connected server's scheduled (one-time) posts — the Scheduled tab. The
+  // list loads whenever scheduling is configured (so the chip can appear);
+  // per-schedule preview payloads only fetch once the user is on that tab.
+  const scheduleOn = isScheduleConfigured();
+  const sched = useScheduledPosts(
+    connectedGuildId || undefined,
+    scheduleOn,
+    filter === SCHEDULED_FILTER,
+  );
 
   // The connected server's shared library (posted messages + server drafts),
   // refreshed on open / when the connected server changes. Fails soft: a signed-
@@ -539,14 +569,71 @@ export function TemplateGallery() {
     [replaceMessage, closeGallery],
   );
 
+  // Upcoming scheduled posts, as gallery cards with a live preview. The message
+  // (needed for the thumbnail and to load it back into the editor) is fetched
+  // lazily by the hook; until it lands the card shows a placeholder. Cancel
+  // routes through the shared confirm dialog; the trash icon reads "Cancel".
+  const scheduledCards: CardData[] = useMemo(() => {
+    if (!scheduleOn) return [];
+    return sched.upcoming.map((s) => {
+      const message = sched.messages.get(s.id) ?? undefined;
+      const paused = s.status === "paused" || s.status === "suspended";
+      const when = formatInstant(s.next_run_at, s.tz);
+      const name = s.title?.trim() || s.dest_label || "Scheduled post";
+      const tags: CardData["tags"] = [];
+      if (s.status === "suspended") tags.push({ text: "Over plan limit", tone: "warn" });
+      if (s.make_permanent) tags.push({ text: "Never expires", tone: "ok" });
+      return {
+        kind: "scheduled",
+        key: `sched:${s.id}`,
+        emoji: "🕒",
+        name,
+        description: s.dest_label
+          ? `Scheduled for ${s.dest_label}. Load it back to edit or reschedule.`
+          : "One-time scheduled post. Load it back to edit or reschedule.",
+        message,
+        previewPending: !sched.messages.has(s.id),
+        accent: ACCENT_INDIGO,
+        badge: paused ? "Paused" : "Scheduled",
+        metaText: paused ? `Paused · ${when}` : `Posts ${when}`,
+        tags,
+        searchText: message ? collectSearchText(message) : undefined,
+        onPick: () => {
+          const m = sched.messages.get(s.id);
+          if (!m) {
+            pushToast("That post's message isn't available to load.", "error");
+            return;
+          }
+          replaceMessage(m);
+          closeGallery();
+          const validation = validateMessage(m);
+          pushToast(
+            validation.ok
+              ? "Loaded the scheduled message into the editor."
+              : `Loaded with ${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}.`,
+            validation.ok ? "success" : "info",
+          );
+        },
+        onDelete: () => setPendingDelete({ kind: "scheduled", id: s.id, name, schedule: s }),
+      };
+    });
+  }, [scheduleOn, sched.upcoming, sched.messages, replaceMessage, closeGallery]);
+
   // Chip row: Posted, the two draft shelves (this browser / server library —
   // each only when there are any), then a single Template chip for the whole
   // curated set (categories no longer split). Posted also shows when the only
   // thing to manage is orphaned never-expire slots — with no card holding
   // them, this tab's strip is the one place they can still be freed.
+  // The Scheduled chip shows when the server has any scheduled posts (upcoming
+  // or history), or when the gallery was opened straight onto it (so the
+  // account-menu / Send-panel hand-off always lands on a real, if empty, tab).
+  const hasScheduled =
+    scheduleOn &&
+    (sched.upcoming.length > 0 || sched.history.length > 0 || filter === SCHEDULED_FILTER);
   const filters: Filter[] = useMemo(
     () => [
       ...(postedCards.length || orphanSlots.length ? [POSTED_FILTER] : []),
+      ...(hasScheduled ? [SCHEDULED_FILTER] : []),
       ...(savedCards.length ? [SAVED_FILTER] : []),
       ...(libraryDraftCards.length ? [SERVER_DRAFTS_FILTER] : []),
       ...(templateCards.length ? [TEMPLATE_FILTER] : []),
@@ -554,6 +641,7 @@ export function TemplateGallery() {
     [
       postedCards.length,
       orphanSlots.length,
+      hasScheduled,
       savedCards.length,
       libraryDraftCards.length,
       templateCards.length,
@@ -569,19 +657,25 @@ export function TemplateGallery() {
   // entries arrive, instead of falling through to Templates on every open.
   const libraryPending =
     libraryOn && !!connectedGuildId && !(libGuild === connectedGuildId && libLoaded);
+  // Likewise for a requested Scheduled tab — the schedule list is fetched on
+  // open, so hold on Scheduled until it settles instead of bouncing to Posted.
+  const schedulePending = scheduleOn && !sched.loaded;
 
   // If the requested filter disappears (e.g. last saved message removed), fall
   // through to the first real chip so the gallery never opens on a combined view.
   useEffect(() => {
     if (libraryPending && (filter === POSTED_FILTER || filter === SERVER_DRAFTS_FILTER)) return;
+    if (schedulePending && filter === SCHEDULED_FILTER) return;
     if (filter !== activeFilter) setFilter(activeFilter);
-  }, [activeFilter, filter, libraryPending]);
+  }, [activeFilter, filter, libraryPending, schedulePending]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     let base: CardData[];
     if (activeFilter === POSTED_FILTER) {
       base = postedCards;
+    } else if (activeFilter === SCHEDULED_FILTER) {
+      base = scheduledCards;
     } else if (activeFilter === SAVED_FILTER) {
       base = savedCards;
     } else if (activeFilter === SERVER_DRAFTS_FILTER) {
@@ -591,7 +685,15 @@ export function TemplateGallery() {
       base = templateCards;
     }
     return q ? base.filter((c) => haystack(c).includes(q)) : base;
-  }, [activeFilter, query, postedCards, savedCards, libraryDraftCards, templateCards]);
+  }, [
+    activeFilter,
+    query,
+    postedCards,
+    scheduledCards,
+    savedCards,
+    libraryDraftCards,
+    templateCards,
+  ]);
 
   const startBlank = () => {
     clearAll();
@@ -601,7 +703,16 @@ export function TemplateGallery() {
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
-    if (pendingDelete.kind === "library" && pendingDelete.guildId) {
+    if (pendingDelete.kind === "scheduled" && pendingDelete.schedule) {
+      void sched
+        .cancel(pendingDelete.schedule)
+        .then((ok) =>
+          pushToast(
+            ok ? "Scheduled post canceled." : "Couldn't cancel it — try again.",
+            ok ? "success" : "error",
+          ),
+        );
+    } else if (pendingDelete.kind === "library" && pendingDelete.guildId) {
       const { guildId, id } = pendingDelete;
       void removeLibrary(guildId, id).then((ok) => {
         pushToast(
@@ -697,6 +808,7 @@ export function TemplateGallery() {
                       // curated template categories.
                       f === SAVED_FILTER || f === SERVER_DRAFTS_FILTER ? styles.chipSaved : "",
                       f === POSTED_FILTER ? styles.chipPosted : "",
+                      f === SCHEDULED_FILTER ? styles.chipScheduled : "",
                       activeFilter === f ? styles.chipActive : "",
                     ]
                       .filter(Boolean)
@@ -796,7 +908,47 @@ export function TemplateGallery() {
                 ) : null}
               </div>
             ) : null}
-            {shown.length === 0 ? (
+
+            {/* The Scheduled tab's usage line — its own version of the Posted
+                slot strip: how many timed posts are live against the plan cap,
+                with the same upgrade hop when the server is at the limit. */}
+            {activeFilter === SCHEDULED_FILTER &&
+            (sched.upcoming.length > 0 || sched.history.length > 0) ? (
+              <div className={styles.slotStrip}>
+                <div className={styles.slotStripHead}>
+                  <span className={styles.slotStripText}>
+                    <strong>Scheduled posts:</strong>{" "}
+                    {sched.quota != null
+                      ? `${sched.activeCount}/${sched.quota} used`
+                      : `${sched.activeCount} active`}
+                    {" · "}each fires once at its set time, then drops into the history below.
+                  </span>
+                  {sched.quota != null && sched.activeCount >= sched.quota ? (
+                    <button
+                      type="button"
+                      className={styles.slotStripUpgrade}
+                      onClick={() => {
+                        closeGallery();
+                        if (connectedGuildId) usePlanStore.getState().openPricing(connectedGuildId);
+                      }}
+                    >
+                      Upgrade for more
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {shown.length > 0 ? (
+              <div className={styles.grid}>
+                {shown.map((c) => (
+                  <GalleryCard key={c.key} card={c} />
+                ))}
+              </div>
+            ) : activeFilter === SCHEDULED_FILTER && sched.history.length > 0 && !query.trim() ? (
+              // Nothing upcoming, but the history section below still has rows.
+              <p className={styles.emptyInline}>No upcoming scheduled posts — history is below.</p>
+            ) : (
               <div className={styles.empty}>
                 <SearchIcon size={28} aria-hidden />
                 {query.trim() ? (
@@ -812,44 +964,66 @@ export function TemplateGallery() {
                       Clear search
                     </button>
                   </>
+                ) : activeFilter === SCHEDULED_FILTER ? (
+                  <p className={styles.emptyTitle}>No scheduled posts yet.</p>
                 ) : (
                   // Reachable on the Posted tab when it exists only for the
                   // orphaned-slot strip above — no posted cards to show yet.
                   <p className={styles.emptyTitle}>No posted messages in this history yet.</p>
                 )}
               </div>
-            ) : (
-              <div className={styles.grid}>
-                {shown.map((c) => (
-                  <GalleryCard key={c.key} card={c} />
-                ))}
-              </div>
             )}
+
+            {/* Posted / failed schedules have no message to preview (the server
+                deletes it once it fires), so they live as compact rows below the
+                upcoming grid — view on Discord, remove, or clear the lot. */}
+            {activeFilter === SCHEDULED_FILTER && sched.history.length > 0 ? (
+              <div className={styles.scheduleHistoryWrap}>
+                <ScheduleHistory
+                  history={sched.history}
+                  ttlDays={permanent?.ttl_days ?? null}
+                  retentionDays={sched.retentionDays}
+                  busyId={sched.busyId}
+                  onRemove={(s) => {
+                    void sched.cancel(s).then((ok) => {
+                      if (!ok) pushToast("Couldn't remove it — try again.", "error");
+                    });
+                  }}
+                  onClear={async () => {
+                    const failed = await sched.clearHistory(sched.history);
+                    pushToast(
+                      failed === 0
+                        ? "Cleared posted & failed schedules."
+                        : `Cleared some; ${failed} couldn't be removed.`,
+                      failed === 0 ? "success" : "info",
+                    );
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
 
           <footer className={styles.footer}>
             <span className={styles.footerHint}>
               {shown.length} {shown.length === 1 ? "result" : "results"}
             </span>
-            {/* The connected server's library usage + a hand-off to the full
-                management dialog (scheduled posts, never-expire slots). Shown
-                only once the shelf actually loaded for this server, so a
-                non-manager never sees a meter for a list they can't read. */}
+            {/* The connected server's library usage, at a glance. Every list it
+                summarises (Posted, Saved, Scheduled, never-expire slots) is now
+                a tab or an on-card control in this gallery, so it's a quiet
+                read-out rather than a hand-off. Shown only once the shelf loaded
+                for this server, so a non-manager never sees a meter for a list
+                they can't read. */}
             {connectedGuildId && libGuild === connectedGuildId && libLoaded ? (
-              <button
-                type="button"
+              <span
                 className={styles.libraryMeter}
+                data-static=""
                 data-over={
                   libDrafts.quota != null && libDrafts.used > libDrafts.quota ? "" : undefined
                 }
-                onClick={() => {
-                  closeGallery();
-                  useManagedMessagesStore.getState().open(connectedGuildId, connectedGuildName);
-                }}
                 title={
                   libDrafts.quota != null && libDrafts.used > libDrafts.quota
                     ? "More saved messages than the plan allows — they stay readable, but content can't be changed until you delete down to the limit or upgrade."
-                    : "Posted messages sync automatically (the newest posts, oldest roll off; never-expire messages stay put). Saved messages are yours to add and remove. Open Managed messages for scheduled posts."
+                    : "Posted messages sync automatically (the newest posts, oldest roll off; never-expire messages stay put). Saved messages are yours to add and remove."
                 }
               >
                 Posted: last {Math.max(0, libPosted.used - pinnedPostedCount)}
@@ -858,10 +1032,8 @@ export function TemplateGallery() {
                 {" · Saved: "}
                 {libDrafts.used}
                 {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
-                {libDrafts.quota != null && libDrafts.used > libDrafts.quota
-                  ? " · over limit"
-                  : " · Manage"}
-              </button>
+                {libDrafts.quota != null && libDrafts.used > libDrafts.quota ? " · over limit" : ""}
+              </span>
             ) : null}
             <button type="button" className={styles.blankBtn} onClick={startBlank}>
               <PlusIcon size={16} />
@@ -875,9 +1047,11 @@ export function TemplateGallery() {
         open={!!pendingDelete}
         onClose={() => setPendingDelete(null)}
         title={
-          pendingDelete?.kind === "library"
-            ? "Remove from the server library?"
-            : "Delete saved message?"
+          pendingDelete?.kind === "scheduled"
+            ? "Cancel scheduled post?"
+            : pendingDelete?.kind === "library"
+              ? "Remove from the server library?"
+              : "Delete saved message?"
         }
         size="sm"
         // The gallery overlay sits at --app-z-tooltip; lift the confirm above it
@@ -886,7 +1060,12 @@ export function TemplateGallery() {
       >
         <div className={styles.confirmBody}>
           <p className={styles.confirmText}>
-            {pendingDelete?.kind === "library" ? (
+            {pendingDelete?.kind === "scheduled" ? (
+              <>
+                Cancel <strong>{pendingDelete?.name}</strong>? It won't be posted. This can't be
+                undone — you'd have to schedule it again.
+              </>
+            ) : pendingDelete?.kind === "library" ? (
               <>
                 Remove <strong>{pendingDelete?.name}</strong> from the server library? Everyone
                 managing this server loses this entry (a posted message stays live on Discord). This
@@ -907,7 +1086,7 @@ export function TemplateGallery() {
           </p>
           <div className={styles.confirmActions}>
             <Button variant="ghost" type="button" onClick={() => setPendingDelete(null)}>
-              Cancel
+              {pendingDelete?.kind === "scheduled" ? "Keep it" : "Cancel"}
             </Button>
             <Button
               variant="danger"
@@ -915,7 +1094,11 @@ export function TemplateGallery() {
               leadingIcon={<TrashIcon />}
               onClick={confirmDelete}
             >
-              {pendingDelete?.kind === "saved" ? "Delete" : "Remove"}
+              {pendingDelete?.kind === "saved"
+                ? "Delete"
+                : pendingDelete?.kind === "scheduled"
+                  ? "Cancel post"
+                  : "Remove"}
             </Button>
           </div>
         </div>
@@ -947,16 +1130,25 @@ function GalleryCard({ card }: { card: CardData }) {
       : "var(--app-accent)";
 
   const isTemplate = card.kind === "template";
+  const isScheduled = card.kind === "scheduled";
   const isServerLibrary = card.storedInServerLibrary === true;
   const cardLabel = isTemplate
     ? `Start from the ${card.name} template`
+    : isScheduled
+      ? `${card.name}, scheduled post`
+      : isServerLibrary
+        ? `${card.name}, saved in the server library`
+        : card.name;
+  const deleteLabel = isScheduled
+    ? `Cancel scheduled post "${card.name}"`
     : isServerLibrary
-      ? `${card.name}, saved in the server library`
-      : card.name;
-  const deleteLabel = isServerLibrary
-    ? `Remove "${card.name}" from the server library`
-    : `Delete saved message "${card.name}"`;
-  const deleteTitle = isServerLibrary ? "Remove from server library" : "Delete saved message";
+      ? `Remove "${card.name}" from the server library`
+      : `Delete saved message "${card.name}"`;
+  const deleteTitle = isScheduled
+    ? "Cancel scheduled post"
+    : isServerLibrary
+      ? "Remove from server library"
+      : "Delete saved message";
 
   return (
     <div
@@ -971,7 +1163,18 @@ function GalleryCard({ card }: { card: CardData }) {
       style={{ "--card-accent": accent } as CSSProperties}
     >
       <div className={styles.cardPreview}>
-        <TemplateThumbnail message={card.message} />
+        {card.message ? (
+          <TemplateThumbnail message={card.message} />
+        ) : (
+          // A scheduled card whose payload is still loading (or has none to
+          // preview) — a calm placeholder in place of the live thumbnail.
+          <div className={styles.thumbPlaceholder}>
+            <span className={styles.thumbPlaceholderIcon} aria-hidden>
+              🕒
+            </span>
+            <span>{card.previewPending ? "Loading preview…" : "Preview unavailable"}</span>
+          </div>
+        )}
         <div className={styles.cardFade} aria-hidden />
         {card.pin ? (
           // The never-expire toggle, top-left of the preview (delete sits
@@ -1030,9 +1233,9 @@ function GalleryCard({ card }: { card: CardData }) {
           <span className={styles.useBtn}>
             {card.kind === "posted"
               ? "Edit & update →"
-              : card.kind === "saved"
-                ? "Load message →"
-                : "Use this template →"}
+              : card.kind === "template"
+                ? "Use this template →"
+                : "Load message →"}
           </span>
         </div>
       </div>
@@ -1067,7 +1270,9 @@ function GalleryCard({ card }: { card: CardData }) {
                   {t.text}
                 </span>
               ))}
-              {card.savedAt !== undefined ? (
+              {card.metaText ? (
+                <span className={styles.cardTime}>{card.metaText}</span>
+              ) : card.savedAt !== undefined ? (
                 <span className={styles.cardTime}>{formatRelative(card.savedAt)}</span>
               ) : null}
             </>

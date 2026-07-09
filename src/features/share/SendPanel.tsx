@@ -126,7 +126,6 @@ import {
   type PermanentSlots,
 } from "@/core/guild/api";
 import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
-import { useManagedMessagesStore } from "@/core/guild/managedMessagesStore";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { usePlanStore } from "@/core/plan/planStore";
@@ -1552,8 +1551,8 @@ export function SendPanel({
             )
           ) : null}
 
-          {/* The list of scheduled posts lives in "Managed messages" (account
-              menu), not here — this keeps the Send screen short. Link to it. */}
+          {/* The list of scheduled posts lives in the gallery's Scheduled tab,
+              not here — this keeps the Send screen short. Link to it. */}
           {when === "later" &&
           authStatus === "authed" &&
           (knownGuildId ?? (connectedGuildId || undefined)) ? (
@@ -1563,7 +1562,8 @@ export function SendPanel({
               onClick={() => {
                 const gid = knownGuildId ?? (connectedGuildId || undefined);
                 if (!gid) return;
-                useManagedMessagesStore.getState().open(gid, knownGuildName);
+                alignConnectedGuild(gid);
+                useTemplateGalleryStore.getState().openGallery("Scheduled");
                 onCloseDialog?.();
               }}
             >

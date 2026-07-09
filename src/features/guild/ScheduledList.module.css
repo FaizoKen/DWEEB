@@ -1,4 +1,6 @@
-/* Styles for the list of scheduled posts (rendered in "Managed messages"). */
+/* Styles for the scheduled-posts history rows. Once the "Managed messages"
+   dialog's list; now shared by the gallery's Scheduled tab
+   (`GalleryScheduled.tsx`) for the posted/failed history section. */
 
 /* The Upcoming / History groups, stacked. */
 .groups {
