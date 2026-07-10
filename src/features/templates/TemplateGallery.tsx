@@ -77,7 +77,15 @@ import { Preview } from "@/features/preview/Preview";
 import { GuildIdentity } from "@/features/share/GuildIdentity";
 import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
-import { CloseIcon, PlusIcon, PuzzleIcon, SearchIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
+import {
+  ChevronRightIcon,
+  CloseIcon,
+  PlusIcon,
+  PuzzleIcon,
+  SearchIcon,
+  SparkleIcon,
+  TrashIcon,
+} from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { ScheduleHistory } from "./GalleryScheduled";
 import { useTemplateGalleryStore } from "./templateGalleryStore";
@@ -294,6 +302,30 @@ export function TemplateGallery() {
     [connectedGuildId],
   );
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const chipsRef = useRef<HTMLDivElement | null>(null);
+  const [chipScroll, setChipScroll] = useState({ left: false, right: false });
+
+  const updateChipScroll = useCallback(() => {
+    const row = chipsRef.current;
+    if (!row) return;
+    const maxScrollLeft = Math.max(0, row.scrollWidth - row.clientWidth);
+    const next = {
+      left: row.scrollLeft > 1,
+      right: row.scrollLeft < maxScrollLeft - 1,
+    };
+    setChipScroll((current) =>
+      current.left === next.left && current.right === next.right ? current : next,
+    );
+  }, []);
+
+  const scrollChips = useCallback((direction: -1 | 1) => {
+    const row = chipsRef.current;
+    if (!row) return;
+    row.scrollBy({
+      left: direction * Math.max(140, row.clientWidth * 0.75),
+      behavior: "smooth",
+    });
+  }, []);
 
   // Focus search on open so a user can start typing immediately.
   useEffect(() => {
@@ -653,6 +685,35 @@ export function TemplateGallery() {
   const firstFilter = filters[0] ?? TEMPLATE_FILTER;
   const activeFilter = filters.includes(filter) ? filter : firstFilter;
 
+  // Keep the arrow affordances honest as categories load or the dialog resizes.
+  // When opened directly to a category near the end, reveal that active chip
+  // instead of leaving it clipped beyond the right edge.
+  useEffect(() => {
+    const row = chipsRef.current;
+    if (!row) return;
+
+    const frame = requestAnimationFrame(() => {
+      const activeChip = row.querySelector<HTMLButtonElement>('[aria-pressed="true"]');
+      if (activeChip) {
+        const chipLeft = activeChip.offsetLeft;
+        const chipRight = chipLeft + activeChip.offsetWidth;
+        if (chipLeft < row.scrollLeft) {
+          row.scrollTo({ left: chipLeft });
+        } else if (chipRight > row.scrollLeft + row.clientWidth) {
+          row.scrollTo({ left: chipRight - row.clientWidth });
+        }
+      }
+      updateChipScroll();
+    });
+
+    const resizeObserver = new ResizeObserver(updateChipScroll);
+    resizeObserver.observe(row);
+    return () => {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+    };
+  }, [activeFilter, filters, updateChipScroll]);
+
   // Posted history is server-fed, so on a cold open the library hasn't
   // answered yet and the Posted/Server-drafts chips don't exist *yet* — that's
   // not the same as the tab being empty. Hold a requested library-backed
@@ -807,31 +868,63 @@ export function TemplateGallery() {
                 ) : null}
               </div>
 
-              <div className={styles.chips} role="group" aria-label="Filter templates by category">
-                {filters.map((f) => (
+              <div className={styles.chipScroller}>
+                {chipScroll.left ? (
                   <button
-                    key={f}
                     type="button"
-                    aria-pressed={activeFilter === f}
-                    className={[
-                      styles.chip,
-                      // The Saved/Posted pseudo-categories carry their own tints
-                      // (teal / green) so a user's own messages stand out from the
-                      // curated template categories.
-                      f === BROWSER_DRAFTS_FILTER || f === SERVER_DRAFTS_FILTER
-                        ? styles.chipSaved
-                        : "",
-                      f === POSTED_FILTER ? styles.chipPosted : "",
-                      f === SCHEDULED_FILTER ? styles.chipScheduled : "",
-                      activeFilter === f ? styles.chipActive : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    onClick={() => setFilter(f)}
+                    className={`${styles.chipScrollButton} ${styles.chipScrollLeft}`}
+                    onClick={() => scrollChips(-1)}
+                    aria-label="Show previous categories"
+                    title="Previous categories"
                   >
-                    {f}
+                    <ChevronRightIcon size={17} aria-hidden />
                   </button>
-                ))}
+                ) : null}
+
+                <div
+                  ref={chipsRef}
+                  className={styles.chips}
+                  role="group"
+                  aria-label="Filter templates by category"
+                  onScroll={updateChipScroll}
+                >
+                  {filters.map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      aria-pressed={activeFilter === f}
+                      className={[
+                        styles.chip,
+                        // The Saved/Posted pseudo-categories carry their own tints
+                        // (teal / green) so a user's own messages stand out from the
+                        // curated template categories.
+                        f === BROWSER_DRAFTS_FILTER || f === SERVER_DRAFTS_FILTER
+                          ? styles.chipSaved
+                          : "",
+                        f === POSTED_FILTER ? styles.chipPosted : "",
+                        f === SCHEDULED_FILTER ? styles.chipScheduled : "",
+                        activeFilter === f ? styles.chipActive : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      onClick={() => setFilter(f)}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+
+                {chipScroll.right ? (
+                  <button
+                    type="button"
+                    className={`${styles.chipScrollButton} ${styles.chipScrollRight}`}
+                    onClick={() => scrollChips(1)}
+                    aria-label="Show more categories"
+                    title="More categories"
+                  >
+                    <ChevronRightIcon size={17} aria-hidden />
+                  </button>
+                ) : null}
               </div>
             </div>
           </header>
