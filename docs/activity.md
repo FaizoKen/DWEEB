@@ -81,8 +81,10 @@ fired with the browser closed, counted against the same per-server plan quota.
 "Never expire" carries over too (the worker spends the slot when it fires).
 Always the standard DWEEB identity, never a custom bot: a custom bot's single
 Activity webhook roams between channels on demand, so by fire time it could sit
-somewhere else. Listing/cancelling schedules stays on the web (gallery →
-Scheduled); the success toast says so.
+somewhere else. The Message directory's **Scheduled** tab lists the server's
+upcoming posts (live previews, cancel) and history — the same view as the web
+gallery, through the same endpoints (the schedule API accepts the Activity
+bearer as well as the web cookie).
 
 ### Restore a posted message
 

@@ -10,7 +10,8 @@
  * keeps — pulling a message DWEEB posted here back into the editor is just as
  * useful in the room, and the proxy makes it a one-field action. Scheduling
  * rides inside the post confirm (its "When → Schedule" choice) rather than as
- * bar chrome; managing existing schedules stays on the web.
+ * bar chrome; existing schedules are managed in the Message directory's
+ * Scheduled tab.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -348,7 +349,7 @@ export function ActivityBar() {
     if (firesAt != null) {
       setPending(null);
       pushToast(
-        `Scheduled for ${formatInstant(firesAt, browserTimezone())} — manage it in DWEEB on the web.`,
+        `Scheduled for ${formatInstant(firesAt, browserTimezone())} — manage it under the Message directory's Scheduled tab.`,
         "success",
       );
     }

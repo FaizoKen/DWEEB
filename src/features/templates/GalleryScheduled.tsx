@@ -45,6 +45,7 @@ export function ScheduleHistory({
   busyId,
   onRemove,
   onClear,
+  openLink,
 }: {
   history: ScheduleView[];
   /** Component TTL (days) for this deployment, for the "expired" badge. */
@@ -55,6 +56,10 @@ export function ScheduleHistory({
   onRemove: (s: ScheduleView) => void;
   /** Clear every terminal row at once; resolves when the request settles. */
   onClear: () => Promise<void>;
+  /** Open a Discord message link. The embedded Activity passes the SDK's
+   *  `openExternalLink` (its sandboxed iframe can't navigate out itself); the
+   *  web leaves it unset and gets the plain deep-linking anchor. */
+  openLink?: (url: string) => void;
 }) {
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -116,6 +121,7 @@ export function ScheduleHistory({
             busy={busyId === s.id}
             expired={isExpired(s, ttlDays)}
             onRemove={() => onRemove(s)}
+            openLink={openLink}
           />
         ))}
       </div>
@@ -128,11 +134,13 @@ function HistoryRow({
   busy,
   expired,
   onRemove,
+  openLink,
 }: {
   schedule: ScheduleView;
   busy: boolean;
   expired: boolean;
   onRemove: () => void;
+  openLink?: (url: string) => void;
 }) {
   const when = s.last_run_at ?? s.next_run_at;
   // A direct jump to the message the last run posted — only once we have all
@@ -166,7 +174,15 @@ function HistoryRow({
         <div className={styles.itemError}>⚠ {s.last_error}</div>
       ) : null}
       <div className={styles.itemActions}>
-        {postedUrl ? (
+        {postedUrl && openLink ? (
+          <button
+            type="button"
+            className={cn(styles.smallBtn, styles.viewBtn)}
+            onClick={() => openLink(postedUrl)}
+          >
+            View on Discord ↗
+          </button>
+        ) : postedUrl ? (
           <a
             className={cn(styles.smallBtn, styles.viewBtn)}
             href={postedUrl}

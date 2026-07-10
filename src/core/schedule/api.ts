@@ -3,15 +3,17 @@
  *
  * Rides on the same `VITE_PROXY_BASE_URL` as the other proxy features — with no
  * proxy configured the Schedule tab is hidden, so these are only ever called
- * when `isScheduleConfigured()` is true. Requests send `credentials: "include"`
- * so the proxy can recognise a signed-in owner, and an `X-Manage-Token` header
- * for anonymous per-schedule management.
+ * when `isScheduleConfigured()` is true. Requests go through `proxyFetch`, which
+ * sends the web session cookie *and* the embedded Activity's bearer token (the
+ * server accepts either), plus an `X-Manage-Token` header here for anonymous
+ * per-schedule management — so the same client serves both surfaces.
  *
  * Nothing here throws — every call resolves to a discriminated result so callers
  * branch on `ok` instead of try/catch.
  */
 
 import { PROXY_BASE_URL } from "@/core/guild/config";
+import { proxyFetch } from "@/core/net/proxyFetch";
 import type { Recurrence } from "./recurrence";
 
 /** True when a proxy is configured, i.e. scheduling is available. */
@@ -121,10 +123,9 @@ export async function createSchedule(input: CreateScheduleInput): Promise<Create
   }
   let res: Response;
   try {
-    res = await fetch(`${PROXY_BASE_URL}/api/schedules`, {
+    res = await proxyFetch("/api/schedules", {
       method: "POST",
       headers: authHeaders(),
-      credentials: "include",
       body: JSON.stringify(input),
     });
   } catch {
@@ -155,9 +156,8 @@ export async function createSchedule(input: CreateScheduleInput): Promise<Create
 export async function getSchedule(id: string, manageToken?: string): Promise<ScheduleResult> {
   let res: Response;
   try {
-    res = await fetch(`${PROXY_BASE_URL}/api/schedules/${encodeURIComponent(id)}`, {
+    res = await proxyFetch(`/api/schedules/${encodeURIComponent(id)}`, {
       headers: authHeaders(manageToken),
-      credentials: "include",
     });
   } catch {
     return { ok: false, error: "Couldn't reach the scheduling service.", status: 0 };
@@ -172,7 +172,7 @@ export async function getSchedule(id: string, manageToken?: string): Promise<Sch
 export async function listMine(): Promise<ListResult> {
   let res: Response;
   try {
-    res = await fetch(`${PROXY_BASE_URL}/api/schedules`, { credentials: "include" });
+    res = await proxyFetch("/api/schedules");
   } catch {
     return { ok: false, error: "Couldn't reach the scheduling service.", status: 0 };
   }
@@ -189,9 +189,7 @@ export async function listMine(): Promise<ListResult> {
 export async function listForGuild(guildId: string): Promise<ListResult> {
   let res: Response;
   try {
-    res = await fetch(`${PROXY_BASE_URL}/api/guilds/${encodeURIComponent(guildId)}/schedules`, {
-      credentials: "include",
-    });
+    res = await proxyFetch(`/api/guilds/${encodeURIComponent(guildId)}/schedules`);
   } catch {
     return { ok: false, error: "Couldn't reach the scheduling service.", status: 0 };
   }
@@ -218,10 +216,9 @@ export async function updateSchedule(
 ): Promise<ScheduleResult> {
   let res: Response;
   try {
-    res = await fetch(`${PROXY_BASE_URL}/api/schedules/${encodeURIComponent(id)}`, {
+    res = await proxyFetch(`/api/schedules/${encodeURIComponent(id)}`, {
       method: "PATCH",
       headers: authHeaders(manageToken),
-      credentials: "include",
       body: JSON.stringify(patch),
     });
   } catch {
@@ -237,10 +234,9 @@ export async function updateSchedule(
 export async function cancelSchedule(id: string, manageToken?: string): Promise<CancelResult> {
   let res: Response;
   try {
-    res = await fetch(`${PROXY_BASE_URL}/api/schedules/${encodeURIComponent(id)}`, {
+    res = await proxyFetch(`/api/schedules/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: authHeaders(manageToken),
-      credentials: "include",
     });
   } catch {
     return { ok: false, error: "Couldn't reach the scheduling service.", status: 0 };

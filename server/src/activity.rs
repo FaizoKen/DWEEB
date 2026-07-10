@@ -1322,8 +1322,9 @@ pub struct ScheduleBody {
 /// place. The channel-bound DWEEB webhook can't drift like that.
 ///
 /// Answers `201 { id, next_run_at }`. No manage token is echoed — the schedule is
-/// owned by the (bearer-verified) creator, who lists/cancels it signed-in on the
-/// web; the token would otherwise be dropped on the iframe floor.
+/// owned by the (bearer-verified) creator (and manageable by any Manage-Webhooks
+/// member via the guild list, either surface); the token would otherwise be
+/// dropped on the iframe floor.
 pub async fn activity_schedule(
     State(st): State<AppState>,
     jar: PrivateCookieJar,

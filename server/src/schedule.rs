@@ -35,13 +35,14 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::error::AppError;
-use crate::routes::{current_session, AppState};
+use crate::routes::{authorize_activity_webhooks, current_session, AppState};
 use crate::schedule_rule::{next_after, Recurrence};
 use crate::schedule_validate::{
     is_snowflake, parse_tz, validate_dest_label, validate_payload, validate_recurrence,
     validate_title, validate_webhook, webhook_id,
 };
 use crate::seal;
+use crate::session::Session;
 
 /// base62, URL-clean — same alphabet as the short-link ids.
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -962,10 +963,11 @@ pub async fn schedule_get(
     let store = store(&st)?;
     let row = load(&store, &id).await?;
     let token = manage_token_from(&headers).or(q.token);
-    if !authorize_row(&st, &jar, token.as_deref(), &row).await {
+    let session = identity(&st, &jar, &headers).await;
+    if !authorize_row(&st, session.as_ref(), token.as_deref(), &row).await {
         return Err(forbidden());
     }
-    let owned = is_owner(&jar, &row);
+    let owned = is_owner(session.as_ref(), &row);
     let payload = seal::open(&st.key, &row.payload_sealed)
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .unwrap_or(Value::Null);
@@ -977,12 +979,15 @@ pub async fn schedule_get(
 }
 
 /// `GET /api/schedules` → the signed-in user's schedules (cross-device list).
+/// Accepts either surface's credential — the web cookie or the Activity bearer.
 pub async fn schedule_list(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
+    headers: HeaderMap,
 ) -> Result<Response, AppError> {
     let store = store(&st)?;
-    let session = current_session(&jar)
+    let session = identity(&st, &jar, &headers)
+        .await
         .ok_or_else(|| AppError::Unauthorized("Sign in to list your schedules.".into()))?;
     let uid = session.uid;
     let rows = tokio::task::spawn_blocking(move || store.list_for_owner(&uid, LIST_LIMIT))
@@ -1000,15 +1005,18 @@ pub async fn schedule_list(
 /// `GET /api/guilds/:guild_id/schedules` → every schedule for that server.
 /// Gated like the webhook picker: the caller must hold Manage Webhooks in the
 /// guild (the bot does too). Masked — no webhook URLs/tokens, no payloads.
+/// Accepts either surface's credential (cookie or Activity bearer), so the
+/// embedded gallery's Scheduled tab reads the same list the web one does.
 pub async fn schedule_list_for_guild(
     State(st): State<AppState>,
     Path(guild): Path<String>,
     jar: PrivateCookieJar,
+    headers: HeaderMap,
 ) -> Result<Response, AppError> {
     let store = store(&st)?;
     // Authorize first (a Discord-gated membership + Manage-Webhooks check).
-    crate::routes::authorize_webhooks(&st, &jar, &guild).await?;
-    let session = current_session(&jar);
+    let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
+    let session = authorize_activity_webhooks(&st, session, &guild).await?;
     // The per-server quota travels with the list so the UI can show "used / cap"
     // (the `used` count is derived client-side from the live rows below), and the
     // retention window so it can note when posted/failed rows auto-clear. When
@@ -1029,10 +1037,10 @@ pub async fn schedule_list_for_guild(
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
         .map_err(AppError::Internal)?;
-    let me = session.as_ref().map(|s| s.uid.as_str());
+    let me = session.uid.as_str();
     let items: Vec<Value> = rows
         .iter()
-        .map(|r| view(r, r.owner_user_id.as_deref() == me))
+        .map(|r| view(r, r.owner_user_id.as_deref() == Some(me)))
         .collect();
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -1052,7 +1060,8 @@ pub async fn schedule_patch(
     let store = store(&st)?;
     let mut row = load(&store, &id).await?;
     let token = manage_token_from(&headers);
-    if !authorize_row(&st, &jar, token.as_deref(), &row).await {
+    let session = identity(&st, &jar, &headers).await;
+    if !authorize_row(&st, session.as_ref(), token.as_deref(), &row).await {
         return Err(forbidden());
     }
 
@@ -1151,7 +1160,7 @@ pub async fn schedule_patch(
         }
     }
 
-    let owned = is_owner(&jar, &row);
+    let owned = is_owner(session.as_ref(), &row);
     let view_value = view(&row, owned);
     let rowc = row.clone();
     let found = tokio::task::spawn_blocking(move || store.replace_mutable(&rowc))
@@ -1174,7 +1183,8 @@ pub async fn schedule_delete(
     let store = store(&st)?;
     let row = load(&store, &id).await?;
     let token = manage_token_from(&headers);
-    if !authorize_row(&st, &jar, token.as_deref(), &row).await {
+    let session = identity(&st, &jar, &headers).await;
+    if !authorize_row(&st, session.as_ref(), token.as_deref(), &row).await {
         return Err(forbidden());
     }
     tokio::task::spawn_blocking(move || store.delete(&id))
@@ -1209,15 +1219,25 @@ async fn load(store: &Arc<ScheduleStore>, id: &str) -> Result<Row, AppError> {
     row.ok_or_else(not_found)
 }
 
-/// A request may manage a row if it presents the matching manage token, or holds
-/// a session whose user id stamped the row at creation.
-fn is_authorized(jar: &PrivateCookieJar, token: Option<&str>, row: &Row) -> bool {
+/// The caller's identity from either surface: the web session cookie, or the
+/// embedded Activity's `Authorization: Bearer` (its sandboxed iframe never gets
+/// the cookie — same split as the library endpoints). `None` when neither
+/// credential is usable; row auth then rests on the manage token alone.
+async fn identity(st: &AppState, jar: &PrivateCookieJar, headers: &HeaderMap) -> Option<Session> {
+    crate::activity::resolve_identity(st, jar, headers)
+        .await
+        .ok()
+}
+
+/// A request may manage a row if it presents the matching manage token, or
+/// carries an identity whose user id stamped the row at creation.
+fn is_authorized(session: Option<&Session>, token: Option<&str>, row: &Row) -> bool {
     if let Some(t) = token {
         if !t.is_empty() && hash_token(t) == row.manage_token_hash {
             return true;
         }
     }
-    is_owner(jar, row)
+    is_owner(session, row)
 }
 
 /// Like [`is_authorized`], plus: a server manager (Manage Webhooks in the row's
@@ -1226,15 +1246,15 @@ fn is_authorized(jar: &PrivateCookieJar, token: Option<&str>, row: &Row) -> bool
 /// when the cheap token/owner check fails.
 async fn authorize_row(
     st: &AppState,
-    jar: &PrivateCookieJar,
+    session: Option<&Session>,
     token: Option<&str>,
     row: &Row,
 ) -> bool {
-    if is_authorized(jar, token, row) {
+    if is_authorized(session, token, row) {
         return true;
     }
-    if let Some(guild) = &row.guild_id {
-        if crate::routes::authorize_webhooks(st, jar, guild)
+    if let (Some(sess), Some(guild)) = (session, &row.guild_id) {
+        if authorize_activity_webhooks(st, sess.clone(), guild)
             .await
             .is_ok()
         {
@@ -1244,8 +1264,8 @@ async fn authorize_row(
     false
 }
 
-fn is_owner(jar: &PrivateCookieJar, row: &Row) -> bool {
-    match (current_session(jar), row.owner_user_id.as_deref()) {
+fn is_owner(session: Option<&Session>, row: &Row) -> bool {
+    match (session, row.owner_user_id.as_deref()) {
         (Some(s), Some(owner)) => s.uid == owner,
         _ => false,
     }

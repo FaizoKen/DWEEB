@@ -19,7 +19,8 @@
  * A brand-new post also chooses *when*: now (the default) or a one-time
  * scheduled post at a picked instant — the proxy then holds the message
  * (sealed) and posts it later through the same DWEEB webhook, no browser
- * needed. Managing existing schedules stays on the web.
+ * needed. Existing schedules are managed in the Message directory's
+ * Scheduled tab (see `ActivityGallery`).
  *
  * Presentational: it owns no post logic. Confirming hands back to the bar,
  * which runs `publish()` / `update()` / `schedule()` and, on success, opens
@@ -651,8 +652,8 @@ export function PostConfirm({
                     </p>
                   ) : null}
                   <p className={styles.idHint}>
-                    Posts once at this time (your local time), as DWEEB. Manage or cancel it in
-                    DWEEB on the web.
+                    Posts once at this time (your local time), as DWEEB. Manage or cancel it in the
+                    Message directory's Scheduled tab.
                   </p>
                 </div>
               ) : null}
