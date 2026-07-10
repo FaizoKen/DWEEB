@@ -26,6 +26,13 @@
  * get. Search spans name / description / tags. Interactive templates are tagged
  * "Bot needed" and name the plugin they pair with.
  *
+ * Built to stay fast on a large (Plus/Pro) shelf: entry hydration and search
+ * text are cached per immutable entry, each card's haystack is precomputed (a
+ * keystroke is one `includes` per card, against a deferred query), the grid
+ * mounts in pages behind a load-more sentinel, thumbnails lazy-mount as their
+ * card nears the viewport, and `content-visibility` lets off-screen cards skip
+ * layout & paint.
+ *
  * Picking a template or saved message replaces the editor wholesale (fresh ids,
  * undoable) and closes the gallery. Rendered into a portal so it overlays the
  * whole app.
@@ -34,6 +41,7 @@
 import {
   memo,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -43,7 +51,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
-import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
+import { useSavedMessagesStore, type SavedMessageRecord } from "@/core/state/savedMessagesStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import {
@@ -55,10 +63,12 @@ import {
 } from "@/core/guild/api";
 import { usePlanStore } from "@/core/plan/planStore";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
+import { onceVisible } from "@/lib/onceVisible";
 import { isLibraryConfigured } from "@/core/library/api";
 import {
   libraryEntryMessage,
   libraryEntryOrigin,
+  libraryEntrySearchText,
   useLibraryStore,
 } from "@/core/library/libraryStore";
 import { interactiveComponents } from "@/core/plugins/targets";
@@ -153,19 +163,57 @@ interface CardData {
    *  way `run` opens a confirm before freeing (touch has no hover cue, so a bare
    *  tap must never silently remove the slot). */
   pin?: { state: "on" | "off" | "paused"; busy: boolean; title: string; run: () => void };
-  /** Lowercased text pulled from the message body (content, labels, …) so the
-   *  card is findable by what the message says, not just its name. Precomputed
-   *  when the card is built so search stays cheap per keystroke. */
-  searchText?: string;
+  /** Lowercased search haystack: the card's metadata plus text pulled from the
+   *  message body (content, labels, …), so the card is findable by what the
+   *  message says, not just its name. Fully precomputed when the card is built —
+   *  a keystroke costs one `includes` per card, never a re-join. */
+  search: string;
 }
 
-/** Lowercased search haystack for one card — its metadata plus the message body. */
-function haystack(c: CardData): string {
-  return [c.name, c.description, c.category, c.pairsWith, c.badge, c.searchText]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+/** Join a card's searchable parts into its one lowercased haystack. */
+function searchHaystack(...parts: (string | undefined)[]): string {
+  return parts.filter(Boolean).join(" ").toLowerCase();
 }
+
+/** Message-body search text, cached per (immutable) message object — shared by
+ *  the saved / scheduled / template decks so a card-list rebuild never re-walks
+ *  a message tree it has already indexed. (Library entries have their own
+ *  per-entry cache in the library store.) */
+const messageSearchCache = new WeakMap<WebhookMessage, string>();
+function messageSearchText(message: WebhookMessage): string {
+  let cached = messageSearchCache.get(message);
+  if (cached === undefined) {
+    cached = collectSearchText(message);
+    messageSearchCache.set(message, cached);
+  }
+  return cached;
+}
+
+/** Saved-entry hydration, cached per record object (records are immutable —
+ *  save/rename swap in fresh objects). Null = malformed payload (an older or
+ *  corrupt record): the entry is skipped rather than thrown on. */
+const savedHydrationCache = new WeakMap<SavedMessageRecord, WebhookMessage | null>();
+function savedEntryMessage(entry: SavedMessageRecord): WebhookMessage | null {
+  let cached = savedHydrationCache.get(entry);
+  if (cached === undefined) {
+    try {
+      cached = attachEditorFields(entry.payload);
+    } catch {
+      cached = null;
+    }
+    savedHydrationCache.set(entry, cached);
+  }
+  return cached;
+}
+
+/** How many cards mount per page. A Plus/Pro shelf can hold hundreds of
+ *  entries; mounting every card at once (each hosts a live preview) makes
+ *  opening the gallery a multi-second layout, so the grid grows page by page
+ *  as the user scrolls (see the load-more sentinel). */
+const CARD_PAGE_SIZE = 48;
+/** The first screenful of thumbnails mounts eagerly so the gallery never opens
+ *  onto blank preview windows; everything past it lazy-mounts on approach. */
+const EAGER_THUMBNAILS = 12;
 
 /** Compact "2m ago" / "yesterday" / "Mar 4" stamp for continue/saved cards. */
 function formatRelative(savedAt: number): string {
@@ -196,6 +244,9 @@ export function TemplateGallery() {
   );
 
   const [query, setQuery] = useState("");
+  // Filtering runs against the deferred value so typing stays responsive even
+  // when a keystroke re-filters (and re-renders) a large deck.
+  const deferredQuery = useDeferredValue(query);
   // Seeded once from the store so callers can deep-link straight to a chip
   // (e.g. "Browser drafts"); the gallery is remounted on each open, so this
   // initialiser re-runs fresh.
@@ -364,16 +415,14 @@ export function TemplateGallery() {
     return () => window.removeEventListener("keydown", onKey);
   }, [closeGallery]);
 
-  // Saved messages, re-hydrated to editable form for their thumbnails. Skips any
-  // entry whose payload won't parse (an older/corrupt record) rather than throw.
+  // Saved messages, re-hydrated to editable form for their thumbnails (cached
+  // per record — see savedEntryMessage). Skips any entry whose payload won't
+  // parse (an older/corrupt record) rather than throw.
   const savedMessages = useMemo(
     () =>
       savedEntries.flatMap((e) => {
-        try {
-          return [{ entry: e, message: attachEditorFields(e.payload) }];
-        } catch {
-          return [];
-        }
+        const message = savedEntryMessage(e);
+        return message ? [{ entry: e, message }] : [];
       }),
     [savedEntries],
   );
@@ -390,7 +439,12 @@ export function TemplateGallery() {
         accent: ACCENT_TEAL,
         savedAt: entry.savedAt,
         badge: "Browser draft",
-        searchText: collectSearchText(message),
+        search: searchHaystack(
+          entry.name,
+          "Browser draft — only visible on this device.",
+          "Browser draft",
+          messageSearchText(message),
+        ),
         onPick: () => {
           replaceMessage(message);
           closeGallery();
@@ -478,18 +532,19 @@ export function TemplateGallery() {
         }
       }
       const origin = libraryEntryOrigin(entry);
+      const description = isPosted
+        ? holdsSlot
+          ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · never-expire keeps it out of the rolling history window, so it stays here until you free the slot.`
+          : `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
+              connectedGuildName ?? "server"
+            } history — it rolls off as newer posts land. Load it and save it to keep it.`
+        : `A saved message in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`;
       const card: CardData = {
         kind: isPosted ? "posted" : "saved",
         key: `lib:${entry.id}`,
         emoji: isPosted ? "📤" : "🔖",
         name: displayName,
-        description: isPosted
-          ? holdsSlot
-            ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · never-expire keeps it out of the rolling history window, so it stays here until you free the slot.`
-            : `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
-                connectedGuildName ?? "server"
-              } history — it rolls off as newer posts land. Load it and save it to keep it.`
-          : `A saved message in the ${connectedGuildName ?? "server"} library, shared with this server's managers.`,
+        description,
         message,
         accent: isPosted ? ACCENT_GREEN : ACCENT_TEAL,
         savedAt: entry.updated_at * 1000,
@@ -497,7 +552,12 @@ export function TemplateGallery() {
         storedInServerLibrary: true,
         tags,
         pin,
-        searchText: collectSearchText(message),
+        search: searchHaystack(
+          displayName,
+          description,
+          isPosted ? "Posted" : "Server draft",
+          libraryEntrySearchText(entry),
+        ),
         // Never-expire posted messages sit above the rolling window and never
         // auto-evict; deleting one would strand its claimed slot. So a pinned
         // card drops delete entirely — free the slot from its pin chip first,
@@ -598,7 +658,13 @@ export function TemplateGallery() {
         category: t.category,
         requiresBot: t.requiresBot,
         pairsWith: t.pairsWith,
-        searchText: collectSearchText(t.message),
+        search: searchHaystack(
+          t.name,
+          t.description,
+          t.category,
+          t.pairsWith,
+          messageSearchText(t.message),
+        ),
         onPick: () => {
           replaceMessage(t.message);
           closeGallery();
@@ -638,21 +704,27 @@ export function TemplateGallery() {
       const tags: CardData["tags"] = [];
       if (s.status === "suspended") tags.push({ text: "Over plan limit", tone: "warn" });
       if (s.make_permanent) tags.push({ text: "Never expires", tone: "ok" });
+      const description = s.dest_label
+        ? `Scheduled for ${s.dest_label}. Load it back to edit or reschedule.`
+        : "One-time scheduled post. Load it back to edit or reschedule.";
       return {
         kind: "scheduled",
         key: `sched:${s.id}`,
         emoji: "🕒",
         name,
-        description: s.dest_label
-          ? `Scheduled for ${s.dest_label}. Load it back to edit or reschedule.`
-          : "One-time scheduled post. Load it back to edit or reschedule.",
+        description,
         message,
         previewPending: !sched.messages.has(s.id),
         accent: ACCENT_INDIGO,
         badge: paused ? "Paused" : "Scheduled",
         metaText: paused ? `Paused · ${when}` : `Posts ${when}`,
         tags,
-        searchText: message ? collectSearchText(message) : undefined,
+        search: searchHaystack(
+          name,
+          description,
+          paused ? "Paused" : "Scheduled",
+          message ? messageSearchText(message) : undefined,
+        ),
         onPick: () => {
           const m = sched.messages.get(s.id);
           if (!m) {
@@ -754,7 +826,7 @@ export function TemplateGallery() {
   }, [activeFilter, filter, libraryPending, schedulePending]);
 
   const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     let base: CardData[];
     if (activeFilter === POSTED_FILTER) {
       base = postedCards;
@@ -768,16 +840,25 @@ export function TemplateGallery() {
       // TEMPLATE_FILTER — the whole curated set, no per-category split.
       base = templateCards;
     }
-    return q ? base.filter((c) => haystack(c).includes(q)) : base;
+    return q ? base.filter((c) => c.search.includes(q)) : base;
   }, [
     activeFilter,
-    query,
+    deferredQuery,
     postedCards,
     scheduledCards,
     savedCards,
     libraryDraftCards,
     templateCards,
   ]);
+
+  // The grid mounts in pages — a new tab or search starts back at one page,
+  // and the sentinel at the grid's tail reveals the next as the user nears it.
+  const [visibleCount, setVisibleCount] = useState(CARD_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(CARD_PAGE_SIZE);
+  }, [activeFilter, deferredQuery]);
+  const visibleCards = shown.length > visibleCount ? shown.slice(0, visibleCount) : shown;
+  const revealMore = useCallback(() => setVisibleCount((n) => n + CARD_PAGE_SIZE), []);
 
   const startBlank = () => {
     clearAll();
@@ -1108,9 +1189,18 @@ export function TemplateGallery() {
 
             {shown.length > 0 ? (
               <div className={styles.grid}>
-                {shown.map((c) => (
-                  <GalleryCard key={c.key} card={c} />
+                {visibleCards.map((c, i) => (
+                  <GalleryCard key={c.key} card={c} eagerThumb={i < EAGER_THUMBNAILS} />
                 ))}
+                {shown.length > visibleCards.length ? (
+                  // Keyed on the revealed count so each reveal re-arms a fresh
+                  // sentinel for the following page.
+                  <LoadMoreSentinel
+                    key={visibleCards.length}
+                    remaining={shown.length - visibleCards.length}
+                    onReveal={revealMore}
+                  />
+                ) : null}
               </div>
             ) : activeFilter === SCHEDULED_FILTER && sched.history.length > 0 && !query.trim() ? (
               // Nothing upcoming, but the history section below still has rows.
@@ -1256,10 +1346,10 @@ export function TemplateGallery() {
         <div className={styles.confirmBody}>
           <p className={styles.confirmText}>
             Free <strong>{pendingFreeSlot?.name}</strong>'s never-expire slot? Its buttons &amp;
-            selects go back on the{" "}
-            {permanent?.ttl_days ? `${permanent.ttl_days}-day ` : ""}expiry clock — counted from
-            when it was sent, so an older message's may lapse right away — and it rejoins the rolling
-            history, where newer posts can push it off. You can re-pin it later if a slot is free.
+            selects go back on the {permanent?.ttl_days ? `${permanent.ttl_days}-day ` : ""}expiry
+            clock — counted from when it was sent, so an older message's may lapse right away — and
+            it rejoins the rolling history, where newer posts can push it off. You can re-pin it
+            later if a slot is free.
           </p>
           <div className={styles.confirmActions}>
             <Button variant="ghost" type="button" onClick={() => setPendingFreeSlot(null)}>
@@ -1284,7 +1374,16 @@ export function TemplateGallery() {
   );
 }
 
-function GalleryCard({ card }: { card: CardData }) {
+/** Memoized so a search keystroke or a page reveal only renders the cards it
+ *  actually adds or removes — card objects are stable between rebuilds of
+ *  their deck. */
+const GalleryCard = memo(function GalleryCard({
+  card,
+  eagerThumb,
+}: {
+  card: CardData;
+  eagerThumb?: boolean;
+}) {
   const onKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       // Only the card itself activates on Enter/Space — keys aimed at the inner
@@ -1345,7 +1444,7 @@ function GalleryCard({ card }: { card: CardData }) {
     >
       <div className={styles.cardPreview}>
         {card.message ? (
-          <TemplateThumbnail message={card.message} />
+          <TemplateThumbnail message={card.message} eager={eagerThumb} />
         ) : (
           // A scheduled card whose payload is still loading (or has none to
           // preview) — a calm placeholder in place of the live thumbnail.
@@ -1469,6 +1568,28 @@ function GalleryCard({ card }: { card: CardData }) {
       </div>
     </div>
   );
+});
+
+/**
+ * Full-width row at the grid's tail that reveals the next page of cards —
+ * automatically as it scrolls near (via the shared observer), or by click
+ * (the keyboard / no-IntersectionObserver fallback). The parent keys it on the
+ * revealed count so each reveal re-arms a fresh sentinel.
+ */
+function LoadMoreSentinel({ remaining, onReveal }: { remaining: number; onReveal: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    return onceVisible(el, onReveal);
+  }, [onReveal]);
+  return (
+    <div ref={ref} className={styles.loadMore}>
+      <button type="button" className={styles.loadMoreBtn} onClick={onReveal}>
+        Show {Math.min(remaining, CARD_PAGE_SIZE)} more
+      </button>
+    </div>
+  );
 }
 
 /**
@@ -1476,22 +1597,40 @@ function GalleryCard({ card }: { card: CardData }) {
  * "double" size and scales it to 0.5, clipping to the card window — the same
  * trick as the mobile `MiniPreview`. The inner tree is `inert` so none of the
  * rendered buttons/avatars can steal focus or a tap; the card is the single
- * interactive target. Memoized on the (stable) message so typing in search
- * doesn't re-render every visible preview tree.
+ * interactive target.
+ *
+ * The Preview is the expensive part of a card, so it only mounts once the card
+ * nears the viewport (`eager` skips the wait for the first screenful). Once
+ * mounted it stays mounted — scrolling back is instant — and the off-screen
+ * cost is handled by the card's `content-visibility: auto`. Memoized on the
+ * (stable) message so typing in search doesn't re-render every visible
+ * preview tree.
  */
 const TemplateThumbnail = memo(function TemplateThumbnail({
   message,
+  eager,
 }: {
   message: WebhookMessage;
+  eager?: boolean;
 }) {
+  const [live, setLive] = useState(eager === true);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (live) return;
+    const el = viewportRef.current;
+    if (!el) return;
+    return onceVisible(el, () => setLive(true));
+  }, [live]);
   const makeInert = useCallback((el: HTMLDivElement | null) => {
     if (el) el.inert = true;
   }, []);
   return (
-    <div className={styles.thumbViewport}>
-      <div className={styles.thumbStage} ref={makeInert}>
-        <Preview message={message} />
-      </div>
+    <div className={styles.thumbViewport} ref={viewportRef}>
+      {live ? (
+        <div className={styles.thumbStage} ref={makeInert}>
+          <Preview message={message} />
+        </div>
+      ) : null}
     </div>
   );
 });

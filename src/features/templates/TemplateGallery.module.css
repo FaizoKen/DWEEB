@@ -344,6 +344,34 @@
   gap: 18px;
 }
 
+/* Load-more sentinel at the grid's tail — spans the full row. It reveals the
+ * next page automatically as it scrolls near; the button is the manual /
+ * keyboard fallback. */
+.loadMore {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 2px;
+}
+.loadMoreBtn {
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--app-bg-input);
+  border: 1px solid var(--app-border);
+  color: var(--app-text-muted);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.loadMoreBtn:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.loadMoreBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
 /* A quiet inline note where the grid would be — e.g. the Scheduled tab has no
  * upcoming posts but its history section still renders below. */
 .emptyInline {
@@ -377,6 +405,12 @@
     box-shadow 140ms ease,
     border-color 140ms ease;
   animation: cardIn 240ms ease both;
+  /* Off-screen cards skip layout & paint entirely — with the lazy-mounted
+   * thumbnails this is what keeps a large (Plus/Pro) shelf cheap while
+   * scrolling. The intrinsic size approximates a card (196px preview + body)
+   * so the scrollbar stays honest before a card first renders. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
 }
 /* A thin accent ribbon at the very top gives every card a colour identity. */
 .card::before {

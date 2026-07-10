@@ -14,6 +14,7 @@
 
 import { create } from "zustand";
 import type { WebhookMessage } from "@/core/schema/types";
+import { collectSearchText } from "@/core/schema/traversal";
 import type { RestoredOrigin } from "@/core/state/messageStore";
 import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
 import {
@@ -210,15 +211,46 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 }));
 
+/** Hydration is cached per entry object: entries are immutable API snapshots
+ *  (every store mutation swaps in fresh objects), so a WeakMap key can never go
+ *  stale — and a Plus/Pro shelf with hundreds of entries would otherwise re-run
+ *  `attachEditorFields` over the whole list every time any dependent state
+ *  (a slot toggle, a search keystroke's rebuild) recomputes its cards. Sharing
+ *  the hydrated object is safe: the editor clones on load (`reassignIds`) and
+ *  never mutates a message in place. */
+const hydrationCache = new WeakMap<LibraryEntryView, WebhookMessage | null>();
+const searchTextCache = new WeakMap<LibraryEntryView, string>();
+
 /** Re-hydrate a library entry into an editable message. Null when the payload
- *  is missing (unopenable seal) or malformed. */
+ *  is missing (unopenable seal) or malformed. Cached per entry. */
 export function libraryEntryMessage(entry: LibraryEntryView): WebhookMessage | null {
-  if (entry.payload == null) return null;
-  try {
-    return attachEditorFields(entry.payload);
-  } catch {
-    return null;
+  let cached = hydrationCache.get(entry);
+  if (cached === undefined) {
+    cached = null;
+    if (entry.payload != null) {
+      try {
+        cached = attachEditorFields(entry.payload);
+      } catch {
+        cached = null;
+      }
+    }
+    hydrationCache.set(entry, cached);
   }
+  return cached;
+}
+
+/** Lowercased text pulled from the entry's message body (content, labels, …)
+ *  for search. Cached per entry — computing this walks the whole message tree,
+ *  which adds up fast across a large shelf. Empty when the payload is
+ *  missing or malformed. */
+export function libraryEntrySearchText(entry: LibraryEntryView): string {
+  let cached = searchTextCache.get(entry);
+  if (cached === undefined) {
+    const message = libraryEntryMessage(entry);
+    cached = message ? collectSearchText(message) : "";
+    searchTextCache.set(entry, cached);
+  }
+  return cached;
 }
 
 /** The update-in-place origin for a posted entry, when it has everything a
