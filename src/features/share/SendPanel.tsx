@@ -1394,14 +1394,16 @@ export function SendPanel({
     return () => ac.abort();
   }, [initialWebhook]);
 
-  // The fast path — let DWEEB (or a registered custom bot) create the webhook —
-  // only exists when a proxy is configured to run the OAuth flow. When it does,
-  // the manual URL field is the secondary path: a one-line summary once a valid
-  // webhook is set, expanding to the full credential field only when the user
-  // opts to edit it (`pasteMode`) or the typed URL still needs fixing. With no
-  // fast path at all, the field is the only way in, so it's always open.
+  // Whether the raw URL field can collapse to a one-line summary depends on the
+  // mode, because it hinges on an *easier* alternative existing:
+  //  - new    : a webhook can be created through Discord's OAuth flow whenever a
+  //             proxy is configured (`proxyOn`), so the paste field is secondary.
+  //  - update : there's no create flow — an edit can only reuse the exact webhook
+  //             that posted the message — so the sole alternative is the
+  //             auto-detect picker (managers only). A signed-out / non-manager
+  //             user has no picker, so the field stays open, exactly like Restore.
+  // (`canCollapseUrl` is finished below, once `pickerActive` is known.)
   const proxyOn = isProxyConfigured();
-  const editingUrl = !proxyOn || pasteMode || (url.trim().length > 0 && !parsedUrl);
   // Open the URL field, revealed and focused — used by both "Paste it instead"
   // and "Edit URL". Revealing matches intent: you asked to see/change the URL.
   const openUrlField = () => {
@@ -1422,6 +1424,12 @@ export function SendPanel({
   // app-owned webhooks, which is the route plugin components need.
   const canManageWebhooks = useCanManageGuildWebhooks();
   const pickerActive = authStatus === "authed" && canManageWebhooks;
+
+  // The paste field collapses only when an easier alternative exists (see the
+  // mode note above): the OAuth create flow for a new post, or the picker for an
+  // update. `pasteMode` or a still-invalid typed URL forces it open regardless.
+  const canCollapseUrl = mode === "update" ? pickerActive : proxyOn;
+  const editingUrl = !canCollapseUrl || pasteMode || (url.trim().length > 0 && !parsedUrl);
 
   // Choose a webhook the picker surfaced: fill the field from its recover URL and
   // remember it (name / owner / destination) so the ownership + routing checks
@@ -1662,7 +1670,7 @@ export function SendPanel({
           the edit will change and where it lives (naming the server, since it
           may differ from the connected one); new mode shows the post destination
           or a quiet link to paste a URL. */}
-      {proxyOn && !editingUrl ? (
+      {canCollapseUrl && !editingUrl ? (
         mode === "update" ? (
           parsedUrl ? (
             <p className={styles.urlSet}>
@@ -1750,7 +1758,7 @@ export function SendPanel({
             label="Webhook URL"
             error={urlInvalid ? "Not a valid Discord webhook URL." : undefined}
             hint={
-              proxyOn ? (
+              canCollapseUrl ? (
                 parsedUrl ? (
                   <button type="button" className={styles.pasteBack} onClick={closeUrlField}>
                     Done — use this webhook
