@@ -235,7 +235,12 @@ function SaveMessageDialog({
   onSave,
 }: SaveMessageDialogProps) {
   const [name, setName] = useState("");
-  const [destination, setDestination] = useState<SaveMode>("local");
+  // Default to the shared server draft when it's an option — teammates and the
+  // Activity can pick it up. Falls back to a browser draft when no server
+  // library is available (the toggle is hidden then, so it must be "local").
+  const [destination, setDestination] = useState<SaveMode>(
+    serverSaveAvailable ? "server" : "local",
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -244,14 +249,14 @@ function SaveMessageDialog({
   useEffect(() => {
     if (open) {
       setName("");
-      setDestination("local");
+      setDestination(serverSaveAvailable ? "server" : "local");
       setError(null);
       setBusy(false);
       // Modal grabs focus on its dialog by default; defer so we win.
       const t = setTimeout(() => inputRef.current?.focus(), 30);
       return () => clearTimeout(t);
     }
-  }, [open]);
+  }, [open, serverSaveAvailable]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
