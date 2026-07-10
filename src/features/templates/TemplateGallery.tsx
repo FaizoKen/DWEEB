@@ -147,8 +147,11 @@ interface CardData {
   tags?: { text: string; tone: "ok" | "warn" | "info" }[];
   /** Posted only — the never-expire toggle chip at the preview's top-left.
    *  One control carries both the status and the action: "off" is a
-   *  hover-revealed "+ Never expire" (claims a slot), "on"/"paused" are
-   *  always-visible status chips whose hover flips to "- Never expire". */
+   *  hover-revealed "+ Never expire" (claims a slot on tap, no confirm), while
+   *  "on"/"paused" are always-visible status chips. On a mouse the chip flips to
+   *  a red "- Never expire" on hover; on touch it shows a persistent "✕". Either
+   *  way `run` opens a confirm before freeing (touch has no hover cue, so a bare
+   *  tap must never silently remove the slot). */
   pin?: { state: "on" | "off" | "paused"; busy: boolean; title: string; run: () => void };
   /** Lowercased text pulled from the message body (content, labels, …) so the
    *  card is findable by what the message says, not just its name. Precomputed
@@ -212,6 +215,14 @@ export function TemplateGallery() {
     posted?: boolean;
     /** Scheduled only — the schedule the confirm cancels. */
     schedule?: ScheduleView;
+  } | null>(null);
+  // Freeing a never-expire slot goes through its own confirm — freeing is
+  // meaningful (the message drops back onto the expiry clock) and, with no hover
+  // to warn on touch, a bare tap on the chip must not silently remove it.
+  const [pendingFreeSlot, setPendingFreeSlot] = useState<{
+    messageId: string;
+    name: string;
+    paused: boolean;
   } | null>(null);
 
   // The connected server's scheduled (one-time) posts — the Scheduled tab. The
@@ -435,10 +446,13 @@ export function TemplateGallery() {
       ) {
         tags.push({ text: "Buttons expired", tone: "warn" });
       }
+      const displayName =
+        entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft");
       // The pin chip: ONE control that both shows never-expire state and
-      // toggles it. Held slots (even plan-paused ones) free on click; an
-      // interactive message without a slot offers to claim one (a message
-      // with no components has nothing to keep alive, so no chip).
+      // toggles it. A held slot (even a plan-paused one) opens a confirm before
+      // freeing; an interactive message without a slot claims one on tap
+      // (additive, no confirm). A message with no components has nothing to keep
+      // alive, so it gets no chip.
       let pin: CardData["pin"];
       if (canManageSlots && isPosted && entry.message_id) {
         const messageId = entry.message_id;
@@ -448,9 +462,9 @@ export function TemplateGallery() {
             state: paused ? "paused" : "on",
             busy: slotBusy,
             title: paused
-              ? "Never expire is paused — the server holds more never-expire messages than its plan allows. Click to free the slot."
-              : "This message never expires and stays in this history. Click to free the slot — it goes back on the expiry clock, counted from its send date.",
-            run: () => void freeNeverExpire(messageId),
+              ? "Never expire is paused — the server holds more never-expire messages than its plan allows. Tap to free the slot."
+              : "This message never expires and stays in this history. Tap to free the slot — it goes back on the expiry clock, counted from its send date.",
+            run: () => setPendingFreeSlot({ messageId, name: displayName, paused }),
           };
         } else if (interactive && entry.channel_id) {
           const channelId = entry.channel_id;
@@ -464,8 +478,6 @@ export function TemplateGallery() {
         }
       }
       const origin = libraryEntryOrigin(entry);
-      const displayName =
-        entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft");
       const card: CardData = {
         kind: isPosted ? "posted" : "saved",
         key: `lib:${entry.id}`,
@@ -534,7 +546,6 @@ export function TemplateGallery() {
     canManageSlots,
     slotBusy,
     assignNeverExpire,
-    freeNeverExpire,
     connectedGuildName,
     replaceMessage,
     replaceMessageFromRestore,
@@ -1234,6 +1245,40 @@ export function TemplateGallery() {
           </div>
         </div>
       </Modal>
+
+      <Modal
+        open={!!pendingFreeSlot}
+        onClose={() => setPendingFreeSlot(null)}
+        title="Turn off never-expire?"
+        size="sm"
+        backdropStyle={{ zIndex: "calc(var(--app-z-tooltip) + 10)" }}
+      >
+        <div className={styles.confirmBody}>
+          <p className={styles.confirmText}>
+            Free <strong>{pendingFreeSlot?.name}</strong>'s never-expire slot? Its buttons &amp;
+            selects go back on the{" "}
+            {permanent?.ttl_days ? `${permanent.ttl_days}-day ` : ""}expiry clock — counted from
+            when it was sent, so an older message's may lapse right away — and it rejoins the rolling
+            history, where newer posts can push it off. You can re-pin it later if a slot is free.
+          </p>
+          <div className={styles.confirmActions}>
+            <Button variant="ghost" type="button" onClick={() => setPendingFreeSlot(null)}>
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              type="button"
+              disabled={slotBusy}
+              onClick={() => {
+                if (pendingFreeSlot) void freeNeverExpire(pendingFreeSlot.messageId);
+                setPendingFreeSlot(null);
+              }}
+            >
+              Free slot
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </>,
     document.body,
   );
@@ -1315,8 +1360,10 @@ function GalleryCard({ card }: { card: CardData }) {
         {card.pin ? (
           // The never-expire toggle, top-left of the preview (delete sits
           // top-right). One chip = state AND action: "off" is a hover-revealed
-          // "+ Never expire"; "on"/"paused" stay visible as status and flip
-          // their label to "- Never expire" on hover.
+          // "+ Never expire"; "on"/"paused" stay visible as status. On a mouse
+          // the label flips to "- Never expire" on hover; on touch (no hover) a
+          // persistent "✕" marks it removable. Either way, tapping a held slot
+          // opens a confirm before it frees.
           <button
             type="button"
             className={styles.pinToggle}
@@ -1339,7 +1386,12 @@ function GalleryCard({ card }: { card: CardData }) {
                   : "+ Never expire"}
             </span>
             {card.pin.state !== "off" ? (
-              <span className={styles.pinLabelHover}>- Never expire</span>
+              <>
+                <span className={styles.pinLabelHover}>- Never expire</span>
+                <span className={styles.pinRemoveGlyph} aria-hidden>
+                  ✕
+                </span>
+              </>
             ) : null}
           </button>
         ) : null}
