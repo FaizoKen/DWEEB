@@ -16,8 +16,9 @@
  *    live preview: load one back into the editor, cancel it, or manage the
  *    posted/failed history — all inline (this replaced the old "Managed
  *    messages" dialog). Payloads are fetched lazily, only while the tab is open.
- *  - **Saved** — the user's named, stashed messages (a dedicated category), so
- *    reusable messages are reachable without digging through the Saved menu.
+ *  - **Browser drafts** — the user's named, browser-local messages (a dedicated
+ *    category), so reusable messages are reachable without digging through the
+ *    Saved menu.
  *  - **Templates** — the curated starting points.
  *
  * Every card carries a **live, faithful thumbnail** — the real `Preview`
@@ -87,7 +88,7 @@ import styles from "./TemplateGallery.module.css";
  *  shelves (this browser's saves and the server library's shared drafts), then
  *  all curated templates collapsed into one. Templates keep their per-card
  *  category label, but the chips no longer split by category. */
-const SAVED_FILTER = "Saved" as const;
+const BROWSER_DRAFTS_FILTER = "Browser drafts" as const;
 const SERVER_DRAFTS_FILTER = "Server drafts" as const;
 const POSTED_FILTER = "Posted" as const;
 const SCHEDULED_FILTER = "Scheduled" as const;
@@ -95,7 +96,7 @@ const TEMPLATE_FILTER = "Template" as const;
 type Filter =
   | typeof POSTED_FILTER
   | typeof SCHEDULED_FILTER
-  | typeof SAVED_FILTER
+  | typeof BROWSER_DRAFTS_FILTER
   | typeof SERVER_DRAFTS_FILTER
   | typeof TEMPLATE_FILTER;
 
@@ -184,8 +185,9 @@ export function TemplateGallery() {
   );
 
   const [query, setQuery] = useState("");
-  // Seeded once from the store so callers can deep-link straight to "Saved";
-  // the gallery is remounted on each open, so this initialiser re-runs fresh.
+  // Seeded once from the store so callers can deep-link straight to a chip
+  // (e.g. "Browser drafts"); the gallery is remounted on each open, so this
+  // initialiser re-runs fresh.
   const [filter, setFilter] = useState<Filter>(
     () => useTemplateGalleryStore.getState().initialFilter,
   );
@@ -338,11 +340,11 @@ export function TemplateGallery() {
         key: entry.id,
         emoji: "🔖",
         name: entry.name,
-        description: "Saved in this browser — only visible on this device.",
+        description: "Browser draft — only visible on this device.",
         message,
         accent: ACCENT_TEAL,
         savedAt: entry.savedAt,
-        badge: "Saved",
+        badge: "Browser draft",
         searchText: collectSearchText(message),
         onPick: () => {
           replaceMessage(message);
@@ -500,7 +502,7 @@ export function TemplateGallery() {
 
   // The Posted deck IS the connected server's shared history — server-fed only,
   // so what you see is exactly what the library holds, on every device. Drafts
-  // stay SEPARATE: "Saved" is this browser's private stash, "Server drafts" is
+  // stay SEPARATE: "Browser drafts" is this browser's private stash, "Server drafts" is
   // the shared library shelf — mixing them hid which one a card actually lived
   // in.
   const postedCards = libraryPostedCards;
@@ -636,7 +638,7 @@ export function TemplateGallery() {
       ...(postedCards.length || orphanSlots.length ? [POSTED_FILTER] : []),
       ...(hasScheduled ? [SCHEDULED_FILTER] : []),
       ...(libraryDraftCards.length ? [SERVER_DRAFTS_FILTER] : []),
-      ...(savedCards.length ? [SAVED_FILTER] : []),
+      ...(savedCards.length ? [BROWSER_DRAFTS_FILTER] : []),
       ...(templateCards.length ? [TEMPLATE_FILTER] : []),
     ],
     [
@@ -677,7 +679,7 @@ export function TemplateGallery() {
       base = postedCards;
     } else if (activeFilter === SCHEDULED_FILTER) {
       base = scheduledCards;
-    } else if (activeFilter === SAVED_FILTER) {
+    } else if (activeFilter === BROWSER_DRAFTS_FILTER) {
       base = savedCards;
     } else if (activeFilter === SERVER_DRAFTS_FILTER) {
       base = libraryDraftCards;
@@ -816,7 +818,9 @@ export function TemplateGallery() {
                       // The Saved/Posted pseudo-categories carry their own tints
                       // (teal / green) so a user's own messages stand out from the
                       // curated template categories.
-                      f === SAVED_FILTER || f === SERVER_DRAFTS_FILTER ? styles.chipSaved : "",
+                      f === BROWSER_DRAFTS_FILTER || f === SERVER_DRAFTS_FILTER
+                        ? styles.chipSaved
+                        : "",
                       f === POSTED_FILTER ? styles.chipPosted : "",
                       f === SCHEDULED_FILTER ? styles.chipScheduled : "",
                       activeFilter === f ? styles.chipActive : "",
@@ -1073,7 +1077,7 @@ export function TemplateGallery() {
             ? "Cancel scheduled post?"
             : pendingDelete?.kind === "library"
               ? "Remove from the server library?"
-              : "Delete saved message?"
+              : "Delete browser draft?"
         }
         size="sm"
         // The gallery overlay sits at --app-z-tooltip; lift the confirm above it
@@ -1165,12 +1169,12 @@ function GalleryCard({ card }: { card: CardData }) {
     ? `Cancel scheduled post "${card.name}"`
     : isServerLibrary
       ? `Remove "${card.name}" from the server library`
-      : `Delete saved message "${card.name}"`;
+      : `Delete browser draft "${card.name}"`;
   const deleteTitle = isScheduled
     ? "Cancel scheduled post"
     : isServerLibrary
       ? "Remove from server library"
-      : "Delete saved message";
+      : "Delete browser draft";
 
   return (
     <div

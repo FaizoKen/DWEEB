@@ -8,8 +8,9 @@
  *    destination toggle — this browser's localStorage, or the server library
  *    that teammates and the embedded Activity can pick up too.
  *  - Wipe the editor back to an empty message.
- *  - Jump to the full-screen gallery for posted or saved messages when those
- *    lists exist.
+ *  - Jump to the full-screen gallery — posted messages, scheduled posts, server
+ *    drafts, and this browser's drafts (each shown only when it has entries),
+ *    plus templates (always).
  */
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -34,6 +35,7 @@ import {
   SaveIcon,
   SendIcon,
   ServerStackIcon,
+  TemplateIcon,
   TrashIcon,
 } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
@@ -169,12 +171,21 @@ export function SavedMessagesMenu() {
                 icon={<BookmarkIcon />}
                 onSelect={() => {
                   close();
-                  openGallery("Saved");
+                  openGallery("Browser drafts");
                 }}
               >
-                Saved messages ({entries.length})
+                Browser drafts ({entries.length})
               </MenuItem>
             ) : null}
+            <MenuItem
+              icon={<TemplateIcon />}
+              onSelect={() => {
+                close();
+                openGallery("Template");
+              }}
+            >
+              Templates
+            </MenuItem>
             <MenuItem
               icon={<TrashIcon />}
               onSelect={() => {
@@ -279,7 +290,7 @@ function SaveMessageDialog({
                 setError(null);
               }}
             >
-              <strong>This browser</strong>
+              <strong>Browser draft</strong>
               <span>Saved on this device only.</span>
             </button>
             <button
