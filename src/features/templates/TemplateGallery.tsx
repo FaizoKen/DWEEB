@@ -205,9 +205,11 @@ export function TemplateGallery() {
     name: string;
     /** Library only — the server the entry belongs to. */
     guildId?: string;
-    /** Library only — the entry holds a never-expire slot, which removing the
-     *  history record does NOT free (the confirm says so). */
-    neverExpires?: boolean;
+    /** Library only — a `posted` history entry (vs a server draft): the confirm
+     *  frames it as pruning the shared history now rather than waiting for it to
+     *  roll off. Never-expire posted cards drop delete entirely, so a pinned
+     *  message never reaches this dialog. */
+    posted?: boolean;
     /** Scheduled only — the schedule the confirm cancels. */
     schedule?: ScheduleView;
   } | null>(null);
@@ -484,14 +486,21 @@ export function TemplateGallery() {
         tags,
         pin,
         searchText: collectSearchText(message),
-        onDelete: () =>
-          setPendingDelete({
-            kind: "library",
-            id: entry.id,
-            guildId: entry.guild_id,
-            name: displayName,
-            neverExpires: holdsSlot,
-          }),
+        // Never-expire posted messages sit above the rolling window and never
+        // auto-evict; deleting one would strand its claimed slot. So a pinned
+        // card drops delete entirely — free the slot from its pin chip first,
+        // then the message becomes an ordinary history entry that can be
+        // removed. Server drafts (never `holdsSlot`) always keep delete.
+        onDelete: holdsSlot
+          ? undefined
+          : () =>
+              setPendingDelete({
+                kind: "library",
+                id: entry.id,
+                guildId: entry.guild_id,
+                name: displayName,
+                posted: isPosted,
+              }),
         onPick: () => {
           if (origin) {
             // Posted with its webhook intact: restore content *and* origin so
@@ -1169,7 +1178,9 @@ export function TemplateGallery() {
           pendingDelete?.kind === "scheduled"
             ? "Cancel scheduled post?"
             : pendingDelete?.kind === "library"
-              ? "Remove from the server library?"
+              ? pendingDelete.posted
+                ? "Remove from posted history?"
+                : "Remove from the server library?"
               : "Delete browser draft?"
         }
         size="sm"
@@ -1185,18 +1196,19 @@ export function TemplateGallery() {
                 undone — you'd have to schedule it again.
               </>
             ) : pendingDelete?.kind === "library" ? (
-              <>
-                Remove <strong>{pendingDelete?.name}</strong> from the server library? Everyone
-                managing this server loses this entry (a posted message stays live on Discord). This
-                can't be undone.
-                {pendingDelete?.neverExpires ? (
-                  <>
-                    {" "}
-                    Its never-expire slot stays claimed — free it from its card first if you want
-                    the slot back.
-                  </>
-                ) : null}
-              </>
+              pendingDelete.posted ? (
+                <>
+                  Remove <strong>{pendingDelete?.name}</strong> from this server's posted history
+                  now? It won't wait to roll off on its own — every manager loses the entry (the
+                  message stays live on Discord). This can't be undone.
+                </>
+              ) : (
+                <>
+                  Remove <strong>{pendingDelete?.name}</strong> from the server library? Everyone
+                  managing this server loses this entry (a posted message stays live on Discord).
+                  This can't be undone.
+                </>
+              )
             ) : (
               <>
                 Permanently delete <strong>"{pendingDelete?.name}"</strong>? This can't be undone.
@@ -1250,6 +1262,7 @@ function GalleryCard({ card }: { card: CardData }) {
 
   const isTemplate = card.kind === "template";
   const isScheduled = card.kind === "scheduled";
+  const isPosted = card.kind === "posted";
   const isServerLibrary = card.storedInServerLibrary === true;
   const cardLabel = isTemplate
     ? `Start from the ${card.name} template`
@@ -1260,14 +1273,18 @@ function GalleryCard({ card }: { card: CardData }) {
         : card.name;
   const deleteLabel = isScheduled
     ? `Cancel scheduled post "${card.name}"`
-    : isServerLibrary
-      ? `Remove "${card.name}" from the server library`
-      : `Delete browser draft "${card.name}"`;
+    : isPosted
+      ? `Remove "${card.name}" from the posted history`
+      : isServerLibrary
+        ? `Remove "${card.name}" from the server library`
+        : `Delete browser draft "${card.name}"`;
   const deleteTitle = isScheduled
     ? "Cancel scheduled post"
-    : isServerLibrary
-      ? "Remove from server library"
-      : "Delete browser draft";
+    : isPosted
+      ? "Remove from history now"
+      : isServerLibrary
+        ? "Remove from server library"
+        : "Delete browser draft";
 
   return (
     <div
