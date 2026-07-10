@@ -846,9 +846,9 @@ export function TemplateGallery() {
                     className={styles.tabMeter}
                     title="Posted messages sync automatically — the newest posts, oldest roll off. Never-expire messages stay put."
                   >
-                    <strong>Posted:</strong> last{" "}
+                    <strong>Posted history:</strong>{" "}
                     {Math.max(0, libPosted.used - pinnedPostedCount)}
-                    {libPosted.quota != null ? ` of ${libPosted.quota}` : ""}
+                    {libPosted.quota != null ? ` / ${libPosted.quota}` : ""}
                   </p>
                 ) : null}
                 {activeFilter === SERVER_DRAFTS_FILTER ? (
