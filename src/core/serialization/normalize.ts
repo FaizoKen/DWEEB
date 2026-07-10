@@ -217,3 +217,21 @@ export function stripSessionAttachments(payload: unknown): unknown {
   }
   return obj;
 }
+
+/**
+ * Whether a message-shaped value contains an in-session upload URL.
+ *
+ * These URLs point at bytes held by this browser's attachment registry. They
+ * are safe in the local auto-save, but a server draft would leave teammates and
+ * other devices with a dangling reference. Only media `url` fields count: text
+ * content is allowed to mention the `session://` scheme without being mistaken
+ * for an upload.
+ */
+export function hasSessionAttachments(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  if (Array.isArray(payload)) return payload.some(hasSessionAttachments);
+  return Object.entries(payload as Record<string, unknown>).some(([key, value]) => {
+    if (key === "url" && typeof value === "string" && isSessionUrl(value)) return true;
+    return value != null && typeof value === "object" && hasSessionAttachments(value);
+  });
+}

@@ -6,12 +6,12 @@
  *
  * The web app's action bar (account menu, share links) is mostly absent: inside
  * Discord the context is fixed and publishing is one server-side call, so this
- * stays focused on "edit together, then post". Restore is the one import it
- * keeps — pulling a message DWEEB posted here back into the editor is just as
- * useful in the room, and the proxy makes it a one-field action. Scheduling
- * rides inside the post confirm (its "When → Schedule" choice) rather than as
- * bar chrome; existing schedules are managed in the Message directory's
- * Scheduled tab.
+ * stays focused on "edit together, then post". It keeps the server-scoped
+ * library actions that are useful in the room: save the current message as a
+ * named draft, browse the Message directory, or restore a posted message.
+ * Scheduling rides inside the post confirm (its "When → Schedule" choice)
+ * rather than as bar chrome; existing schedules are managed in the Message
+ * directory's Scheduled tab.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -35,6 +35,7 @@ import {
   PlusIcon,
   RedoIcon,
   RefreshIcon,
+  SaveIcon,
   SendIcon,
   SupportIcon,
   UndoIcon,
@@ -43,6 +44,7 @@ import { ChannelPicker } from "./ChannelPicker";
 import { GuildPicker, ServerGlyph, ServerGlyphSkeleton } from "./GuildPicker";
 import { ActivityGallery } from "./ActivityGallery";
 import { RestoreDialog } from "./RestoreDialog";
+import { SaveDraftDialog } from "./SaveDraftDialog";
 import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
 import { PlanBadge } from "./PlanBadge";
@@ -247,6 +249,10 @@ export function ActivityBar() {
     : undefined;
 
   const [restoreOpen, setRestoreOpen] = useState(false);
+  // The Activity has one useful save destination: the selected server's shared
+  // library. Its dialog therefore only asks for a name (no browser/server
+  // destination toggle like the web app).
+  const [saveOpen, setSaveOpen] = useState(false);
   // The server-library "Message directory" dialog. Reads the same Manage-Webhooks
   // gate as Restore (the proxy enforces it), so it shares the disabled states.
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -422,11 +428,12 @@ export function ActivityBar() {
           </>
         ) : null}
 
-        {/* Utility actions — restoring a message DWEEB posted here and jumping to
-            the full web app. Restore reads through the channel's webhook, so
-            (like Post) it needs a destination and is gated on Manage Webhooks;
-            "Open on web" hands the current draft to the web app for what the
-            embedded surface omits (scheduling, saved messages, account).
+        {/* Utility actions — saving/browsing the server library, restoring a
+            message DWEEB posted here, and jumping to the full web app. Library
+            actions are server-scoped (no channel needed); Restore reads through
+            the channel's webhook. All three server actions are gated on Manage
+            Webhooks. "Open on web" hands the current draft to the web app for
+            browser-local saves, account, and other full-site management.
 
             When the bar is too narrow to hold every control at full size, these
             fold into a single overflow menu — which also absorbs the update
@@ -454,6 +461,16 @@ export function ActivityBar() {
                     View posted message
                   </MenuItem>
                 ) : null}
+                <MenuItem
+                  icon={<SaveIcon size={16} />}
+                  disabled={!targetGuildId || blockedFromPosting || botMissing}
+                  onSelect={() => {
+                    close();
+                    setSaveOpen(true);
+                  }}
+                >
+                  Save current message
+                </MenuItem>
                 <MenuItem
                   icon={<BookmarkIcon size={16} />}
                   disabled={!targetGuildId || blockedFromPosting || botMissing}
@@ -499,6 +516,22 @@ export function ActivityBar() {
           </Menu>
         ) : (
           <>
+            <IconButton
+              label={
+                botMissing
+                  ? "Add DWEEB to this server first to save a server draft"
+                  : blockedFromPosting
+                    ? blockedReason
+                    : targetGuildId
+                      ? "Save the current message as a server draft"
+                      : "Pick a server before saving a draft"
+              }
+              onClick={() => setSaveOpen(true)}
+              disabled={!targetGuildId || blockedFromPosting || botMissing}
+            >
+              <SaveIcon />
+            </IconButton>
+
             <IconButton
               label={
                 botMissing
@@ -641,6 +674,12 @@ export function ActivityBar() {
         )}
       </div>
 
+      <SaveDraftDialog
+        open={saveOpen}
+        guildId={targetGuildId}
+        serverName={targetGuildMeta?.name}
+        onClose={() => setSaveOpen(false)}
+      />
       <RestoreDialog open={restoreOpen} onClose={() => setRestoreOpen(false)} />
       {/* Full-screen, like the web app's gallery; mounted only while open so
           each visit starts fresh (default tab, empty search, page one). */}

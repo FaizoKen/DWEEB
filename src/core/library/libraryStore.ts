@@ -16,7 +16,11 @@ import { create } from "zustand";
 import type { WebhookMessage } from "@/core/schema/types";
 import { collectSearchText } from "@/core/schema/traversal";
 import type { RestoredOrigin } from "@/core/state/messageStore";
-import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
+import {
+  attachEditorFields,
+  hasSessionAttachments,
+  stripEditorFields,
+} from "@/core/serialization/normalize";
 import {
   createLibraryEntry,
   deleteLibraryEntry,
@@ -173,6 +177,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   async saveDraft(guildId, title, message) {
+    // In-session uploads are backed by bytes in this browser's attachment
+    // registry. Persisting only their `session://` URL would make the shared
+    // draft look saved while leaving it broken for teammates and other devices.
+    // Guard at the shared server-draft boundary so both the web app and the
+    // Discord Activity get the same honest failure.
+    if (hasSessionAttachments(message)) {
+      return {
+        ok: false,
+        error: "Uploaded files can't be saved in a server draft — use image or media URLs instead.",
+        status: 400,
+      };
+    }
     const res = await createLibraryEntry(guildId, {
       label: "draft",
       title,

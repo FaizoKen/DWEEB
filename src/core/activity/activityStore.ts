@@ -206,9 +206,9 @@ interface ActivityState {
    *  native invite dialog; DM / group-DM launch → the share-link modal (the
    *  invite dialog throws there). Both land joiners in this same instance. */
   invite(): Promise<void>;
-  /** Hand off the current draft to the full web app (account menu, schedule management,
-   *  saved messages — the features the embedded surface omits). Opens the public
-   *  site with the draft carried in a share link. */
+  /** Hand off the current draft to the full web app (account menu, browser-local
+   *  drafts, and other full-site management the embedded surface omits). Opens
+   *  the public site with the draft carried in a share link. */
   openOnWeb(): Promise<void>;
   /** Open the web app's pricing page for a specific server. Embedded checkout is
    *  impossible (the Activity sandbox can't run Stripe), so upgrading happens on

@@ -51,6 +51,7 @@ destination differs:
         │      body: same JSON-or-multipart shape as /post
         ├── POST /api/activity/schedule message + fire time → stored sealed, posted later by the schedule worker (Bearer)
         ├── POST /api/activity/restore message id → the message DWEEB posted, read back via the same webhook (Bearer)
+        ├── GET/POST /api/guilds/:id/library posted history + named server drafts (Bearer)
         ├── GET  /api/activity/identities    who this server can post as: DWEEB + its custom bots (Bearer)
         ├── POST /api/activity/connect-bot   authorize URL for the one-time custom-bot connect flow (Bearer)
         └── WS   /api/activity/room/:instance   draft + presence relay
@@ -71,6 +72,22 @@ draft PATCHes the message you just posted (`POST /api/activity/edit`, through th
 the posted message. The sandboxed iframe can't navigate to discord.com itself, so
 the ↗ opens it through the SDK's `openExternalLink`. Re-point the channel and the
 primary reverts to **Post** (a fresh post into the new destination).
+
+### Save a server draft
+
+The bar's **Save draft** action stores the current shared message as a named
+draft in the destination server's Message directory. The server is implicit, so
+the Activity dialog only asks for a name; unlike the web app there is no
+browser/server destination toggle. A channel is not required because the
+library belongs to the server, but the same Manage Webhooks permission and plan
+quota as the web library apply. The message is read when **Save draft** is
+pressed, so edits that arrived from collaborators while the dialog was open are
+included.
+
+Saved drafts are sealed server-side and visible to other server managers in both
+the Activity and web app. In-session file uploads cannot be saved there: their
+bytes only exist in the current browser, so the dialog asks the user to replace
+them with image or media URLs instead of creating a broken cross-device draft.
 
 ### Schedule a post
 
