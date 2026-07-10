@@ -16,8 +16,6 @@ import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { usePlanStore } from "@/core/plan/planStore";
-import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
-import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { loadLastGuildId } from "@/core/guild/cache";
 import {
   clearPendingGuildId,
@@ -32,7 +30,6 @@ import { Menu } from "@/ui/Menu";
 import {
   CheckCircleIcon,
   ChevronRightIcon,
-  ClockIcon,
   LogInIcon,
   PlusIcon,
   RefreshIcon,
@@ -293,14 +290,6 @@ export function AccountMenu() {
         {(close) => (
           <AccountPanel
             onClose={close}
-            onManageMessages={() => {
-              close();
-              // Scheduled posts now live in the gallery's Scheduled tab. Make
-              // sure it reads *this* server's schedules, then open straight onto
-              // it.
-              if (connectedId) alignConnectedGuild(connectedId);
-              useTemplateGalleryStore.getState().openGallery("Scheduled");
-            }}
             onManageCustomBot={() => {
               close();
               if (connectedId) setCustomBotGuildId(connectedId);
@@ -321,13 +310,9 @@ export function AccountMenu() {
 
 function AccountPanel({
   onClose,
-  onManageMessages,
   onManageCustomBot,
 }: {
   onClose: () => void;
-  /** Opens the gallery's "Scheduled posts" tab for the connected server (closes
-   *  the menu first). */
-  onManageMessages: () => void;
   /** Opens the connected server's "Custom bot" dialog (closes the menu first). */
   onManageCustomBot: () => void;
 }) {
@@ -379,8 +364,8 @@ function AccountPanel({
   useScrollActiveIntoView(listRef, activeRowRef, []);
 
   // Switching servers keeps the menu open — the row's meta (roles · channels ·
-  // emoji) fills in as the data loads, and the "Scheduled posts" sub-row
-  // moves under the new selection, so the click has visible feedback in place.
+  // emoji) fills in as the data loads, and the "Plans" / "Custom bot" sub-rows
+  // move under the new selection, so the click has visible feedback in place.
   // Clicking the already-connected server again reads as "done" and closes.
   const onPick = (id: string) => {
     if (id !== connectedId) {
@@ -456,10 +441,6 @@ function AccountPanel({
                         <ChevronRightIcon size={12} />
                       </span>
                     )}
-                  </button>
-                  <button type="button" className={styles.serverSubRow} onClick={onManageMessages}>
-                    <ClockIcon size={14} />
-                    <span>Scheduled posts</span>
                   </button>
                   <button type="button" className={styles.serverSubRow} onClick={onManageCustomBot}>
                     <SettingsIcon size={14} />

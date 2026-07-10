@@ -635,8 +635,8 @@ export function TemplateGallery() {
     () => [
       ...(postedCards.length || orphanSlots.length ? [POSTED_FILTER] : []),
       ...(hasScheduled ? [SCHEDULED_FILTER] : []),
-      ...(savedCards.length ? [SAVED_FILTER] : []),
       ...(libraryDraftCards.length ? [SERVER_DRAFTS_FILTER] : []),
+      ...(savedCards.length ? [SAVED_FILTER] : []),
       ...(templateCards.length ? [TEMPLATE_FILTER] : []),
     ],
     [

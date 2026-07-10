@@ -20,6 +20,7 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isLibraryConfigured } from "@/core/library/api";
 import { useLibraryStore } from "@/core/library/libraryStore";
+import { isScheduleConfigured } from "@/core/schedule/api";
 import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
@@ -29,6 +30,7 @@ import { TextInput } from "@/ui/TextInput";
 import {
   BookmarkIcon,
   ChevronDownIcon,
+  ClockIcon,
   SaveIcon,
   SendIcon,
   ServerStackIcon,
@@ -71,6 +73,13 @@ export function SavedMessagesMenu() {
   const serverDraftCount = useLibraryStore((s) =>
     s.guildId === connectedGuildId ? s.entries.filter((e) => e.label === "draft").length : 0,
   );
+
+  // Scheduled posts moved here from the account panel's per-server sub-rows.
+  // They're a property of the connected server (the gallery's Scheduled tab
+  // reads that server's schedules), so the jump only shows when scheduling is
+  // configured and a server is connected. No count — that would cost a list
+  // fetch just to render the menu; the tab shows its own numbers on open.
+  const scheduleAvailable = isScheduleConfigured() && !!connectedGuildId;
 
   const [saveOpen, setSaveOpen] = useState(false);
 
@@ -133,15 +142,15 @@ export function SavedMessagesMenu() {
                 Posted messages ({serverPostedCount})
               </MenuItem>
             ) : null}
-            {entries.length > 0 ? (
+            {scheduleAvailable ? (
               <MenuItem
-                icon={<BookmarkIcon />}
+                icon={<ClockIcon />}
                 onSelect={() => {
                   close();
-                  openGallery("Saved");
+                  openGallery("Scheduled");
                 }}
               >
-                Saved messages ({entries.length})
+                Scheduled posts
               </MenuItem>
             ) : null}
             {serverDraftCount > 0 ? (
@@ -153,6 +162,17 @@ export function SavedMessagesMenu() {
                 }}
               >
                 Server drafts ({serverDraftCount})
+              </MenuItem>
+            ) : null}
+            {entries.length > 0 ? (
+              <MenuItem
+                icon={<BookmarkIcon />}
+                onSelect={() => {
+                  close();
+                  openGallery("Saved");
+                }}
+              >
+                Saved messages ({entries.length})
               </MenuItem>
             ) : null}
             <MenuItem
