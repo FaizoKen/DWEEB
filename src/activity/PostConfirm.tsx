@@ -16,8 +16,14 @@
  * also always resolves against the same server we post to, so the web app's
  * "preview names may be placeholders" caveat can't arise either.
  *
- * Presentational: it owns no post logic. Confirming hands back to the bar, which
- * runs `publish()` / `update()` and, on success, opens `PostSuccess`.
+ * A brand-new post also chooses *when*: now (the default) or a one-time
+ * scheduled post at a picked instant — the proxy then holds the message
+ * (sealed) and posts it later through the same DWEEB webhook, no browser
+ * needed. Managing existing schedules stays on the web.
+ *
+ * Presentational: it owns no post logic. Confirming hands back to the bar,
+ * which runs `publish()` / `update()` / `schedule()` and, on success, opens
+ * `PostSuccess` (or toasts the fire time for a schedule).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -38,7 +44,7 @@ import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { Switch } from "@/ui/Switch";
 import { pushToast } from "@/ui/Toast";
-import { PlusIcon, SendIcon, RefreshIcon } from "@/ui/Icon";
+import { ClockIcon, PlusIcon, SendIcon, RefreshIcon } from "@/ui/Icon";
 import { ServerGlyph } from "./GuildPicker";
 import styles from "./PostConfirm.module.css";
 
@@ -65,12 +71,30 @@ export interface PostConfirmProps {
    *  "Post as" choice — a connected custom bot's application id, or null for
    *  DWEEB (always null unless the picker was shown). */
   onConfirm: (makePermanent: boolean, postAs: string | null) => void;
+  /** Confirm a SCHEDULED post instead (the "When → Schedule" choice, brand-new
+   *  posts only): store the message server-side and post it at `at` (unix
+   *  seconds). Scheduled posts always go out as DWEEB, so there's no `postAs`. */
+  onSchedule: (makePermanent: boolean, at: number) => void;
   onCancel: () => void;
   /** Hand off to the full web app — used by the "Manage on web" action when every
    *  never-expire slot is taken (managing/freeing slots lives on the web). */
   onManageOnWeb?: () => void;
   /** Open this guild's custom-bot configuration in the full web app. */
   onManageCustomBots?: () => void;
+}
+
+/** Format a Date as a `datetime-local` value (local wall-clock, minute precision). */
+function toLocalInputValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Default the schedule picker to the next whole hour, in local wall-clock —
+ *  mirrors the web app's Send panel. */
+function defaultScheduleAt(): string {
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  d.setMinutes(0, 0, 0);
+  return toLocalInputValue(d);
 }
 
 /** Render a short, readable list of user-mention chips with a "+N more" tail. */
@@ -228,12 +252,29 @@ export function PostConfirm({
   channelName,
   busy = false,
   onConfirm,
+  onSchedule,
   onCancel,
   onManageOnWeb,
   onManageCustomBots,
 }: PostConfirmProps) {
   const message = useMessageStore((s) => s.message);
   const pings = useMemo(() => summarizePings(message), [message]);
+
+  // Send now vs schedule for later — only a brand-new post offers the choice
+  // (an update edits a live message; "later" has no meaning there). While
+  // "Schedule" is picked the primary button converts to "Schedule post" and the
+  // create runs through `onSchedule` instead of `onConfirm`. Fresh per open.
+  const offersSchedule = mode === "new";
+  const [when, setWhen] = useState<"now" | "later">("now");
+  const [scheduleAt, setScheduleAt] = useState<string>(defaultScheduleAt);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    setWhen("now");
+    setScheduleAt(defaultScheduleAt());
+    setScheduleError(null);
+  }, [open]);
+  const scheduling = offersSchedule && when === "later";
 
   // Whether the message carries interactive components — the only case where
   // expiry (and so the "Never expire" toggle) is relevant. Same signal the web
@@ -454,7 +495,10 @@ export function PostConfirm({
   const customIdentities = (identities ?? []).filter(
     (i): i is Extract<ActivityIdentity, { kind: "custom" }> => i.kind === "custom",
   );
-  const showIdentity = offersIdentity;
+  // A scheduled post always goes out as DWEEB (a custom bot's roaming Activity
+  // webhook could sit in another channel by fire time), so the "Post as" row
+  // gives way to the schedule area's own note while "Schedule" is picked.
+  const showIdentity = offersIdentity && !scheduling;
 
   const title =
     mode === "update"
@@ -465,18 +509,39 @@ export function PostConfirm({
   const action =
     mode === "update"
       ? "Edit the message you posted here"
-      : newCopy
-        ? "Post a separate new copy into the channel"
-        : "Post a new message";
-  const confirmLabel = busy
-    ? mode === "update"
-      ? "Updating…"
-      : "Posting…"
-    : mode === "update"
-      ? "Update message"
-      : newCopy
-        ? "Post copy"
-        : "Post message";
+      : scheduling
+        ? "Post a new message at the scheduled time"
+        : newCopy
+          ? "Post a separate new copy into the channel"
+          : "Post a new message";
+  const confirmLabel = scheduling
+    ? busy
+      ? "Scheduling…"
+      : "Schedule post"
+    : busy
+      ? mode === "update"
+        ? "Updating…"
+        : "Posting…"
+      : mode === "update"
+        ? "Update message"
+        : newCopy
+          ? "Post copy"
+          : "Post message";
+
+  // Validate the picked time, then hand off. Runs from the primary button while
+  // "Schedule" is picked; errors surface inline under the picker.
+  const handleSchedule = () => {
+    const at = Date.parse(scheduleAt);
+    if (Number.isNaN(at)) {
+      setScheduleError("Pick a date and time.");
+      return;
+    }
+    if (at < Date.now() - 60_000) {
+      setScheduleError("That time is in the past — pick a future time.");
+      return;
+    }
+    onSchedule(showPermanent ? makePermanent : false, Math.floor(at / 1000));
+  };
 
   return (
     <Modal
@@ -493,12 +558,16 @@ export function PostConfirm({
             variant="primary"
             size="sm"
             onClick={() =>
-              onConfirm(showPermanent ? makePermanent : false, showIdentity ? postAs : null)
+              scheduling
+                ? handleSchedule()
+                : onConfirm(showPermanent ? makePermanent : false, showIdentity ? postAs : null)
             }
             disabled={busy}
             leadingIcon={
               busy ? (
                 <span className={styles.spinner} aria-hidden="true" />
+              ) : scheduling ? (
+                <ClockIcon />
               ) : mode === "update" ? (
                 <RefreshIcon />
               ) : (
@@ -532,6 +601,61 @@ export function PostConfirm({
             <dt>Channel</dt>
             <dd>
               <span className={styles.destName}>#{channelName}</span>
+            </dd>
+          </div>
+        ) : null}
+        {offersSchedule ? (
+          <div className={styles.fact}>
+            <dt>When</dt>
+            <dd>
+              <div className={styles.idPills} role="group" aria-label="When to post">
+                <button
+                  type="button"
+                  className={styles.idPill}
+                  data-active={!scheduling ? "" : undefined}
+                  disabled={busy}
+                  onClick={() => {
+                    setWhen("now");
+                    setScheduleError(null);
+                  }}
+                >
+                  Now
+                </button>
+                <button
+                  type="button"
+                  className={styles.idPill}
+                  data-active={scheduling ? "" : undefined}
+                  disabled={busy}
+                  onClick={() => setWhen("later")}
+                >
+                  Schedule
+                </button>
+              </div>
+              {scheduling ? (
+                <div className={styles.scheduleArea}>
+                  <input
+                    type="datetime-local"
+                    className={styles.scheduleInput}
+                    value={scheduleAt}
+                    min={toLocalInputValue(new Date())}
+                    disabled={busy}
+                    aria-label="Date and time to post"
+                    onChange={(e) => {
+                      setScheduleAt(e.currentTarget.value);
+                      setScheduleError(null);
+                    }}
+                  />
+                  {scheduleError ? (
+                    <p className={styles.scheduleError} role="alert">
+                      {scheduleError}
+                    </p>
+                  ) : null}
+                  <p className={styles.idHint}>
+                    Posts once at this time (your local time), as DWEEB. Manage or cancel it in
+                    DWEEB on the web.
+                  </p>
+                </div>
+              ) : null}
             </dd>
           </div>
         ) : null}

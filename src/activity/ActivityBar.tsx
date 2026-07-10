@@ -4,11 +4,13 @@
  * and the primary **Post** action. Presence and inviting live in the bottom
  * `PresenceDock` instead.
  *
- * The web app's action bar (account menu, share links, scheduling) is mostly
- * absent: inside Discord the context is fixed and publishing is one server-side
- * call, so this stays focused on "edit together, then post". Restore is the one
- * import it keeps — pulling a message DWEEB posted here back into the editor is
- * just as useful in the room, and the proxy makes it a one-field action.
+ * The web app's action bar (account menu, share links) is mostly absent: inside
+ * Discord the context is fixed and publishing is one server-side call, so this
+ * stays focused on "edit together, then post". Restore is the one import it
+ * keeps — pulling a message DWEEB posted here back into the editor is just as
+ * useful in the room, and the proxy makes it a one-field action. Scheduling
+ * rides inside the post confirm (its "When → Schedule" choice) rather than as
+ * bar chrome; managing existing schedules stays on the web.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -44,6 +46,7 @@ import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
 import { PlanBadge } from "./PlanBadge";
 import { fetchActivityPlan } from "@/core/activity/api";
+import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import type { PlanInfo } from "@/core/guild/api";
 import styles from "./ActivityBar.module.css";
 
@@ -92,6 +95,7 @@ export function ActivityBar() {
   const publishing = useActivityStore((s) => s.publishing);
   const publish = useActivityStore((s) => s.publish);
   const update = useActivityStore((s) => s.update);
+  const schedulePost = useActivityStore((s) => s.schedule);
   const openLastPost = useActivityStore((s) => s.openLastPost);
   const openOnWeb = useActivityStore((s) => s.openOnWeb);
   const openPlansOnWeb = useActivityStore((s) => s.openPlansOnWeb);
@@ -330,6 +334,23 @@ export function ActivityBar() {
         permanent: result.permanent ?? false,
         permanentError: result.permanent_error ?? null,
       });
+    }
+  };
+
+  // Run the confirmed SCHEDULE (the confirm's "When → Schedule" choice): store
+  // the message server-side to post at `at`. Success is a toast rather than the
+  // post-success dialog — nothing has landed in the channel yet, so there's no
+  // message to view; a failure toasts (from the store) and leaves the confirm
+  // open to adjust the time and retry.
+  const confirmSchedule = async (makePermanent: boolean, at: number) => {
+    if (!pending) return;
+    const firesAt = await schedulePost(at, makePermanent);
+    if (firesAt != null) {
+      setPending(null);
+      pushToast(
+        `Scheduled for ${formatInstant(firesAt, browserTimezone())} — manage it in DWEEB on the web.`,
+        "success",
+      );
     }
   };
 
@@ -633,6 +654,7 @@ export function ActivityBar() {
         channelName={channelName}
         busy={publishing}
         onConfirm={(makePermanent, postAs) => void confirmPost(makePermanent, postAs)}
+        onSchedule={(makePermanent, at) => void confirmSchedule(makePermanent, at)}
         onCancel={() => setPending(null)}
         onManageOnWeb={() => void openOnWeb()}
         onManageCustomBots={() => {

@@ -91,6 +91,51 @@ export async function publishToChannel(
   return (await res.json()) as ActivityPostResult;
 }
 
+/** Result of a successful schedule: the stored schedule's id and when it fires
+ *  (unix seconds — echo of the requested time, post-validation). */
+export interface ActivityScheduleResult {
+  id: string;
+  next_run_at: number;
+}
+
+/** `POST /api/activity/schedule` — store the built message server-side and post
+ *  it later (one-time), through the same DWEEB-owned webhook a live post rides.
+ *  The proxy resolves the webhook itself — the iframe never sees credentials —
+ *  and the schedule lands in the same store the web app's Scheduled tab manages.
+ *  Always posts as DWEEB (a custom bot's roaming webhook could drift to another
+ *  channel before the schedule fires). `makePermanent` asks the worker to spend
+ *  a never-expire slot on the message once it's posted. */
+export async function schedulePostToChannel(
+  guildId: string,
+  channelId: string,
+  message: unknown,
+  startAt: number,
+  tz: string,
+  destLabel?: string,
+  makePermanent = false,
+): Promise<ActivityScheduleResult> {
+  let res: Response;
+  try {
+    res = await proxyFetch("/api/activity/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: guildId,
+        channel_id: channelId,
+        message,
+        start_at: startAt,
+        tz,
+        dest_label: destLabel,
+        make_permanent: makePermanent,
+      }),
+    });
+  } catch {
+    throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
+  }
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return (await res.json()) as ActivityScheduleResult;
+}
+
 /** One identity the Activity can post as: DWEEB itself, or a registered custom
  *  bot. A custom bot is pickable when `ready` (its Activity webhook is
  *  connected); otherwise `can_connect` says whether the one-time connect flow

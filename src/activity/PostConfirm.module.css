@@ -150,6 +150,38 @@
   color: var(--app-text-muted);
 }
 
+/* One-time scheduling — the "When" row's picker, shown while "Schedule" is on. */
+.scheduleArea {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scheduleInput {
+  width: 100%;
+  max-width: 260px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--app-text);
+  background: var(--app-bg-input, var(--app-bg-subtle));
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+}
+
+.scheduleInput:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 1px;
+}
+
+.scheduleError {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-danger, #f23f43);
+}
+
 /* Whole-message-replace heads-up shown only in update mode. */
 .replaceNote {
   margin: 0 0 14px;

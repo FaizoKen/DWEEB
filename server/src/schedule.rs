@@ -772,6 +772,15 @@ pub struct TokenQuery {
     pub token: Option<String>,
 }
 
+/// A freshly stored schedule, as [`create_for_owner`] reports it. The manage
+/// token exists exactly once here — whether it reaches the browser is the
+/// handler's call (the web app stores it; the Activity leans on ownership).
+pub(crate) struct Created {
+    pub id: String,
+    pub manage_token: String,
+    pub next_run_at: i64,
+}
+
 /// `POST /api/schedules` → `201 { id, manage_token, next_run_at, status }`.
 /// The manage token is returned exactly once — the browser must keep it.
 pub async fn schedule_create(
@@ -779,13 +788,35 @@ pub async fn schedule_create(
     jar: PrivateCookieJar,
     Json(body): Json<CreateBody>,
 ) -> Result<Response, AppError> {
-    let store = store(&st)?;
-
     // Scheduling requires a Discord login: the schedule is owned by the account
     // (manageable across devices, and counts against the per-server quota under a
     // real identity). Checked up front so an anonymous request fails fast.
     let session = current_session(&jar)
         .ok_or_else(|| AppError::Unauthorized("Sign in with Discord to schedule a post.".into()))?;
+    let created = create_for_owner(&st, session.uid, body).await?;
+    Ok((
+        StatusCode::CREATED,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({
+            "id": created.id,
+            "manage_token": created.manage_token,
+            "next_run_at": created.next_run_at,
+            "status": "active",
+        })),
+    )
+        .into_response())
+}
+
+/// Validate + store a new schedule owned by `owner_uid` — the shared core of
+/// the web handler above and the embedded Activity's `/api/activity/schedule`
+/// (which resolves the webhook server-side and authorizes with a bearer, so it
+/// can't ride the cookie-only handler).
+pub(crate) async fn create_for_owner(
+    st: &AppState,
+    owner_uid: String,
+    body: CreateBody,
+) -> Result<Created, AppError> {
+    let store = store(st)?;
 
     validate_webhook(&body.webhook_url).map_err(bad_request_s)?;
     let wid = webhook_id(&body.webhook_url)
@@ -869,7 +900,7 @@ pub async fn schedule_create(
     let new = NewSchedule {
         id: id.clone(),
         manage_token_hash: hash_token(&token),
-        owner_user_id: Some(session.uid),
+        owner_user_id: Some(owner_uid),
         webhook_id: wid,
         webhook_sealed,
         thread_id: body.thread_id.filter(|t| !t.is_empty()),
@@ -890,17 +921,11 @@ pub async fn schedule_create(
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
     match res {
-        Ok(()) => Ok((
-            StatusCode::CREATED,
-            [(header::CACHE_CONTROL, "no-store")],
-            Json(json!({
-                "id": id,
-                "manage_token": token,
-                "next_run_at": next_run_at,
-                "status": "active",
-            })),
-        )
-            .into_response()),
+        Ok(()) => Ok(Created {
+            id,
+            manage_token: token,
+            next_run_at,
+        }),
         Err(CreateError::Full) => Err(AppError::Status {
             status: StatusCode::SERVICE_UNAVAILABLE,
             message: "Scheduling is at capacity right now — try again later.".into(),

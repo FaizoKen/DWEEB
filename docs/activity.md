@@ -46,6 +46,7 @@ destination differs:
         ├── GET  /api/guilds/:id/bootstrap   roles/channels/emoji  (Bearer)
         ├── POST /api/activity/post    message → posted to the chosen channel via a DWEEB webhook (Bearer)
         ├── POST /api/activity/edit    message → PATCH a message already posted, via the same webhook (Bearer)
+        ├── POST /api/activity/schedule message + fire time → stored sealed, posted later by the schedule worker (Bearer)
         ├── POST /api/activity/restore message id → the message DWEEB posted, read back via the same webhook (Bearer)
         ├── GET  /api/activity/identities    who this server can post as: DWEEB + its custom bots (Bearer)
         ├── POST /api/activity/connect-bot   authorize URL for the one-time custom-bot connect flow (Bearer)
@@ -67,6 +68,21 @@ draft PATCHes the message you just posted (`POST /api/activity/edit`, through th
 the posted message. The sandboxed iframe can't navigate to discord.com itself, so
 the ↗ opens it through the SDK's `openExternalLink`. Re-point the channel and the
 primary reverts to **Post** (a fresh post into the new destination).
+
+### Schedule a post
+
+A brand-new post's confirm dialog also chooses **when**: *Now* (the default) or
+*Schedule* — a one-time post at a picked local date & time. The web app schedules
+by handing over a webhook URL the browser holds; the Activity never sees webhook
+credentials, so `POST /api/activity/schedule` resolves the destination webhook
+server-side (the same reuse-or-mint DWEEB webhook a live post rides) and stores
+the message through the same schedule store/worker as the web — sealed at rest,
+fired with the browser closed, counted against the same per-server plan quota.
+"Never expire" carries over too (the worker spends the slot when it fires).
+Always the standard DWEEB identity, never a custom bot: a custom bot's single
+Activity webhook roams between channels on demand, so by fire time it could sit
+somewhere else. Listing/cancelling schedules stays on the web (gallery →
+Scheduled); the success toast says so.
 
 ### Restore a posted message
 

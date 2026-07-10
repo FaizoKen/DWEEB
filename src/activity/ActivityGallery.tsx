@@ -15,9 +15,10 @@
  *
  * Deliberately absent: **Browser drafts** (localStorage isn't a surface inside
  * Discord's iframe — nothing local exists here by design), **Scheduled**
- * (scheduling is web-only; "Open on web" is the hand-off), and the
- * never-expire slot manager (its API rides the web cookie session, not the
- * Activity's bearer token — the web gallery stays the management surface).
+ * (creating a schedule lives in the post confirm's "When" choice; the list and
+ * cancel/edit stay on the web), and the never-expire slot manager (its API
+ * rides the web cookie session, not the Activity's bearer token — the web
+ * gallery stays the management surface).
  *
  * Rendered as a full-screen overlay via portal, exactly like the web gallery;
  * mounted only while open (see ActivityBar), so state resets per visit.

@@ -434,23 +434,9 @@ pub async fn activity_post(
             (hook.webhook_id, hook.token)
         }
         // Standard identity: reuse a DWEEB-owned incoming webhook already in
-        // the channel (so we don't spawn duplicates, and never hijack a third
-        // party's hook); otherwise mint one. Either way the post carries
+        // the channel; otherwise mint one. Either way the post carries
         // DWEEB's component routing.
-        None => match dweeb_webhook_in_channel(&st, &guild, &channel_id, None).await? {
-            Some(found) => found,
-            None => {
-                let reason = format!("Created via DWEEB Activity by {}", session.uid);
-                let w = st
-                    .discord
-                    .create_webhook(&channel_id, "DWEEB", None, Some(&reason))
-                    .await?;
-                let token = w.token.ok_or_else(|| {
-                    AppError::BadGateway("Discord created a webhook without a token.".into())
-                })?;
-                (w.id, token)
-            }
-        },
+        None => require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?,
     };
 
     let created = st
@@ -1134,6 +1120,31 @@ async fn dweeb_webhook_in_channel(
     Ok(chosen.map(|w| (w.id.clone(), w.token.clone().unwrap_or_default())))
 }
 
+/// Resolve the DWEEB webhook a standard-identity post rides: reuse a DWEEB-owned
+/// incoming webhook already in the channel (so we don't spawn duplicates, and
+/// never hijack a third party's hook), or mint one. Returns `(webhook_id, token)`.
+async fn require_dweeb_webhook(
+    st: &AppState,
+    session_uid: &str,
+    guild: &str,
+    channel_id: &str,
+) -> Result<(String, String), AppError> {
+    match dweeb_webhook_in_channel(st, guild, channel_id, None).await? {
+        Some(found) => Ok(found),
+        None => {
+            let reason = format!("Created via DWEEB Activity by {session_uid}");
+            let w = st
+                .discord
+                .create_webhook(channel_id, "DWEEB", None, Some(&reason))
+                .await?;
+            let token = w.token.ok_or_else(|| {
+                AppError::BadGateway("Discord created a webhook without a token.".into())
+            })?;
+            Ok((w.id, token))
+        }
+    }
+}
+
 /// Whether `w` is a DWEEB-owned incoming webhook in `channel_id` with a usable
 /// token — the gate for reusing (or editing through) it.
 fn webhook_is_ours(w: &Webhook, channel_id: &str, client_id: &str) -> bool {
@@ -1264,6 +1275,107 @@ pub async fn activity_edit(
         "application_id": custom_app,
     }))
     .into_response())
+}
+
+// ── Schedule a post (POST /api/activity/schedule) ────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ScheduleBody {
+    #[serde(default)]
+    guild_id: String,
+    #[serde(default)]
+    channel_id: String,
+    /// The wire payload the browser built — stored sealed until it fires.
+    message: Value,
+    /// Absolute fire time, unix seconds.
+    #[serde(default)]
+    start_at: i64,
+    /// The creator's IANA timezone. A one-time schedule fires at the absolute
+    /// `start_at` regardless, but the row stores it so the web management list
+    /// displays the time in the zone it was picked in.
+    #[serde(default)]
+    tz: String,
+    /// Cached "#channel · Server" for the management list (display-only).
+    #[serde(default)]
+    dest_label: Option<String>,
+    /// Spend a never-expire slot on the message once it fires (the worker does
+    /// the claim), keeping its interactive components past the TTL.
+    #[serde(default)]
+    make_permanent: bool,
+}
+
+/// `POST /api/activity/schedule` `{ guild_id, channel_id, message, start_at, tz }`
+/// — post the built message *later*: a one-time scheduled post, from inside the
+/// Activity.
+///
+/// The web app schedules by handing `/api/schedules` a webhook URL the browser
+/// holds; the Activity never sees webhook credentials, so this bearer-gated twin
+/// resolves the destination webhook server-side — the same reuse-or-mint DWEEB
+/// webhook a live [`activity_post`] rides — and then stores the schedule through
+/// the shared creation path (`schedule::create_for_owner`: same validation,
+/// sealing, per-server plan quota, and worker). Gated identically to a live post
+/// (Manage Webhooks in the guild).
+///
+/// Always the standard DWEEB identity, never a custom bot: a custom bot's single
+/// Activity webhook roams between channels on demand, so by the time a schedule
+/// fires it may sit in a different channel — the post would land in the wrong
+/// place. The channel-bound DWEEB webhook can't drift like that.
+///
+/// Answers `201 { id, next_run_at }`. No manage token is echoed — the schedule is
+/// owned by the (bearer-verified) creator, who lists/cancels it signed-in on the
+/// web; the token would otherwise be dropped on the iframe floor.
+pub async fn activity_schedule(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Json(body): Json<ScheduleBody>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let guild = body.guild_id.trim().to_string();
+    let channel_id = body.channel_id.trim().to_string();
+    if !is_snowflake(&guild) || !is_snowflake(&channel_id) {
+        return Err(bad_request("guild_id and channel_id must be Discord ids"));
+    }
+    if !body.message.is_object() {
+        return Err(bad_request("message must be a JSON object"));
+    }
+
+    authorize_activity_webhooks(&st, session.clone(), &guild).await?;
+    ensure_channel_in_guild(&st, &guild, &channel_id).await?;
+
+    let (webhook_id, token) = require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?;
+
+    let created = crate::schedule::create_for_owner(
+        &st,
+        session.uid,
+        crate::schedule::CreateBody {
+            webhook_url: format!("https://discord.com/api/webhooks/{webhook_id}/{token}"),
+            thread_id: None,
+            payload: body.message,
+            tz: body.tz,
+            recurrence: crate::schedule_rule::Recurrence::Once,
+            start_at: Some(body.start_at),
+            end_at: None,
+            max_runs: None,
+            title: None,
+            dest_label: body.dest_label,
+            guild_id: Some(guild),
+            make_permanent: body.make_permanent,
+        },
+    )
+    .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "id": created.id,
+            "next_run_at": created.next_run_at,
+        })),
+    )
+        .into_response())
 }
 
 // ── Restore a posted message (POST /api/activity/restore) ────────────────────

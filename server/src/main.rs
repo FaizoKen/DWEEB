@@ -468,6 +468,15 @@ async fn run() {
             "/api/activity/edit",
             post(activity::activity_edit).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
         )
+        // Schedule the built message to post later (one-time). The proxy resolves
+        // the DWEEB webhook server-side (the iframe never sees credentials) and
+        // stores the schedule sealed until it fires — same store/worker/quota as
+        // the web's /api/schedules. Bearer-gated like /post, body bounded like it.
+        .route(
+            "/api/activity/schedule",
+            post(activity::activity_schedule)
+                .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
         // Restore: pull a message DWEEB posted in the channel back into the editor.
         // The body is just three ids, so it's bounded tight like the token call.
         .route(

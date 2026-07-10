@@ -45,8 +45,10 @@ import {
   exchangeCode,
   publishToChannel,
   restorePostedMessage,
+  schedulePostToChannel,
   type ActivityPostResult,
 } from "./api";
+import { browserTimezone } from "@/core/schedule/recurrence";
 import { libraryEntryMessage } from "@/core/library/libraryStore";
 import type { LibraryEntryView } from "@/core/library/api";
 import { startCollab, stopCollab, broadcastTarget, type CollabParticipant } from "./collab";
@@ -175,6 +177,12 @@ interface ActivityState {
     makePermanent?: boolean,
     applicationId?: string | null,
   ): Promise<ActivityPostResult | null>;
+  /** Store the current message server-side to post LATER (one-time) into the
+   *  chosen channel — the confirm dialog's "Schedule" choice. `startAt` is the
+   *  fire time in unix seconds. Resolves with the validated fire time on
+   *  success, or null when it was guarded/failed (surfaced as a toast). Always
+   *  posts as DWEEB; managing/cancelling the schedule lives on the web. */
+  schedule(startAt: number, makePermanent?: boolean): Promise<number | null>;
   /** PATCH the message last posted from this Activity with the current draft.
    *  Only meaningful while {@link lastPost} matches the chosen destination.
    *  Returns the result on success / null on failure, like {@link publish}. */
@@ -198,7 +206,7 @@ interface ActivityState {
    *  native invite dialog; DM / group-DM launch → the share-link modal (the
    *  invite dialog throws there). Both land joiners in this same instance. */
   invite(): Promise<void>;
-  /** Hand off the current draft to the full web app (account menu, scheduling,
+  /** Hand off the current draft to the full web app (account menu, schedule management,
    *  saved messages — the features the embedded surface omits). Opens the public
    *  site with the draft carried in a share link. */
   openOnWeb(): Promise<void>;
@@ -531,6 +539,59 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       return result;
     } catch (e) {
       pushToast(e instanceof Error ? e.message : "Couldn't post the message.", "error");
+      return null;
+    } finally {
+      set({ publishing: false });
+    }
+  },
+
+  async schedule(startAt, makePermanent = false) {
+    const guildId = get().targetGuildId;
+    if (!guildId) {
+      pushToast("Pick a server to post to first.", "error");
+      return null;
+    }
+    const channelId = get().targetChannelId;
+    if (!channelId) {
+      pushToast("Pick a channel to post to first.", "error");
+      return null;
+    }
+    // Same gate as a live post — the proxy enforces it too, this keeps the
+    // failure friendly.
+    if (get().canPostToTarget === false) {
+      pushToast("You need the “Manage Webhooks” permission to post in this server.", "error");
+      return null;
+    }
+    const message = useMessageStore.getState().message;
+    if (!guardValid(message, "post")) return null;
+    // Uploaded files exist only in this browser — the worker can't attach them
+    // when the schedule fires later, so the post would land broken. (The proxy
+    // re-guards this; mirrors the web app's schedule gate.)
+    if (JSON.stringify(message).includes("session://")) {
+      pushToast("Uploaded files can't be scheduled — use image/media URLs instead.", "error");
+      return null;
+    }
+    if (get().publishing) return null;
+    set({ publishing: true });
+    try {
+      const payload = buildWirePayload(message);
+      // Cached "#channel · Server" so the web management list reads well.
+      const channelName = useGuildStore.getState().data?.channelById[channelId]?.name;
+      const serverName = get().targetGuildMeta?.name;
+      const destLabel =
+        channelName && serverName ? `#${channelName} · ${serverName}` : (serverName ?? undefined);
+      const result = await schedulePostToChannel(
+        guildId,
+        channelId,
+        payload,
+        startAt,
+        browserTimezone(),
+        destLabel,
+        makePermanent,
+      );
+      return result.next_run_at;
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : "Couldn't schedule the post.", "error");
       return null;
     } finally {
       set({ publishing: false });
