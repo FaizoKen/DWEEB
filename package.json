@@ -7,6 +7,8 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "dev": "vite",
+    "dev:server": "cd server && cargo run",
+    "dev:activity": "vite --mode activity",
     "build": "tsc -b && vite build && bun scripts/gen-template-pages.ts",
     "gen:seo": "bun scripts/gen-template-pages.ts",
     "preview": "vite preview --host",

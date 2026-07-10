@@ -39,6 +39,7 @@ const DEV_CONFIG_ORIGINS: Record<string, string> = {
   "quick-replies": (
     import.meta.env.VITE_DEV_QUICK_REPLIES_ORIGIN || "http://localhost:8096"
   ).trim(),
+  picker: (import.meta.env.VITE_DEV_PICKER_ORIGIN || "http://localhost:8097").trim(),
 };
 
 /** Repoint a plugin's configUrl at its local dev origin, preserving the path. */

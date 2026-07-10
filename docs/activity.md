@@ -274,12 +274,12 @@ mkdir -p certs && cd certs
 mkcert -cert-file localhost.pem -key-file localhost-key.pem localhost 127.0.0.1 ::1
 ```
 
-`vite.config.ts` auto-detects `certs/localhost*.pem` and serves HTTPS when
-present (absent the files it stays on HTTP, so the normal web-app dev loop and CI
-are untouched). The `certs/` folder is gitignored. Then:
+`vite.config.ts` auto-detects `certs/localhost*.pem` in the explicit Activity
+mode. Ordinary `bun run dev` stays on HTTP even when those files exist, so it
+can safely call the local HTTP proxy. The `certs/` folder is gitignored. Then:
 
 ```bash
-bun run dev                       # now https://localhost:5173
+bun run dev:activity              # https://localhost:5173
 ```
 
 Set the override to `https://localhost:5173`. Launch from a server channel —
@@ -301,10 +301,11 @@ build detects the faux ticket, it skips the proxy-bound handshake and seeds a st
 session from the launch query params (`guild_id`/`channel_id`/`instance_id`), so
 the builder renders immediately. This never runs in a production build. Point the
 dev build at the deployed app/proxy so the rest matches the launching app — create
-a gitignored **`.env.local`**:
+a gitignored **`.env.activity.local`**:
 
 ```bash
-# .env.local — local Activity dev against the deployed (prod) app + proxy
+# .env.activity.local — local Activity dev against the deployed app + proxy
+# Activity mode: local UI against the deployed app and proxy.
 VITE_DISCORD_CLIENT_ID=<prod app id, the one the override launches under>
 VITE_PROXY_BASE_URL=https://api.dweeb.example.com
 ```

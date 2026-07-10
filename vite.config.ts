@@ -11,7 +11,7 @@ import { createRequire } from "node:module";
 // string, so it's inlined and tree-shakeable — no runtime `import` of the JSON.
 const APP_VERSION: string = createRequire(import.meta.url)("./package.json").version;
 
-// Serve the dev server over HTTPS when a locally-trusted cert is present.
+// Serve Activity dev mode over HTTPS when a locally-trusted cert is present.
 //
 // The Discord client embeds an Activity in an iframe whose `frame-src` CSP only
 // whitelists `https://localhost:*` — a plain `http://localhost` override is
@@ -19,8 +19,9 @@ const APP_VERSION: string = createRequire(import.meta.url)("./package.json").ver
 // inside an iframe. So local Activity dev needs a *trusted* cert. Generate one
 // with mkcert (`mkcert -install` once, then `mkcert -cert-file certs/localhost.pem
 // -key-file certs/localhost-key.pem localhost 127.0.0.1 ::1`) and Vite picks it
-// up here. Absent the files we stay on plain HTTP, so the web app's normal dev
-// loop and CI are untouched. See docs/activity.md.
+// up here. Normal `vite` development deliberately stays on plain HTTP so it
+// can call the local HTTP proxy without mixed-content or schemeful-cookie
+// failures. See docs/activity.md.
 function devHttps(): ServerOptions["https"] {
   const cert = path.resolve(__dirname, "certs/localhost.pem");
   const key = path.resolve(__dirname, "certs/localhost-key.pem");
@@ -135,7 +136,7 @@ function injectSecurityMeta(): Plugin {
 // for share links — the server only ever sees `/`. (The deploy workflow
 // still publishes a 404.html copy of the shell so stray deep links load
 // the app.)
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
   },
@@ -248,11 +249,12 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: false,
-    // HTTPS only when the mkcert files exist (see `devHttps`) — needed for the
-    // embedded Activity, harmless for everything else.
-    https: devHttps(),
+    // Discord embeds only trusted HTTPS localhost pages. Keep that constraint
+    // in the explicit Activity mode; ordinary local web + proxy development is
+    // HTTP end-to-end even when mkcert files happen to be present.
+    https: mode === "activity" ? devHttps() : undefined,
   },
   preview: {
     port: 4173,
   },
-});
+}));

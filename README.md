@@ -91,7 +91,9 @@ auto-expire and are deleted after 7 days.
 
 ```bash
 bun install
-bun run dev          # http://localhost:5173
+bun run dev:server   # terminal 1: local proxy on http://localhost:8080
+bun run dev          # terminal 2: local web app on http://localhost:5173
+bun run dev:activity # Activity override on https://localhost:5173 (see docs/activity.md)
 bun run build        # produces dist/ (static, ready for any host)
 bun run preview      # serve the built bundle locally
 bun run typecheck    # tsc -b --noEmit

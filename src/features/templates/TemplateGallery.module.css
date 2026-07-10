@@ -178,12 +178,21 @@
 
 .chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+  max-width: 100%;
   min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  overscroll-behavior-x: contain;
+  scrollbar-color: var(--app-border) transparent;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .chip {
+  flex: 0 0 auto;
   height: 32px;
   padding: 0 14px;
   border-radius: 999px;
