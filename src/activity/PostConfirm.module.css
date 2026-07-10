@@ -77,7 +77,8 @@
 }
 
 .idPill,
-.idPillConnect {
+.idPillConnect,
+.idPillAdd {
   appearance: none;
   font: inherit;
   font-size: 12px;
@@ -96,7 +97,8 @@
 }
 
 .idPill:hover:not(:disabled),
-.idPillConnect:hover:not(:disabled) {
+.idPillConnect:hover:not(:disabled),
+.idPillAdd:hover:not(:disabled) {
   border-color: var(--app-accent);
 }
 
@@ -113,8 +115,30 @@
   color: var(--app-text-muted);
 }
 
+/* Compact trailing action: add the first custom bot or manage existing ones on
+   the web, where credentials and Discord app setup can be handled safely. */
+.idPillAdd {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  border-style: dashed;
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+}
+
+.idPillAdd:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
 .idPill:disabled,
-.idPillConnect:disabled {
+.idPillConnect:disabled,
+.idPillAdd:disabled {
   opacity: 0.55;
   cursor: default;
 }

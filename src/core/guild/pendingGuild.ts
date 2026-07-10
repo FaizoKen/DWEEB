@@ -2,8 +2,9 @@
  * The "connect to this server next" hint, in sessionStorage.
  *
  * Written when an intent names a specific guild before its data can be loaded:
- *  - returning from the bot-add OAuth flow (the just-added server), or
- *  - opening an "Edit in DWEEB" link for a message in that server.
+ *  - returning from the bot-add OAuth flow (the just-added server),
+ *  - opening an "Edit in DWEEB" link for a message in that server, or
+ *  - following an Activity handoff to configure that server's custom bots.
  *
  * The AccountMenu's auto-connect effect consumes it once Discord login resolves:
  * it connects straight by id (authorization only needs that the user manages the

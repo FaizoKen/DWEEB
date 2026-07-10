@@ -95,6 +95,7 @@ import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import { useInstallStore } from "@/features/install/installStore";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
+import { readCustomBotParam } from "@/core/guild/customBotLink";
 import { useShareUrlBootstrap } from "./useShareUrlBootstrap";
 import { useDraftOriginBootstrap } from "./useDraftOriginBootstrap";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
@@ -293,6 +294,8 @@ export function App() {
     // A `?plans=` deep link (the Activity's "Upgrade" hand-off) opens the pricing
     // modal — don't also throw the gallery in front of it.
     if (readPlansParam(window.location.search)) return;
+    // The Activity's custom-bot handoff opens a guild-scoped setup dialog.
+    if (readCustomBotParam(window.location.search)) return;
     if (!shouldAutoOpenGallery()) return;
     markGalleryAutoOpened();
     openGallery();

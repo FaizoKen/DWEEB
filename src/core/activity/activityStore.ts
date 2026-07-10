@@ -18,6 +18,7 @@ import { DISCORD_CLIENT_ID, WEB_APP_BASE_URL, botInviteUrl } from "@/core/guild/
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { fetchUserGuilds, type PickerGuild } from "@/core/guild/api";
+import { customBotConfigUrl } from "@/core/guild/customBotLink";
 import { useMessageStore } from "@/core/state/messageStore";
 import type { WebhookMessage } from "@/core/schema/types";
 import {
@@ -206,6 +207,10 @@ interface ActivityState {
    *  the site: this hands off to `/?plans=<guildId>`, which opens the pricing
    *  modal scoped to that server (signing the user in first if needed). */
   openPlansOnWeb(guildId: string): Promise<void>;
+  /** Open the web app's custom-bot settings for the exact destination server.
+   *  The web deep link signs in if needed, selects that guild, and opens its
+   *  configuration dialog. */
+  openCustomBotsOnWeb(guildId: string): Promise<void>;
   /** Open Discord's "Add to Server" flow for the launching guild so the user can
    *  add the missing DWEEB bot (see {@link botMissing}). Routes through the host
    *  SDK — the sandboxed iframe can't open discord.com itself — and pre-selects
@@ -770,6 +775,21 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       await openExternalLink(url);
     } catch {
       // The web app / dev URL-override aren't sandboxed, so a plain open works.
+      try {
+        window.open(url, "_blank", "noopener");
+      } catch {
+        /* nothing more we can do */
+      }
+    }
+  },
+
+  async openCustomBotsOnWeb(guildId: string) {
+    const url = customBotConfigUrl(WEB_APP_BASE_URL, guildId);
+    try {
+      // A real Activity is sandboxed, so external navigation must go through
+      // Discord's host client. The fallback keeps local URL-override dev useful.
+      await openExternalLink(url);
+    } catch {
       try {
         window.open(url, "_blank", "noopener");
       } catch {

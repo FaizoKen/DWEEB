@@ -102,11 +102,15 @@ handshake deliberately does **not** request (a new scope risks breaking the
 
 ### Post as the server's own bot (custom bots)
 
-A server that registered a **custom bot** (web app → account menu → Custom bot)
-can post and update from the Activity *as that bot*: the pre-post confirm gains a
-**Post as** row — `DWEEB` and each registered bot — and the message lands under
-the bot's identity, with its components routed to that app (which the dispatcher
-serves, so DWEEB plugins keep working on it).
+A server can post and update from the Activity under one of its **custom bots**:
+the pre-post confirm's **Post as** row shows `DWEEB`, each registered bot, and a
+trailing **+**. The + opens the full web app directly on that destination guild's
+Custom bot configuration (`?custom-bot=<guildId>`, signing in first if needed),
+because app credentials should never be entered inside the Activity iframe. When
+the user returns, the open dialog refreshes its identities so a newly registered
+bot appears without being reopened. Posts under a custom bot carry that bot's
+identity, with components routed to its app (which the dispatcher serves, so
+DWEEB plugins keep working on it).
 
 The mechanism is a per-bot **Activity webhook**. Discord only reveals a webhook's
 execute token to the app that owns it, so DWEEB's bot can never recover a

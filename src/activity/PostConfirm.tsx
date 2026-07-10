@@ -38,7 +38,7 @@ import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
 import { Switch } from "@/ui/Switch";
 import { pushToast } from "@/ui/Toast";
-import { SendIcon, RefreshIcon } from "@/ui/Icon";
+import { PlusIcon, SendIcon, RefreshIcon } from "@/ui/Icon";
 import { ServerGlyph } from "./GuildPicker";
 import styles from "./PostConfirm.module.css";
 
@@ -69,6 +69,8 @@ export interface PostConfirmProps {
   /** Hand off to the full web app — used by the "Manage on web" action when every
    *  never-expire slot is taken (managing/freeing slots lives on the web). */
   onManageOnWeb?: () => void;
+  /** Open this guild's custom-bot configuration in the full web app. */
+  onManageCustomBots?: () => void;
 }
 
 /** Render a short, readable list of user-mention chips with a "+N more" tail. */
@@ -228,6 +230,7 @@ export function PostConfirm({
   onConfirm,
   onCancel,
   onManageOnWeb,
+  onManageCustomBots,
 }: PostConfirmProps) {
   const message = useMessageStore((s) => s.message);
   const pings = useMemo(() => summarizePings(message), [message]);
@@ -273,15 +276,19 @@ export function PostConfirm({
 
   // "Post as" — DWEEB or one of the server's registered custom bots. Only a
   // brand-new post chooses an identity (an update rides whatever authored the
-  // message), and the row renders only when the server actually has custom
-  // bots — everyone else sees the dialog exactly as before. Like the web app's
-  // Send panel, a ready custom bot is pre-selected until the user picks
-  // (posting under your own bot is the nicer outcome); a fetch failure just
-  // hides the row and the post goes out as DWEEB.
+  // message). The row always renders for a destination guild: even a server
+  // with no custom bots needs its DWEEB choice plus the add/manage shortcut.
+  // Like the web app's Send panel, a ready custom bot is pre-selected until the
+  // user picks; a fetch failure simply leaves DWEEB as the only identity while
+  // the web shortcut remains available.
   const offersIdentity = open && mode === "new" && !!guildId;
   const [identities, setIdentities] = useState<ActivityIdentity[] | null>(null);
   const [postAs, setPostAs] = useState<string | null>(null);
   const identityTouched = useRef(false);
+  // After the + opens web settings, re-read when the user returns so a newly
+  // registered bot appears without closing and reopening this dialog.
+  const refreshAfterManage = useRef(false);
+  const manageRefreshInFlight = useRef(false);
   // The bot whose connect flow is out in the user's external browser — drives
   // the "waiting" pill until the server says it's ready.
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -294,6 +301,8 @@ export function PostConfirm({
     setPostAs(null);
     setConnecting(null);
     identityTouched.current = false;
+    refreshAfterManage.current = false;
+    manageRefreshInFlight.current = false;
     adoptedRef.current = null;
     const ac = new AbortController();
     fetchActivityIdentities(guildId, ac.signal)
@@ -308,6 +317,47 @@ export function PostConfirm({
         // 501/403/network/abort — leave the row hidden; posting proceeds as DWEEB.
       });
     return () => ac.abort();
+  }, [offersIdentity, guildId]);
+
+  // Registering or removing bots happens in an external browser. Re-read the
+  // identities when Discord becomes active again so the open dialog stays in
+  // sync, without polling or disturbing the current Post-as choice.
+  useEffect(() => {
+    if (!offersIdentity || !guildId) return;
+    let cancelled = false;
+
+    const refresh = async () => {
+      if (!refreshAfterManage.current || manageRefreshInFlight.current) return;
+      manageRefreshInFlight.current = true;
+      try {
+        const ids = await fetchActivityIdentities(guildId);
+        if (cancelled) return;
+        setIdentities(ids);
+        // If web settings removed the selected bot, fall back safely to DWEEB.
+        setPostAs((current) =>
+          current === null ||
+          ids.some((i) => i.kind === "custom" && i.ready && i.application_id === current)
+            ? current
+            : null,
+        );
+      } catch {
+        // A later focus/visibility return retries while this dialog stays open.
+      } finally {
+        manageRefreshInFlight.current = false;
+      }
+    };
+
+    const onFocus = () => void refresh();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [offersIdentity, guildId]);
 
   // The instant path: the connect callback pushes a `bot_connected` frame down
@@ -404,7 +454,7 @@ export function PostConfirm({
   const customIdentities = (identities ?? []).filter(
     (i): i is Extract<ActivityIdentity, { kind: "custom" }> => i.kind === "custom",
   );
-  const showIdentity = offersIdentity && customIdentities.length > 0;
+  const showIdentity = offersIdentity;
 
   const title =
     mode === "update"
@@ -539,6 +589,21 @@ export function PostConfirm({
                     </button>
                   );
                 })}
+                {onManageCustomBots ? (
+                  <button
+                    type="button"
+                    className={styles.idPillAdd}
+                    disabled={busy}
+                    aria-label="Add or manage custom bots on the web"
+                    title="Add or manage custom bots on the web"
+                    onClick={() => {
+                      refreshAfterManage.current = true;
+                      onManageCustomBots();
+                    }}
+                  >
+                    <PlusIcon size={14} aria-hidden="true" />
+                  </button>
+                ) : null}
               </div>
               {connecting ? (
                 <p className={styles.idHint}>

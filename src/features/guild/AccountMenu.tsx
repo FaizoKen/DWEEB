@@ -40,6 +40,7 @@ import {
 import { cn } from "@/lib/cn";
 import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import { CustomBotDialog } from "./CustomBotDialog";
+import { useCustomBotDeepLink } from "@/app/useCustomBotDeepLink";
 import styles from "./AccountMenu.module.css";
 
 /** Query keys Discord appends to the redirect after a bot add. */
@@ -114,9 +115,12 @@ export function AccountMenu() {
   const showLoader = busy && !settledRef.current;
 
   // The "Custom bot" dialog — register the server's own Discord app so the
-  // DWEEB dispatcher serves its interactions. Only opened from this menu, so
-  // plain local state is enough (no cross-feature opener needed).
+  // DWEEB dispatcher serves its interactions. It opens from this menu or from
+  // the Activity's guild-scoped web handoff.
   const [customBotGuildId, setCustomBotGuildId] = useState<string | null>(null);
+  // The Activity's Post-as + opens this same dialog for its destination server,
+  // surviving web sign-in when necessary.
+  useCustomBotDeepLink(setCustomBotGuildId);
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   // One-shot guard so the post–sign-in auto-select runs once, not on every

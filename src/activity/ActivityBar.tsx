@@ -95,6 +95,7 @@ export function ActivityBar() {
   const openLastPost = useActivityStore((s) => s.openLastPost);
   const openOnWeb = useActivityStore((s) => s.openOnWeb);
   const openPlansOnWeb = useActivityStore((s) => s.openPlansOnWeb);
+  const openCustomBotsOnWeb = useActivityStore((s) => s.openCustomBotsOnWeb);
   const lastPost = useActivityStore((s) => s.lastPost);
   const targetChannelId = useActivityStore((s) => s.targetChannelId);
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
@@ -634,6 +635,9 @@ export function ActivityBar() {
         onConfirm={(makePermanent, postAs) => void confirmPost(makePermanent, postAs)}
         onCancel={() => setPending(null)}
         onManageOnWeb={() => void openOnWeb()}
+        onManageCustomBots={() => {
+          if (targetGuildId) void openCustomBotsOnWeb(targetGuildId);
+        }}
       />
 
       <PostSuccess

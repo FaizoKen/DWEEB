@@ -8,7 +8,8 @@
  * proceeds untouched beneath it.
  *
  * Stands down entirely on deep-linked loads (a share/short link being decoded,
- * a `?template=`/`?plans=` param, or a webhook-create redirect) — the visitor
+ * a `?template=`/`?plans=`/`?custom-bot=` param, or a webhook-create redirect) —
+ * the visitor
  * came for something specific, so nothing is recorded and a later organic
  * visit still gets the one auto-play. Pre-film users (evidence of prior use)
  * get a single toast pointing at the More menu's "Watch the intro" instead.
@@ -25,6 +26,7 @@ import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
 import { readTemplateParam } from "@/app/useTemplateDeepLink";
 import { readPlansParam } from "@/app/usePlansDeepLink";
+import { readCustomBotParam } from "@/core/guild/customBotLink";
 import { pushToast } from "@/ui/Toast";
 import { welcomeAutoDecision, writeWelcomeRecord } from "./welcomeGate";
 import { useWelcomeStore } from "./welcomeStore";
@@ -41,7 +43,8 @@ function isDeepLinkedLoad(): boolean {
     !!readShareTokenFromHash(window.location.hash) ||
     !!readShortLinkId(window.location.pathname) ||
     !!readTemplateParam(window.location.search) ||
-    !!readPlansParam(window.location.search)
+    !!readPlansParam(window.location.search) ||
+    !!readCustomBotParam(window.location.search)
   );
 }
 
