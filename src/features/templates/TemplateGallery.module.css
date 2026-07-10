@@ -864,29 +864,24 @@
   white-space: nowrap;
 }
 
-/* Server-library usage read-out: a quiet pill between the hint and the primary
- * footer action. Now a static <span> (management moved into the gallery's
- * tabs), so it doesn't invite a click. */
-.libraryMeter {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  height: 36px;
-  padding: 0 12px;
-  border-radius: var(--app-radius);
-  background: transparent;
-  border: 1px solid var(--app-border);
-  color: var(--app-text-subtle);
-  font-size: var(--app-text-sm);
-  font-weight: 500;
-  white-space: nowrap;
+/* Per-tab server-library usage read-out, at the top of the list. A quiet line
+ * (not a box), so it doesn't compete with the never-expire / scheduled strips
+ * that can sit below it on the same tab. Moved here from the shared footer so
+ * each tab shows only its own numbers. */
+.tabMeter {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.tabMeter strong {
+  color: var(--app-text);
 }
 /* Over the plan's library limit — the shelf is content-frozen (see the server's
- * over-quota guard); tint the meter so the state is visible at a glance. */
-.libraryMeter[data-over] {
+ * over-quota guard); tint the read-out so the state is visible at a glance. */
+.tabMeter[data-over],
+.tabMeter[data-over] strong {
   color: #d83c3e;
-  border-color: color-mix(in srgb, #d83c3e 40%, transparent);
-  background: color-mix(in srgb, #d83c3e 8%, transparent);
 }
 
 .blankBtn {

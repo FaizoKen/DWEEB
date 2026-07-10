@@ -833,6 +833,47 @@ export function TemplateGallery() {
           </header>
 
           <div className={styles.body}>
+            {/* Per-tab usage read-out, moved out of the shared footer so each
+                tab shows only its own numbers. A quiet line above the list, not
+                a box, so it doesn't compete with the never-expire / scheduled
+                strips below. Shown once the shelf has loaded for the connected
+                server (a non-manager never sees a meter for a list they can't
+                read). */}
+            {connectedGuildId && libGuild === connectedGuildId && libLoaded ? (
+              <>
+                {activeFilter === POSTED_FILTER ? (
+                  <p
+                    className={styles.tabMeter}
+                    title="Posted messages sync automatically — the newest posts, oldest roll off. Never-expire messages stay put."
+                  >
+                    <strong>Posted:</strong> last{" "}
+                    {Math.max(0, libPosted.used - pinnedPostedCount)}
+                    {libPosted.quota != null ? ` of ${libPosted.quota}` : ""}
+                    {pinnedPostedCount > 0 ? ` (+${pinnedPostedCount} pinned)` : ""}
+                  </p>
+                ) : null}
+                {activeFilter === SERVER_DRAFTS_FILTER ? (
+                  <p
+                    className={styles.tabMeter}
+                    data-over={
+                      libDrafts.quota != null && libDrafts.used > libDrafts.quota ? "" : undefined
+                    }
+                    title={
+                      libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                        ? "More server drafts than the plan allows — they stay readable, but content can't be changed until you delete down to the limit or upgrade."
+                        : "Server drafts are yours to add and remove."
+                    }
+                  >
+                    <strong>Server drafts:</strong> {libDrafts.used}
+                    {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
+                    {libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                      ? " · over limit"
+                      : ""}
+                  </p>
+                ) : null}
+              </>
+            ) : null}
+
             {/* The Posted tab doubles as the never-expire slot manager: usage,
                 the upgrade path when full, and any slots whose message has no
                 card here (nothing else could free those). Hidden when the
@@ -1017,34 +1058,6 @@ export function TemplateGallery() {
             <span className={styles.footerHint}>
               {shown.length} {shown.length === 1 ? "result" : "results"}
             </span>
-            {/* The connected server's library usage, at a glance. Every list it
-                summarises (Posted, Saved, Scheduled, never-expire slots) is now
-                a tab or an on-card control in this gallery, so it's a quiet
-                read-out rather than a hand-off. Shown only once the shelf loaded
-                for this server, so a non-manager never sees a meter for a list
-                they can't read. */}
-            {connectedGuildId && libGuild === connectedGuildId && libLoaded ? (
-              <span
-                className={styles.libraryMeter}
-                data-static=""
-                data-over={
-                  libDrafts.quota != null && libDrafts.used > libDrafts.quota ? "" : undefined
-                }
-                title={
-                  libDrafts.quota != null && libDrafts.used > libDrafts.quota
-                    ? "More saved messages than the plan allows — they stay readable, but content can't be changed until you delete down to the limit or upgrade."
-                    : "Posted messages sync automatically (the newest posts, oldest roll off; never-expire messages stay put). Saved messages are yours to add and remove."
-                }
-              >
-                Posted: last {Math.max(0, libPosted.used - pinnedPostedCount)}
-                {libPosted.quota != null ? ` of ${libPosted.quota}` : ""}
-                {pinnedPostedCount > 0 ? ` (+${pinnedPostedCount} pinned)` : ""}
-                {" · Saved: "}
-                {libDrafts.used}
-                {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
-                {libDrafts.quota != null && libDrafts.used > libDrafts.quota ? " · over limit" : ""}
-              </span>
-            ) : null}
             <button type="button" className={styles.blankBtn} onClick={startBlank}>
               <PlusIcon size={16} />
               Start from scratch
