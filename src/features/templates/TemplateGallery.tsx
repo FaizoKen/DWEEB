@@ -849,7 +849,6 @@ export function TemplateGallery() {
                     <strong>Posted:</strong> last{" "}
                     {Math.max(0, libPosted.used - pinnedPostedCount)}
                     {libPosted.quota != null ? ` of ${libPosted.quota}` : ""}
-                    {pinnedPostedCount > 0 ? ` (+${pinnedPostedCount} pinned)` : ""}
                   </p>
                 ) : null}
                 {activeFilter === SERVER_DRAFTS_FILTER ? (
