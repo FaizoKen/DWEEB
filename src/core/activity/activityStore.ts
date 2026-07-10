@@ -27,7 +27,7 @@ import {
   isShortLinkConfigured,
   attachEditorFields,
 } from "@/core/serialization";
-import { buildWirePayload, parseMessageIdInput } from "@/core/webhook/send";
+import { buildWirePayload, parseMessageIdInput, prepareMessagePayload } from "@/core/webhook/send";
 import { validateMessage } from "@/core/schema/validation";
 import { pushToast } from "@/ui/Toast";
 import {
@@ -525,13 +525,17 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (get().publishing) return null;
     set({ publishing: true });
     try {
-      const payload = buildWirePayload(message);
+      // Resolve in-session uploads (`session://` blobs) into `attachment://`
+      // references + the file bytes — the proxy forwards them to Discord as
+      // multipart, exactly like the web builder's direct send.
+      const { payload, files } = prepareMessagePayload(message);
       const result = await publishToChannel(
         guildId,
         channelId,
         payload,
         makePermanent,
         applicationId,
+        files,
       );
       set({ lastPost: result });
       // Success is surfaced by the post-success dialog (see ActivityBar), so no
@@ -616,7 +620,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (get().publishing) return null;
     set({ publishing: true });
     try {
-      const payload = buildWirePayload(message);
+      // Same upload resolution as a fresh post — an edit that (still) references
+      // in-session files re-uploads them alongside the payload.
+      const { payload, files } = prepareMessagePayload(message);
       // The update rides whichever identity authored the message — the
       // webhook (and custom bot, when it was one) from the original post.
       const result = await editPostedMessage(
@@ -626,6 +632,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         last.webhook_id ?? "",
         payload,
         last.application_id ?? null,
+        files,
       );
       set({ lastPost: result });
       // The post-success dialog confirms it (see ActivityBar) — skip the toast.

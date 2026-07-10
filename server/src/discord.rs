@@ -575,6 +575,76 @@ impl Discord {
         Err(webhook_error_from(resp).await)
     }
 
+    /// [`execute_webhook`], but carrying uploaded files: the payload rides as a
+    /// `payload_json` multipart field and each file as its `files[i]` part, the
+    /// exact shape the web builder sends to Discord directly. The payload's
+    /// `attachments` array (built by the browser) maps each part index to the
+    /// `attachment://<filename>` references inside the components. Falls back to
+    /// the plain JSON call when `files` is empty. Multipart bodies are streamed,
+    /// so a 429 here is not retried (single shot) — acceptable for a user-clicked
+    /// post, which surfaces the rate limit as a friendly error instead.
+    pub async fn execute_webhook_with_files(
+        &self,
+        webhook_id: &str,
+        token: &str,
+        payload: &Value,
+        files: Vec<UploadFile>,
+    ) -> Result<Value, AppError> {
+        if files.is_empty() {
+            return self.execute_webhook(webhook_id, token, payload).await;
+        }
+        let url =
+            format!("{API_BASE}/webhooks/{webhook_id}/{token}?wait=true&with_components=true");
+        let resp = send_with_retry(
+            self.http
+                .post(&url)
+                .multipart(multipart_form(payload, files)),
+        )
+        .await
+        .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        if resp.status().is_success() {
+            return resp.json::<Value>().await.map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
+    /// [`edit_webhook_message`], but carrying uploaded files (multipart, same
+    /// shape as [`Self::execute_webhook_with_files`]) and returning the updated
+    /// message Discord echoes back — the caller records it so the library entry
+    /// holds resolved CDN attachment URLs rather than dangling `attachment://`
+    /// references. Handles the file-less case too (plain JSON PATCH), so the
+    /// Activity edit path has one call for both.
+    pub async fn edit_webhook_message_with_files(
+        &self,
+        webhook_id: &str,
+        token: &str,
+        message_id: &str,
+        payload: &Value,
+        files: Vec<UploadFile>,
+    ) -> Result<Value, AppError> {
+        let url = format!(
+            "{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}?with_components=true"
+        );
+        let req = if files.is_empty() {
+            self.http.patch(&url).json(payload)
+        } else {
+            self.http
+                .patch(&url)
+                .multipart(multipart_form(payload, files))
+        };
+        let resp = send_with_retry(req)
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        if resp.status().is_success() {
+            return resp.json::<Value>().await.map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
     /// Post `payload` to a full incoming-webhook URL the proxy holds as config
     /// (e.g. `FEEDBACK_WEBHOOK_URL`), rather than an id+token pair resolved per
     /// channel. Used by the embedded Activity's feedback relay: the sandboxed
@@ -1059,6 +1129,39 @@ fn command_set() -> Value {
 /// Note the caller may hold the bot concurrency permit across this, so a sleep
 /// here also throttles the whole proxy while Discord is asking us to slow down —
 /// the back-pressure that keeps a burst from compounding.
+/// One uploaded file forwarded to Discord in a multipart webhook call.
+/// `name` is the multipart part name (`files[0]`, `files[1]`, …) whose index
+/// the payload's `attachments` array references — preserved verbatim from the
+/// browser's request so the mapping can never drift in transit.
+pub struct UploadFile {
+    pub name: String,
+    pub filename: String,
+    /// The browser-reported MIME type; invalid/absent falls back to reqwest's
+    /// default (`application/octet-stream`) rather than failing the post.
+    pub content_type: Option<String>,
+    pub bytes: axum::body::Bytes,
+}
+
+/// Assemble Discord's multipart webhook body: `payload_json` + one part per
+/// uploaded file.
+fn multipart_form(payload: &Value, files: Vec<UploadFile>) -> reqwest::multipart::Form {
+    let mut form = reqwest::multipart::Form::new().text("payload_json", payload.to_string());
+    for f in files {
+        // `Bytes` clones are refcounted, so building the part twice on an
+        // invalid MIME type costs nothing.
+        let part = || {
+            reqwest::multipart::Part::stream(reqwest::Body::from(f.bytes.clone()))
+                .file_name(f.filename.clone())
+        };
+        let part = match f.content_type.as_deref() {
+            Some(ct) => part().mime_str(ct).unwrap_or_else(|_| part()),
+            None => part(),
+        };
+        form = form.part(f.name, part);
+    }
+    form
+}
+
 async fn send_with_retry(
     req: reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, reqwest::Error> {

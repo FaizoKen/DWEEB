@@ -456,17 +456,24 @@ async fn run() {
         // Embedded Discord Activity: SDK token exchange, server-side publish,
         // and the real-time collaboration room (see `activity.rs`). The token +
         // post bodies are bounded well before JSON parsing; the room is a WS.
+        // Post/edit take a bigger body than the other JSON routes because they
+        // may arrive as multipart carrying the message's uploaded files (the
+        // proxy forwards them to Discord): 32 MiB covers Discord's 10 MiB base
+        // per-file limit with room for several images, while still bounding
+        // what one request can make the proxy buffer.
         .route(
             "/api/activity/token",
             post(activity::activity_token).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
         .route(
             "/api/activity/post",
-            post(activity::activity_post).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+            post(activity::activity_post)
+                .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024)),
         )
         .route(
             "/api/activity/edit",
-            post(activity::activity_edit).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+            post(activity::activity_edit)
+                .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024)),
         )
         // Schedule the built message to post later (one-time). The proxy resolves
         // the DWEEB webhook server-side (the iframe never sees credentials) and

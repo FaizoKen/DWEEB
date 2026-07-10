@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
+use axum::extract::{FromRequest, Multipart, Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -43,7 +43,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
-use crate::discord::{DiscordUser, Webhook};
+use crate::discord::{DiscordUser, UploadFile, Webhook};
 use crate::error::AppError;
 use crate::routes::{
     authorize_activity_member, authorize_activity_webhooks, current_session, dispatcher_api,
@@ -374,6 +374,97 @@ pub async fn activity_feedback(
 
 // ── Publish (POST /api/activity/post) ───────────────────────────────────────
 
+/// Discord's hard cap on files per message — reject anything past it before
+/// buffering, so an abusive client can't make the proxy hold more than the
+/// route's body limit ever allows anyway.
+const MAX_UPLOAD_FILES: usize = 10;
+
+/// Is `name` a well-formed multipart file part (`files[0]`, `files[1]`, …)?
+/// The index inside the brackets is what the payload's `attachments` array
+/// references, so only the exact shape the browser produces is accepted.
+fn is_files_part(name: &str) -> bool {
+    name.strip_prefix("files[")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .is_some_and(|idx| !idx.is_empty() && idx.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Extract a post/edit body that arrives as either plain JSON (no uploads —
+/// the shape both routes have always taken) or `multipart/form-data` carrying
+/// a `payload_json` field with that same JSON plus `files[i]` parts (the
+/// message references them as `attachment://<filename>`; the payload's
+/// `attachments` array maps part indices to filenames). The parts are buffered
+/// here — the route's `DefaultBodyLimit` bounds the total — and forwarded to
+/// Discord verbatim, so the proxy never re-derives the browser's mapping.
+async fn body_with_uploads<T: serde::de::DeserializeOwned>(
+    req: Request,
+) -> Result<(T, Vec<UploadFile>), AppError> {
+    let is_multipart = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| {
+            ct.trim_start()
+                .to_ascii_lowercase()
+                .starts_with("multipart/form-data")
+        });
+
+    if !is_multipart {
+        let Json(body) = Json::<T>::from_request(req, &())
+            .await
+            .map_err(|e| bad_request(&format!("invalid JSON body: {e}")))?;
+        return Ok((body, Vec::new()));
+    }
+
+    let mut multipart = Multipart::from_request(req, &())
+        .await
+        .map_err(|e| bad_request(&format!("invalid multipart body: {e}")))?;
+    let mut body: Option<T> = None;
+    let mut files: Vec<UploadFile> = Vec::new();
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| bad_request(&format!("unreadable multipart body: {e}")))?
+    {
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "payload_json" {
+            let text = field
+                .text()
+                .await
+                .map_err(|e| bad_request(&format!("unreadable payload_json: {e}")))?;
+            body = Some(
+                serde_json::from_str(&text)
+                    .map_err(|e| bad_request(&format!("payload_json is not valid JSON: {e}")))?,
+            );
+        } else if is_files_part(&name) {
+            if files.len() >= MAX_UPLOAD_FILES {
+                return Err(bad_request(
+                    "Too many attachments — Discord allows at most 10 files per message.",
+                ));
+            }
+            let filename = field.file_name().unwrap_or("file").to_string();
+            let content_type = field.content_type().map(str::to_string);
+            let bytes = field
+                .bytes()
+                .await
+                .map_err(|e| bad_request(&format!("unreadable file upload: {e}")))?;
+            files.push(UploadFile {
+                name,
+                filename,
+                content_type,
+                bytes,
+            });
+        } else {
+            return Err(bad_request(
+                "unexpected multipart field (expected payload_json and files[i])",
+            ));
+        }
+    }
+
+    let body = body.ok_or_else(|| bad_request("multipart body is missing payload_json"))?;
+    Ok((body, files))
+}
+
 #[derive(Deserialize)]
 pub struct PostBody {
     #[serde(default)]
@@ -400,16 +491,23 @@ pub struct PostBody {
 /// DWEEB-owned webhook in the channel — or creates one — and posts through it, so
 /// the message keeps the builder's custom username/avatar and its components
 /// route back to the dispatcher. Returns the new message id + a jump link.
+///
+/// The body is JSON, or — when the message carries in-session uploads —
+/// multipart with the same JSON in `payload_json` plus `files[i]` parts that
+/// are forwarded to Discord alongside it (see [`body_with_uploads`]).
 pub async fn activity_post(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
     headers: HeaderMap,
-    Json(body): Json<PostBody>,
+    req: Request,
 ) -> Result<Response, AppError> {
     if !st.config.activities_enabled {
         return Err(not_enabled());
     }
+    // Authenticate before buffering the body, so an unauthenticated caller
+    // can't make the proxy hold megabytes of upload first.
     let session = resolve_identity(&st, &jar, &headers).await?;
+    let (body, files) = body_with_uploads::<PostBody>(req).await?;
     let guild = body.guild_id.trim().to_string();
     let channel_id = body.channel_id.trim().to_string();
     if !is_snowflake(&guild) || !is_snowflake(&channel_id) {
@@ -439,9 +537,10 @@ pub async fn activity_post(
         None => require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?,
     };
 
+    let had_uploads = !files.is_empty();
     let created = st
         .discord
-        .execute_webhook(&webhook_id, &token, &body.message)
+        .execute_webhook_with_files(&webhook_id, &token, &body.message, files)
         .await?;
     let message_id = created
         .get("id")
@@ -490,7 +589,11 @@ pub async fn activity_post(
     // Land the post in the server's message library (best-effort, logged-only
     // failure): the Activity has no browser-local posted list, so this shared
     // record is what lets either surface reload the message later and update it
-    // in place. The execute URL is sealed at rest by the library store.
+    // in place. The execute URL is sealed at rest by the library store. When
+    // files were uploaded, record the message Discord echoed back instead of
+    // the request payload: its media items carry resolved CDN URLs, so the
+    // library entry previews and re-posts, where the request's `attachment://`
+    // references would dangle (the bytes aren't part of any later send).
     crate::library::record_posted_best_effort(
         &st,
         &guild,
@@ -500,7 +603,7 @@ pub async fn activity_post(
         Some(&format!(
             "https://discord.com/api/webhooks/{webhook_id}/{token}"
         )),
-        &body.message,
+        if had_uploads { &created } else { &body.message },
         None,
         None,
         &session.uid,
@@ -1185,16 +1288,21 @@ pub struct EditBody {
 /// DWEEB-owned in the target channel before the edit — Discord additionally only
 /// lets a webhook edit a message it authored, so a valid `message_id` for another
 /// author just fails. Returns the message id + jump link.
+///
+/// Accepts uploads exactly like [`activity_post`]: JSON, or multipart with
+/// `payload_json` + `files[i]` parts (see [`body_with_uploads`]).
 pub async fn activity_edit(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
     headers: HeaderMap,
-    Json(body): Json<EditBody>,
+    req: Request,
 ) -> Result<Response, AppError> {
     if !st.config.activities_enabled {
         return Err(not_enabled());
     }
+    // Authenticate before buffering the body — same order as `activity_post`.
     let session = resolve_identity(&st, &jar, &headers).await?;
+    let (body, files) = body_with_uploads::<EditBody>(req).await?;
     let guild = body.guild_id.trim().to_string();
     let channel_id = body.channel_id.trim().to_string();
     let message_id = body.message_id.trim().to_string();
@@ -1244,12 +1352,16 @@ pub async fn activity_edit(
             })?,
     };
 
-    st.discord
-        .edit_webhook_message(&webhook_id, &token, &message_id, body.message.clone())
+    let had_uploads = !files.is_empty();
+    let updated = st
+        .discord
+        .edit_webhook_message_with_files(&webhook_id, &token, &message_id, &body.message, files)
         .await?;
 
     // Refresh the message's library entry (or create one, for a message posted
     // before the library existed) so the shared shelf tracks the live content.
+    // As on the post path, an edit that uploaded files records Discord's echo
+    // (resolved CDN URLs) rather than the request's `attachment://` references.
     crate::library::record_posted_best_effort(
         &st,
         &guild,
@@ -1259,7 +1371,7 @@ pub async fn activity_edit(
         Some(&format!(
             "https://discord.com/api/webhooks/{webhook_id}/{token}"
         )),
-        &body.message,
+        if had_uploads { &updated } else { &body.message },
         None,
         None,
         &session.uid,
@@ -2424,6 +2536,22 @@ fn valid_instance(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn files_part_names() {
+        // The exact browser shape is accepted…
+        assert!(is_files_part("files[0]"));
+        assert!(is_files_part("files[9]"));
+        assert!(is_files_part("files[10]"));
+        // …and anything else is rejected: missing/garbage index, other fields,
+        // or attempts to smuggle extra characters around the brackets.
+        assert!(!is_files_part("files[]"));
+        assert!(!is_files_part("files[a]"));
+        assert!(!is_files_part("files[0]x"));
+        assert!(!is_files_part("files[-1]"));
+        assert!(!is_files_part("payload_json"));
+        assert!(!is_files_part("files"));
+    }
 
     #[test]
     fn webhook_is_ours_gate() {

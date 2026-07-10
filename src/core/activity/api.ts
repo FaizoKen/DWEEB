@@ -8,6 +8,7 @@
 
 import { proxyFetch } from "@/core/net/proxyFetch";
 import type { PermanentSlots, PlanInfo } from "@/core/guild/api";
+import type { CollectedFile } from "@/core/serialization/attachments";
 
 /** Read the proxy's `{ error }` body for a failed call, with a sane fallback. */
 async function errorMessage(res: Response): Promise<string> {
@@ -18,6 +19,32 @@ async function errorMessage(res: Response): Promise<string> {
     /* non-JSON body — fall through */
   }
   return `Request failed (${res.status}).`;
+}
+
+/**
+ * Build the request init for a proxy post/edit that may carry uploaded files.
+ * Without files it's the plain JSON body the proxy has always accepted; with
+ * files it becomes `multipart/form-data` — `payload_json` holding that same
+ * JSON body plus `files[i]` parts — which the proxy parses and forwards to
+ * Discord's webhook endpoint verbatim, mirroring the web builder's direct
+ * multipart send. Content-Type is left unset on the multipart branch so the
+ * browser stamps the boundary itself.
+ */
+function jsonOrMultipart(body: Record<string, unknown>, files: CollectedFile[]): RequestInit {
+  if (files.length === 0) {
+    return {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    };
+  }
+  const form = new FormData();
+  form.append("payload_json", JSON.stringify(body));
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i]!;
+    form.append(`files[${i}]`, f.file, f.filename);
+  }
+  return { method: "POST", body: form };
 }
 
 /** `POST /api/activity/token` — exchange the SDK's authorization code for a
@@ -63,27 +90,33 @@ export interface ActivityPostResult {
  *  with `applicationId` set, through that custom bot's connected Activity
  *  webhook instead, so the message appears under the server's own bot. When
  *  `makePermanent` is set the proxy also spends a never-expire slot on the new
- *  message (best-effort; reported back via `permanent` / `permanent_error`). */
+ *  message (best-effort; reported back via `permanent` / `permanent_error`).
+ *  `files` carries the message's in-session uploads (from
+ *  `prepareMessagePayload`) — the call switches to multipart so the proxy can
+ *  forward the bytes to Discord alongside the payload. */
 export async function publishToChannel(
   guildId: string,
   channelId: string,
   message: unknown,
   makePermanent = false,
   applicationId: string | null = null,
+  files: CollectedFile[] = [],
 ): Promise<ActivityPostResult> {
   let res: Response;
   try {
-    res = await proxyFetch("/api/activity/post", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        guild_id: guildId,
-        channel_id: channelId,
-        message,
-        make_permanent: makePermanent,
-        application_id: applicationId ?? "",
-      }),
-    });
+    res = await proxyFetch(
+      "/api/activity/post",
+      jsonOrMultipart(
+        {
+          guild_id: guildId,
+          channel_id: channelId,
+          message,
+          make_permanent: makePermanent,
+          application_id: applicationId ?? "",
+        },
+        files,
+      ),
+    );
   } catch {
     throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
   }
@@ -284,7 +317,8 @@ export async function restorePostedMessage(
  *  exact webhook (from the original post); `applicationId` names the custom bot
  *  the message was posted as (null = DWEEB), so the proxy edits through that
  *  bot's connected Activity webhook. Either way the webhook is re-verified
- *  server-side before the edit. */
+ *  server-side before the edit. `files` carries in-session uploads exactly as
+ *  on {@link publishToChannel} — multipart when present. */
 export async function editPostedMessage(
   guildId: string,
   channelId: string,
@@ -292,21 +326,24 @@ export async function editPostedMessage(
   webhookId: string,
   message: unknown,
   applicationId: string | null = null,
+  files: CollectedFile[] = [],
 ): Promise<ActivityPostResult> {
   let res: Response;
   try {
-    res = await proxyFetch("/api/activity/edit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        guild_id: guildId,
-        channel_id: channelId,
-        message_id: messageId,
-        webhook_id: webhookId,
-        application_id: applicationId ?? "",
-        message,
-      }),
-    });
+    res = await proxyFetch(
+      "/api/activity/edit",
+      jsonOrMultipart(
+        {
+          guild_id: guildId,
+          channel_id: channelId,
+          message_id: messageId,
+          webhook_id: webhookId,
+          application_id: applicationId ?? "",
+          message,
+        },
+        files,
+      ),
+    );
   } catch {
     throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
   }

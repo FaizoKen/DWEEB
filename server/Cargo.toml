@@ -7,7 +7,10 @@ description = "Read-only Discord REST proxy for the DWEEB embed builder (roles /
 [dependencies]
 # `ws` powers the embedded Activity's real-time collaboration room (a WebSocket
 # that fans message drafts + presence between the participants of one instance).
-axum = { version = "0.7", features = ["ws"] }
+# `multipart` parses the Activity's post/edit bodies when they carry uploaded
+# files (`payload_json` + `files[i]` parts, same shape the web builder sends
+# straight to Discord).
+axum = { version = "0.7", features = ["ws", "multipart"] }
 # Loads a local `.env` for `cargo run` / direct binary runs (no-op under Docker,
 # which injects env vars itself).
 dotenvy = "0.15"
@@ -43,7 +46,9 @@ sha2 = "0.10"
 # HMAC-SHA256 for verifying Stripe webhook signatures (see `stripe.rs`). Pairs
 # with `sha2` above (same `digest` 0.10 line), so no version conflict.
 hmac = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# `multipart` forwards the Activity's uploaded files to Discord's webhook
+# execute/edit endpoints (payload_json + file parts).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 # Optional shared cache + rate-limit backend for multi-instance deployments.
 # Minimal feature set: an async (tokio) connection manager with auto-reconnect.
 redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }

@@ -45,7 +45,10 @@ destination differs:
         ├── POST /api/activity/token   code → access_token   (proxy holds the secret)
         ├── GET  /api/guilds/:id/bootstrap   roles/channels/emoji  (Bearer)
         ├── POST /api/activity/post    message → posted to the chosen channel via a DWEEB webhook (Bearer)
+        │      body: JSON — or, when the message carries in-session uploads, multipart
+        │      `payload_json` + `files[i]` parts the proxy forwards to Discord verbatim
         ├── POST /api/activity/edit    message → PATCH a message already posted, via the same webhook (Bearer)
+        │      body: same JSON-or-multipart shape as /post
         ├── POST /api/activity/schedule message + fire time → stored sealed, posted later by the schedule worker (Bearer)
         ├── POST /api/activity/restore message id → the message DWEEB posted, read back via the same webhook (Bearer)
         ├── GET  /api/activity/identities    who this server can post as: DWEEB + its custom bots (Bearer)

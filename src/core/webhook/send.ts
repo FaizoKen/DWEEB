@@ -17,7 +17,7 @@
 
 import { type WebhookMessage } from "@/core/schema/types";
 import { attachEditorFields, stripEditorFields } from "@/core/serialization/normalize";
-import { collectSessionAttachments } from "@/core/serialization/attachments";
+import { collectSessionAttachments, type CollectedFile } from "@/core/serialization/attachments";
 
 /** Discord limits us to webhooks under one of these origins. */
 const WEBHOOK_HOST_RE =
@@ -121,6 +121,35 @@ export function buildWirePayload(message: WebhookMessage): Record<string, unknow
 }
 
 /**
+ * The wire payload plus the session-blob files it references. When `files` is
+ * non-empty the payload already carries the `attachments` array Discord uses
+ * to map each `files[i]` multipart part to its `attachment://<filename>`
+ * reference — the caller just has to ship both in one multipart request.
+ * Shared by the direct browser→Discord send below and the embedded Activity's
+ * proxy publish (which forwards the same shape server-side).
+ */
+export interface PreparedMessage {
+  payload: Record<string, unknown>;
+  files: CollectedFile[];
+}
+
+export function prepareMessagePayload(message: WebhookMessage): PreparedMessage {
+  const { payload, files } = collectSessionAttachments(message);
+  // `payload` already carries the computed `flags` — collectSessionAttachments
+  // builds it via stripEditorFields, which emits them.
+  if (files.length === 0) return { payload, files };
+  // Discord wants an `attachments` entry for every uploaded file so it can
+  // map `attachment://<filename>` references to the right multipart part.
+  return {
+    payload: {
+      ...payload,
+      attachments: files.map((f, i) => ({ id: i, filename: f.filename })),
+    },
+    files,
+  };
+}
+
+/**
  * Wrap a payload + its attachments into a Discord-compatible request body.
  *
  * When the message references no session blobs we keep posting JSON — that
@@ -137,27 +166,17 @@ interface PreparedBody {
 }
 
 function prepareBody(message: WebhookMessage): PreparedBody {
-  const { payload, files } = collectSessionAttachments(message);
-  // `payload` already carries the computed `flags` — collectSessionAttachments
-  // builds it via stripEditorFields, which emits them.
-  const enriched = payload;
+  const { payload, files } = prepareMessagePayload(message);
 
   if (files.length === 0) {
     return {
-      body: JSON.stringify(enriched),
+      body: JSON.stringify(payload),
       headers: { "Content-Type": "application/json" },
     };
   }
 
-  // Discord wants an `attachments` entry for every uploaded file so it can
-  // map `attachment://<filename>` references to the right multipart part.
-  const finalPayload = {
-    ...enriched,
-    attachments: files.map((f, i) => ({ id: i, filename: f.filename })),
-  };
-
   const form = new FormData();
-  form.append("payload_json", JSON.stringify(finalPayload));
+  form.append("payload_json", JSON.stringify(payload));
   for (let i = 0; i < files.length; i++) {
     const f = files[i]!;
     form.append(`files[${i}]`, f.file, f.filename);
