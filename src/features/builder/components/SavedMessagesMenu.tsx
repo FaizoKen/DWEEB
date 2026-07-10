@@ -283,6 +283,19 @@ function SaveMessageDialog({
             <button
               type="button"
               role="radio"
+              aria-checked={destination === "server"}
+              className={cn(styles.destOption, destination === "server" && styles.destOptionActive)}
+              onClick={() => {
+                setDestination("server");
+                setError(null);
+              }}
+            >
+              <strong>Server draft</strong>
+              <span>Shared in {serverName ?? "this server"}.</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
               aria-checked={destination === "local"}
               className={cn(styles.destOption, destination === "local" && styles.destOptionActive)}
               onClick={() => {
@@ -292,19 +305,6 @@ function SaveMessageDialog({
             >
               <strong>Browser draft</strong>
               <span>Saved on this device only.</span>
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={destination === "server"}
-              className={cn(styles.destOption, destination === "server" && styles.destOptionActive)}
-              onClick={() => {
-                setDestination("server");
-                setError(null);
-              }}
-            >
-              <strong>Server library</strong>
-              <span>Shared in {serverName ?? "this server"}.</span>
             </button>
           </div>
         ) : null}
