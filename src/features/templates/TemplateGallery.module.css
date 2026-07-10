@@ -61,6 +61,13 @@
   color: var(--app-text);
 }
 
+/* Server-glyph slot in the title (the Activity gallery's counterpart to the
+ * web title's GuildIdentity) — keeps the icon from stretching in the flex row. */
+.titleGlyph {
+  display: inline-flex;
+  flex: none;
+}
+
 .titleSpark {
   display: inline-flex;
   align-items: center;

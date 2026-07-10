@@ -38,7 +38,7 @@ import {
 } from "@/ui/Icon";
 import { ChannelPicker } from "./ChannelPicker";
 import { GuildPicker, ServerGlyph, ServerGlyphSkeleton } from "./GuildPicker";
-import { LibraryDialog } from "./LibraryDialog";
+import { ActivityGallery } from "./ActivityGallery";
 import { RestoreDialog } from "./RestoreDialog";
 import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
@@ -619,7 +619,9 @@ export function ActivityBar() {
       </div>
 
       <RestoreDialog open={restoreOpen} onClose={() => setRestoreOpen(false)} />
-      <LibraryDialog open={libraryOpen} onClose={() => setLibraryOpen(false)} />
+      {/* Full-screen, like the web app's gallery; mounted only while open so
+          each visit starts fresh (default tab, empty search, page one). */}
+      {libraryOpen ? <ActivityGallery onClose={() => setLibraryOpen(false)} /> : null}
 
       <PostConfirm
         open={pending != null}
