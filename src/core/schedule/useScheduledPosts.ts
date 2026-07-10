@@ -9,6 +9,12 @@
  * gallery can show a live preview thumbnail (the same one every other card
  * carries) and load it straight back into the editor.
  *
+ * Everything it surfaces (`upcoming` / `history` / `activeCount`) is **scoped to
+ * the connected server** — the three sources are merged only so a non-manager
+ * still sees the schedules they own, then filtered to the current guild so a
+ * user managing Server A never sees the posts they timed for Server B. With no
+ * server connected, nothing is surfaced (the gallery is server-centric).
+ *
  * History rows (posted / failed) have no payload — the server deletes the
  * message once it fires — so previews only exist for upcoming posts.
  *
@@ -49,9 +55,11 @@ export interface ScheduledPostsData {
   loading: boolean;
   /** True once the list has answered at least once for the current inputs. */
   loaded: boolean;
-  /** Still-going-to-fire schedules (active / sending / paused / suspended). */
+  /** The connected server's still-going-to-fire schedules (active / sending /
+   *  paused / suspended). */
   upcoming: ScheduleView[];
-  /** Terminal schedules (posted / failed) — history, no payload to preview. */
+  /** The connected server's terminal schedules (posted / failed) — history, no
+   *  payload to preview. */
   history: ScheduleView[];
   /** Decoded message per upcoming schedule id, for previews + editor load.
    *  Absent = not fetched yet; null = fetch failed / no payload. */
@@ -149,11 +157,24 @@ export function useScheduledPosts(
     };
   }, [enabled, guildId, authStatus, reloadToken]);
 
+  // The gallery is server-centric, so only the connected server's schedules are
+  // surfaced. The three sources above are merged first (a non-manager still sees
+  // their own schedules, which `listForGuild` can't return) and only then scoped
+  // to the current guild — a user managing Server A must not see the posts they
+  // timed for Server B. With no server connected there's nothing to scope to, so
+  // nothing shows. Guild-less schedules (a raw-URL post with no known server)
+  // belong to no server and so never appear in this server-scoped view.
+  const guildItems = useMemo(
+    () => (guildId ? items.filter((s) => s.guild_id === guildId) : []),
+    [items, guildId],
+  );
+
   // Fetch the decrypted message for every upcoming schedule we don't have yet,
-  // so the tab's cards carry a real preview. Only runs while the tab is open.
+  // so the tab's cards carry a real preview. Only runs while the tab is open,
+  // and only for this server's schedules (the ones the gallery will render).
   useEffect(() => {
     if (!enabled || !fetchPayloads) return;
-    const missing = items.filter((s) => UPCOMING.has(s.status) && !messages.has(s.id));
+    const missing = guildItems.filter((s) => UPCOMING.has(s.status) && !messages.has(s.id));
     if (missing.length === 0) return;
     let cancelled = false;
     setPayloadsLoading(true);
@@ -177,7 +198,7 @@ export function useScheduledPosts(
     return () => {
       cancelled = true;
     };
-  }, [enabled, fetchPayloads, items, messages]);
+  }, [enabled, fetchPayloads, guildItems, messages]);
 
   const cancel = useCallback(async (s: ScheduleView): Promise<boolean> => {
     setBusyId(s.id);
@@ -199,13 +220,11 @@ export function useScheduledPosts(
     return results.filter((r) => !r.ok).length;
   }, []);
 
-  const upcoming = useMemo(() => items.filter((s) => UPCOMING.has(s.status)), [items]);
-  const history = useMemo(() => items.filter((s) => !UPCOMING.has(s.status)), [items]);
+  const upcoming = useMemo(() => guildItems.filter((s) => UPCOMING.has(s.status)), [guildItems]);
+  const history = useMemo(() => guildItems.filter((s) => !UPCOMING.has(s.status)), [guildItems]);
   const activeCount = useMemo(
-    () =>
-      items.filter((s) => QUOTA_COUNTED.has(s.status) && (!guildId || s.guild_id === guildId))
-        .length,
-    [items, guildId],
+    () => guildItems.filter((s) => QUOTA_COUNTED.has(s.status)).length,
+    [guildItems],
   );
 
   return {
