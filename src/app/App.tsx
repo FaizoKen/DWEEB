@@ -73,10 +73,15 @@ const WelcomeVideo = lazy(() =>
   import("@/features/welcome/WelcomeVideo").then((m) => ({ default: m.WelcomeVideo })),
 );
 import { ToastViewport, pushToast } from "@/ui/Toast";
-import { SparkleIcon } from "@/ui/Icon";
+import { SparkleIcon, UsersIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
 import { UpdatePrompt } from "./UpdatePrompt";
-import { type IncomingWebhook, type IncomingWebhookResult } from "@/core/guild/config";
+import {
+  activityLaunchUrl,
+  isProxyConfigured,
+  type IncomingWebhook,
+  type IncomingWebhookResult,
+} from "@/core/guild/config";
 import {
   clearPopupPending,
   consumeReturn,
@@ -183,9 +188,13 @@ export function App() {
   const pricingOpen = usePlanStore((s) => s.open);
 
   // The "Collaborate in Discord" dialog — summoned from the Builder's "More"
-  // menu. Mints a voice-channel Activity invite so a group co-edits in one shared
-  // instance. Mounted lazily only while open.
+  // menu and the mobile FAB. Mints a voice-channel Activity invite so a group
+  // co-edits in one shared instance. Mounted lazily only while open.
   const collaborateOpen = useCollaborateStore((s) => s.open);
+  const openCollaborate = useCollaborateStore((s) => s.openCollaborate);
+  // Only offer the collaborate FAB where the invite can actually be minted (a
+  // configured proxy) — matches the Builder "More" menu's gate.
+  const collaborateUrl = isProxyConfigured() ? activityLaunchUrl() : "";
 
   // The "Install app" dialog — summoned from the Builder's "More" menu. Replays
   // the captured native PWA prompt on Chromium, or shows per-platform manual
@@ -388,8 +397,24 @@ export function App() {
           ) : null}
 
           <div className="fab-row">
-            {/* The full preview opens by tapping the live mini preview above; on
-              mobile the AI launcher widens to line up under that thumbnail. */}
+            {/* "Collaborate in Discord" shortcut, beneath the mini preview —
+              mints an Activity invite so a group co-edits one shared instance.
+              Mobile only (the full action lives in the Builder's "More" menu on
+              desktop), and only when the proxy can actually mint the invite —
+              same gate the menu item uses. The full preview still opens by
+              tapping the mini preview above. */}
+            {isMobileSheet && !previewOpen && collaborateUrl ? (
+              <button
+                type="button"
+                className="collab-fab"
+                onClick={openCollaborate}
+                aria-label="Collaborate in Discord"
+              >
+                <UsersIcon size={18} />
+                <span>Collab</span>
+              </button>
+            ) : null}
+
             <button
               type="button"
               className="ai-fab"

@@ -2,16 +2,19 @@
  * so it can be unconditionally visible here — there's no desktop case to hide. */
 .card {
   position: relative;
-  /* Width matches the AI launcher pill below so their edges line up; height
-   * keeps the ~1.58 aspect so the thumbnail reads as a tidy little card. */
-  width: var(--app-mini-preview-w);
+  /* Width matches the Preview/AI row below so their left edges line up; height
+   * keeps the row's ~1.58 aspect so the thumbnail reads as a tidy little card. */
+  width: 165px;
   height: 104px;
   flex-shrink: 0;
   border-radius: 14px;
   overflow: hidden;
   background: var(--discord-bg-primary);
+  /* A tight, close shadow that hugs the card — the big `--app-shadow-lg` drop
+   * (16px offset, 48px blur) bled down onto the FAB row right below and visibly
+   * darkened it. Keep the inset hairline that defines the card's edge. */
   box-shadow:
-    var(--app-shadow-lg),
+    0 2px 8px rgba(0, 0, 0, 0.35),
     0 0 0 1px rgba(255, 255, 255, 0.07) inset;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
