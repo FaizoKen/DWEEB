@@ -196,14 +196,17 @@ fn payload_thread_name(message: &Value) -> Option<&str> {
 
 /// Membership + kind gate for a channel the Activity is about to post into.
 ///
-/// Forum (15) and media (16) channels can *host* webhooks, but executing one
-/// there must start a new post: Discord requires a `thread_name` (the post's
-/// title) or an existing `thread_id`, and 400s opaquely without one. The
-/// Activity posts new messages, so we require the payload to carry the title —
-/// the confirm dialog collects it — and refuse up front with advice otherwise.
-/// Every other kind passes — Discord stays the authority on anything subtler.
-/// A channel that isn't in the guild fails exactly like
-/// [`ensure_channel_in_guild`].
+/// Discord's `thread_name` rule cuts both ways, and both violations 400
+/// opaquely there, so refuse each up front with advice:
+///
+///  - forum (15) / media (16) channels can *host* webhooks, but executing one
+///    must start a new post — a payload without a `thread_name` (the post's
+///    title, which the editor requires while such a channel is picked) fails;
+///  - every OTHER kind rejects a post that carries a `thread_name` (the param
+///    is only valid on forum/media executes).
+///
+/// Everything subtler passes through — Discord stays the authority. A channel
+/// that isn't in the guild fails exactly like [`ensure_channel_in_guild`].
 async fn ensure_postable_channel(
     st: &AppState,
     guild: &str,
@@ -219,6 +222,11 @@ async fn ensure_postable_channel(
         Some(kind) if is_thread_only_kind(kind) && payload_thread_name(message).is_none() => {
             Err(bad_request(
                 "Posting to a forum or media channel starts a new post, which needs a title — add one in the post dialog.",
+            ))
+        }
+        Some(kind) if !is_thread_only_kind(kind) && payload_thread_name(message).is_some() => {
+            Err(bad_request(
+                "This channel can't take a forum post title — clear it (Message options → Forum post), or pick a forum/media channel.",
             ))
         }
         Some(_) => Ok(()),

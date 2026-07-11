@@ -23,9 +23,10 @@
  * safety but the editor never lets the user set it.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useValidationSummary } from "@/features/builder/useValidation";
+import { useOptionsRevealStore, type OptionsSection } from "@/features/builder/optionsReveal";
 import { LIMITS } from "@/core/schema/limits";
 import type { AllowedMentions } from "@/core/schema/types";
 import { Disclosure } from "@/ui/Disclosure";
@@ -44,8 +45,6 @@ const MENTION_LABELS: Record<MentionKind, string> = {
   users: "@user",
 };
 
-type OptionsSection = "notification" | "forum";
-
 export function MessageOptions() {
   const message = useMessageStore((s) => s.message);
   const setSuppress = useMessageStore((s) => s.setSuppressNotifications);
@@ -57,6 +56,27 @@ export function MessageOptions() {
   const [openSection, setOpenSection] = useState<OptionsSection | null>(null);
   const toggleSection = (section: OptionsSection) =>
     setOpenSection((current) => (current === section ? null : section));
+
+  // Jump-to-issue for message-level problems: the header's issue chip fires a
+  // one-shot reveal (see `optionsReveal.ts`), and this card answers it — the
+  // same way a node issue's jump scrolls its tree row into view. Expand the
+  // named lane (when the issue lives in one), bring the card on screen, and
+  // focus the lane's first field so the fix is a keystroke away.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const revealToken = useOptionsRevealStore((s) => s.token);
+  const revealSection = useOptionsRevealStore((s) => s.section);
+  useEffect(() => {
+    if (revealToken === 0) return; // initial mount, no reveal requested yet
+    if (revealSection) setOpenSection(revealSection);
+    // Deferred a frame so a just-expanded lane has mounted before we measure
+    // scroll positions / look up its focus target.
+    requestAnimationFrame(() => {
+      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      rootRef.current
+        ?.querySelector<HTMLElement>(`[data-reveal-focus="${revealSection ?? ""}"]`)
+        ?.focus({ preventScroll: true });
+    });
+  }, [revealToken, revealSection]);
 
   const am = message.allowed_mentions;
 
@@ -70,12 +90,15 @@ export function MessageOptions() {
   const forumActive =
     (message.thread_name?.trim().length ?? 0) > 0 || (message.applied_tags?.length ?? 0) > 0;
 
-  // The destination requires a title this lane doesn't have yet (a forum/media
-  // channel is picked in the Activity, `thread_name` empty) — flag the lane in
-  // the danger colour so the meta banner's "set one under Message options →
-  // Forum post" advice has an obvious landing spot.
+  // Any thread-name problem — a forum/media destination missing its title
+  // (THREAD_NAME_REQUIRED), a title set while a non-forum channel is picked
+  // (THREAD_NAME_FORBIDDEN, Discord rejects that post), or an overlong one —
+  // renders inline on the field below, like every other field error, and
+  // flags the lane in the danger colour so the collapsed card points here.
   const { messageIssues } = useValidationSummary();
-  const titleRequired = messageIssues.some((i) => i.code === "THREAD_NAME_REQUIRED");
+  const threadIssue = messageIssues.find(
+    (i) => i.code.startsWith("THREAD_NAME") && i.severity === "error",
+  );
 
   const setParseKind = (kind: MentionKind, on: boolean) => {
     const parse = new Set<MentionKind>(am?.parse ?? []);
@@ -101,7 +124,7 @@ export function MessageOptions() {
   };
 
   return (
-    <div className={styles.options}>
+    <div ref={rootRef} className={styles.options}>
       <div className={styles.optionsTabs}>
         <button
           type="button"
@@ -128,7 +151,7 @@ export function MessageOptions() {
           className={cn(
             styles.optionsTab,
             forumActive && styles.optionsTabActive,
-            titleRequired && styles.optionsTabError,
+            threadIssue && styles.optionsTabError,
           )}
           aria-expanded={openSection === "forum"}
           onClick={() => toggleSection("forum")}
@@ -139,7 +162,7 @@ export function MessageOptions() {
           <span className={styles.optionsTabText}>
             <span className={styles.optionsTabTitle}>
               Forum post
-              {titleRequired ? (
+              {threadIssue ? (
                 <span
                   className={cn(styles.optionsTabDot, styles.optionsTabDotError)}
                   aria-hidden="true"
@@ -232,17 +255,14 @@ export function MessageOptions() {
       {openSection === "forum" ? (
         <div className={styles.optionsBody}>
           <div className={styles.sectionHint}>
-            Forum / media channel only — Discord ignores these on text channels.
+            Forum / media channel only — Discord rejects a post to other channels while these are
+            set.
           </div>
 
           <Field
             label="Thread name"
             hint="Starts a new forum post with this title. Skip when posting into an existing thread."
-            error={
-              titleRequired
-                ? "Required — the selected forum/media channel starts a new post, and it needs a title."
-                : undefined
-            }
+            error={threadIssue?.message}
           >
             {(id) => (
               <TextArea
@@ -252,6 +272,7 @@ export function MessageOptions() {
                 maxLength={LIMITS.THREAD_NAME}
                 onChange={(e) => setThreadName(e.currentTarget.value || undefined)}
                 placeholder="e.g. Release notes — v2.4"
+                data-reveal-focus="forum"
               />
             )}
           </Field>

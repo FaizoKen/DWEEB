@@ -384,12 +384,15 @@ dialog can't change that mapping).
 - **Manage Webhooks required** to publish (the post goes through a webhook).
 - **Forum / media channels start a new post.** Picking one as the destination
   makes the *editor's* validation require a post title — the draft's
-  `thread_name` (Message options → Forum post, collab-synced): the meta banner
-  says so, the Forum lane shows a danger dot, and Post/Schedule stay disabled
-  until it's set (see `useDestinationIssues` + the core post-destination
-  store; the proxy re-guards server-side). The post confirm shows the title as
-  a read-only receipt. Update is exempt — editing an existing post needs no
-  title (a restored forum post's draft never carries one). The created
+  `thread_name` (Message options → Forum post, collab-synced): the error
+  renders inline on the Thread name field, the Forum lane shows a danger dot,
+  the issue chip jumps there, and Post/Schedule stay disabled until it's set
+  (see `useDestinationIssues` + the core post-destination store; the proxy
+  re-guards server-side). The rule cuts both ways: a title set while a
+  NON-forum channel is picked is also an error — Discord rejects that post.
+  The post confirm shows the title as a read-only receipt. Update is exempt —
+  a PATCH disregards the create-only `thread_name` param (a restored forum
+  post's draft never carries one anyway). The created
   thread's id rides the post result and the library entry, so Update, gallery
   loads, and Restore keep editing the post in place. Posting into an
   *existing* forum post has no picker — paste its message link into Restore

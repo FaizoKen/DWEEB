@@ -45,8 +45,9 @@
   box-shadow: var(--app-focus-ring);
 }
 
-/* A message-level problem (empty message, bad mentions) has no component to
-   jump to — the chip still counts it, but there's nothing to click through to. */
+/* Defensive only: message-level problems now jump to the meta header / Message
+   options card (see optionsReveal.ts), so every counted issue has a landing
+   spot — this covers a hypothetical issue that somehow has neither. */
 .chip:disabled {
   cursor: default;
 }

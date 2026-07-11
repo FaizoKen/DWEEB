@@ -78,28 +78,46 @@ export const THREAD_ONLY_CHANNEL_TYPES: ReadonlySet<number> = new Set([15, 16]);
 
 /**
  * Destination-aware validation, split from {@link validateMessage} (which is
- * pure and destination-agnostic, shared by every surface): posting into a
- * forum/media channel starts a new post, so the message must carry a
- * `thread_name` (its title). Pass the destination channel's Discord `type`
- * when it's known — null/undefined (no destination picked, or a surface that
- * doesn't track one) validates nothing. Surfaced live in the editor via
- * `useDestinationIssues`, and re-checked at post time by the Activity store
- * and the proxy.
+ * pure and destination-agnostic, shared by every surface). The `thread_name`
+ * rule cuts both ways at Discord:
+ *
+ *  - a forum/media destination starts a new post, so the message MUST carry a
+ *    `thread_name` (its title) — a post without one 400s;
+ *  - every other channel kind REJECTS a post that carries one (`thread_name`
+ *    is only valid on forum/media webhook executes).
+ *
+ * Pass the destination channel's Discord `type` when it's known —
+ * null/undefined (no destination picked, or a surface that doesn't track one)
+ * validates nothing. Surfaced live in the editor via `useDestinationIssues`
+ * (inline on the Thread name field), and re-checked at post time by the
+ * Activity store and the proxy.
  */
 export function validateDestination(
   message: Pick<WebhookMessage, "thread_name">,
   channelType: number | null | undefined,
   channelName?: string | null,
 ): ValidationIssue[] {
-  if (channelType == null || !THREAD_ONLY_CHANNEL_TYPES.has(channelType)) return [];
-  if ((message.thread_name ?? "").trim().length > 0) return [];
-  const kind = channelType === 16 ? "media" : "forum";
-  const dest = channelName ? `#${channelName}` : `this ${kind} channel`;
+  if (channelType == null) return [];
+  const hasTitle = (message.thread_name ?? "").trim().length > 0;
+  if (THREAD_ONLY_CHANNEL_TYPES.has(channelType)) {
+    if (hasTitle) return [];
+    const kind = channelType === 16 ? "media" : "forum";
+    const dest = channelName ? `#${channelName}` : `this ${kind} channel`;
+    return [
+      {
+        severity: "error",
+        code: "THREAD_NAME_REQUIRED",
+        message: `Posting to ${dest} starts a new ${kind} post, which needs a title (Message options → Forum post).`,
+      },
+    ];
+  }
+  if (!hasTitle) return [];
+  const dest = channelName ? `#${channelName}` : "this channel";
   return [
     {
       severity: "error",
-      code: "THREAD_NAME_REQUIRED",
-      message: `Posting to ${dest} starts a new ${kind} post, which needs a title — set one under Message options → Forum post.`,
+      code: "THREAD_NAME_FORBIDDEN",
+      message: `Discord rejects a post to ${dest} while a forum post title is set — clear it (Message options → Forum post), or pick a forum/media channel.`,
     },
   ];
 }

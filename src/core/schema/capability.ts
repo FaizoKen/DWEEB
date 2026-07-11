@@ -104,7 +104,7 @@ export function inspectCapabilities(
       kind: "forum_channel",
       severity: "warning",
       title: "Needs a forum or media channel",
-      detail: `Your ${parts.join(" and ")} only take${parts.length > 1 ? "" : "s"} effect in a forum or media channel — Discord ignores ${parts.length > 1 ? "them" : "it"} on text channels.`,
+      detail: `Your ${parts.join(" and ")} only work${parts.length > 1 ? "" : "s"} in a forum or media channel — Discord rejects a post to other channel kinds while ${parts.length > 1 ? "they're" : "it's"} set.`,
     });
   }
 

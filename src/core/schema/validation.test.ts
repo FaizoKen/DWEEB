@@ -353,3 +353,34 @@ describe("validateDestination — forum/media post titles", () => {
     expect(issue!.message).toContain("#help-forum");
   });
 });
+
+describe("validateDestination — title on a non-forum destination", () => {
+  it("rejects a thread_name when the destination can't take one", () => {
+    // Discord 400s a webhook execute carrying thread_name on anything that
+    // isn't a forum/media channel — text, announcement, voice, stage alike.
+    for (const type of [0, 2, 5, 13]) {
+      const issues = validateDestination({ thread_name: "Release notes" }, type);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe("THREAD_NAME_FORBIDDEN");
+      expect(issues[0]!.severity).toBe("error");
+      expect(issues[0]!.nodeId).toBeUndefined();
+    }
+  });
+
+  it("a blank title doesn't trip the non-forum rejection", () => {
+    expect(validateDestination({ thread_name: "   " }, 0)).toHaveLength(0);
+    expect(validateDestination({}, 0)).toHaveLength(0);
+  });
+
+  it("stays quiet when the destination is unknown, even with a title set", () => {
+    // The web app doesn't track a destination while editing — a title there
+    // is covered by the send-time capability note, not a hard error.
+    expect(validateDestination({ thread_name: "Release notes" }, null)).toHaveLength(0);
+    expect(validateDestination({ thread_name: "Release notes" }, undefined)).toHaveLength(0);
+  });
+
+  it("names the destination channel in the advice when known", () => {
+    const [issue] = validateDestination({ thread_name: "Release notes" }, 0, "general");
+    expect(issue!.message).toContain("#general");
+  });
+});

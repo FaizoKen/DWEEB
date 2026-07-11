@@ -95,13 +95,16 @@ export function ActivityBar() {
   // provider — but it's memoized per message, so it's a single cheap pass.
   const validation = useMergedValidationView();
   const hasErrors = validation.errorCount > 0;
-  // The destination-title rule (a forum/media channel needs a `thread_name`)
-  // only applies to *brand-new* posts — an update edits the existing post, no
-  // title involved. A restored forum post's draft never carries one (Discord
-  // doesn't echo execute-only params), so gate Update on every error EXCEPT
-  // that one; Post and "New" (a new copy) keep the full gate.
+  // The destination-title rules (a forum/media channel needs a `thread_name`;
+  // every other kind rejects one) only apply to *brand-new* posts — an update
+  // PATCHes the existing message, where Discord disregards the create-only
+  // `thread_name` param. A restored forum post's draft never carries one
+  // (Discord doesn't echo execute-only params), so gate Update on every error
+  // EXCEPT those; Post and "New" (a new copy) keep the full gate.
   const destErrorCount = validation.messageIssues.filter(
-    (i) => i.code === "THREAD_NAME_REQUIRED" && i.severity === "error",
+    (i) =>
+      (i.code === "THREAD_NAME_REQUIRED" || i.code === "THREAD_NAME_FORBIDDEN") &&
+      i.severity === "error",
   ).length;
   const hasUpdateErrors = validation.errorCount - destErrorCount > 0;
 
