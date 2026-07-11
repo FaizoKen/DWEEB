@@ -453,10 +453,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
       // Open the shared editing room. A DM launch passes no guild — the room is
       // keyed by the unguessable instance id instead (see `server/activity.rs`).
+      // No token is passed: each socket connect mints its own single-use room
+      // ticket over the authenticated proxy client (see collab.ts / `roomUrl`),
+      // so the access token never rides a WebSocket URL.
       startCollab({
         instanceId,
         guildId,
-        token: accessToken,
         // Stamped onto our `focus` frames so peers can render per-node presence.
         self: { id: user.id, name: user.name, avatar: user.avatar },
         // Seed the room's shared destination with the launching channel (server
@@ -476,6 +478,14 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
               ? `This room is full — the host's plan allows ${cap} live editors. You can keep editing on your own.`
               : "This collaboration room is full. You can keep editing on your own.",
             "info",
+          ),
+        // The Activity's sign-in is no longer valid (revoked/expired token, or
+        // membership lost) — collab has stopped for good; editing continues
+        // solo. Only a relaunch can mint a fresh session, so say exactly that.
+        onAuthExpired: () =>
+          pushToast(
+            "Your Discord session in this Activity has expired — relaunch DWEEB to reconnect with your team.",
+            "error",
           ),
         // A custom bot's connect flow finished — surface it so the post dialog
         // selects it right away (see PostConfirm's consume effect).

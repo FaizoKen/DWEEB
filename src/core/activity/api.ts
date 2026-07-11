@@ -66,6 +66,35 @@ export async function exchangeCode(code: string): Promise<string> {
   return body.access_token;
 }
 
+/** `POST /api/activity/room-ticket` — mint the single-use, short-lived ticket
+ *  the collaboration WebSocket connects with. Identity (and membership, when
+ *  the launch has a guild) are verified here, over a normal bearer-
+ *  authenticated POST — so the socket URL itself never carries the Discord
+ *  access token (a URL is one access-log directive away from being written
+ *  somewhere durable). Every (re)connect mints a fresh ticket. Throws with
+ *  `status` attached; a 401/403 is definitive — the Activity session itself is
+ *  no longer valid — so the caller stops reconnecting (see collab.ts). */
+export async function mintRoomTicket(instanceId: string, guildId: string | null): Promise<string> {
+  let res: Response;
+  try {
+    res = await proxyFetch("/api/activity/room-ticket", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instance_id: instanceId, guild_id: guildId ?? "" }),
+    });
+  } catch {
+    throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
+  }
+  if (!res.ok) {
+    const err = new Error(await errorMessage(res)) as Error & { status: number };
+    err.status = res.status;
+    throw err;
+  }
+  const body = (await res.json()) as { ticket?: string };
+  if (!body.ticket) throw new Error("The server returned an unexpected response.");
+  return body.ticket;
+}
+
 /** Result of a successful publish/update: the message + a jump link. `webhook_id`
  *  identifies the webhook that posted it, so a later edit targets exactly that
  *  one (see {@link editPostedMessage}); `application_id` names the custom bot it

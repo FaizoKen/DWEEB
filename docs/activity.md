@@ -54,7 +54,8 @@ destination differs:
         ├── GET/POST /api/guilds/:id/library posted history + named server drafts (Bearer)
         ├── GET  /api/activity/identities    who this server can post as: DWEEB + its custom bots (Bearer)
         ├── POST /api/activity/connect-bot   authorize URL for the one-time custom-bot connect flow (Bearer)
-        └── WS   /api/activity/room/:instance   draft + presence relay
+        ├── POST /api/activity/room-ticket   single-use WS credential; identity + guild gate run here (Bearer)
+        └── WS   /api/activity/room/:instance?ticket=…   draft + presence relay (the URL never carries the token)
 ```
 
 Inside Discord every request must go through the client's proxy. The SDK's
@@ -369,6 +370,11 @@ dialog can't change that mapping).
 
 - **Last-write-wins.** Concurrent edits to the same field resolve to whoever
   typed last — it's not a CRDT. Fine for a small group co-writing one message.
+- **Undo is local-only time travel.** Remote frames bypass the undo history
+  (a peer's keystrokes must not eat your undo budget), so undoing after a
+  teammate's edit restores your whole pre-edit snapshot — their edit included —
+  and broadcasts it to the room. Last-write-wins, applied to time travel; the
+  behaviour is pinned by `src/core/state/messageStore.test.ts`.
 - **Uploaded files post from the uploader's browser only.** In-session uploads
   sync to collaborators as `session://` references — the bytes never leave the
   browser they were picked in. Teammates see a placeholder in the preview, and

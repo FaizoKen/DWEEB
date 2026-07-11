@@ -56,6 +56,10 @@ pub struct AppState {
     /// Live collaboration rooms for the embedded Activity (see `activity.rs`).
     /// Ephemeral + in-memory, so it's always present (cheap when unused).
     pub activity_rooms: Arc<crate::activity::ActivityRooms>,
+    /// Single-use WebSocket room tickets (see `activity.rs`): minted over an
+    /// authenticated POST so the room socket's URL never carries the Discord
+    /// access token. Ephemeral + in-memory, like the rooms.
+    pub activity_tickets: Arc<crate::activity::ActivityTickets>,
     /// Persisted Activity collaboration drafts (see `activity_draft.rs`), so a
     /// room resumes where it was left off. None when Activities are disabled.
     pub activity_drafts: Option<Arc<crate::activity_draft::ActivityDraftStore>>,

@@ -85,6 +85,17 @@ services:
     # tagged with the image name above, so a later plain `up` reuses it.
     build: .
     <<: *svc-base
+    # The proxy's logs go to journald, overriding the json-file default from
+    # svc-base: json-file logs die with the container on every CD redeploy,
+    # which silently discarded the `activity_handshake` telemetry this service
+    # exists to collect (and the `web_crash` reports with it). journald
+    # survives container recreation, the host already caps the journal
+    # (200M, see the VPS maintenance timer), and `docker logs` / Dozzle keep
+    # working — the driver supports reading back. Query across deploys with:
+    #   journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d \
+    #     | grep activity_handshake
+    logging:
+      driver: journald
     env_file: .env
     environment:
       # Compose-network address of the dispatcher's permanent-slot API (the

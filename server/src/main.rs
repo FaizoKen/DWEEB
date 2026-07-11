@@ -379,6 +379,7 @@ async fn run() {
         shortlinks,
         schedules,
         activity_rooms: Arc::new(crate::activity::ActivityRooms::new()),
+        activity_tickets: Arc::new(crate::activity::ActivityTickets::new()),
         activity_drafts,
         library,
         entitlements,
@@ -519,6 +520,12 @@ async fn run() {
         // The destination server's tier + limits, for the Activity's quiet plan
         // indicator. Bearer-gated read (membership only — display-only data).
         .route("/api/activity/plan", get(activity::activity_plan))
+        // Mint the single-use ticket the room WebSocket connects with — an
+        // authenticated POST, so the socket URL never carries the access token.
+        .route(
+            "/api/activity/room-ticket",
+            post(activity::activity_room_ticket),
+        )
         .route("/api/activity/room/:instance", get(activity::activity_room))
         // Image proxy: fetches an external image/video so the sandboxed Activity
         // iframe (whose CSP blocks arbitrary `<img>`/`<video>` hosts) can render

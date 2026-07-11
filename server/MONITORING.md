@@ -94,6 +94,39 @@ Live, searchable, multi-container logs with no extra exposure. (If you'd rather
 have it on a subdomain, add a Caddy block with `basic_auth` and publish a real
 port — but keep it behind auth.)
 
+## 4. Durable proxy logs & telemetry (journald)
+
+The **proxy** service alone logs to **journald** instead of the shared
+json-file driver (see its `logging:` block in `compose.yml`). json-file logs
+die with the container, and CD recreates the container on every deploy — which
+silently discarded the `activity_handshake` launch telemetry and `web_crash`
+reports between deploys. journald survives recreation, the host's journal is
+already capped (200M + the maintenance timer's vacuum), and `docker logs` /
+Dozzle still work.
+
+Query history across deploys (any past container instance included):
+
+```bash
+# Every handshake beacon from the last 14 days
+journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
+  | grep activity_handshake
+
+# Stall/finish breakdown: count per (stage, outcome)
+journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
+  | grep -a activity_handshake \
+  | grep -oE 'stage=\S+ outcome=\S+' | sort | uniq -c | sort -rn
+
+# Launch success rate: distinct launches that reached done vs. all seen
+# (a launch emits one beacon per stage, so count distinct launch ids)
+J() { journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
+       | grep -a activity_handshake; }
+echo "$(J | grep -a 'outcome=done' | grep -oE 'launch=\S+' | sort -u | wc -l)" \
+     "/ $(J | grep -oE 'launch=\S+' | sort -u | wc -l)"
+
+# Frontend crash reports (web + Activity surfaces)
+journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat | grep web_crash
+```
+
 ## Off-host dead-man's switch (recommended)
 
 Gatus and Beszel run **on** the VPS, so if the whole box (or its network) drops,

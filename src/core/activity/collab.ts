@@ -24,13 +24,21 @@
  * The server relays every frame opaquely, so this protocol is entirely
  * client-side. It's intentionally not a CRDT: concurrent edits to the *same*
  * node resolve to whoever typed last — the honest, robust tradeoff for a small
- * group co-writing one announcement.
+ * group co-writing one announcement. One corollary worth knowing (pinned by
+ * `messageStore.test.ts`): remote frames bypass the local undo history, so an
+ * undo restores the whole pre-edit snapshot — including nodes a peer has since
+ * edited — and re-broadcasts it. Same rule, applied to time travel.
+ *
+ * The socket authenticates with a single-use ticket minted over an
+ * authenticated POST (`/api/activity/room-ticket`) right before each connect,
+ * so the WS URL never carries the Discord access token.
  */
 
 import { useMessageStore } from "@/core/state/messageStore";
 import type { WebhookMessage } from "@/core/schema/types";
 import type { EditorId } from "@/core/schema/types";
 import { PROXY_BASE_URL } from "@/core/guild/config";
+import { mintRoomTicket } from "./api";
 import { applyOps, diffMessage, type CollabOp } from "./collabPatch";
 import { usePresenceStore } from "./presence";
 
@@ -46,7 +54,6 @@ interface StartOptions {
   /** The launching guild, or null on a DM / group-DM launch (no guild to gate
    *  the room on — the unguessable instance id keys it instead). */
   guildId: string | null;
-  token: string;
   /** The signed-in editor, stamped onto every `focus` frame so peers can render
    *  per-node presence (avatar + ring) without waiting on the roster to resolve. */
   self: { id: string; name: string; avatar: string | null };
@@ -67,6 +74,11 @@ interface StartOptions {
    *  application id. Delivered over the live socket, so it lands even while the
    *  Activity is backgrounded during the external-browser OAuth. */
   onBotConnected?: (applicationId: string) => void;
+  /** The Activity's own sign-in is no longer valid: minting a room ticket was
+   *  refused outright (401/403 — revoked/expired token, or membership lost).
+   *  Reconnecting can only fail the same way, so collab stops for good and the
+   *  shell tells the user to relaunch. Editing continues solo. */
+  onAuthExpired?: () => void;
   /** The room's starting content has settled — fired once. Either we adopted a
    *  full-message draft from the room (a latecomer's `hello` reply, or the
    *  server's `resume` of a persisted draft) and it's now in the store, or — for a
@@ -210,20 +222,52 @@ export function stopCollab(): void {
   }
 }
 
-function roomUrl(o: StartOptions): string {
+function roomUrl(o: StartOptions, ticket: string): string {
   const wsBase = PROXY_BASE_URL.replace(/^http/i, "ws");
-  const q = new URLSearchParams({ token: o.token });
-  // Sent only for a server launch — the proxy gates the room on guild membership
-  // when present, and skips that gate for a DM launch (no guild).
-  if (o.guildId) q.set("guild", o.guildId);
+  // Only the single-use ticket rides the URL. Identity — and the guild
+  // membership gate, on a server launch — were established when it was minted
+  // (`POST /api/activity/room-ticket`, a normal bearer call), so no long-lived
+  // credential can end up in an access log via this URL.
+  const q = new URLSearchParams({ ticket });
   return `${wsBase}/api/activity/room/${encodeURIComponent(o.instanceId)}?${q.toString()}`;
 }
 
 function connect(): void {
   if (stopped || !opts) return;
+  const o = opts;
+  void (async () => {
+    // Every (re)connect mints its own single-use ticket — the credential the
+    // socket URL carries instead of the Discord access token.
+    let ticket: string;
+    try {
+      ticket = await mintRoomTicket(o.instanceId, o.guildId);
+    } catch (e) {
+      // The session may have been torn down (or restarted) while we awaited.
+      if (stopped || opts !== o) return;
+      const status = (e as { status?: number }).status;
+      if (status === 401 || status === 403) {
+        // Definitive: the Activity's sign-in itself is no longer valid
+        // (revoked/expired token, or membership lost). Every retry would be
+        // refused the same way — stop for good and let the shell say
+        // "relaunch", instead of looping on the backoff forever.
+        stopped = true;
+        o.onConnectedChange?.(false);
+        o.onAuthExpired?.();
+        return;
+      }
+      // Transient (network, proxy restart) — keep the usual backoff.
+      scheduleReconnect();
+      return;
+    }
+    if (stopped || opts !== o) return;
+    openSocket(o, ticket);
+  })();
+}
+
+function openSocket(o: StartOptions, ticket: string): void {
   let ws: WebSocket;
   try {
-    ws = new WebSocket(roomUrl(opts));
+    ws = new WebSocket(roomUrl(o, ticket));
   } catch {
     scheduleReconnect();
     return;

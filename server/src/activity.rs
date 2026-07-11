@@ -2263,6 +2263,148 @@ struct Participant {
     avatar: Option<String>,
 }
 
+// ── Room tickets (POST /api/activity/room-ticket) ────────────────────────────
+
+/// How long a minted room ticket stays claimable. The client mints and
+/// connects back-to-back (every socket attempt mints its own ticket), so this
+/// only needs to absorb a slow network hop — and a short window means a ticket
+/// that *does* end up somewhere it shouldn't goes stale almost immediately.
+const TICKET_TTL_SECS: u64 = 60;
+/// Ticket id length (base62) — ~190 bits, unguessable.
+const TICKET_LEN: usize = 32;
+/// Cap on outstanding tickets, so a hostile authenticated client can't grow
+/// the map without bound. Expired entries are swept on every mint, so this
+/// bounds the *live* window, which is tiny in practice (one per connecting
+/// socket).
+const MAX_TICKETS: usize = 10_000;
+
+/// Single-use WebSocket credentials for the collaboration room.
+///
+/// A browser WebSocket can't carry an `Authorization` header, and the room
+/// socket previously rode the *Discord access token* in its URL query — never
+/// logged today, but one Caddy `log` directive or `RUST_LOG=debug` session
+/// away from writing user tokens into logs. Instead the client now POSTs to
+/// [`activity_room_ticket`] (a normal bearer-authenticated call), where
+/// identity is resolved and the guild membership gate runs, and gets back an
+/// unguessable one-shot ticket bound to that room. The ticket is what rides
+/// the WS URL: consumed on first use, expired after [`TICKET_TTL_SECS`], and
+/// never grants anything beyond joining the one room it was minted for.
+///
+/// In-memory like the rooms themselves — a proxy restart only forces a
+/// reconnect, which mints a fresh ticket anyway.
+pub struct ActivityTickets {
+    inner: Mutex<HashMap<String, TicketClaim>>,
+}
+
+/// Everything `activity_room` needs, resolved and authorized at mint time.
+struct TicketClaim {
+    me: Participant,
+    /// The authorized guild — empty for a DM launch (gated by the unguessable
+    /// instance id alone, exactly like the legacy token path).
+    guild: String,
+    /// The room this ticket may join; a ticket for one room can't open another.
+    instance: String,
+    expires_at: Instant,
+}
+
+impl Default for ActivityTickets {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ActivityTickets {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Mint a ticket for `me` to join `instance` (with `guild` already
+    /// authorized by the caller). `None` only on rng/lock failure or when the
+    /// outstanding-ticket cap is hit.
+    fn mint(&self, me: Participant, guild: String, instance: String) -> Option<String> {
+        let id = crate::schedule::random_base62(TICKET_LEN)?;
+        let now = Instant::now();
+        let Ok(mut map) = self.inner.lock() else {
+            return None;
+        };
+        // Sweep expired tickets on every mint — the map stays tiny without a
+        // background task.
+        map.retain(|_, t| t.expires_at > now);
+        if map.len() >= MAX_TICKETS {
+            return None;
+        }
+        map.insert(
+            id.clone(),
+            TicketClaim {
+                me,
+                guild,
+                instance,
+                expires_at: now + Duration::from_secs(TICKET_TTL_SECS),
+            },
+        );
+        Some(id)
+    }
+
+    /// Consume a ticket: removed on first use, and only returned while fresh.
+    fn claim(&self, id: &str) -> Option<TicketClaim> {
+        let Ok(mut map) = self.inner.lock() else {
+            return None;
+        };
+        let t = map.remove(id)?;
+        (t.expires_at > Instant::now()).then_some(t)
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RoomTicketBody {
+    #[serde(default)]
+    instance_id: String,
+    /// The launching guild, or empty for a DM / group-DM launch.
+    #[serde(default)]
+    guild_id: String,
+}
+
+/// `POST /api/activity/room-ticket` `{ instance_id, guild_id }` — mint the
+/// single-use ticket the collaboration WebSocket connects with (see
+/// [`ActivityTickets`]). Runs the exact gates the socket used to run itself:
+/// bearer identity, plus the guild-membership check when the launch has a
+/// guild. Answers `{ ticket, expires_in }`; the client puts the ticket in the
+/// WS URL and mints a fresh one for every (re)connect.
+pub async fn activity_room_ticket(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Json(body): Json<RoomTicketBody>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let instance = body.instance_id.trim().to_string();
+    if !valid_instance(&instance) {
+        return Err(bad_request("invalid instance id"));
+    }
+    let guild = body.guild_id.trim().to_string();
+    if !guild.is_empty() {
+        if !is_snowflake(&guild) {
+            return Err(bad_request("invalid guild id"));
+        }
+        authorize_activity_member(&st, session.clone(), &guild).await?;
+    }
+    let me = Participant {
+        id: session.uid,
+        name: session.name,
+        avatar: session.avatar,
+    };
+    let ticket = st
+        .activity_tickets
+        .mint(me, guild, instance)
+        .ok_or_else(|| AppError::Internal("could not mint a room ticket".into()))?;
+    Ok(Json(json!({ "ticket": ticket, "expires_in": TICKET_TTL_SECS })).into_response())
+}
+
 /// In-memory state for one Activity instance: the broadcast channel every
 /// participant's socket subscribes to, plus a per-user connection count so the
 /// roster reflects unique people (a user with two tabs counts once, and the room
@@ -2401,28 +2543,39 @@ fn roster_json(members: &HashMap<String, (Participant, u32)>) -> String {
 
 #[derive(Deserialize)]
 pub struct RoomQuery {
-    /// Discord user access token — WebSockets can't carry an `Authorization`
-    /// header, so the bearer rides in the query (same-origin to the iframe via
-    /// Discord's proxy, forwarded over TLS).
+    /// Single-use room ticket from [`activity_room_ticket`] — the standard
+    /// path. Identity and the guild gate were resolved at mint, so the socket
+    /// URL carries no long-lived credential (see [`ActivityTickets`]).
+    #[serde(default)]
+    ticket: String,
+    /// Legacy: the Discord user access token in the query (WebSockets can't
+    /// carry an `Authorization` header). Still accepted so a client loaded
+    /// before a deploy can keep reconnecting; new clients always send a
+    /// `ticket` instead, which keeps the token out of URLs entirely.
     #[serde(default)]
     token: String,
-    /// The Activity's guild, gated exactly like every other guild feature.
-    /// Empty for a DM / group-DM launch, which has no guild — see [`activity_room`].
+    /// The Activity's guild on the legacy token path (a ticket carries its own
+    /// authorized guild). Empty for a DM / group-DM launch, which has no guild
+    /// — see [`activity_room`].
     #[serde(default)]
     guild: String,
 }
 
 /// `GET /api/activity/room/:instance` (WebSocket) — join the collaboration room
-/// for an Activity instance. Authenticated by the bearer token in the query.
+/// for an Activity instance. Authenticated by a single-use ticket in the query
+/// (minted over POST by [`activity_room_ticket`]), or — legacy clients only —
+/// the bearer token itself.
 ///
-/// When the launch carries a `guild` (server channel), we also enforce the same
-/// membership gate the rest of the proxy uses. A DM / group-DM launch has no
-/// guild, so there's nothing to gate on — the room is keyed by Discord's
-/// per-launch `instance` id, which is unguessable and ephemeral, and that id is
-/// the capability: a peer can only join the same room by being in the same DM and
-/// launching the same Activity. (Omitting `guild` can't be used to bypass a *guild*
-/// room's membership check either, since reaching that room still requires its
-/// unguessable instance id.)
+/// When the launch carries a guild (server channel), the same membership gate
+/// the rest of the proxy uses is enforced — at mint time on the ticket path,
+/// here on the legacy path. A DM / group-DM launch has no guild, so there's
+/// nothing to gate on — the room is keyed by Discord's per-launch `instance`
+/// id, which is unguessable and ephemeral, and that id is the capability: a
+/// peer can only join the same room by being in the same DM and launching the
+/// same Activity. (Omitting the guild can't be used to bypass a *guild* room's
+/// membership check either, since reaching that room still requires its
+/// unguessable instance id — and a ticket is additionally bound to the exact
+/// room it was minted for.)
 pub async fn activity_room(
     State(st): State<AppState>,
     Path(instance): Path<String>,
@@ -2435,29 +2588,55 @@ pub async fn activity_room(
     if !valid_instance(&instance) {
         return Err(bad_request("invalid instance id"));
     }
-    if q.token.trim().is_empty() {
-        return Err(AppError::Unauthorized(
-            "missing activity credentials".into(),
-        ));
-    }
-    let session = resolve_bearer(&st, q.token.trim()).await?;
-    let guild = q.guild.trim();
-    if !guild.is_empty() {
-        if !is_snowflake(guild) {
-            return Err(bad_request("invalid guild id"));
+    let (me, guild) = if !q.ticket.trim().is_empty() {
+        // Ticket path: everything was resolved + authorized at mint. Consume
+        // it (single use) and check it was minted for THIS room.
+        let claim = st.activity_tickets.claim(q.ticket.trim()).ok_or_else(|| {
+            AppError::Unauthorized(
+                "That room ticket has expired — reconnect to mint a fresh one.".into(),
+            )
+        })?;
+        if claim.instance != instance {
+            return Err(AppError::Unauthorized(
+                "That room ticket is for a different room.".into(),
+            ));
         }
-        authorize_activity_member(&st, session.clone(), guild).await?;
-    }
+        (claim.me, claim.guild)
+    } else {
+        // Legacy path: the access token itself in the query, gated exactly as
+        // it always was.
+        if q.token.trim().is_empty() {
+            return Err(AppError::Unauthorized(
+                "missing activity credentials".into(),
+            ));
+        }
+        let session = resolve_bearer(&st, q.token.trim()).await?;
+        let guild = q.guild.trim();
+        if !guild.is_empty() {
+            if !is_snowflake(guild) {
+                return Err(bad_request("invalid guild id"));
+            }
+            authorize_activity_member(&st, session.clone(), guild).await?;
+        }
+        (
+            Participant {
+                id: session.uid,
+                name: session.name,
+                avatar: session.avatar,
+            },
+            guild.to_string(),
+        )
+    };
     // The key drafts persist/resume under. It's the STABLE context of the
     // instance id (`gc-<guild>-<channel>` / the DM context), NOT the whole id —
     // Discord changes the per-launch prefix on every End→Play, so keying by the
     // full id would never resume a relaunch (see `draft_context`). `None` disables
     // persistence for this socket (unrecognized id, or a `gc-` context whose guild
-    // doesn't match the authorized query guild — so a forged instance path can't
+    // doesn't match the authorized guild — so a forged instance path can't
     // read or poison another channel's draft; the room still works, just ephemeral).
     let draft_key: Option<String> =
         draft_context(&instance).and_then(|ctx| match context_guild(ctx) {
-            Some(cg) => (cg == guild).then(|| ctx.to_string()),
+            Some(cg) => (cg == guild.as_str()).then(|| ctx.to_string()),
             None => Some(ctx.to_string()),
         });
     // This server's plan tier caps how many people can co-edit a room hosted in
@@ -2468,14 +2647,9 @@ pub async fn activity_room(
         crate::entitlement::UNLIMITED_SLOTS
     } else {
         st.entitlements
-            .coeditor_cap(guild)
+            .coeditor_cap(&guild)
             .await
             .unwrap_or(crate::entitlement::UNLIMITED_SLOTS)
-    };
-    let me = Participant {
-        id: session.uid,
-        name: session.name,
-        avatar: session.avatar,
     };
     Ok(ws.on_upgrade(move |socket| async move {
         room_socket(st, instance, draft_key, me, host_cap, socket).await;
@@ -2701,6 +2875,29 @@ fn valid_instance(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn room_tickets_are_single_use_and_carry_their_claim() {
+        let tickets = ActivityTickets::new();
+        let me = Participant {
+            id: "u1".into(),
+            name: "Nia".into(),
+            avatar: None,
+        };
+        let id = tickets
+            .mint(me, "g1".into(), "i-abc123-gc-g1-c1".into())
+            .unwrap();
+        // Unguessable-length id, and the claim carries what was authorized.
+        assert_eq!(id.len(), TICKET_LEN);
+        let claim = tickets.claim(&id).unwrap();
+        assert_eq!(claim.me.id, "u1");
+        assert_eq!(claim.guild, "g1");
+        assert_eq!(claim.instance, "i-abc123-gc-g1-c1");
+        // Single use: the same ticket can't be claimed twice…
+        assert!(tickets.claim(&id).is_none());
+        // …and an unknown ticket never resolves.
+        assert!(tickets.claim("no-such-ticket").is_none());
+    }
 
     #[test]
     fn files_part_names() {
