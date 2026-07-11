@@ -91,6 +91,14 @@ export interface ActivityUser {
  *  layout change. Null until the handshake resolves. */
 export type ActivityPlatform = "mobile" | "desktop";
 
+/** Mirror the platform onto `<html>` so overlays that portal to document.body
+ *  (modals, the Message directory, toasts) — and therefore escape the padded
+ *  `.app` shell — can apply the same mobile-only safe-area floor via the
+ *  `--app-sait` token (see tokens.css). */
+function stampPlatformOnRoot(platform: ActivityPlatform) {
+  document.documentElement.dataset.activityPlatform = platform;
+}
+
 interface ActivityState {
   status: ActivityStatus;
   step: ActivityStep;
@@ -317,6 +325,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     // carries a real ticket and the handshake below runs normally.
     const mock = devOverrideSession();
     if (mock) {
+      stampPlatformOnRoot(mock.platform);
       set({
         status: "ready",
         step: "done",
@@ -357,6 +366,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       // fallback (the native top bar's inset isn't populated until the first
       // layout change — see ActivityApp). `sdk.platform` is "mobile"/"desktop".
       const platform: ActivityPlatform = sdk.platform === "mobile" ? "mobile" : "desktop";
+      stampPlatformOnRoot(platform);
       set({ step: "sdk-ready", platform });
       trace.stage("sdk-ready", "reached", { platform });
 

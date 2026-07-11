@@ -96,11 +96,12 @@
 @media (max-width: 640px) {
   /* Keep the same breathing room on all four sides (the backdrop's padding)
      instead of going full-bleed: the dialog stays a rounded card with a
-     consistent 16px gap top/bottom matching the left/right gap. Safe-area
-     insets are added so notched phones don't eat into that gap. */
+     consistent 16px gap top/bottom matching the left/right gap. The `--app-sa*`
+     insets (tokens.css) keep that gap clear of notches AND — since the portal
+     escapes the padded Activity shell — of the Discord mobile client's native
+     top bar and home indicator. */
   .backdrop {
-    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px
-      calc(16px + env(safe-area-inset-bottom, 0px));
+    padding: calc(16px + var(--app-sait)) 16px calc(16px + var(--app-saib));
   }
   .dialog {
     max-height: 100%;

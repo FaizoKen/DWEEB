@@ -9,22 +9,12 @@
 
   /* Discord's mobile client overlays a native top bar (the activity switcher +
      Leave button) and a home indicator at the bottom; keep our chrome clear of
-     both. Discord exposes the insets as `--discord-safe-area-inset-*`; `env()`
-     is the iOS + web/dev fallback. On desktop there's no in-iframe chrome, so
-     these all resolve to 0 and the layout is unchanged. */
-  --sait: var(--discord-safe-area-inset-top, env(safe-area-inset-top, 0px));
-  --saib: var(--discord-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
-  --sail: var(--discord-safe-area-inset-left, env(safe-area-inset-left, 0px));
-  --sair: var(--discord-safe-area-inset-right, env(safe-area-inset-right, 0px));
-  padding: var(--sait) var(--sair) var(--saib) var(--sail);
-}
-
-/* The mobile client doesn't populate `--discord-safe-area-inset-*` until the
-   first layout-mode/orientation change, so on first paint the native top bar
-   would still cover our header. Floor the top inset at the bar's known height
-   (48px) on mobile only — `max()` lets the real value win once Discord sets it. */
-.app[data-platform="mobile"] {
-  padding-top: max(var(--sait), 48px);
+     both. The insets — including the mobile-only 48px top-bar floor, keyed off
+     `html[data-activity-platform="mobile"]` — resolve once at the root (see
+     tokens.css) so overlays that portal out of this shell share them. On
+     desktop there's no in-iframe chrome, so they all resolve to 0 and the
+     layout is unchanged. */
+  padding: var(--app-sait) var(--app-sair) var(--app-saib) var(--app-sail);
 }
 
 .panes {

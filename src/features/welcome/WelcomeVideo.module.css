@@ -12,7 +12,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  /* --app-sa* (tokens.css) keep the film clear of the Discord mobile client's
+     native top bar / home indicator inside the Activity; 0 everywhere else. */
+  padding: calc(20px + var(--app-sait)) 20px calc(20px + var(--app-saib));
   background: rgba(3, 4, 8, 0.88);
   animation: welcomeFade 200ms ease-out both;
 }
@@ -149,9 +151,10 @@
   }
 }
 
-/* Phones: let the panel own nearly the whole screen. */
+/* Phones: let the panel own nearly the whole screen — still clear of the
+   Discord mobile client's top bar / home indicator inside the Activity. */
 @media (max-width: 520px) {
   .backdrop {
-    padding: 10px;
+    padding: calc(10px + var(--app-sait)) 10px calc(10px + var(--app-saib));
   }
 }

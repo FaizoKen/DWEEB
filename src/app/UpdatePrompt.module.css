@@ -3,7 +3,9 @@
    of corner notice (but persistent rather than auto-dismissing). */
 .viewport {
   position: fixed;
-  top: 16px;
+  /* --app-sait (tokens.css) keeps the prompt clear of the Discord mobile
+     client's native top bar inside the Activity; 0 everywhere else. */
+  top: calc(16px + var(--app-sait));
   right: 16px;
   z-index: var(--app-z-tooltip);
   display: flex;
@@ -14,7 +16,7 @@
    (~48px bar + a 16px gap) — same treatment as the toasts. */
 @media (max-width: 900px) {
   .viewport {
-    top: 64px;
+    top: calc(64px + var(--app-sait));
   }
 }
 

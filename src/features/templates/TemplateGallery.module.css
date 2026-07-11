@@ -1062,11 +1062,12 @@
 /* ── Mobile ─────────────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
   /* Keep the same breathing room on all four sides instead of going
-     full-bleed — the panel stays a rounded card with a consistent gap,
-     padded past notches via safe-area insets. */
+     full-bleed — the panel stays a rounded card with a consistent gap. The
+     `--app-sa*` insets (tokens.css) keep that gap clear of notches AND — since
+     the portal escapes the padded Activity shell — of the Discord mobile
+     client's native top bar and home indicator. */
   .backdrop {
-    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px
-      calc(16px + env(safe-area-inset-bottom, 0px));
+    padding: calc(16px + var(--app-sait)) 16px calc(16px + var(--app-saib));
   }
   .panel {
     width: 100%;

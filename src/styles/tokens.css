@@ -93,6 +93,18 @@
   --app-z-modal: 50;
   --app-z-tooltip: 60;
 
+  /* ── Safe-area insets ─────────────────────────────────────────────── */
+  /* Resolved once at the root so fixed/portaled overlays (modals, galleries,
+     toasts — anything that escapes the padded Activity shell via a portal to
+     document.body) clear the client chrome too. Inside the Discord Activity
+     the mobile client overlays a native top bar + home indicator and exposes
+     the insets as `--discord-safe-area-inset-*`; `env()` is the iOS + plain-web
+     fallback. On desktop / outside the Activity these resolve to 0. */
+  --app-sait: var(--discord-safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --app-saib: var(--discord-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --app-sail: var(--discord-safe-area-inset-left, env(safe-area-inset-left, 0px));
+  --app-sair: var(--discord-safe-area-inset-right, env(safe-area-inset-right, 0px));
+
   /* ── Discord preview surface ──────────────────────────────────────── */
   --discord-bg-primary: #313338;
   --discord-bg-secondary: #2b2d31;
@@ -121,4 +133,14 @@
   --discord-radius: 8px;
 
   --discord-font: "gg sans", "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* The Discord mobile client doesn't populate `--discord-safe-area-inset-*`
+   until the first layout-mode/orientation change, so on first paint the native
+   top bar (activity switcher + Leave button, 48px) would still cover anything
+   flush with the top. Floor the top inset at the bar's height on mobile only —
+   `max()` lets the real value win once Discord sets it. The attribute is
+   stamped on <html> by the activity store when the SDK handshake resolves. */
+:root[data-activity-platform="mobile"] {
+  --app-sait: max(var(--discord-safe-area-inset-top, env(safe-area-inset-top, 0px)), 48px);
 }

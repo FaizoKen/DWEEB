@@ -1,6 +1,8 @@
 .viewport {
   position: fixed;
-  top: 16px;
+  /* --app-sait (tokens.css) keeps the stack clear of the Discord mobile
+     client's native top bar inside the Activity; 0 everywhere else. */
+  top: calc(16px + var(--app-sait));
   right: 16px;
   /* Toasts are global feedback, so keep them above full-screen overlays that
      also live on the tooltip/modal layers, including gallery confirm dialogs. */
@@ -17,7 +19,7 @@
    (~48px bar + a 16px gap). Desktop keeps the top-right corner. */
 @media (max-width: 900px) {
   .viewport {
-    top: 64px;
+    top: calc(64px + var(--app-sait));
   }
 }
 

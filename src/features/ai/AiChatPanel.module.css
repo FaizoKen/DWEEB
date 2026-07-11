@@ -10,7 +10,9 @@
 
 .panel {
   position: fixed;
-  top: 0;
+  /* --app-sait (tokens.css) keeps the docked column clear of the Discord
+     mobile client's native top bar inside the Activity; 0 everywhere else. */
+  top: var(--app-sait);
   right: 0;
   bottom: 0;
   left: auto;

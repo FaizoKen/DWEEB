@@ -53,7 +53,6 @@ export function ActivityApp() {
   const status = useActivityStore((s) => s.status);
   const step = useActivityStore((s) => s.step);
   const error = useActivityStore((s) => s.error);
-  const platform = useActivityStore((s) => s.platform);
   const pipMode = useActivityStore((s) => s.pipMode);
   const init = useActivityStore((s) => s.init);
 
@@ -144,7 +143,7 @@ export function ActivityApp() {
   // their state is inert here — this branch renders neither the sheet nor its FAB.
   if (pipMode) {
     return (
-      <div className={styles.app} data-platform={platform ?? undefined} data-pip="true">
+      <div className={styles.app} data-pip="true">
         <div className={styles.pipPreview}>{previewReady ? <Preview /> : <PreviewSkeleton />}</div>
         <ToastViewport />
       </div>
@@ -152,11 +151,7 @@ export function ActivityApp() {
   }
 
   return (
-    <div
-      className={styles.app}
-      data-platform={platform ?? undefined}
-      data-preview-open={previewOpen ? "true" : "false"}
-    >
+    <div className={styles.app} data-preview-open={previewOpen ? "true" : "false"}>
       <div className={styles.panes}>
         <section className={styles.editor} aria-label="Component builder">
           {/* The bar is real immediately — only the component list below waits on
