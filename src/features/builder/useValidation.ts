@@ -188,9 +188,10 @@ export function usePluginGuildIssues(): ValidationIssue[] {
  * can't live in `validateMessage` — it depends on where the post is going,
  * which only the embedded Activity tracks live (it mirrors its picked channel
  * into the post-destination store; the web app never writes it, so this is a
- * no-op there). Message-level (no `nodeId`): the meta header's banner points
- * the user at Message options → Forum post, the Forum lane shows an error dot,
- * and the bar's Post button disables until a title is set.
+ * no-op there). Message-level (no `nodeId`), but rendered *in its section*
+ * like any field error: the Forum lane shows a danger dot and the Thread name
+ * field carries the inline error (see `MessageOptions`), while the bar's Post
+ * button disables until a title is set.
  */
 export function useDestinationIssues(): ValidationIssue[] {
   // Subscribe to just the field the check reads, so keystrokes elsewhere in

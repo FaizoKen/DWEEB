@@ -489,9 +489,13 @@ function MetaHeader() {
   // the Activity bar); here we only surface message-level problems that have no
   // component to point at (bad mentions, …) as a readable banner. "A message must
   // contain at least one component" is already covered by the empty-tree
-  // placeholder, so drop it to avoid saying it twice.
+  // placeholder, and the missing forum post title renders inline on its own
+  // field (Message options → Forum post, flagged by the lane's danger dot) —
+  // both are dropped here to avoid saying them twice.
   const { messageIssues } = useValidationSummary();
-  const bannerIssues = messageIssues.filter((i) => i.code !== "EMPTY_MESSAGE");
+  const bannerIssues = messageIssues.filter(
+    (i) => i.code !== "EMPTY_MESSAGE" && i.code !== "THREAD_NAME_REQUIRED",
+  );
 
   return (
     <section className={styles.meta} aria-label="Webhook execution overrides">

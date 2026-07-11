@@ -238,6 +238,11 @@ export function MessageOptions() {
           <Field
             label="Thread name"
             hint="Starts a new forum post with this title. Skip when posting into an existing thread."
+            error={
+              titleRequired
+                ? "Required — the selected forum/media channel starts a new post, and it needs a title."
+                : undefined
+            }
           >
             {(id) => (
               <TextArea
