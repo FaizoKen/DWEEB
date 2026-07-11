@@ -289,10 +289,30 @@
     z-index: var(--app-z-modal);
   }
 
-  /* Collapsed to an icon-only circle so the Preview/AI pair keeps its original
-   * compact look and fits comfortably on narrow screens. */
+  /* Align the action row with the mini preview above it: the row spans the same
+   * width, the AI launcher stays a fixed circle pinned to the right, and the
+   * Collab pill flexes to fill the rest. So the row's left edge lines up with
+   * the thumbnail's left edge and the AI circle's right edge with the
+   * thumbnail's right edge — a tidy, edge-aligned stack. */
+  .fab-row {
+    width: var(--app-mini-preview-w);
+    /* Pins the AI circle to the right edge when it's the only child (preview
+     * open, Collab hidden); with Collab present its flex-grow eats the free
+     * space, so this has no effect then. */
+    justify-content: flex-end;
+  }
+
+  .collab-fab {
+    flex: 1;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  /* AI launcher collapses to an icon-only circle so it stays compact beside the
+   * Collab pill; it never flexes, keeping its fixed round footprint. */
   .ai-fab {
     gap: 0;
+    flex: 0 0 auto;
     width: var(--app-fab-h);
     height: var(--app-fab-h);
     padding: 0;

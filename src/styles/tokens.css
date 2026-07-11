@@ -61,9 +61,13 @@
 
   --app-control-h: 36px;
   --app-control-h-sm: 32px;
-  /* Shared height for the floating pills (Add component / Preview / AI) so they
+  /* Shared height for the floating pills (Add component / Collab / AI) so they
      always line up at the same size regardless of which file styles them. */
   --app-fab-h: 42px;
+  /* Width of the mobile live mini preview card, shared with the FAB action row
+     below it so the Collab + AI pair spans exactly the same width and their
+     edges line up. */
+  --app-mini-preview-w: 165px;
 
   --app-space-1: 4px;
   --app-space-2: 8px;
