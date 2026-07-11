@@ -501,13 +501,22 @@ impl Discord {
     /// Fetch a webhook's own message by id, with the webhook token. `Ok(None)`
     /// when this webhook didn't author it (404) — the signal to try the next
     /// candidate webhook in the channel; `Ok(Some(message))` on success.
+    /// `thread_id` locates a message living in a thread (including a forum/
+    /// media post, which IS a thread): Discord resolves webhook-message reads
+    /// within the webhook's own channel unless the thread is named, so without
+    /// it a thread message 404s even for its authoring webhook.
     pub async fn webhook_message(
         &self,
         webhook_id: &str,
         token: &str,
         message_id: &str,
+        thread_id: Option<&str>,
     ) -> Result<Option<Value>, AppError> {
-        let url = format!("{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}");
+        let mut url = format!("{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}");
+        if let Some(thread) = thread_id {
+            url.push_str("?thread_id=");
+            url.push_str(thread);
+        }
         let resp = send_with_retry(self.http.get(&url))
             .await
             .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
@@ -615,7 +624,9 @@ impl Discord {
     /// message Discord echoes back — the caller records it so the library entry
     /// holds resolved CDN attachment URLs rather than dangling `attachment://`
     /// references. Handles the file-less case too (plain JSON PATCH), so the
-    /// Activity edit path has one call for both.
+    /// Activity edit path has one call for both. `thread_id` targets a message
+    /// living in a thread — a forum/media post's messages need it or the PATCH
+    /// 404s (same rule as [`Self::webhook_message`]).
     pub async fn edit_webhook_message_with_files(
         &self,
         webhook_id: &str,
@@ -623,10 +634,15 @@ impl Discord {
         message_id: &str,
         payload: &Value,
         files: Vec<UploadFile>,
+        thread_id: Option<&str>,
     ) -> Result<Value, AppError> {
-        let url = format!(
+        let mut url = format!(
             "{API_BASE}/webhooks/{webhook_id}/{token}/messages/{message_id}?with_components=true"
         );
+        if let Some(thread) = thread_id {
+            url.push_str("&thread_id=");
+            url.push_str(thread);
+        }
         let req = if files.is_empty() {
             self.http.patch(&url).json(payload)
         } else {

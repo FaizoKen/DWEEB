@@ -45,6 +45,23 @@
   text-overflow: ellipsis;
 }
 
+/* Small kind tag next to a forum/media destination, so "this starts a new
+   post there" doesn't come out of nowhere when the Title row appears. */
+.forumBadge {
+  margin-left: 8px;
+  display: inline-block;
+  vertical-align: 1px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-subtle);
+  color: var(--app-text-muted);
+}
+
 /* Mention chips in the ping summary. */
 .chips {
   display: inline-flex;

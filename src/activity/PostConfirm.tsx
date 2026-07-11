@@ -33,6 +33,7 @@ import { useActivityStore } from "@/core/activity/activityStore";
 import { useRoleInfo } from "@/core/guild/guildStore";
 import { summarizePings, type PingSummary } from "@/core/schema/mentions";
 import { inspectCapabilities } from "@/core/schema/capability";
+import { LIMITS } from "@/core/schema/limits";
 import type { PickerGuild, PermanentSlots } from "@/core/guild/api";
 import {
   fetchActivityIdentities,
@@ -65,6 +66,10 @@ export interface PostConfirmProps {
   guildId?: string | null;
   /** Resolved destination channel name (without the leading `#`), when known. */
   channelName?: string;
+  /** The destination channel's Discord `type`, when known. A forum (15) or
+   *  media (16) destination starts a NEW post there, so the confirm collects a
+   *  required post title (the draft's `thread_name`) for a brand-new post. */
+  channelType?: number;
   /** True while the confirmed post is in flight — drives the button spinner. */
   busy?: boolean;
   /** Confirm the post. `makePermanent` carries the "Never expire" choice (always
@@ -251,6 +256,7 @@ export function PostConfirm({
   guild,
   guildId,
   channelName,
+  channelType,
   busy = false,
   onConfirm,
   onSchedule,
@@ -259,7 +265,28 @@ export function PostConfirm({
   onManageCustomBots,
 }: PostConfirmProps) {
   const message = useMessageStore((s) => s.message);
+  const setThreadName = useMessageStore((s) => s.setThreadName);
   const pings = useMemo(() => summarizePings(message), [message]);
+
+  // A forum/media destination can only receive a NEW post (a titled thread),
+  // so a brand-new post there needs a title. The field edits the shared
+  // draft's `thread_name` directly — the same field Message options → Forum
+  // sets on the web — so it's collab-synced and rides the wire payload the
+  // proxy forwards (and re-guards). An update targets the existing post, so
+  // no title is asked for there.
+  const forumDest = channelType === 15 || channelType === 16;
+  const needsTitle = mode === "new" && forumDest;
+  const postTitle = message.thread_name ?? "";
+  const [titleError, setTitleError] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) setTitleError(null);
+  }, [open]);
+  /** Gate a confirm/schedule on the forum post title being present. */
+  const guardTitle = (): boolean => {
+    if (!needsTitle || postTitle.trim().length > 0) return true;
+    setTitleError("Give the new forum post a title first.");
+    return false;
+  };
 
   // Send now vs schedule for later — only a brand-new post offers the choice
   // (an update edits a live message; "later" has no meaning there). While
@@ -532,6 +559,7 @@ export function PostConfirm({
   // Validate the picked time, then hand off. Runs from the primary button while
   // "Schedule" is picked; errors surface inline under the picker.
   const handleSchedule = () => {
+    if (!guardTitle()) return;
     const at = Date.parse(scheduleAt);
     if (Number.isNaN(at)) {
       setScheduleError("Pick a date and time.");
@@ -558,11 +586,14 @@ export function PostConfirm({
           <Button
             variant="primary"
             size="sm"
-            onClick={() =>
-              scheduling
-                ? handleSchedule()
-                : onConfirm(showPermanent ? makePermanent : false, showIdentity ? postAs : null)
-            }
+            onClick={() => {
+              if (scheduling) {
+                handleSchedule();
+                return;
+              }
+              if (!guardTitle()) return;
+              onConfirm(showPermanent ? makePermanent : false, showIdentity ? postAs : null);
+            }}
             disabled={busy}
             leadingIcon={
               busy ? (
@@ -602,6 +633,41 @@ export function PostConfirm({
             <dt>Channel</dt>
             <dd>
               <span className={styles.destName}>#{channelName}</span>
+              {forumDest ? (
+                <span className={styles.forumBadge}>
+                  {channelType === 16 ? "Media channel" : "Forum"}
+                </span>
+              ) : null}
+            </dd>
+          </div>
+        ) : null}
+        {needsTitle ? (
+          <div className={styles.fact}>
+            <dt>Title</dt>
+            <dd>
+              <input
+                type="text"
+                className={styles.scheduleInput}
+                value={postTitle}
+                maxLength={LIMITS.THREAD_NAME}
+                disabled={busy}
+                placeholder="e.g. Release notes — v2.4"
+                aria-label="Title for the new forum post"
+                aria-invalid={titleError ? true : undefined}
+                onChange={(e) => {
+                  setThreadName(e.currentTarget.value || undefined);
+                  setTitleError(null);
+                }}
+              />
+              {titleError ? (
+                <p className={styles.scheduleError} role="alert">
+                  {titleError}
+                </p>
+              ) : null}
+              <p className={styles.idHint}>
+                Posting here starts a new {channelType === 16 ? "media" : "forum"} post with this
+                title. Tags can be set under Message options → Forum post.
+              </p>
             </dd>
           </div>
         ) : null}

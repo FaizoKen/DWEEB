@@ -27,7 +27,12 @@ import {
   isShortLinkConfigured,
   attachEditorFields,
 } from "@/core/serialization";
-import { buildWirePayload, parseMessageIdInput, prepareMessagePayload } from "@/core/webhook/send";
+import {
+  buildWirePayload,
+  parseMessageChannelId,
+  parseMessageIdInput,
+  prepareMessagePayload,
+} from "@/core/webhook/send";
 import { validateMessage } from "@/core/schema/validation";
 import { pushToast } from "@/ui/Toast";
 import {
@@ -644,7 +649,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       // in-session files re-uploads them alongside the payload.
       const { payload, files } = prepareMessagePayload(message);
       // The update rides whichever identity authored the message — the
-      // webhook (and custom bot, when it was one) from the original post.
+      // webhook (and custom bot, when it was one) from the original post —
+      // plus the thread a forum/media post opened (Discord can't locate a
+      // thread message without it).
       const result = await editPostedMessage(
         last.guild_id,
         last.channel_id,
@@ -653,6 +660,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         payload,
         last.application_id ?? null,
         files,
+        last.thread_id ?? null,
       );
       set({ lastPost: result });
       // The post-success dialog confirms it (see ActivityBar) — skip the toast.
@@ -676,16 +684,22 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (get().canPostToTarget === false) {
       throw new Error("You need the “Manage Webhooks” permission to restore a message here.");
     }
-    // Accept a bare snowflake or a full message link (the channel is fixed to the
-    // target, so the link's channel part is ignored — only the message id matters).
+    // Accept a bare snowflake or a full message link. A link whose channel
+    // segment differs from the picked channel names the THREAD the message
+    // lives in — that's exactly how a forum/media post's link looks (Discord
+    // uses the thread id as the link's channel part) — so pass it along: the
+    // proxy needs it to locate a thread message. A matching segment (or a bare
+    // id) restores from the channel itself, as before.
     const messageId = parseMessageIdInput(input);
     if (!messageId) {
       throw new Error("Enter a message ID or a Discord message link.");
     }
+    const linkChannelId = parseMessageChannelId(input);
+    const threadId = linkChannelId && linkChannelId !== channelId ? linkChannelId : null;
     if (get().restoring) return;
     set({ restoring: true });
     try {
-      const result = await restorePostedMessage(guildId, channelId, messageId);
+      const result = await restorePostedMessage(guildId, channelId, messageId, threadId);
       const decoded = decodeRestored(result.message);
       // Load it into the shared editor — collab broadcasts the new draft to
       // everyone in the room (a top-level structural change, so a full snapshot).
@@ -702,6 +716,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
           url: result.url,
           webhook_id: result.webhook_id,
           application_id: result.application_id ?? null,
+          thread_id: result.thread_id ?? null,
         },
       });
       const validation = validateMessage(decoded);
@@ -734,18 +749,23 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       entry.channel_id &&
       entry.guild_id === get().targetGuildId
     ) {
+      // A thread post (e.g. a forum post) lives under the thread id, which
+      // Discord uses as the channel segment of the message link — and which
+      // the follow-up edit must carry to locate the message.
+      const linkSeg = entry.thread_id || entry.channel_id;
       set({
         lastPost: {
           message_id: entry.message_id,
           channel_id: entry.channel_id,
           guild_id: entry.guild_id,
-          url: `https://discord.com/channels/${entry.guild_id}/${entry.channel_id}/${entry.message_id}`,
+          url: `https://discord.com/channels/${entry.guild_id}/${linkSeg}/${entry.message_id}`,
           webhook_id: entry.webhook_id ?? undefined,
           // The identity that authored the message (a custom bot's application
           // id, or null = DWEEB), recorded at post time — Update then rides the
           // same identity instead of failing down the DWEEB path against a
           // custom bot's webhook.
           application_id: entry.application_id ?? null,
+          thread_id: entry.thread_id ?? null,
         },
       });
       const onTarget = entry.channel_id === get().targetChannelId;

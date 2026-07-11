@@ -241,12 +241,13 @@ export function ActivityBar() {
     return () => ac.abort();
   }, [targetGuildId]);
 
-  // Destination channel name for the confirm/success dialogs — resolved from the
-  // connected guild's channel map (the same source the picker reads).
+  // Destination channel name + kind for the confirm/success dialogs — resolved
+  // from the connected guild's channel map (the same source the picker reads).
+  // The kind lets the confirm require a post title on a forum/media destination.
   const connectedData = useGuildStore((s) => s.data);
-  const channelName = targetChannelId
-    ? connectedData?.channelById[targetChannelId]?.name
-    : undefined;
+  const targetChannel = targetChannelId ? connectedData?.channelById[targetChannelId] : undefined;
+  const channelName = targetChannel?.name;
+  const channelType = targetChannel?.type;
 
   const [restoreOpen, setRestoreOpen] = useState(false);
   // The Activity has one useful save destination: the selected server's shared
@@ -692,6 +693,7 @@ export function ActivityBar() {
         guild={targetGuildMeta}
         guildId={targetGuildId}
         channelName={channelName}
+        channelType={channelType}
         busy={publishing}
         onConfirm={(makePermanent, postAs) => void confirmPost(makePermanent, postAs)}
         onSchedule={(makePermanent, at) => void confirmSchedule(makePermanent, at)}

@@ -106,6 +106,11 @@ export interface ActivityPostResult {
   url: string | null;
   webhook_id?: string;
   application_id?: string | null;
+  /** The thread the message lives in, when it isn't directly in `channel_id` —
+   *  a forum/media post opens one (its id comes back here). A later edit must
+   *  hand it back to {@link editPostedMessage} or Discord can't find the
+   *  message. Null/absent = an ordinary channel post. */
+  thread_id?: string | null;
   /** True when a never-expire slot was claimed for this post (the user opted in
    *  and it succeeded). Absent/false on an ordinary post. */
   permanent?: boolean;
@@ -372,18 +377,27 @@ export interface ActivityRestoreResult extends ActivityPostResult {
 /** `POST /api/activity/restore` — pull a message DWEEB posted in the channel back
  *  out of Discord. Unlike the web app's Restore, no webhook URL is needed: the
  *  proxy resolves the DWEEB-owned webhook from the channel, so the caller supplies
- *  only a message id. A 404 means the id isn't a message DWEEB posted here. */
+ *  only a message id. A 404 means the id isn't a message DWEEB posted here.
+ *  `threadId` names the thread the message lives in when it isn't directly in
+ *  the channel — a forum/media post, or a thread under a text channel (derived
+ *  from a pasted message link); without it such a message can't resolve. */
 export async function restorePostedMessage(
   guildId: string,
   channelId: string,
   messageId: string,
+  threadId: string | null = null,
 ): Promise<ActivityRestoreResult> {
   let res: Response;
   try {
     res = await proxyFetch("/api/activity/restore", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ guild_id: guildId, channel_id: channelId, message_id: messageId }),
+      body: JSON.stringify({
+        guild_id: guildId,
+        channel_id: channelId,
+        message_id: messageId,
+        thread_id: threadId ?? "",
+      }),
     });
   } catch {
     throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
@@ -398,7 +412,9 @@ export async function restorePostedMessage(
  *  the message was posted as (null = DWEEB), so the proxy edits through that
  *  bot's connected Activity webhook. Either way the webhook is re-verified
  *  server-side before the edit. `files` carries in-session uploads exactly as
- *  on {@link publishToChannel} — multipart when present. */
+ *  on {@link publishToChannel} — multipart when present. `threadId` names the
+ *  thread the message lives in (a forum/media post — from the original post's
+ *  result); Discord can't locate a thread message without it. */
 export async function editPostedMessage(
   guildId: string,
   channelId: string,
@@ -407,6 +423,7 @@ export async function editPostedMessage(
   message: unknown,
   applicationId: string | null = null,
   files: CollectedFile[] = [],
+  threadId: string | null = null,
 ): Promise<ActivityPostResult> {
   let res: Response;
   try {
@@ -419,6 +436,7 @@ export async function editPostedMessage(
           message_id: messageId,
           webhook_id: webhookId,
           application_id: applicationId ?? "",
+          thread_id: threadId ?? "",
           message,
         },
         files,

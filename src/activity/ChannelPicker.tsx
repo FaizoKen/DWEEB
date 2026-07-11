@@ -21,14 +21,11 @@ import type { GuildChannel } from "@/core/guild/types";
 import { ChannelTypeIcon, CheckCircleIcon, ChevronDownIcon, SearchIcon } from "@/ui/Icon";
 import styles from "./ChannelPicker.module.css";
 
-/** Channel types the Activity can post into: text and announcement. Forum and
- *  media channels (15/16) host webhooks too — and the web app's picker offers
- *  them, paired with its optional thread field — but *executing* a webhook
- *  there requires a `thread_name`/`thread_id` the Activity's post and schedule
- *  paths don't carry, so a post would always fail at Discord. Keep them out of
- *  the picker until the Activity grows a post-title affordance (the proxy
- *  re-guards this server-side regardless). */
-const POSTABLE_CHANNEL_TYPES = new Set([0, 5]);
+/** Channel types the Activity can post into: text, announcement, forum, and
+ *  media — the same set the web app's picker offers. A forum/media destination
+ *  starts a NEW post there, so the post confirm requires a title for it (the
+ *  message's `thread_name`, which the proxy re-guards server-side). */
+const POSTABLE_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
 /** Only show the search box once the list is long enough to need it. */
 const SEARCH_THRESHOLD = 8;
 

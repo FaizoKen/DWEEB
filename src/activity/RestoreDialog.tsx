@@ -102,7 +102,8 @@ export function RestoreDialog({ open, onClose }: { open: boolean; onClose: () =>
       </Field>
       <p className={styles.hint}>
         Right-click the message in Discord → <strong>Copy Message Link</strong> (or Copy Message ID
-        with Developer Mode on).
+        with Developer Mode on). For a post in a forum or media channel — or a message inside a
+        thread — paste the full link, so DWEEB knows which thread it lives in.
       </p>
     </Modal>
   );

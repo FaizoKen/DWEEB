@@ -177,19 +177,38 @@ fn bad_request(message: &str) -> AppError {
 const CHANNEL_KIND_FORUM: i64 = 15;
 const CHANNEL_KIND_MEDIA: i64 = 16;
 
+/// Whether a channel kind only accepts posts that start (or target) a thread —
+/// Discord's forum (15) and media (16) channels.
+fn is_thread_only_kind(kind: i64) -> bool {
+    matches!(kind, CHANNEL_KIND_FORUM | CHANNEL_KIND_MEDIA)
+}
+
+/// The trimmed `thread_name` a wire payload carries, if any — the builder's
+/// "Post title" for a forum/media destination (the confirm dialog requires it
+/// there, and Message options → Forum sets the same field on the web).
+fn payload_thread_name(message: &Value) -> Option<&str> {
+    message
+        .get("thread_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
 /// Membership + kind gate for a channel the Activity is about to post into.
 ///
 /// Forum (15) and media (16) channels can *host* webhooks, but executing one
-/// there requires a `thread_name`/`thread_id` — a post without either always
-/// 400s at Discord. The Activity's post and schedule paths carry no thread
-/// parameters (its picker doesn't offer those channels either), so refuse them
-/// up front with advice instead of relaying Discord's opaque error. Every other
-/// kind passes — Discord stays the authority on anything subtler. A channel
-/// that isn't in the guild fails exactly like [`ensure_channel_in_guild`].
+/// there must start a new post: Discord requires a `thread_name` (the post's
+/// title) or an existing `thread_id`, and 400s opaquely without one. The
+/// Activity posts new messages, so we require the payload to carry the title —
+/// the confirm dialog collects it — and refuse up front with advice otherwise.
+/// Every other kind passes — Discord stays the authority on anything subtler.
+/// A channel that isn't in the guild fails exactly like
+/// [`ensure_channel_in_guild`].
 async fn ensure_postable_channel(
     st: &AppState,
     guild: &str,
     channel_id: &str,
+    message: &Value,
 ) -> Result<(), AppError> {
     match crate::routes::channel_type_in_guild(st, guild, channel_id).await? {
         None => Err(AppError::Status {
@@ -197,11 +216,26 @@ async fn ensure_postable_channel(
             message: "That channel isn't in this server.".into(),
             retry_after: None,
         }),
-        Some(CHANNEL_KIND_FORUM) | Some(CHANNEL_KIND_MEDIA) => Err(bad_request(
-            "Forum and media channels need a post title, which the Activity can't set yet — pick a text or announcement channel.",
-        )),
+        Some(kind) if is_thread_only_kind(kind) && payload_thread_name(message).is_none() => {
+            Err(bad_request(
+                "Posting to a forum or media channel starts a new post, which needs a title — add one in the post dialog.",
+            ))
+        }
         Some(_) => Ok(()),
     }
+}
+
+/// The thread a freshly-executed webhook message landed in, from the message
+/// Discord echoed back (`wait=true`). For an ordinary channel post the echo's
+/// `channel_id` equals the channel we posted to; when it differs, the message
+/// lives in a thread — for a forum/media post that new thread's id IS the id
+/// every later read/edit of the message must carry.
+fn created_thread_id(requested_channel: &str, created: &Value) -> Option<String> {
+    created
+        .get("channel_id")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty() && *c != requested_channel)
+        .map(str::to_string)
 }
 
 // ── Token exchange (POST /api/activity/token) ───────────────────────────────
@@ -559,7 +593,7 @@ pub async fn activity_post(
     let custom_app = parse_application_id(&body.application_id)?;
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
-    ensure_postable_channel(&st, &guild, &channel_id).await?;
+    ensure_postable_channel(&st, &guild, &channel_id, &body.message).await?;
 
     let (webhook_id, token) = match custom_app.as_deref() {
         // Post as one of the server's own bots: through its connected Activity
@@ -587,11 +621,18 @@ pub async fn activity_post(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    // A forum/media post landed in a brand-new thread (its id comes back as the
+    // echoed message's channel_id). Every later read/edit of the message — and
+    // its jump link — must carry that thread id, so it rides the response.
+    let thread_id = created_thread_id(&channel_id, &created);
     let jump = if message_id.is_empty() {
         Value::Null
     } else {
+        // A thread post lives under the thread id, which Discord uses as the
+        // channel segment of the message link.
+        let seg = thread_id.as_deref().unwrap_or(&channel_id);
         Value::String(format!(
-            "https://discord.com/channels/{guild}/{channel_id}/{message_id}"
+            "https://discord.com/channels/{guild}/{seg}/{message_id}"
         ))
     };
 
@@ -639,7 +680,7 @@ pub async fn activity_post(
         &guild,
         Some(&channel_id),
         &message_id,
-        None,
+        thread_id.as_deref(),
         Some(&format!(
             "https://discord.com/api/webhooks/{webhook_id}/{token}"
         )),
@@ -662,6 +703,10 @@ pub async fn activity_post(
         // Which custom bot authored the post (null for DWEEB) — the FE carries
         // it into `activity_edit` so the update rides the same identity.
         "application_id": custom_app,
+        // The thread a forum/media post opened (null for an ordinary channel
+        // post) — the FE hands it back to `activity_edit`, which needs it to
+        // locate the message.
+        "thread_id": thread_id,
         // Never-expire outcome for the success dialog's receipt. `permanent` is
         // true only when a slot was actually claimed; `permanent_error` carries a
         // user-facing reason when the user asked but it couldn't be granted.
@@ -1418,6 +1463,12 @@ pub struct EditBody {
     /// webhook. Empty/absent = the standard DWEEB path.
     #[serde(default)]
     application_id: String,
+    /// The thread the message lives in (from the post response — a forum/media
+    /// post opens one), when it isn't directly in `channel_id`. Discord resolves
+    /// webhook-message edits within the webhook's channel unless the thread is
+    /// named, so without it a thread message 404s. Empty/absent = no thread.
+    #[serde(default)]
+    thread_id: String,
     /// The wire payload the browser rebuilt (components + flags + username/avatar).
     message: Value,
 }
@@ -1460,9 +1511,16 @@ pub async fn activity_edit(
         id if is_snowflake(id) => Some(id),
         _ => return Err(bad_request("webhook_id must be a Discord id")),
     };
+    let thread_id = match body.thread_id.trim() {
+        "" => None,
+        id if is_snowflake(id) => Some(id.to_string()),
+        _ => return Err(bad_request("thread_id must be a Discord id")),
+    };
     let custom_app = parse_application_id(&body.application_id)?;
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
+    // `channel_id` is the webhook's channel — for a thread message that's the
+    // parent (e.g. the forum), which is what the guild's channel list knows.
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
 
     let (webhook_id, token) = match custom_app.as_deref() {
@@ -1496,7 +1554,14 @@ pub async fn activity_edit(
     let had_uploads = !files.is_empty();
     let updated = st
         .discord
-        .edit_webhook_message_with_files(&webhook_id, &token, &message_id, &body.message, files)
+        .edit_webhook_message_with_files(
+            &webhook_id,
+            &token,
+            &message_id,
+            &body.message,
+            files,
+            thread_id.as_deref(),
+        )
         .await?;
 
     // Refresh the message's library entry (or create one, for a message posted
@@ -1508,7 +1573,7 @@ pub async fn activity_edit(
         &guild,
         Some(&channel_id),
         &message_id,
-        None,
+        thread_id.as_deref(),
         Some(&format!(
             "https://discord.com/api/webhooks/{webhook_id}/{token}"
         )),
@@ -1520,13 +1585,16 @@ pub async fn activity_edit(
     )
     .await;
 
+    // A thread post lives under the thread id in Discord's message links.
+    let seg = thread_id.as_deref().unwrap_or(&channel_id);
     Ok(Json(json!({
         "message_id": message_id,
         "channel_id": channel_id,
         "guild_id": guild,
-        "url": format!("https://discord.com/channels/{guild}/{channel_id}/{message_id}"),
+        "url": format!("https://discord.com/channels/{guild}/{seg}/{message_id}"),
         "webhook_id": webhook_id,
         "application_id": custom_app,
+        "thread_id": thread_id,
     }))
     .into_response())
 }
@@ -1599,7 +1667,10 @@ pub async fn activity_schedule(
     }
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
-    ensure_postable_channel(&st, &guild, &channel_id).await?;
+    // Same forum/media rule as a live post: the sealed payload must carry the
+    // post title (`thread_name`) — the worker executes it verbatim at fire time,
+    // opening the new forum post then.
+    ensure_postable_channel(&st, &guild, &channel_id, &body.message).await?;
 
     let (webhook_id, token) = require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?;
 
@@ -1643,6 +1714,12 @@ pub struct RestoreBody {
     channel_id: String,
     #[serde(default)]
     message_id: String,
+    /// The thread the message lives in, when it isn't directly in `channel_id`
+    /// — a forum/media post, or a thread under a text channel. The FE derives
+    /// it from a pasted message link whose channel segment isn't the picked
+    /// channel. Empty/absent = read the channel itself.
+    #[serde(default)]
+    thread_id: String,
 }
 
 /// `POST /api/activity/restore` `{ guild_id, channel_id, message_id }` — pull a
@@ -1679,6 +1756,11 @@ pub async fn activity_restore(
             "guild_id, channel_id and message_id must be Discord ids",
         ));
     }
+    let thread_id = match body.thread_id.trim() {
+        "" => None,
+        id if is_snowflake(id) => Some(id.to_string()),
+        _ => return Err(bad_request("thread_id must be a Discord id")),
+    };
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     ensure_channel_in_guild(&st, &guild, &channel_id).await?;
@@ -1697,7 +1779,7 @@ pub async fn activity_restore(
         had_candidate = true;
         if let Some(m) = st
             .discord
-            .webhook_message(&webhook_id, &token, &message_id)
+            .webhook_message(&webhook_id, &token, &message_id, thread_id.as_deref())
             .await?
         {
             found = Some((m, webhook_id, None));
@@ -1720,7 +1802,12 @@ pub async fn activity_restore(
             }
             if let Some(m) = st
                 .discord
-                .webhook_message(&hook.webhook_id, &hook.token, &message_id)
+                .webhook_message(
+                    &hook.webhook_id,
+                    &hook.token,
+                    &message_id,
+                    thread_id.as_deref(),
+                )
                 .await?
             {
                 found = Some((m, hook.webhook_id, Some(app)));
@@ -1730,12 +1817,25 @@ pub async fn activity_restore(
     }
     let Some((message, webhook_id, application_id)) = found else {
         return Err(if had_candidate {
+            // A forum/media post lives in a thread the caller has to name — a
+            // bare message id without one can never resolve there, so say what
+            // fixes it (pasting the full link carries the thread id).
+            let forum_hint = if thread_id.is_none()
+                && matches!(
+                    crate::routes::channel_type_in_guild(&st, &guild, &channel_id).await,
+                    Ok(Some(kind)) if is_thread_only_kind(kind)
+                ) {
+                " This is a forum/media channel — paste the post's full message link (not just the id) so DWEEB can find the right post."
+            } else {
+                ""
+            };
             AppError::Status {
                 status: StatusCode::NOT_FOUND,
-                message: "Discord couldn't find that message under this server's DWEEB or \
-                          connected-bot webhooks. Only a message posted through them can be \
-                          restored."
-                    .into(),
+                message: format!(
+                    "Discord couldn't find that message under this server's DWEEB or \
+                     connected-bot webhooks. Only a message posted through them can be \
+                     restored.{forum_hint}"
+                ),
                 retry_after: None,
             }
         } else {
@@ -1745,18 +1845,22 @@ pub async fn activity_restore(
         });
     };
 
+    // A thread post lives under the thread id in Discord's message links.
+    let seg = thread_id.as_deref().unwrap_or(&channel_id);
     Ok(Json(json!({
         // The raw Discord message — the browser decodes it into the editor.
         "message": message,
         "message_id": message_id,
         "channel_id": channel_id,
         "guild_id": guild,
-        "url": format!("https://discord.com/channels/{guild}/{channel_id}/{message_id}"),
+        "url": format!("https://discord.com/channels/{guild}/{seg}/{message_id}"),
         // Same webhook id `post` returns, so a follow-up edit targets this hook.
         "webhook_id": webhook_id,
         // The custom bot that authored it (null for DWEEB), so a follow-up
         // update rides the same identity.
         "application_id": application_id,
+        // Echo the thread back so the follow-up edit carries it too.
+        "thread_id": thread_id,
     }))
     .into_response())
 }
@@ -2897,6 +3001,41 @@ mod tests {
         assert!(tickets.claim(&id).is_none());
         // …and an unknown ticket never resolves.
         assert!(tickets.claim("no-such-ticket").is_none());
+    }
+
+    #[test]
+    fn payload_thread_name_reads_the_post_title() {
+        // A real title comes back trimmed…
+        let m = json!({ "thread_name": "  Release notes — v2.4  " });
+        assert_eq!(payload_thread_name(&m), Some("Release notes — v2.4"));
+        // …and absent/blank/non-string titles all read as "no title", which is
+        // what makes the forum/media gate refuse the post up front.
+        assert_eq!(payload_thread_name(&json!({})), None);
+        assert_eq!(payload_thread_name(&json!({ "thread_name": "" })), None);
+        assert_eq!(payload_thread_name(&json!({ "thread_name": "   " })), None);
+        assert_eq!(payload_thread_name(&json!({ "thread_name": 7 })), None);
+    }
+
+    #[test]
+    fn created_thread_id_only_differs_for_thread_posts() {
+        // Ordinary channel post: the echo lands where we posted — no thread.
+        let echo = json!({ "id": "9", "channel_id": "100" });
+        assert_eq!(created_thread_id("100", &echo), None);
+        // Forum/media post: the echo's channel is the brand-new thread.
+        let echo = json!({ "id": "9", "channel_id": "555" });
+        assert_eq!(created_thread_id("100", &echo), Some("555".into()));
+        // Defensive: a malformed echo never invents a thread.
+        assert_eq!(created_thread_id("100", &json!({})), None);
+        assert_eq!(created_thread_id("100", &json!({ "channel_id": "" })), None);
+    }
+
+    #[test]
+    fn thread_only_kinds_are_forum_and_media() {
+        assert!(is_thread_only_kind(15));
+        assert!(is_thread_only_kind(16));
+        for kind in [0, 2, 4, 5, 10, 11, 12, 13] {
+            assert!(!is_thread_only_kind(kind));
+        }
     }
 
     #[test]

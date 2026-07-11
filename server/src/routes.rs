@@ -757,7 +757,14 @@ async fn revive_message_components(
     });
     for w in candidates {
         let token = w.token.as_deref().unwrap_or_default();
-        let Some(message) = st.discord.webhook_message(&w.id, token, message_id).await? else {
+        // No thread id here — the permanent-slot record only carries the parent
+        // channel, so a message living in a thread (e.g. a forum post) can't be
+        // revived this way. Best-effort by contract: its buttons stay greyed.
+        let Some(message) = st
+            .discord
+            .webhook_message(&w.id, token, message_id, None)
+            .await?
+        else {
             continue; // 404 — a different webhook authored this message
         };
         let Some(mut components) = message.get("components").cloned() else {
@@ -1186,7 +1193,7 @@ pub(crate) async fn ensure_channel_in_guild(
 /// then fresh, the same two-step [`ensure_channel_in_guild`] takes so a
 /// just-created channel still resolves. `None` when the channel isn't in the
 /// guild at all. Lets callers gate on channel *kind* (the Activity's post path
-/// refuses forum/media channels, which need thread parameters it doesn't carry).
+/// requires a post title — `thread_name` — for forum/media channels).
 pub(crate) async fn channel_type_in_guild(
     st: &AppState,
     guild: &str,
