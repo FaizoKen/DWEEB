@@ -73,7 +73,7 @@ const WelcomeVideo = lazy(() =>
   import("@/features/welcome/WelcomeVideo").then((m) => ({ default: m.WelcomeVideo })),
 );
 import { ToastViewport, pushToast } from "@/ui/Toast";
-import { EyeIcon, SparkleIcon } from "@/ui/Icon";
+import { SparkleIcon } from "@/ui/Icon";
 import { TestModeNotice } from "./TestModeNotice";
 import { UpdatePrompt } from "./UpdatePrompt";
 import { type IncomingWebhook, type IncomingWebhookResult } from "@/core/guild/config";
@@ -388,20 +388,8 @@ export function App() {
           ) : null}
 
           <div className="fab-row">
-            {/* Explicit "open the full preview" toggle, beneath its thumbnail.
-              Mobile only — the desktop preview is always visible. */}
-            {isMobileSheet && !previewOpen ? (
-              <button
-                type="button"
-                className="preview-fab"
-                onClick={() => setPreviewOpen(true)}
-                aria-label="Show preview"
-              >
-                <EyeIcon size={18} />
-                <span>Preview</span>
-              </button>
-            ) : null}
-
+            {/* The full preview opens by tapping the live mini preview above; on
+              mobile the AI launcher widens to line up under that thumbnail. */}
             <button
               type="button"
               className="ai-fab"

@@ -64,6 +64,9 @@
   /* Shared height for the floating pills (Add component / Preview / AI) so they
      always line up at the same size regardless of which file styles them. */
   --app-fab-h: 42px;
+  /* Width of the mobile live mini preview card, shared with the AI launcher pill
+     beneath it so the two stack edge-to-edge at the same width. */
+  --app-mini-preview-w: 165px;
 
   --app-space-1: 4px;
   --app-space-2: 8px;

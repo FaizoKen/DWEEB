@@ -2,9 +2,9 @@
  * so it can be unconditionally visible here — there's no desktop case to hide. */
 .card {
   position: relative;
-  /* Width matches the Preview/AI row below so their left edges line up; height
-   * keeps the row's ~1.58 aspect so the thumbnail reads as a tidy little card. */
-  width: 165px;
+  /* Width matches the AI launcher pill below so their edges line up; height
+   * keeps the ~1.58 aspect so the thumbnail reads as a tidy little card. */
+  width: var(--app-mini-preview-w);
   height: 104px;
   flex-shrink: 0;
   border-radius: 14px;
