@@ -35,7 +35,8 @@ import {
   libraryEntrySearchText,
   useLibraryStore,
 } from "@/core/library/libraryStore";
-import { fetchPermanentSlots, type PermanentSlots } from "@/core/guild/api";
+import type { PermanentSlots } from "@/core/guild/api";
+import { fetchActivityPermanentSlots } from "@/core/activity/api";
 import { TEMPLATES, type MessageTemplate } from "@/data/presets";
 import { isScheduleConfigured, type ScheduleView } from "@/core/schedule/api";
 import { useScheduledPosts } from "@/core/schedule/useScheduledPosts";
@@ -93,7 +94,9 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     if (targetGuildId) void useLibraryStore.getState().refresh(targetGuildId);
   }, [targetGuildId]);
 
-  // Never-expire slot state for the target server — read-only display on posted cards.
+  // Never-expire slot state for the target server — read-only display on posted
+  // cards. Through the Activity's bearer-gated twin endpoint: the web app's
+  // `/api/guilds/:id/permanent` is cookie-only and 401s inside Discord's iframe.
   const [permanent, setPermanent] = useState<PermanentSlots | null>(null);
   useEffect(() => {
     if (!targetGuildId) {
@@ -101,7 +104,7 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
       return;
     }
     const ac = new AbortController();
-    fetchPermanentSlots(targetGuildId, ac.signal)
+    fetchActivityPermanentSlots(targetGuildId, ac.signal)
       .then(setPermanent)
       .catch(() => setPermanent(null));
     return () => ac.abort();
