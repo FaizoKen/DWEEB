@@ -47,7 +47,8 @@ use crate::discord::{DiscordUser, UploadFile, Webhook};
 use crate::error::AppError;
 use crate::routes::{
     authorize_activity_member, authorize_activity_webhooks, current_session, dispatcher_api,
-    dispatcher_url_with_cap, ensure_channel_in_guild, is_snowflake, relay_dispatcher, AppState,
+    dispatcher_url_with_cap, ensure_channel_in_guild, is_snowflake, relay_dispatcher, spawn_revive,
+    AppState,
 };
 use crate::session::{now, Session};
 
@@ -738,6 +739,106 @@ pub async fn activity_permanent(
         .http
         .get(dispatcher_url_with_cap(
             format!("{}/permanent/{guild}", api.base),
+            cap,
+        ))
+        .bearer_auth(&api.token);
+    relay_dispatcher(req).await
+}
+
+#[derive(Deserialize)]
+pub struct PermanentAddActivityBody {
+    guild_id: String,
+    message_id: String,
+    channel_id: String,
+}
+
+/// `POST /api/activity/permanent` `{ guild_id, message_id, channel_id }` — spend
+/// a never-expire slot on a posted message, straight from the embedded gallery's
+/// pin chip. The bearer twin of the web app's `routes::permanent_add`: the same
+/// Manage-Webhooks gate as posting, the same dispatcher relay (a 409 carries the
+/// current slots when the guild is full), and the same best-effort revive of any
+/// TTL-disabled components on success.
+pub async fn activity_permanent_add(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Json(body): Json<PermanentAddActivityBody>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let guild = body.guild_id.trim().to_string();
+    let message_id = body.message_id.trim().to_string();
+    let channel_id = body.channel_id.trim().to_string();
+    if !is_snowflake(&guild) {
+        return Err(bad_request("guild_id must be a Discord id"));
+    }
+    if !is_snowflake(&message_id) || !is_snowflake(&channel_id) {
+        return Err(bad_request("message_id and channel_id must be Discord ids"));
+    }
+    let session = authorize_activity_webhooks(&st, session, &guild).await?;
+    let api = dispatcher_api(&st)?;
+    let cap = st.entitlements.permanent_cap(&guild).await;
+    let req = api
+        .http
+        .post(dispatcher_url_with_cap(
+            format!("{}/permanent/{guild}", api.base),
+            cap,
+        ))
+        .bearer_auth(&api.token)
+        .json(&json!({
+            "message_id": message_id,
+            "channel_id": channel_id,
+            // Recorded for audit; the session is the source of truth for who.
+            "added_by": session.uid,
+        }));
+    let resp = relay_dispatcher(req).await?;
+    // Now permanent: revive anything the TTL gate disabled while the message
+    // was expiring — the same favour the web dashboard's add gets.
+    if resp.status() == StatusCode::OK {
+        spawn_revive(&st, guild, channel_id, message_id);
+    }
+    Ok(resp)
+}
+
+#[derive(Deserialize)]
+pub struct PermanentRemoveQuery {
+    #[serde(default)]
+    guild_id: String,
+    #[serde(default)]
+    message_id: String,
+}
+
+/// `DELETE /api/activity/permanent?guild_id=<id>&message_id=<id>` — give a slot
+/// back from the embedded gallery. The bearer twin of the web app's
+/// `routes::permanent_remove`; relays the dispatcher's fresh slots JSON (a 404
+/// means it was already freed — the FE refetches and treats it as success).
+pub async fn activity_permanent_remove(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Query(q): Query<PermanentRemoveQuery>,
+) -> Result<Response, AppError> {
+    if !st.config.activities_enabled {
+        return Err(not_enabled());
+    }
+    let session = resolve_identity(&st, &jar, &headers).await?;
+    let guild = q.guild_id.trim().to_string();
+    let message_id = q.message_id.trim().to_string();
+    if !is_snowflake(&guild) {
+        return Err(bad_request("guild_id must be a Discord id"));
+    }
+    if !is_snowflake(&message_id) {
+        return Err(bad_request("message_id must be a Discord id"));
+    }
+    authorize_activity_webhooks(&st, session, &guild).await?;
+    let api = dispatcher_api(&st)?;
+    let cap = st.entitlements.permanent_cap(&guild).await;
+    let req = api
+        .http
+        .delete(dispatcher_url_with_cap(
+            format!("{}/permanent/{guild}/{message_id}", api.base),
             cap,
         ))
         .bearer_auth(&api.token);

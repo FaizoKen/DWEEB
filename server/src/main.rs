@@ -505,10 +505,17 @@ async fn run() {
             post(activity::activity_connect_bot)
                 .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
-        // Never-expire slot state for the destination guild, so the pre-post
-        // confirm can offer the "Never expire" toggle. Bearer-gated read (the
-        // cookie-only guild endpoint can't serve the Activity).
-        .route("/api/activity/permanent", get(activity::activity_permanent))
+        // Never-expire slots for the destination guild: the read feeds the
+        // pre-post confirm's toggle and the gallery's pin chips; add/remove let
+        // the gallery assign & free slots on posted cards, like the web one.
+        // All bearer-gated (the cookie-only guild endpoints can't serve the
+        // Activity), Manage-Webhooks in the guild required.
+        .route(
+            "/api/activity/permanent",
+            get(activity::activity_permanent)
+                .post(activity::activity_permanent_add)
+                .delete(activity::activity_permanent_remove),
+        )
         // The destination server's tier + limits, for the Activity's quiet plan
         // indicator. Bearer-gated read (membership only — display-only data).
         .route("/api/activity/plan", get(activity::activity_plan))

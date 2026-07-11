@@ -698,9 +698,10 @@ pub async fn permanent_reenable(
 }
 
 /// Run [`revive_message_components`] off the request path, logging the outcome.
-/// Shared by both never-expire entry points; a few Discord round-trips must
-/// never make a Discord interaction handler (or the dashboard click) wait.
-fn spawn_revive(st: &AppState, guild: String, channel_id: String, message_id: String) {
+/// Shared by every never-expire entry point (dashboard, Discord button, and the
+/// embedded Activity's gallery); a few Discord round-trips must never make a
+/// Discord interaction handler (or the dashboard click) wait.
+pub(crate) fn spawn_revive(st: &AppState, guild: String, channel_id: String, message_id: String) {
     let st = st.clone();
     tokio::spawn(async move {
         match revive_message_components(&st, &guild, &channel_id, &message_id).await {

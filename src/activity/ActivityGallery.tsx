@@ -18,9 +18,11 @@
  *  - **Template** — the curated starting points, loaded straight into the
  *    room's shared editor.
  *
- * Deliberately absent: **Browser drafts** (localStorage isn't a surface inside
- * Discord's iframe — nothing local exists here by design) and the never-expire
- * slot manager (the web gallery stays that management surface).
+ * Posted cards carry the web gallery's never-expire pin chip — assign & free
+ * slots on-card, through the Activity's bearer twin endpoints. Deliberately
+ * absent: **Browser drafts** (localStorage isn't a surface inside Discord's
+ * iframe — nothing local exists here by design) and the orphan-slot strip
+ * (slots whose message left the history; the web gallery frees those).
  *
  * Rendered as a full-screen overlay via portal, exactly like the web gallery;
  * mounted only while open (see ActivityBar), so state resets per visit.
@@ -36,7 +38,12 @@ import {
   useLibraryStore,
 } from "@/core/library/libraryStore";
 import type { PermanentSlots } from "@/core/guild/api";
-import { fetchActivityPermanentSlots } from "@/core/activity/api";
+import {
+  addActivityPermanentMessage,
+  fetchActivityPermanentSlots,
+  removeActivityPermanentMessage,
+} from "@/core/activity/api";
+import { interactiveComponents } from "@/core/plugins/targets";
 import { TEMPLATES, type MessageTemplate } from "@/data/presets";
 import { isScheduleConfigured, type ScheduleView } from "@/core/schedule/api";
 import { useScheduledPosts } from "@/core/schedule/useScheduledPosts";
@@ -94,10 +101,13 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     if (targetGuildId) void useLibraryStore.getState().refresh(targetGuildId);
   }, [targetGuildId]);
 
-  // Never-expire slot state for the target server — read-only display on posted
-  // cards. Through the Activity's bearer-gated twin endpoint: the web app's
-  // `/api/guilds/:id/permanent` is cookie-only and 401s inside Discord's iframe.
+  // Never-expire slot state for the target server — posted cards carry the same
+  // assign/free pin chip as the web gallery. Through the Activity's bearer-gated
+  // twin endpoints: the web app's `/api/guilds/:id/permanent` is cookie-only and
+  // 401s inside Discord's iframe. Fail-soft: a 501 (feature off) or 403 just
+  // hides the chips, leaving the gallery a plain shelf.
   const [permanent, setPermanent] = useState<PermanentSlots | null>(null);
+  const [slotBusy, setSlotBusy] = useState(false);
   useEffect(() => {
     if (!targetGuildId) {
       setPermanent(null);
@@ -109,6 +119,60 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
       .catch(() => setPermanent(null));
     return () => ac.abort();
   }, [targetGuildId]);
+
+  // Claim a never-expire slot for a posted message, straight from its card.
+  // Always asks the server (idempotent, and the local `used/cap` may be stale);
+  // a 409 "all slots taken" comes back with the fresh state instead of throwing.
+  const assignNeverExpire = useCallback(
+    async (messageId: string, channelId: string) => {
+      if (!targetGuildId) return;
+      setSlotBusy(true);
+      try {
+        const res = await addActivityPermanentMessage(targetGuildId, messageId, channelId);
+        setPermanent(res.slots);
+        if (res.full) {
+          pushToast(
+            `All ${res.slots.cap} never-expire slots are in use — free one here, or upgrade the server's plan for more.`,
+            "error",
+          );
+        } else {
+          pushToast("Never expire is on — buttons & selects keep working.", "success");
+        }
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : String(e), "error");
+      } finally {
+        setSlotBusy(false);
+      }
+    },
+    [targetGuildId],
+  );
+
+  // Give a slot back. The message returns to the expiry clock, counted from
+  // its send date — an old message's buttons may expire right away.
+  const freeNeverExpire = useCallback(
+    async (messageId: string) => {
+      if (!targetGuildId) return;
+      setSlotBusy(true);
+      try {
+        setPermanent(await removeActivityPermanentMessage(targetGuildId, messageId));
+        pushToast("Slot freed — the message is back on the expiry clock.", "info");
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : String(e), "error");
+      } finally {
+        setSlotBusy(false);
+      }
+    },
+    [targetGuildId],
+  );
+
+  // Freeing a never-expire slot goes through its own confirm — freeing is
+  // meaningful (the message drops back onto the expiry clock) and, with no hover
+  // to warn on touch, a bare tap on the chip must not silently remove it.
+  const [pendingFreeSlot, setPendingFreeSlot] = useState<{
+    messageId: string;
+    name: string;
+    paused: boolean;
+  } | null>(null);
 
   const [query, setQuery] = useState("");
   // Filtering runs against the deferred value so typing stays responsive even
@@ -188,9 +252,15 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
       const message = libraryEntryMessage(entry);
       if (!message) continue;
       const isPosted = entry.label === "posted";
+      const interactive = interactiveComponents(message).length > 0;
       const displayName =
         entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft");
       const holdsSlot = isPosted && !!entry.message_id && grantIds.has(entry.message_id);
+      // The pin chip: ONE control that both shows never-expire state and
+      // toggles it — the same behaviour as the web gallery. A held slot (even a
+      // plan-paused one) opens a confirm before freeing; an interactive message
+      // without a slot claims one on tap (additive, no confirm). A message with
+      // no components has nothing to keep alive, so it gets no chip.
       let pin: CardData["pin"];
       if (canManageSlots && isPosted && entry.message_id) {
         const messageId = entry.message_id;
@@ -198,20 +268,29 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
           const paused = !permanentIds.has(messageId);
           pin = {
             state: paused ? "paused" : "on",
-            busy: false,
+            busy: slotBusy,
             title: paused
-              ? "Never expire is paused — the server holds more never-expire messages than its plan allows."
-              : "This message never expires and stays in this history.",
-            run: () => {
-              pushToast("Never-expire management is web-only.", "info");
-            },
+              ? "Never expire is paused — the server holds more never-expire messages than its plan allows. Tap to free the slot."
+              : "This message never expires and stays in this history. Tap to free the slot — it goes back on the expiry clock, counted from its send date.",
+            run: () => setPendingFreeSlot({ messageId, name: displayName, paused }),
+          };
+        } else if (interactive && entry.channel_id) {
+          const channelId = entry.channel_id;
+          pin = {
+            state: "off",
+            busy: slotBusy,
+            title:
+              "Keep this message's buttons & selects working forever — uses one of the server's never-expire slots and keeps it in this history.",
+            run: () => void assignNeverExpire(messageId, channelId),
           };
         }
       }
       const description = isPosted
-        ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
-            serverName ?? "server"
-          } history — load it and edits update the live message in place.`
+        ? holdsSlot
+          ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · never-expire keeps it out of the rolling history window, so it stays here until you free the slot.`
+          : `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
+              serverName ?? "server"
+            } history — load it and edits update the live message in place.`
         : `A saved message in the ${serverName ?? "server"} library, shared with this server's managers.`;
       const card: CardData = {
         kind: isPosted ? "posted" : "saved",
@@ -253,7 +332,17 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
       (isPosted ? posted : drafts).push(card);
     }
     return { postedCards: posted, draftCards: drafts };
-  }, [serverEntries, serverName, loadEntry, onClose, grantIds, permanentIds, canManageSlots]);
+  }, [
+    serverEntries,
+    serverName,
+    loadEntry,
+    onClose,
+    grantIds,
+    permanentIds,
+    canManageSlots,
+    slotBusy,
+    assignNeverExpire,
+  ]);
 
   // Upcoming scheduled posts, as gallery cards with a live preview — mirrors
   // the web gallery's Scheduled tab. The message (thumbnail + editor load) is
@@ -722,6 +811,40 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
               onClick={confirmDelete}
             >
               {pendingDelete?.schedule ? "Cancel post" : "Remove"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!pendingFreeSlot}
+        onClose={() => setPendingFreeSlot(null)}
+        title="Turn off never-expire?"
+        size="sm"
+        backdropStyle={{ zIndex: "calc(var(--app-z-tooltip) + 10)" }}
+      >
+        <div className={styles.confirmBody}>
+          <p className={styles.confirmText}>
+            Free <strong>{pendingFreeSlot?.name}</strong>'s never-expire slot? Its buttons &amp;
+            selects go back on the {permanent?.ttl_days ? `${permanent.ttl_days}-day ` : ""}expiry
+            clock — counted from when it was sent, so an older message's may lapse right away — and
+            it rejoins the rolling history, where newer posts can push it off. You can re-pin it
+            later if a slot is free.
+          </p>
+          <div className={styles.confirmActions}>
+            <Button variant="ghost" type="button" onClick={() => setPendingFreeSlot(null)}>
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              type="button"
+              disabled={slotBusy}
+              onClick={() => {
+                if (pendingFreeSlot) void freeNeverExpire(pendingFreeSlot.messageId);
+                setPendingFreeSlot(null);
+              }}
+            >
+              Free slot
             </Button>
           </div>
         </div>

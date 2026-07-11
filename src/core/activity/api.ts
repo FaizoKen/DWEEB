@@ -7,7 +7,7 @@
  */
 
 import { proxyFetch } from "@/core/net/proxyFetch";
-import type { PermanentSlots, PlanInfo } from "@/core/guild/api";
+import type { PermanentAddResult, PermanentSlots, PlanInfo } from "@/core/guild/api";
 import type { CollectedFile } from "@/core/serialization/attachments";
 
 /** Read the proxy's `{ error }` body for a failed call, with a sane fallback. */
@@ -258,6 +258,57 @@ export async function fetchActivityPermanentSlots(
     err.status = res.status;
     throw err;
   }
+  return (await res.json()) as PermanentSlots;
+}
+
+/** `POST /api/activity/permanent` — spend a never-expire slot on a posted
+ *  message, from the gallery's pin chip. The bearer twin of the web app's
+ *  `addPermanentMessage`, with the same result shape: a 409 "all slots taken"
+ *  isn't an error — it comes back as `{ full: true }` with the occupying slots
+ *  so the UI can explain instead of dead-ending. */
+export async function addActivityPermanentMessage(
+  guildId: string,
+  messageId: string,
+  channelId: string,
+): Promise<PermanentAddResult> {
+  let res: Response;
+  try {
+    res = await proxyFetch("/api/activity/permanent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guild_id: guildId, message_id: messageId, channel_id: channelId }),
+    });
+  } catch {
+    throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
+  }
+  if (res.status === 409) {
+    try {
+      return { full: true, slots: (await res.json()) as PermanentSlots };
+    } catch {
+      throw new Error("The server returned an unexpected response.");
+    }
+  }
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return { full: false, slots: (await res.json()) as PermanentSlots };
+}
+
+/** `DELETE /api/activity/permanent` — give a slot back, from the gallery's pin
+ *  chip. The bearer twin of the web app's `removePermanentMessage`; a 404
+ *  (already freed) is treated as success — the goal state is reached either
+ *  way, so the fresh list is fetched and returned. */
+export async function removeActivityPermanentMessage(
+  guildId: string,
+  messageId: string,
+): Promise<PermanentSlots> {
+  const qs = `guild_id=${encodeURIComponent(guildId)}&message_id=${encodeURIComponent(messageId)}`;
+  let res: Response;
+  try {
+    res = await proxyFetch(`/api/activity/permanent?${qs}`, { method: "DELETE" });
+  } catch {
+    throw new Error("Couldn't reach DWEEB. Check your connection and try again.");
+  }
+  if (res.status === 404) return fetchActivityPermanentSlots(guildId);
+  if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as PermanentSlots;
 }
 
