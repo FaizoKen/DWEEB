@@ -35,6 +35,7 @@ import {
   libraryEntrySearchText,
   useLibraryStore,
 } from "@/core/library/libraryStore";
+import { fetchPermanentSlots, type PermanentSlots } from "@/core/guild/api";
 import { TEMPLATES, type MessageTemplate } from "@/data/presets";
 import { isScheduleConfigured, type ScheduleView } from "@/core/schedule/api";
 import { useScheduledPosts } from "@/core/schedule/useScheduledPosts";
@@ -90,6 +91,20 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
   // web app should show up without a relaunch.
   useEffect(() => {
     if (targetGuildId) void useLibraryStore.getState().refresh(targetGuildId);
+  }, [targetGuildId]);
+
+  // Never-expire slot state for the target server — read-only display on posted cards.
+  const [permanent, setPermanent] = useState<PermanentSlots | null>(null);
+  useEffect(() => {
+    if (!targetGuildId) {
+      setPermanent(null);
+      return;
+    }
+    const ac = new AbortController();
+    fetchPermanentSlots(targetGuildId, ac.signal)
+      .then(setPermanent)
+      .catch(() => setPermanent(null));
+    return () => ac.abort();
   }, [targetGuildId]);
 
   const [query, setQuery] = useState("");
@@ -153,6 +168,16 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
   );
 
   const serverName = targetGuildMeta?.name;
+  const grantIds = useMemo(
+    () => new Set((permanent?.items ?? []).map((i) => i.message_id)),
+    [permanent],
+  );
+  const permanentIds = useMemo(
+    () => new Set((permanent?.items ?? []).filter((i) => !i.suspended).map((i) => i.message_id)),
+    [permanent],
+  );
+  const canManageSlots = permanent != null && permanent.ttl_days != null && !!targetGuildId;
+
   const { postedCards, draftCards } = useMemo(() => {
     const posted: CardData[] = [];
     const drafts: CardData[] = [];
@@ -162,6 +187,24 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
       const isPosted = entry.label === "posted";
       const displayName =
         entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft");
+      const holdsSlot = isPosted && !!entry.message_id && grantIds.has(entry.message_id);
+      let pin: CardData["pin"];
+      if (canManageSlots && isPosted && entry.message_id) {
+        const messageId = entry.message_id;
+        if (holdsSlot) {
+          const paused = !permanentIds.has(messageId);
+          pin = {
+            state: paused ? "paused" : "on",
+            busy: false,
+            title: paused
+              ? "Never expire is paused — the server holds more never-expire messages than its plan allows."
+              : "This message never expires and stays in this history.",
+            run: () => {
+              pushToast("Never-expire management is web-only.", "info");
+            },
+          };
+        }
+      }
       const description = isPosted
         ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · synced automatically in the ${
             serverName ?? "server"
@@ -178,6 +221,7 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
         savedAt: entry.updated_at * 1000,
         badge: isPosted ? "Posted" : "Server draft",
         storedInServerLibrary: true,
+        pin,
         search: searchHaystack(
           displayName,
           description,
@@ -193,18 +237,20 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
             pushToast("This entry couldn't be read — it may predate a server key change.", "error");
           }
         },
-        onDelete: () =>
-          setPendingDelete({
-            id: entry.id,
-            guildId: entry.guild_id,
-            name: displayName,
-            posted: isPosted,
-          }),
+        onDelete: holdsSlot
+          ? undefined
+          : () =>
+              setPendingDelete({
+                id: entry.id,
+                guildId: entry.guild_id,
+                name: displayName,
+                posted: isPosted,
+              }),
       };
       (isPosted ? posted : drafts).push(card);
     }
     return { postedCards: posted, draftCards: drafts };
-  }, [serverEntries, serverName, loadEntry, onClose]);
+  }, [serverEntries, serverName, loadEntry, onClose, grantIds, permanentIds, canManageSlots]);
 
   // Upcoming scheduled posts, as gallery cards with a live preview — mirrors
   // the web gallery's Scheduled tab. The message (thumbnail + editor load) is
