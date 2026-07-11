@@ -94,11 +94,17 @@
 }
 
 @media (max-width: 640px) {
+  /* Keep the same breathing room on all four sides (the backdrop's padding)
+     instead of going full-bleed: the dialog stays a rounded card with a
+     consistent 16px gap top/bottom matching the left/right gap. Safe-area
+     insets are added so notched phones don't eat into that gap. */
+  .backdrop {
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px
+      calc(16px + env(safe-area-inset-bottom, 0px));
+  }
   .dialog {
-    max-height: 100dvh;
+    max-height: 100%;
     width: 100%;
-    border-radius: 0;
-    border: none;
   }
   .dialog .header {
     padding: 12px 14px;
@@ -109,23 +115,18 @@
   }
   .dialog .footer {
     padding: 12px 14px;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     flex-wrap: wrap;
   }
 
-  /* Compact variant keeps its centered card look on mobile too. */
+  /* Compact variant stays a small centered card on mobile too. */
   .dialogSm {
-    width: min(360px, calc(100% - 24px));
-    max-height: calc(100dvh - 24px);
-    border-radius: var(--app-radius-lg);
-    border: 1px solid var(--app-border);
+    width: min(360px, 100%);
   }
   .dialogSm .header {
     padding: 12px 16px;
   }
   .dialogSm .body {
     padding: 14px 16px;
-    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   }
 }
 
