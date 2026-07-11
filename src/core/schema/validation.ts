@@ -71,6 +71,39 @@ const SNOWFLAKE_RE = /^\d{15,25}$/;
  */
 const RESERVED_USERNAME_RE = /clyde|discord/i;
 
+/** Discord channel `type`s that only accept posts which start a new thread:
+ *  forum (15) and media (16). Executing a webhook there without a
+ *  `thread_name` always 400s. */
+export const THREAD_ONLY_CHANNEL_TYPES: ReadonlySet<number> = new Set([15, 16]);
+
+/**
+ * Destination-aware validation, split from {@link validateMessage} (which is
+ * pure and destination-agnostic, shared by every surface): posting into a
+ * forum/media channel starts a new post, so the message must carry a
+ * `thread_name` (its title). Pass the destination channel's Discord `type`
+ * when it's known — null/undefined (no destination picked, or a surface that
+ * doesn't track one) validates nothing. Surfaced live in the editor via
+ * `useDestinationIssues`, and re-checked at post time by the Activity store
+ * and the proxy.
+ */
+export function validateDestination(
+  message: Pick<WebhookMessage, "thread_name">,
+  channelType: number | null | undefined,
+  channelName?: string | null,
+): ValidationIssue[] {
+  if (channelType == null || !THREAD_ONLY_CHANNEL_TYPES.has(channelType)) return [];
+  if ((message.thread_name ?? "").trim().length > 0) return [];
+  const kind = channelType === 16 ? "media" : "forum";
+  const dest = channelName ? `#${channelName}` : `this ${kind} channel`;
+  return [
+    {
+      severity: "error",
+      code: "THREAD_NAME_REQUIRED",
+      message: `Posting to ${dest} starts a new ${kind} post, which needs a title — set one under Message options → Forum post.`,
+    },
+  ];
+}
+
 export function validateMessage(message: WebhookMessage): ValidationResult {
   const issues: ValidationIssue[] = [];
 

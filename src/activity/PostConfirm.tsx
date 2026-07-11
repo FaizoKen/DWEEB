@@ -33,7 +33,6 @@ import { useActivityStore } from "@/core/activity/activityStore";
 import { useRoleInfo } from "@/core/guild/guildStore";
 import { summarizePings, type PingSummary } from "@/core/schema/mentions";
 import { inspectCapabilities } from "@/core/schema/capability";
-import { LIMITS } from "@/core/schema/limits";
 import type { PickerGuild, PermanentSlots } from "@/core/guild/api";
 import {
   fetchActivityIdentities,
@@ -265,26 +264,28 @@ export function PostConfirm({
   onManageCustomBots,
 }: PostConfirmProps) {
   const message = useMessageStore((s) => s.message);
-  const setThreadName = useMessageStore((s) => s.setThreadName);
   const pings = useMemo(() => summarizePings(message), [message]);
 
   // A forum/media destination can only receive a NEW post (a titled thread),
-  // so a brand-new post there needs a title. The field edits the shared
-  // draft's `thread_name` directly — the same field Message options → Forum
-  // sets on the web — so it's collab-synced and rides the wire payload the
-  // proxy forwards (and re-guards). An update targets the existing post, so
-  // no title is asked for there.
+  // so a brand-new post there needs a title — the draft's `thread_name`. The
+  // *editor* owns collecting it: while a forum/media channel is picked, a
+  // missing title is a live validation error (see `useDestinationIssues`)
+  // that disables Post before this dialog can open. Here it's a read-only
+  // receipt of what the new post will be called; the guard below only catches
+  // the race where a collaborator clears the title while this dialog is open.
   const forumDest = channelType === 15 || channelType === 16;
   const needsTitle = mode === "new" && forumDest;
-  const postTitle = message.thread_name ?? "";
+  const postTitle = (message.thread_name ?? "").trim();
   const [titleError, setTitleError] = useState<string | null>(null);
   useEffect(() => {
     if (open) setTitleError(null);
   }, [open]);
-  /** Gate a confirm/schedule on the forum post title being present. */
+  /** Gate a confirm/schedule on the forum post title still being present. */
   const guardTitle = (): boolean => {
-    if (!needsTitle || postTitle.trim().length > 0) return true;
-    setTitleError("Give the new forum post a title first.");
+    if (!needsTitle || postTitle.length > 0) return true;
+    setTitleError(
+      "The post title was cleared while this dialog was open — set one under Message options → Forum post.",
+    );
     return false;
   };
 
@@ -645,20 +646,7 @@ export function PostConfirm({
           <div className={styles.fact}>
             <dt>Title</dt>
             <dd>
-              <input
-                type="text"
-                className={styles.scheduleInput}
-                value={postTitle}
-                maxLength={LIMITS.THREAD_NAME}
-                disabled={busy}
-                placeholder="e.g. Release notes — v2.4"
-                aria-label="Title for the new forum post"
-                aria-invalid={titleError ? true : undefined}
-                onChange={(e) => {
-                  setThreadName(e.currentTarget.value || undefined);
-                  setTitleError(null);
-                }}
-              />
+              <span className={styles.destName}>{postTitle || "—"}</span>
               {titleError ? (
                 <p className={styles.scheduleError} role="alert">
                   {titleError}
@@ -666,7 +654,7 @@ export function PostConfirm({
               ) : null}
               <p className={styles.idHint}>
                 Posting here starts a new {channelType === 16 ? "media" : "forum"} post with this
-                title. Tags can be set under Message options → Forum post.
+                title — edit it (and tags) under Message options → Forum post.
               </p>
             </dd>
           </div>

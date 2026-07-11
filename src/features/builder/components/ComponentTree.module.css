@@ -761,6 +761,15 @@
   border-radius: 50%;
   background: var(--app-accent);
 }
+/* Error variant: the lane holds a setting validation *requires* (a forum/media
+   destination is picked but the post title is empty). */
+.optionsTabDotError {
+  background: var(--app-danger, #f23f43);
+}
+.optionsTabError .optionsTabIcon {
+  border-color: var(--app-danger, #f23f43);
+  color: var(--app-danger, #f23f43);
+}
 /* Chevron points right when collapsed, down when expanded. */
 .optionsTabChevron {
   flex: none;

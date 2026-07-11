@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { validateMessage } from "./validation";
+import { validateDestination, validateMessage } from "./validation";
 import {
   ButtonStyle,
   ComponentType,
@@ -315,5 +315,41 @@ describe("validateMessage — duplicate component ids", () => {
     expect(errorCodes(msg([a as unknown as AnyComponent, b as unknown as AnyComponent]))).toContain(
       "COMPONENT_ID_DUPLICATE",
     );
+  });
+});
+
+describe("validateDestination — forum/media post titles", () => {
+  it("requires a thread_name for forum (15) and media (16) destinations", () => {
+    for (const type of [15, 16]) {
+      const issues = validateDestination({}, type);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe("THREAD_NAME_REQUIRED");
+      expect(issues[0]!.severity).toBe("error");
+      // Message-level: no node to point at — the meta banner shows it.
+      expect(issues[0]!.nodeId).toBeUndefined();
+    }
+  });
+
+  it("a blank/whitespace title still counts as missing", () => {
+    expect(validateDestination({ thread_name: "   " }, 15)).toHaveLength(1);
+  });
+
+  it("passes once a title is set", () => {
+    expect(validateDestination({ thread_name: "Release notes" }, 15)).toHaveLength(0);
+    expect(validateDestination({ thread_name: "Release notes" }, 16)).toHaveLength(0);
+  });
+
+  it("validates nothing for non-thread-only or unknown destinations", () => {
+    for (const type of [0, 2, 5, 13]) {
+      expect(validateDestination({}, type)).toHaveLength(0);
+    }
+    // Unknown destination (web surfaces, or no channel picked yet) — no-op.
+    expect(validateDestination({}, null)).toHaveLength(0);
+    expect(validateDestination({}, undefined)).toHaveLength(0);
+  });
+
+  it("names the destination channel in the advice when known", () => {
+    const [issue] = validateDestination({}, 15, "help-forum");
+    expect(issue!.message).toContain("#help-forum");
   });
 });

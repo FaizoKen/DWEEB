@@ -25,6 +25,7 @@
 
 import { useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useValidationSummary } from "@/features/builder/useValidation";
 import { LIMITS } from "@/core/schema/limits";
 import type { AllowedMentions } from "@/core/schema/types";
 import { Disclosure } from "@/ui/Disclosure";
@@ -68,6 +69,13 @@ export function MessageOptions() {
       ((am.parse?.length ?? 0) > 0 || (am.roles?.length ?? 0) > 0 || (am.users?.length ?? 0) > 0));
   const forumActive =
     (message.thread_name?.trim().length ?? 0) > 0 || (message.applied_tags?.length ?? 0) > 0;
+
+  // The destination requires a title this lane doesn't have yet (a forum/media
+  // channel is picked in the Activity, `thread_name` empty) — flag the lane in
+  // the danger colour so the meta banner's "set one under Message options →
+  // Forum post" advice has an obvious landing spot.
+  const { messageIssues } = useValidationSummary();
+  const titleRequired = messageIssues.some((i) => i.code === "THREAD_NAME_REQUIRED");
 
   const setParseKind = (kind: MentionKind, on: boolean) => {
     const parse = new Set<MentionKind>(am?.parse ?? []);
@@ -117,7 +125,11 @@ export function MessageOptions() {
         </button>
         <button
           type="button"
-          className={cn(styles.optionsTab, forumActive && styles.optionsTabActive)}
+          className={cn(
+            styles.optionsTab,
+            forumActive && styles.optionsTabActive,
+            titleRequired && styles.optionsTabError,
+          )}
           aria-expanded={openSection === "forum"}
           onClick={() => toggleSection("forum")}
         >
@@ -127,7 +139,14 @@ export function MessageOptions() {
           <span className={styles.optionsTabText}>
             <span className={styles.optionsTabTitle}>
               Forum post
-              {forumActive ? <span className={styles.optionsTabDot} aria-hidden="true" /> : null}
+              {titleRequired ? (
+                <span
+                  className={cn(styles.optionsTabDot, styles.optionsTabDotError)}
+                  aria-hidden="true"
+                />
+              ) : forumActive ? (
+                <span className={styles.optionsTabDot} aria-hidden="true" />
+              ) : null}
             </span>
             <span className={styles.optionsTabSub}>Thread title &amp; tags</span>
           </span>

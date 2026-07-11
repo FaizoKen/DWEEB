@@ -383,13 +383,17 @@ dialog can't change that mapping).
   Scheduled posts and server drafts can't carry uploads at all.
 - **Manage Webhooks required** to publish (the post goes through a webhook).
 - **Forum / media channels start a new post.** Picking one as the destination
-  makes the post confirm require a title (the draft's `thread_name` — the same
-  field as Message options → Forum post, so it's collab-synced) and posting
-  opens a brand-new forum post under it; the proxy re-guards a missing title
-  server-side. The created thread's id rides the post result and the library
-  entry, so Update, gallery loads, and Restore keep editing the post in place.
-  Posting into an *existing* forum post has no picker — paste its message link
-  into Restore instead (the link's channel segment carries the thread).
+  makes the *editor's* validation require a post title — the draft's
+  `thread_name` (Message options → Forum post, collab-synced): the meta banner
+  says so, the Forum lane shows a danger dot, and Post/Schedule stay disabled
+  until it's set (see `useDestinationIssues` + the core post-destination
+  store; the proxy re-guards server-side). The post confirm shows the title as
+  a read-only receipt. Update is exempt — editing an existing post needs no
+  title (a restored forum post's draft never carries one). The created
+  thread's id rides the post result and the library entry, so Update, gallery
+  loads, and Restore keep editing the post in place. Posting into an
+  *existing* forum post has no picker — paste its message link into Restore
+  instead (the link's channel segment carries the thread).
 - **Drafts persist per channel, best-effort.** The room's shared draft is
   snapshotted server-side (sealed at rest, see `server/src/activity_draft.rs`)
   and resumes when the Activity is relaunched in the same place — but it's a

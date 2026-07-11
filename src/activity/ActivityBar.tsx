@@ -16,6 +16,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
@@ -94,6 +95,15 @@ export function ActivityBar() {
   // provider — but it's memoized per message, so it's a single cheap pass.
   const validation = useMergedValidationView();
   const hasErrors = validation.errorCount > 0;
+  // The destination-title rule (a forum/media channel needs a `thread_name`)
+  // only applies to *brand-new* posts — an update edits the existing post, no
+  // title involved. A restored forum post's draft never carries one (Discord
+  // doesn't echo execute-only params), so gate Update on every error EXCEPT
+  // that one; Post and "New" (a new copy) keep the full gate.
+  const destErrorCount = validation.messageIssues.filter(
+    (i) => i.code === "THREAD_NAME_REQUIRED" && i.severity === "error",
+  ).length;
+  const hasUpdateErrors = validation.errorCount - destErrorCount > 0;
 
   const publishing = useActivityStore((s) => s.publishing);
   const publish = useActivityStore((s) => s.publish);
@@ -248,6 +258,15 @@ export function ActivityBar() {
   const targetChannel = targetChannelId ? connectedData?.channelById[targetChannelId] : undefined;
   const channelName = targetChannel?.name;
   const channelType = targetChannel?.type;
+
+  // Mirror the picked destination into the shared post-destination store, so
+  // the editor's validation goes destination-aware: selecting a forum/media
+  // channel surfaces "needs a post title" live in the builder (banner + Forum
+  // lane dot + disabled Post) instead of springing it in the confirm dialog.
+  const setPostDestination = usePostDestinationStore((s) => s.setPostDestination);
+  useEffect(() => {
+    setPostDestination(channelType ?? null, channelName ?? null);
+  }, [setPostDestination, channelType, channelName]);
 
   const [restoreOpen, setRestoreOpen] = useState(false);
   // The Activity has one useful save destination: the selected server's shared
@@ -647,9 +666,9 @@ export function ActivityBar() {
               size="sm"
               leadingIcon={<RefreshIcon />}
               onClick={() => setPending({ mode: "update", newCopy: false })}
-              disabled={publishing || noDestination || hasErrors}
+              disabled={publishing || noDestination || hasUpdateErrors}
               title={
-                hasErrors
+                hasUpdateErrors
                   ? "Fix the highlighted issues before updating"
                   : "Update the message you posted with the current draft"
               }

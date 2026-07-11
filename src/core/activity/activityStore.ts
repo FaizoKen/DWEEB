@@ -33,7 +33,8 @@ import {
   parseMessageIdInput,
   prepareMessagePayload,
 } from "@/core/webhook/send";
-import { validateMessage } from "@/core/schema/validation";
+import { validateDestination, validateMessage } from "@/core/schema/validation";
+import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { pushToast } from "@/ui/Toast";
 import {
   configureUrlMappings,
@@ -547,6 +548,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     // draft between the click and here.
     const message = useMessageStore.getState().message;
     if (!guardValid(message, "post")) return null;
+    if (!guardDestination(message)) return null;
     if (get().publishing) return null;
     set({ publishing: true });
     try {
@@ -593,6 +595,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
     const message = useMessageStore.getState().message;
     if (!guardValid(message, "post")) return null;
+    if (!guardDestination(message)) return null;
     // Uploaded files exist only in this browser — the worker can't attach them
     // when the schedule fires later, so the post would land broken. (The proxy
     // re-guards this; mirrors the web app's schedule gate.)
@@ -1158,6 +1161,21 @@ function decodeRestored(raw: unknown): WebhookMessage {
   } catch {
     throw new Error("That message can't be opened in the editor — it isn't a DWEEB message.");
   }
+}
+
+/**
+ * Block a brand-new post/schedule when the destination requires a post title
+ * the draft doesn't carry (a forum/media channel with no `thread_name`). The
+ * editor surfaces this live (see `useDestinationIssues`) and disables Post, so
+ * this only trips on races — e.g. a collaborator clearing the title between
+ * the confirm click and here — where the toast beats a raw proxy 400.
+ */
+function guardDestination(message: WebhookMessage): boolean {
+  const { channelType, channelName } = usePostDestinationStore.getState();
+  const issues = validateDestination(message, channelType, channelName);
+  if (issues.length === 0) return true;
+  pushToast(issues[0]!.message, "error");
+  return false;
 }
 
 /**

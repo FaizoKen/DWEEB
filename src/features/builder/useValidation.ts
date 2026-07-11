@@ -22,8 +22,13 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { getAttachmentSnapshot, subscribeAttachments } from "@/core/state/attachmentStore";
 import { getPluginSummary } from "@/core/state/pluginSummaryCache";
+import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { interactiveComponents } from "@/core/plugins/targets";
-import { validateMessage, type ValidationIssue } from "@/core/schema/validation";
+import {
+  validateDestination,
+  validateMessage,
+  type ValidationIssue,
+} from "@/core/schema/validation";
 import type { EditorId, WebhookMessage } from "@/core/schema/types";
 
 export interface ValidationView {
@@ -90,29 +95,42 @@ export function buildValidationView(message: WebhookMessage): ValidationView {
 }
 
 /**
- * Fold extra node-scoped issues (e.g. the plugin guild checks below) into a
- * view, returning a new one with the per-node lists, counts, and first-issue
- * ids updated. Issues without a `nodeId` are ignored — this is for component
- * problems only. Base's first-error / first-warning ids win when set, so a real
- * message error still anchors the header's jump affordance.
+ * Fold extra issues (the plugin guild checks and the destination check below)
+ * into a view, returning a new one with the per-node lists, message-level
+ * list, counts, and first-issue ids updated. Node-scoped extras join their
+ * node's list; extras without a `nodeId` (e.g. THREAD_NAME_REQUIRED) join
+ * `messageIssues`, where the meta header's banner shows them. Base's
+ * first-error / first-warning ids win when set, so a real message error still
+ * anchors the header's jump affordance.
  */
 export function mergeNodeIssues(base: ValidationView, extra: ValidationIssue[]): ValidationView {
   if (extra.length === 0) return base;
   const byNode = new Map(base.byNode);
+  let messageIssues = base.messageIssues;
   let { errorCount, warningCount, firstErrorNodeId, firstWarningNodeId } = base;
   for (const issue of extra) {
-    if (issue.nodeId === undefined) continue;
+    if (issue.severity === "error") errorCount++;
+    else warningCount++;
+    if (issue.nodeId === undefined) {
+      messageIssues = messageIssues === base.messageIssues ? [...messageIssues] : messageIssues;
+      messageIssues.push(issue);
+      continue;
+    }
     const existing = byNode.get(issue.nodeId);
     byNode.set(issue.nodeId, existing ? [...existing, issue] : [issue]);
-    if (issue.severity === "error") {
-      errorCount++;
-      if (firstErrorNodeId === null) firstErrorNodeId = issue.nodeId;
-    } else {
-      warningCount++;
-      if (firstWarningNodeId === null) firstWarningNodeId = issue.nodeId;
-    }
+    if (issue.severity === "error" && firstErrorNodeId === null) firstErrorNodeId = issue.nodeId;
+    if (issue.severity === "warning" && firstWarningNodeId === null)
+      firstWarningNodeId = issue.nodeId;
   }
-  return { ...base, byNode, errorCount, warningCount, firstErrorNodeId, firstWarningNodeId };
+  return {
+    ...base,
+    byNode,
+    messageIssues,
+    errorCount,
+    warningCount,
+    firstErrorNodeId,
+    firstWarningNodeId,
+  };
 }
 
 /**
@@ -164,17 +182,45 @@ export function usePluginGuildIssues(): ValidationIssue[] {
 }
 
 /**
+ * Editor-only validation for the *destination*: a forum/media channel only
+ * accepts posts that start a new thread, so the draft needs a title
+ * (`thread_name`) while one is selected. Like the plugin checks above, this
+ * can't live in `validateMessage` — it depends on where the post is going,
+ * which only the embedded Activity tracks live (it mirrors its picked channel
+ * into the post-destination store; the web app never writes it, so this is a
+ * no-op there). Message-level (no `nodeId`): the meta header's banner points
+ * the user at Message options → Forum post, the Forum lane shows an error dot,
+ * and the bar's Post button disables until a title is set.
+ */
+export function useDestinationIssues(): ValidationIssue[] {
+  // Subscribe to just the field the check reads, so keystrokes elsewhere in
+  // the draft don't rebuild the (memoized) issue list.
+  const threadName = useMessageStore((s) => s.message.thread_name);
+  const channelType = usePostDestinationStore((s) => s.channelType);
+  const channelName = usePostDestinationStore((s) => s.channelName);
+  return useMemo(
+    () => validateDestination({ thread_name: threadName }, channelType, channelName),
+    [threadName, channelType, channelName],
+  );
+}
+
+/**
  * The full validation view — base message checks with the guild-scoped plugin
- * issues folded in — for surfaces that need it *above* the tree's
- * {@link ValidationContext} provider: the web action bar and the Activity bar,
- * whose shared header issue chip must count exactly what the tree does. It's the
- * same fold `ComponentTree` applies before providing the context, extracted so
- * both the provider and the header read one memoized source.
+ * issues and the destination check folded in — for surfaces that need it
+ * *above* the tree's {@link ValidationContext} provider: the web action bar
+ * and the Activity bar, whose shared header issue chip must count exactly what
+ * the tree does. It's the same fold `ComponentTree` applies before providing
+ * the context, extracted so both the provider and the header read one
+ * memoized source.
  */
 export function useMergedValidationView(): ValidationView {
   const base = useValidationView();
   const pluginIssues = usePluginGuildIssues();
-  return useMemo(() => mergeNodeIssues(base, pluginIssues), [base, pluginIssues]);
+  const destinationIssues = useDestinationIssues();
+  return useMemo(
+    () => mergeNodeIssues(base, [...pluginIssues, ...destinationIssues]),
+    [base, pluginIssues, destinationIssues],
+  );
 }
 
 /** Recompute the live validation view from the current message (memoized). */
