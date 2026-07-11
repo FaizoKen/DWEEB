@@ -8,6 +8,11 @@ import {
   type TopLevelComponent,
   type WebhookMessage,
 } from "./types";
+import {
+  forgetAttachment,
+  parseSessionUrl,
+  registerAttachment,
+} from "@/core/state/attachmentStore";
 import { FIXTURES } from "@/test/fixtures";
 
 /** Build a message from top-level components, casting through the loose shapes
@@ -276,6 +281,30 @@ describe("validateMessage — media & files", () => {
       file: { url: "https://example.com/report.pdf" },
     } as unknown as AnyComponent;
     expect(errorCodes(msg([file]))).toContain("FILE_URL_NOT_ATTACHMENT");
+  });
+});
+
+describe("validateMessage — in-session uploads", () => {
+  function fileComp(url: string): AnyComponent {
+    return { _id: "f", type: ComponentType.File, file: { url } } as unknown as AnyComponent;
+  }
+
+  it("errors when a session:// upload's bytes aren't in this browser", () => {
+    // A reference synced in from a collaborator, or a resumed room draft — the
+    // URL parses fine, but no local blob backs it, so a send from here would
+    // ship a dangling attachment:// reference Discord rejects.
+    expect(errorCodes(msg([fileComp("session://nosuchblob/team-logo.png")]))).toContain(
+      "ATTACHMENT_MISSING",
+    );
+  });
+
+  it("accepts a session:// upload whose blob is registered locally", () => {
+    const url = registerAttachment(new File(["x"], "logo.png", { type: "image/png" }));
+    try {
+      expect(errorCodes(msg([fileComp(url)]))).not.toContain("ATTACHMENT_MISSING");
+    } finally {
+      forgetAttachment(parseSessionUrl(url)!.blobId);
+    }
   });
 });
 

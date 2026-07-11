@@ -365,12 +365,24 @@ To iterate on the **backend** (`server/src/activity.rs`) locally, run the proxy,
 expose it over a tunnel, and repoint the `/proxy` URL Mapping at the tunnel (this
 dialog can't change that mapping).
 
-## Limitations (v1)
+## Limitations
 
 - **Last-write-wins.** Concurrent edits to the same field resolve to whoever
   typed last — it's not a CRDT. Fine for a small group co-writing one message.
-- **No uploaded files.** Use image/media URLs (the same constraint as scheduled
-  posts — uploaded blobs only live in one browser).
+- **Uploaded files post from the uploader's browser only.** In-session uploads
+  sync to collaborators as `session://` references — the bytes never leave the
+  browser they were picked in. Teammates see a placeholder in the preview, and
+  the validator blocks their Post while the draft references someone else's
+  upload (the uploader posts, or the file is swapped for an image/media URL).
+  Scheduled posts and server drafts can't carry uploads at all.
 - **Manage Webhooks required** to publish (the post goes through a webhook).
-- **Rooms are ephemeral.** The shared draft lives only while someone is
-  connected; nothing is persisted server-side.
+- **No forum / media channels.** Executing a webhook there needs a thread
+  title the Activity doesn't ask for yet, so its picker offers text and
+  announcement channels only, and the proxy refuses a forum/media destination
+  with the same advice. (The web app covers forums via its optional thread
+  field.)
+- **Drafts persist per channel, best-effort.** The room's shared draft is
+  snapshotted server-side (sealed at rest, see `server/src/activity_draft.rs`)
+  and resumes when the Activity is relaunched in the same place — but it's a
+  durability heartbeat (throttled), not a second sync channel, so the last few
+  seconds before everyone disconnects can be lost.

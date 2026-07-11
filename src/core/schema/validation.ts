@@ -871,9 +871,13 @@ function isDiscordCdnUrl(url: string): boolean {
 }
 
 /**
- * If `url` is a session blob ref, flag the component when the blob is no
- * longer in memory (page reload, manual eviction). Errors block send so the
- * user knows to re-attach the file before posting.
+ * If `url` is a session blob ref, flag the component when the blob isn't in
+ * this browser's registry. That happens when a collaborator's upload synced
+ * into the shared draft (in-session bytes never leave the uploader's browser),
+ * when a resumed room draft references an upload nobody holds anymore, or when
+ * the local copy was evicted. Errors block send — a post from here would ship a
+ * dangling `attachment://` reference Discord rejects — so the advice names both
+ * ways out: whoever holds the file posts, or it's replaced on this device.
  */
 function checkAttachmentResolves(url: string, nodeId: EditorId, issues: ValidationIssue[]): void {
   const parsed = parseSessionUrl(url);
@@ -884,6 +888,6 @@ function checkAttachmentResolves(url: string, nodeId: EditorId, issues: Validati
     severity: "error",
     code: "ATTACHMENT_MISSING",
     message:
-      "Uploaded file is no longer in this browser session — re-attach the file before sending.",
+      "This uploaded file isn't in this browser — if a teammate added it, ask them to post; otherwise re-attach it or use a media URL.",
   });
 }

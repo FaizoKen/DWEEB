@@ -40,6 +40,11 @@ export interface LibraryEntryView {
   /** Canonical webhook execute URL — posted entries only. */
   webhook_url?: string | null;
   webhook_id?: string | null;
+  /** The custom bot a posted entry was posted as (application id), when it
+   *  wasn't DWEEB. The Activity threads this back into its edit path so a
+   *  gallery-loaded message updates through the identity that authored it.
+   *  Null/absent = DWEEB, or a row recorded before this was tracked. */
+  application_id?: string | null;
   channel_id?: string | null;
   message_id?: string | null;
   thread_id?: string | null;

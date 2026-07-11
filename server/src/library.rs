@@ -82,7 +82,8 @@ const LABELS: [&str; 2] = ["posted", "draft"];
 
 /// All columns, in the order [`row_from`] reads them.
 const COLS: &str = "id, guild_id, label, title, payload_sealed, webhook_sealed, webhook_id, \
-     channel_id, message_id, thread_id, dest_label, created_by, created_at, updated_at";
+     application_id, channel_id, message_id, thread_id, dest_label, created_by, \
+     created_at, updated_at";
 
 /// A full stored entry. `Clone` so a handler can read-modify-write it.
 #[derive(Clone)]
@@ -96,6 +97,13 @@ pub struct Row {
     /// later load can update the live message in place. Absent on drafts.
     pub webhook_sealed: Option<String>,
     pub webhook_id: Option<String>,
+    /// The custom bot a posted entry was posted as (its application id), when
+    /// it wasn't DWEEB — recorded by the Activity's post/edit so a later
+    /// gallery load can update the message through the *same* identity (the
+    /// custom bot's connected webhook, not the DWEEB path, which can't read a
+    /// foreign webhook's token). `None` = DWEEB, or a row recorded before this
+    /// was tracked / by a surface that can't know it (the web posts by URL).
+    pub application_id: Option<String>,
     pub channel_id: Option<String>,
     /// Discord message snowflake — the upsert key for posted entries.
     pub message_id: Option<String>,
@@ -117,13 +125,14 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         payload_sealed: r.get(4)?,
         webhook_sealed: r.get(5)?,
         webhook_id: r.get(6)?,
-        channel_id: r.get(7)?,
-        message_id: r.get(8)?,
-        thread_id: r.get(9)?,
-        dest_label: r.get(10)?,
-        created_by: r.get(11)?,
-        created_at: r.get(12)?,
-        updated_at: r.get(13)?,
+        application_id: r.get(7)?,
+        channel_id: r.get(8)?,
+        message_id: r.get(9)?,
+        thread_id: r.get(10)?,
+        dest_label: r.get(11)?,
+        created_by: r.get(12)?,
+        created_at: r.get(13)?,
+        updated_at: r.get(14)?,
     })
 }
 
@@ -135,6 +144,10 @@ pub struct NewEntry {
     pub payload_sealed: String,
     pub webhook_sealed: Option<String>,
     pub webhook_id: Option<String>,
+    /// See [`Row::application_id`]. `None` when the identity is DWEEB or the
+    /// recording surface can't know it — an upsert refresh never *clears* a
+    /// stored id with `None` (a message's authoring webhook is immutable).
+    pub application_id: Option<String>,
     pub channel_id: Option<String>,
     pub message_id: Option<String>,
     pub thread_id: Option<String>,
@@ -197,6 +210,7 @@ impl LibraryStore {
                  payload_sealed TEXT NOT NULL,
                  webhook_sealed TEXT,
                  webhook_id     TEXT,
+                 application_id TEXT,
                  channel_id     TEXT,
                  message_id     TEXT,
                  thread_id      TEXT,
@@ -211,6 +225,21 @@ impl LibraryStore {
                  ON library_messages(guild_id, message_id);",
         )
         .map_err(|e| format!("schema: {e}"))?;
+        // Migrate DBs created before `application_id` existed (SQLite has no
+        // ADD COLUMN IF NOT EXISTS) — which custom bot authored a posted entry,
+        // so the Activity can update it through the right identity.
+        let has_app: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('library_messages') \
+                 WHERE name = 'application_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_app == 0 {
+            conn.execute_batch("ALTER TABLE library_messages ADD COLUMN application_id TEXT;")
+                .map_err(|e| format!("migrate application_id: {e}"))?;
+        }
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM library_messages", [], |r| r.get(0))
             .map_err(|e| format!("count: {e}"))?;
@@ -282,19 +311,25 @@ impl LibraryStore {
                     .optional()
                     .map_err(|e| CreateError::Storage(e.to_string()))?;
                 if let Some(id) = existing {
+                    // `application_id` COALESCEs like the webhook fields: a
+                    // message's authoring identity never changes, so a refresh
+                    // from a surface that can't know it (the web records by
+                    // URL) must not blank a stamp the Activity already made.
                     conn.execute(
                         "UPDATE library_messages SET payload_sealed=?2, \
                          webhook_sealed=COALESCE(?3, webhook_sealed), \
                          webhook_id=COALESCE(?4, webhook_id), \
-                         channel_id=COALESCE(?5, channel_id), thread_id=?6, \
-                         dest_label=COALESCE(?7, dest_label), \
-                         title=COALESCE(?8, title), updated_at=?9 \
+                         application_id=COALESCE(?5, application_id), \
+                         channel_id=COALESCE(?6, channel_id), thread_id=?7, \
+                         dest_label=COALESCE(?8, dest_label), \
+                         title=COALESCE(?9, title), updated_at=?10 \
                          WHERE id=?1",
                         params![
                             id,
                             n.payload_sealed,
                             n.webhook_sealed,
                             n.webhook_id,
+                            n.application_id,
                             n.channel_id,
                             n.thread_id,
                             n.dest_label,
@@ -325,8 +360,9 @@ impl LibraryStore {
         conn.execute(
             "INSERT INTO library_messages \
              (id, guild_id, label, title, payload_sealed, webhook_sealed, webhook_id, \
-              channel_id, message_id, thread_id, dest_label, created_by, created_at, updated_at) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13)",
+              application_id, channel_id, message_id, thread_id, dest_label, created_by, \
+              created_at, updated_at) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14)",
             params![
                 n_id,
                 n.guild_id,
@@ -335,6 +371,7 @@ impl LibraryStore {
                 n.payload_sealed,
                 n.webhook_sealed,
                 n.webhook_id,
+                n.application_id,
                 n.channel_id,
                 n.message_id,
                 n.thread_id,
@@ -422,8 +459,8 @@ impl LibraryStore {
         let conn = self.lock();
         conn.execute(
             "UPDATE library_messages SET label=?2, title=?3, payload_sealed=?4, \
-             webhook_sealed=?5, webhook_id=?6, channel_id=?7, message_id=?8, thread_id=?9, \
-             dest_label=?10, updated_at=?11 WHERE id=?1",
+             webhook_sealed=?5, webhook_id=?6, application_id=?7, channel_id=?8, \
+             message_id=?9, thread_id=?10, dest_label=?11, updated_at=?12 WHERE id=?1",
             params![
                 row.id,
                 row.label,
@@ -431,6 +468,7 @@ impl LibraryStore {
                 row.payload_sealed,
                 row.webhook_sealed,
                 row.webhook_id,
+                row.application_id,
                 row.channel_id,
                 row.message_id,
                 row.thread_id,
@@ -552,6 +590,7 @@ pub async fn record_posted_best_effort(
     message_id: &str,
     thread_id: Option<&str>,
     webhook_url: Option<&str>,
+    application_id: Option<&str>,
     payload: &Value,
     title: Option<&str>,
     dest_label: Option<&str>,
@@ -578,6 +617,9 @@ pub async fn record_posted_best_effort(
         payload_sealed,
         webhook_id: webhook_url.and_then(webhook_id),
         webhook_sealed,
+        // The custom bot the message was posted as (`None` = DWEEB) — what
+        // lets a later gallery load update it through the same identity.
+        application_id: application_id.map(str::to_string),
         channel_id: channel_id.map(str::to_string),
         message_id: Some(message_id.to_string()),
         thread_id: thread_id.map(str::to_string),
@@ -642,6 +684,9 @@ pub async fn record_fired_schedule(
         payload_sealed: payload_sealed.to_string(),
         webhook_sealed: Some(webhook_sealed.to_string()),
         webhook_id: Some(webhook_id.to_string()),
+        // Schedules always fire as DWEEB (a custom bot's roaming webhook could
+        // have drifted to another channel by fire time).
+        application_id: None,
         channel_id: channel_id.map(str::to_string),
         message_id: Some(message_id.to_string()),
         thread_id: thread_id.map(str::to_string),
@@ -809,6 +854,9 @@ pub async fn library_create(
         payload_sealed,
         webhook_id: body.webhook_url.as_deref().and_then(webhook_id),
         webhook_sealed,
+        // Manual creates come from surfaces that post by webhook URL and can't
+        // know the authoring app; an upsert refresh keeps any existing stamp.
+        application_id: None,
         channel_id: body.channel_id.filter(|v| !v.is_empty()),
         message_id: body.message_id.filter(|v| !v.is_empty()),
         thread_id: body.thread_id.filter(|v| !v.is_empty()),
@@ -978,6 +1026,7 @@ fn view(st: &AppState, r: &Row) -> Value {
         "payload": payload,
         "webhook_url": webhook_url,
         "webhook_id": r.webhook_id,
+        "application_id": r.application_id,
         "channel_id": r.channel_id,
         "message_id": r.message_id,
         "thread_id": r.thread_id,
@@ -1110,6 +1159,7 @@ mod tests {
             payload_sealed: "sealed-payload".into(),
             webhook_sealed: Some("sealed-hook".into()),
             webhook_id: Some("42".into()),
+            application_id: None,
             channel_id: Some("7".into()),
             message_id: message_id.map(str::to_string),
             thread_id: None,
@@ -1194,6 +1244,79 @@ mod tests {
         )
         .unwrap();
         assert_eq!(store.counts_for_guild("g2").unwrap(), (1, 0));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn migrates_db_without_application_id_column() {
+        // Simulate a DB created before `application_id` existed (the prod
+        // case), then open it through the store — the migration must add the
+        // column without losing existing rows, and a legacy row reads as NULL.
+        let path = std::env::temp_dir().join(format!(
+            "dweeb-library-test-{}-migrate.db",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE library_messages (
+                     id TEXT PRIMARY KEY, guild_id TEXT NOT NULL, label TEXT NOT NULL,
+                     title TEXT, payload_sealed TEXT NOT NULL, webhook_sealed TEXT,
+                     webhook_id TEXT, channel_id TEXT, message_id TEXT, thread_id TEXT,
+                     dest_label TEXT, created_by TEXT NOT NULL,
+                     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+                 );
+                 INSERT INTO library_messages
+                   (id, guild_id, label, payload_sealed, message_id, created_by,
+                    created_at, updated_at)
+                 VALUES ('legacyxxxx','g1','posted','sealed','m1','user-1',1,1);",
+            )
+            .unwrap();
+        }
+        let store = LibraryStore::open(path.to_str().unwrap(), 100, 10, 10).unwrap();
+        let row = store.get("g1", "legacyxxxx").unwrap().unwrap();
+        assert_eq!(row.application_id, None);
+        // New rows can carry the stamp, and a refresh backfills the legacy row.
+        let mut n = entry("g1", "posted", Some("m1"));
+        n.application_id = Some("777".into());
+        store
+            .upsert(&n, "id-new-xxxx", 2_000, None, &HashSet::new())
+            .unwrap();
+        let row = store.get("g1", "legacyxxxx").unwrap().unwrap();
+        assert_eq!(row.application_id.as_deref(), Some("777"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn posted_refresh_keeps_but_can_backfill_application_id() {
+        let (store, path) = temp_store("appid", 100, 10, 10);
+        // Posted as a custom bot — the Activity stamps the authoring app.
+        let mut n = entry("g1", "posted", Some("m1"));
+        n.application_id = Some("777".into());
+        let id = upsert(&store, &n, "id-appid-xx", 1_000, None).unwrap();
+        // A refresh from a surface that can't know the identity (the web
+        // records by webhook URL — `application_id: None`) must not blank the
+        // stamp: a message's authoring webhook never changes.
+        let ignorant = entry("g1", "posted", Some("m1"));
+        upsert(&store, &ignorant, "id-other-xx", 2_000, None).unwrap();
+        let row = store.get("g1", &id).unwrap().unwrap();
+        assert_eq!(row.application_id.as_deref(), Some("777"));
+        // And a legacy row recorded before the stamp existed picks it up from
+        // the first refresh that knows it (COALESCE takes the new non-NULL).
+        let legacy = upsert(
+            &store,
+            &entry("g1", "posted", Some("m2")),
+            "id-legacy-xx",
+            3_000,
+            None,
+        )
+        .unwrap();
+        let mut knowing = entry("g1", "posted", Some("m2"));
+        knowing.application_id = Some("888".into());
+        upsert(&store, &knowing, "id-know-xxx", 4_000, None).unwrap();
+        let row = store.get("g1", &legacy).unwrap().unwrap();
+        assert_eq!(row.application_id.as_deref(), Some("888"));
         let _ = std::fs::remove_file(path);
     }
 

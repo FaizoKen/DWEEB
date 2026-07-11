@@ -21,9 +21,14 @@ import type { GuildChannel } from "@/core/guild/types";
 import { ChannelTypeIcon, CheckCircleIcon, ChevronDownIcon, SearchIcon } from "@/ui/Icon";
 import styles from "./ChannelPicker.module.css";
 
-/** Channel types that can host a webhook: text, announcement, forum, media —
- *  the same set the web app's picker offers. */
-const WEBHOOK_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
+/** Channel types the Activity can post into: text and announcement. Forum and
+ *  media channels (15/16) host webhooks too — and the web app's picker offers
+ *  them, paired with its optional thread field — but *executing* a webhook
+ *  there requires a `thread_name`/`thread_id` the Activity's post and schedule
+ *  paths don't carry, so a post would always fail at Discord. Keep them out of
+ *  the picker until the Activity grows a post-title affordance (the proxy
+ *  re-guards this server-side regardless). */
+const POSTABLE_CHANNEL_TYPES = new Set([0, 5]);
 /** Only show the search box once the list is long enough to need it. */
 const SEARCH_THRESHOLD = 8;
 
@@ -110,13 +115,13 @@ export function ChannelPicker({
       ? `Posting to #${label}${shared ? " — shared with everyone in this room" : ""} · click to change`
       : `Choose a channel to post to${shared ? " (shared with everyone in this room)" : ""}`;
 
-  // Webhook-hostable channels, plus the current selection even if its type isn't
+  // Postable channels, plus the current selection even if its type isn't
   // normally listed (e.g. launched from a voice channel) so the default never
   // vanishes from its own picker.
   const channels = useMemo(
     () =>
       (data?.channels ?? []).filter(
-        (c) => WEBHOOK_CHANNEL_TYPES.has(c.type) || c.id === selectedId,
+        (c) => POSTABLE_CHANNEL_TYPES.has(c.type) || c.id === selectedId,
       ),
     [data, selectedId],
   );

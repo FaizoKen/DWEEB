@@ -59,9 +59,11 @@ use crate::session::{now, Session};
 const BEARER_TTL_SECS: i64 = 600;
 
 /// Bounds for the collaboration rooms, so an abusive client can't exhaust memory:
-/// the most distinct Activity instances we keep, the per-room broadcast backlog
-/// (a lagging peer just skips to the latest draft — fine under last-write-wins),
-/// and the largest relayed frame.
+/// the most distinct Activity instances we keep, the per-room broadcast backlog,
+/// and the largest relayed frame. A peer that outruns the backlog has *missed*
+/// frames — under granular per-node patch sync that's silent divergence, not a
+/// harmless skip — so the socket loop answers an overflow with a `resync` nudge
+/// that makes the client re-run its join handshake (see `room_socket`).
 const MAX_ROOMS: usize = 5_000;
 const BROADCAST_CAP: usize = 64;
 const MAX_RELAY_BYTES: usize = 256 * 1024;
@@ -73,6 +75,12 @@ const MAX_RELAY_BYTES: usize = 256 * 1024;
 /// ping intervals so a momentarily slow client isn't dropped.
 const ROOM_PING_INTERVAL_SECS: u64 = 30;
 const ROOM_IDLE_TIMEOUT_SECS: u64 = 90;
+
+/// Minimum gap between `resync` nudges to one lagging socket, so a sustained
+/// broadcast overflow can't amplify into a hello/full-draft storm (each nudge
+/// makes the client re-run its join handshake, which every peer answers with
+/// its full current draft).
+const RESYNC_MIN_INTERVAL_SECS: u64 = 2;
 
 // ── Identity (cookie OR bearer) ─────────────────────────────────────────────
 
@@ -162,6 +170,37 @@ fn bad_request(message: &str) -> AppError {
         status: StatusCode::BAD_REQUEST,
         message: message.into(),
         retry_after: None,
+    }
+}
+
+/// Discord channel kinds whose webhooks require thread parameters to execute.
+const CHANNEL_KIND_FORUM: i64 = 15;
+const CHANNEL_KIND_MEDIA: i64 = 16;
+
+/// Membership + kind gate for a channel the Activity is about to post into.
+///
+/// Forum (15) and media (16) channels can *host* webhooks, but executing one
+/// there requires a `thread_name`/`thread_id` — a post without either always
+/// 400s at Discord. The Activity's post and schedule paths carry no thread
+/// parameters (its picker doesn't offer those channels either), so refuse them
+/// up front with advice instead of relaying Discord's opaque error. Every other
+/// kind passes — Discord stays the authority on anything subtler. A channel
+/// that isn't in the guild fails exactly like [`ensure_channel_in_guild`].
+async fn ensure_postable_channel(
+    st: &AppState,
+    guild: &str,
+    channel_id: &str,
+) -> Result<(), AppError> {
+    match crate::routes::channel_type_in_guild(st, guild, channel_id).await? {
+        None => Err(AppError::Status {
+            status: StatusCode::NOT_FOUND,
+            message: "That channel isn't in this server.".into(),
+            retry_after: None,
+        }),
+        Some(CHANNEL_KIND_FORUM) | Some(CHANNEL_KIND_MEDIA) => Err(bad_request(
+            "Forum and media channels need a post title, which the Activity can't set yet — pick a text or announcement channel.",
+        )),
+        Some(_) => Ok(()),
     }
 }
 
@@ -520,7 +559,7 @@ pub async fn activity_post(
     let custom_app = parse_application_id(&body.application_id)?;
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
-    ensure_channel_in_guild(&st, &guild, &channel_id).await?;
+    ensure_postable_channel(&st, &guild, &channel_id).await?;
 
     let (webhook_id, token) = match custom_app.as_deref() {
         // Post as one of the server's own bots: through its connected Activity
@@ -604,6 +643,7 @@ pub async fn activity_post(
         Some(&format!(
             "https://discord.com/api/webhooks/{webhook_id}/{token}"
         )),
+        custom_app.as_deref(),
         if had_uploads { &created } else { &body.message },
         None,
         None,
@@ -1472,6 +1512,7 @@ pub async fn activity_edit(
         Some(&format!(
             "https://discord.com/api/webhooks/{webhook_id}/{token}"
         )),
+        custom_app.as_deref(),
         if had_uploads { &updated } else { &body.message },
         None,
         None,
@@ -1558,7 +1599,7 @@ pub async fn activity_schedule(
     }
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
-    ensure_channel_in_guild(&st, &guild, &channel_id).await?;
+    ensure_postable_channel(&st, &guild, &channel_id).await?;
 
     let (webhook_id, token) = require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?;
 
@@ -2491,6 +2532,8 @@ async fn room_socket(
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let idle_timeout = Duration::from_secs(ROOM_IDLE_TIMEOUT_SECS);
     let mut last_seen = Instant::now();
+    let resync_min = Duration::from_secs(RESYNC_MIN_INTERVAL_SECS);
+    let mut last_resync: Option<Instant> = None;
     loop {
         tokio::select! {
             inbound = socket.recv() => match inbound {
@@ -2522,7 +2565,28 @@ async fn room_socket(
                         break;
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    // This peer's subscription overflowed the room backlog:
+                    // frames were dropped, and a dropped `patch` is an op it
+                    // will never see — its tree has silently diverged. Nudge it
+                    // to resync: the client answers by re-sending `hello`,
+                    // peers reply with their full current draft (the same
+                    // latecomer machinery), and its three-way merge reapplies
+                    // any local pending edits on top. Server-authored (no
+                    // `cid`), like `bot_connected`. Throttled per socket so a
+                    // sustained overflow can't turn into a hello/draft storm.
+                    let due = match last_resync {
+                        Some(t) => t.elapsed() >= resync_min,
+                        None => true,
+                    };
+                    if due {
+                        last_resync = Some(Instant::now());
+                        let frame = json!({ "type": "resync" }).to_string();
+                        if socket.send(Message::Text(frame)).await.is_err() {
+                            break;
+                        }
+                    }
+                }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
             _ = ping.tick() => {

@@ -1178,6 +1178,33 @@ pub(crate) async fn ensure_channel_in_guild(
     ))
 }
 
+/// A channel's Discord `type` from the guild's channel list — cached first,
+/// then fresh, the same two-step [`ensure_channel_in_guild`] takes so a
+/// just-created channel still resolves. `None` when the channel isn't in the
+/// guild at all. Lets callers gate on channel *kind* (the Activity's post path
+/// refuses forum/media channels, which need thread parameters it doesn't carry).
+pub(crate) async fn channel_type_in_guild(
+    st: &AppState,
+    guild: &str,
+    channel_id: &str,
+) -> Result<Option<i64>, AppError> {
+    let cached = fetch_channels(st, guild, false).await?;
+    if let Some(t) = channel_type_from(&cached, channel_id) {
+        return Ok(Some(t));
+    }
+    let fresh = fetch_channels(st, guild, true).await?;
+    Ok(channel_type_from(&fresh, channel_id))
+}
+
+/// Find `channel_id` in a channels-list JSON array and read its `type`.
+fn channel_type_from(channels: &Value, channel_id: &str) -> Option<i64> {
+    let ch = channels
+        .as_array()?
+        .iter()
+        .find(|c| c.get("id").and_then(Value::as_str) == Some(channel_id))?;
+    ch.get("type").and_then(Value::as_i64)
+}
+
 /// Ensure `webhook_id` belongs to `guild` before a write touches it — the bot
 /// token can otherwise act on any webhook id, in any server it's in.
 async fn ensure_webhook_in_guild(

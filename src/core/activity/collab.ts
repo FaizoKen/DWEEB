@@ -17,6 +17,9 @@
  *    full current draft, so a latecomer inherits the in-progress message without
  *    clobbering anyone (a newcomer never broadcasts its own default on open).
  *  - `roster` frames (server-authored) drive the presence list.
+ *  - A server-authored `resync` means our socket missed relayed frames (the
+ *    room's broadcast backlog overflowed) — we re-send `hello` so peers hand us
+ *    their full draft again, closing any silent divergence.
  *
  * The server relays every frame opaquely, so this protocol is entirely
  * client-side. It's intentionally not a CRDT: concurrent edits to the *same*
@@ -301,6 +304,18 @@ function handleFrame(frame: Record<string, unknown>): void {
     // echo guard below.
     const appId = typeof frame.application_id === "string" ? frame.application_id : "";
     if (appId) opts?.onBotConnected?.(appId);
+    return;
+  }
+  if (type === "resync") {
+    // Server-authored: our subscription outran the room's broadcast backlog and
+    // frames were dropped — under per-node patch sync a missed patch is an op
+    // we'll never see, so our tree may have silently diverged. Re-run the join
+    // handshake: peers answer `hello` with their full current draft, which
+    // `applyFull` reconciles against our un-broadcast local edits (nothing
+    // pending is lost), and we re-announce our focus so our presence ring
+    // survives the round trip. Handled before the echo guard (no `cid`).
+    send({ type: "hello", cid });
+    if (currentFocus) sendFocus(currentFocus);
     return;
   }
   // Ignore the echo of our own frames.

@@ -731,7 +731,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
           guild_id: entry.guild_id,
           url: `https://discord.com/channels/${entry.guild_id}/${entry.channel_id}/${entry.message_id}`,
           webhook_id: entry.webhook_id ?? undefined,
-          application_id: null,
+          // The identity that authored the message (a custom bot's application
+          // id, or null = DWEEB), recorded at post time — Update then rides the
+          // same identity instead of failing down the DWEEB path against a
+          // custom bot's webhook.
+          application_id: entry.application_id ?? null,
         },
       });
       const onTarget = entry.channel_id === get().targetChannelId;
