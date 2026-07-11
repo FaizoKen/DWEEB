@@ -38,3 +38,8 @@
   font-size: var(--app-text-xs);
   color: var(--app-danger-text);
 }
+
+.warning {
+  font-size: var(--app-text-xs);
+  color: rgb(240, 178, 50);
+}

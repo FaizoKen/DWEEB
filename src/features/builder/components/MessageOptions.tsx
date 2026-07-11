@@ -26,7 +26,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useValidationSummary } from "@/features/builder/useValidation";
-import { useOptionsRevealStore, type OptionsSection } from "@/features/builder/optionsReveal";
+import {
+  routeMessageIssues,
+  sectionForField,
+  useOptionsRevealStore,
+  type MessageIssueField,
+  type OptionsSection,
+} from "@/features/builder/optionsReveal";
 import { LIMITS } from "@/core/schema/limits";
 import type { AllowedMentions } from "@/core/schema/types";
 import { Disclosure } from "@/ui/Disclosure";
@@ -45,6 +51,28 @@ const MENTION_LABELS: Record<MentionKind, string> = {
   users: "@user",
 };
 
+/** The dot beside a lane title: danger when the lane holds an error, amber for
+ *  a warning, the accent "configured" dot when it just has settings, else none. */
+function LaneDot({
+  severity,
+  active,
+}: {
+  severity: "error" | "warning" | null;
+  active: boolean;
+}) {
+  if (severity === "error") {
+    return (
+      <span className={cn(styles.optionsTabDot, styles.optionsTabDotError)} aria-hidden="true" />
+    );
+  }
+  if (severity === "warning") {
+    return (
+      <span className={cn(styles.optionsTabDot, styles.optionsTabDotWarn)} aria-hidden="true" />
+    );
+  }
+  return active ? <span className={styles.optionsTabDot} aria-hidden="true" /> : null;
+}
+
 export function MessageOptions() {
   const message = useMessageStore((s) => s.message);
   const setSuppress = useMessageStore((s) => s.setSuppressNotifications);
@@ -60,23 +88,33 @@ export function MessageOptions() {
   // Jump-to-issue for message-level problems: the header's issue chip fires a
   // one-shot reveal (see `optionsReveal.ts`), and this card answers it — the
   // same way a node issue's jump scrolls its tree row into view. Expand the
-  // named lane (when the issue lives in one), bring the card on screen, and
-  // focus the lane's first field so the fix is a keystroke away.
+  // lane hosting the field (when it lives in one), unfold any <details> around
+  // it, bring it on screen, and focus it so the fix is a keystroke away.
   const rootRef = useRef<HTMLDivElement>(null);
   const revealToken = useOptionsRevealStore((s) => s.token);
-  const revealSection = useOptionsRevealStore((s) => s.section);
+  const revealField = useOptionsRevealStore((s) => s.field);
   useEffect(() => {
     if (revealToken === 0) return; // initial mount, no reveal requested yet
-    if (revealSection) setOpenSection(revealSection);
+    const section = revealField ? sectionForField(revealField) : null;
+    if (section) setOpenSection(section);
     // Deferred a frame so a just-expanded lane has mounted before we measure
     // scroll positions / look up its focus target.
     requestAnimationFrame(() => {
-      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      rootRef.current
-        ?.querySelector<HTMLElement>(`[data-reveal-focus="${revealSection ?? ""}"]`)
-        ?.focus({ preventScroll: true });
+      // Lane fields carry data-reveal-focus; the meta header's username/avatar
+      // inputs (outside this card) carry data-meta-field with the same names.
+      const el = revealField
+        ? (rootRef.current?.querySelector<HTMLElement>(`[data-reveal-focus="${revealField}"]`) ??
+          document.querySelector<HTMLElement>(`[data-meta-field="${revealField}"]`))
+        : null;
+      // A target behind a collapsed Advanced fold can't be focused — open its
+      // <details> ancestors first (native, so this sticks).
+      for (let n = el?.parentElement; n; n = n.parentElement) {
+        if (n instanceof HTMLDetailsElement) n.open = true;
+      }
+      (el ?? rootRef.current)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.focus({ preventScroll: true });
     });
-  }, [revealToken, revealSection]);
+  }, [revealToken, revealField]);
 
   const am = message.allowed_mentions;
 
@@ -90,15 +128,20 @@ export function MessageOptions() {
   const forumActive =
     (message.thread_name?.trim().length ?? 0) > 0 || (message.applied_tags?.length ?? 0) > 0;
 
-  // Any thread-name problem — a forum/media destination missing its title
-  // (THREAD_NAME_REQUIRED), a title set while a non-forum channel is picked
-  // (THREAD_NAME_FORBIDDEN, Discord rejects that post), or an overlong one —
-  // renders inline on the field below, like every other field error, and
-  // flags the lane in the danger colour so the collapsed card points here.
+  // Message-level issues, routed to the field they belong to (thread name,
+  // applied tags, allowed-mention ids) — each renders inline under its own
+  // control like any other field error, and its lane gets a danger (error) or
+  // amber (warning) dot so the collapsed card points at the problem.
   const { messageIssues } = useValidationSummary();
-  const threadIssue = messageIssues.find(
-    (i) => i.code.startsWith("THREAD_NAME") && i.severity === "error",
-  );
+  const fieldIssues = routeMessageIssues(messageIssues);
+  const issueAt = (field: MessageIssueField) => fieldIssues.get(field);
+  const laneSeverity = (fields: MessageIssueField[]): "error" | "warning" | null => {
+    if (fields.some((f) => fieldIssues.get(f)?.error)) return "error";
+    if (fields.some((f) => fieldIssues.get(f)?.warning)) return "warning";
+    return null;
+  };
+  const forumSeverity = laneSeverity(["thread_name", "applied_tags"]);
+  const notificationSeverity = laneSeverity(["mention_roles", "mention_users"]);
 
   const setParseKind = (kind: MentionKind, on: boolean) => {
     const parse = new Set<MentionKind>(am?.parse ?? []);
@@ -128,7 +171,11 @@ export function MessageOptions() {
       <div className={styles.optionsTabs}>
         <button
           type="button"
-          className={cn(styles.optionsTab, notificationActive && styles.optionsTabActive)}
+          className={cn(
+            styles.optionsTab,
+            notificationActive && styles.optionsTabActive,
+            notificationSeverity === "error" && styles.optionsTabError,
+          )}
           aria-expanded={openSection === "notification"}
           onClick={() => toggleSection("notification")}
         >
@@ -138,9 +185,7 @@ export function MessageOptions() {
           <span className={styles.optionsTabText}>
             <span className={styles.optionsTabTitle}>
               Notifications
-              {notificationActive ? (
-                <span className={styles.optionsTabDot} aria-hidden="true" />
-              ) : null}
+              <LaneDot severity={notificationSeverity} active={notificationActive} />
             </span>
             <span className={styles.optionsTabSub}>Silent send &amp; who gets pinged</span>
           </span>
@@ -151,7 +196,7 @@ export function MessageOptions() {
           className={cn(
             styles.optionsTab,
             forumActive && styles.optionsTabActive,
-            threadIssue && styles.optionsTabError,
+            forumSeverity === "error" && styles.optionsTabError,
           )}
           aria-expanded={openSection === "forum"}
           onClick={() => toggleSection("forum")}
@@ -162,14 +207,7 @@ export function MessageOptions() {
           <span className={styles.optionsTabText}>
             <span className={styles.optionsTabTitle}>
               Forum post
-              {threadIssue ? (
-                <span
-                  className={cn(styles.optionsTabDot, styles.optionsTabDotError)}
-                  aria-hidden="true"
-                />
-              ) : forumActive ? (
-                <span className={styles.optionsTabDot} aria-hidden="true" />
-              ) : null}
+              <LaneDot severity={forumSeverity} active={forumActive} />
             </span>
             <span className={styles.optionsTabSub}>Thread title &amp; tags</span>
           </span>
@@ -212,8 +250,9 @@ export function MessageOptions() {
           </Field>
 
           {/* Raw-snowflake / no-op fields — power-user territory, parked behind
-              a subtle inline disclosure. */}
-          <Disclosure>
+              a subtle inline disclosure. Unfolded on mount when a field inside
+              carries an issue, so the inline error isn't hidden by the fold. */}
+          <Disclosure defaultOpen={notificationSeverity != null}>
             {/* TTS — only meaningful for V1 (plain content) messages; no-op on V2 */}
             <Switch
               checked={message.tts ?? false}
@@ -224,6 +263,8 @@ export function MessageOptions() {
             <Field
               label="Allowed role IDs"
               hint="Comma/space separated snowflakes. Conflicts with @role chip — use one."
+              error={issueAt("mention_roles")?.error}
+              warning={issueAt("mention_roles")?.warning}
             >
               {(id) => (
                 <TextInput
@@ -231,6 +272,7 @@ export function MessageOptions() {
                   value={(am?.roles ?? []).join(" ")}
                   onChange={(e) => updateAllowed({ roles: onSnowflakeList(e.currentTarget.value) })}
                   placeholder="e.g. 1185234567890123456 1185234567890123457"
+                  data-reveal-focus="mention_roles"
                 />
               )}
             </Field>
@@ -238,6 +280,8 @@ export function MessageOptions() {
             <Field
               label="Allowed user IDs"
               hint="Comma/space separated snowflakes. Conflicts with @user chip — use one."
+              error={issueAt("mention_users")?.error}
+              warning={issueAt("mention_users")?.warning}
             >
               {(id) => (
                 <TextInput
@@ -245,6 +289,7 @@ export function MessageOptions() {
                   value={(am?.users ?? []).join(" ")}
                   onChange={(e) => updateAllowed({ users: onSnowflakeList(e.currentTarget.value) })}
                   placeholder="e.g. 1185234567890123456"
+                  data-reveal-focus="mention_users"
                 />
               )}
             </Field>
@@ -262,7 +307,8 @@ export function MessageOptions() {
           <Field
             label="Thread name"
             hint="Starts a new forum post with this title. Skip when posting into an existing thread."
-            error={threadIssue?.message}
+            error={issueAt("thread_name")?.error}
+            warning={issueAt("thread_name")?.warning}
           >
             {(id) => (
               <TextArea
@@ -272,7 +318,7 @@ export function MessageOptions() {
                 maxLength={LIMITS.THREAD_NAME}
                 onChange={(e) => setThreadName(e.currentTarget.value || undefined)}
                 placeholder="e.g. Release notes — v2.4"
-                data-reveal-focus="forum"
+                data-reveal-focus="thread_name"
               />
             )}
           </Field>
@@ -280,6 +326,8 @@ export function MessageOptions() {
           <Field
             label="Applied tags"
             hint={`Up to ${LIMITS.APPLIED_TAGS} tag snowflakes, comma/space separated.`}
+            error={issueAt("applied_tags")?.error}
+            warning={issueAt("applied_tags")?.warning}
           >
             {(id) => (
               <TextInput
@@ -287,6 +335,7 @@ export function MessageOptions() {
                 value={(message.applied_tags ?? []).join(" ")}
                 onChange={(e) => setAppliedTags(onSnowflakeList(e.currentTarget.value))}
                 placeholder="e.g. 1185234567890123456"
+                data-reveal-focus="applied_tags"
               />
             )}
           </Field>

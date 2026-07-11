@@ -761,10 +761,15 @@
   border-radius: 50%;
   background: var(--app-accent);
 }
-/* Error variant: the lane holds a setting validation *requires* (a forum/media
-   destination is picked but the post title is empty). */
+/* Error variant: a field inside the lane carries a validation error (e.g. a
+   forum/media destination is picked but the post title is empty). */
 .optionsTabDotError {
   background: var(--app-danger, #f23f43);
+}
+/* Warning variant: the lane's worst issue is a soft one (Discord accepts but
+   degrades the value) — matches the amber the issue banner/chip use. */
+.optionsTabDotWarn {
+  background: rgb(240, 178, 50);
 }
 .optionsTabError .optionsTabIcon {
   border-color: var(--app-danger, #f23f43);

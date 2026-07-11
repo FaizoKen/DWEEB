@@ -14,6 +14,9 @@ interface FieldProps {
   label: string;
   hint?: ReactNode;
   error?: string | null;
+  /** Softer than `error` (amber): Discord accepts the value but degrades it.
+   *  Shown only while no error stands, so the two never stack. */
+  warning?: string | null;
   htmlFor?: string;
   /** When true, the label is visually hidden but still announced to AT. */
   hideLabel?: boolean;
@@ -21,7 +24,16 @@ interface FieldProps {
   children: (controlId: string) => ReactNode;
 }
 
-export function Field({ label, hint, error, htmlFor, hideLabel, className, children }: FieldProps) {
+export function Field({
+  label,
+  hint,
+  error,
+  warning,
+  htmlFor,
+  hideLabel,
+  className,
+  children,
+}: FieldProps) {
   const reactId = useId();
   const controlId = htmlFor ?? reactId;
   return (
@@ -32,6 +44,7 @@ export function Field({ label, hint, error, htmlFor, hideLabel, className, child
       <div className={styles.control}>{children(controlId)}</div>
       {hint ? <div className={styles.hint}>{hint}</div> : null}
       {error ? <div className={styles.error}>{error}</div> : null}
+      {!error && warning ? <div className={styles.warning}>{warning}</div> : null}
     </div>
   );
 }

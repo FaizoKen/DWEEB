@@ -19,7 +19,7 @@
 
 import { useMessageStore } from "@/core/state/messageStore";
 import { scrollPreviewNodeIntoView, scrollTreeRowIntoView } from "@/features/builder/scrollTreeRow";
-import { sectionForIssueCode, useOptionsRevealStore } from "@/features/builder/optionsReveal";
+import { fieldForIssueCode, useOptionsRevealStore } from "@/features/builder/optionsReveal";
 import type { ValidationView } from "@/features/builder/useValidation";
 import { AlertCircleIcon, AlertTriangleIcon } from "@/ui/Icon";
 import { cn } from "@/lib/cn";
@@ -49,7 +49,7 @@ export function HeaderIssueChip({ view }: { view: ValidationView }) {
       scrollTreeRowIntoView(targetId);
       scrollPreviewNodeIntoView(targetId);
     } else if (messageTarget) {
-      reveal(sectionForIssueCode(messageTarget.code));
+      reveal(fieldForIssueCode(messageTarget.code));
     }
   };
 

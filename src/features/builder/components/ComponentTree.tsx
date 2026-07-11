@@ -65,6 +65,7 @@ import { IconButton } from "@/ui/IconButton";
 import { PlaceholderInput } from "@/ui/PlaceholderInput";
 import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
 import { AddComponentMenu, type AddMenuNode } from "./AddComponentMenu";
+import { fieldForIssueCode, routeMessageIssues } from "@/features/builder/optionsReveal";
 import { MessageOptions } from "./MessageOptions";
 import { PostedMessageBanner } from "../PostedMessageBanner";
 import {
@@ -486,15 +487,16 @@ function MetaHeader() {
   const components = useMemo(() => countComponents(message), [message]);
 
   // The at-a-glance issue *count* now lives in the header bar's chip (shared with
-  // the Activity bar); here we only surface message-level problems that have no
-  // component to point at (bad mentions, …) as a readable banner. "A message must
-  // contain at least one component" is already covered by the empty-tree
-  // placeholder, and thread-name problems (missing/forbidden/overlong title)
-  // render inline on their own field (Message options → Forum post, flagged by
-  // the lane's danger dot) — all are dropped here to avoid saying them twice.
+  // the Activity bar). Message-level issues that belong to a specific setting —
+  // username/avatar here, thread name / applied tags / allowed-mention ids in
+  // Message options — render inline under their own field like any other field
+  // error (see `routeMessageIssues`), so the banner keeps only the truly
+  // message-wide leftovers (top-level/total limits). "A message must contain at
+  // least one component" is already covered by the empty-tree placeholder.
   const { messageIssues } = useValidationSummary();
+  const fieldIssues = routeMessageIssues(messageIssues);
   const bannerIssues = messageIssues.filter(
-    (i) => i.code !== "EMPTY_MESSAGE" && !i.code.startsWith("THREAD_NAME"),
+    (i) => i.code !== "EMPTY_MESSAGE" && fieldForIssueCode(i.code) === null,
   );
 
   return (
@@ -502,7 +504,11 @@ function MetaHeader() {
       {bannerIssues.length > 0 ? <IssueList issues={bannerIssues} /> : null}
 
       <div className={styles.row2}>
-        <Field label="Username">
+        <Field
+          label="Username"
+          error={fieldIssues.get("username")?.error}
+          warning={fieldIssues.get("username")?.warning}
+        >
           {(id) => (
             <PlaceholderInput
               id={id}
@@ -515,7 +521,11 @@ function MetaHeader() {
             />
           )}
         </Field>
-        <Field label="Avatar URL">
+        <Field
+          label="Avatar URL"
+          error={fieldIssues.get("avatar")?.error}
+          warning={fieldIssues.get("avatar")?.warning}
+        >
           {(id) => (
             <PlaceholderInput
               id={id}
