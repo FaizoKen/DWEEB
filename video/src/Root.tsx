@@ -1,6 +1,7 @@
 import React from "react";
 import { Composition } from "remotion";
 import { DweebPromo } from "./DweebPromo";
+import { ActivityPreview } from "./ActivityPreview";
 import { TOTAL, FPS } from "./timeline";
 
 export const RemotionRoot: React.FC = () => {
@@ -23,6 +24,14 @@ export const RemotionRoot: React.FC = () => {
         fps={FPS}
         width={1080}
         height={1920}
+      />
+      <Composition
+        id="ActivityPreview"
+        component={ActivityPreview}
+        durationInFrames={300}
+        fps={30}
+        width={640}
+        height={360}
       />
     </>
   );

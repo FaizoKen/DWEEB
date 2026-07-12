@@ -10,6 +10,7 @@
     "studio": "remotion studio src/index.ts",
     "render": "remotion render src/index.ts DweebPromo out/dweeb-promo.mp4 --concurrency 4",
     "render:vertical": "remotion render src/index.ts DweebPromoVertical out/dweeb-promo-vertical.mp4 --concurrency 4",
+    "render:activity": "remotion render src/index.ts ActivityPreview out/dweeb-activity-preview.mp4 --concurrency 4 --crf 30 --muted",
     "still": "remotion still src/index.ts DweebPromo out/cover.png --frame 2250",
     "typecheck": "tsc -p tsconfig.json"
   },
