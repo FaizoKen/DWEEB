@@ -74,7 +74,6 @@ const WelcomeVideo = lazy(() =>
 );
 import { ToastViewport, pushToast } from "@/ui/Toast";
 import { SparkleIcon, UsersIcon } from "@/ui/Icon";
-import { TestModeNotice } from "./TestModeNotice";
 import { UpdatePrompt } from "./UpdatePrompt";
 import {
   activityLaunchUrl,
@@ -338,7 +337,6 @@ export function App() {
 
   return (
     <>
-      <TestModeNotice />
       <div
         className="app-shell"
         data-preview-open={previewOpen ? "true" : "false"}

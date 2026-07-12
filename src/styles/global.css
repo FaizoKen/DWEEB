@@ -15,8 +15,7 @@
   border: 0;
 }
 
-/* The root lays the test-mode notice and the shell out as a column; the shell
- * flexes to fill whatever height the banner leaves (all of it once dismissed). */
+/* The root lays the shell out as a column so it fills the viewport height. */
 #root {
   display: flex;
   flex-direction: column;
@@ -31,50 +30,6 @@
   min-height: 0;
   background: var(--app-bg);
   transition: padding-right 260ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Test-mode notice: a slim warning strip above both panes. Sits in normal
- * flow (not fixed) so it can never cover the builder's action bar; the mobile
- * preview sheet and modals are fixed and intentionally overlay it. */
-.test-notice {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--app-space-2);
-  padding: 6px var(--app-space-4);
-  background: var(--app-warning-soft);
-  border-bottom: 1px solid rgba(240, 178, 50, 0.35);
-  color: var(--app-warning-text);
-  font-size: var(--app-text-sm);
-}
-
-.test-notice svg {
-  flex-shrink: 0;
-}
-
-.test-notice__text {
-  margin: 0;
-  min-width: 0;
-}
-
-.test-notice__text strong {
-  font-weight: 600;
-}
-
-.test-notice__dismiss {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--app-radius-sm);
-  color: inherit;
-  cursor: pointer;
-}
-
-.test-notice__dismiss:hover {
-  background: var(--app-warning-soft);
 }
 
 /* On desktop, opening the AI panel pushes the builder/preview grid in so the
