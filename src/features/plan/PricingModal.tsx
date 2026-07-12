@@ -331,6 +331,16 @@ export function PricingModal() {
         </p>
       ) : null}
 
+      <div className={styles.networkBenefit} role="note">
+        <span className={styles.networkBenefitIcon} aria-hidden="true">
+          ✦
+        </span>
+        <span>
+          Your subscription benefits apply across every Discord app built by{" "}
+          <strong>faizo.net</strong>.
+        </span>
+      </div>
+
       <div className={styles.toggleRow}>
         <div className={styles.periodToggle} role="group" aria-label="Billing interval">
           <button

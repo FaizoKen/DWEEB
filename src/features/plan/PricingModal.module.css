@@ -78,6 +78,33 @@
   font-weight: 600;
 }
 
+/* The shared faizo.net subscription covers the wider Discord-app family, not
+   just DWEEB. Keep this visible before the price choice so buyers see the
+   bundle value before entering checkout. */
+.networkBenefit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--app-accent) 28%, var(--app-border));
+  background: color-mix(in srgb, var(--app-accent) 7%, transparent);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+.networkBenefitIcon {
+  flex: none;
+  color: var(--app-accent);
+  font-size: 14px;
+  line-height: 1;
+}
+.networkBenefit strong {
+  color: var(--app-text);
+  font-weight: 700;
+}
+
 /* Row holding the Monthly / Annual switch, centered above the cards. */
 .toggleRow {
   display: flex;
