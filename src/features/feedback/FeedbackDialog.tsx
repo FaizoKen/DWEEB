@@ -18,7 +18,7 @@ import { Field } from "@/ui/Field";
 import { Select } from "@/ui/Select";
 import { TextInput } from "@/ui/TextInput";
 import { TextArea } from "@/ui/TextArea";
-import { CheckCircleIcon, SupportIcon } from "@/ui/Icon";
+import { CheckCircleIcon, SparkleIcon, SupportIcon } from "@/ui/Icon";
 import {
   FEEDBACK_DETAILS_MAX,
   FEEDBACK_SUMMARY_MAX,
@@ -28,6 +28,8 @@ import {
 } from "@/core/feedback/submit";
 import { useFeedbackStore } from "./feedbackStore";
 import styles from "./FeedbackDialog.module.css";
+
+const TOPGG_REVIEW_URL = "https://top.gg/bot/1511769679096447016#reviews";
 
 export function FeedbackDialog() {
   const close = useFeedbackStore((s) => s.closeFeedback);
@@ -200,6 +202,19 @@ export function FeedbackDialog() {
       </Field>
 
       {error ? <div className={styles.error}>{error}</div> : null}
+
+      <div className={styles.review}>
+        <span className={styles.reviewIcon} aria-hidden="true">
+          <SparkleIcon size={18} />
+        </span>
+        <p className={styles.reviewText}>
+          If you’re enjoying DWEEB, please consider leaving a review on{" "}
+          <a href={TOPGG_REVIEW_URL} target="_blank" rel="noopener noreferrer">
+            Top.gg ↗
+          </a>
+          !
+        </p>
+      </div>
     </Modal>
   );
 }

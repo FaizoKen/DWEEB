@@ -39,6 +39,37 @@
   color: var(--app-text);
 }
 
+/* Top.gg review nudge — a friendly accent callout under the form. */
+.review {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: var(--app-radius-sm);
+  background: color-mix(in srgb, var(--app-accent) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-accent) 28%, transparent);
+}
+
+.reviewIcon {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--app-accent);
+}
+
+.reviewText {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+
+.reviewText a {
+  color: var(--app-accent);
+  font-weight: 600;
+}
+
 /* Submit failure line under the form. */
 .error {
   margin: 0;
