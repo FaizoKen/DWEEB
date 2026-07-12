@@ -390,10 +390,11 @@ export function PricingModal() {
       <p className={styles.included}>{INCLUDED}</p>
       <p className={styles.downgradeNote}>{DOWNGRADE_NOTE}</p>
       <p className={styles.creatorNote}>
-        Built by{" "}
+        One subscription gives this server premium benefits across every Discord app built by{" "}
         <a href="https://discord.gg/2wB7rHRDg2" target="_blank" rel="noopener noreferrer">
           Faizo
         </a>
+        .
       </p>
     </Modal>
   );
