@@ -188,7 +188,7 @@ export function App() {
   const pricingOpen = usePlanStore((s) => s.open);
 
   // The "Collaborate in Discord" dialog — summoned from the Builder's "More"
-  // menu and the mobile FAB. Mints a voice-channel Activity invite so a group
+  // menu and the floating shortcut. Mints a voice-channel Activity invite so a group
   // co-edits in one shared instance. Mounted lazily only while open.
   const collaborateOpen = useCollaborateStore((s) => s.open);
   const openCollaborate = useCollaborateStore((s) => s.openCollaborate);
@@ -397,13 +397,12 @@ export function App() {
           ) : null}
 
           <div className="fab-row">
-            {/* "Collaborate in Discord" shortcut, beneath the mini preview —
+            {/* "Collaborate in Discord" shortcut, beneath the mini preview on mobile —
               mints an Activity invite so a group co-edits one shared instance.
-              Mobile only (the full action lives in the Builder's "More" menu on
-              desktop), and only when the proxy can actually mint the invite —
-              same gate the menu item uses. The full preview still opens by
-              tapping the mini preview above. */}
-            {isMobileSheet && !previewOpen && collaborateUrl ? (
+              It stays in the bottom-right action row on desktop, and only renders
+              when the proxy can actually mint the invite — the same gate the menu
+              item uses. On mobile it hides behind the full preview sheet. */}
+            {(!isMobileSheet || !previewOpen) && collaborateUrl ? (
               <button
                 type="button"
                 className="collab-fab"

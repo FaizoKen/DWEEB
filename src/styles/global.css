@@ -123,7 +123,7 @@
 .fab-stack {
   position: fixed;
   right: 16px;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(16px + var(--app-saib));
   z-index: var(--app-z-toolbar);
   display: flex;
   flex-direction: column;
@@ -131,20 +131,24 @@
   gap: 10px;
 }
 
-/* The action row under the mini preview. On desktop only the AI launcher
- * remains, so the row collapses to that single pill. */
+/* The action row under the mini preview on mobile and in the bottom-right on
+ * desktop. It keeps the same compact Collab + AI footprint in both layouts. */
 .fab-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: var(--app-mini-preview-w);
+  justify-content: flex-end;
 }
 
-/* Collaborate shortcut: only ever rendered on mobile (App gates it). A compact
- * accent pill sitting in the action row beside the AI launcher, opening the
- * "Collaborate in Discord" dialog. */
+/* Compact accent shortcut beside the AI launcher, opening the "Collaborate in
+ * Discord" dialog. */
 .collab-fab {
   display: inline-flex;
   align-items: center;
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
   gap: 8px;
   height: var(--app-fab-h);
   padding: 0 18px;
@@ -181,9 +185,12 @@
 .ai-fab {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
+  flex: 0 0 auto;
+  width: var(--app-fab-h);
   height: var(--app-fab-h);
-  padding: 0 18px;
+  padding: 0;
+  justify-content: center;
   border-radius: 999px;
   background: linear-gradient(120deg, #7c3aed 0%, #c026d3 50%, #ec4899 100%);
   color: #fff;
@@ -214,6 +221,10 @@
 }
 .ai-fab svg {
   flex-shrink: 0;
+}
+
+.ai-fab span {
+  display: none;
 }
 
 .app-shell[data-ai-open="true"] .ai-fab {
@@ -287,40 +298,6 @@
    * stack over it — the AI launcher stays tappable while the preview is open. */
   .fab-stack {
     z-index: var(--app-z-modal);
-  }
-
-  /* Align the action row with the mini preview above it: the row spans the same
-   * width, the AI launcher stays a fixed circle pinned to the right, and the
-   * Collab pill flexes to fill the rest. So the row's left edge lines up with
-   * the thumbnail's left edge and the AI circle's right edge with the
-   * thumbnail's right edge — a tidy, edge-aligned stack. */
-  .fab-row {
-    width: var(--app-mini-preview-w);
-    /* Pins the AI circle to the right edge when it's the only child (preview
-     * open, Collab hidden); with Collab present its flex-grow eats the free
-     * space, so this has no effect then. */
-    justify-content: flex-end;
-  }
-
-  .collab-fab {
-    flex: 1;
-    min-width: 0;
-    justify-content: center;
-  }
-
-  /* AI launcher collapses to an icon-only circle so it stays compact beside the
-   * Collab pill; it never flexes, keeping its fixed round footprint. */
-  .ai-fab {
-    gap: 0;
-    flex: 0 0 auto;
-    width: var(--app-fab-h);
-    height: var(--app-fab-h);
-    padding: 0;
-    justify-content: center;
-  }
-
-  .ai-fab span {
-    display: none;
   }
 }
 
