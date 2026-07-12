@@ -1,6 +1,6 @@
 # DWEEB — Launch Film v3.2: Script & Storyboard
 
-**Runtime:** 1:23 (2,497 frames) @ 30fps, 1920×1080 (`DweebPromo`) — the exact
+**Runtime:** 1:19 (2,358 frames) @ 30fps, 1920×1080 (`DweebPromo`) — the exact
 frame count comes from `public/audio/manifest.json` after `npm run audio`.
 **Voice:** Microsoft Edge neural `en-US-AndrewMultilingualNeural`, +6% rate
 **Goal:** one clear story a first-time viewer can follow with zero Discord-admin
@@ -40,7 +40,7 @@ v3.1 flow fixes over v3 (all in service of "clean, easy, simple"):
   in the activity header like the real app.
 - **CTA**: no more deal-with-it shades on the mascot; feature tags instead of
   the free/no-account chips; the search bar is a proper Google bar (G logo,
-  centered "dweeb bot"); the licence fine print is gone.
+  centered "dweeb.faizo.net" — shown, never spoken); the licence fine print is gone.
 
 A virtual camera (`components/Camera.tsx`) lives in world space; every scene
 pushes in close on the beat being narrated and pulls wide before the cut so the
@@ -58,14 +58,14 @@ frame durations), so re-recording the VO re-syncs every cut automatically.
 | # | id | VO | Picture |
 |---|----|----|---------|
 | 1 | hook | Every day, your server posts messages that look like this. They could look like this. | Discord chat: a plain grey text post swaps in place for a rich Components V2 announcement card. |
-| 2 | reveal | This is DWEEB — the ultimate toolkit for fancy Discord messages. | Mascot lands, wordmark + green underline, tagline. |
+| 2 | reveal | This is DWEEB — the visual builder for rich Discord messages. | Mascot lands, wordmark + green underline, tagline. |
 | 3 | build | Design with Discord's real building blocks — containers, sections, media galleries, buttons, select menus — and watch a pixel-accurate preview update live, while DWEEB enforces Discord's limits for you. | The editor in one steady framing: tree assembles block-by-block (each lands complete), the preview mirrors each block; on the limits beat the floating pill pops green — Ready to send. |
 | 4 | assistant | Or just describe it — the built-in AI assistant drafts the whole message, right in your editor. | The AI Assistant docks on the right (like the real app), a prompt types, the draft lands in tree + preview at once. No model names. |
 | 5 | plugins | Now make it do things. Select a button, pick a plugin — support tickets, giveaways, role menus, pop-up forms — real behavior, set up visually. | The Enter-giveaway button is selected; the "Attach a plugin" picker opens in-editor with all 7 real plugins; Giveaway is attached, the chip lands on the row. |
 | 6 | send | When it's ready, name the message, pick a channel — DWEEB finds or creates the webhook for you. One click. Posted. | Message tab names it ("Nebula Announcements"), the action-bar Send drops a channel popover in place — a Deliver row shows "Send now / Schedule…" with Send now selected → click → the message lands in Discord with a ping. |
 | 7 | templates | And you never start from zero — flip through ready-made templates, preview the message live, and open one to make it yours. | Gallery on the left, a big live-preview stage on the right: Welcome → Role menu → Giveaway → Announcement flip by as the cursor browses, then one opens. |
 | 8 | activity | DWEEB also runs inside Discord. Open the Activity in a voice channel and build together — live presence, real-time co-editing, one-click publish. | A Staff Lounge voice call → the DWEEB Activity launches from it → the simplified embedded builder: presence rings on the tree, two edits land at once, **Post** flips to **Update**. |
-| 9 | cta | DWEEB. Way more features are waiting — explore them now, for free, right in your browser. Just search dweeb bot on Google, and start building. | Riser → impact: mascot + wordmark, feature tags (Visual builder · AI assistant · Plugins · Build together) + "…and a whole lot more — explore it all, free"; a Google search bar (G logo) types **dweeb bot** centered. |
+| 9 | cta | DWEEB. So many more features are waiting — all free, right in your browser. Start building today. | Riser → impact: mascot + wordmark, feature tags (Visual builder · AI assistant · Plugins · Build together) + "…and a whole lot more — explore it all, free"; a Google search bar (G logo) types **dweeb.faizo.net** centered (the URL is shown, never spoken). |
 
 ## Accuracy sources (per claim)
 
@@ -89,8 +89,8 @@ frame durations), so re-recording the VO re-syncs every cut automatically.
 
 ## Production notes
 
-- **VO**: `scripts/generate-audio.mjs` via `msedge-tts`, one CBR-mp3 per line —
-  duration = bytes/6000 → frames → `manifest.json` drives the whole timeline.
+- **VO**: `scripts/generate-audio.mjs` via `msedge-tts`, one 96 kbps CBR-mp3 per
+  line — duration = bytes/12000 → frames → `manifest.json` drives the whole timeline.
 - **Music**: the licensed bed (Pavel Yudin — "Tech Corporate", Pixabay,
   `paulyudin-tech-corporate-182507.mp3`). The music step decodes it with
   Remotion's bundled ffmpeg, trims it to the film, bakes the duck under every

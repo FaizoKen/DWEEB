@@ -3,8 +3,8 @@
 // written to public/audio with a manifest carrying exact durations (in frames)
 // so the visual timeline stays perfectly in sync with the voice.
 //
-// No ffmpeg/python required: TTS comes from msedge-tts as CBR 48kbps mp3 (so
-// duration = bytes / 6000), and the music/SFX are synthesized as raw PCM WAV
+// No ffmpeg/python required: TTS comes from msedge-tts as CBR 96kbps mp3 (so
+// duration = bytes / 12000), and the music/SFX are synthesized as raw PCM WAV
 // (see audio-synth.mjs). To regenerate ONLY the SFX (offline), use `npm run sfx`.
 
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
@@ -19,6 +19,13 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const FPS = 30;
 
+// 96 kbps CBR mono mp3 — twice the bitrate of the old 48 kbps bed, so the
+// neural voice lands with noticeably fewer compression artifacts. CBR is exact
+// (verified 2.000× byte ratio), so the duration estimate stays byte-derived:
+// seconds = bytes / (96000 / 8) = bytes / 12000.
+const TTS_FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3;
+const BYTES_PER_SEC = 12000;
+
 // ─── Voice-over ──────────────────────────────────────────────────────────────
 // The simplified cut: one clear story — problem → product → build → describe it →
 // make it do things → send → templates → build together → CTA. Nine lines, no
@@ -27,14 +34,14 @@ const FPS = 30;
 // before the next scene leads in.
 const LINES = [
   { id: "hook",      gapAfter: 20, text: "Every day, your server posts messages that look like this. They could look like this." },
-  { id: "reveal",    gapAfter: 18, text: "This is DWEEB — the ultimate toolkit for fancy Discord messages." },
+  { id: "reveal",    gapAfter: 18, text: "This is DWEEB — the visual builder for rich Discord messages." },
   { id: "build",     gapAfter: 16, text: "Design with Discord's real building blocks — containers, sections, media galleries, buttons, select menus — and watch a pixel-accurate preview update live, while DWEEB enforces Discord's limits for you." },
   { id: "assistant", gapAfter: 18, text: "Or just describe it — the built-in AI assistant drafts the whole message, right in your editor." },
   { id: "plugins",   gapAfter: 16, text: "Now make it do things. Select a button, pick a plugin — support tickets, giveaways, role menus, pop-up forms — real behavior, set up visually." },
   { id: "send",      gapAfter: 26, text: "When it's ready, name the message, pick a channel — DWEEB finds or creates the webhook for you. One click. Posted." },
   { id: "templates", gapAfter: 18, text: "And you never start from zero — flip through ready-made templates, preview the message live, and open one to make it yours." },
   { id: "activity",  gapAfter: 20, text: "DWEEB also runs inside Discord. Open the Activity in a voice channel and build together — live presence, real-time co-editing, one-click publish." },
-  { id: "cta",       gapAfter: 0,  text: "DWEEB. Way more features are waiting — explore them now, for free, right in your browser. Just search dweeb bot on Google, and start building." },
+  { id: "cta",       gapAfter: 0,  text: "DWEEB. So many more features are waiting — all free, right in your browser. Start building today." },
 ];
 
 const VOICE_CANDIDATES = [
@@ -48,7 +55,7 @@ async function synth() {
   let chosen = null;
   for (const v of VOICE_CANDIDATES) {
     try {
-      await tts.setMetadata(v, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+      await tts.setMetadata(v, TTS_FORMAT);
       chosen = v;
       break;
     } catch (e) {
@@ -67,7 +74,7 @@ async function synth() {
     });
     fs.renameSync(audioFilePath, file);
     const bytes = fs.statSync(file).size;
-    const durationSec = bytes / 6000; // 48 kbps CBR mono mp3
+    const durationSec = bytes / BYTES_PER_SEC; // 96 kbps CBR mono mp3
     // +2 safety frames: the byte estimate can undershoot the decoded tail, and
     // this pad keeps the music duck covering the last syllable.
     const frames = Math.ceil(durationSec * FPS) + 2;

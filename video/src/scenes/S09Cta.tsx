@@ -31,16 +31,17 @@ const GoogleG: React.FC<{ size?: number }> = ({ size = 36 }) => (
   </svg>
 );
 
-/** CTA — the end card: lockup, feature tags, and a Google search for "dweeb bot". */
+/** CTA — the end card: lockup, feature tags, and a Google search for "dweeb.faizo.net". */
 export const SceneCta: React.FC = () => {
   const frame = useCurrentFrame();
   const vert = useVertical();
   const d = voDelay("cta");
 
   const drop = useSpr(4, { damping: 11, stiffness: 130, mass: 0.9 });
-  // The search bar lands on "…search dweeb bot…" — derived from the line's
-  // length so re-recording the VO keeps the beat in place.
-  const searchAt = d + Math.round(VO.cta.frames * 0.66);
+  // The search bar slides in around "…right in your browser" — the VO never
+  // speaks the URL, the bar shows it. Derived from the line's length so
+  // re-recording the VO keeps the beat in place.
+  const searchAt = d + Math.round(VO.cta.frames * 0.6);
   const searchIn = useSpr(searchAt, { damping: 13 });
 
   // Portrait wraps the feature tags into two rows (below), so the column stays
@@ -111,7 +112,7 @@ export const SceneCta: React.FC = () => {
               </div>
             </Rise>
 
-            {/* the Google search bar — "dweeb bot" types itself in, centered */}
+            {/* the Google search bar — "dweeb.faizo.net" types itself in, centered */}
             <div
               style={{
                 opacity: searchIn,
@@ -131,7 +132,7 @@ export const SceneCta: React.FC = () => {
                 <GoogleG size={38} />
               </div>
               <span style={{ fontFamily: INTER, fontSize: 44, fontWeight: 500, color: "#202124" }}>
-                <TypeText text="dweeb bot" start={searchAt + 16} cps={14} caretColor="#4285f4" />
+                <TypeText text="dweeb.faizo.net" start={searchAt + 16} cps={16} caretColor="#4285f4" />
               </span>
               <svg
                 width={32}
