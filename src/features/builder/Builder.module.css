@@ -20,21 +20,26 @@
   min-width: 0;
 }
 
+/* Styled to match the Activity bar (ActivityBar.module.css) so the web builder
+   and the embedded Activity read as the same product chrome: a slim 44px row,
+   hairline cluster dividers, icons over labels. */
 .actionBar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--app-space-3);
-  padding: 10px 14px;
+  padding: var(--app-space-1) var(--app-space-3);
+  min-height: 44px;
   background: var(--app-bg-elevated);
   border-bottom: 1px solid var(--app-border);
   z-index: var(--app-z-toolbar);
   /* The bar always stays on a single row. Rather than wrap when space runs out,
-     its controls collapse to icons in stages — measured against the bar's own
-     width in Builder.tsx, which sets `data-compact` (secondary buttons) and
-     hides the Send label. `nowrap` enforces the single row; `min-width: 0` lets
-     the bar shrink inside the builder's grid column rather than forcing the
-     whole pane (and the tree below it) wider than the viewport. */
+     its controls collapse in stages — measured against the bar's own width in
+     Builder.tsx, which sets `data-compact` (utility icons fold into the More
+     menu) and hides the Send label. `nowrap` enforces the single row;
+     `min-width: 0` lets the bar shrink inside the builder's grid column rather
+     than forcing the whole pane (and the tree below it) wider than the
+     viewport. */
   flex-wrap: nowrap;
   min-width: 0;
 }
@@ -42,31 +47,43 @@
 .actionGroup {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  /* A group never splits mid-cluster — the staged collapse keeps the row from
-     ever needing to wrap. */
+  gap: var(--app-space-1);
+  /* A group never splits mid-cluster, and never shrinks below its natural
+     width — the fit measurement in Builder.tsx reads that natural width to
+     decide when to fold controls away, so letting the box compress would hide
+     the very overflow it needs to see. */
   flex-wrap: nowrap;
+  flex: none;
 }
 
-/* Once the bar has collapsed its labels to icons (`data-compact`, set in
-   Builder.tsx), tighten the spacing too so the single row reclaims every pixel
-   it can — this is what lets the smallest phones keep all controls on one line.
-   Measured live by the collapse pass, so it just makes more labels survive. */
+/* Hairline divider that separates the clusters in the right group
+   (plan · utilities · history · primary) without adding visual weight. */
+.sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--app-space-1) var(--app-space-1);
+  background: var(--app-border);
+  flex: none;
+}
+
+/* Compact: the bar is too narrow to hold every control at full size on one line
+   (its own width, not the viewport — see the fit measurement in Builder.tsx).
+   The utility icons fold into the More menu and "New" collapses to its icon
+   (both in the TSX); here we drop the cluster dividers and tighten the spacing
+   so what remains — account · plan · overflow · undo/redo · primary — stays on
+   a single, uncrowded row. */
 .actionBar[data-compact] {
-  gap: 6px;
+  gap: var(--app-space-2);
+  padding-left: var(--app-space-2);
+  padding-right: var(--app-space-2);
 }
 
 .actionBar[data-compact] .actionGroup {
-  gap: 4px;
+  gap: 2px;
 }
 
-@media (max-width: 900px) {
-  .actionBar {
-    /* Tighter chrome on phones. The single-row collapse itself is width-driven
-       (see `data-compact` in Builder.tsx), not tied to this breakpoint. */
-    padding: 8px 10px;
-    gap: 8px;
-  }
+.actionBar[data-compact] .sep {
+  display: none;
 }
 
 /* Reserve room at the bottom of the builder pane for the floating preview

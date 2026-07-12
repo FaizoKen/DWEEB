@@ -48,7 +48,7 @@ import { RestoreDialog } from "./RestoreDialog";
 import { SaveDraftDialog } from "./SaveDraftDialog";
 import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
-import { PlanBadge } from "./PlanBadge";
+import { PlanBadge } from "@/features/plan/PlanBadge";
 import { fetchActivityPlan } from "@/core/activity/api";
 import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import type { PlanInfo } from "@/core/guild/api";

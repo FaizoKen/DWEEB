@@ -1,17 +1,18 @@
 /**
- * The Activity's quiet plan indicator.
+ * The quiet plan indicator — shared by the web action bar and the Activity bar.
  *
- * The embedded builder deliberately hides account/billing chrome so a first-time
- * user experiences it as free and frictionless. This is the one small concession:
- * a recessive pill in the bar showing which plan the *server* is on. For a Free
- * server it reads as a neutral status that quietly reinforces "this is free" —
- * not an upgrade nag — and the actual plan comparison stays one click in, out of
- * a newcomer's way.
+ * The builder deliberately keeps billing chrome out of the way so a first-time
+ * user experiences it as free and frictionless. This is the one small
+ * concession: a recessive pill in the bar showing which plan the *server* is
+ * on. For a Free server it reads as a neutral status that quietly reinforces
+ * "this is free" — not an upgrade nag — and the actual plan comparison stays
+ * one click in, out of a newcomer's way.
  *
- * Clicking it opens a compact popover with the per-feature limits and, where
- * in-app billing exists, a "see plans on web" hand-off: embedded checkout can't
- * run inside Discord (the sandbox blocks discord.com navigation), so upgrading
- * happens on the web — the same constraint the never-expire upsell lives under.
+ * Clicking it opens a compact popover with the per-feature limits and a plans
+ * hand-off. On the web that opens the pricing modal directly; in the Activity
+ * it hands off to the web app — embedded checkout can't run inside Discord
+ * (the sandbox blocks discord.com navigation), so upgrading happens on the
+ * web, the same constraint the never-expire upsell lives under.
  */
 
 import { Menu, MenuItem, MenuDivider } from "@/ui/Menu";
@@ -47,7 +48,8 @@ export function PlanBadge({
 }: {
   plan: PlanInfo;
   serverName?: string;
-  /** Hand off to the web app, where plans (and checkout) live. */
+  /** Open the plan comparison — the pricing modal on web, a web hand-off in
+   *  the Activity. */
   onSeePlans: () => void;
 }) {
   const paid = plan.tier !== "free";

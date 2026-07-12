@@ -1,16 +1,3 @@
-.trigger {
-  /* Inherits Button styles via the Button component; nothing custom here yet. */
-}
-
-.menu {
-  /* A comfortable width for the three actions. */
-  min-width: 240px;
-  max-width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 /* Save dialog form layout. */
 .saveForm {
   display: flex;
