@@ -18,7 +18,7 @@ import { createPortal } from "react-dom";
 import { guildIconUrl, type PickerGuild } from "@/core/guild/api";
 import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import { CheckCircleIcon, ChevronDownIcon, CompassIcon, PlusIcon, SearchIcon } from "@/ui/Icon";
-import channelStyles from "./ChannelPicker.module.css";
+import channelStyles from "@/features/guild/ChannelPicker.module.css";
 import styles from "./GuildPicker.module.css";
 
 /** Only show the search box once the list is long enough to need it. */
