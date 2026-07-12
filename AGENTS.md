@@ -71,7 +71,9 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   link-plugin UI; do not reintroduce per-plugin parameter panels.
 - **Discovery marketing**: lead with DWEEB's visual Discord message builder for webhooks,
   embeds, and Components V2. Do not use "without the JSON" copy, and do not present the
-  collaborative "Build Together" Activity feature as DWEEB's main functionality.
+  collaborative "Build Together" Activity feature as DWEEB's main functionality. Keep
+  essential discovery-banner text and branding inside the central vertical safe band because
+  Discord's listing preview may center-crop the banner at larger display sizes.
 - **Web Send dialog shows the destination read-only.** When the action bar's channel chip has
   a pick, the Send tab renders `GuildWebhookPicker variant="summary"` — one row for the picked
   channel, no channel list (changing the channel lives in the bar chip; don't reintroduce an
