@@ -15,6 +15,7 @@
 import { useGuildStore } from "./guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isProxyConfigured } from "./config";
+import { pushToast } from "@/ui/Toast";
 
 /**
  * True when `guildId` names a server the signed-in user belongs to and the
@@ -29,12 +30,17 @@ export function canConnectGuild(guildId: string | undefined): guildId is string 
 
 /**
  * Re-align the connected guild to a reloaded message's home server when the
- * user belongs to it and isn't already there. No-op (returns false) otherwise,
- * so callers can fall back to a passive mismatch notice.
+ * user belongs to it and isn't already there. No-op (returns false) otherwise.
+ * An actual switch announces itself with a quiet toast — every caller is
+ * acting on something that lives in that server (a restored message, its
+ * posted history, its schedules), and a silently jumping server picker reads
+ * as a glitch.
  */
 export function alignConnectedGuild(guildId: string | undefined): boolean {
   if (!canConnectGuild(guildId)) return false;
   if (useGuildStore.getState().guildId === guildId) return false;
   void useGuildStore.getState().connect(guildId);
+  const name = useAuthStore.getState().guilds.find((g) => g.id === guildId)?.name;
+  pushToast(name ? `Switched to ${name}.` : "Switched server.", "info");
   return true;
 }

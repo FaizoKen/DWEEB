@@ -50,6 +50,7 @@ import {
 } from "@/core/webhook";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
+import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { SUPPORT_INVITE_URL, isFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { type GuildWebhook } from "@/core/guild/api";
@@ -715,11 +716,23 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
     }
 
     const validation = validateMessage(result.message);
+    // The webhook's home server, when a prior save/verify recorded it. Carrying
+    // it on the origin lets the editor line itself up with the message's server
+    // — switching there right away (below) when the user belongs to it, so the
+    // preview resolves mentions/emoji against the right data from the start.
+    const savedEntry = loadHistory().find((e) => e.id === parsedUrl.id);
+    const originGuildId = savedEntry?.guildId;
+    const originGuildName =
+      savedEntry?.guildName ??
+      (originGuildId ? authGuilds.find((g) => g.id === originGuildId)?.name : undefined);
     replaceFromRestore(result.message, {
       webhookUrl: parsedUrl.url,
       messageId,
       threadId: threadId.trim() || undefined,
+      guildId: originGuildId,
+      guildName: originGuildName,
     });
+    alignConnectedGuild(originGuildId);
     // A successful restore proves the webhook is valid, so remember it for the
     // recents list (this browser only). The fetch returns the message, not the
     // webhook object, so we can't capture a name/owner here — `rememberWebhook`

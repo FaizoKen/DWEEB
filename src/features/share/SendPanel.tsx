@@ -1489,9 +1489,9 @@ export function SendPanel({
   // the *connected* server. When this message carries any such token but the
   // connected server isn't the one this posts to (a pasted webhook for another
   // server, or no server connected at all), those names render as placeholders
-  // — so the confirm dialog says so *before* the post, not just after (the
-  // builder's PostedMessageBanner only appears once a posted/restored origin is
-  // set). Skipped on the happy path where the connected server IS the
+  // — so the confirm dialog says so *before* the post; it's the only surface
+  // that explains the mismatch now that the builder has no banner for it.
+  // Skipped on the happy path where the connected server IS the
   // destination, and when there's nothing name-resolved to misrender.
   // `connectedGuildId` is "" (not null) when no server is connected, so compare
   // and branch on truthiness throughout.

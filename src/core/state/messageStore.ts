@@ -143,12 +143,6 @@ export interface MessageState {
   /** Like `replaceMessage` but records the restore origin for the Send flow. */
   replaceMessageFromRestore(next: WebhookMessage, origin: RestoredOrigin): void;
   /**
-   * Drop the restore origin so the next send posts a new message instead of
-   * updating the linked one. Wired to the editor's "Detach" affordance (see
-   * PostedMessageBanner); pair with {@link setRestoreOrigin} to re-link.
-   */
-  clearRestoreOrigin(): void;
-  /**
    * Record the origin without touching the message or history — the Send panel
    * calls this after a successful POST/PATCH so the next send defaults to
    * updating the message that's now live instead of posting a duplicate.
@@ -462,10 +456,6 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // A real origin supersedes any pending one — the webhook is resolved now.
       pendingEditOrigin: null,
     }));
-  },
-
-  clearRestoreOrigin() {
-    set({ restoredFrom: null });
   },
 
   setRestoreOrigin(origin) {

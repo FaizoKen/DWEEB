@@ -190,14 +190,26 @@ function ActionBar({
   // A restore origin is set after restoring a message, or after a successful
   // send re-targets the form at the now-live message. The primary action then
   // reads "Update" (edit in place), with a secondary "New" alongside for a
-  // separate copy — mirroring the Activity bar's New/Update pair. And like the
-  // Activity, "Update" only holds while the destination still points at the
-  // linked message's channel: re-pointing the chip elsewhere flips the primary
-  // back to "Send" (a new post there), which is why the old banner's "Detach"
-  // button isn't needed. When either channel is unknown (signed out, a pasted
-  // URL with no saved entry), the link alone decides — the old behaviour.
+  // separate copy — mirroring the Activity bar's New/Update pair.
+  //
+  // The link is scoped to its server: while the connected server differs from
+  // the message's home server, the link is *parked* — the bar behaves like a
+  // fresh compose there (primary "Send", no mismatch banner to explain), and
+  // Update resumes the moment the user reconnects to the message's server.
+  // This replaced the old "Updating a message … [Detach]" banner outright; the
+  // Send dialog's Update tab still covers the exotic cross-server edit.
+  const parked =
+    restoredFrom?.guildId != null &&
+    !!connectedGuildId &&
+    restoredFrom.guildId !== connectedGuildId;
+  // Within the right server, "Update" additionally only holds while the
+  // destination chip still points at the linked message's channel — like the
+  // Activity, re-pointing it elsewhere flips the primary back to "Send" (a new
+  // post there). When either channel is unknown (signed out, a pasted URL with
+  // no saved entry), the link alone decides — the old behaviour.
   const isUpdate =
     restoredFrom != null &&
+    !parked &&
     (!destActive || !barChannelId || !restoredChannelId || restoredChannelId === barChannelId);
 
   // Seed the chip once per server, so it isn't a blank "Pick a channel" for

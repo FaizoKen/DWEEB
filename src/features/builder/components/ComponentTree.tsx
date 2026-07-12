@@ -67,7 +67,6 @@ import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholder
 import { AddComponentMenu, type AddMenuNode } from "./AddComponentMenu";
 import { fieldForIssueCode, routeMessageIssues } from "@/features/builder/optionsReveal";
 import { MessageOptions } from "./MessageOptions";
-import { PostedMessageBanner } from "../PostedMessageBanner";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -387,7 +386,6 @@ export function ComponentTree() {
       <DragContext.Provider value={dragSession}>
         <div className={styles.tree}>
           <div ref={scrollRef} className={styles.scroll}>
-            <PostedMessageBanner />
             <MetaHeader />
 
             {components.length === 0 ? (
