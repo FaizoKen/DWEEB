@@ -1,13 +1,14 @@
 /**
- * The Activity's destination picker — choose which channel the message posts to.
+ * The destination picker — choose which channel the message posts to. Shared by
+ * the Activity bar and the web builder's action bar.
  *
- * This is the deliberately-slimmed cousin of the web app's `GuildWebhookPicker`.
- * There, picking a channel has to resolve/create a webhook, juggle custom-bot
- * identities, and offer webhook upkeep. In the Activity none of that surfaces:
- * the proxy's `POST /api/activity/post` reuses-or-mints a DWEEB webhook in
- * whatever channel it's handed, server-side. So all the UI has to do is pick a
- * channel id — a searchable, category-grouped list, defaulting to the launching
- * channel — and the bar handles the rest.
+ * This is the deliberately-slimmed cousin of the Send dialog's
+ * `GuildWebhookPicker`. There, picking a channel has to resolve/create a
+ * webhook, juggle custom-bot identities, and offer webhook upkeep. Here none of
+ * that surfaces: all the UI does is pick a channel id — a searchable,
+ * category-grouped list — and the caller handles the rest (the Activity's
+ * proxy reuses-or-mints a webhook server-side at post time; the web bar records
+ * the intent and the Send flow resolves the webhook when it opens).
  *
  * The panel is portalled to `<body>` with `position: fixed` (mirroring `ui/Menu`)
  * so it floats above the editor pane's `overflow: hidden` instead of being

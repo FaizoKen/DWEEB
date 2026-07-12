@@ -170,6 +170,7 @@ export function GuildWebhookPicker({
   activeId,
   onPick,
   matchChannelId,
+  initialChannelId,
 }: {
   /** Send is channel-first (auto webhook); Restore selects an exact webhook. */
   mode: "send" | "restore";
@@ -180,6 +181,14 @@ export function GuildWebhookPicker({
   /** Restore: channel parsed from a pasted message link — its webhooks float to
    *  the top and are tagged, so the right one is obvious. */
   matchChannelId?: string | null;
+  /** Send: the destination the action bar's channel picker already holds. When
+   *  the active webhook doesn't post there, the picker resolves this channel's
+   *  webhook by itself on open — so a channel picked in the bar carries through
+   *  to the dialog without a second pick. Only silent resolutions run
+   *  automatically (reuse, or DWEEB minting one); a custom-bot identity with
+   *  nothing to reuse needs an OAuth popup, which must stay behind a real
+   *  click. */
+  initialChannelId?: string | null;
 }) {
   const { active, connectedId, status, webhooks, dweebAppId, error, canReinvite, reload } =
     useGuildWebhooks();
@@ -264,7 +273,7 @@ export function GuildWebhookPicker({
   // to DWEEB too, so the user can post under one (the preferred identity) and we
   // mark / prioritise its webhooks. Labeling uses every registered app id; only
   // bots with a stored secret can mint a fresh webhook (one-click OAuth).
-  const { bots: customBots } = useGuildCustomBots();
+  const { bots: customBots, loading: customBotsLoading } = useGuildCustomBots();
   const secretBots = useMemo(() => customBots.filter((b) => b.has_secret), [customBots]);
   // Name for a webhook's owning app when it's a registered custom bot, else
   // undefined — drives the owner chip's "custom bot" flavour.
@@ -320,76 +329,6 @@ export function GuildWebhookPicker({
     groups.sort((a, b) => a.position - b.position);
     return groups;
   }, [webhookChannels, guildData]);
-
-  if (!active) return null;
-
-  const titleText = mode === "send" ? "Post to a channel" : "Your server’s webhooks";
-  const header = (
-    <div className={styles.head}>
-      <span className={styles.title}>{titleText}</span>
-      <button
-        type="button"
-        className={styles.refresh}
-        onClick={reload}
-        disabled={status === "loading"}
-        title="Reload from Discord"
-      >
-        <RefreshIcon size={13} />
-      </button>
-    </div>
-  );
-
-  if (status === "loading" && usable.length === 0) {
-    return (
-      <section className={styles.picker} aria-label="Destination">
-        {header}
-        <p className={styles.note}>Loading this server…</p>
-      </section>
-    );
-  }
-
-  if (status === "denied") {
-    // Don't vanish silently — say why the channel picker is hidden. When the
-    // miss is the *bot's* permission we can offer a one-click re-add; otherwise
-    // it's the server's call, and pasting a webhook URL below still works.
-    return (
-      <section className={styles.picker} aria-label="Destination">
-        {header}
-        <p className={styles.note}>
-          Channel picking is hidden here — the DWEEB bot needs the <strong>Manage Webhooks</strong>{" "}
-          permission in this server to set up webhooks for you.{" "}
-          {canReinvite ? (
-            <a
-              className={styles.link}
-              href={botInviteUrl(connectedId)}
-              target="_blank"
-              rel="noopener noreferrer"
-              // Plain click re-adds the bot in a popup (this server pre-selected)
-              // and reconnects here; modified clicks keep their native new-tab open.
-              onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-                e.preventDefault();
-                startBotAddPopup(connectedId);
-              }}
-            >
-              Re-add the bot ↗
-            </a>
-          ) : (
-            "Ask a server admin to grant it, or paste a webhook URL below."
-          )}
-        </p>
-      </section>
-    );
-  }
-
-  if (status === "error") {
-    return (
-      <section className={styles.picker} aria-label="Destination">
-        {header}
-        <p className={styles.note}>{error ?? "Couldn’t load this server."}</p>
-      </section>
-    );
-  }
 
   const fail = (e: unknown) => {
     if (isAuthError(e)) {
@@ -474,6 +413,117 @@ export function GuildWebhookPicker({
       setResolvingChannel(null);
     }
   };
+
+  // Carry the action bar's destination through: when the dialog opens with a
+  // bar-picked channel that the active webhook doesn't post to, resolve that
+  // channel's webhook automatically — the user already made the choice in the
+  // bar, so asking for a second click here would be a re-pick. One-shot per
+  // mount, and only once everything the decision reads has settled: the webhook
+  // list, the channel list, and the custom-bot registry (whose load seeds the
+  // preferred identity — deciding before it lands would resolve under the wrong
+  // one). Only silent paths run (reuse, or a DWEEB mint); a custom-bot identity
+  // with nothing to reuse needs an OAuth popup, which stays behind a real click
+  // on the (already-highlighted) row.
+  const autoResolved = useRef(false);
+  useEffect(() => {
+    if (mode !== "send" || !initialChannelId || autoResolved.current) return;
+    if (!active || status !== "ready" || !channelsLoaded || customBotsLoading) return;
+    // The identity seed hasn't applied yet (bots just loaded this commit) —
+    // wait for the re-render where `identity` reflects it.
+    if (!identityTouched.current && identity.kind === "dweeb" && secretBots.length > 0) return;
+    autoResolved.current = true;
+    // Gone, or not a channel a webhook can post to — leave the picker as-is.
+    if (!webhookChannels.some((c) => c.id === initialChannelId)) return;
+    if (activeChannelId === initialChannelId) return;
+    const existing = reusableInChannel(initialChannelId, identity);
+    if (existing) {
+      onPick(existing);
+      return;
+    }
+    if (identity.kind === "dweeb") void onPickChannel(initialChannelId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    mode,
+    initialChannelId,
+    active,
+    status,
+    channelsLoaded,
+    customBotsLoading,
+    identity,
+    secretBots,
+    activeChannelId,
+    webhookChannels,
+  ]);
+
+  if (!active) return null;
+
+  const titleText = mode === "send" ? "Post to a channel" : "Your server’s webhooks";
+  const header = (
+    <div className={styles.head}>
+      <span className={styles.title}>{titleText}</span>
+      <button
+        type="button"
+        className={styles.refresh}
+        onClick={reload}
+        disabled={status === "loading"}
+        title="Reload from Discord"
+      >
+        <RefreshIcon size={13} />
+      </button>
+    </div>
+  );
+
+  if (status === "loading" && usable.length === 0) {
+    return (
+      <section className={styles.picker} aria-label="Destination">
+        {header}
+        <p className={styles.note}>Loading this server…</p>
+      </section>
+    );
+  }
+
+  if (status === "denied") {
+    // Don't vanish silently — say why the channel picker is hidden. When the
+    // miss is the *bot's* permission we can offer a one-click re-add; otherwise
+    // it's the server's call, and pasting a webhook URL below still works.
+    return (
+      <section className={styles.picker} aria-label="Destination">
+        {header}
+        <p className={styles.note}>
+          Channel picking is hidden here — the DWEEB bot needs the <strong>Manage Webhooks</strong>{" "}
+          permission in this server to set up webhooks for you.{" "}
+          {canReinvite ? (
+            <a
+              className={styles.link}
+              href={botInviteUrl(connectedId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              // Plain click re-adds the bot in a popup (this server pre-selected)
+              // and reconnects here; modified clicks keep their native new-tab open.
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                startBotAddPopup(connectedId);
+              }}
+            >
+              Re-add the bot ↗
+            </a>
+          ) : (
+            "Ask a server admin to grant it, or paste a webhook URL below."
+          )}
+        </p>
+      </section>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <section className={styles.picker} aria-label="Destination">
+        {header}
+        <p className={styles.note}>{error ?? "Couldn’t load this server."}</p>
+      </section>
+    );
+  }
 
   const onSaveEdit = async (id: string, changes: WebhookEdit) => {
     setActingId(id);

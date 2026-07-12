@@ -41,7 +41,7 @@ import {
   SupportIcon,
   UndoIcon,
 } from "@/ui/Icon";
-import { ChannelPicker } from "./ChannelPicker";
+import { ChannelPicker } from "@/features/guild/ChannelPicker";
 import { GuildPicker, ServerGlyph, ServerGlyphSkeleton } from "./GuildPicker";
 import { ActivityGallery } from "./ActivityGallery";
 import { RestoreDialog } from "./RestoreDialog";

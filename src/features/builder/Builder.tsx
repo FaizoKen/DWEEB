@@ -13,11 +13,14 @@
  * two stay in sync without prop drilling.
  */
 
-import { useLayoutEffect, useRef, useState } from "react";
-import { useMessageStore } from "@/core/state/messageStore";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMessageStore, type RestoredOrigin } from "@/core/state/messageStore";
+import { useSendTargetStore } from "@/core/state/sendTargetStore";
+import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { usePlanStore } from "@/core/plan/planStore";
+import { loadHistory, parseWebhookUrl, useCanManageGuildWebhooks } from "@/core/webhook";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
@@ -44,6 +47,7 @@ import { Menu, MenuItem, MenuDivider } from "@/ui/Menu";
 import { ComponentTree } from "./components/ComponentTree";
 import { SaveMessageDialog } from "./components/SaveMessageDialog";
 import { AccountMenu } from "@/features/guild/AccountMenu";
+import { ChannelPicker } from "@/features/guild/ChannelPicker";
 import { PlanBadge } from "@/features/plan/PlanBadge";
 import { activityLaunchUrl, isProxyConfigured } from "@/core/guild/config";
 import { isFeedbackConfigured } from "@/core/feedback/submit";
@@ -53,6 +57,13 @@ import { useInstallStore } from "@/features/install/installStore";
 import { useInstallState } from "@/features/install/useInstallState";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
 import styles from "./Builder.module.css";
+
+/** Space (px) the left cluster (account control + destination chip) needs to
+ *  stay readable. The fit check collapses the right-side actions into the More
+ *  menu once they'd squeeze the destination below this — so a long channel
+ *  name truncates gracefully instead of the whole row overflowing. Mirrors the
+ *  Activity bar's constant. */
+const LEFT_MIN_WIDTH = 150;
 
 interface BuilderProps {
   /** Opens the Share / Export dialog on the Share-link tab. */
@@ -117,12 +128,7 @@ function ActionBar({
   const canUndo = useMessageStore((s) => s.past.length > 0);
   const canRedo = useMessageStore((s) => s.future.length > 0);
   const clearAll = useMessageStore((s) => s.clearAll);
-  // A restore origin is set after restoring a message, or after a successful
-  // send re-targets the form at the now-live message. The primary action then
-  // reads "Update" and opens the dedicated Update tab (edit in place), with a
-  // secondary "New" alongside for posting a separate copy — mirroring the
-  // Activity bar's New/Update pair. With no origin the primary is "Send".
-  const isUpdate = useMessageStore((s) => s.restoredFrom != null);
+  const restoredFrom = useMessageStore((s) => s.restoredFrom);
 
   const openFeedback = useFeedbackStore((s) => s.openFeedback);
   const feedbackOn = isFeedbackConfigured();
@@ -153,6 +159,104 @@ function ActionBar({
   );
   const planVisible = !!plan && !!connectedGuildId;
 
+  // ── Destination channel (mirrors the Activity bar) ────────────────────────
+  // The chip next to the account control says where the next post lands. It
+  // only exists where it can actually steer a send — the channel-first flow,
+  // which needs a signed-in user with Manage Webhooks in the connected server;
+  // in the paste-a-URL world the destination *is* the URL in the Send dialog.
+  const authed = useAuthStore((s) => s.status === "authed");
+  const canManage = useCanManageGuildWebhooks();
+  const guildData = useGuildStore((s) => s.data);
+  const destActive = authed && canManage && !!connectedGuildId;
+
+  const sendTargetGuildId = useSendTargetStore((s) => s.guildId);
+  const sendTargetChannelId = useSendTargetStore((s) => s.channelId);
+  const setSendTarget = useSendTargetStore((s) => s.setSendTarget);
+  // The pick only means something in the server it was made for; a server
+  // switch parks it until the user returns to that server.
+  const barChannelId =
+    connectedGuildId && sendTargetGuildId === connectedGuildId ? sendTargetChannelId : null;
+
+  // The linked (restored/posted) message's channel, recovered from this
+  // browser's webhook history — the entry was written by the restore or send
+  // that set the origin, so it's fresh whenever `restoredFrom` changes.
+  const restoredChannelId = useMemo(() => {
+    if (!restoredFrom) return null;
+    const parsed = parseWebhookUrl(restoredFrom.webhookUrl);
+    if (!parsed) return null;
+    return loadHistory().find((e) => e.id === parsed.id)?.channelId ?? null;
+  }, [restoredFrom]);
+
+  // A restore origin is set after restoring a message, or after a successful
+  // send re-targets the form at the now-live message. The primary action then
+  // reads "Update" (edit in place), with a secondary "New" alongside for a
+  // separate copy — mirroring the Activity bar's New/Update pair. And like the
+  // Activity, "Update" only holds while the destination still points at the
+  // linked message's channel: re-pointing the chip elsewhere flips the primary
+  // back to "Send" (a new post there), which is why the old banner's "Detach"
+  // button isn't needed. When either channel is unknown (signed out, a pasted
+  // URL with no saved entry), the link alone decides — the old behaviour.
+  const isUpdate =
+    restoredFrom != null &&
+    (!destActive || !barChannelId || !restoredChannelId || restoredChannelId === barChannelId);
+
+  // Seed the chip once per server, so it isn't a blank "Pick a channel" for
+  // returning users: the linked message's channel, else the channel of the
+  // most recent saved webhook in this server. Only while nothing is picked for
+  // this server — an explicit pick always wins.
+  useEffect(() => {
+    if (!destActive || !connectedGuildId) return;
+    if (sendTargetGuildId === connectedGuildId) return;
+    const channels = guildData?.guildId === connectedGuildId ? guildData.channelById : null;
+    if (!channels) return;
+    const fromHistory = loadHistory().find(
+      (e) => e.guildId === connectedGuildId && e.channelId && channels[e.channelId],
+    )?.channelId;
+    const candidate =
+      restoredChannelId && channels[restoredChannelId] ? restoredChannelId : (fromHistory ?? null);
+    if (candidate) setSendTarget(connectedGuildId, candidate);
+  }, [
+    destActive,
+    connectedGuildId,
+    sendTargetGuildId,
+    guildData,
+    restoredChannelId,
+    setSendTarget,
+  ]);
+
+  // A *new* link (a restore, or a send that just landed) snaps the chip to the
+  // message's channel — the destination and the linked message start out
+  // agreeing, like the Activity. Once-per-origin (the ref), so the user can
+  // still re-point the chip afterwards without this yanking it back.
+  const snappedOriginRef = useRef<RestoredOrigin | null>(null);
+  useEffect(() => {
+    if (!restoredFrom) {
+      snappedOriginRef.current = null;
+      return;
+    }
+    if (snappedOriginRef.current === restoredFrom) return;
+    if (!destActive || !connectedGuildId || !restoredChannelId) return;
+    if (guildData?.guildId !== connectedGuildId || !guildData.channelById[restoredChannelId])
+      return;
+    snappedOriginRef.current = restoredFrom;
+    setSendTarget(connectedGuildId, restoredChannelId);
+  }, [restoredFrom, destActive, connectedGuildId, restoredChannelId, guildData, setSendTarget]);
+
+  // Mirror the picked channel's kind/name into the shared post-destination
+  // store, so validation goes destination-aware exactly like the Activity: a
+  // forum/media destination surfaces "needs a post title" live in the builder.
+  // New posts only — while the primary is Update the next post PATCHes the
+  // linked message, where Discord disregards the create-only `thread_name`.
+  const setPostDestination = usePostDestinationStore((s) => s.setPostDestination);
+  const barChannel =
+    barChannelId && guildData?.guildId === connectedGuildId
+      ? guildData.channelById[barChannelId]
+      : undefined;
+  useEffect(() => {
+    if (isUpdate || !destActive) setPostDestination(null, null);
+    else setPostDestination(barChannel?.type ?? null, barChannel?.name ?? null);
+  }, [isUpdate, destActive, barChannel, setPostDestination]);
+
   // The save dialog behind the bar's save icon (see SaveMessageDialog).
   const [saveOpen, setSaveOpen] = useState(false);
 
@@ -162,6 +266,8 @@ function ActionBar({
   const collaborateUrl = isProxyConfigured() ? activityLaunchUrl() : "";
 
   const barRef = useRef<HTMLDivElement>(null);
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
   // The action bar always stays on a single row. As its available width shrinks
   // — a narrow builder pane on desktop, or a phone — its controls collapse in
   // stages rather than wrapping onto a second line:
@@ -190,34 +296,36 @@ function ActionBar({
   }, []);
 
   // A signature of everything that changes the *inline* bar's width, so a state
-  // flip (Send↔Update revealing New, the plan pill appearing, feedback
-  // toggling) re-runs the fit measurement below — not just a raw width change.
-  const layoutKey = `${isUpdate}|${planVisible}|${feedbackOn}`;
+  // flip (Send↔Update revealing New, the plan pill or destination chip
+  // appearing, feedback toggling) re-runs the fit measurement below — not just
+  // a raw width change.
+  const layoutKey = `${isUpdate}|${planVisible}|${feedbackOn}|${destActive}`;
 
   // On every width or content change, optimistically restore the full row…
   useLayoutEffect(() => {
     setCompact(0);
   }, [barWidth, layoutKey]);
 
-  // …then collapse one stage at a time until the two control groups fit side by
-  // side on one row. Each group keeps its natural width, so summing them (plus
-  // the gap between and the bar's padding) tells us what a single row needs —
-  // more reliable than `scrollWidth`, which `justify-content: space-between`
-  // leaves unchanged when items overflow. Each pass runs before paint, so the
-  // staged collapse never flashes.
+  // …then collapse one stage at a time until both clusters fit on one row. The
+  // right cluster is `flex: none`, so its box width *is* its natural width; the
+  // left (account + destination chip) is allowed to truncate, so we reserve a
+  // readable minimum for it rather than its content width — mirroring the
+  // Activity bar's fit check. Each pass runs before paint, so the staged
+  // collapse never flashes.
   useLayoutEffect(() => {
     const bar = barRef.current;
-    if (!bar || compact >= 2) return;
+    const left = leftRef.current;
+    const right = rightRef.current;
+    if (!bar || !left || !right || compact >= 2) return;
     const cs = getComputedStyle(bar);
     const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
     const gap = parseFloat(cs.columnGap) || 0;
-    const groups = Array.from(bar.children) as HTMLElement[];
-    const needed =
-      groups.reduce((sum, g) => sum + g.getBoundingClientRect().width, 0) +
-      gap * Math.max(0, groups.length - 1) +
-      padX;
+    // Without the destination chip the left side is just the fixed-size account
+    // control — reserve what it actually takes, not the chip minimum.
+    const reserve = destActive ? LEFT_MIN_WIDTH : left.getBoundingClientRect().width;
+    const needed = right.getBoundingClientRect().width + reserve + gap + padX;
     if (needed > bar.clientWidth + 1) setCompact((c) => c + 1);
-  }, [compact, barWidth, layoutKey]);
+  }, [compact, barWidth, layoutKey, destActive]);
 
   // Undo/redo (and the overflow trigger) tighten to the small control size when
   // compact so the row keeps breathing room; full size on wider bars.
@@ -226,13 +334,23 @@ function ActionBar({
   return (
     <>
       <div ref={barRef} className={styles.actionBar} data-compact={compact >= 1 ? "" : undefined}>
-        {/* Left corner — who you are and which server is connected (the web's
-            counterpart of the Activity bar's destination cluster). The actual
-            post destination is chosen in the Send dialog, where webhooks and
-            identities live. */}
-        <div className={styles.actionGroup}>{isProxyConfigured() ? <AccountMenu /> : null}</div>
+        {/* Left corner — who you are, which server is connected, and where the
+            next post lands (the Activity bar's destination cluster, web
+            edition). The chip records intent: the Send dialog's channel-first
+            picker resolves this channel's webhook when it opens. It only
+            renders where it can steer a send — the paste-a-URL world keeps its
+            destination in the dialog. */}
+        <div ref={leftRef} className={`${styles.actionGroup} ${styles.left}`}>
+          {isProxyConfigured() ? <AccountMenu /> : null}
+          {destActive && connectedGuildId ? (
+            <ChannelPicker
+              selectedId={barChannelId}
+              onSelect={(id) => setSendTarget(connectedGuildId, id)}
+            />
+          ) : null}
+        </div>
 
-        <div className={styles.actionGroup}>
+        <div ref={rightRef} className={`${styles.actionGroup} ${styles.right}`}>
           {/* Quiet plan indicator, leading the utility cluster — a recessive
               pill showing the connected server's tier, opening a popover with
               the limits and the pricing modal. Hidden until a server is

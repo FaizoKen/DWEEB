@@ -48,11 +48,24 @@
   display: inline-flex;
   align-items: center;
   gap: var(--app-space-1);
-  /* A group never splits mid-cluster, and never shrinks below its natural
-     width — the fit measurement in Builder.tsx reads that natural width to
-     decide when to fold controls away, so letting the box compress would hide
-     the very overflow it needs to see. */
+  /* A group never splits mid-cluster — the staged collapse keeps the row from
+     ever needing to wrap. */
   flex-wrap: nowrap;
+}
+
+/* Left cluster (account + destination chip): allowed to shrink so a long
+   channel name truncates inside the chip instead of pushing the actions off
+   the row. The fit measurement reserves a readable minimum for it. */
+.left {
+  gap: var(--app-space-2);
+  min-width: 0;
+}
+
+/* Right cluster: never shrinks below its natural width — the fit measurement
+   in Builder.tsx reads that natural width to decide when to fold controls
+   away, so letting the box compress would hide the very overflow it needs to
+   see. */
+.right {
   flex: none;
 }
 

@@ -81,6 +81,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useSendTargetStore } from "@/core/state/sendTargetStore";
 import { useLibraryStore } from "@/core/library/libraryStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
@@ -467,6 +468,16 @@ export function SendPanel({
   const login = useAuthStore((s) => s.login);
   const connectedData = useGuildStore((s) => s.data);
   const connectedGuildId = useGuildStore((s) => s.guildId);
+
+  // The action bar's destination chip — where the user already said the next
+  // post should go. Only meaningful for the connected server; the channel-first
+  // picker below auto-resolves this channel's webhook on open (see
+  // GuildWebhookPicker's `initialChannelId`), and every pick/send writes back so
+  // the chip stays honest.
+  const sendTargetGuildId = useSendTargetStore((s) => s.guildId);
+  const sendTargetChannelId = useSendTargetStore((s) => s.channelId);
+  const barChannelId =
+    connectedGuildId && sendTargetGuildId === connectedGuildId ? sendTargetChannelId : null;
 
   const knownGuildName = useMemo(() => {
     const stored = parsedUrl ? history.find((e) => e.id === parsedUrl.id)?.guildName : undefined;
@@ -1121,6 +1132,13 @@ export function SendPanel({
           knownChannelName ??
           (effChannelId ? connectedData?.channelById[effChannelId]?.name : undefined);
 
+        // Keep the action bar's destination chip honest: the message landed in
+        // this channel, so that's where the *next* post points too (a send
+        // through a pasted URL or an OAuth-created webhook may have moved it).
+        if (effGuildId && effChannelId) {
+          useSendTargetStore.getState().setSendTarget(effGuildId, effChannelId);
+        }
+
         // Point the form at the message that's now live: record it as the
         // restore origin, which flips the toolbar's primary action to "Update"
         // — opening the Update tab pre-filled with this webhook + message id (+
@@ -1437,6 +1455,12 @@ export function SendPanel({
   const handlePickGuildWebhook = (w: GuildWebhook) => {
     const parsed = parseWebhookUrl(w.url ?? "");
     if (!parsed) return;
+    // Mirror the choice back to the action bar's destination chip (new posts
+    // only — an update's webhook pick names the *editing* webhook, not where
+    // the next new post should go).
+    if (mode === "new" && w.guild_id && w.channel_id) {
+      useSendTargetStore.getState().setSendTarget(w.guild_id, w.channel_id);
+    }
     const channelName = w.channel_id ? connectedData?.channelById[w.channel_id]?.name : undefined;
     const guildName = w.guild_id ? authGuilds.find((g) => g.id === w.guild_id)?.name : undefined;
     rememberWebhook(parsed.url, {
@@ -1617,6 +1641,7 @@ export function SendPanel({
                 mode="send"
                 activeId={parsedUrl?.id ?? null}
                 onPick={handlePickGuildWebhook}
+                initialChannelId={barChannelId}
               />
               <details className={styles.redirectNote}>
                 <summary className={styles.redirectSummary}>Other ways to create a webhook</summary>

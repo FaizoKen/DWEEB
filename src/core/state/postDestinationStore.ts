@@ -3,13 +3,14 @@
  * builder needs to validate destination-dependent rules live (today: a
  * forum/media destination requires a post title, see `validateDestination`).
  *
- * The embedded Activity is the writer: its bar mirrors the picked channel's
- * kind/name here whenever the destination resolves or changes. The web app
- * never writes it (its Send panel resolves the destination at send time, long
- * after editing), so on the web this stays `null` and contributes nothing —
- * which is exactly why this lives in `core/state` rather than the Activity:
- * the shared validation layer can read it without dragging any Activity code
- * (SDK, collab, proxy fetch) into the web bundle.
+ * Both bars write it: the embedded Activity's mirrors the picked channel's
+ * kind/name here whenever the destination resolves or changes, and the web
+ * action bar does the same from its destination chip (for *new* posts only —
+ * while its primary action is Update the next post PATCHes, where the
+ * create-only rules don't apply, so it writes `null`). Without a known
+ * destination (signed out, paste-a-URL) this stays `null` and contributes
+ * nothing. It lives in `core/state` so the shared validation layer can read
+ * it without dragging surface-specific code into either bundle.
  */
 
 import { create } from "zustand";
