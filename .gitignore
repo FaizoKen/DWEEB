@@ -28,3 +28,7 @@ prod-backup/
 
 # Local mkcert dev certificates for HTTPS (Discord Activity local dev)
 certs/
+
+# Private cross-tool agent context (deployment/ops facts) — public repo, never commit.
+AGENTS.local.md
+CLAUDE.local.md
