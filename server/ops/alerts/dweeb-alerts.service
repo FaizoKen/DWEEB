@@ -1,0 +1,22 @@
+[Unit]
+Description=DWEEB error-log -> Discord alerts (tails compose logs)
+Documentation=https://github.com/FaizoKen/DWEEB
+After=docker.service network-online.target
+Requires=docker.service
+# If we crash-loop past the burst limit, ping the webhook via the template
+# unit instead of dying silently (the exact failure this service exists to catch).
+OnFailure=dweeb-failure-ping@%n.service
+StartLimitIntervalSec=600
+StartLimitBurst=6
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/dweeb/.env
+ExecStart=/usr/bin/python3 -u /usr/local/sbin/dweeb-log-alerts.py
+Restart=always
+RestartSec=15
+Nice=10
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target

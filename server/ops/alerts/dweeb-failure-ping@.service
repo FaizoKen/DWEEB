@@ -1,0 +1,7 @@
+[Unit]
+Description=Ping the monitoring Discord webhook that unit %i failed
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/dweeb/.env
+ExecStart=/usr/local/sbin/dweeb-failure-ping.sh %i
