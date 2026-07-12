@@ -60,8 +60,10 @@ import { cn } from "@/lib/cn";
 import { useScrollActiveIntoView } from "@/lib/useScrollActiveIntoView";
 import styles from "./GuildWebhookPicker.module.css";
 
-/** Channel types that can host a webhook: text, announcement, forum, media. */
-const WEBHOOK_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
+/** Channel types that can host a webhook: text, announcement, forum, media.
+ *  Exported so the Send panel can tell whether the action bar's pick is still a
+ *  postable channel (which decides the summary vs. full-list variant below). */
+export const WEBHOOK_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
 /** Show a search box only once the list is long enough to need it. */
 const SEARCH_THRESHOLD = 8;
 /** Default name for a webhook DWEEB creates on the user's behalf. */
@@ -171,6 +173,7 @@ export function GuildWebhookPicker({
   onPick,
   matchChannelId,
   initialChannelId,
+  variant = "list",
 }: {
   /** Send is channel-first (auto webhook); Restore selects an exact webhook. */
   mode: "send" | "restore";
@@ -189,6 +192,12 @@ export function GuildWebhookPicker({
    *  nothing to reuse needs an OAuth popup, which must stay behind a real
    *  click. */
   initialChannelId?: string | null;
+  /** Send only. "list" offers the full channel list (the destination is still
+   *  being chosen); "summary" collapses it to a single read-only row for
+   *  `initialChannelId` — the channel was already picked in the action bar, so
+   *  the dialog only *shows* it (changing it lives in the bar). All the
+   *  resolution machinery still runs; only the re-picking UI goes away. */
+  variant?: "list" | "summary";
 }) {
   const { active, connectedId, status, webhooks, dweebAppId, error, canReinvite, reload } =
     useGuildWebhooks();
@@ -457,7 +466,12 @@ export function GuildWebhookPicker({
 
   if (!active) return null;
 
-  const titleText = mode === "send" ? "Post to a channel" : "Your server’s webhooks";
+  const titleText =
+    mode === "send"
+      ? variant === "summary"
+        ? "Posting to"
+        : "Post to a channel"
+      : "Your server’s webhooks";
   const header = (
     <div className={styles.head}>
       <span className={styles.title}>{titleText}</span>
@@ -718,6 +732,56 @@ export function GuildWebhookPicker({
         ) : null}
       </section>
     );
+  }
+
+  /* ── Send: bar-picked destination (summary) ──────────────────────────── */
+  // The action bar already chose the channel, so this variant skips the whole
+  // channel list and just *shows* the destination: one row whose right edge is
+  // the resolve state — a check once its webhook is ready, "Setting up…" while
+  // DWEEB mints one, or "create as …" when a custom bot still needs its OAuth
+  // click. Falls through to the full list if the bar's channel turns out gone
+  // (deleted, or can't host a webhook), so a destination can be re-picked.
+  if (mode === "send" && variant === "summary" && initialChannelId) {
+    const barChannel = channelsLoaded ? guildData?.channelById[initialChannelId] : undefined;
+    if (!channelsLoaded || (barChannel && WEBHOOK_CHANNEL_TYPES.has(barChannel.type))) {
+      const summarySelectorVisible = secretBots.length > 0;
+      return (
+        <section className={styles.picker} aria-label="Destination">
+          {header}
+          {summarySelectorVisible ? (
+            <PostAsSelector
+              identity={identity}
+              bots={secretBots}
+              onSelect={(id) => {
+                identityTouched.current = true;
+                setIdentity(id);
+              }}
+            />
+          ) : null}
+          {actionError ? <p className={styles.error}>{actionError}</p> : null}
+          {barChannel ? (
+            <ul className={cn(styles.list, styles.channelPanel)}>
+              <li>
+                <ChannelRow
+                  channel={barChannel}
+                  active={barChannel.id === activeChannelId}
+                  busy={resolvingChannel === barChannel.id}
+                  reuse={reusableInChannel(barChannel.id, identity)}
+                  identity={identity}
+                  selectorVisible={summarySelectorVisible}
+                  onPick={() => void onPickChannel(barChannel.id)}
+                />
+              </li>
+            </ul>
+          ) : (
+            <p className={styles.note}>Loading this server…</p>
+          )}
+          <p className={styles.note}>
+            Picked in the toolbar’s channel picker — close this dialog to change where it posts.
+          </p>
+        </section>
+      );
+    }
   }
 
   /* ── Send: channel-first ─────────────────────────────────────────────── */

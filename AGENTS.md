@@ -69,6 +69,12 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `window.opener`.
 - Link-plugin URLs stay freely editable and the binding follows the URL. Keep one uniform
   link-plugin UI; do not reintroduce per-plugin parameter panels.
+- **Web Send dialog shows the destination read-only.** When the action bar's channel chip has
+  a pick, the Send tab renders `GuildWebhookPicker variant="summary"` — one row for the picked
+  channel, no channel list (changing the channel lives in the bar chip; don't reintroduce an
+  in-dialog re-pick). The full list appears only when no bar pick exists yet (it's then the
+  first pick), and that decision is frozen per dialog open so an in-dialog pick doesn't yank
+  the list away mid-flow.
 
 ## CI
 

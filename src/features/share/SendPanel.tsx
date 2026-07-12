@@ -153,7 +153,7 @@ import { createSchedule, isScheduleConfigured } from "@/core/schedule/api";
 import { rememberSchedule } from "@/core/schedule/localStore";
 import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import { WebhookRecents } from "./WebhookRecents";
-import { GuildWebhookPicker } from "./GuildWebhookPicker";
+import { GuildWebhookPicker, WEBHOOK_CHANNEL_TYPES } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
@@ -478,6 +478,26 @@ export function SendPanel({
   const sendTargetChannelId = useSendTargetStore((s) => s.channelId);
   const barChannelId =
     connectedGuildId && sendTargetGuildId === connectedGuildId ? sendTargetChannelId : null;
+
+  // With a live bar pick, the Send screen stops offering the channel list and
+  // only *shows* the destination (the picker's "summary" variant) — re-picking
+  // a channel here was a confusing second ask when the bar already answered it.
+  // No pick yet (fresh user) keeps the full list: the dialog is then the first
+  // pick, not a re-pick. That decision is frozen per dialog open (the Modal
+  // unmounts this panel when closed): an in-dialog pick writes the bar store,
+  // and flipping the list away mid-flow would yank the UI and strand a
+  // mis-click — the summary applies from the next open. While the channel list
+  // is still loading the pick is assumed good; once loaded, a deleted or
+  // unhostable channel drops back to the full list so a destination can be
+  // chosen at all.
+  const [barPickedAtOpen] = useState(() => barChannelId != null);
+  const barChannelsLoaded = connectedData != null && connectedData.guildId === connectedGuildId;
+  const barChannel =
+    barChannelsLoaded && barChannelId ? connectedData.channelById[barChannelId] : undefined;
+  const destinationPicked =
+    barPickedAtOpen &&
+    barChannelId != null &&
+    (!barChannelsLoaded || (barChannel != null && WEBHOOK_CHANNEL_TYPES.has(barChannel.type)));
 
   const knownGuildName = useMemo(() => {
     const stored = parsedUrl ? history.find((e) => e.id === parsedUrl.id)?.guildName : undefined;
@@ -1511,7 +1531,9 @@ export function SendPanel({
     <>
       <p className={styles.lead}>
         {mode === "new"
-          ? "Pick a channel below and hit send — your message goes straight from this browser to Discord. We never see or store it."
+          ? pickerActive && destinationPicked
+            ? "Check the channel below and hit send — your message goes straight from this browser to Discord. We never see or store it."
+            : "Pick a channel below and hit send — your message goes straight from this browser to Discord. We never see or store it."
           : "Your edit goes straight from this browser to Discord — we never see or store it."}
       </p>
 
@@ -1642,6 +1664,7 @@ export function SendPanel({
                 activeId={parsedUrl?.id ?? null}
                 onPick={handlePickGuildWebhook}
                 initialChannelId={barChannelId}
+                variant={destinationPicked ? "summary" : "list"}
               />
               <details className={styles.redirectNote}>
                 <summary className={styles.redirectSummary}>Other ways to create a webhook</summary>
@@ -1733,18 +1756,29 @@ export function SendPanel({
             </button>
           )
         ) : parsedUrl ? (
-          <p className={styles.urlSet}>
-            {knownChannelName ? (
-              <>
-                All set — your message will post to <strong>#{knownChannelName}</strong>.
-              </>
-            ) : (
-              <>All set — posting straight to your channel.</>
-            )}{" "}
-            <button type="button" className={styles.urlSetLink} onClick={openUrlField}>
-              Change
+          // In summary mode the destination row above already says where this
+          // posts, so a matching webhook needs no "All set" repeat — just the
+          // quiet advanced path. A webhook posting *elsewhere* (a pasted URL)
+          // keeps the line: it's then the only honest destination statement.
+          pickerActive && destinationPicked && knownChannelId === barChannelId ? (
+            <button type="button" className={styles.pasteToggle} onClick={openUrlField}>
+              Already have a webhook URL?{" "}
+              <span className={styles.pasteToggleAccent}>Paste it instead</span>
             </button>
-          </p>
+          ) : (
+            <p className={styles.urlSet}>
+              {knownChannelName ? (
+                <>
+                  All set — your message will post to <strong>#{knownChannelName}</strong>.
+                </>
+              ) : (
+                <>All set — posting straight to your channel.</>
+              )}{" "}
+              <button type="button" className={styles.urlSetLink} onClick={openUrlField}>
+                Change
+              </button>
+            </p>
+          )
         ) : (
           <button type="button" className={styles.pasteToggle} onClick={openUrlField}>
             Already have a webhook URL?{" "}
