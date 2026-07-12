@@ -56,15 +56,8 @@ import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import { useInstallStore } from "@/features/install/installStore";
 import { useInstallState } from "@/features/install/useInstallState";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
+import { measureNeededWidth } from "@/lib/measureBarFit";
 import styles from "./Builder.module.css";
-
-/** Ceiling (px) on the space the fit check reserves for the left cluster
- *  (account control + destination chip). The reserve is the cluster's real
- *  natural width capped at this — a short channel name never books phantom
- *  space (which would collapse the actions with visible room left over), while
- *  a long one truncates gracefully once the actions need the room. Mirrors the
- *  Activity bar's constant. */
-const LEFT_MAX_RESERVE = 150;
 
 /** One utility action in the bar's right cluster: an inline icon button while
  *  the bar has room, a "More"-menu row once the fit check folds it away. */
@@ -381,35 +374,36 @@ function ActionBar({
   // reserve tracks the cluster's natural width.
   const layoutKey = `${isUpdate}|${planVisible}|${feedbackOn}|${destActive}|${barChannel?.name ?? ""}`;
 
-  // On every width or content change, optimistically restore the full row…
-  useLayoutEffect(() => {
-    setLevel(0);
-  }, [barWidth, layoutKey]);
-
-  // …then collapse one step at a time until both clusters fit on one row. The
+  // On every width or content change, optimistically restore the full row,
+  // then collapse one step at a time until both clusters fit on one row. The
   // right cluster is `flex: none`, so its box width *is* its natural width; the
   // left (account + destination chip) is allowed to truncate, so we reserve its
   // natural width capped at a readable maximum — mirroring the Activity bar's
   // fit check. Each pass runs before paint, so the staged collapse never
   // flashes.
+  //
+  // Restart and measurement live in ONE effect on purpose. As separate effects
+  // (the old shape), a width change made the reset queue `level = 0` while the
+  // measurement pass in the same commit still saw the OUTGOING level's DOM and
+  // queued `level + 1` — netting the same level as before, so the effect never
+  // re-ran and the ladder wedged mid-collapse (crushed destination, overflowing
+  // actions) on any gradual resize. Here a fresh cycle only resets; measuring
+  // resumes next commit, once the DOM really shows the restored full row.
+  const fitCycleRef = useRef("");
   useLayoutEffect(() => {
+    const fitCycle = `${barWidth}|${layoutKey}`;
+    if (fitCycleRef.current !== fitCycle) {
+      fitCycleRef.current = fitCycle;
+      if (level !== 0) {
+        setLevel(0);
+        return;
+      }
+    }
     const bar = barRef.current;
     const left = leftRef.current;
     const right = rightRef.current;
     if (!bar || !left || !right || level >= maxLevel) return;
-    const cs = getComputedStyle(bar);
-    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
-    const gap = parseFloat(cs.columnGap) || 0;
-    // The left cluster's natural (untruncated) width, measured with its flex
-    // shrink briefly disabled — its rendered box compresses under pressure, so
-    // reading it directly would under-reserve. Restored before paint (this is a
-    // layout effect), so nothing flashes.
-    const prevShrink = left.style.flexShrink;
-    left.style.flexShrink = "0";
-    const naturalLeft = left.getBoundingClientRect().width;
-    left.style.flexShrink = prevShrink;
-    const reserve = Math.min(naturalLeft, LEFT_MAX_RESERVE);
-    const needed = right.getBoundingClientRect().width + reserve + gap + padX;
+    const needed = measureNeededWidth(bar, left, right);
     if (needed > bar.clientWidth + 1) setLevel((l) => l + 1);
   }, [level, maxLevel, barWidth, layoutKey]);
 

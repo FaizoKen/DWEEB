@@ -51,6 +51,7 @@ import { PostSuccess } from "./PostSuccess";
 import { PlanBadge } from "@/features/plan/PlanBadge";
 import { fetchActivityPlan } from "@/core/activity/api";
 import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
+import { measureNeededWidth } from "@/lib/measureBarFit";
 import type { PlanInfo } from "@/core/guild/api";
 import styles from "./ActivityBar.module.css";
 
@@ -61,14 +62,6 @@ import styles from "./ActivityBar.module.css";
  *  focus/visibility re-checks and the manual button keep working past the cap. */
 const AUTO_RECHECK_INTERVAL_MS = 5_000;
 const AUTO_RECHECK_MAX_TICKS = 24; // ~2 minutes of polling
-
-/** Ceiling (px) on the space the fit check reserves for the destination
- *  cluster (server glyph + channel picker). The reserve is the cluster's real
- *  natural width capped at this — a short channel name never books phantom
- *  space (which would fold the actions away with visible room left over),
- *  while a long one truncates gracefully once the actions need the room.
- *  Mirrors the web builder bar's constant. */
-const LEFT_MAX_RESERVE = 150;
 
 /** One utility action in the bar's right cluster: an inline icon button while
  *  the bar has room, an overflow-menu row once the fit check folds it away. */
@@ -413,35 +406,37 @@ export function ActivityBar() {
   const planVisible = !!(plan && !botMissing && targetGuildId);
   const layoutKey = `${canUpdate}|${botMissing}|${blockedFromPosting}|${showView}|${planVisible}|${feedbackOn}|${isDm}|${channelName ?? ""}`;
 
-  // Measure whether the inline layout fits, collapsing one step when it can't.
-  // First optimistically restore the full row on any width/content change…
+  // Measure whether the inline layout fits, collapsing one step when it can't:
+  // on any width/content change, optimistically restore the full row, then —
+  // before paint — check it against the bar's real width and collapse if the
+  // actions (their natural, never-shrinking width) would leave the destination
+  // less than it needs. The right cluster is `flex:none` so its box width *is*
+  // its natural width; the left is allowed to truncate, so we reserve its
+  // natural width capped at a readable maximum. Runs in a layout effect so the
+  // staged collapse never flashes.
+  //
+  // Restart and measurement live in ONE effect on purpose. As separate effects
+  // (the old shape), a width change made the reset queue `level = 0` while the
+  // measurement pass in the same commit still saw the OUTGOING level's DOM and
+  // queued `level + 1` — netting the same level as before, so the effect never
+  // re-ran and the ladder wedged mid-collapse (crushed destination, overflowing
+  // actions) on any gradual resize. Here a fresh cycle only resets; measuring
+  // resumes next commit, once the DOM really shows the restored full row.
+  const fitCycleRef = useRef("");
   useLayoutEffect(() => {
-    setLevel(0);
-  }, [barWidth, layoutKey]);
-  // …then, before paint, check it against the bar's real width and collapse if
-  // the actions (their natural, never-shrinking width) would leave the
-  // destination less than it needs. The right cluster is `flex:none` so its box
-  // width *is* its natural width; the left is allowed to truncate, so we
-  // reserve its natural width capped at a readable maximum. Runs in a layout
-  // effect so the staged collapse never flashes.
-  useLayoutEffect(() => {
+    const fitCycle = `${barWidth}|${layoutKey}`;
+    if (fitCycleRef.current !== fitCycle) {
+      fitCycleRef.current = fitCycle;
+      if (level !== 0) {
+        setLevel(0);
+        return;
+      }
+    }
     const bar = barRef.current;
     const left = leftRef.current;
     const right = rightRef.current;
     if (!bar || !left || !right || level >= maxLevel) return;
-    const cs = getComputedStyle(bar);
-    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
-    const gap = parseFloat(cs.columnGap) || 0;
-    // The left cluster's natural (untruncated) width, measured with its flex
-    // shrink briefly disabled — its rendered box compresses under pressure, so
-    // reading it directly would under-reserve. Restored before paint (this is
-    // a layout effect), so nothing flashes.
-    const prevShrink = left.style.flexShrink;
-    left.style.flexShrink = "0";
-    const naturalLeft = left.getBoundingClientRect().width;
-    left.style.flexShrink = prevShrink;
-    const reserve = Math.min(naturalLeft, LEFT_MAX_RESERVE);
-    const needed = right.getBoundingClientRect().width + reserve + gap + padX;
+    const needed = measureNeededWidth(bar, left, right);
     if (needed > bar.clientWidth + 1) setLevel((l) => l + 1);
   }, [level, maxLevel, barWidth, layoutKey]);
 
