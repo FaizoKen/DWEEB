@@ -14,7 +14,7 @@
  * directory's Scheduled tab.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { useGuildStore } from "@/core/guild/guildStore";
@@ -62,11 +62,26 @@ import styles from "./ActivityBar.module.css";
 const AUTO_RECHECK_INTERVAL_MS = 5_000;
 const AUTO_RECHECK_MAX_TICKS = 24; // ~2 minutes of polling
 
-/** Space (px) the destination cluster (server glyph + channel picker) needs to
- *  stay readable. The fit check below collapses the utility actions into an
- *  overflow menu once they'd squeeze the destination below this — so a long
- *  channel name truncates gracefully instead of the whole row overflowing. */
-const LEFT_MIN_WIDTH = 150;
+/** Ceiling (px) on the space the fit check reserves for the destination
+ *  cluster (server glyph + channel picker). The reserve is the cluster's real
+ *  natural width capped at this — a short channel name never books phantom
+ *  space (which would fold the actions away with visible room left over),
+ *  while a long one truncates gracefully once the actions need the room.
+ *  Mirrors the web builder bar's constant. */
+const LEFT_MAX_RESERVE = 150;
+
+/** One utility action in the bar's right cluster: an inline icon button while
+ *  the bar has room, an overflow-menu row once the fit check folds it away. */
+interface UtilityAction {
+  key: string;
+  icon: ComponentType<{ size?: number }>;
+  /** Tooltip / accessible name on the inline icon button. */
+  label: string;
+  /** Row text once folded into the overflow menu. */
+  menuLabel: string;
+  disabled?: boolean;
+  run: () => void;
+}
 
 /** A post the user has asked for but not yet confirmed (the pre-post dialog is
  *  open). `newCopy` marks the "New" button — a separate copy alongside the
@@ -121,19 +136,21 @@ export function ActivityBar() {
   const setTargetChannel = useActivityStore((s) => s.setTargetChannel);
   const canPostToTarget = useActivityStore((s) => s.canPostToTarget);
 
-  // When the bar can't fit every control at full size on one row the utility
-  // actions (restore, open-on-web, feedback, and — in the update state — view)
-  // fold into a single overflow menu and the secondary "New" button collapses to
-  // its icon; wider bars keep everything inline. Crucially this keys off the
-  // bar's *own* width, measured below, not the viewport: the bar lives in the
-  // editor pane, which is only half the window on desktop, so a viewport media
-  // query (the old approach) kept everything inline in a pane far too narrow for
-  // it — the destination got crushed and the actions overflowed. Mirrors the web
-  // builder's action bar (see `features/builder/Builder`).
+  // When the bar can't fit every control at full size on one row, its controls
+  // collapse one small step at a time (see the ladder built below `showView`):
+  // the row first tightens (`data-compact` — dividers go, sizes shrink, "New"
+  // drops its label), then the utility actions fold into an overflow menu one
+  // at a time, then — in the update state — "View" folds too. Wider bars keep
+  // everything inline. Crucially this keys off the bar's *own* width, measured
+  // below, not the viewport: the bar lives in the editor pane, which is only
+  // half the window on desktop, so a viewport media query (the old approach)
+  // kept everything inline in a pane far too narrow for it — the destination
+  // got crushed and the actions overflowed. Mirrors the web builder's action
+  // bar (see `features/builder/Builder`).
   const barRef = useRef<HTMLDivElement>(null);
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(false);
+  const [level, setLevel] = useState(0);
   // Bumped by the ResizeObserver whenever the bar's width changes, driving a
   // fresh fit measurement. (Width only — collapsing changes the bar's content,
   // not its width, so this never feeds back on itself.)
@@ -314,37 +331,123 @@ export function ActivityBar() {
   // where it sits inline. When compact it rides in the overflow menu instead.
   const showView = canUpdate && !botMissing && !blockedFromPosting;
 
+  // Utility actions — inline icon buttons while the bar has room. The fit
+  // check below folds them into the overflow menu one at a time from the END
+  // of this list, so the least-reached-for actions leave the row first and a
+  // near-fit never strands a wide empty gap where a whole cluster used to be.
+  const utilities: UtilityAction[] = [
+    {
+      key: "save",
+      icon: SaveIcon,
+      label: botMissing
+        ? "Add DWEEB to this server first to save a server draft"
+        : blockedFromPosting
+          ? blockedReason
+          : targetGuildId
+            ? "Save the current message as a server draft"
+            : "Pick a server before saving a draft",
+      menuLabel: "Save current message",
+      disabled: !targetGuildId || blockedFromPosting || botMissing,
+      run: () => setSaveOpen(true),
+    },
+    {
+      key: "library",
+      icon: BookmarkIcon,
+      label: botMissing
+        ? "Add DWEEB to this server first to open its message library"
+        : blockedFromPosting
+          ? blockedReason
+          : "Message directory — this server's message library",
+      menuLabel: "Message directory",
+      disabled: !targetGuildId || blockedFromPosting || botMissing,
+      run: () => setLibraryOpen(true),
+    },
+    {
+      key: "restore",
+      icon: HistoryIcon,
+      label: botMissing
+        ? "Add DWEEB to this server first to restore a message"
+        : blockedFromPosting
+          ? blockedReason
+          : "Restore a message DWEEB posted",
+      menuLabel: "Restore a message",
+      disabled: noDestination || blockedFromPosting || botMissing,
+      run: () => setRestoreOpen(true),
+    },
+    {
+      key: "web",
+      icon: GlobeIcon,
+      label: "Open on web for full features",
+      menuLabel: "Open on web",
+      run: () => void openOnWeb(),
+    },
+    ...(feedbackOn
+      ? [
+          {
+            key: "feedback",
+            icon: SupportIcon,
+            label: "Send feedback",
+            menuLabel: "Send feedback",
+            run: openFeedback,
+          } satisfies UtilityAction,
+        ]
+      : []),
+  ];
+
+  // The collapse ladder: step 1 tightens the row (`data-compact`), steps
+  // 2..N+1 fold the N utility icons into the overflow menu one at a time, and
+  // — in the update state — a final step folds the inline "View" button too.
+  const foldMax = utilities.length;
+  const maxLevel = 1 + foldMax + (showView ? 1 : 0);
+  const tightened = level >= 1;
+  const foldedCount = Math.min(Math.max(level - 1, 0), foldMax);
+  const inlineUtilities = utilities.slice(0, foldMax - foldedCount);
+  const foldedUtilities = utilities.slice(foldMax - foldedCount);
+  const viewFolded = showView && level >= 1 + foldMax + 1;
+
   // A signature of everything that changes the *inline* bar's width, so a state
   // flip (Post↔Update revealing New/View, the plan pill appearing, feedback
-  // toggling) re-runs the fit measurement below — not just a raw width change.
+  // toggling, the destination renaming) re-runs the fit measurement below — not
+  // just a raw width change. The channel name matters because the left reserve
+  // tracks the cluster's natural width.
   const planVisible = !!(plan && !botMissing && targetGuildId);
-  const layoutKey = `${canUpdate}|${botMissing}|${blockedFromPosting}|${showView}|${planVisible}|${feedbackOn}|${isDm}`;
+  const layoutKey = `${canUpdate}|${botMissing}|${blockedFromPosting}|${showView}|${planVisible}|${feedbackOn}|${isDm}|${channelName ?? ""}`;
 
-  // Measure whether the inline layout fits, collapsing to compact when it can't.
+  // Measure whether the inline layout fits, collapsing one step when it can't.
   // First optimistically restore the full row on any width/content change…
   useLayoutEffect(() => {
-    setCompact(false);
+    setLevel(0);
   }, [barWidth, layoutKey]);
   // …then, before paint, check it against the bar's real width and collapse if
   // the actions (their natural, never-shrinking width) would leave the
-  // destination less than a readable minimum. The right cluster is `flex:none`
-  // so its box width *is* its natural width; the left is allowed to truncate, so
-  // we reserve a fixed minimum for it rather than its content width. Runs in a
-  // layout effect so the collapse never flashes.
+  // destination less than it needs. The right cluster is `flex:none` so its box
+  // width *is* its natural width; the left is allowed to truncate, so we
+  // reserve its natural width capped at a readable maximum. Runs in a layout
+  // effect so the staged collapse never flashes.
   useLayoutEffect(() => {
     const bar = barRef.current;
+    const left = leftRef.current;
     const right = rightRef.current;
-    if (!bar || !right || compact) return;
+    if (!bar || !left || !right || level >= maxLevel) return;
     const cs = getComputedStyle(bar);
     const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
     const gap = parseFloat(cs.columnGap) || 0;
-    const needed = right.getBoundingClientRect().width + LEFT_MIN_WIDTH + gap + padX;
-    if (needed > bar.clientWidth + 1) setCompact(true);
-  }, [compact, barWidth, layoutKey]);
+    // The left cluster's natural (untruncated) width, measured with its flex
+    // shrink briefly disabled — its rendered box compresses under pressure, so
+    // reading it directly would under-reserve. Restored before paint (this is
+    // a layout effect), so nothing flashes.
+    const prevShrink = left.style.flexShrink;
+    left.style.flexShrink = "0";
+    const naturalLeft = left.getBoundingClientRect().width;
+    left.style.flexShrink = prevShrink;
+    const reserve = Math.min(naturalLeft, LEFT_MAX_RESERVE);
+    const needed = right.getBoundingClientRect().width + reserve + gap + padX;
+    if (needed > bar.clientWidth + 1) setLevel((l) => l + 1);
+  }, [level, maxLevel, barWidth, layoutKey]);
 
-  // Undo/redo (and the overflow trigger) tighten to the small control size when
-  // compact so the row keeps breathing room; full size on wider bars.
-  const iconSize = compact ? "sm" : "md";
+  // Undo/redo (and the overflow trigger) tighten to the small control size once
+  // the row tightens; full size on wider bars.
+  const iconSize = tightened ? ("sm" as const) : ("md" as const);
 
   // Run the confirmed post. `publish`/`update` resolve with the result on
   // success (null on failure, which they toast), so we only swap the confirm
@@ -385,7 +488,7 @@ export function ActivityBar() {
   };
 
   return (
-    <div ref={barRef} className={styles.bar} data-compact={compact ? "" : undefined}>
+    <div ref={barRef} className={styles.bar} data-compact={tightened ? "" : undefined}>
       <div ref={leftRef} className={styles.left}>
         {/* Server indicator, left corner — which server the post lands in. On a
             DM launch it's the destination picker, collapsed to the chosen
@@ -458,22 +561,34 @@ export function ActivityBar() {
             Webhooks. "Open on web" hands the current draft to the web app for
             browser-local saves, account, and other full-site management.
 
-            When the bar is too narrow to hold every control at full size, these
-            fold into a single overflow menu — which also absorbs the update
-            state's "View" — keeping the row to the destination, undo/redo, and
-            the primary action. Wider bars show them inline. */}
-        {compact ? (
+            When the bar is too narrow to hold every control at full size, the
+            fit check folds these into a single overflow menu one at a time —
+            which can also absorb the update state's "View" — keeping the row
+            to the destination, undo/redo, and the primary action. Wider bars
+            show them inline. */}
+        {inlineUtilities.map((action) => (
+          <IconButton
+            key={action.key}
+            label={action.label}
+            onClick={action.run}
+            disabled={action.disabled}
+          >
+            <action.icon />
+          </IconButton>
+        ))}
+
+        {foldedUtilities.length > 0 || viewFolded ? (
           <Menu
             align="end"
             trigger={
-              <IconButton label="More actions" size="sm">
+              <IconButton label="More actions" size={iconSize}>
                 <MoreHorizontalIcon />
               </IconButton>
             }
           >
             {(close) => (
               <>
-                {showView ? (
+                {viewFolded ? (
                   <MenuItem
                     icon={<ExternalLinkIcon size={16} />}
                     onSelect={() => {
@@ -484,116 +599,23 @@ export function ActivityBar() {
                     View posted message
                   </MenuItem>
                 ) : null}
-                <MenuItem
-                  icon={<SaveIcon size={16} />}
-                  disabled={!targetGuildId || blockedFromPosting || botMissing}
-                  onSelect={() => {
-                    close();
-                    setSaveOpen(true);
-                  }}
-                >
-                  Save current message
-                </MenuItem>
-                <MenuItem
-                  icon={<BookmarkIcon size={16} />}
-                  disabled={!targetGuildId || blockedFromPosting || botMissing}
-                  onSelect={() => {
-                    close();
-                    setLibraryOpen(true);
-                  }}
-                >
-                  Message directory
-                </MenuItem>
-                <MenuItem
-                  icon={<HistoryIcon size={16} />}
-                  disabled={noDestination || blockedFromPosting || botMissing}
-                  onSelect={() => {
-                    close();
-                    setRestoreOpen(true);
-                  }}
-                >
-                  Restore a message
-                </MenuItem>
-                <MenuItem
-                  icon={<GlobeIcon size={16} />}
-                  onSelect={() => {
-                    close();
-                    void openOnWeb();
-                  }}
-                >
-                  Open on web
-                </MenuItem>
-                {feedbackOn ? (
+                {foldedUtilities.map((action) => (
                   <MenuItem
-                    icon={<SupportIcon size={16} />}
+                    key={action.key}
+                    icon={<action.icon size={16} />}
+                    disabled={action.disabled}
                     onSelect={() => {
                       close();
-                      openFeedback();
+                      action.run();
                     }}
                   >
-                    Send feedback
+                    {action.menuLabel}
                   </MenuItem>
-                ) : null}
+                ))}
               </>
             )}
           </Menu>
-        ) : (
-          <>
-            <IconButton
-              label={
-                botMissing
-                  ? "Add DWEEB to this server first to save a server draft"
-                  : blockedFromPosting
-                    ? blockedReason
-                    : targetGuildId
-                      ? "Save the current message as a server draft"
-                      : "Pick a server before saving a draft"
-              }
-              onClick={() => setSaveOpen(true)}
-              disabled={!targetGuildId || blockedFromPosting || botMissing}
-            >
-              <SaveIcon />
-            </IconButton>
-
-            <IconButton
-              label={
-                botMissing
-                  ? "Add DWEEB to this server first to open its message library"
-                  : blockedFromPosting
-                    ? blockedReason
-                    : "Message directory — this server's message library"
-              }
-              onClick={() => setLibraryOpen(true)}
-              disabled={!targetGuildId || blockedFromPosting || botMissing}
-            >
-              <BookmarkIcon />
-            </IconButton>
-
-            <IconButton
-              label={
-                botMissing
-                  ? "Add DWEEB to this server first to restore a message"
-                  : blockedFromPosting
-                    ? blockedReason
-                    : "Restore a message DWEEB posted"
-              }
-              onClick={() => setRestoreOpen(true)}
-              disabled={noDestination || blockedFromPosting || botMissing}
-            >
-              <HistoryIcon />
-            </IconButton>
-
-            <IconButton label="Open on web for full features" onClick={() => void openOnWeb()}>
-              <GlobeIcon />
-            </IconButton>
-
-            {feedbackOn ? (
-              <IconButton label="Send feedback" onClick={openFeedback}>
-                <SupportIcon />
-              </IconButton>
-            ) : null}
-          </>
-        )}
+        ) : null}
 
         <span className={styles.sep} aria-hidden="true" />
 
@@ -642,9 +664,10 @@ export function ActivityBar() {
         ) : canUpdate ? (
           <>
             {/* The iframe can't open discord.com itself; openLastPost routes
-                through the SDK (see activityStore). When compact this moves into
-                the overflow menu above, so it's only inline on wider bars. */}
-            {!compact ? (
+                through the SDK (see activityStore). On the tightest bars the
+                fit check moves this into the overflow menu above (`viewFolded`),
+                so it's only inline while there's room. */}
+            {!viewFolded ? (
               <IconButton label="View the posted message" onClick={() => void openLastPost()}>
                 <ExternalLinkIcon />
               </IconButton>

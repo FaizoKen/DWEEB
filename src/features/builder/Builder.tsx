@@ -13,7 +13,7 @@
  * two stay in sync without prop drilling.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useMessageStore, type RestoredOrigin } from "@/core/state/messageStore";
 import { useSendTargetStore } from "@/core/state/sendTargetStore";
 import { usePostDestinationStore } from "@/core/state/postDestinationStore";
@@ -58,12 +58,25 @@ import { useInstallState } from "@/features/install/useInstallState";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
 import styles from "./Builder.module.css";
 
-/** Space (px) the left cluster (account control + destination chip) needs to
- *  stay readable. The fit check collapses the right-side actions into the More
- *  menu once they'd squeeze the destination below this — so a long channel
- *  name truncates gracefully instead of the whole row overflowing. Mirrors the
+/** Ceiling (px) on the space the fit check reserves for the left cluster
+ *  (account control + destination chip). The reserve is the cluster's real
+ *  natural width capped at this — a short channel name never books phantom
+ *  space (which would collapse the actions with visible room left over), while
+ *  a long one truncates gracefully once the actions need the room. Mirrors the
  *  Activity bar's constant. */
-const LEFT_MIN_WIDTH = 150;
+const LEFT_MAX_RESERVE = 150;
+
+/** One utility action in the bar's right cluster: an inline icon button while
+ *  the bar has room, a "More"-menu row once the fit check folds it away. */
+interface UtilityAction {
+  key: string;
+  icon: ComponentType<{ size?: number }>;
+  /** Tooltip / accessible name on the inline icon button. */
+  label: string;
+  /** Row text once folded into the More menu. */
+  menuLabel: string;
+  run: () => void;
+}
 
 interface BuilderProps {
   /** Opens the Share / Export dialog on the Share-link tab. */
@@ -277,23 +290,77 @@ function ActionBar({
   // the Activity to function). Empty string ⇒ the entry point is hidden.
   const collaborateUrl = isProxyConfigured() ? activityLaunchUrl() : "";
 
+  // Utility actions — inline icon buttons while the bar has room. The fit
+  // check below folds them into the "More" overflow one at a time from the END
+  // of this list, so the least-reached-for actions leave the row first and a
+  // near-fit never strands a wide empty gap where a whole cluster used to be.
+  const utilities: UtilityAction[] = [
+    {
+      key: "save",
+      icon: SaveIcon,
+      label: "Save the current message as a draft",
+      menuLabel: "Save current message",
+      run: () => setSaveOpen(true),
+    },
+    {
+      key: "gallery",
+      icon: BookmarkIcon,
+      label: "Message directory — saved messages, posted history, and templates",
+      menuLabel: "Message directory",
+      run: () => openGallery(),
+    },
+    {
+      key: "restore",
+      icon: HistoryIcon,
+      label: "Restore a message your webhook previously posted",
+      menuLabel: "Restore a message",
+      run: onRestore,
+    },
+    {
+      key: "share",
+      icon: ShareIcon,
+      label: "Share this message as a link",
+      menuLabel: "Share link",
+      run: onShare,
+    },
+    ...(feedbackOn
+      ? [
+          {
+            key: "feedback",
+            icon: SupportIcon,
+            label: "Send feedback",
+            menuLabel: "Send feedback",
+            run: openFeedback,
+          } satisfies UtilityAction,
+        ]
+      : []),
+  ];
+
   const barRef = useRef<HTMLDivElement>(null);
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   // The action bar always stays on a single row. As its available width shrinks
-  // — a narrow builder pane on desktop, or a phone — its controls collapse in
-  // stages rather than wrapping onto a second line:
-  //   0 — everything inline: the utility icon cluster, full-size undo/redo,
-  //       and the labelled primary
-  //   1 — the utility icons fold into the "More" overflow menu, undo/redo and
-  //       the overflow trigger tighten to small, the secondary "New" drops its
-  //       label (via the `data-compact` flag its CSS keys off), and the cluster
-  //       dividers disappear
-  //   2 — the primary Send/Update button also drops to its icon
+  // — a narrow builder pane on desktop, or a phone — its controls collapse one
+  // small step at a time rather than wrapping onto a second line, so every
+  // width keeps as much inline as actually fits:
+  //   step 1        — the row tightens: cluster dividers disappear, undo/redo
+  //                   and the overflow trigger drop to the small control size,
+  //                   and the secondary "New" collapses to its icon (all via
+  //                   the `data-compact` flag) — nothing is hidden yet
+  //   steps 2..N+1  — the N utility icons fold into the "More" overflow menu
+  //                   one at a time, from the end of `utilities`
+  //   final step    — the primary Send/Update button drops to its icon
   // We measure the real control widths instead of guessing a breakpoint, so the
   // full row survives on any width — viewport *or* pane — that has room for it.
   // Mirrors the Activity bar's own fit check (see ActivityBar).
-  const [compact, setCompact] = useState(0);
+  const [level, setLevel] = useState(0);
+  const foldMax = utilities.length;
+  const maxLevel = 1 + foldMax + 1;
+  const tightened = level >= 1;
+  const foldedCount = Math.min(Math.max(level - 1, 0), foldMax);
+  const inlineUtilities = utilities.slice(0, foldMax - foldedCount);
+  const foldedUtilities = utilities.slice(foldMax - foldedCount);
+  const primaryIconOnly = level >= maxLevel;
   // Bumped by the ResizeObserver below whenever the bar's *width* changes; drives
   // a fresh measurement pass. (Width only — collapsing changes the bar's content,
   // not its width, so this never feeds back on itself.)
@@ -309,43 +376,50 @@ function ActionBar({
 
   // A signature of everything that changes the *inline* bar's width, so a state
   // flip (Send↔Update revealing New, the plan pill or destination chip
-  // appearing, feedback toggling) re-runs the fit measurement below — not just
-  // a raw width change.
-  const layoutKey = `${isUpdate}|${planVisible}|${feedbackOn}|${destActive}`;
+  // appearing or renaming, feedback toggling) re-runs the fit measurement below
+  // — not just a raw width change. The channel name matters because the left
+  // reserve tracks the cluster's natural width.
+  const layoutKey = `${isUpdate}|${planVisible}|${feedbackOn}|${destActive}|${barChannel?.name ?? ""}`;
 
   // On every width or content change, optimistically restore the full row…
   useLayoutEffect(() => {
-    setCompact(0);
+    setLevel(0);
   }, [barWidth, layoutKey]);
 
-  // …then collapse one stage at a time until both clusters fit on one row. The
+  // …then collapse one step at a time until both clusters fit on one row. The
   // right cluster is `flex: none`, so its box width *is* its natural width; the
-  // left (account + destination chip) is allowed to truncate, so we reserve a
-  // readable minimum for it rather than its content width — mirroring the
-  // Activity bar's fit check. Each pass runs before paint, so the staged
-  // collapse never flashes.
+  // left (account + destination chip) is allowed to truncate, so we reserve its
+  // natural width capped at a readable maximum — mirroring the Activity bar's
+  // fit check. Each pass runs before paint, so the staged collapse never
+  // flashes.
   useLayoutEffect(() => {
     const bar = barRef.current;
     const left = leftRef.current;
     const right = rightRef.current;
-    if (!bar || !left || !right || compact >= 2) return;
+    if (!bar || !left || !right || level >= maxLevel) return;
     const cs = getComputedStyle(bar);
     const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
     const gap = parseFloat(cs.columnGap) || 0;
-    // Without the destination chip the left side is just the fixed-size account
-    // control — reserve what it actually takes, not the chip minimum.
-    const reserve = destActive ? LEFT_MIN_WIDTH : left.getBoundingClientRect().width;
+    // The left cluster's natural (untruncated) width, measured with its flex
+    // shrink briefly disabled — its rendered box compresses under pressure, so
+    // reading it directly would under-reserve. Restored before paint (this is a
+    // layout effect), so nothing flashes.
+    const prevShrink = left.style.flexShrink;
+    left.style.flexShrink = "0";
+    const naturalLeft = left.getBoundingClientRect().width;
+    left.style.flexShrink = prevShrink;
+    const reserve = Math.min(naturalLeft, LEFT_MAX_RESERVE);
     const needed = right.getBoundingClientRect().width + reserve + gap + padX;
-    if (needed > bar.clientWidth + 1) setCompact((c) => c + 1);
-  }, [compact, barWidth, layoutKey, destActive]);
+    if (needed > bar.clientWidth + 1) setLevel((l) => l + 1);
+  }, [level, maxLevel, barWidth, layoutKey]);
 
-  // Undo/redo (and the overflow trigger) tighten to the small control size when
-  // compact so the row keeps breathing room; full size on wider bars.
-  const iconSize = compact >= 1 ? ("sm" as const) : ("md" as const);
+  // Undo/redo (and the overflow trigger) tighten to the small control size once
+  // the row tightens; full size on wider bars.
+  const iconSize = tightened ? ("sm" as const) : ("md" as const);
 
   return (
     <>
-      <div ref={barRef} className={styles.actionBar} data-compact={compact >= 1 ? "" : undefined}>
+      <div ref={barRef} className={styles.actionBar} data-compact={tightened ? "" : undefined}>
         {/* Left corner — who you are, which server is connected, and where the
             next post lands (the Activity bar's destination cluster, web
             edition). The chip records intent: the Send dialog's channel-first
@@ -380,41 +454,16 @@ function ActionBar({
 
           {/* Utility actions — saving a draft, the message directory (gallery),
               restoring a posted message, sharing a link, and feedback. Inline
-              icons on a wide bar; folded into the "More" overflow below when
-              the bar can't fit every control at full size (`compact`). */}
-          {compact < 1 ? (
-            <>
-              <IconButton
-                label="Save the current message as a draft"
-                onClick={() => setSaveOpen(true)}
-              >
-                <SaveIcon />
-              </IconButton>
-              <IconButton
-                label="Message directory — saved messages, posted history, and templates"
-                onClick={() => openGallery()}
-              >
-                <BookmarkIcon />
-              </IconButton>
-              <IconButton
-                label="Restore a message your webhook previously posted"
-                onClick={onRestore}
-              >
-                <HistoryIcon />
-              </IconButton>
-              <IconButton label="Share this message as a link" onClick={onShare}>
-                <ShareIcon />
-              </IconButton>
-              {feedbackOn ? (
-                <IconButton label="Send feedback" onClick={openFeedback}>
-                  <SupportIcon />
-                </IconButton>
-              ) : null}
-            </>
-          ) : null}
+              icons while the bar has room; the fit check folds them into the
+              "More" overflow below one at a time as the row tightens. */}
+          {inlineUtilities.map((action) => (
+            <IconButton key={action.key} label={action.label} onClick={action.run}>
+              <action.icon />
+            </IconButton>
+          ))}
 
-          {/* The overflow menu: the long tail of occasional actions, plus —
-              when compact — the utility icons folded in above them. */}
+          {/* The overflow menu: the long tail of occasional actions, plus any
+              utility icons the fit check folded in above them. */}
           <Menu
             align="end"
             trigger={
@@ -425,55 +474,20 @@ function ActionBar({
           >
             {(close) => (
               <>
-                {compact >= 1 ? (
+                {foldedUtilities.length > 0 ? (
                   <>
-                    <MenuItem
-                      icon={<SaveIcon />}
-                      onSelect={() => {
-                        close();
-                        setSaveOpen(true);
-                      }}
-                    >
-                      Save current message
-                    </MenuItem>
-                    <MenuItem
-                      icon={<BookmarkIcon />}
-                      onSelect={() => {
-                        close();
-                        openGallery();
-                      }}
-                    >
-                      Message directory
-                    </MenuItem>
-                    <MenuItem
-                      icon={<HistoryIcon />}
-                      onSelect={() => {
-                        close();
-                        onRestore();
-                      }}
-                    >
-                      Restore a message
-                    </MenuItem>
-                    <MenuItem
-                      icon={<ShareIcon />}
-                      onSelect={() => {
-                        close();
-                        onShare();
-                      }}
-                    >
-                      Share link
-                    </MenuItem>
-                    {feedbackOn ? (
+                    {foldedUtilities.map((action) => (
                       <MenuItem
-                        icon={<SupportIcon />}
+                        key={action.key}
+                        icon={<action.icon />}
                         onSelect={() => {
                           close();
-                          openFeedback();
+                          action.run();
                         }}
                       >
-                        Send feedback
+                        {action.menuLabel}
                       </MenuItem>
-                    ) : null}
+                    ))}
                     <MenuDivider />
                   </>
                 ) : null}
@@ -590,9 +604,9 @@ function ActionBar({
                 aria-label="Update"
                 title="Update the message you last posted or restored"
               >
-                {/* Dropped last — only once folding the utility icons still
-                    isn't enough to keep the bar on one row (see `compact`). */}
-                {compact >= 2 ? null : "Update"}
+                {/* Dropped last — only once folding every utility icon still
+                    isn't enough to keep the bar on one row (see `level`). */}
+                {primaryIconOnly ? null : "Update"}
               </Button>
             </>
           ) : (
@@ -605,7 +619,7 @@ function ActionBar({
               aria-label="Send"
               title="Post this message to your Discord webhook"
             >
-              {compact >= 2 ? null : "Send"}
+              {primaryIconOnly ? null : "Send"}
             </Button>
           )}
         </div>

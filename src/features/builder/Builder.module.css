@@ -34,12 +34,12 @@
   border-bottom: 1px solid var(--app-border);
   z-index: var(--app-z-toolbar);
   /* The bar always stays on a single row. Rather than wrap when space runs out,
-     its controls collapse in stages — measured against the bar's own width in
-     Builder.tsx, which sets `data-compact` (utility icons fold into the More
-     menu) and hides the Send label. `nowrap` enforces the single row;
-     `min-width: 0` lets the bar shrink inside the builder's grid column rather
-     than forcing the whole pane (and the tree below it) wider than the
-     viewport. */
+     its controls collapse one small step at a time — measured against the bar's
+     own width in Builder.tsx, which first sets `data-compact` (the tightened
+     look below), then folds the utility icons into the More menu one by one,
+     then hides the Send label. `nowrap` enforces the single row; `min-width: 0`
+     lets the bar shrink inside the builder's grid column rather than forcing
+     the whole pane (and the tree below it) wider than the viewport. */
   flex-wrap: nowrap;
   min-width: 0;
 }
@@ -79,12 +79,12 @@
   flex: none;
 }
 
-/* Compact: the bar is too narrow to hold every control at full size on one line
-   (its own width, not the viewport — see the fit measurement in Builder.tsx).
-   The utility icons fold into the More menu and "New" collapses to its icon
-   (both in the TSX); here we drop the cluster dividers and tighten the spacing
-   so what remains — account · plan · overflow · undo/redo · primary — stays on
-   a single, uncrowded row. */
+/* Compact: the first collapse step, taken when the bar can't hold every control
+   at full size on one line (its own width, not the viewport — see the fit
+   measurement in Builder.tsx). Nothing is hidden yet — "New" collapses to its
+   icon (Button's `collapseLabel` keys off this flag) and here we drop the
+   cluster dividers and tighten the spacing. Only if that still doesn't fit does
+   the TSX go on to fold the utility icons into the More menu one at a time. */
 .actionBar[data-compact] {
   gap: var(--app-space-2);
   padding-left: var(--app-space-2);

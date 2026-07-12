@@ -74,12 +74,13 @@
   opacity: 0.8;
 }
 
-/* Compact: the bar is too narrow to hold every control at full size on one line
-   (its own width, not the viewport — see the fit measurement in ActivityBar.tsx).
-   The utility actions fold into an overflow menu and "New" collapses to its icon
-   (both in the TSX); here we drop the cluster dividers and tighten the spacing so
-   what remains — destination · undo/redo · primary post/update — stays on a
-   single, uncrowded row. */
+/* Compact: the first collapse step, taken when the bar can't hold every control
+   at full size on one line (its own width, not the viewport — see the fit
+   measurement in ActivityBar.tsx). Nothing is hidden yet — "New" collapses to
+   its icon (Button's `collapseLabel` keys off this flag) and here we drop the
+   cluster dividers and tighten the spacing. Only if that still doesn't fit does
+   the TSX go on to fold the utility actions into an overflow menu one at a
+   time. */
 .bar[data-compact] {
   gap: var(--app-space-2);
   padding-left: var(--app-space-2);
