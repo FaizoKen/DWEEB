@@ -62,6 +62,15 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - Plans (Free/Plus/Pro) are **quota-raising only** — a plan must never lock a feature outright.
   Entitlement is keyed per **guild**, not per user. Guild moves have a 7-day cooldown;
   downgrades keep the oldest resources within cap, suspend overflow, and restore it on upgrade.
+- **Stripe stays off the boot path.** Import Stripe.js only via `@stripe/stripe-js/pure`
+  (the default entry injects the js.stripe.com script — cookies + fraud beacons — as an
+  import side effect; it once rode the vendor chunk and hit every visitor on every page
+  view). Cheap availability checks live in `src/core/plan/stripeConfig.ts`, never
+  `stripeApi.ts`, and vite.config.ts's manualChunks keeps `@stripe` in its own lazy chunk.
+- index.html's JSON-LD `softwareVersion`/`dateModified` and `og:updated_time` are stamped
+  at build by `stampBuildMeta` (vite.config.ts) — don't hand-maintain them; the build
+  throws if the patterns vanish. Marketing claims there must match the plans model
+  (quota-raising only — never claim "no usage limit" or "no paywall").
 - Message library: "posted" is a server-only rolling history window (no local fallback);
   drafts have hard per-plan caps.
 - Keep the default `webhook.incoming` OAuth path. Custom bots must not collect bot tokens;

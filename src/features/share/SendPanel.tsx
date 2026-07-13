@@ -130,7 +130,7 @@ import { useGuildCustomBots } from "@/core/guild/useGuildCustomBots";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { usePlanStore } from "@/core/plan/planStore";
-import { isCheckoutConfigured } from "@/core/plan/stripeApi";
+import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";

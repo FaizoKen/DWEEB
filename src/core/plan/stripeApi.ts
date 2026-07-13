@@ -3,31 +3,34 @@
  *
  * DWEEB runs its own embedded Checkout — no redirect to a sibling app. The proxy
  * mints an embedded Checkout session (`/api/stripe/checkout`) and a billing-portal
- * URL (`/api/stripe/portal`); Stripe.js (loaded lazily from js.stripe.com) renders
- * the payment form inline in the pricing modal.
+ * URL (`/api/stripe/portal`); Stripe.js renders the payment form inline in the
+ * pricing modal.
+ *
+ * Stripe.js is imported through `@stripe/stripe-js/pure`: the default entry
+ * injects the js.stripe.com script (plus its cookies and fraud beacons) as a
+ * side effect of merely being evaluated, which put Stripe on every page view
+ * while this module rode along in a shared chunk. With `/pure`, the script only
+ * loads when `getStripe()` is first called — i.e. when a checkout form actually
+ * renders. Keep this module out of eagerly-loaded graphs regardless: the cheap
+ * availability check lives in `stripeConfig.ts` for exactly that reason.
  *
  * All calls send `credentials: "include"` so the proxy can attribute the
  * subscription to the signed-in Discord user. Nothing here throws — callers branch
  * on `ok`.
  */
 
-import { loadStripe, type Stripe } from "@stripe/stripe-js";
+import { loadStripe } from "@stripe/stripe-js/pure";
+import type { Stripe } from "@stripe/stripe-js";
 import { PROXY_BASE_URL } from "@/core/guild/config";
-
-const PUBLISHABLE_KEY = (import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined) ?? "";
+import { STRIPE_PUBLISHABLE_KEY } from "./stripeConfig";
 
 let stripePromise: Promise<Stripe | null> | null = null;
 
 /** Lazily load Stripe.js once. Resolves to null when no publishable key is set. */
 export function getStripe(): Promise<Stripe | null> {
-  if (!PUBLISHABLE_KEY) return Promise.resolve(null);
-  if (!stripePromise) stripePromise = loadStripe(PUBLISHABLE_KEY);
+  if (!STRIPE_PUBLISHABLE_KEY) return Promise.resolve(null);
+  if (!stripePromise) stripePromise = loadStripe(STRIPE_PUBLISHABLE_KEY);
   return stripePromise;
-}
-
-/** True when in-app checkout can run: a publishable key AND a configured proxy. */
-export function isCheckoutConfigured(): boolean {
-  return PUBLISHABLE_KEY.length > 0 && PROXY_BASE_URL.length > 0;
 }
 
 /** A DWEEB tier that can be purchased. */

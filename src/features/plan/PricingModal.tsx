@@ -26,7 +26,6 @@ import {
   createCheckout,
   fetchMySubscriptions,
   getStripe,
-  isCheckoutConfigured,
   openBillingPortal,
   reassignSubscription,
   syncCheckout,
@@ -34,6 +33,7 @@ import {
   type PaidTier,
   type PremiumSubscription,
 } from "@/core/plan/stripeApi";
+import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
 import { guildIconUrl, type PickerGuild, type PlanTier } from "@/core/guild/api";
 import styles from "./PricingModal.module.css";
 

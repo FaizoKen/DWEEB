@@ -30,13 +30,15 @@
   opacity: 0.7;
 }
 
-/* Paid tiers get a subtle accent so premium feels acknowledged — still quiet. */
+/* Paid tiers get a subtle accent so premium feels acknowledged — still quiet.
+   Text uses the AA-safe accent tint: raw blurple is only ~3.6:1 against the
+   bar at this size. */
 .pillPaid {
-  color: var(--app-accent, rgb(120, 130, 255));
+  color: var(--app-accent-text, #aeb6ff);
 }
 .pillPaid:hover,
 .pillPaid[aria-expanded="true"] {
-  color: var(--app-accent, rgb(120, 130, 255));
+  color: var(--app-accent-text, #aeb6ff);
   background: color-mix(in srgb, var(--app-accent, rgb(120, 130, 255)) 12%, transparent);
 }
 
@@ -72,7 +74,7 @@
   background: var(--app-bg-hover);
 }
 .tierPaid {
-  color: var(--app-accent, rgb(120, 130, 255));
+  color: var(--app-accent-text, #aeb6ff);
   background: color-mix(in srgb, var(--app-accent, rgb(120, 130, 255)) 16%, transparent);
 }
 

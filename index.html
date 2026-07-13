@@ -1,6 +1,13 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Charset first: the spec wants it inside the first 1024 bytes, and the
+         build prepends the CSP meta above everything here — keeping it ahead of
+         the inline script below preserves that budget even on hosts that don't
+         send `charset` in the Content-Type header (GitHub Pages does; a local
+         `vite preview` doesn't). -->
+    <meta charset="UTF-8" />
+
     <!-- Short-link early resolve: when this page load is a `/s/<id>` short
          link, start fetching the stored share token NOW — in parallel with the
          JS bundle download — instead of after the app boots. The app consumes
@@ -35,7 +42,6 @@
     <link rel="dns-prefetch" href="https://media.discordapp.net" />
     <link rel="preconnect" href="https://media.discordapp.net" />
 
-    <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#1e1f22" />
     <meta name="color-scheme" content="dark" />
@@ -140,7 +146,14 @@
         "sameAs": ["https://github.com/FaizoKen/DWEEB"],
         "author": { "@id": "https://faizo.net/#organization" },
         "publisher": { "@id": "https://faizo.net/#organization" },
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "offers": {
+          "@type": "AggregateOffer",
+          "lowPrice": "0",
+          "highPrice": "10",
+          "priceCurrency": "USD",
+          "offerCount": "3",
+          "description": "Free core builder; optional per-server Plus ($5/mo) and Pro ($10/mo) upgrades raise quotas only — no feature is locked behind a plan."
+        },
         "featureList": [
           "Visual Components V2 editor with containers, sections, buttons and media",
           "Pixel-accurate live Discord preview",
@@ -189,7 +202,7 @@
             "name": "Is DWEEB free?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. It is completely free and runs entirely in your browser. There is no paywall, no sign-up, and no usage limit."
+              "text": "Yes. The full builder is free and runs entirely in your browser — design, preview, send, share, and every Components V2 component, with no sign-up and no feature ever locked behind a plan. Optional Plus and Pro upgrades (per Discord server) only raise quotas on extras like scheduled posts and saved messages."
             }
           },
           {
@@ -229,7 +242,7 @@
             "name": "Is DWEEB private? Where is my data stored?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "DWEEB is private by design. It runs in your browser, so your message drafts and saved data stay on your device and are never uploaded to our servers, and share links keep their data in the URL fragment. The only data that leaves your browser is what you opt into sending — signing in with Discord, the AI assistant, or a plugin you attach (a plugin runs as its own external service and receives the data it needs, such as a webhook URL you pick for it). There is no account and no database, which makes DWEEB well suited to sensitive announcements and to large communities and teams."
+              "text": "DWEEB is private by design. It runs in your browser, so your message drafts and saved data stay on your device and are never uploaded to our servers, and share links keep their data in the URL fragment. The only data that leaves your browser is what you opt into sending — signing in with Discord, the AI assistant, a plugin you attach (a plugin runs as its own external service and receives the data it needs, such as a webhook URL you pick for it), or a feature that stores what you save with it, like scheduled posts or the message library. No account is required, which makes DWEEB well suited to sensitive announcements and to large communities and teams."
             }
           },
           {
@@ -354,8 +367,10 @@
         <h2>Frequently asked questions</h2>
         <h3>Is DWEEB free?</h3>
         <p>
-          Yes — it is completely free for noncommercial use and source-available, requires no account,
-          and runs entirely in your browser.
+          Yes — the full builder is free for noncommercial use and source-available, requires no
+          account, and runs entirely in your browser. Optional per-server Plus/Pro upgrades only
+          raise quotas on extras like scheduled posts and saved messages — no feature is ever
+          locked behind a plan.
         </p>
         <h3>Is DWEEB private?</h3>
         <p>

@@ -337,7 +337,7 @@ export function App() {
 
   return (
     <>
-      <div
+      <main
         className="app-shell"
         data-preview-open={previewOpen ? "true" : "false"}
         data-ai-open={aiOpen ? "true" : "false"}
@@ -481,7 +481,7 @@ export function App() {
         <SendCoachMark />
         <UpdatePrompt />
         <ToastViewport />
-      </div>
+      </main>
     </>
   );
 }

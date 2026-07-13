@@ -131,6 +131,47 @@ function injectSecurityMeta(): Plugin {
   };
 }
 
+/** Build stamps for index.html — keeps the hand-written JSON-LD/OG freshness
+ *  fields honest. The source file carries readable last-known values (dev
+ *  serves them as-is); every build overwrites them from package.json and the
+ *  clock, and THROWS if a pattern goes missing so the stamp can't silently
+ *  stop applying after an index.html refactor. (Discovered the hard way: the
+ *  hand-maintained `softwareVersion` sat at 0.9.0 while the app shipped 0.11.0.) */
+function stampBuildMeta(): Plugin {
+  const stamp = (html: string, pattern: RegExp, replacement: string, what: string): string => {
+    if (!pattern.test(html)) {
+      throw new Error(`stampBuildMeta: could not find ${what} in index.html`);
+    }
+    return html.replace(pattern, replacement);
+  };
+  return {
+    name: "stamp-build-meta",
+    apply: "build",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        const now = new Date();
+        const date = now.toISOString().slice(0, 10);
+        let out = html;
+        out = stamp(
+          out,
+          /"softwareVersion": "[^"]*"/,
+          `"softwareVersion": "${APP_VERSION}"`,
+          '"softwareVersion"',
+        );
+        out = stamp(out, /"dateModified": "[^"]*"/, `"dateModified": "${date}"`, '"dateModified"');
+        out = stamp(
+          out,
+          /(<meta property="og:updated_time" content=")[^"]*(")/,
+          `$1${now.toISOString()}$2`,
+          "og:updated_time",
+        );
+        return out;
+      },
+    },
+  };
+}
+
 // Static SPA build targeting GitHub Pages.
 // Share-state is encoded in the URL hash, so no SPA fallback is needed
 // for share links — the server only ever sees `/`. (The deploy workflow
@@ -142,6 +183,7 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
+    stampBuildMeta(),
     injectSecurityMeta(),
     // Service worker: precache the hashed app shell so repeat visits load from
     // disk with no network round trip (GitHub Pages caps Cache-Control at ~10
@@ -239,6 +281,14 @@ export default defineConfig(({ mode }) => ({
           // the Share dialog), so keep it in its own chunk instead of letting it
           // ride along in the always-loaded vendor chunk.
           if (id.includes("lz-string")) return "serializer";
+          // Stripe stays out of vendor for two reasons: the bytes are useless
+          // until the pricing modal opens, and @stripe/stripe-js's default entry
+          // injects the js.stripe.com script (cookies + fraud beacons) as an
+          // import side effect — riding in the boot-path vendor chunk, that put
+          // Stripe on every page view for every visitor. stripeApi.ts imports
+          // the deferred `/pure` entry now, but the code still has no business
+          // executing at boot.
+          if (id.includes("@stripe")) return "stripe";
           // The Embedded App SDK (+ its only consumers, eventemitter3 / zod) load
           // exclusively on the Activity entry. Splitting them out keeps the web
           // app's vendor chunk — and so the public site's first paint — untouched

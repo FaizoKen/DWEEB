@@ -1,0 +1,23 @@
+# DWEEB
+
+> DWEEB (Discord Webhook Embed Builder) is a free, browser-based visual builder for Discord webhook messages using Components V2 — design rich messages with containers, sections, buttons, select menus, and media in a pixel-accurate live Discord preview, then send, schedule, or share them through a webhook. No JSON and no account required; the core builder runs entirely client-side, and optional per-server Plus/Pro upgrades only raise quotas — no feature is ever locked behind a plan.
+
+Key facts:
+
+- Supports every message component a Discord webhook can send (Discord Components V2): containers, sections, text displays, buttons, string/user/role/mentionable/channel select menus, thumbnails, media galleries, files, and separators, with Discord's limits enforced while building.
+- Any message can be shared through a single URL (the message is encoded in the URL fragment, so drafts stay private) and exported or imported as message JSON.
+- Interactive components (buttons and selects that respond to clicks) attach to DWEEB's hosted plugins: support tickets, giveaways, self-assign roles, pop-up application forms, canned auto-replies, and more — many need no bot at all.
+- Also included: scheduled posts, editing a message the webhook already sent, a per-server message library, a webhook manager, and a collaborative builder that runs inside Discord as an embedded Activity.
+- Source-available under the PolyForm Noncommercial License 1.0.0 (free for noncommercial use).
+
+## Docs
+
+- [Features overview](https://dweeb.faizo.net/features/): every built-in feature — self roles, tickets, giveaways, forms, auto-replies, scheduled posts, webhook manager — each with a dedicated page
+- [Message template gallery](https://dweeb.faizo.net/templates/): ready-made Discord message templates (welcome, rules, announcements, reaction roles, and more), each openable in the builder
+- [Privacy policy](https://dweeb.faizo.net/privacy): what data DWEEB does and doesn't handle
+- [Terms of service](https://dweeb.faizo.net/terms)
+
+## Optional
+
+- [Source code on GitHub](https://github.com/FaizoKen/DWEEB)
+- [Support Discord server](https://discord.gg/2wB7rHRDg2)
