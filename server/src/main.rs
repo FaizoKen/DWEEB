@@ -32,6 +32,7 @@ mod seal;
 mod session;
 mod shortlink;
 mod singleflight;
+mod sqlite_pool;
 mod stripe;
 mod telemetry;
 
@@ -45,6 +46,7 @@ use axum::routing::{any, get, patch, post};
 use axum::Router;
 use axum_extra::extract::cookie::Key;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::cache::{DataCache, TtlCache};
@@ -54,7 +56,7 @@ use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
 use crate::routes::{
     bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, emojis,
     guild_activity_invite, health, list_guilds, permanent_add, permanent_list, permanent_reenable,
-    permanent_remove, roles, webhook_create, webhook_delete, webhook_modify, webhooks_list,
+    permanent_remove, ready, roles, webhook_create, webhook_delete, webhook_modify, webhooks_list,
     AppState, DispatcherApi,
 };
 use crate::schedule::{
@@ -390,6 +392,10 @@ async fn run() {
 
     let app = Router::new()
         .route("/health", get(health))
+        // Readiness: verifies each present SQLite store answers a `SELECT 1`, so
+        // a monitor can distinguish "up" from "a data volume is wedged". 503 (with
+        // the failing store) when a probe fails; see `routes::ready`.
+        .route("/ready", get(ready))
         // Auth
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
@@ -466,16 +472,10 @@ async fn run() {
             "/api/activity/token",
             post(activity::activity_token).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
-        .route(
-            "/api/activity/post",
-            post(activity::activity_post)
-                .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024)),
-        )
-        .route(
-            "/api/activity/edit",
-            post(activity::activity_edit)
-                .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024)),
-        )
+        // NB: `/api/activity/post` and `/api/activity/edit` (the 32 MiB upload
+        // routes) live in `untimed_routes` below — they're deliberately exempt
+        // from the global request timeout so a slow client uploading a large
+        // attachment isn't cut off mid-transfer.
         // Schedule the built message to post later (one-time). The proxy resolves
         // the DWEEB webhook server-side (the iframe never sees credentials) and
         // stores the schedule sealed until it fires — same store/worker/quota as
@@ -526,7 +526,9 @@ async fn run() {
             "/api/activity/room-ticket",
             post(activity::activity_room_ticket),
         )
-        .route("/api/activity/room/:instance", get(activity::activity_room))
+        // NB: the room WebSocket `/api/activity/room/:instance` lives in
+        // `untimed_routes` below — a persistent socket must not be bounded by the
+        // global request timeout.
         // Image proxy: fetches an external image/video so the sandboxed Activity
         // iframe (whose CSP blocks arbitrary `<img>`/`<video>` hosts) can render
         // it. Unauthenticated by necessity — an `<img>` can't carry a bearer — but
@@ -634,6 +636,15 @@ async fn run() {
             "/api/guilds/:guild_id/custom-apps/:application_id/webhook",
             post(auth::custom_bot_webhook_start),
         )
+        // Global request timeout: a backstop that bounds any single request so a
+        // handler wedged on a stuck store lock or a hung upstream returns 408
+        // instead of pinning a connection forever (outbound Discord calls and DB
+        // access are already individually bounded; this catches the residue). It
+        // wraps every route added *above*; the WebSocket and the two 32 MiB
+        // upload routes are merged *after* it (see `untimed_routes`) so a
+        // persistent socket / slow large upload is never cut off.
+        .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
+        .merge(untimed_routes())
         .layer(cors)
         // The Activity plugin proxy is merged *after* the credentialed CORS layer
         // so it isn't wrapped by it: the sandboxed plugin iframe calls it from an
@@ -701,6 +712,34 @@ async fn connect_redis(url: &str) -> Result<redis::aio::ConnectionManager, Strin
 /// main credentialed CORS allow-list can't accept. `Any` origin/methods/headers
 /// answers the JSON preflight and returns `Access-Control-Allow-Origin: *` (valid
 /// for these non-credentialed calls). Auth/SSRF/size bounds live in the handlers.
+/// Backstop for a single request's total time (see the `TimeoutLayer` in
+/// `main`). Generous on purpose: it exists to unstick a wedged handler, not to
+/// enforce a latency SLA, so it clears the slowest legitimate path (a handler
+/// making several sequential Discord calls, each already capped by the reqwest
+/// client) with headroom.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Routes deliberately exempt from the global request timeout, merged into the
+/// app *after* the `TimeoutLayer`: the collaboration room WebSocket (a
+/// persistent socket, not a request/response) and the two 32 MiB upload routes
+/// (a slow client legitimately spends a while streaming a large attachment). All
+/// three still get CORS, rate-limiting, and tracing, which are applied after the
+/// merge in `main`.
+fn untimed_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/activity/post",
+            post(activity::activity_post)
+                .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024)),
+        )
+        .route(
+            "/api/activity/edit",
+            post(activity::activity_edit)
+                .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024)),
+        )
+        .route("/api/activity/room/:instance", get(activity::activity_room))
+}
+
 fn activity_plugin_routes() -> Router<AppState> {
     let cors = CorsLayer::new()
         .allow_methods(Any)

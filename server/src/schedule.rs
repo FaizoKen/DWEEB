@@ -21,7 +21,9 @@
 
 use std::path::Path as FsPath;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use crate::sqlite_pool::SqlitePool;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, Query, State};
@@ -192,7 +194,7 @@ pub enum CreateError {
 // ── Store ────────────────────────────────────────────────────────────────────
 
 pub struct ScheduleStore {
-    conn: Mutex<Connection>,
+    pool: SqlitePool,
     max_entries: i64,
     max_per_webhook: i64,
     /// Max active schedules per destination server — the user-facing quota.
@@ -215,13 +217,19 @@ impl ScheduleStore {
                     .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
             }
         }
-        let conn = Connection::open(path).map_err(|e| format!("could not open {path}: {e}"))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| format!("journal_mode: {e}"))?;
-        conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| format!("synchronous: {e}"))?;
-        conn.pragma_update(None, "busy_timeout", 5_000)
-            .map_err(|e| format!("busy_timeout: {e}"))?;
+        let pool = SqlitePool::open_default(path, |c: &Connection| {
+            c.pragma_update(None, "journal_mode", "WAL")
+                .map_err(|e| format!("journal_mode: {e}"))?;
+            c.pragma_update(None, "synchronous", "NORMAL")
+                .map_err(|e| format!("synchronous: {e}"))?;
+            c.pragma_update(None, "busy_timeout", 5_000)
+                .map_err(|e| format!("busy_timeout: {e}"))?;
+            Ok(())
+        })?;
+        // Schema + migrations + count are one-time work: hold one checked-out
+        // connection across them, then drop it before moving `pool` into the
+        // struct (also so a size-1 pool doesn't self-deadlock).
+        let conn = pool.get();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS scheduled_posts (
                  id                TEXT PRIMARY KEY,
@@ -306,8 +314,9 @@ impl ScheduleStore {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM scheduled_posts", [], |r| r.get(0))
             .map_err(|e| format!("count: {e}"))?;
+        drop(conn);
         Ok(ScheduleStore {
-            conn: Mutex::new(conn),
+            pool,
             max_entries: max_entries as i64,
             max_per_webhook: max_per_webhook as i64,
             max_per_guild: max_per_guild as i64,
@@ -316,7 +325,16 @@ impl ScheduleStore {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|p| p.into_inner())
+        self.pool.get()
+    }
+
+    /// Cheap connectivity probe for the readiness endpoint (see
+    /// `LibraryStore::ping`): a `SELECT 1` on the shared connection, so it also
+    /// proves the store isn't wedged behind a stuck lock.
+    pub fn ping(&self) -> Result<(), String> {
+        self.lock()
+            .query_row("SELECT 1", [], |_| Ok(()))
+            .map_err(e2s)
     }
 
     /// The per-server active-schedule quota, surfaced so the management UI can
@@ -475,7 +493,7 @@ impl ScheduleStore {
     pub fn list_for_owner(&self, uid: &str, limit: usize) -> Result<Vec<Row>, String> {
         let conn = self.lock();
         let mut stmt = conn
-            .prepare(&format!(
+            .prepare_cached(&format!(
                 "SELECT {COLS} FROM scheduled_posts \
                  WHERE owner_user_id = ?1 ORDER BY created_at DESC LIMIT ?2"
             ))
@@ -489,7 +507,7 @@ impl ScheduleStore {
     pub fn list_for_guild(&self, guild_id: &str, limit: usize) -> Result<Vec<Row>, String> {
         let conn = self.lock();
         let mut stmt = conn
-            .prepare(&format!(
+            .prepare_cached(&format!(
                 "SELECT {COLS} FROM scheduled_posts \
                  WHERE guild_id = ?1 ORDER BY next_run_at ASC LIMIT ?2"
             ))
@@ -564,7 +582,7 @@ impl ScheduleStore {
         .map_err(e2s)?;
         let ids: Vec<String> = {
             let mut stmt = tx
-                .prepare(
+                .prepare_cached(
                     "SELECT id FROM scheduled_posts \
                      WHERE status='active' AND next_run_at <= ?1 \
                      ORDER BY next_run_at ASC LIMIT ?2",

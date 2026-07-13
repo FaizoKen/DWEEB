@@ -54,6 +54,21 @@ endpoints:
     alerts:
       - type: discord
 
+  # Deep readiness for the proxy: /ready probes each SQLite store (shortlinks,
+  # schedules, activity drafts, message library, Stripe mirror) with a SELECT 1,
+  # so a wedged/unwritable data volume alerts even while /health still 200s. 503
+  # (with the failing store in the body) when a probe fails — a slower interval
+  # since it touches the DBs.
+  - name: proxy readiness (DB stores)
+    group: edge
+    url: "https://${DOMAIN}/ready"
+    interval: 120s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == ready"
+    alerts:
+      - type: discord
+
   # ── Plugins ────────────────────────────────────────────────────────────────
   - name: modal-form
     group: plugins

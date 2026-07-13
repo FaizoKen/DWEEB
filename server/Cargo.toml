@@ -17,7 +17,7 @@ dotenvy = "0.15"
 # `sync` brings in the Semaphore used to cap concurrent calls to Discord under
 # the shared bot token; `time` backs the rate limiter's periodic eviction.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "timeout"] }
 # Encrypted (AEAD) cookies for the OAuth session — keeps the user's Discord
 # access token off the wire to JS (httpOnly) and unreadable at rest in the cookie.
 axum-extra = { version = "0.9", features = ["cookie-private"] }

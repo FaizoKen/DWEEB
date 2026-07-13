@@ -24,7 +24,8 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Mutex;
+
+use crate::sqlite_pool::SqlitePool;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path as UrlPath, State};
@@ -48,7 +49,7 @@ const ID_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxy
 const ID_LEN: usize = 8;
 
 pub struct ShortLinkStore {
-    conn: Mutex<Connection>,
+    pool: SqlitePool,
     ttl_secs: i64,
     max_entries: i64,
     /// Approximate row count, kept in step with inserts/sweeps so the storage
@@ -67,34 +68,52 @@ impl ShortLinkStore {
                     .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
             }
         }
-        let conn = Connection::open(path).map_err(|e| format!("could not open {path}: {e}"))?;
         // WAL: readers never block behind the (rare) writer. NORMAL sync is
-        // durable enough for cache-like data and skips an fsync per insert.
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| format!("journal_mode: {e}"))?;
-        conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| format!("synchronous: {e}"))?;
-        conn.pragma_update(None, "busy_timeout", 5_000)
-            .map_err(|e| format!("busy_timeout: {e}"))?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS short_links (
-                 id         TEXT PRIMARY KEY,
-                 token      TEXT NOT NULL,
-                 created_at INTEGER NOT NULL,
-                 expires_at INTEGER NOT NULL
-             );
-             CREATE INDEX IF NOT EXISTS short_links_expires ON short_links(expires_at);",
-        )
-        .map_err(|e| format!("schema: {e}"))?;
-        let count: i64 = conn
+        // durable enough for cache-like data and skips an fsync per insert. Set
+        // per connection in the pool's init.
+        let pool = SqlitePool::open_default(path, |c: &Connection| {
+            c.pragma_update(None, "journal_mode", "WAL")
+                .map_err(|e| format!("journal_mode: {e}"))?;
+            c.pragma_update(None, "synchronous", "NORMAL")
+                .map_err(|e| format!("synchronous: {e}"))?;
+            c.pragma_update(None, "busy_timeout", 5_000)
+                .map_err(|e| format!("busy_timeout: {e}"))?;
+            Ok(())
+        })?;
+        // Schema + initial count: one-time, so run once on a checked-out
+        // connection rather than in the per-connection init above.
+        {
+            let conn = pool.get();
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS short_links (
+                     id         TEXT PRIMARY KEY,
+                     token      TEXT NOT NULL,
+                     created_at INTEGER NOT NULL,
+                     expires_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS short_links_expires ON short_links(expires_at);",
+            )
+            .map_err(|e| format!("schema: {e}"))?;
+        }
+        let count: i64 = pool
+            .get()
             .query_row("SELECT COUNT(*) FROM short_links", [], |r| r.get(0))
             .map_err(|e| format!("count: {e}"))?;
         Ok(ShortLinkStore {
-            conn: Mutex::new(conn),
+            pool,
             ttl_secs: (ttl_days as i64) * 86_400,
             max_entries: max_entries as i64,
             count: AtomicI64::new(count),
         })
+    }
+
+    /// Cheap connectivity probe for the readiness endpoint (see
+    /// `LibraryStore::ping`): a `SELECT 1` on the shared connection.
+    pub fn ping(&self) -> Result<(), String> {
+        self.pool
+            .get()
+            .query_row("SELECT 1", [], |_| Ok(()))
+            .map_err(|e| e.to_string())
     }
 
     /// Store `token` under a fresh id; returns `(id, expires_at)`.
@@ -104,7 +123,7 @@ impl ShortLinkStore {
         }
         let now = unix_now();
         let expires = now + self.ttl_secs;
-        let conn = lock(&self.conn);
+        let conn = self.pool.get();
         // Collisions are ~impossible at 62^8; the PRIMARY KEY catches the
         // freak case and we simply roll a new id.
         for _ in 0..4 {
@@ -132,7 +151,7 @@ impl ShortLinkStore {
     /// — expiry is checked on every read, so links die on time even between
     /// sweeps.
     pub fn resolve(&self, id: &str) -> Result<Option<String>, String> {
-        let conn = lock(&self.conn);
+        let conn = self.pool.get();
         conn.query_row(
             "SELECT token FROM short_links WHERE id = ?1 AND expires_at > ?2",
             rusqlite::params![id, unix_now()],
@@ -149,7 +168,7 @@ impl ShortLinkStore {
     /// from `main` — reads already ignore expired rows, this just reclaims the
     /// space and keeps the table tiny.
     pub fn sweep(&self) -> Result<usize, String> {
-        let conn = lock(&self.conn);
+        let conn = self.pool.get();
         let deleted = conn
             .execute(
                 "DELETE FROM short_links WHERE expires_at <= ?1",
@@ -170,12 +189,6 @@ pub enum CreateError {
     /// The row cap is reached — answer 503, existing links keep working.
     Full,
     Storage(String),
-}
-
-/// A poisoned mutex only means another request panicked mid-query; the
-/// connection itself is fine, so fail open rather than poisoning the service.
-fn lock(m: &Mutex<Connection>) -> std::sync::MutexGuard<'_, Connection> {
-    m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 fn unix_now() -> i64 {
@@ -333,6 +346,14 @@ mod tests {
     }
 
     #[test]
+    fn ping_answers_on_open_store() {
+        // The readiness probe's building block: an open store answers `SELECT 1`.
+        let (store, path) = temp_store("ping", 100);
+        assert!(store.ping().is_ok());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn create_resolve_roundtrip() {
         let (store, path) = temp_store("roundtrip", 100);
         let (id, expires) = store.create("12.AbC$+-xyz").expect("create");
@@ -350,7 +371,7 @@ mod tests {
         // Backdate the row past its TTL: it must vanish from reads at once,
         // and the sweep must physically delete it.
         {
-            let conn = lock(&store.conn);
+            let conn = store.pool.get();
             conn.execute(
                 "UPDATE short_links SET expires_at = ?1 WHERE id = ?2",
                 rusqlite::params![unix_now() - 1, id],

@@ -34,7 +34,9 @@
 
 use std::collections::HashMap;
 use std::path::Path as FsPath;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
+
+use crate::sqlite_pool::SqlitePool;
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -95,7 +97,7 @@ pub struct SubRow {
 
 /// SQLite mirror of the user's Stripe subscriptions + the discord→customer map.
 pub struct StripeStore {
-    conn: Mutex<Connection>,
+    pool: SqlitePool,
 }
 
 impl StripeStore {
@@ -106,13 +108,18 @@ impl StripeStore {
                     .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
             }
         }
-        let conn = Connection::open(path).map_err(|e| format!("could not open {path}: {e}"))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| format!("journal_mode: {e}"))?;
-        conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| format!("synchronous: {e}"))?;
-        conn.pragma_update(None, "busy_timeout", 5_000)
-            .map_err(|e| format!("busy_timeout: {e}"))?;
+        let pool = SqlitePool::open_default(path, |c: &Connection| {
+            c.pragma_update(None, "journal_mode", "WAL")
+                .map_err(|e| format!("journal_mode: {e}"))?;
+            c.pragma_update(None, "synchronous", "NORMAL")
+                .map_err(|e| format!("synchronous: {e}"))?;
+            c.pragma_update(None, "busy_timeout", 5_000)
+                .map_err(|e| format!("busy_timeout: {e}"))?;
+            Ok(())
+        })?;
+        // Schema + migrations are one-time; hold one checked-out connection
+        // across them, then drop it before moving `pool` into the struct.
+        let conn = pool.get();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS stripe_subscriptions (
                  id                   TEXT PRIMARY KEY,
@@ -182,13 +189,20 @@ impl StripeStore {
             )
             .map_err(|e| format!("migrate reassigned_at: {e}"))?;
         }
-        Ok(StripeStore {
-            conn: Mutex::new(conn),
-        })
+        drop(conn);
+        Ok(StripeStore { pool })
     }
 
     fn lock(&self) -> MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|p| p.into_inner())
+        self.pool.get()
+    }
+
+    /// Cheap connectivity probe for the readiness endpoint (see
+    /// `LibraryStore::ping`): a `SELECT 1` on the shared connection.
+    pub fn ping(&self) -> Result<(), String> {
+        self.lock()
+            .query_row("SELECT 1", [], |_| Ok(()))
+            .map_err(|e| e.to_string())
     }
 
     /// Sum of `price_slots[price_id]` over a **server's** active/trialing subs —
@@ -196,7 +210,7 @@ impl StripeStore {
     /// the subscriptions bound to it, whoever paid).
     pub fn active_slots(&self, guild_id: &str, price_slots: &HashMap<String, i64>) -> i64 {
         let conn = self.lock();
-        let mut stmt = match conn.prepare(
+        let mut stmt = match conn.prepare_cached(
             "SELECT price_id FROM stripe_subscriptions \
              WHERE guild_id = ?1 AND status IN ('active','trialing')",
         ) {
@@ -261,7 +275,7 @@ impl StripeStore {
     /// list that powers the management + move UI. Most-recent period first.
     pub fn list_subscriptions_for_user(&self, user_id: &str) -> Vec<SubRow> {
         let conn = self.lock();
-        let mut stmt = match conn.prepare(&format!(
+        let mut stmt = match conn.prepare_cached(&format!(
             "SELECT {} FROM stripe_subscriptions \
              WHERE user_id = ?1 ORDER BY current_period_end DESC",
             Self::SUB_COLS

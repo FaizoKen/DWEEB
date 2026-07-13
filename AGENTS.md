@@ -90,6 +90,29 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   in-dialog re-pick). The full list appears only when no bar pick exists yet (it's then the
   first pick), and that decision is frozen per dialog open so an in-dialog pick doesn't yank
   the list away mid-flow.
+- **Proxy health vs readiness.** `/health` is bare liveness (static 200, no deps). `/ready`
+  probes every *present* SQLite store (shortlinks, schedules, activity drafts, library, Stripe
+  mirror) with a `SELECT 1` via `spawn_blocking` — so a wedged/unwritable volume or a stuck
+  store lock returns `503 {"failed":[…]}` even while `/health` still 200s. Each store exposes an
+  inherent `ping()`; add one for any new store and probe it in `routes::ready`. Gatus watches
+  `/ready` (`server/gatus/config.yaml`, asserts `[BODY].status == ready`).
+- **Global request timeout has exemptions.** `main` wraps the normal routes in a `TimeoutLayer`
+  (`REQUEST_TIMEOUT`, 60s) as a backstop for wedged handlers. The room WebSocket and the two
+  32 MiB upload routes (`/api/activity/post`, `/api/activity/edit`) are merged *after* the layer
+  via `untimed_routes()` and must stay there — a persistent socket / slow large upload must not
+  be cut off. Any new long-lived or large-upload route belongs in `untimed_routes()`, not the
+  main chain.
+- **SQLite stores share a small connection pool** (`sqlite_pool.rs`): each store holds a
+  `SqlitePool` (round-robin `Vec<Mutex<Connection>>`) instead of a single `Mutex<Connection>`, so
+  WAL's concurrent reads are no longer serialized behind one lock. Pragmas (WAL +
+  `synchronous=NORMAL` + 5s `busy_timeout`) run per connection in the pool's `init` closure;
+  schema/migrations/count are one-time and run once on a checked-out connection (then dropped
+  before `pool` moves into the struct — a size-1 pool would otherwise self-deadlock). A store
+  method still checks out **one** connection for its whole operation (`self.lock()` →
+  `pool.get()`), preserving transaction semantics. Use `prepare_cached` (not `prepare`) for
+  repeated queries (per-connection statement cache). Size = `SQLITE_POOL_SIZE` env (default 3,
+  floor 1); **set it to `1` to reproduce the old single-connection behaviour** on a
+  memory-constrained host (each connection carries its own page + statement cache).
 
 ## CI
 

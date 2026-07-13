@@ -114,6 +114,65 @@ pub async fn health() -> impl IntoResponse {
     axum::Json(json!({ "status": "ok" }))
 }
 
+/// Readiness probe — unlike `/health` (bare liveness), this proves each present
+/// SQLite store is open and answering, so an orchestrator or uptime monitor
+/// (Gatus) can tell "process alive" apart from "a data volume is wedged /
+/// unwritable / the store's lock is stuck". Each probe is a trivial `SELECT 1`
+/// run off the async path via `spawn_blocking` — deliberately, since the very
+/// failure this catches (a jammed store `Mutex`) would otherwise block the
+/// executor thread if we locked inline. Absent stores (feature off) are skipped,
+/// not failed. Returns 503 with the list of unready components if any probe
+/// fails, so a monitor can see *which* store is down. No auth: it exposes only
+/// up/down, never data.
+pub async fn ready(State(st): State<AppState>) -> Response {
+    let mut failed: Vec<&'static str> = Vec::new();
+
+    // Probe an optional store by cloning its `Arc` into a blocking task. Each
+    // store exposes an inherent `ping()` (a `SELECT 1` on its shared
+    // connection). A join error (the blocking task panicked) counts as unready.
+    macro_rules! probe {
+        ($opt:expr, $name:literal) => {
+            if let Some(store) = $opt.clone() {
+                let outcome = tokio::task::spawn_blocking(move || store.ping())
+                    .await
+                    .map_err(|e| format!("probe task failed: {e}"))
+                    .and_then(|r| r);
+                if let Err(e) = outcome {
+                    tracing::warn!(store = $name, error = %e, "readiness probe failed");
+                    failed.push($name);
+                }
+            }
+        };
+    }
+
+    probe!(st.shortlinks, "shortlinks");
+    probe!(st.schedules, "schedules");
+    probe!(st.activity_drafts, "activity_drafts");
+    probe!(st.library, "library");
+
+    // Stripe's mirror store lives inside `StripeState`, so it's probed directly.
+    if let Some(stripe) = st.stripe.clone() {
+        let outcome = tokio::task::spawn_blocking(move || stripe.store.ping())
+            .await
+            .map_err(|e| format!("probe task failed: {e}"))
+            .and_then(|r| r);
+        if let Err(e) = outcome {
+            tracing::warn!(store = "stripe", error = %e, "readiness probe failed");
+            failed.push("stripe");
+        }
+    }
+
+    if failed.is_empty() {
+        (StatusCode::OK, Json(json!({ "status": "ready" }))).into_response()
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "status": "unready", "failed": failed })),
+        )
+            .into_response()
+    }
+}
+
 // ── Guild reads (login + membership gated) ─────────────────────────────────
 
 pub async fn roles(

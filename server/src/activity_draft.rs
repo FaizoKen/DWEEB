@@ -19,13 +19,14 @@
 
 use std::path::Path as FsPath;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Mutex;
+
+use crate::sqlite_pool::SqlitePool;
 
 use rusqlite::{params, Connection};
 
 /// SQLite-backed map of `instance_id → sealed latest draft`.
 pub struct ActivityDraftStore {
-    conn: Mutex<Connection>,
+    pool: SqlitePool,
     max_entries: i64,
     /// Approximate row count, kept in step with inserts/deletes so the cap check
     /// is a load rather than a `COUNT(*)` on the persist hot path.
@@ -40,35 +41,51 @@ impl ActivityDraftStore {
                     .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
             }
         }
-        let conn = Connection::open(path).map_err(|e| format!("could not open {path}: {e}"))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| format!("journal_mode: {e}"))?;
-        conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| format!("synchronous: {e}"))?;
-        conn.pragma_update(None, "busy_timeout", 5_000)
-            .map_err(|e| format!("busy_timeout: {e}"))?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS activity_drafts (
-                 instance_id  TEXT PRIMARY KEY,
-                 draft_sealed TEXT NOT NULL,
-                 updated_at   INTEGER NOT NULL
-             );
-             CREATE INDEX IF NOT EXISTS idx_activity_drafts_updated
-                 ON activity_drafts(updated_at);",
-        )
-        .map_err(|e| format!("schema: {e}"))?;
-        let count: i64 = conn
+        let pool = SqlitePool::open_default(path, |c: &Connection| {
+            c.pragma_update(None, "journal_mode", "WAL")
+                .map_err(|e| format!("journal_mode: {e}"))?;
+            c.pragma_update(None, "synchronous", "NORMAL")
+                .map_err(|e| format!("synchronous: {e}"))?;
+            c.pragma_update(None, "busy_timeout", 5_000)
+                .map_err(|e| format!("busy_timeout: {e}"))?;
+            Ok(())
+        })?;
+        // Schema + initial count are one-time; run them once on a checked-out
+        // connection rather than in the per-connection init.
+        {
+            let conn = pool.get();
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS activity_drafts (
+                     instance_id  TEXT PRIMARY KEY,
+                     draft_sealed TEXT NOT NULL,
+                     updated_at   INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_activity_drafts_updated
+                     ON activity_drafts(updated_at);",
+            )
+            .map_err(|e| format!("schema: {e}"))?;
+        }
+        let count: i64 = pool
+            .get()
             .query_row("SELECT COUNT(*) FROM activity_drafts", [], |r| r.get(0))
             .map_err(|e| format!("count: {e}"))?;
         Ok(ActivityDraftStore {
-            conn: Mutex::new(conn),
+            pool,
             max_entries: max_entries as i64,
             count: AtomicI64::new(count),
         })
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|p| p.into_inner())
+        self.pool.get()
+    }
+
+    /// Cheap connectivity probe for the readiness endpoint (see
+    /// `LibraryStore::ping`): a `SELECT 1` on the shared connection.
+    pub fn ping(&self) -> Result<(), String> {
+        self.lock()
+            .query_row("SELECT 1", [], |_| Ok(()))
+            .map_err(|e| e.to_string())
     }
 
     /// Upsert the sealed draft for `instance`. Updating an existing instance is

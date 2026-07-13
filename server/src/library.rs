@@ -49,7 +49,9 @@
 use std::collections::HashSet;
 use std::path::Path as FsPath;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use crate::sqlite_pool::SqlitePool;
 
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -168,7 +170,7 @@ pub enum CreateError {
 // ── Store ────────────────────────────────────────────────────────────────────
 
 pub struct LibraryStore {
-    conn: Mutex<Connection>,
+    pool: SqlitePool,
     max_entries: i64,
     /// Max saved drafts per server when plan entitlement is disabled — the
     /// standalone-deployment default the tier limits override.
@@ -194,57 +196,65 @@ impl LibraryStore {
                     .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
             }
         }
-        let conn = Connection::open(path).map_err(|e| format!("could not open {path}: {e}"))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| format!("journal_mode: {e}"))?;
-        conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| format!("synchronous: {e}"))?;
-        conn.pragma_update(None, "busy_timeout", 5_000)
-            .map_err(|e| format!("busy_timeout: {e}"))?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS library_messages (
-                 id             TEXT PRIMARY KEY,
-                 guild_id       TEXT NOT NULL,
-                 label          TEXT NOT NULL,
-                 title          TEXT,
-                 payload_sealed TEXT NOT NULL,
-                 webhook_sealed TEXT,
-                 webhook_id     TEXT,
-                 application_id TEXT,
-                 channel_id     TEXT,
-                 message_id     TEXT,
-                 thread_id      TEXT,
-                 dest_label     TEXT,
-                 created_by     TEXT NOT NULL,
-                 created_at     INTEGER NOT NULL,
-                 updated_at     INTEGER NOT NULL
-             );
-             CREATE INDEX IF NOT EXISTS idx_library_guild
-                 ON library_messages(guild_id, updated_at);
-             CREATE INDEX IF NOT EXISTS idx_library_msg
-                 ON library_messages(guild_id, message_id);",
-        )
-        .map_err(|e| format!("schema: {e}"))?;
-        // Migrate DBs created before `application_id` existed (SQLite has no
-        // ADD COLUMN IF NOT EXISTS) — which custom bot authored a posted entry,
-        // so the Activity can update it through the right identity.
-        let has_app: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('library_messages') \
-                 WHERE name = 'application_id'",
-                [],
-                |r| r.get(0),
+        let pool = SqlitePool::open_default(path, |c: &Connection| {
+            c.pragma_update(None, "journal_mode", "WAL")
+                .map_err(|e| format!("journal_mode: {e}"))?;
+            c.pragma_update(None, "synchronous", "NORMAL")
+                .map_err(|e| format!("synchronous: {e}"))?;
+            c.pragma_update(None, "busy_timeout", 5_000)
+                .map_err(|e| format!("busy_timeout: {e}"))?;
+            Ok(())
+        })?;
+        // Schema + migrations + initial count are one-time, so run them once on a
+        // single checked-out connection rather than in the per-connection init.
+        {
+            let conn = pool.get();
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS library_messages (
+                     id             TEXT PRIMARY KEY,
+                     guild_id       TEXT NOT NULL,
+                     label          TEXT NOT NULL,
+                     title          TEXT,
+                     payload_sealed TEXT NOT NULL,
+                     webhook_sealed TEXT,
+                     webhook_id     TEXT,
+                     application_id TEXT,
+                     channel_id     TEXT,
+                     message_id     TEXT,
+                     thread_id      TEXT,
+                     dest_label     TEXT,
+                     created_by     TEXT NOT NULL,
+                     created_at     INTEGER NOT NULL,
+                     updated_at     INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_library_guild
+                     ON library_messages(guild_id, updated_at);
+                 CREATE INDEX IF NOT EXISTS idx_library_msg
+                     ON library_messages(guild_id, message_id);",
             )
-            .unwrap_or(0);
-        if has_app == 0 {
-            conn.execute_batch("ALTER TABLE library_messages ADD COLUMN application_id TEXT;")
-                .map_err(|e| format!("migrate application_id: {e}"))?;
+            .map_err(|e| format!("schema: {e}"))?;
+            // Migrate DBs created before `application_id` existed (SQLite has no
+            // ADD COLUMN IF NOT EXISTS) — which custom bot authored a posted
+            // entry, so the Activity can update it through the right identity.
+            let has_app: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('library_messages') \
+                     WHERE name = 'application_id'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if has_app == 0 {
+                conn.execute_batch("ALTER TABLE library_messages ADD COLUMN application_id TEXT;")
+                    .map_err(|e| format!("migrate application_id: {e}"))?;
+            }
         }
-        let count: i64 = conn
+        let count: i64 = pool
+            .get()
             .query_row("SELECT COUNT(*) FROM library_messages", [], |r| r.get(0))
             .map_err(|e| format!("count: {e}"))?;
         Ok(LibraryStore {
-            conn: Mutex::new(conn),
+            pool,
             max_entries: max_entries as i64,
             max_drafts_per_guild: max_drafts_per_guild as i64,
             posted_per_guild: posted_per_guild as i64,
@@ -253,7 +263,17 @@ impl LibraryStore {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|p| p.into_inner())
+        self.pool.get()
+    }
+
+    /// Cheap connectivity probe for the readiness endpoint: proves the DB file
+    /// is open and answering (catches an unwritable volume / wedged lock) without
+    /// touching any real data. Runs on the shared connection like every other
+    /// call, so a probe that returns also means the store isn't dead-locked.
+    pub fn ping(&self) -> Result<(), String> {
+        self.lock()
+            .query_row("SELECT 1", [], |_| Ok(()))
+            .map_err(e2s)
     }
 
     /// The standalone per-server draft quota, surfaced so the list can show
@@ -394,7 +414,7 @@ impl LibraryStore {
                 // (window + permanent slots), so this stays cheap.
                 let rows: Vec<(String, Option<String>)> = {
                     let mut stmt = conn
-                        .prepare(
+                        .prepare_cached(
                             "SELECT id, message_id FROM library_messages \
                              WHERE guild_id=?1 AND label='posted' \
                              ORDER BY updated_at DESC, rowid DESC",
@@ -431,7 +451,7 @@ impl LibraryStore {
     pub fn list_for_guild(&self, guild: &str, limit: usize) -> Result<Vec<Row>, String> {
         let conn = self.lock();
         let mut stmt = conn
-            .prepare(&format!(
+            .prepare_cached(&format!(
                 "SELECT {COLS} FROM library_messages WHERE guild_id=?1 \
                  ORDER BY updated_at DESC LIMIT ?2"
             ))
