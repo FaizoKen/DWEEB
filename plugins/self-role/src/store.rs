@@ -1,9 +1,9 @@
 //! SQLite-backed instance store.
 //!
-//! Two tables. `instances` holds one JSON config blob per instance, keyed by a
-//! 128-bit random token that lives inside the component's `custom_id` — that id
-//! is the *capability* to read/replace this instance's config, so it must stay
-//! unguessable. `grants` is the ledger for **temporary roles**: one row per
+//! Two tables. `instances` holds one JSON config blob per instance, keyed by the
+//! opaque public id in the component's `custom_id`. A separate random edit token
+//! authorizes replacement and only its SHA-256 digest is stored. `grants` is the
+//! ledger for **temporary roles**: one row per
 //! (instance, member, role) records when a self-granted role is due to be taken
 //! back, which the background reaper drains. Role assignment always uses the
 //! deployment-wide shared bot (`BOT_TOKEN`), so the only per-instance secret is
@@ -13,6 +13,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// One role this menu manages. `name`/`color` are cached at save time purely so
 /// the config UI and the confirmation messages can render nicely without a live
@@ -210,26 +211,16 @@ pub struct Store {
     conn: Mutex<Connection>,
 }
 
+pub enum EditLookup {
+    Authorized(Box<InstanceConfig>),
+    Unknown,
+    Forbidden,
+}
+
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             CREATE TABLE IF NOT EXISTS instances (
-                 id          TEXT PRIMARY KEY,
-                 created_at  INTEGER NOT NULL,
-                 config      TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS grants (
-                 instance_id TEXT NOT NULL,
-                 guild_id    TEXT NOT NULL,
-                 user_id     TEXT NOT NULL,
-                 role_id     TEXT NOT NULL,
-                 expires_at  INTEGER NOT NULL,
-                 PRIMARY KEY (instance_id, user_id, role_id)
-             );
-             CREATE INDEX IF NOT EXISTS idx_grants_due ON grants(expires_at);",
-        )?;
+        init_schema(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -248,23 +239,73 @@ impl Store {
             .unwrap_or_else(|poison| poison.into_inner())
     }
 
-    /// Insert a new instance under a fresh id.
-    pub fn create(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<()> {
+    /// Insert a new instance and store only the edit-token digest.
+    pub fn create(
+        &self,
+        id: &str,
+        edit_token: &str,
+        config: &InstanceConfig,
+    ) -> rusqlite::Result<()> {
         let json = serde_json::to_string(config).expect("serialize config");
+        let token_hash = hash_edit_token(edit_token);
         let now = unix_millis();
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO instances (id, created_at, config) VALUES (?1, ?2, ?3)",
-            (id, now, json),
+            "INSERT INTO instances (id, created_at, config, edit_token_hash)
+             VALUES (?1, ?2, ?3, ?4)",
+            (id, now, json, token_hash),
         )?;
         Ok(())
     }
 
-    /// Replace an existing instance's config. Returns false if the id is unknown.
-    pub fn update(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<bool> {
-        let json = serde_json::to_string(config).expect("serialize config");
+    /// Load only when the separate edit credential matches. Migrated legacy
+    /// rows carry a null digest and deliberately cannot be updated in place.
+    pub fn get_for_edit(&self, id: &str, edit_token: &str) -> rusqlite::Result<EditLookup> {
         let conn = self.lock();
-        let n = conn.execute("UPDATE instances SET config = ?2 WHERE id = ?1", (id, json))?;
+        let row: Option<(String, Option<String>)> = conn
+            .query_row(
+                "SELECT config, edit_token_hash FROM instances WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })?;
+        let Some((json, stored_hash)) = row else {
+            return Ok(EditLookup::Unknown);
+        };
+        let Some(stored_hash) = stored_hash else {
+            return Ok(EditLookup::Forbidden);
+        };
+        if !edit_token_matches(edit_token, &stored_hash) {
+            return Ok(EditLookup::Forbidden);
+        }
+        match serde_json::from_str::<InstanceConfig>(&json) {
+            Ok(mut config) => {
+                config.normalize();
+                Ok(EditLookup::Authorized(Box::new(config)))
+            }
+            Err(_) => Ok(EditLookup::Unknown),
+        }
+    }
+
+    /// Atomically replace only when the edit-token digest matches.
+    pub fn update(
+        &self,
+        id: &str,
+        edit_token: &str,
+        config: &InstanceConfig,
+    ) -> rusqlite::Result<bool> {
+        let json = serde_json::to_string(config).expect("serialize config");
+        let token_hash = hash_edit_token(edit_token);
+        let conn = self.lock();
+        let n = conn.execute(
+            "UPDATE instances SET config = ?2
+             WHERE id = ?1 AND edit_token_hash = ?3",
+            (id, json, token_hash),
+        )?;
         Ok(n > 0)
     }
 
@@ -351,10 +392,148 @@ impl Store {
     }
 }
 
+fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         CREATE TABLE IF NOT EXISTS instances (
+             id              TEXT PRIMARY KEY,
+             created_at      INTEGER NOT NULL,
+             config          TEXT NOT NULL,
+             edit_token_hash TEXT
+         );
+         CREATE TABLE IF NOT EXISTS grants (
+             instance_id TEXT NOT NULL,
+             guild_id    TEXT NOT NULL,
+             user_id     TEXT NOT NULL,
+             role_id     TEXT NOT NULL,
+             expires_at  INTEGER NOT NULL,
+             PRIMARY KEY (instance_id, user_id, role_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_grants_due ON grants(expires_at);",
+    )?;
+    if !has_column(conn, "instances", "edit_token_hash")? {
+        conn.execute("ALTER TABLE instances ADD COLUMN edit_token_hash TEXT", [])?;
+    }
+    Ok(())
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for name in names {
+        if name? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn hash_edit_token(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+fn edit_token_matches(token: &str, stored_hash: &str) -> bool {
+    let candidate = Sha256::digest(token.as_bytes());
+    let mut stored = [0u8; 32];
+    if hex::decode_to_slice(stored_hash, &mut stored).is_err() {
+        return false;
+    }
+    candidate
+        .iter()
+        .zip(stored.iter())
+        .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
+}
+
 fn unix_millis() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TOKEN: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    fn config(name: &str) -> InstanceConfig {
+        InstanceConfig {
+            target: "button".into(),
+            guild_id: "123456789012345678".into(),
+            guild_name: "Guild".into(),
+            roles: vec![ManagedRole {
+                id: "123456789012345679".into(),
+                name: name.into(),
+                color: 0,
+                emoji: None,
+                emoji_id: None,
+                emoji_animated: false,
+                description: None,
+            }],
+            mode: "toggle".into(),
+            max: None,
+            requirement: Requirement::default(),
+            expires_after_secs: None,
+            log_webhook: Some("https://discord.com/api/webhooks/1/secret".into()),
+            response: ResponseDef::default(),
+        }
+    }
+
+    #[test]
+    fn migrates_legacy_rows_without_granting_edit_access() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE instances (
+                id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, config TEXT NOT NULL
+             );
+             INSERT INTO instances VALUES ('legacy', 1, '{}');",
+        )
+        .unwrap();
+        init_schema(&conn).unwrap();
+        assert!(has_column(&conn, "instances", "edit_token_hash").unwrap());
+        let hash: Option<String> = conn
+            .query_row(
+                "SELECT edit_token_hash FROM instances WHERE id = 'legacy'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(hash.is_none());
+    }
+
+    #[test]
+    fn stores_only_hash_and_requires_token_for_updates() {
+        let store = Store::open(":memory:").unwrap();
+        store.create("one", TOKEN, &config("Before")).unwrap();
+        let stored: String = store
+            .lock()
+            .query_row(
+                "SELECT edit_token_hash FROM instances WHERE id = 'one'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, hash_edit_token(TOKEN));
+        assert_ne!(stored, TOKEN);
+        assert!(matches!(
+            store.get_for_edit("one", "wrong").unwrap(),
+            EditLookup::Forbidden
+        ));
+        assert!(!store.update("one", "wrong", &config("Wrong")).unwrap());
+        assert!(store.update("one", TOKEN, &config("After")).unwrap());
+        assert_eq!(store.get("one").unwrap().unwrap().roles[0].name, "After");
+    }
+
+    #[test]
+    fn masked_view_never_serializes_the_webhook() {
+        let json =
+            serde_json::to_string(&MaskedInstance::from_config("one".into(), config("Safe")))
+                .unwrap();
+        assert!(!json.contains("secret"));
+        assert!(!json.contains("discord.com/api/webhooks"));
+        assert!(json.contains("log_webhook_set"));
+    }
 }

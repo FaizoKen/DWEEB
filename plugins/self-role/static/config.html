@@ -403,6 +403,8 @@
       let nonce = null;
       let hostOrigin = "*";
       let instanceId = null; // set when reconfiguring
+      let managementToken = null; // browser-local edit credential, never part of custom_id
+      let protocolVersion = 1;
 
       // ── Capabilities (from /api/meta) ───────────────────────────────────
       let defaultBot = false; // deployment runs a shared bot
@@ -439,7 +441,7 @@
       let reqAll = false;
 
       // Audit-log webhook.
-      let savedWebhooks = []; // [{ id, name, url, channelName?, guildName? }]
+      let savedWebhooks = []; // Safe labels only: [{ id, name, channelName?, guildName? }]
       let logWebhookSet = false; // a webhook is already stored (reconfigure)
 
       const $ = (id) => document.getElementById(id);
@@ -1058,19 +1060,19 @@
           o.textContent = label;
           sel.appendChild(o);
         };
-        if (logWebhookSet) opt("__keep__", "Keep the current log webhook");
+        if (logWebhookSet && managementToken) opt("__keep__", "Keep the current log webhook");
         opt("", "None — don't log");
         for (const w of savedWebhooks) {
           const where = w.channelName ? ` · #${w.channelName}` : "";
-          opt(w.url, `${w.name || "Saved webhook"}${where}`);
+          opt(w.id, `${w.name || "Saved webhook"}${where}`);
         }
         opt("__paste__", "Paste a webhook URL…");
-        sel.value = logWebhookSet ? "__keep__" : "";
+        sel.value = logWebhookSet && managementToken ? "__keep__" : "";
         $("logUrl").style.display = "none";
       }
       // The value to send for `log_webhook`: "" keeps an existing one, null
       // clears/none, a URL sets it. (Matches the backend's update contract.)
-      function logWebhookPayload() {
+      async function logWebhookPayload() {
         const v = $("logSel").value;
         if (v === "__keep__") return ""; // keep existing (backend: empty = keep)
         if (v === "__paste__") {
@@ -1078,7 +1080,13 @@
           return u || null;
         }
         if (v === "") return null; // none / remove
-        return v; // a saved webhook URL
+        // Saved options contain an opaque local id, not a credential. Request
+        // this one URL now; DWEEB asks the user before releasing it.
+        const credential = await requestResource("savedWebhook", v);
+        if (!credential || typeof credential.url !== "string") {
+          throw new Error("That webhook was not shared.");
+        }
+        return credential.url;
       }
 
       // ── Reply ───────────────────────────────────────────────────────────
@@ -1093,23 +1101,36 @@
       }
 
       // ── DWEEB protocol ──────────────────────────────────────────────────
-      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
 
       window.addEventListener("message", async (event) => {
+        if (event.source !== parent) return;
         const msg = event.data;
         if (!msg || typeof msg !== "object") return;
 
-        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
-          const resolve = pendingReqs.get(msg.requestId);
+        if (
+          msg.type === "dweeb:plugin:response" &&
+          event.origin === hostOrigin &&
+          msg.nonce === nonce &&
+          pendingReqs.has(msg.requestId)
+        ) {
+          const pending = pendingReqs.get(msg.requestId);
+          if (pending.port) return; // credentials only arrive on their document-bound port
           pendingReqs.delete(msg.requestId);
-          resolve(msg.ok ? msg.data : null);
+          pending.resolve(msg.ok ? msg.data : null);
           return;
         }
 
         if (msg.type !== "dweeb:plugin:init") return;
+        if (typeof msg.nonce !== "string" || !msg.nonce) return;
 
         nonce = msg.nonce;
         hostOrigin = event.origin;
+        protocolVersion = msg.apiVersion === 2 ? 2 : 1;
+        managementToken =
+          protocolVersion >= 2 && /^[0-9a-f]{64}$/.test(msg.managementToken || "")
+            ? msg.managementToken
+            : null;
         if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
         target = msg.target === "string_select" ? "string_select" : "button";
 
@@ -1124,8 +1145,12 @@
         }
 
         // Saved webhooks power the audit-log picker. Best-effort.
-        const webhooks = await requestResource("savedWebhooks");
-        if (Array.isArray(webhooks)) savedWebhooks = webhooks;
+        // A v1 host's historical savedWebhooks shape contained credentials.
+        // Do not request it during the plugin-first rollout fallback.
+        if (protocolVersion >= 2) {
+          const webhooks = await requestResource("savedWebhooks");
+          if (Array.isArray(webhooks)) savedWebhooks = webhooks;
+        }
         renderLogOptions();
 
         if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
@@ -1144,21 +1169,49 @@
 
       // ── Request editor data from DWEEB (one promise per request) ────────
       const pendingReqs = new Map();
-      function requestResource(resource) {
+      function requestResource(resource, resourceId) {
         return new Promise((resolve) => {
           if (nonce == null) return resolve(null);
+          if (resource === "savedWebhook" && protocolVersion < 2) return resolve(null);
           const requestId = "req_" + Math.random().toString(36).slice(2);
-          pendingReqs.set(requestId, resolve);
-          parent.postMessage(
-            { type: "dweeb:plugin:request", nonce, requestId, resource },
-            hostOrigin,
-          );
+          const message = {
+            type: "dweeb:plugin:request",
+            nonce,
+            requestId,
+            resource,
+            ...(resourceId ? { resourceId } : {}),
+          };
+          const channel = resource === "savedWebhook" ? new MessageChannel() : null;
+          pendingReqs.set(requestId, { resolve, port: channel && channel.port1 });
+          if (channel) {
+            channel.port1.onmessage = (event) => {
+              const msg = event.data;
+              if (
+                !msg ||
+                msg.type !== "dweeb:plugin:response" ||
+                msg.nonce !== nonce ||
+                msg.requestId !== requestId ||
+                msg.resource !== resource
+              )
+                return;
+              if (!pendingReqs.has(requestId)) return;
+              pendingReqs.delete(requestId);
+              channel.port1.close();
+              resolve(msg.ok ? msg.data : null);
+            };
+            channel.port1.start();
+            parent.postMessage(message, hostOrigin, [channel.port2]);
+          } else {
+            parent.postMessage(message, hostOrigin);
+          }
           setTimeout(() => {
             if (pendingReqs.has(requestId)) {
+              const pending = pendingReqs.get(requestId);
               pendingReqs.delete(requestId);
+              if (pending.port) pending.port.close();
               resolve(null);
             }
-          }, 4000);
+          }, resource === "savedWebhook" ? 120000 : 4000);
         });
       }
 
@@ -1332,6 +1385,17 @@
         const reqAge = Math.max(0, Math.min(366, parseInt($("reqAge").value, 10) || 0));
         const expirySecs = getExpirySecs();
 
+        // Lock Save while the host-owned credential confirmation is open so a
+        // double click cannot start a second overlapping permission request.
+        setBusy(true);
+        let logWebhook;
+        try {
+          logWebhook = await logWebhookPayload();
+        } catch {
+          setBusy(false);
+          return fail("That webhook was not shared. Pick another destination or paste its URL.");
+        }
+
         const chosen = roles.filter((r) => selected.has(r.id));
         const body = {
           target,
@@ -1359,27 +1423,44 @@
             min_account_age_days: reqAge,
           },
           expires_after_secs: expirySecs > 0 ? expirySecs : null,
-          log_webhook: logWebhookPayload(),
+          log_webhook: logWebhook,
           response:
             replyMode === "custom" ? { mode: "custom", text: replyText } : { mode: "summary" },
         };
 
-        setBusy(true);
         try {
-          const url = instanceId
+          const canUpdate = !!(instanceId && managementToken);
+          const url = canUpdate
             ? `/api/instances/${encodeURIComponent(instanceId)}`
             : "/api/instances";
           const res = await fetch(url, {
-            method: instanceId ? "PUT" : "POST",
-            headers: { "Content-Type": "application/json" },
+            method: canUpdate ? "PUT" : "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(canUpdate ? { "X-DWEEB-Plugin-Edit-Token": managementToken } : {}),
+            },
             body: JSON.stringify(body),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
             setBusy(false);
+            if (res.status === 403) {
+              managementToken = null;
+              renderLogOptions();
+              return fail(
+                "Edit access is no longer available in this browser. Choose the log destination again, then Save to create a replacement menu.",
+              );
+            }
             return fail(data.error || `Server returned ${res.status}.`);
           }
           const id = data.id || instanceId;
+          const nextManagementToken = /^[0-9a-f]{64}$/.test(data.managementToken || "")
+            ? data.managementToken
+            : managementToken;
+          if (protocolVersion >= 2 && !nextManagementToken) {
+            setBusy(false);
+            return fail("The plugin service did not return edit access. Reload and try again.");
+          }
           const modeLabel =
             max === 1 ? "Pick one" : MODE_DEFS[mode]?.title || mode;
           // The `{roles}` placeholder's first-paint value: the role *names*,
@@ -1404,6 +1485,9 @@
               guildId,
               summary: { label: "Self Role", description: descBits.join(" · ") },
               values: { roles: rolesValue },
+              ...(protocolVersion >= 2 && nextManagementToken
+                ? { managementToken: nextManagementToken }
+                : {}),
               // For a string select, hand DWEEB the option list to wire + lock
               // onto the menu (one per role, value = role ID, + emoji/subtitle),
               // and pin the selection bounds so the user can't widen them and

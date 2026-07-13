@@ -394,6 +394,15 @@ pub async fn post_webhook_log(http: &reqwest::Client, webhook_url: &str, content
     match http.post(webhook_url).json(&body).send().await {
         Ok(resp) if resp.status().is_success() => {}
         Ok(resp) => tracing::warn!(status = %resp.status(), "audit-log webhook rejected"),
-        Err(e) => tracing::warn!(error = %e, "audit-log webhook unreachable"),
+        Err(e) => {
+            let kind = if e.is_timeout() {
+                "timeout"
+            } else if e.is_connect() {
+                "connect"
+            } else {
+                "transport"
+            };
+            tracing::warn!(kind, "audit-log webhook unreachable");
+        }
     }
 }

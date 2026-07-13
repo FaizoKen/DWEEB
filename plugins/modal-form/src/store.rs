@@ -1,24 +1,19 @@
 //! SQLite-backed instance store.
 //!
-//! Two tables. `instances` holds one JSON config blob per form, keyed by a
-//! 128-bit random token that lives inside the component's `custom_id` — that id
-//! is the *capability* to read/replace this instance's config, so it must stay
-//! unguessable. Reads intended for the config UI mask the forward webhook (a
-//! secret); see [`MaskedInstance`]. `submissions` records who has submitted each
-//! form, but only when the form opts into "one response per person"
-//! (`limit_one`) — it is the single bit of per-user state this plugin keeps.
+//! `instances` holds one JSON config blob per form, keyed by the opaque id in
+//! the component's `custom_id`. A separate random edit token authorizes
+//! replacement; only its SHA-256 digest is stored. Public reads mask the
+//! forwarding webhook through [`MaskedInstance`]. `submissions` records the
+//! single bit of per-user state needed by one-response-per-person forms.
 
 use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-/// One configurable modal text field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModalField {
-    /// Stable id; becomes the text input's `custom_id` and keys the submitted
-    /// value. Generated once in the config UI and preserved across reorders, so
-    /// reordering fields never reshuffles which answer is which.
     pub id: String,
     pub label: String,
     /// `"short"` (single line) or `"paragraph"` (multi-line).
@@ -27,8 +22,6 @@ pub struct ModalField {
     pub required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
-    /// Text pre-filled into the input when the modal opens (Discord's `value`).
-    /// Handy for templates ("Steps to reproduce:\n1. ") the member edits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -43,39 +36,24 @@ pub struct ModalDef {
     pub fields: Vec<ModalField>,
 }
 
-/// How to reply to the submitter (ephemeral). Either a plain-text "flat"
-/// message typed in the config UI, or a DWEEB saved message (Components V2).
-/// A saved-message `payload`, when present, takes priority over `text`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReplyDef {
-    /// A DWEEB Components V2 wire payload (the saved message) used to reply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
-    /// A plain-text reply typed directly in the config UI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
 }
 
-/// The full, stored configuration for one instance.
-///
-/// New fields are additive with serde defaults so configs written by an older
-/// build keep deserializing: `include_submitter` defaults to the historical
-/// behaviour (named submissions), the rest to "off / not set".
+/// Full stored configuration. The forwarding webhook is a secret and must
+/// never be returned by the public config GET route.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceConfig {
     pub modal: ModalDef,
-    /// Discord incoming-webhook URL the submission is forwarded to. Secret.
     pub forward_webhook: String,
-    /// Optional display name the forwarded message posts under (the webhook
-    /// `username` override). None ⇒ the default "Modal Form".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forward_username: Option<String>,
-    /// Whether the forwarded message names who submitted. False makes the form
-    /// an anonymous suggestion/report box. Defaults true (legacy behaviour).
     #[serde(default = "default_true")]
     pub include_submitter: bool,
-    /// When true, each member may submit only once: a second button click is
-    /// turned away before the modal opens. Backed by the `submissions` table.
     #[serde(default)]
     pub limit_one: bool,
     pub reply: ReplyDef,
@@ -85,9 +63,7 @@ fn default_true() -> bool {
     true
 }
 
-/// A read view safe to hand back to the browser: the webhook is replaced by a
-/// boolean so the secret never leaves the server. Everything else round-trips
-/// so the config UI can repopulate exactly what was saved.
+/// Browser-safe read view: the webhook is represented only by a boolean.
 #[derive(Debug, Serialize)]
 pub struct MaskedInstance {
     pub id: String,
@@ -99,6 +75,12 @@ pub struct MaskedInstance {
     pub limit_one: bool,
 }
 
+pub enum EditLookup {
+    Authorized(InstanceConfig),
+    Unknown,
+    Forbidden,
+}
+
 pub struct Store {
     conn: Mutex<Connection>,
 }
@@ -106,55 +88,82 @@ pub struct Store {
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             CREATE TABLE IF NOT EXISTS instances (
-                 id          TEXT PRIMARY KEY,
-                 created_at  INTEGER NOT NULL,
-                 config      TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS submissions (
-                 instance_id TEXT NOT NULL,
-                 user_id     TEXT NOT NULL,
-                 created_at  INTEGER NOT NULL,
-                 PRIMARY KEY (instance_id, user_id)
-             );",
-        )?;
+        init_schema(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 
-    /// Take the connection lock, shrugging off poisoning.
-    ///
-    /// The only thing that runs under this lock is a single `rusqlite` call,
-    /// which returns errors rather than panicking — so the lock can't actually
-    /// be poisoned today. Recovering anyway (instead of `unwrap()`) keeps one
-    /// unlucky panic in a future caller from bricking every later DB op for the
-    /// life of the process.
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
     }
 
-    /// Insert a new instance under a fresh id, returning the id.
-    pub fn create(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<()> {
+    /// Create under a fresh id and store only the edit-token digest.
+    pub fn create(
+        &self,
+        id: &str,
+        edit_token: &str,
+        config: &InstanceConfig,
+    ) -> rusqlite::Result<()> {
         let json = serde_json::to_string(config).expect("serialize config");
+        let token_hash = hash_edit_token(edit_token);
         let now = unix_millis();
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO instances (id, created_at, config) VALUES (?1, ?2, ?3)",
-            (id, now, json),
+            "INSERT INTO instances (id, created_at, config, edit_token_hash)
+             VALUES (?1, ?2, ?3, ?4)",
+            (id, now, json, token_hash),
         )?;
         Ok(())
     }
 
-    /// Replace an existing instance's config. Returns false if the id is unknown.
-    pub fn update(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<bool> {
-        let json = serde_json::to_string(config).expect("serialize config");
+    /// Load a config only when the separate edit credential matches. Migrated
+    /// legacy rows have a null digest and intentionally return `Forbidden`.
+    pub fn get_for_edit(&self, id: &str, edit_token: &str) -> rusqlite::Result<EditLookup> {
         let conn = self.lock();
-        let n = conn.execute("UPDATE instances SET config = ?2 WHERE id = ?1", (id, json))?;
+        let row: Option<(String, Option<String>)> = conn
+            .query_row(
+                "SELECT config, edit_token_hash FROM instances WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })?;
+        let Some((json, stored_hash)) = row else {
+            return Ok(EditLookup::Unknown);
+        };
+        let Some(stored_hash) = stored_hash else {
+            return Ok(EditLookup::Forbidden);
+        };
+        if !edit_token_matches(edit_token, &stored_hash) {
+            return Ok(EditLookup::Forbidden);
+        }
+        match serde_json::from_str(&json) {
+            Ok(config) => Ok(EditLookup::Authorized(config)),
+            Err(_) => Ok(EditLookup::Unknown),
+        }
+    }
+
+    /// Atomically replace only when the edit-token digest matches.
+    pub fn update(
+        &self,
+        id: &str,
+        edit_token: &str,
+        config: &InstanceConfig,
+    ) -> rusqlite::Result<bool> {
+        let json = serde_json::to_string(config).expect("serialize config");
+        let token_hash = hash_edit_token(edit_token);
+        let conn = self.lock();
+        let n = conn.execute(
+            "UPDATE instances SET config = ?2
+             WHERE id = ?1 AND edit_token_hash = ?3",
+            (id, json, token_hash),
+        )?;
         Ok(n > 0)
     }
 
@@ -175,8 +184,6 @@ impl Store {
         })
     }
 
-    /// Has this member already submitted this form? Only meaningful for forms
-    /// with `limit_one`; callers gate on the config flag before asking.
     pub fn has_submitted(&self, instance_id: &str, user_id: &str) -> rusqlite::Result<bool> {
         let conn = self.lock();
         let exists: Option<i64> = conn
@@ -193,18 +200,66 @@ impl Store {
         Ok(exists.is_some())
     }
 
-    /// Record that a member submitted this form. Idempotent: a repeat is a
-    /// no-op (`INSERT OR IGNORE` on the composite key), so a rapid double click
-    /// can't error here.
     pub fn record_submission(&self, instance_id: &str, user_id: &str) -> rusqlite::Result<()> {
         let now = unix_millis();
         let conn = self.lock();
         conn.execute(
-            "INSERT OR IGNORE INTO submissions (instance_id, user_id, created_at) VALUES (?1, ?2, ?3)",
+            "INSERT OR IGNORE INTO submissions (instance_id, user_id, created_at)
+             VALUES (?1, ?2, ?3)",
             (instance_id, user_id, now),
         )?;
         Ok(())
     }
+}
+
+fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         CREATE TABLE IF NOT EXISTS instances (
+             id              TEXT PRIMARY KEY,
+             created_at      INTEGER NOT NULL,
+             config          TEXT NOT NULL,
+             edit_token_hash TEXT
+         );
+         CREATE TABLE IF NOT EXISTS submissions (
+             instance_id TEXT NOT NULL,
+             user_id     TEXT NOT NULL,
+             created_at  INTEGER NOT NULL,
+             PRIMARY KEY (instance_id, user_id)
+         );",
+    )?;
+    if !has_column(conn, "instances", "edit_token_hash")? {
+        conn.execute("ALTER TABLE instances ADD COLUMN edit_token_hash TEXT", [])?;
+    }
+    Ok(())
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for name in names {
+        if name? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn hash_edit_token(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+fn edit_token_matches(token: &str, stored_hash: &str) -> bool {
+    let candidate = Sha256::digest(token.as_bytes());
+    let mut stored = [0u8; 32];
+    if hex::decode_to_slice(stored_hash, &mut stored).is_err() {
+        return false;
+    }
+    candidate
+        .iter()
+        .zip(stored.iter())
+        .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
 }
 
 fn unix_millis() -> i64 {
@@ -213,4 +268,100 @@ fn unix_millis() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    fn config(title: &str) -> InstanceConfig {
+        InstanceConfig {
+            modal: ModalDef {
+                title: title.into(),
+                fields: vec![ModalField {
+                    id: "field".into(),
+                    label: "Question".into(),
+                    style: "short".into(),
+                    required: true,
+                    placeholder: None,
+                    value: None,
+                    min_length: None,
+                    max_length: None,
+                }],
+            },
+            forward_webhook: "https://discord.com/api/webhooks/1/secret".into(),
+            forward_username: None,
+            include_submitter: true,
+            limit_one: false,
+            reply: ReplyDef {
+                payload: None,
+                text: Some("Thanks".into()),
+            },
+        }
+    }
+
+    #[test]
+    fn migrates_legacy_rows_without_granting_edit_access() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE instances (
+                id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, config TEXT NOT NULL
+             );
+             INSERT INTO instances VALUES ('legacy', 1, '{}');",
+        )
+        .unwrap();
+        init_schema(&conn).unwrap();
+        assert!(has_column(&conn, "instances", "edit_token_hash").unwrap());
+        let hash: Option<String> = conn
+            .query_row(
+                "SELECT edit_token_hash FROM instances WHERE id = 'legacy'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(hash.is_none());
+    }
+
+    #[test]
+    fn stores_only_hash_and_requires_token_for_updates() {
+        let store = Store::open(":memory:").unwrap();
+        store.create("one", TOKEN, &config("Before")).unwrap();
+        let stored: String = store
+            .lock()
+            .query_row(
+                "SELECT edit_token_hash FROM instances WHERE id = 'one'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, hash_edit_token(TOKEN));
+        assert_ne!(stored, TOKEN);
+        assert!(matches!(
+            store.get_for_edit("one", "wrong").unwrap(),
+            EditLookup::Forbidden
+        ));
+        assert!(!store.update("one", "wrong", &config("Wrong")).unwrap());
+        assert!(store.update("one", TOKEN, &config("After")).unwrap());
+        assert_eq!(store.get("one").unwrap().unwrap().modal.title, "After");
+    }
+
+    #[test]
+    fn masked_view_never_serializes_the_webhook() {
+        let cfg = config("Safe");
+        let masked = MaskedInstance {
+            id: "one".into(),
+            modal: cfg.modal,
+            reply: cfg.reply,
+            forward_webhook_set: true,
+            forward_username: cfg.forward_username,
+            include_submitter: cfg.include_submitter,
+            limit_one: cfg.limit_one,
+        };
+        let json = serde_json::to_string(&masked).unwrap();
+        assert!(!json.contains("secret"));
+        assert!(!json.contains("discord.com/api/webhooks"));
+        assert!(json.contains("forward_webhook_set"));
+    }
 }

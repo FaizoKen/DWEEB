@@ -48,8 +48,8 @@ option fires nothing — a confusing trigger for a form. So Modal Form targets
 | Concern | How it's handled |
 |---|---|
 | Interaction authenticity | Ed25519 signature verified on the **raw** body before parsing ([`discord.rs`](src/discord.rs)). Bad/missing signature → `401`. Custom-app signatures verified with the dispatcher-attested key. |
-| Who can reconfigure an instance | The instance id is 128 bits of CSPRNG entropy, carried inside the Discord `custom_id` (not visible to normal users). Knowing it is the capability; there's no separate account system. |
-| Secret leakage | The forward webhook URL is **write-only**: `GET` masks it to a boolean, so the browser never receives it. |
+| Who can reconfigure an instance | A separate 256-bit browser-local edit token is returned once on create; SQLite stores only its SHA-256 hash. The public instance id in Discord `custom_id` grants read/interaction routing only. A legacy or cache-miss edit creates a new instance and rebinds. |
+| Secret leakage | After save, the forward webhook is **write-only**: `GET` masks it to a boolean, so a later config read never returns the stored URL. |
 | SSRF | The forward target is restricted to Discord webhook hosts + `/api/webhooks/` paths ([`validate.rs`](src/validate.rs)). |
 | Mention injection | The forward sets `allowed_mentions: { parse: [] }`, so an `@everyone`/`@here`/role mention a member pastes into an answer **can't ping** the destination channel. |
 | Reply within Discord's 3s window | The forward POST uses a **2.5s** client timeout and is best-effort; the user's reply is sent regardless of its outcome. |
@@ -100,9 +100,9 @@ $5 VPS. Give it a small persistent volume for the `.db` file.
 | GET | `/health` | Liveness. |
 | GET | `/registry.json` | DWEEB plugin registry (one plugin). CORS-open. |
 | GET | `/config.html` | The config iframe DWEEB embeds. |
-| POST | `/api/instances` | Create an instance → `{ id }`. |
+| POST | `/api/instances` | Create an instance → `{ id, managementToken }` (token returned once). |
 | GET | `/api/instances/:id` | Read an instance (webhook masked). |
-| PUT | `/api/instances/:id` | Replace an instance. Empty `forward_webhook` keeps the existing one. |
+| PUT | `/api/instances/:id` | Replace an instance; requires `X-DWEEB-Plugin-Edit-Token`. Empty `forward_webhook` keeps the existing one only after authorization. |
 | POST | `/interactions` | Discord interactions (signature-verified). |
 
 ## Files

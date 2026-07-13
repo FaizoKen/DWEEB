@@ -187,7 +187,9 @@
       let nonce = null;
       let hostOrigin = "*";
       let instanceId = null; // set when reconfiguring
-      let savedWebhooks = []; // [{ id, name, url, channelName?, guildName? }]
+      let managementToken = null; // browser-local edit credential, never part of custom_id
+      let protocolVersion = 1;
+      let savedWebhooks = []; // Safe labels only: [{ id, name, channelName?, guildName? }]
       let webhookAlreadySet = false; // reconfigure: keep existing if input left blank
 
       const $ = (id) => document.getElementById(id);
@@ -416,8 +418,8 @@
       }
 
       // ── Saved-webhook picker ────────────────────────────────────────────
-      // Picking one just fills the URL field above (the single source of truth
-      // on save), then resets the select so it reads as an action, not a state.
+      // The initial list contains labels only. Picking one asks the DWEEB host
+      // for that single credential; the host shows its own confirmation first.
       function renderWebhookOptions() {
         const sel = $("savedWebhook");
         sel.innerHTML = "";
@@ -442,22 +444,39 @@
         sel.disabled = savedWebhooks.length === 0;
       }
 
-      $("savedWebhook").addEventListener("change", () => {
-        const picked = savedWebhooks.find((w) => w.id === $("savedWebhook").value);
-        if (picked) $("webhook").value = picked.url;
-        $("savedWebhook").value = "";
+      $("savedWebhook").addEventListener("change", async () => {
+        const sel = $("savedWebhook");
+        const picked = savedWebhooks.find((w) => w.id === sel.value);
+        if (!picked) return;
+        sel.disabled = true;
+        $("error").textContent = "";
+        const credential = await requestResource("savedWebhook", picked.id);
+        if (credential && typeof credential.url === "string") {
+          $("webhook").value = credential.url;
+        } else {
+          fail("That webhook was not shared. You can pick another one or paste a URL.");
+        }
+        sel.value = "";
+        sel.disabled = savedWebhooks.length === 0;
       });
 
       // ── DWEEB protocol ──────────────────────────────────────────────────
-      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
 
       window.addEventListener("message", async (event) => {
+        if (event.source !== parent) return;
         const msg = event.data;
         if (!msg || typeof msg !== "object") return;
 
         if (msg.type === "dweeb:plugin:init") {
+          if (typeof msg.nonce !== "string" || !msg.nonce) return;
           nonce = msg.nonce;
           hostOrigin = event.origin;
+          protocolVersion = msg.apiVersion === 2 ? 2 : 1;
+          managementToken =
+            protocolVersion >= 2 && /^[0-9a-f]{64}$/.test(msg.managementToken || "")
+              ? msg.managementToken
+              : null;
           if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
 
           if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
@@ -474,29 +493,78 @@
             }
           }
           renderFields();
-          requestResource("savedWebhooks");
-          return;
-        }
-
-        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
-          pendingReqs.delete(msg.requestId);
-          if (msg.ok && Array.isArray(msg.data) && msg.resource === "savedWebhooks") {
-            savedWebhooks = msg.data.filter((w) => w && w.id && w.url);
-            renderWebhookOptions();
+          // A v1 host's historical savedWebhooks shape contained credentials.
+          // Do not request it during the plugin-first rollout fallback.
+          if (protocolVersion >= 2) {
+            const webhooks = await requestResource("savedWebhooks");
+            if (Array.isArray(webhooks)) {
+              savedWebhooks = webhooks.filter((w) => w && w.id);
+              renderWebhookOptions();
+            }
           }
           sendResize();
           return;
         }
+
+        if (
+          msg.type === "dweeb:plugin:response" &&
+          event.origin === hostOrigin &&
+          msg.nonce === nonce &&
+          pendingReqs.has(msg.requestId)
+        ) {
+          const pending = pendingReqs.get(msg.requestId);
+          if (pending.port) return; // credentials only arrive on their document-bound port
+          pendingReqs.delete(msg.requestId);
+          pending.resolve(msg.ok ? msg.data : null);
+          return;
+        }
       });
 
-      const pendingReqs = new Set();
-      function requestResource(resource) {
-        const requestId = "req_" + Math.random().toString(36).slice(2);
-        pendingReqs.add(requestId);
-        parent.postMessage(
-          { type: "dweeb:plugin:request", nonce, requestId, resource },
-          hostOrigin,
-        );
+      const pendingReqs = new Map();
+      function requestResource(resource, resourceId) {
+        return new Promise((resolve) => {
+          if (nonce == null) return resolve(null);
+          if (resource === "savedWebhook" && protocolVersion < 2) return resolve(null);
+          const requestId = "req_" + Math.random().toString(36).slice(2);
+          const message = {
+            type: "dweeb:plugin:request",
+            nonce,
+            requestId,
+            resource,
+            ...(resourceId ? { resourceId } : {}),
+          };
+          const channel = resource === "savedWebhook" ? new MessageChannel() : null;
+          pendingReqs.set(requestId, { resolve, port: channel && channel.port1 });
+          if (channel) {
+            channel.port1.onmessage = (event) => {
+              const msg = event.data;
+              if (
+                !msg ||
+                msg.type !== "dweeb:plugin:response" ||
+                msg.nonce !== nonce ||
+                msg.requestId !== requestId ||
+                msg.resource !== resource
+              )
+                return;
+              if (!pendingReqs.has(requestId)) return;
+              pendingReqs.delete(requestId);
+              channel.port1.close();
+              resolve(msg.ok ? msg.data : null);
+            };
+            channel.port1.start();
+            parent.postMessage(message, hostOrigin, [channel.port2]);
+          } else {
+            parent.postMessage(message, hostOrigin);
+          }
+          setTimeout(() => {
+            if (pendingReqs.has(requestId)) {
+              const pending = pendingReqs.get(requestId);
+              pendingReqs.delete(requestId);
+              if (pending.port) pending.port.close();
+              resolve(null);
+            }
+          }, resource === "savedWebhook" ? 120000 : 4000);
+        });
       }
 
       function sendResize() {
@@ -556,9 +624,12 @@
         const replyText = $("replyText").value.trim();
         if (!replyText) return fail("Type the reply members get after submitting.");
 
-        // Resolve the forward webhook ("" => keep the stored one on update).
+        // A hidden stored webhook may be kept only with edit authorization. A
+        // legacy/cache-miss reconfigure creates a replacement instance, so the
+        // destination must be selected again instead of copying a secret.
         const webhookInput = $("webhook").value.trim();
-        if (!webhookInput && !(instanceId && webhookAlreadySet))
+        const canUpdate = !!(instanceId && managementToken);
+        if (!webhookInput && !(canUpdate && webhookAlreadySet))
           return fail("Add a Discord webhook URL so answers have somewhere to go.");
 
         const forwardName = $("forwardName").value.trim();
@@ -585,19 +656,39 @@
 
         setBusy(true);
         try {
-          const url = instanceId ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
-          const method = instanceId ? "PUT" : "POST";
+          const url = canUpdate
+            ? `/api/instances/${encodeURIComponent(instanceId)}`
+            : "/api/instances";
+          const method = canUpdate ? "PUT" : "POST";
           const res = await fetch(url, {
             method,
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(canUpdate ? { "X-DWEEB-Plugin-Edit-Token": managementToken } : {}),
+            },
             body: JSON.stringify(body),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
             setBusy(false);
+            if (res.status === 403) {
+              managementToken = null;
+              webhookAlreadySet = false;
+              $("webhook").placeholder = "https://discord.com/api/webhooks/...";
+              return fail(
+                "Edit access is no longer available in this browser. Choose the destination again, then Save to create a replacement form.",
+              );
+            }
             return fail(data.error || `Server returned ${res.status}.`);
           }
           const id = data.id || instanceId;
+          const nextManagementToken = /^[0-9a-f]{64}$/.test(data.managementToken || "")
+            ? data.managementToken
+            : managementToken;
+          if (protocolVersion >= 2 && !nextManagementToken) {
+            setBusy(false);
+            return fail("The plugin service did not return edit access. Reload and try again.");
+          }
           const n = fields.length;
           const tags = [];
           if (!$("includeSubmitter").checked) tags.push("anonymous");
@@ -610,6 +701,9 @@
               nonce,
               customId: PREFIX + id,
               summary: { label: title, description },
+              ...(protocolVersion >= 2 && nextManagementToken
+                ? { managementToken: nextManagementToken }
+                : {}),
             },
             hostOrigin,
           );

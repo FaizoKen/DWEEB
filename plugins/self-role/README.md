@@ -111,8 +111,8 @@ any message). See [the placeholder framework](../../docs/plugins.md#placeholders
 | Concern | How it's handled |
 |---|---|
 | Interaction authenticity | Ed25519 signature verified on the **raw** body before parsing ([`discord.rs`](src/discord.rs)). Bad/missing signature → `401`. Custom-app signatures verified with the dispatcher-attested key. |
-| Who can reconfigure an instance | The instance id is 128 bits of CSPRNG entropy, carried inside the Discord `custom_id` (not visible to normal users). Knowing it is the capability; there is no separate account system. |
-| Bot-token leakage | The bot token is never per-instance and never stored: it lives only in the server's `BOT_TOKEN` env, so the browser never receives it and the database holds no secret. |
+| Who can reconfigure an instance | A separate 256-bit browser-local edit token is returned once on create; SQLite stores only its SHA-256 hash. The public instance id in Discord `custom_id` grants read/interaction routing only. A legacy or cache-miss edit creates a new instance and rebinds. |
+| Bot-token leakage | The bot token is never per-instance and never stored: it lives only in the server's `BOT_TOKEN` env, so the browser and database never receive the bot token. (An optional per-instance audit webhook is stored separately and masked on reads.) |
 | SSRF | The token is only ever sent to `discord.com` (a fixed host) — there is no user-supplied URL to abuse. |
 | Privilege escalation | Only roles in the menu's managed set are ever touched; select values are intersected with that set. The bot can only assign roles **below** its own top role, enforced by Discord. The access gate re-derives the member's roles from the payload — never a client-supplied claim. |
 | SSRF | Role assignment only ever calls `discord.com` (a fixed host). The one user-supplied URL — the optional audit-log webhook — is pinned to genuine Discord webhook hosts/paths (`validate_webhook`), exactly like Modal Form. |
@@ -197,9 +197,9 @@ the DWEEB production stack it's wired exactly like the other plugins — see
 | GET | `/config.html` | The config iframe DWEEB embeds. |
 | GET | `/api/meta` | Whether a hosted bot exists + its invite URL. |
 | POST | `/api/connect` | Probe a guild with the shared bot → assignable roles **and the server's custom emoji** for the pickers. Stores nothing. |
-| POST | `/api/instances` | Create an instance → `{ id }`. |
+| POST | `/api/instances` | Create an instance → `{ id, managementToken }` (token returned once). |
 | GET | `/api/instances/:id` | Read an instance. |
-| PUT | `/api/instances/:id` | Replace an instance. |
+| PUT | `/api/instances/:id` | Replace an instance; requires `X-DWEEB-Plugin-Edit-Token`. |
 | POST | `/interactions` | Discord interactions (signature-verified). |
 
 ## Files

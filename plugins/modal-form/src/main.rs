@@ -99,8 +99,8 @@ async fn run() {
         .route("/interactions", post(routes::interactions))
         .with_state(state)
         // The registry is fetched cross-origin by DWEEB; the config API is hit
-        // by the iframe. Both are public/capability-gated, so a permissive
-        // (credential-less) CORS policy is fine.
+        // by the iframe. Reads/creates are public; PUT is edit-token gated, so a
+        // permissive credential-less CORS policy is fine.
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
