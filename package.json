@@ -1,7 +1,7 @@
 {
   "name": "dweeb",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "description": "DWEEB — a local-by-default visual Discord webhook & embed builder for Components V2 messages, with optional scheduling, server libraries, plugins, AI, and collaboration.",
   "license": "PolyForm-Noncommercial-1.0.0",
