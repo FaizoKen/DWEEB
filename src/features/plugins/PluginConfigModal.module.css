@@ -34,3 +34,14 @@
   line-height: 1.45;
   color: var(--app-text-muted);
 }
+
+.compatibilityError {
+  margin: 10px 2px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--app-danger) 50%, transparent);
+  border-radius: var(--app-radius-sm);
+  background: color-mix(in srgb, var(--app-danger) 12%, transparent);
+  color: var(--app-danger);
+  font-size: 13px;
+  line-height: 1.45;
+}

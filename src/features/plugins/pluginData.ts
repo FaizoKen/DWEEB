@@ -6,18 +6,12 @@
  * reply with). This resolver is the single, audited gate for that: it answers a
  * fixed allow-list of resources and nothing else.
  *
- * Most resources are pure *content* — the message the user is building, their
- * named saved messages — and carry nothing sensitive. The lone exception is
- * `savedWebhooks`, which returns each saved webhook's execute URL. That URL
- * embeds a bot token, so it is a credential: a forwarding plugin (Modal Form)
- * genuinely needs the real destination to post to, and the only alternative —
- * making the user re-paste a URL they already saved — is the worse UX. The
- * tradeoff is deliberate, but note its weight: this gate auto-answers any plugin
- * iframe with no per-request user gesture, so a plugin can read every saved
- * webhook URL the moment its config opens. The defense is upstream — the plugin
- * registry is bundled and curated (see `registry.ts`); only trusted plugins
- * ship. Still off-limits everywhere here: the Discord OAuth session and AI
- * provider keys. An unknown resource is refused.
+ * Most resources are pure content. Webhook execute URLs are different: each one
+ * embeds a credential. `savedWebhooks` therefore returns labels and opaque local
+ * ids only. A plugin can receive one URL through singular `savedWebhook`, but
+ * only after the host has shown a confirmation and passes `allowCredential` for
+ * that exact id. The manifest gate in `usePluginConfig` is an additional
+ * default-deny boundary. Discord OAuth sessions and AI keys are never exposed.
  */
 
 import { useSavedMessagesStore } from "@/core/state/savedMessagesStore";
@@ -29,16 +23,6 @@ import { stripEditorFields } from "@/core/serialization/normalize";
 import { getPlugins } from "@/core/plugins/registry";
 import { bakeForeignPlaceholders, type PlaceholderContext } from "@/core/plugins/placeholders";
 import { loadHistory } from "@/core/webhook";
-
-/** Resources a plugin may request. Anything else is refused. */
-export const PLUGIN_RESOURCES = [
-  "savedMessages",
-  "savedWebhooks",
-  "message",
-  "component",
-  "guild",
-] as const;
-export type PluginResource = (typeof PLUGIN_RESOURCES)[number];
 
 export type ResourceResult = { ok: true; data: unknown } | { ok: false; error: string };
 
@@ -53,6 +37,29 @@ interface ResourceContext {
    * token is baked to its first-paint value. Absent → no baking.
    */
   pluginId?: string;
+  /** Opaque local id used by singular resources such as `savedWebhook`. */
+  resourceId?: string;
+  /** Set only after the user approves releasing one credential. */
+  allowCredential?: boolean;
+}
+
+export interface SavedWebhookMetadata {
+  id: string;
+  name: string;
+  channelName?: string;
+  guildName?: string;
+}
+
+/** Look up safe display data for a credential confirmation. Never returns the URL. */
+export function savedWebhookMetadata(id: string): SavedWebhookMetadata | null {
+  const entry = loadHistory().find((candidate) => candidate.id === id && !candidate.deletedAt);
+  if (!entry) return null;
+  return {
+    id: entry.id,
+    name: entry.name,
+    ...(entry.channelName ? { channelName: entry.channelName } : {}),
+    ...(entry.guildName ? { guildName: entry.guildName } : {}),
+  };
 }
 
 /**
@@ -90,11 +97,8 @@ export function resolvePluginResource(resource: string, ctx: ResourceContext): R
       };
     }
     case "savedWebhooks": {
-      // The webhooks saved in this browser, so a forwarding plugin can offer
-      // "post submissions to one of your saved webhooks" instead of making the
-      // user re-paste a URL. Returns the execute `url` (a credential — see the
-      // file header) plus enough metadata to label each one in a picker. Entries
-      // a health check found gone on Discord are dropped — they can't receive.
+      // Labels only. A plugin uses the opaque id to request one credential after
+      // the user picks it; opening a config iframe never releases execute URLs.
       const entries = loadHistory();
       return {
         ok: true,
@@ -103,11 +107,21 @@ export function resolvePluginResource(resource: string, ctx: ResourceContext): R
           .map((e) => ({
             id: e.id,
             name: e.name,
-            url: e.url,
             channelName: e.channelName,
             guildName: e.guildName,
           })),
       };
+    }
+    case "savedWebhook": {
+      if (!ctx.resourceId) return { ok: false, error: "A saved webhook id is required." };
+      if (!ctx.allowCredential) {
+        return { ok: false, error: "Permission to share this webhook was not granted." };
+      }
+      const entry = loadHistory().find(
+        (candidate) => candidate.id === ctx.resourceId && !candidate.deletedAt,
+      );
+      if (!entry) return { ok: false, error: "That saved webhook is no longer available." };
+      return { ok: true, data: { id: entry.id, url: entry.url } };
     }
     case "message": {
       // The message currently being built, as the clean Discord wire payload.

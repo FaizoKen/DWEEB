@@ -67,7 +67,7 @@ export interface PluginSelectOption {
 
 export interface PluginReadyMessage {
   type: typeof PLUGIN_MSG.ready;
-  /** Protocol version the plugin speaks. Informational. */
+  /** Highest protocol version this iframe speaks. */
   apiVersion?: number;
 }
 
@@ -111,6 +111,12 @@ export interface PluginSaveMessage {
    * until the plugin renders them live. Ignored when absent.
    */
   values?: Record<string, string>;
+  /**
+   * Protocol v2 only: the one-time edit credential returned by a stateful
+   * plugin create. The host validates and stores it browser-locally; it is
+   * never written onto the Discord component or any message payload.
+   */
+  managementToken?: string;
 }
 
 export interface PluginCancelMessage {
@@ -132,6 +138,8 @@ export interface PluginRequestMessage {
   requestId: string;
   /** Whitelisted resource name (see `features/plugins/pluginData.ts`). */
   resource: string;
+  /** Resource-specific id. Required when requesting one saved webhook. */
+  resourceId?: string;
 }
 
 export type PluginInboundMessage =
@@ -168,6 +176,12 @@ export interface PluginInitMessage {
   theme: PluginTheme;
   /** BCP-47 language tag of the editor UI, best-effort. */
   locale: string;
+  /**
+   * Protocol v2 only: browser-local edit credential for `customId`, when this
+   * browser created or last rebound the instance. Missing means the plugin must
+   * create a replacement instance instead of updating the public id in place.
+   */
+  managementToken?: string;
 }
 
 export interface PluginResponseMessage {
@@ -190,6 +204,30 @@ function isObject(v: unknown): v is Record<string, unknown> {
 
 export function isReadyMessage(v: unknown): v is PluginReadyMessage {
   return isObject(v) && v.type === PLUGIN_MSG.ready;
+}
+
+/**
+ * Negotiate the highest mutually supported version while requiring the iframe
+ * to meet the version its manifest declared. `null` means init must not be sent.
+ */
+export function negotiatePluginApiVersion(
+  hostVersion: number,
+  declaredVersion: number,
+  iframeVersion: unknown,
+): number | null {
+  const advertised =
+    typeof iframeVersion === "number" && Number.isInteger(iframeVersion) && iframeVersion >= 1
+      ? iframeVersion
+      : 1;
+  if (declaredVersion < 1 || declaredVersion > hostVersion || advertised < declaredVersion) {
+    return null;
+  }
+  return Math.min(hostVersion, declaredVersion, advertised);
+}
+
+/** Canonical form of the 256-bit edit credential used by protocol v2. */
+export function sanitizeManagementToken(raw: unknown): string | undefined {
+  return typeof raw === "string" && /^[0-9a-f]{64}$/.test(raw) ? raw : undefined;
 }
 
 /** A save message that carries the expected nonce and a usable customId. */
@@ -224,8 +262,12 @@ export function isRequestMessage(v: unknown, nonce: string): v is PluginRequestM
     v.nonce === nonce &&
     typeof v.requestId === "string" &&
     v.requestId.length > 0 &&
+    v.requestId.length <= 128 &&
     typeof v.resource === "string" &&
-    v.resource.length > 0
+    v.resource.length > 0 &&
+    v.resource.length <= 64 &&
+    (v.resourceId === undefined ||
+      (typeof v.resourceId === "string" && v.resourceId.length > 0 && v.resourceId.length <= 128))
   );
 }
 

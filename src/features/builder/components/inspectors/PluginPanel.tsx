@@ -41,6 +41,7 @@ import {
   LINK_PLUGINS,
 } from "@/core/plugins/registry";
 import { LIMITS } from "@/core/schema/limits";
+import { clearPluginEditToken } from "@/core/plugins/editTokenCache";
 import type { PluginManifest } from "@/core/plugins/manifest";
 import { matchLinkPlugin, type LinkPluginManifest } from "@/core/plugins/linkManifest";
 import { matchPlugin, pluginsForTarget, targetOf, type PluginTarget } from "@/core/plugins/targets";
@@ -312,7 +313,10 @@ export function PluginPanel({ node }: Props) {
   };
 
   const handleDetach = () => {
-    if (customId) clearPluginSummary(customId);
+    if (customId) {
+      clearPluginSummary(customId);
+      if (attached) clearPluginEditToken(customId, attached.id);
+    }
     writeCustomId(DETACH_DEFAULTS[target]);
   };
 

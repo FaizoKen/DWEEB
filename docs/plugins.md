@@ -74,6 +74,7 @@ renders nothing). `configUrl` (and any `icon`/`homepage`) must be `https://`, or
 | `publisher`      | no       | Author/brand label. |
 | `defaultEmoji`   | no       | A unicode emoji (or `<:name:id>` token) the editor stamps onto a **button** when your plugin is freshly attached to a blank one, so a picked action arrives already labelled + emojied. A preset's own `emoji` wins over it; an emoji the user already set is never overwritten. |
 | `targets`        | yes      | Which component kinds you support (see below). At least one. |
+| `resources`      | no       | Editor-data resources the config iframe may request. Access is default-deny; every requested resource must be declared here. See “Reading editor data.” |
 | `configUrl`      | yes      | `https` (or `http://localhost`) iframe URL for configuration. |
 | `customIdPrefix` | yes      | Every `custom_id` you mint must start with this. How DWEEB re-binds on reload and how it validates your saves. Keep it short and unique, e.g. `"rolemenu:"`. |
 | `apiVersion`     | no       | Highest protocol version you speak. Defaults to `1`. |
@@ -240,11 +241,12 @@ On reload (draft, share link), DWEEB recognizes the owning plugin purely by
 prefix-matching the `custom_id`, and "Reconfigure" reopens your iframe with that
 same `custom_id` so you can reload the instance's saved config.
 
-> Your service owns config storage. DWEEB does not persist or proxy it. The only
-> things DWEEB caches locally (per `custom_id`, and expendable) are the optional
-> `summary` you return on save, to label the chip nicely, and the optional
-> `guildId` if your plugin is guild-scoped — used only to warn before the message
-> is posted to a different server.
+> Your service owns authoritative config storage. DWEEB may proxy the config API
+> inside a Discord Activity. The web host caches display metadata and, for a
+> protocol-v2 stateful plugin, its separate edit credential in this browser.
+> That credential never enters `custom_id`, a draft/share token, or a Discord
+> message. Losing the browser cache must produce a new instance and rebind, not
+> an unauthenticated update of the public instance id.
 
 ## 3. Build the config iframe (`configUrl`)
 
@@ -257,18 +259,21 @@ so an external link (e.g. an OAuth invite) can open in a new tab via
 ### Handshake
 
 ```
-your iframe → DWEEB : "dweeb:plugin:ready"    { apiVersion? }
-DWEEB → your iframe : "dweeb:plugin:init"     { nonce, apiVersion, target, customId?, preset?, theme, locale }
-your iframe → DWEEB : "dweeb:plugin:save"     { nonce, customId, summary?, options?, fields?, guildId? }  // adopt id (+ wire options/fields)
+your iframe → DWEEB : "dweeb:plugin:ready"    { apiVersion }
+DWEEB → your iframe : "dweeb:plugin:init"     { nonce, apiVersion, target, customId?, managementToken?, preset?, theme, locale }
+your iframe → DWEEB : "dweeb:plugin:save"     { nonce, customId, managementToken?, summary?, options?, fields?, guildId? }
 your iframe → DWEEB : "dweeb:plugin:cancel"   { nonce }                       // user backed out
 your iframe → DWEEB : "dweeb:plugin:resize"   { nonce, height }              // optional auto-height
-your iframe → DWEEB : "dweeb:plugin:request"  { nonce, requestId, resource }  // read editor data
+your iframe → DWEEB : "dweeb:plugin:request"  { nonce, requestId, resource, resourceId? }  // read declared editor data
 DWEEB → your iframe : "dweeb:plugin:response" { nonce, requestId, resource, ok, data?, error? }
 ```
 
 Rules:
 
-- **Post `ready` once your UI has booted.** DWEEB replies with `init`.
+- **Post `ready` once your UI has booted.** DWEEB compares it with the manifest's
+  declared `apiVersion` and sends `init` only after a compatible version is
+  negotiated. A declared v2 plugin whose deployed iframe still reports v1 gets
+  a visible compatibility error rather than partial initialization.
 - **Echo the `nonce`** from `init` on every message you send back. DWEEB ignores
   any message without the current nonce, or from the wrong origin.
 - Use `init.customId` (when present) to load the instance being edited; absent
@@ -280,6 +285,12 @@ Rules:
   open blank.
 - On `save`, DWEEB validates `customId` (prefix + length) before adopting it. A
   mismatch is rejected and the modal stays open.
+- Protocol v2 stateful plugins return a fresh 256-bit `managementToken` once from
+  create and echo it in `save`. DWEEB validates and keeps it browser-local, then
+  sends it back in a later `init` for that exact plugin + `customId`. Store only a
+  SHA-256 hash server-side and require the raw token in
+  `X-DWEEB-Plugin-Edit-Token` for `PUT`. If `init.managementToken` is absent,
+  `POST` a new instance and return its new id/token so DWEEB rebinds safely.
 - `summary` is optional: `{ label, description?, icon? }` for a nicer chip.
 - `guildId` is optional: the Discord guild this binding targets, if your plugin
   is guild-scoped (it only works in the server it was configured for). DWEEB
@@ -336,6 +347,19 @@ Rules:
 </script>
 ```
 
+### Deploying a protocol-v2 stateful plugin
+
+Use a two-stage rollout, in this order:
+
+1. Deploy the plugin services and their embedded/static config pages first. The
+   new iframe must remain safe under an old v1 host: it may load public masked
+   config, but without `init.managementToken` it uses `POST` to create and rebind
+   instead of attempting `PUT`.
+2. After both plugin services are healthy and their iframes report v2, deploy the
+   web host with the v2 manifests and token cache. Deploying the web host first is
+   intentionally fail-closed: it shows the compatibility error until the plugin
+   iframe is upgraded.
+
 A full, real plugin (Rust backend + Discord modal flow) lives in
 [`plugins/modal-form/`](../plugins/modal-form/).
 
@@ -343,23 +367,27 @@ A full, real plugin (Rust backend + Discord modal flow) lives in
 
 Some plugins need the user's own builder content to configure themselves. Ask
 for it with a `request`; DWEEB replies with a matching `response` (same
-`requestId`). Resources are a fixed allow-list. Most return pure *content*; the
-one exception is `savedWebhooks`, which returns saved webhook execute URLs (a
-credential) so a forwarding plugin can post to them — see the note below. The
-OAuth session and AI provider keys are **never** exposed.
+`requestId`). Resources are a fixed allow-list and must also appear in the
+plugin's manifest `resources` array. The OAuth session and AI provider keys are
+**never** exposed.
 
 | `resource`      | `data` returned |
 |-----------------|-----------------|
 | `savedMessages` | `[{ id, name, savedAt, payload }]` — the user's named saved messages (Components V2 wire payloads). |
-| `savedWebhooks` | `[{ id, name, url, channelName?, guildName? }]` — webhooks saved in this browser, including the execute `url`. For forwarding plugins (e.g. Modal Form) so the user can pick a destination instead of re-pasting a URL. |
+| `savedWebhooks` | `[{ id, name, channelName?, guildName? }]` — safe labels for webhooks saved in this browser. Execute URLs are deliberately omitted. |
+| `savedWebhook`  | `{ id, url }` for one `resourceId`. DWEEB shows a host-controlled confirmation naming the plugin and destination before releasing this credential. Declare both `savedWebhooks` and `savedWebhook` for a picker. |
 | `message`       | The message currently being built, as a clean Discord wire payload. |
 | `component`     | `{ target, customId }` for the component you're attached to. |
 | `guild`         | `{ id, name }` of the server the editor is connected to, or `null` if none. Lets a plugin target "this server" without the user pasting an id (e.g. Self Role auto-fills it). A guild id is public, not a credential. |
 
-> **`savedWebhooks` hands over a credential.** A webhook URL embeds a token;
-> this gate auto-answers any plugin iframe with no per-request user gesture, so a
-> plugin can read every saved webhook URL the moment its config opens. That's why
-> the registry is bundled and curated — only ship plugins you trust with it.
+> A webhook URL embeds a token. Never place URLs in picker option data. Request
+> safe `savedWebhooks` labels first, then request singular `savedWebhook` with the
+> selected id. For `savedWebhook`, the requesting iframe document creates a
+> `MessageChannel` and transfers one port with the original request; DWEEB sends
+> the approval result only over that document-bound port, never through the
+> iframe's navigation-stable `contentWindow`. The host owns the confirmation. A
+> declined request returns `{ ok: false }` and further credential prompts are
+> refused until the config modal is reopened.
 
 ```js
 // Ask for the user's saved messages, e.g. to offer a "reply with…" picker.
@@ -591,8 +619,8 @@ fail its verification.
 
 §1–5 are the *minimum* to make a plugin function. They are not the bar for
 adding one to the bundled registry. Because the registry is curated, a listed
-plugin is trusted with real credentials (the `savedWebhooks` gate hands over
-webhook tokens with no user gesture) and, if it touches Discord, a shared bot
+plugin can receive real credentials (a singular `savedWebhook` only after the
+host-owned user confirmation) and, if it touches Discord, may use a shared bot
 token. A plugin that ships is held to the standard below.
 
 **[`plugins/self-role/`](../plugins/self-role/) is the reference
@@ -629,8 +657,10 @@ forwarding flow), [`dispatcher`](../plugins/dispatcher/) (routing).
       managed set — never act on a raw client-supplied id).
 - [ ] Keep secrets in env, never in the database, never in a browser response.
       If you call a third party, pin the host so there is no SSRF surface.
-- [ ] If reconfiguration is capability-gated by an id in the `custom_id`, make
-      that id ≥ 128 bits of CSPRNG entropy (`getrandom`), not a sequence.
+- [ ] Never use the id published in Discord `custom_id` as edit authorization.
+      Return a separate 256-bit random edit token once on create, persist only
+      its SHA-256 hash, and require it for updates. A missing token must create a
+      replacement instance/rebind rather than weaken authorization.
 - [ ] In the config iframe, render any Discord-supplied string (role/channel
       names) with `textContent` / `createElement`; `escapeHtml` before any
       `innerHTML`.

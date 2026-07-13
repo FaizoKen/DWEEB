@@ -20,12 +20,13 @@ import type { PluginTarget } from "./targets";
 import { ALL_PLUGIN_TARGETS } from "./targets";
 import { parseManagedFields, type ManagedField } from "./managedFields";
 import { parsePlaceholders, type PluginPlaceholder } from "./placeholders";
+import { parsePluginResources, type PluginResource } from "./resources";
 
 /** Manifest schema version. Bump when the shape below changes incompatibly. */
 export const PLUGIN_MANIFEST_SCHEMA_VERSION = 1 as const;
 
 /** postMessage protocol version DWEEB speaks (see `protocol.ts`). */
-export const PLUGIN_API_VERSION = 1 as const;
+export const PLUGIN_API_VERSION = 2 as const;
 
 export interface PluginManifest {
   /** Manifest shape version. Only {@link PLUGIN_MANIFEST_SCHEMA_VERSION} is accepted. */
@@ -65,6 +66,12 @@ export interface PluginManifest {
    * inviting the bot.
    */
   requiresBot?: boolean;
+  /**
+   * Editor data this plugin's configuration iframe may request. Access is
+   * default-deny; undeclared resources are refused even when they are part of
+   * the host protocol's global allow-list.
+   */
+  resources?: PluginResource[];
   /** https URL of the configuration iframe DWEEB embeds. */
   configUrl: string;
   /**
@@ -192,6 +199,7 @@ export function parseManifest(raw: unknown): PluginManifest | null {
   const managesFields = parseManagedFields(o.managesFields);
   const placeholders = parsePlaceholders(o.placeholders);
   const presets = parsePresets(o.presets, targets);
+  const resources = parsePluginResources(o.resources);
 
   const manifest: PluginManifest = {
     schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
@@ -203,11 +211,17 @@ export function parseManifest(raw: unknown): PluginManifest | null {
     configUrl: o.configUrl,
     customIdPrefix: o.customIdPrefix,
     ...(o.requiresBot === true ? { requiresBot: true } : {}),
+    ...(resources ? { resources } : {}),
     ...(isAllowedUrl(o.icon) ? { icon: o.icon } : {}),
     ...(isAllowedUrl(o.homepage) ? { homepage: o.homepage } : {}),
     ...(isNonEmptyString(o.publisher) ? { publisher: o.publisher } : {}),
     ...(isNonEmptyString(o.defaultEmoji) ? { defaultEmoji: o.defaultEmoji.slice(0, 32) } : {}),
-    ...(typeof o.apiVersion === "number" ? { apiVersion: o.apiVersion } : {}),
+    ...(typeof o.apiVersion === "number" &&
+    Number.isInteger(o.apiVersion) &&
+    o.apiVersion >= 1 &&
+    o.apiVersion <= 100
+      ? { apiVersion: o.apiVersion }
+      : {}),
     ...(o.managesSelectOptions === true ? { managesSelectOptions: true } : {}),
     ...(managesFields ? { managesFields } : {}),
     ...(placeholders ? { placeholders } : {}),
