@@ -6,7 +6,7 @@
   /* --app-sait (tokens.css) keeps the prompt clear of the Discord mobile
      client's native top bar inside the Activity; 0 everywhere else. */
   top: calc(16px + var(--app-sait));
-  right: 16px;
+  right: calc(16px + var(--app-sair));
   z-index: var(--app-z-tooltip);
   display: flex;
   pointer-events: none;

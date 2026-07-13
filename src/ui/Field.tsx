@@ -1,4 +1,11 @@
-import { useId, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useId,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { cn } from "@/lib/cn";
 import styles from "./Field.module.css";
 
@@ -6,9 +13,9 @@ import styles from "./Field.module.css";
  * Generic labeled wrapper used by every inspector control. Renders a label
  * row, optional hint, and an optional error/warning under the control.
  *
- * It accepts a render-prop child so the underlying control owns its own
- * accessibility wiring (an id is passed in and should be applied to the
- * control's `id` attribute).
+ * It accepts a render-prop child and wires its rendered control to the hint,
+ * warning, and error by the id passed to that child. Recursing through the
+ * returned elements also covers controls wrapped beside secondary buttons.
  */
 interface FieldProps {
   label: string;
@@ -24,6 +31,47 @@ interface FieldProps {
   children: (controlId: string) => ReactNode;
 }
 
+interface AccessibleElementProps {
+  id?: string;
+  children?: ReactNode;
+  "aria-describedby"?: string;
+  "aria-errormessage"?: string;
+  "aria-invalid"?: boolean | "true" | "false";
+}
+
+function mergeIds(existing: string | undefined, generated: string[]): string | undefined {
+  const ids = [...(existing?.split(/\s+/).filter(Boolean) ?? []), ...generated];
+  return ids.length > 0 ? [...new Set(ids)].join(" ") : undefined;
+}
+
+/** Inject accessibility props into the rendered element carrying controlId.
+ * Recursing also handles Field children that wrap an input beside a button. */
+function wireControl(
+  node: ReactNode,
+  controlId: string,
+  describedByIds: string[],
+  errorId: string | undefined,
+): ReactNode {
+  return Children.map(node, (child) => {
+    if (!isValidElement(child)) return child;
+    const element = child as ReactElement<AccessibleElementProps>;
+    const props = element.props;
+
+    if (props.id === controlId) {
+      return cloneElement(element, {
+        "aria-describedby": mergeIds(props["aria-describedby"], describedByIds),
+        "aria-errormessage": errorId ?? props["aria-errormessage"],
+        "aria-invalid": errorId ? true : props["aria-invalid"],
+      });
+    }
+
+    if (props.children === undefined) return child;
+    return cloneElement(element, {
+      children: wireControl(props.children, controlId, describedByIds, errorId),
+    });
+  });
+}
+
 export function Field({
   label,
   hint,
@@ -36,15 +84,45 @@ export function Field({
 }: FieldProps) {
   const reactId = useId();
   const controlId = htmlFor ?? reactId;
+  const hintId = `${controlId}-hint`;
+  const errorId = `${controlId}-error`;
+  const warningId = `${controlId}-warning`;
+  const hasHint = Boolean(hint);
+  const hasError = Boolean(error);
+  const hasWarning = !hasError && Boolean(warning);
+  const describedByIds = [
+    ...(hasHint ? [hintId] : []),
+    ...(hasError ? [errorId] : []),
+    ...(hasWarning ? [warningId] : []),
+  ];
+  const control = wireControl(
+    children(controlId),
+    controlId,
+    describedByIds,
+    hasError ? errorId : undefined,
+  );
+
   return (
     <div className={cn(styles.field, className)}>
       <label htmlFor={controlId} className={cn(styles.label, hideLabel && styles.labelHidden)}>
         {label}
       </label>
-      <div className={styles.control}>{children(controlId)}</div>
-      {hint ? <div className={styles.hint}>{hint}</div> : null}
-      {error ? <div className={styles.error}>{error}</div> : null}
-      {!error && warning ? <div className={styles.warning}>{warning}</div> : null}
+      <div className={styles.control}>{control}</div>
+      {hint ? (
+        <div id={hintId} className={styles.hint}>
+          {hint}
+        </div>
+      ) : null}
+      {error ? (
+        <div id={errorId} className={styles.error} role="alert">
+          {error}
+        </div>
+      ) : null}
+      {!error && warning ? (
+        <div id={warningId} className={styles.warning}>
+          {warning}
+        </div>
+      ) : null}
     </div>
   );
 }

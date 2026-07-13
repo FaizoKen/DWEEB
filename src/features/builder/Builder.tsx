@@ -50,7 +50,7 @@ import { AccountMenu } from "@/features/guild/AccountMenu";
 import { ChannelPicker } from "@/features/guild/ChannelPicker";
 import { PlanBadge } from "@/features/plan/PlanBadge";
 import { activityLaunchUrl, isProxyConfigured } from "@/core/guild/config";
-import { isFeedbackConfigured } from "@/core/feedback/submit";
+import { useFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import { useInstallStore } from "@/features/install/installStore";
@@ -137,7 +137,7 @@ function ActionBar({
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
 
   const openFeedback = useFeedbackStore((s) => s.openFeedback);
-  const feedbackOn = isFeedbackConfigured();
+  const feedbackOn = useFeedbackConfigured();
   const openCollaborate = useCollaborateStore((s) => s.openCollaborate);
   const openInstall = useInstallStore((s) => s.openInstall);
   // Hide the install entry once we're already running as the installed app —

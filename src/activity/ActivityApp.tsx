@@ -22,7 +22,11 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { ComponentTree } from "@/features/builder/components/ComponentTree";
 import { Preview } from "@/features/preview/Preview";
 import { MiniPreview } from "@/features/preview/MiniPreview";
-import { usePreviewSwipeToClose, useIsMobileSheet } from "@/features/preview/previewSheet";
+import {
+  usePreviewSwipeToClose,
+  usePreviewSheetA11y,
+  useIsMobileSheet,
+} from "@/features/preview/previewSheet";
 import { ToastViewport } from "@/ui/Toast";
 import { Button } from "@/ui/Button";
 import {
@@ -126,6 +130,16 @@ export function ActivityApp() {
   const isMobileSheet = useIsMobileSheet();
   const closePreview = () => setPreviewOpen(false);
   const { sheetRef, swipeProps } = usePreviewSwipeToClose(closePreview);
+  const rememberPreviewOpener = usePreviewSheetA11y(
+    previewOpen,
+    isMobileSheet,
+    closePreview,
+    sheetRef,
+  );
+  const openPreview = () => {
+    rememberPreviewOpener();
+    setPreviewOpen(true);
+  };
 
   useEffect(() => {
     void init();
@@ -153,7 +167,11 @@ export function ActivityApp() {
   return (
     <div className={styles.app} data-preview-open={previewOpen ? "true" : "false"}>
       <div className={styles.panes}>
-        <section className={styles.editor} aria-label="Component builder">
+        <section
+          className={styles.editor}
+          aria-label="Component builder"
+          inert={isMobileSheet && previewOpen ? true : undefined}
+        >
           {/* The bar is real immediately — only the component list below waits on
               the synced draft, so it holds a skeleton until the room's message
               arrives instead of flashing the fresh-open default. */}
@@ -169,13 +187,19 @@ export function ActivityApp() {
           className={styles.preview}
           aria-label="Message preview"
           aria-hidden={isMobileSheet && !previewOpen ? "true" : undefined}
+          role={isMobileSheet ? "dialog" : undefined}
+          tabIndex={isMobileSheet ? -1 : undefined}
+          inert={isMobileSheet && !previewOpen ? true : undefined}
         >
           {/* The preview waits on the draft *and* the guild's mention/emoji data,
               so it holds a skeleton until both are ready rather than rendering
               raw, unresolved mentions. */}
           {!isMobileSheet || previewMounted ? (
             previewReady ? (
-              <Preview onClose={closePreview} swipeProps={swipeProps} />
+              <Preview
+                onClose={isMobileSheet ? closePreview : undefined}
+                swipeProps={isMobileSheet ? swipeProps : undefined}
+              />
             ) : (
               <PreviewSkeleton />
             )
@@ -201,7 +225,7 @@ export function ActivityApp() {
           waits for — it pops in with real content, not the fresh-open default. */}
       {isMobileSheet && !previewOpen ? (
         <div className="fab-stack">
-          {treeReady ? <MiniPreview onOpen={() => setPreviewOpen(true)} /> : null}
+          {treeReady ? <MiniPreview onOpen={openPreview} /> : null}
           <PresenceDock />
         </div>
       ) : null}

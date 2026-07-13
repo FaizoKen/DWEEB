@@ -44,11 +44,26 @@ textarea {
 }
 
 a {
-  color: var(--app-accent);
-  text-decoration: none;
+  /* The darker accent is a strong fill/border but misses 4.5:1 for small text
+     on our dark surfaces. Use the dedicated high-contrast text token here. */
+  color: var(--app-accent-text);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 60%, transparent);
+  text-underline-offset: 0.16em;
 }
 a:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
+}
+
+/* iOS Safari zooms the page when a focused form control renders below 16px.
+   Keep touch input stable without disabling user zoom. `!important` is scoped
+   to coarse pointers so compact desktop controls retain their intended scale. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
 
 img {

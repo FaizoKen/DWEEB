@@ -14,7 +14,8 @@
   justify-content: center;
   /* --app-sa* (tokens.css) keep the film clear of the Discord mobile client's
      native top bar / home indicator inside the Activity; 0 everywhere else. */
-  padding: calc(20px + var(--app-sait)) 20px calc(20px + var(--app-saib));
+  padding: calc(20px + var(--app-sait)) calc(20px + var(--app-sair)) calc(20px + var(--app-saib))
+    calc(20px + var(--app-sail));
   background: rgba(3, 4, 8, 0.88);
   animation: welcomeFade 200ms ease-out both;
 }

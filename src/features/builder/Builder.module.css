@@ -103,6 +103,6 @@
  * button so its drop shadow never falls on top of the last list row. */
 @media (max-width: 900px) {
   .builder {
-    padding-bottom: env(safe-area-inset-bottom, 0);
+    padding-bottom: var(--app-saib);
   }
 }

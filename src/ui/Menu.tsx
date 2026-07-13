@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type ReactNode,
@@ -13,6 +14,7 @@ import styles from "./Menu.module.css";
 
 interface TriggerProps {
   onClick?: (e: ReactMouseEvent) => void;
+  onKeyDown?: (e: ReactKeyboardEvent) => void;
   "aria-haspopup"?: "menu";
   "aria-expanded"?: boolean;
 }
@@ -48,6 +50,40 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const wrapperRef = useRef<HTMLSpanElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const initialFocusRef = useRef<"first" | "last">("first");
+  const needsInitialFocusRef = useRef(false);
+
+  const triggerElement = () =>
+    wrapperRef.current?.querySelector<HTMLElement>("[aria-haspopup='menu']") ?? null;
+  const closeMenu = (restoreFocus: boolean) => {
+    setOpen(false);
+    if (restoreFocus) {
+      requestAnimationFrame(() => triggerElement()?.focus({ preventScroll: true }));
+    }
+  };
+
+  const menuItems = () =>
+    Array.from(
+      panelRef.current?.querySelectorAll<HTMLElement>(
+        "[role='menuitem']:not(:disabled):not([aria-disabled='true'])",
+      ) ?? [],
+    );
+  const focusPastTrigger = (backward: boolean) => {
+    const trigger = triggerElement();
+    if (!trigger) return;
+    const selector =
+      "a[href], button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(
+      (element) =>
+        !panelRef.current?.contains(element) &&
+        !element.closest("[inert]") &&
+        element.getClientRects().length > 0,
+    );
+    const index = candidates.indexOf(trigger);
+    const target = candidates[index + (backward ? -1 : 1)];
+    setOpen(false);
+    requestAnimationFrame(() => (target ?? trigger).focus({ preventScroll: true }));
+  };
 
   const measureAnchor = () => {
     const r = wrapperRef.current?.getBoundingClientRect();
@@ -62,7 +98,10 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeMenu(true);
+      }
     };
     // Keep the floating panel pinned to the trigger as the page scrolls/resizes.
     const onReflow = () => measureAnchor();
@@ -101,15 +140,40 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
     setPos({ left, top });
   }, [open, anchor, align]);
 
+  // A menu opens with one item focused; its items then use arrow-key movement
+  // instead of placing every command in the page's Tab sequence.
+  useEffect(() => {
+    if (!open || !pos || !needsInitialFocusRef.current) return;
+    needsInitialFocusRef.current = false;
+    const items = menuItems();
+    const target = initialFocusRef.current === "last" ? items.at(-1) : items[0];
+    target?.focus({ preventScroll: true });
+  }, [open, pos]);
+
+  const openMenu = (initial: "first" | "last" = "first") => {
+    initialFocusRef.current = initial;
+    needsInitialFocusRef.current = true;
+    measureAnchor();
+    setPos(null);
+    setOpen(true);
+  };
+
   const triggerWithToggle = cloneElement(trigger, {
     onClick: (e: ReactMouseEvent) => {
       trigger.props.onClick?.(e);
+      if (e.defaultPrevented) return;
       if (open) {
-        setOpen(false);
+        closeMenu(false);
       } else {
-        measureAnchor();
-        setPos(null);
-        setOpen(true);
+        openMenu();
+      }
+    },
+    onKeyDown: (e: ReactKeyboardEvent) => {
+      trigger.props.onKeyDown?.(e);
+      if (e.defaultPrevented) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        openMenu(e.key === "ArrowUp" ? "last" : "first");
       }
     },
     "aria-haspopup": "menu",
@@ -132,8 +196,39 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
                 // Rendered offscreen until measured so there's no positioning flash.
                 visibility: pos ? "visible" : "hidden",
               }}
+              onKeyDown={(event) => {
+                const items = menuItems();
+                if (items.length === 0) return;
+                const current = document.activeElement;
+                const index = items.findIndex((item) => item === current);
+                let target: HTMLElement | undefined;
+                if (event.key === "ArrowDown") {
+                  target = items[(index + 1 + items.length) % items.length];
+                } else if (event.key === "ArrowUp") {
+                  target = items[(index - 1 + items.length) % items.length];
+                } else if (event.key === "Home") {
+                  target = items[0];
+                } else if (event.key === "End") {
+                  target = items.at(-1);
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  closeMenu(true);
+                  return;
+                } else if (event.key === "Tab") {
+                  // The panel is portalled at the end of body, so native Tab
+                  // order from a menu item would not continue after the trigger.
+                  event.preventDefault();
+                  focusPastTrigger(event.shiftKey);
+                  return;
+                } else {
+                  return;
+                }
+                event.preventDefault();
+                target?.focus();
+              }}
             >
-              {children(() => setOpen(false))}
+              {children(() => closeMenu(true))}
             </div>,
             document.body,
           )
@@ -154,6 +249,7 @@ export function MenuItem({ icon, children, onSelect, disabled }: MenuItemProps) 
     <button
       type="button"
       role="menuitem"
+      tabIndex={-1}
       className={styles.item}
       onClick={onSelect}
       disabled={disabled}

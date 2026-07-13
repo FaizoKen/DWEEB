@@ -15,15 +15,7 @@
  * surfaces can't drift apart visually.
  */
 
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { onceVisible } from "@/lib/onceVisible";
 import type { WebhookMessage } from "@/core/schema/types";
 import { collectSearchText } from "@/core/schema/traversal";
@@ -130,21 +122,9 @@ export const GalleryCard = memo(function GalleryCard({
   card: CardData;
   eagerThumb?: boolean;
 }) {
-  const onKeyDown = useCallback(
-    (e: ReactKeyboardEvent<HTMLDivElement>) => {
-      // Only the card itself activates on Enter/Space — keys aimed at the inner
-      // delete button (a real <button>) must not also trigger a load.
-      if (e.target !== e.currentTarget) return;
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        card.onPick();
-      }
-    },
-    [card],
-  );
-
-  // The card holds a Preview whose tree contains its own <button>s, so the card
-  // is a div-with-role rather than a real <button> (nested buttons are invalid).
+  // The card is an article with one full-card primary button and separate
+  // management buttons layered above it. This keeps the whole visual card
+  // clickable without nesting buttons inside a role="button" container.
   const accent =
     card.accent !== undefined
       ? `#${card.accent.toString(16).padStart(6, "0")}`
@@ -177,17 +157,18 @@ export const GalleryCard = memo(function GalleryCard({
         : "Delete browser draft";
 
   return (
-    <div
+    <article
       className={styles.card}
       data-kind={card.kind}
       data-server-library={isServerLibrary ? "" : undefined}
-      role="button"
-      tabIndex={0}
-      onClick={card.onPick}
-      onKeyDown={onKeyDown}
-      aria-label={cardLabel}
       style={{ "--card-accent": accent } as CSSProperties}
     >
+      <button
+        type="button"
+        className={styles.cardPrimary}
+        onClick={card.onPick}
+        aria-label={cardLabel}
+      />
       <div className={styles.cardPreview}>
         {card.message ? (
           <TemplateThumbnail message={card.message} eager={eagerThumb} />
@@ -312,7 +293,7 @@ export const GalleryCard = memo(function GalleryCard({
           )}
         </div>
       </div>
-    </div>
+    </article>
   );
 });
 

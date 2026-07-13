@@ -30,16 +30,16 @@ afterEach(() => {
 });
 
 describe("welcomeAutoDecision", () => {
-  it("shows the film on a clean slate (genuine first visit)", () => {
+  it("offers the film on a clean slate (genuine first visit)", () => {
     expect(welcomeAutoDecision()).toBe("show");
   });
 
-  it("announces instead of showing when the gallery has auto-opened before", () => {
+  it("uses the existing-user announcement when the gallery has auto-opened before", () => {
     store.set(GALLERY_STAMP_KEY, String(Date.now()));
     expect(welcomeAutoDecision()).toBe("announce");
   });
 
-  it("announces instead of showing when a saved draft exists", () => {
+  it("uses the existing-user announcement when a saved draft exists", () => {
     store.set(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), payload: { components: [] } }));
     expect(welcomeAutoDecision()).toBe("announce");
   });

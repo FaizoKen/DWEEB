@@ -10,7 +10,7 @@
  * configured yet) and the chat transcript + composer.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { IconButton } from "@/ui/IconButton";
 import { CloseIcon, SendIcon, SettingsIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
@@ -28,6 +28,7 @@ const SUGGESTIONS = [
 ];
 
 export function AiChatPanel() {
+  const titleId = useId();
   const open = useAiStore((s) => s.open);
   const closePanel = useAiStore((s) => s.closePanel);
   const messages = useAiStore((s) => s.messages);
@@ -44,8 +45,19 @@ export function AiChatPanel() {
   const view = !isConfigured || showSettings ? "settings" : "chat";
 
   const [draft, setDraft] = useState("");
+  const panelRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const latestMessage = messages[messages.length - 1];
+  const assistantStatus = thinking
+    ? "AI is generating a response."
+    : latestMessage?.role === "assistant" && !latestMessage.streaming
+      ? latestMessage.appliedMessage
+        ? "AI response complete. The message was updated."
+        : "AI response complete."
+      : "";
 
   // Keep the transcript pinned to the latest turn.
   useLayoutEffect(() => {
@@ -53,9 +65,59 @@ export function AiChatPanel() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, thinking, view]);
 
-  // Focus the composer when the panel opens onto the chat view.
+  // Keep the off-screen, persistently mounted panel out of the focus order and
+  // give opening/closing the same predictable focus lifecycle as a disclosure.
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (!panel || open === wasOpen) return;
+
+    if (open) {
+      const active = document.activeElement;
+      // On first open this panel is lazy-mounted after the launcher's CSS has
+      // hidden it, so browsers may already report `body` as active. The marked
+      // launcher remains connected and becomes visible again on close.
+      openerRef.current =
+        active instanceof HTMLElement && active !== document.body
+          ? active
+          : document.querySelector<HTMLElement>("[data-preview-opener='ai']");
+      const target =
+        view === "chat"
+          ? inputRef.current
+          : panel.querySelector<HTMLElement>(
+              "[data-ai-settings] input:not([disabled]), [data-ai-settings] select:not([disabled]), [data-ai-settings] textarea:not([disabled]), [data-ai-settings] button:not([disabled])",
+            );
+      (target ?? panel).focus({ preventScroll: true });
+      return;
+    }
+
+    // Only move focus when it was left inside the panel. Selecting something
+    // in the preview can also close AI; in that case the user's new focus wins.
+    const current = document.activeElement;
+    if (current instanceof HTMLElement && current !== document.body && !panel.contains(current)) {
+      return;
+    }
+    const opener = openerRef.current;
+    requestAnimationFrame(() => {
+      if (opener?.isConnected && !opener.closest("[inert]")) {
+        opener.focus({ preventScroll: true });
+      }
+    });
+  }, [open, view]);
+
+  // Moving from settings back to chat should land on the composer too.
   useEffect(() => {
-    if (open && view === "chat") inputRef.current?.focus();
+    if (!open) return;
+    if (view === "chat") {
+      inputRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    panelRef.current
+      ?.querySelector<HTMLElement>(
+        "[data-ai-settings] input:not([disabled]), [data-ai-settings] select:not([disabled]), [data-ai-settings] textarea:not([disabled]), [data-ai-settings] button:not([disabled])",
+      )
+      ?.focus({ preventScroll: true });
   }, [open, view]);
 
   const submit = (value: string) => {
@@ -74,15 +136,18 @@ export function AiChatPanel() {
 
   return (
     <aside
+      ref={panelRef}
       className={cn(styles.panel, "app-shell__pane--ai")}
       data-open={open ? "true" : "false"}
+      inert={open ? undefined : true}
       aria-hidden={open ? undefined : "true"}
-      aria-label="AI assistant"
+      aria-labelledby={titleId}
+      tabIndex={-1}
     >
       <header className={styles.header}>
         <div className={styles.title}>
           <SparkleIcon size={18} />
-          <span>AI Assistant</span>
+          <span id={titleId}>AI Assistant</span>
         </div>
         <div className={styles.headerActions}>
           {view === "chat" && messages.length > 0 ? (
@@ -106,7 +171,7 @@ export function AiChatPanel() {
       </header>
 
       {view === "settings" ? (
-        <div className={styles.scroll}>
+        <div className={styles.scroll} data-ai-settings>
           <AiSettingsForm
             showCancel={isConfigured}
             onCancel={() => setShowSettings(false)}
@@ -119,13 +184,25 @@ export function AiChatPanel() {
             {messages.length === 0 ? (
               <EmptyState provider={PROVIDERS[settings.provider].label} onPick={submit} />
             ) : (
-              <ul className={styles.messages}>
+              <ul
+                className={styles.messages}
+                role="log"
+                aria-label="AI conversation"
+                aria-live="off"
+              >
                 {messages.map((m) => (
                   <MessageBubble key={m.id} message={m} />
                 ))}
               </ul>
             )}
-            {error ? <div className={styles.error}>{error}</div> : null}
+            {error ? (
+              <div className={styles.error} role="alert">
+                {error}
+              </div>
+            ) : null}
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              {assistantStatus}
+            </div>
           </div>
 
           <form
@@ -139,6 +216,7 @@ export function AiChatPanel() {
               ref={inputRef}
               className={styles.input}
               rows={1}
+              aria-label="Message the AI assistant"
               placeholder="Describe the message you want to build…"
               value={draft}
               onChange={(e) => setDraft(e.currentTarget.value)}

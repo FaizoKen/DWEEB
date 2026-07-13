@@ -134,7 +134,7 @@
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: 18px 28px max-content 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
   padding: 9px 10px;
@@ -157,6 +157,34 @@
   transition:
     background 120ms ease,
     box-shadow 120ms ease;
+}
+
+/* The row's primary action is a real button, while reorder/duplicate/delete
+ * remain sibling buttons. This avoids nested interactive controls and gives
+ * Enter/Space behavior for free without changing the visual grid. */
+.rowSelect {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 18px 28px max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: inherit;
+}
+
+.rowSelect:focus-visible {
+  outline: none;
+}
+
+.row:has(> .rowSelect:focus-visible) {
+  outline: 2px solid var(--app-border-focus);
+  outline-offset: 1px;
 }
 
 /* Hue/saturation per component type. Numbers match the ComponentType enum in
@@ -441,7 +469,8 @@
   transition: opacity 120ms ease;
 }
 .row:hover .actions,
-.rowSelected .actions {
+.rowSelected .actions,
+.row:focus-within .actions {
   opacity: 1;
 }
 
@@ -480,7 +509,8 @@
 }
 
 .row:hover .presence,
-.rowSelected .presence {
+.rowSelected .presence,
+.row:focus-within .presence {
   opacity: 0;
 }
 
@@ -640,8 +670,8 @@
  * portal still anchors to this trigger so the picker pops up above it. */
 .footer {
   position: fixed;
-  left: 16px;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: calc(16px + var(--app-sail));
+  bottom: calc(16px + var(--app-saib));
   z-index: var(--app-z-toolbar);
   width: auto;
   padding: 0;
@@ -887,7 +917,7 @@
  * padding is enough. Matches the 900px sheet breakpoint that mounts the widget. */
 @media (max-width: 900px) {
   .scroll {
-    padding-bottom: calc(104px + 10px + var(--app-fab-h) + 36px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(104px + 10px + var(--app-fab-h) + 36px + var(--app-saib));
   }
 }
 
@@ -895,6 +925,10 @@
   .row {
     column-gap: 6px;
     padding: 10px 8px;
+  }
+
+  .rowSelect {
+    column-gap: 6px;
   }
 
   /* Trim the inline action buttons a touch on phones so a row carrying all four

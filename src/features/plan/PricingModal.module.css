@@ -87,7 +87,7 @@
   color: var(--app-text-muted);
 }
 .creatorNote a {
-  color: var(--app-accent);
+  color: var(--app-accent-text);
   font-weight: 700;
   text-decoration: none;
 }
@@ -132,7 +132,7 @@
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: var(--app-accent);
+  color: var(--app-accent-text);
 }
 
 /* ── Plan cards ─────────────────────────────────────────────────────────── */
@@ -297,7 +297,7 @@
   color: var(--app-text);
 }
 .quotaUnlimited {
-  color: var(--app-accent);
+  color: var(--app-accent-text);
 }
 .quotaLabel {
   font-weight: 500;
@@ -582,7 +582,7 @@
 .perkTo {
   font-size: 15px;
   font-weight: 800;
-  color: var(--app-accent);
+  color: var(--app-accent-text);
 }
 .perkInfinite {
   font-size: 20px;

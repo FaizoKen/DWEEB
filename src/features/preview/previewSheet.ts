@@ -9,7 +9,7 @@
  * sheet layout at all (so a second live `<Preview>` is only mounted there).
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { TouchEvent as ReactTouchEvent } from "react";
 
 // Must match the `@media (max-width: 900px)` breakpoint in global.css /
@@ -130,6 +130,100 @@ export function usePreviewSwipeToClose(onClose: () => void) {
     sheetRef,
     swipeProps: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd },
   };
+}
+
+/**
+ * Keyboard/focus lifecycle for the mobile form of the preview. The visual
+ * sheet is shared by the web app and Activity, so keeping this here prevents
+ * the two shells drifting apart again.
+ */
+export function usePreviewSheetA11y(
+  open: boolean,
+  isMobileSheet: boolean,
+  onClose: () => void,
+  sheetRef: RefObject<HTMLElement>,
+) {
+  const openerRef = useRef<HTMLElement | null>(null);
+  const openerKeyRef = useRef<string | null>(null);
+  const activeRef = useRef(false);
+
+  // Call synchronously from an opener's event handler. MiniPreview unmounts in
+  // the same render that opens the sheet, so waiting for a layout effect would
+  // otherwise see `body` instead of the real trigger.
+  const rememberOpener = useCallback(() => {
+    const focused = document.activeElement;
+    if (!(focused instanceof HTMLElement) || focused === document.body) return;
+    openerRef.current = focused;
+    openerKeyRef.current = focused.dataset.previewOpener ?? null;
+  }, []);
+
+  useLayoutEffect(() => {
+    const active = open && isMobileSheet;
+    if (active === activeRef.current) return;
+    activeRef.current = active;
+
+    if (active) {
+      // Programmatic opens do not call rememberOpener; preserve a synchronously
+      // captured (possibly now-disconnected) trigger when one exists.
+      if (!openerRef.current) rememberOpener();
+      const sheet = sheetRef.current;
+      sheet?.focus({ preventScroll: true });
+
+      // The live Preview is latched on in an effect so its exit animation can
+      // finish. One frame later its explicit Close button is available.
+      const frame = requestAnimationFrame(() => {
+        sheet
+          ?.querySelector<HTMLButtonElement>("[data-preview-close='true']")
+          ?.focus({ preventScroll: true });
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const opener = openerRef.current;
+    const openerKey = openerKeyRef.current;
+    const frame = requestAnimationFrame(() => {
+      // Selecting a preview component intentionally moves focus to its editor.
+      // Never overwrite an explicit focus destination outside the closing
+      // sheet; explicit Close/Escape/swipe leave focus in the sheet or body.
+      const current = document.activeElement;
+      if (
+        current instanceof HTMLElement &&
+        current !== document.body &&
+        !sheetRef.current?.contains(current)
+      ) {
+        openerRef.current = null;
+        openerKeyRef.current = null;
+        return;
+      }
+      const remountedOpener = openerKey
+        ? document.querySelector<HTMLElement>(`[data-preview-opener="${CSS.escape(openerKey)}"]`)
+        : null;
+      const fallback = document.querySelector<HTMLElement>("[data-preview-opener='mini']");
+      const target = opener?.isConnected ? opener : (remountedOpener ?? fallback);
+      if (target && !target.closest("[inert]")) {
+        target.focus({ preventScroll: true });
+      }
+      openerRef.current = null;
+      openerKeyRef.current = null;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isMobileSheet, open, rememberOpener, sheetRef]);
+
+  useEffect(() => {
+    if (!open || !isMobileSheet) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // A portalled Modal above the sheet owns Escape until it closes.
+      if (document.querySelector("[data-modal-backdrop='true']:not([inert])")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isMobileSheet, onClose, open]);
+
+  return rememberOpener;
 }
 
 /**

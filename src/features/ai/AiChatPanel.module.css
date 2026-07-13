@@ -4,8 +4,8 @@
  * Desktop: docks as a full-height column flush with the right edge of the
  * viewport. The app shell adds matching padding-right when this is open, so
  * the builder/preview grid shrinks to make room rather than being overlaid.
- * Mobile: floats over the preview as a bottom-right card (see the @media
- * block at the bottom).
+ * Compact desktop and mobile: floats over the preview as a bottom-right card
+ * (see the @media block at the bottom).
  */
 
 .panel {
@@ -13,8 +13,8 @@
   /* --app-sait (tokens.css) keeps the docked column clear of the Discord
      mobile client's native top bar inside the Activity; 0 everywhere else. */
   top: var(--app-sait);
-  right: 0;
-  bottom: 0;
+  right: var(--app-sair);
+  bottom: var(--app-saib);
   left: auto;
   width: 380px;
   z-index: var(--app-z-modal);
@@ -24,12 +24,14 @@
   background: var(--app-bg-elevated);
   border-left: 1px solid var(--app-border);
   overflow: hidden;
-  transform: translateX(100%);
+  transform: translateX(calc(100% + var(--app-sair)));
+  pointer-events: none;
   transition: transform 260ms cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform;
 }
 .panel[data-open="true"] {
   transform: none;
+  pointer-events: auto;
 }
 
 .header {
@@ -340,7 +342,7 @@
   padding: 10px 12px;
 }
 .onboard strong {
-  color: var(--app-accent);
+  color: var(--app-accent-text);
 }
 .onboard a {
   font-weight: 600;
@@ -349,7 +351,7 @@
 .onboardSwitch {
   font: inherit;
   font-weight: 600;
-  color: var(--app-accent);
+  color: var(--app-accent-text);
   background: none;
   border: none;
   padding: 0;
@@ -426,19 +428,20 @@
 }
 
 .settings a {
-  color: var(--app-accent);
+  color: var(--app-accent-text);
 }
 
-/* ── Mobile: floating bottom-right card over the preview sheet. */
-@media (max-width: 900px) {
+/* Compact desktop + mobile: float above the preview until the viewport has
+ * enough room for a useful builder, preview, and 380px dock together. */
+@media (max-width: 1199px) {
   .panel {
     top: auto;
-    right: 10px;
-    bottom: var(--app-ai-mobile-bottom, calc(10px + var(--app-saib)));
+    right: calc(10px + var(--app-sair));
+    bottom: var(--app-ai-overlay-bottom, calc(10px + var(--app-saib)));
     left: auto;
-    width: min(94vw, 400px);
-    height: var(--app-ai-mobile-height, min(68dvh, 560px));
-    max-height: calc(100dvh - 20px);
+    width: min(calc(100vw - 20px - var(--app-sail) - var(--app-sair)), 400px);
+    height: var(--app-ai-overlay-height, min(68dvh, 560px));
+    max-height: calc(100dvh - 20px - var(--app-sait) - var(--app-saib));
     border-left: none;
     border: 1px solid var(--app-border);
     border-radius: 16px;

@@ -15,7 +15,13 @@ export function ThumbnailRenderer({ node }: { node: ThumbnailComponent }) {
   return (
     <div className={cn(styles.thumb, obscured && styles.spoiler)}>
       {src ? (
-        <img src={src} alt={node.description || ""} loading="lazy" decoding="async" />
+        <img
+          src={src}
+          alt={node.description || ""}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+        />
       ) : (
         <div className={styles.placeholder}>
           {usesAttachmentId ? "Resolved on send" : "Will upload on send"}

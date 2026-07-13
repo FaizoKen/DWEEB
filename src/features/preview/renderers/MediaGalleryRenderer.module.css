@@ -62,6 +62,11 @@
   cursor: pointer;
 }
 
+.clickable:focus-visible {
+  outline: 2px solid var(--discord-text-link);
+  outline-offset: -2px;
+}
+
 /* Selected-image ring, mirroring the accent outline a selected component gets
    in the preview. `outline-offset: -2px` keeps it inside the cell so it paints
    over the image and isn't clipped by the gallery's overflow. */

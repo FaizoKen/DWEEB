@@ -1014,6 +1014,8 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
   const meta = COMPONENT_META[node.type];
   const issues = useNodeIssues(node._id);
   const severity = worstSeverity(issues);
+  const rowSummary = summarize(node);
+  const editorPanelId = `component-editor-${node._id}`;
 
   const { siblings, extras } = childGroups(node);
   const siblingIds = useMemo(() => siblings.map((c) => c._id), [siblings]);
@@ -1164,20 +1166,29 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
         {...fileDropHandlers}
         onClick={onRowClick}
       >
-        <span className={styles.chevron} aria-hidden="true">
-          {isSelected ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
-        </span>
-        <span className={styles.glyphCell}>
-          <span
-            className={cn(styles.glyph, severity === "error" && styles.glyphError)}
-            aria-hidden="true"
-          >
-            {meta.glyph}
+        <button
+          type="button"
+          className={styles.rowSelect}
+          data-row-select="true"
+          aria-expanded={isSelected}
+          aria-controls={isSelected ? editorPanelId : undefined}
+          aria-label={`${isSelected ? "Close" : "Open"} ${meta.label} editor${rowSummary ? `: ${rowSummary}` : ""}`}
+        >
+          <span className={styles.chevron} aria-hidden="true">
+            {isSelected ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
           </span>
-          <IssueDot issues={issues} />
-        </span>
-        <span className={styles.label}>{meta.label}</span>
-        <span className={styles.summary}>{summarize(node)}</span>
+          <span className={styles.glyphCell}>
+            <span
+              className={cn(styles.glyph, severity === "error" && styles.glyphError)}
+              aria-hidden="true"
+            >
+              {meta.glyph}
+            </span>
+            <IssueDot issues={issues} />
+          </span>
+          <span className={styles.label}>{meta.label}</span>
+          <span className={styles.summary}>{rowSummary}</span>
+        </button>
 
         <PresenceCluster editors={editors} />
 
@@ -1202,7 +1213,7 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
       </div>
 
       {isSelected ? (
-        <div className={styles.editorPanel} onClick={(e) => e.stopPropagation()}>
+        <div id={editorPanelId} className={styles.editorPanel} onClick={(e) => e.stopPropagation()}>
           <Inspector />
         </div>
       ) : null}
@@ -1272,6 +1283,8 @@ function GalleryItemNode({
   const duplicateGalleryItem = useMessageStore((s) => s.duplicateGalleryItem);
   const issues = useNodeIssues(item._id);
   const severity = worstSeverity(issues);
+  const rowSummary = summarizeGalleryItem(item);
+  const editorPanelId = `gallery-item-editor-${item._id}`;
 
   const canMoveUp = index > 0;
   const canMoveDown = index < total - 1;
@@ -1373,20 +1386,29 @@ function GalleryItemNode({
         {...fileDropHandlers}
         onClick={onRowClick}
       >
-        <span className={styles.chevron} aria-hidden="true">
-          {isSelected ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
-        </span>
-        <span className={styles.glyphCell}>
-          <span
-            className={cn(styles.glyph, severity === "error" && styles.glyphError)}
-            aria-hidden="true"
-          >
-            ▦
+        <button
+          type="button"
+          className={styles.rowSelect}
+          data-row-select="true"
+          aria-expanded={isSelected}
+          aria-controls={isSelected ? editorPanelId : undefined}
+          aria-label={`${isSelected ? "Close" : "Open"} image editor${rowSummary ? `: ${rowSummary}` : ""}`}
+        >
+          <span className={styles.chevron} aria-hidden="true">
+            {isSelected ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
           </span>
-          <IssueDot issues={issues} />
-        </span>
-        <span className={styles.label}>Image</span>
-        <span className={styles.summary}>{summarizeGalleryItem(item)}</span>
+          <span className={styles.glyphCell}>
+            <span
+              className={cn(styles.glyph, severity === "error" && styles.glyphError)}
+              aria-hidden="true"
+            >
+              ▦
+            </span>
+            <IssueDot issues={issues} />
+          </span>
+          <span className={styles.label}>Image</span>
+          <span className={styles.summary}>{rowSummary}</span>
+        </button>
 
         <PresenceCluster editors={editors} />
 
@@ -1431,7 +1453,7 @@ function GalleryItemNode({
       </div>
 
       {isSelected ? (
-        <div className={styles.editorPanel} onClick={(e) => e.stopPropagation()}>
+        <div id={editorPanelId} className={styles.editorPanel} onClick={(e) => e.stopPropagation()}>
           <GalleryItemInspector galleryId={galleryId} item={item} />
         </div>
       ) : null}

@@ -31,16 +31,22 @@ export function MediaGalleryRenderer({ node }: { node: MediaGalleryComponent }) 
   // Clicking a specific image selects that image's tree row (each gallery item
   // is its own row now), then scrolls the builder to it. stopPropagation in the
   // figure keeps the wrapper from also selecting the whole gallery.
-  const handlePick = (itemId: EditorId, revealingSpoiler: boolean) => {
+  const handlePick = (itemId: EditorId, revealingSpoiler: boolean, focusTreeRow: boolean) => {
     select(itemId);
     // Mirror ComponentRenderer: dismiss the mobile preview slide-over so the
     // editor becomes visible, but keep it open while the AI chat is active —
     // or while this tap is just revealing a spoiler the user wants to see.
     if (!revealingSpoiler && !useAiStore.getState().open) closePreview?.();
     requestAnimationFrame(() => {
-      document
-        .querySelector<HTMLElement>(`[data-tree-row="true"][data-row-id="${CSS.escape(itemId)}"]`)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const row = document.querySelector<HTMLElement>(
+        `[data-tree-row="true"][data-row-id="${CSS.escape(itemId)}"]`,
+      );
+      row?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (focusTreeRow) {
+        row
+          ?.querySelector<HTMLButtonElement>("[data-row-select='true']")
+          ?.focus({ preventScroll: true });
+      }
     });
   };
 
@@ -51,7 +57,9 @@ export function MediaGalleryRenderer({ node }: { node: MediaGalleryComponent }) 
           key={item._id}
           item={item}
           selected={selectedId === item._id}
-          onPick={() => handlePick(item._id, item.spoiler === true && selectedId !== item._id)}
+          onPick={(focusTreeRow) =>
+            handlePick(item._id, item.spoiler === true && selectedId !== item._id, focusTreeRow)
+          }
         />
       ))}
     </div>
@@ -65,7 +73,7 @@ function GalleryItem({
 }: {
   item: MediaGalleryItem;
   selected: boolean;
-  onPick: () => void;
+  onPick: (focusTreeRow: boolean) => void;
 }) {
   // Reveal follows the editor selection: clicking the item selects it (which
   // reveals it), and selecting another item/node re-blurs this one.
@@ -89,16 +97,31 @@ function GalleryItem({
         obscured && styles.spoiler,
       )}
       title={item.description}
+      role="button"
+      tabIndex={0}
+      aria-label={`${item.description ? `${item.description}. ` : ""}Press Enter to edit this gallery item.`}
       onClick={(e) => {
         e.stopPropagation();
-        onPick();
+        onPick(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onPick(true);
       }}
     >
       {src ? (
         kind === "video" ? (
           <video src={src} muted playsInline preload="metadata" />
         ) : (
-          <img src={src} alt={item.description || ""} loading="lazy" decoding="async" />
+          <img
+            src={src}
+            alt={item.description || ""}
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+          />
         )
       ) : (
         <div className={styles.placeholder} aria-label="Attachment will be uploaded on send">

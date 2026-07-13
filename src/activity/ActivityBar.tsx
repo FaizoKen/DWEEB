@@ -20,7 +20,7 @@ import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
-import { isFeedbackConfigured } from "@/core/feedback/submit";
+import { useFeedbackConfigured } from "@/core/feedback/submit";
 import { useMergedValidationView } from "@/features/builder/useValidation";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
@@ -94,7 +94,7 @@ export function ActivityBar() {
   // inside Discord (see `core/feedback/submit`). Shown only when the build has a
   // feedback webhook wired up; hidden entirely otherwise.
   const openFeedback = useFeedbackStore((s) => s.openFeedback);
-  const feedbackOn = isFeedbackConfigured();
+  const feedbackOn = useFeedbackConfigured();
 
   // Live validation of the shared draft. Errors are the ones Discord would reject
   // (empty message, a button with no label, …); we block Post/Update while any

@@ -82,6 +82,7 @@ export function MiniPreview({ onOpen }: MiniPreviewProps) {
       className={styles.card}
       role="button"
       tabIndex={0}
+      data-preview-opener="mini"
       aria-label="Open message preview"
       onClick={onOpen}
       onKeyDown={onKeyDown}

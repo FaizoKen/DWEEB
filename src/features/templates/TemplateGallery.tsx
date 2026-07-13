@@ -298,8 +298,11 @@ export function TemplateGallery() {
     });
   }, []);
 
-  // Focus search on open so a user can start typing immediately.
+  // Focus search for mouse/keyboard layouts, but not on coarse-pointer devices:
+  // forcing focus there opens the on-screen keyboard over the directory before
+  // the visitor has chosen to search.
   useEffect(() => {
+    if (!window.matchMedia("(pointer: fine)").matches) return;
     const t = setTimeout(() => searchRef.current?.focus(), 40);
     return () => clearTimeout(t);
   }, []);
@@ -793,8 +796,13 @@ export function TemplateGallery() {
         );
       });
     } else {
-      removeEntry(pendingDelete.id);
-      pushToast(`Deleted "${pendingDelete.name}"`, "info");
+      const removed = removeEntry(pendingDelete.id);
+      pushToast(
+        removed
+          ? `Deleted "${pendingDelete.name}"`
+          : `Couldn't delete "${pendingDelete.name}" — check browser storage and try again.`,
+        removed ? "info" : "error",
+      );
     }
     setPendingDelete(null);
   };

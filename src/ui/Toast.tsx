@@ -47,7 +47,7 @@ export function ToastViewport() {
   }, []);
   if (typeof document === "undefined") return null;
   return createPortal(
-    <div className={styles.viewport} role="status" aria-live="polite">
+    <div className={styles.viewport} role="status" aria-live="polite" data-modal-live-region="true">
       {items.map((t) => {
         const Icon = TONE_ICON[t.tone];
         return (

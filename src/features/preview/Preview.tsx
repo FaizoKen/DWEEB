@@ -115,6 +115,14 @@ export function Preview({ onClose, swipeProps, message: messageOverride }: Previ
         {onClose ? (
           <div className={styles.mobileBar}>
             <span className={styles.grabber} aria-hidden="true" />
+            <button
+              type="button"
+              className={styles.mobileClose}
+              data-preview-close="true"
+              onClick={onClose}
+            >
+              Close
+            </button>
           </div>
         ) : null}
         <div className={styles.scroll} data-preview-scroll onClick={clearSelectionOnBackdrop}>
@@ -127,7 +135,7 @@ export function Preview({ onClose, swipeProps, message: messageOverride }: Previ
               title="Edit avatar URL"
             >
               {avatar ? (
-                <img src={avatar} alt="" loading="lazy" />
+                <img src={avatar} alt="" loading="lazy" referrerPolicy="no-referrer" />
               ) : (
                 <svg
                   className={styles.avatarFallback}

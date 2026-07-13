@@ -1,17 +1,17 @@
 /**
- * "Should the intro film auto-play?" decision.
+ * "Should the app offer the intro film?" decision.
  *
  * The welcome video (the DWEEB launch film — problem → build → preview → send,
- * with captions burned in) is a one-shot orientation for brand-new users.
- * Auto-playing it more than once would turn a welcome into a nag, so this
- * module owns the persistent record of whether the user has met it and the
+ * with captions burned in) is an optional orientation for brand-new users.
+ * Prompting more than once would turn a welcome into a nag, so this module owns
+ * the persistent record of whether the user has met it and the
  * decision each load makes from it:
  *
- *  1. **Any record at all ⇒ never auto-play.** The More-menu "Watch the intro"
+ *  1. **Any record at all ⇒ never prompt.** The More-menu "Watch the intro"
  *     entry covers replays.
  *  2. **No record, but evidence of prior use ⇒ "announce".** Users from before
- *     the film existed already know the editor — they get a one-time toast
- *     pointing at the menu entry instead. "Prior use" is any trace an earlier
+ *     the film existed already know the editor — they get the same one-time
+ *     toast pointing at the menu entry. "Prior use" is any trace an earlier
  *     session left behind: the gallery's auto-open stamp or a saved draft.
  *  3. **Clean slate ⇒ "show".** A genuine first visit.
  *
@@ -26,9 +26,9 @@ const STORAGE_KEY = "dweeb.welcome.v1";
 
 /** How the user's one auto-encounter with the film stands. */
 export type WelcomeRecordStatus =
-  /** The film auto-played (recorded at open, so a closed tab still counts). */
+  /** Legacy record from releases that auto-played the film. */
   | "shown"
-  /** Pre-film user — never auto-played; the discovery toast was shown once. */
+  /** The discovery toast was shown once. */
   | "announced";
 
 export interface WelcomeRecord {
@@ -60,7 +60,7 @@ export function writeWelcomeRecord(status: WelcomeRecordStatus): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ status, at: Date.now() }));
   } catch {
-    // Storage disabled or over quota — worst case the film auto-offers once
+    // Storage disabled or over quota — worst case the app offers the film once
     // more on a later visit, which is harmless.
   }
 }

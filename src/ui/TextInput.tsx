@@ -15,7 +15,7 @@ interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function TextInput(
-  { invalid, className, masked, type = "text", ...rest },
+  { invalid, className, masked, type = "text", "aria-invalid": ariaInvalid, ...rest },
   ref,
 ) {
   return (
@@ -25,6 +25,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function T
       // to save those) — we mask via CSS instead.
       type={masked ? "text" : type}
       className={cn(styles.input, invalid && styles.invalid, masked && styles.masked, className)}
+      aria-invalid={ariaInvalid ?? (invalid ? true : undefined)}
       // Keep browser and extension autofill / password managers out of secrets.
       {...(masked
         ? {

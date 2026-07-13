@@ -7,7 +7,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: calc(24px + var(--app-sait)) calc(24px + var(--app-sair)) calc(24px + var(--app-saib))
+    calc(24px + var(--app-sail));
   background: rgba(6, 7, 10, 0.66);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -433,12 +434,29 @@
   border-color: var(--app-border-strong);
   box-shadow: var(--app-shadow);
 }
-.card:focus-visible {
+.card:focus-within {
   outline: none;
   box-shadow: var(--app-focus-ring);
 }
 .card:active {
   transform: translateY(-1px);
+}
+
+/* One semantic primary action spans the card. Management actions (pin/delete)
+ * sit at z-index 4, so they remain independent sibling buttons rather than
+ * invalid interactive descendants of a role="button" card. */
+.cardPrimary {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.cardPrimary:focus-visible {
+  outline: none;
 }
 
 .cardPreview {
@@ -522,6 +540,7 @@
   background: rgba(20, 16, 8, 0.82);
   border: 1px solid rgba(240, 178, 50, 0.4);
   backdrop-filter: blur(2px);
+  pointer-events: none;
 }
 
 /* Delete affordance on saved cards. Sits above the hover overlay so it stays
@@ -580,7 +599,7 @@
   transition: opacity 140ms ease;
 }
 .card:hover .cardHover,
-.card:focus-visible .cardHover {
+.card:focus-within .cardHover {
   opacity: 1;
 }
 
@@ -596,7 +615,7 @@
   transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .card:hover .useBtn,
-.card:focus-visible .useBtn {
+.card:focus-within .useBtn {
   transform: translateY(0);
 }
 
@@ -850,7 +869,7 @@
   font: inherit;
   font-size: 11px;
   font-weight: 600;
-  color: var(--app-accent);
+  color: var(--app-accent-text);
 }
 .slotStripUpgrade:hover {
   text-decoration: underline;

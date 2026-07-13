@@ -5,7 +5,8 @@
   display: grid;
   place-items: center;
   z-index: var(--app-z-modal);
-  padding: 16px;
+  padding: calc(16px + var(--app-sait)) calc(16px + var(--app-sair)) calc(16px + var(--app-saib))
+    calc(16px + var(--app-sail));
   animation: fadeIn 120ms ease-out;
 }
 
@@ -17,7 +18,7 @@
   box-shadow: var(--app-shadow-lg);
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px - var(--app-sait) - var(--app-saib));
   /* Keep the scrolling body clipped to the rounded corners now that it can
      reach the dialog's edge (the Share dialog has no footer). Nested dialogs
      portal to document.body, so they aren't trapped by this. */
@@ -100,9 +101,6 @@
      insets (tokens.css) keep that gap clear of notches AND — since the portal
      escapes the padded Activity shell — of the Discord mobile client's native
      top bar and home indicator. */
-  .backdrop {
-    padding: calc(16px + var(--app-sait)) 16px calc(16px + var(--app-saib));
-  }
   .dialog {
     max-height: 100%;
     width: 100%;

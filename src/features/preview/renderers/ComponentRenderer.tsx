@@ -13,6 +13,7 @@
 import { memo } from "react";
 import { ComponentType, type AnyComponent } from "@/core/schema/types";
 import { isSelect } from "@/core/schema/guards";
+import { COMPONENT_META } from "@/core/schema/metadata";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useAiStore } from "@/core/ai/aiStore";
 import { cn } from "@/lib/cn";
@@ -43,34 +44,50 @@ export const ComponentRenderer = memo(function ComponentRenderer({ node }: Compo
   const select = useMessageStore((s) => s.select);
   const closePreview = usePreviewClose();
 
+  const openEditor = (focusTreeRow: boolean) => {
+    // Revealing an obscured spoiler shouldn't also dismiss the mobile preview
+    // — the user needs to see the now-revealed content. A second activation
+    // (the node is already selected) dismisses as usual.
+    const revealingSpoiler = "spoiler" in node && node.spoiler === true && !isSelected;
+    select(node._id);
+    // On mobile this dismisses the preview slide-over so the editor (and its
+    // now-revealed inspector) becomes visible. When AI is open, keep both up so
+    // the user can continue chatting while picking nodes.
+    if (!revealingSpoiler && !useAiStore.getState().open) closePreview?.();
+
+    // Defer until the selected row's inline inspector has mounted. Keyboard
+    // activation also moves focus to that row's real selection button.
+    const targetId = node._id;
+    requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(
+        `[data-tree-row="true"][data-row-id="${CSS.escape(targetId)}"]`,
+      );
+      row?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (focusTreeRow) {
+        row
+          ?.querySelector<HTMLButtonElement>("[data-row-select='true']")
+          ?.focus({ preventScroll: true });
+      }
+    });
+  };
+
   return (
     <div
       data-node-id={node._id}
       className={cn(styles.wrapper, isSelected && styles.selected)}
+      role="group"
+      aria-label={`${COMPONENT_META[node.type].label} component. Press Enter to edit.`}
+      tabIndex={0}
       onClick={(e) => {
         e.stopPropagation();
-        // Revealing an obscured spoiler shouldn't also dismiss the mobile
-        // preview — the user needs to see the now-revealed content. A second
-        // tap (the node is already selected) dismisses as usual.
-        const revealingSpoiler = "spoiler" in node && node.spoiler === true && !isSelected;
-        select(node._id);
-        // On mobile this dismisses the preview slide-over so the editor
-        // (and its now-revealed inspector) becomes visible. No-op on desktop.
-        // When the AI chat is open the preview close cascades into closing
-        // the chat too (see App.closePreview), so skip the dismiss and let
-        // the user keep chatting while picking nodes. Read the AI state lazily
-        // here so this node doesn't subscribe to (and re-render on) it.
-        if (!revealingSpoiler && !useAiStore.getState().open) closePreview?.();
-        // Bring the matching tree row into the builder's viewport. Deferred
-        // one frame so the freshly-selected row's inline inspector has
-        // mounted before `scrollIntoView` measures positions.
-        const targetId = node._id;
-        requestAnimationFrame(() => {
-          const row = document.querySelector<HTMLElement>(
-            `[data-tree-row="true"][data-row-id="${CSS.escape(targetId)}"]`,
-          );
-          row?.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
+        openEditor(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        openEditor(true);
       }}
     >
       {renderByType(node)}

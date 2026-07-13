@@ -30,6 +30,7 @@ import { MiniPreview } from "@/features/preview/MiniPreview";
 import {
   MOBILE_SHEET_QUERY,
   usePreviewSwipeToClose,
+  usePreviewSheetA11y,
   useIsMobileSheet,
 } from "@/features/preview/previewSheet";
 import { useAiStore } from "@/core/ai/aiStore";
@@ -228,6 +229,16 @@ export function App() {
   };
 
   const { sheetRef, swipeProps } = usePreviewSwipeToClose(closePreview);
+  const rememberPreviewOpener = usePreviewSheetA11y(
+    previewOpen,
+    isMobileSheet,
+    closePreview,
+    sheetRef,
+  );
+  const openPreview = () => {
+    rememberPreviewOpener();
+    setPreviewOpen(true);
+  };
 
   const openShareDialog = (tab: typeof shareInitialTab) => {
     setShareMounted(true);
@@ -316,7 +327,7 @@ export function App() {
   // depends on the nudge token firing.
   useEffect(() => {
     if (sendNudge === 0) return;
-    if (window.matchMedia(MOBILE_SHEET_QUERY).matches) setPreviewOpen(true);
+    if (window.matchMedia(MOBILE_SHEET_QUERY).matches) openPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sendNudge]);
 
@@ -331,7 +342,7 @@ export function App() {
   // brings the (full-screen) preview up first — you watch the message build as
   // you chat. On desktop both panes are always visible, so this is harmless.
   const openAiWithPreview = () => {
-    setPreviewOpen(true);
+    openPreview();
     openAi();
   };
 
@@ -350,6 +361,7 @@ export function App() {
         <section
           className="app-shell__pane app-shell__pane--builder"
           aria-label="Component builder"
+          inert={isMobileSheet && previewOpen ? true : undefined}
         >
           <Builder
             onShare={() => openShareDialog("share")}
@@ -372,10 +384,16 @@ export function App() {
           ref={sheetRef}
           className="app-shell__pane app-shell__pane--preview"
           aria-label="Message preview"
-          aria-hidden={previewOpen ? undefined : "true"}
+          aria-hidden={isMobileSheet && !previewOpen ? "true" : undefined}
+          role={isMobileSheet ? "dialog" : undefined}
+          tabIndex={isMobileSheet ? -1 : undefined}
+          inert={isMobileSheet && !previewOpen ? true : undefined}
         >
           {!isMobileSheet || previewMounted ? (
-            <Preview onClose={closePreview} swipeProps={swipeProps} />
+            <Preview
+              onClose={isMobileSheet ? closePreview : undefined}
+              swipeProps={isMobileSheet ? swipeProps : undefined}
+            />
           ) : null}
         </section>
 
@@ -390,9 +408,7 @@ export function App() {
             that opens the full preview sheet. Mobile only — on desktop the
             preview is already a permanent side column. Sits above the action
             row, so the corner reads as a stacked widget. */}
-          {isMobileSheet && !previewOpen ? (
-            <MiniPreview onOpen={() => setPreviewOpen(true)} />
-          ) : null}
+          {isMobileSheet && !previewOpen ? <MiniPreview onOpen={openPreview} /> : null}
 
           <div className="fab-row">
             {/* "Collaborate in Discord" shortcut, beneath the mini preview on mobile —
@@ -416,6 +432,7 @@ export function App() {
               type="button"
               className="ai-fab"
               onClick={openAiWithPreview}
+              data-preview-opener="ai"
               aria-label="Open the AI assistant"
             >
               <SparkleIcon size={20} />

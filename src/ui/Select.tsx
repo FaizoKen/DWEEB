@@ -7,7 +7,7 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
-  { invalid, className, children, ...rest },
+  { invalid, className, children, "aria-invalid": ariaInvalid, ...rest },
   ref,
 ) {
   return (
@@ -15,6 +15,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       <select
         ref={ref}
         className={cn(styles.select, invalid && styles.invalid, className)}
+        aria-invalid={ariaInvalid ?? (invalid ? true : undefined)}
         {...rest}
       >
         {children}

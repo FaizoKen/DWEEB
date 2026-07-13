@@ -1,4 +1,11 @@
-import { useEffect, useId, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useState,
+  type ChangeEvent,
+  type InputHTMLAttributes,
+  type KeyboardEvent,
+} from "react";
 import { cn } from "@/lib/cn";
 import styles from "./ColorInput.module.css";
 
@@ -10,6 +17,9 @@ interface ColorInputProps {
   clearable?: boolean;
   id?: string;
   className?: string;
+  "aria-describedby"?: InputHTMLAttributes<HTMLInputElement>["aria-describedby"];
+  "aria-errormessage"?: InputHTMLAttributes<HTMLInputElement>["aria-errormessage"];
+  "aria-invalid"?: InputHTMLAttributes<HTMLInputElement>["aria-invalid"];
 }
 
 const toHex = (value: number | null | undefined): string => {
@@ -30,7 +40,16 @@ const parseHexInput = (raw: string): number | null => {
   return null;
 };
 
-export function ColorInput({ value, onChange, clearable, id, className }: ColorInputProps) {
+export function ColorInput({
+  value,
+  onChange,
+  clearable,
+  id,
+  className,
+  "aria-describedby": ariaDescribedBy,
+  "aria-errormessage": ariaErrorMessage,
+  "aria-invalid": ariaInvalid,
+}: ColorInputProps) {
   const generated = useId();
   const controlId = id ?? generated;
   const hex = toHex(value);
@@ -86,6 +105,9 @@ export function ColorInput({ value, onChange, clearable, id, className }: ColorI
           onChange={handlePickerChange}
           className={styles.colorInput}
           aria-label="Pick color"
+          aria-describedby={ariaDescribedBy}
+          aria-errormessage={ariaErrorMessage}
+          aria-invalid={ariaInvalid}
         />
       </label>
       <input

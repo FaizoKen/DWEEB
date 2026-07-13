@@ -1,8 +1,7 @@
 /**
  * The welcome overlay: DWEEB's intro film in a cinematic dialog.
  *
- * Auto-opened once for brand-new users (see `useWelcomeAutoOpen`) on top of the
- * landing gallery, and replayable any time from More ▸ "Watch the intro". The
+ * Opened explicitly from More ▸ "Watch the intro". The
  * film (rendered from `video/`, compressed web cuts in `public/media/`) tells
  * the whole product story in ~90 seconds with kinetic captions burned in — so
  * it starts muted (autoplay policy) and still lands, with one tap for sound.
@@ -104,7 +103,7 @@ export function WelcomeVideo() {
             muted={muted}
             controls
             playsInline
-            preload="auto"
+            preload="metadata"
             onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
           />
           {muted ? (

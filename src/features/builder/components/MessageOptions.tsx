@@ -53,13 +53,7 @@ const MENTION_LABELS: Record<MentionKind, string> = {
 
 /** The dot beside a lane title: danger when the lane holds an error, amber for
  *  a warning, the accent "configured" dot when it just has settings, else none. */
-function LaneDot({
-  severity,
-  active,
-}: {
-  severity: "error" | "warning" | null;
-  active: boolean;
-}) {
+function LaneDot({ severity, active }: { severity: "error" | "warning" | null; active: boolean }) {
   if (severity === "error") {
     return (
       <span className={cn(styles.optionsTabDot, styles.optionsTabDotError)} aria-hidden="true" />

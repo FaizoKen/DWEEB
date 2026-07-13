@@ -84,7 +84,7 @@
   font-weight: 600;
 }
 .fine a {
-  color: var(--app-accent);
+  color: var(--app-accent-text);
 }
 
 /* Create-link failure line under the picker. */

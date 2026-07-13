@@ -1,4 +1,10 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type TextareaHTMLAttributes,
+} from "react";
 import { TextArea } from "@/ui/TextArea";
 import { MarkdownToolbar } from "@/ui/MarkdownToolbar";
 import { wrapInline, type EditResult, type EditState } from "@/ui/markdownActions";
@@ -16,6 +22,9 @@ interface MarkdownTextAreaProps {
   invalid?: boolean;
   /** Placeholders (grouped by provider) offered inline when the user types `{`. */
   placeholders?: PlaceholderGroup[];
+  "aria-describedby"?: TextareaHTMLAttributes<HTMLTextAreaElement>["aria-describedby"];
+  "aria-errormessage"?: TextareaHTMLAttributes<HTMLTextAreaElement>["aria-errormessage"];
+  "aria-invalid"?: TextareaHTMLAttributes<HTMLTextAreaElement>["aria-invalid"];
 }
 
 /**
@@ -33,6 +42,9 @@ export function MarkdownTextArea({
   placeholder,
   invalid,
   placeholders,
+  "aria-describedby": ariaDescribedBy,
+  "aria-errormessage": ariaErrorMessage,
+  "aria-invalid": ariaInvalid,
 }: MarkdownTextAreaProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   // Where to put the caret after the next controlled re-render. Only set by an
@@ -99,6 +111,9 @@ export function MarkdownTextArea({
         rows={rows}
         placeholder={placeholder}
         invalid={invalid}
+        aria-describedby={ariaDescribedBy}
+        aria-errormessage={ariaErrorMessage}
+        aria-invalid={ariaInvalid}
         onChange={(e) => {
           onChange(e.currentTarget.value);
           ac.onValueChange(

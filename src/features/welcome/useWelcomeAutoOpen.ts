@@ -1,22 +1,20 @@
 /**
- * One-shot auto-play of the intro film for brand-new users.
+ * One-shot discovery prompt for the optional intro film.
  *
- * On a genuine first visit the film opens right on top of the landing Template
- * Gallery (its overlay sits above the gallery's), so closing it lands the user
- * exactly where the first-visit flow already starts: "Message directory". No
- * sequencing dance is needed — the film is the front layer, everything else
- * proceeds untouched beneath it.
+ * New users already land in the Template Gallery, so interrupting them with a
+ * second overlay and a multi-megabyte autoplay film is counterproductive. A
+ * one-time toast points to More ▸ Watch the intro instead; the media is loaded
+ * only after the user explicitly asks for it.
  *
  * Stands down entirely on deep-linked loads (a share/short link being decoded,
  * a `?template=`/`?plans=`/`?custom-bot=` param, or a webhook-create redirect) —
  * the visitor
  * came for something specific, so nothing is recorded and a later organic
- * visit still gets the one auto-play. Pre-film users (evidence of prior use)
+ * visit still gets the one prompt. Pre-film users (evidence of prior use)
  * get a single toast pointing at the More menu's "Watch the intro" instead.
  *
- * The decision itself lives in `welcomeGate`; the "shown" record is written
- * the moment the film auto-opens, so auto-play is strictly one-shot even if
- * the tab closes mid-film.
+ * The decision itself lives in `welcomeGate`; an "announced" record keeps the
+ * prompt one-shot. Legacy "shown" records remain valid and suppress it too.
  */
 
 import { useEffect, useState } from "react";
@@ -29,11 +27,8 @@ import { readPlansParam } from "@/app/usePlansDeepLink";
 import { readCustomBotParam } from "@/core/guild/customBotLink";
 import { pushToast } from "@/ui/Toast";
 import { welcomeAutoDecision, writeWelcomeRecord } from "./welcomeGate";
-import { useWelcomeStore } from "./welcomeStore";
 
-/** Small settle delay so the app shell paints beneath the film first. */
-const OPEN_DELAY_MS = 400;
-/** The announce toast waits out the initial layout + gallery entrance. */
+/** Let the initial layout + gallery entrance settle before the quiet prompt. */
 const ANNOUNCE_DELAY_MS = 1500;
 
 /** True when this load is a dedicated flow the film must not interrupt. */
@@ -57,18 +52,9 @@ export function useWelcomeAutoOpen(): void {
   useEffect(() => {
     if (decision === "no" || isDeepLinkedLoad()) return;
 
-    if (decision === "show") {
-      const t = setTimeout(() => {
-        writeWelcomeRecord("shown");
-        useWelcomeStore.getState().openWelcome();
-      }, OPEN_DELAY_MS);
-      return () => clearTimeout(t);
-    }
-
-    // "announce" — pre-film user: one quiet pointer at the replayable film.
     const t = setTimeout(() => {
       writeWelcomeRecord("announced");
-      pushToast('New: an intro film — find "Watch the intro" under More.', "info");
+      pushToast('Want a quick tour? Choose "Watch the intro" under More.', "info");
     }, ANNOUNCE_DELAY_MS);
     return () => clearTimeout(t);
   }, [decision]);
