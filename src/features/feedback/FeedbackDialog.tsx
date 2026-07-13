@@ -19,7 +19,9 @@ import { Select } from "@/ui/Select";
 import { TextInput } from "@/ui/TextInput";
 import { TextArea } from "@/ui/TextArea";
 import { CheckCircleIcon, SparkleIcon, SupportIcon } from "@/ui/Icon";
+import { isActivityMode } from "@/core/activity/runtime";
 import {
+  FEEDBACK_CONTACT_MAX,
   FEEDBACK_DETAILS_MAX,
   FEEDBACK_SUMMARY_MAX,
   FEEDBACK_TAGS,
@@ -32,6 +34,7 @@ import styles from "./FeedbackDialog.module.css";
 const TOPGG_REVIEW_URL = "https://top.gg/bot/1511769679096447016#reviews";
 
 export function FeedbackDialog() {
+  const activityMode = isActivityMode();
   const close = useFeedbackStore((s) => s.closeFeedback);
 
   const [tagIndex, setTagIndex] = useState(0);
@@ -108,7 +111,7 @@ export function FeedbackDialog() {
             support server
           </a>{" "}
           — join to track replies on your report
-          {contact.trim() ? "" : " (we have no way to reach you otherwise)"}.
+          {contact.trim() || activityMode ? "" : " (we have no way to reach you otherwise)"}.
         </p>
       </Modal>
     );
@@ -132,6 +135,13 @@ export function FeedbackDialog() {
     >
       <p className={styles.lead}>
         Spotted a bug or have an idea? Send it straight to our feedback forum — no account needed.
+      </p>
+      <p className={styles.disclosure} role="note">
+        Your report and optional contact are visible to members of that forum. Don’t include webhook
+        URLs, API keys, or other secrets.
+        {activityMode
+          ? " Because you are using the Discord Activity, the report also includes your verified Discord display name and user ID."
+          : ""}
       </p>
 
       <Field label="Type">
@@ -187,13 +197,17 @@ export function FeedbackDialog() {
 
       <Field
         label="Your Discord (optional)"
-        hint="So we can @ you with a reply. Otherwise, watch the support server."
+        hint={
+          activityMode
+            ? "Optional extra contact detail; Activity reports already include your verified Discord identity."
+            : "So we can @ you with a reply. Otherwise, watch the support server."
+        }
       >
         {(id) => (
           <TextInput
             id={id}
             value={contact}
-            maxLength={100}
+            maxLength={FEEDBACK_CONTACT_MAX}
             onChange={(e) => setContact(e.currentTarget.value)}
             placeholder="username or username#0000"
             spellCheck={false}
@@ -201,7 +215,11 @@ export function FeedbackDialog() {
         )}
       </Field>
 
-      {error ? <div className={styles.error}>{error}</div> : null}
+      {error ? (
+        <div className={styles.error} role="alert">
+          {error}
+        </div>
+      ) : null}
 
       <div className={styles.review}>
         <span className={styles.reviewIcon} aria-hidden="true">

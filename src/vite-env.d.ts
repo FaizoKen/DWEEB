@@ -17,8 +17,6 @@ interface ImportMetaEnv {
   readonly VITE_WEB_APP_URL?: string;
   /** Public Discord interactions endpoint shown during custom-bot setup. */
   readonly VITE_INTERACTIONS_URL?: string;
-  /** Feedback forum webhook URL — quick-feedback posts go here. Empty → feature off. */
-  readonly VITE_FEEDBACK_WEBHOOK_URL?: string;
   /** Stripe publishable key (`pk_live_…`/`pk_test_…`) for the in-app embedded
    *  Checkout. Empty → the pricing modal is informational only (no checkout). */
   readonly VITE_STRIPE_PUBLISHABLE_KEY?: string;
@@ -49,7 +47,7 @@ interface Window {
    * In-flight short-link resolution started by the inline early-resolve
    * script in `index.html`, consumed (once) by `shortlink.ts`.
    */
-  __dweebShortLink?: Promise<Response>;
+  __dweebShortLink?: Promise<Response | null>;
 }
 
 // Treat default-imported CSS Modules as a string->string lookup so e.g.
