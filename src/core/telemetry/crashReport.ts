@@ -113,7 +113,11 @@ function clamp(s: string, max: number): string {
  * defeat de-dup, but a genuinely different error should get through.
  */
 export function crashSignature(kind: CrashKind, message: string, stack: string): string {
-  const firstFrame = stack.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+  const firstFrame =
+    stack
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) ?? "";
   return `${kind}|${message}|${firstFrame}`;
 }
 

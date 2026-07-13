@@ -149,7 +149,7 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
         ) : (
           <div className={styles.placeholder}>
             <strong>Drag &amp; drop, paste, or click to upload</strong>
-            <span>Stored in this browser only; never uploaded to a third party.</span>
+            <span>Kept in this browser while editing; uploaded to Discord when you send.</span>
           </div>
         )}
         {dragOver && (

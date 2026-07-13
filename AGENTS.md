@@ -51,6 +51,11 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   registry-only (no backend service). Plugin config iframes are forced dark theme.
 - Every interaction plugin must verify custom-app signatures through the dispatcher-forwarded
   key attestation; `DISPATCHER_FORWARD_SECRET` must match the dispatcher and every plugin.
+- Stateful plugin instance ids in Discord `custom_id` are public bindings, never edit authority.
+  Protocol-v2 services return a separate 256-bit management token once, store only its SHA-256
+  digest, and require it for updates; a legacy/cache-miss edit must create and rebind a new
+  instance. Saved-webhook approval responses travel over an iframe-created `MessagePort`, not
+  `contentWindow`. Deploy compatible plugin services/static pages before the v2 web manifest.
 - Plugin-library presets and `init.preset` seeding stay; the duplicate in-config “Quick start”
   bars stay removed.
 - **Adding/removing a template**: update `src/data/presets.ts` + `scripts/seo/content.ts`
@@ -70,6 +75,14 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   import side effect; it once rode the vendor chunk and hit every visitor on every page
   view). Cheap availability checks live in `src/core/plan/stripeConfig.ts`, never
   `stripeApi.ts`, and vite.config.ts's manualChunks keeps `@stripe` in its own lazy chunk.
+- **Feedback webhook credentials are server-only.** Both web and Activity forms submit the
+  closed report schema to the proxy (`/api/feedback` anonymous + strict per-IP limit;
+  `/api/activity/feedback` bearer-gated). Only `FEEDBACK_WEBHOOK_URL` may hold the destination;
+  never add a `VITE_*` feedback webhook variable or direct browser-to-Discord feedback post.
+- **The intro film is opt-in.** First-time visitors get one quiet pointer to
+  **More ▸ Watch intro**; never auto-open or autoplay the multi-megabyte film on page load.
+  Keep it lazy-mounted and use `preload="metadata"`; an explicit Watch intro action may start
+  playback (while respecting reduced-motion) because the user asked for it.
 - index.html's JSON-LD `softwareVersion`/`dateModified` and `og:updated_time` are stamped
   at build by `stampBuildMeta` (vite.config.ts) — don't hand-maintain them; the build
   throws if the patterns vanish. Marketing claims there must match the plans model
@@ -95,10 +108,11 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   the list away mid-flow.
 - **Proxy health vs readiness.** `/health` is bare liveness (static 200, no deps). `/ready`
   probes every *present* SQLite store (shortlinks, schedules, activity drafts, library, Stripe
-  mirror) with a `SELECT 1` via `spawn_blocking` — so a wedged/unwritable volume or a stuck
-  store lock returns `503 {"failed":[…]}` even while `/health` still 200s. Each store exposes an
-  inherent `ping()`; add one for any new store and probe it in `routes::ready`. Gatus watches
-  `/ready` (`server/gatus/config.yaml`, asserts `[BODY].status == ready`).
+  mirror) with a nonblocking pool checkout + `SELECT 1` under a two-second per-store deadline,
+  so a busy/stuck store returns `503 {"failed":[…]}` even while `/health` still 200s. This proves
+  responsiveness, not filesystem writability. Each store exposes an inherent `ping()`; add one
+  for any new store and probe it in `routes::ready`. Gatus watches `/ready`
+  (`server/gatus/config.yaml`, asserts `[BODY].status == ready`).
 - **Global request timeout has exemptions.** `main` wraps the normal routes in a `TimeoutLayer`
   (`REQUEST_TIMEOUT`, 60s) as a backstop for wedged handlers. The room WebSocket and the two
   32 MiB upload routes (`/api/activity/post`, `/api/activity/edit`) are merged *after* the layer

@@ -110,7 +110,7 @@ export function MediaGalleryInspector({ node }: Props) {
         ) : (
           <>
             <strong>Drag &amp; drop, paste, or click to add images</strong>
-            <span>Stored in this browser only; never uploaded to a third party.</span>
+            <span>Kept in this browser while editing; uploaded to Discord when you send.</span>
           </>
         )}
       </label>

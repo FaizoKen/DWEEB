@@ -6,14 +6,15 @@
 
 A visual editor for Discord webhook messages using **Components V2**. Build rich
 messages with containers, sections, buttons, media, and files, watch a
-pixel-accurate live preview, and share the result through a single URL — no
-backend, no account, no database.
+pixel-accurate live preview, then send, schedule, save, or share the result. The
+core builder needs no account.
 
-**Private by design.** Everything runs in your browser, so your drafts stay on
-your device and share links keep their data in the URL fragment — nothing is
-uploaded to us. The only data that leaves your browser is what you opt into
-sending: signing in with Discord, the AI assistant, or a plugin you attach.
-The one exception is automatic: if the app hits an unexpected runtime error it
+**Local by default.** Your working draft, browser saves, recent webhook URLs,
+attachments, preferences, and AI keys stay on your device. Default share links
+keep message data in the URL fragment. Optional features — sending, short links,
+schedules, server libraries, Activities, feedback, AI, billing, and plugins —
+transmit or store the data needed to work; the
+[Privacy Policy](https://dweeb.faizo.net/privacy) inventories each one. If the app hits an unexpected runtime error it
 sends a small, content-free **crash report** (the error message, a few stack
 frames, the version, and the URL path — never your message content or the
 `#`-fragment payload) so bugs in the wild are fixable. That makes DWEEB a
@@ -61,12 +62,12 @@ The action-bar buttons:
 - **Reset** — replace the current message with the default template
   (undoable).
 
-Privacy: your draft never leaves your browser, and Share URLs put the message in
-the `#hash` fragment, which the server never sees. A webhook URL goes to Discord
-when you Send (and to a plugin you attach, if you point one at it). The one
-opt-in exception: the Share dialog's **Create short link** uploads that message
-to the proxy so it can be served from a tiny `…/s/<id>` URL — stored entries
-auto-expire and are deleted after 7 days.
+Privacy: the auto-saved working draft stays in your browser, and default Share
+URLs put the message in the `#hash` fragment, which the server never sees. Send
+uploads the message and attachments to Discord. **Create short link** uploads the
+message to the proxy for a tiny `…/s/<id>` URL and deletes it automatically after
+7 days. Scheduling, server-library saves, Activities, feedback, AI, billing, and
+plugins have their own explicit data paths described in the Privacy Policy.
 
 ```
 ┌─────────────────────────────────┬────────────────────────────────────────┐

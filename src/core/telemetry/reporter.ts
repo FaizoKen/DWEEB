@@ -2,8 +2,8 @@
  * Frontend crash reporter — the browser glue around the pure core in
  * `crashReport.ts`.
  *
- * DWEEB runs entirely in the browser, so a runtime error that blanks the editor
- * is invisible to us unless a user reports it. This installs the two global
+ * The editor UI runs in the browser, so a runtime error that blanks it is
+ * otherwise invisible to us unless a user reports it. This installs the two global
  * traps every uncaught error passes through — `error` (uncaught exceptions) and
  * `unhandledrejection` (dropped promises) — plus a hook the React
  * `ErrorBoundary` calls, and beacons a small, content-free crash report to the
@@ -44,7 +44,14 @@ function appVersion(): string {
 
 /** Only report from a real deployment that has somewhere to send to. */
 function enabled(): boolean {
-  return import.meta.env.PROD && isProxyConfigured();
+  if (typeof navigator === "undefined") return false;
+  const privacySignals = navigator as Navigator & { globalPrivacyControl?: boolean };
+  return (
+    import.meta.env.PROD &&
+    isProxyConfigured() &&
+    privacySignals.globalPrivacyControl !== true &&
+    navigator.doNotTrack !== "1"
+  );
 }
 
 /** One throttle for the page's lifetime: dedups repeats and caps the total. */

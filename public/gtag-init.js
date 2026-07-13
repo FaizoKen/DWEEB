@@ -10,14 +10,24 @@
 //
 // Kept as an external file (not inlined) so it satisfies the strict CSP
 // `script-src 'self' https://www.googletagmanager.com` with no 'unsafe-inline'.
-window.dataLayer = window.dataLayer || [];
-function gtag() {
-  dataLayer.push(arguments);
-}
-gtag("js", new Date());
-gtag("config", "G-GQRDJZRCTS");
-
 (function () {
+  // Respect both the established DNT signal and Global Privacy Control before
+  // creating the analytics queue or making any request to Google.
+  if (
+    navigator.globalPrivacyControl === true ||
+    navigator.doNotTrack === "1" ||
+    window.doNotTrack === "1"
+  ) {
+    return;
+  }
+
+  window.dataLayer = window.dataLayer || [];
+  window.gtag = function () {
+    window.dataLayer.push(arguments);
+  };
+  window.gtag("js", new Date());
+  window.gtag("config", "G-GQRDJZRCTS");
+
   var loaded = false;
   var events = ["pointerdown", "keydown", "touchstart", "scroll"];
   var opts = { once: true, passive: true, capture: true };

@@ -20,16 +20,17 @@
         var m = /^\/s\/([0-9A-Za-z]{4,16})\/*$/.exec(location.pathname);
         var api = "%VITE_PROXY_BASE_URL%";
         if (m && /^https?:\/\//.test(api))
-          window.__dweebShortLink = fetch(api.replace(/\/+$/, "") + "/api/shortlink/" + m[1]);
+          window.__dweebShortLink = fetch(
+            api.replace(/\/+$/, "") + "/api/shortlink/" + m[1],
+          ).catch(function () {
+            return null;
+          });
       })();
     </script>
 
     <!-- Analytics is deferred to browser idle / first interaction (see
          gtag-init.js), so it never competes with the app's critical resources.
-         A cheap DNS prefetch keeps the eventual lazy load fast without opening a
-         connection during first paint. -->
-    <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
-    <link rel="dns-prefetch" href="https://www.google-analytics.com" />
+         That loader also honors browser privacy signals before contacting Google. -->
     <script defer src="/gtag-init.js"></script>
 
     <!-- The live preview renders Discord-hosted media (avatars, custom emoji,
@@ -49,11 +50,11 @@
     <title>DWEEB — Visual Discord Webhook Builder for Components V2</title>
     <meta
       name="description"
-      content="The visual Discord webhook & embed builder for Components V2 — design, preview, and send rich messages with containers, sections, buttons, select menus, and media, all in a pixel-accurate live Discord preview. Free, no JSON, no account; private by design (runs entirely in your browser, nothing uploaded). Source-available and built for large communities and teams."
+      content="The visual Discord webhook & embed builder for Components V2 — design, preview, and send rich messages with containers, sections, buttons, select menus, and media in a pixel-accurate Discord preview. The core editor is local by default, requires no account, and includes optional server-backed scheduling, libraries, and collaboration."
     />
     <meta
       name="keywords"
-      content="Discord webhook builder, visual Discord webhook builder, best Discord webhook builder, Discord embed builder, Discord embed maker, Discord embed generator, Discord message builder, Components V2 builder, Discord Components V2 builder, Discord Components V2 editor, Discord webhook generator, send Discord webhook online, Discord webhook editor online, Discord webhook message maker, Discord button builder, Discord select menu builder, Discord media gallery message, Discord container & section builder, free Discord webhook tool, private Discord webhook builder, secure Discord webhook tool, source-available Discord webhook builder, browser-based Discord embed builder, no-upload Discord message builder, Discord announcement builder, Discord webhook builder for large communities and teams, DWEEB, DWEEB Discord"
+      content="Discord webhook builder, visual Discord webhook builder, best Discord webhook builder, Discord embed builder, Discord embed maker, Discord embed generator, Discord message builder, Components V2 builder, Discord Components V2 builder, Discord Components V2 editor, Discord webhook generator, send Discord webhook online, Discord webhook editor online, Discord webhook message maker, Discord button builder, Discord select menu builder, Discord media gallery message, Discord container & section builder, free Discord webhook tool, private Discord webhook builder, secure Discord webhook tool, source-available Discord webhook builder, browser-based Discord embed builder, Discord announcement builder, Discord webhook builder for large communities and teams, DWEEB, DWEEB Discord"
     />
     <meta name="author" content="Faizo" />
     <meta name="publisher" content="Faizo" />
@@ -79,7 +80,7 @@
     <meta property="og:title" content="DWEEB — Visual Discord Webhook & Embed Builder (Components V2)" />
     <meta
       property="og:description"
-      content="The visual Discord webhook & embed builder for Components V2. Design, preview, and send rich messages — buttons, sections, select menus, media — in a pixel-accurate live preview. Free, private by design, no JSON or account. Built for large communities and teams."
+      content="The visual Discord webhook & embed builder for Components V2. Design, preview, and send rich messages with a pixel-accurate live preview. Local by default, no account required, and built for communities and teams."
     />
     <meta property="og:url" content="https://dweeb.faizo.net/" />
     <meta property="og:locale" content="en_US" />
@@ -94,19 +95,19 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="DWEEB — privately build, preview and send Discord Components V2 messages, entirely in your browser."
+      content="DWEEB — visually build, preview, and send Discord Components V2 messages with a local-by-default editor."
     />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="DWEEB — Visual Discord Webhook & Embed Builder (Components V2)" />
     <meta
       name="twitter:description"
-      content="The visual Discord webhook & embed builder for Components V2. Design, preview, and send rich messages — buttons, sections, select menus, media — in a pixel-accurate live preview. Free, private by design, no JSON or account. Built for large communities and teams."
+      content="The visual Discord webhook & embed builder for Components V2. Design, preview, and send rich messages with a pixel-accurate live preview. Local by default, no account required, and built for communities and teams."
     />
     <meta name="twitter:image" content="https://dweeb.faizo.net/og-image.png" />
     <meta
       name="twitter:image:alt"
-      content="DWEEB — privately build, preview and send Discord Components V2 messages, entirely in your browser."
+      content="DWEEB — visually build, preview, and send Discord Components V2 messages with a local-by-default editor."
     />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -124,7 +125,7 @@
         "name": "DWEEB",
         "alternateName": "Discord Webhook Embed Builder",
         "url": "https://dweeb.faizo.net/",
-        "description": "Visually build, preview, and send Discord webhook messages using Components V2 — no JSON, no backend, no account. Private by design: everything runs in your browser and nothing is uploaded to our servers, so it's built for large communities and teams. Free for noncommercial use; source-available under the PolyForm Noncommercial License.",
+        "description": "Visually build, preview, and send Discord webhook messages using Components V2. The core editor and browser drafts are local by default and need no account; optional scheduling, server libraries, billing, plugins, AI, and collaboration use connected services. Free for noncommercial use and source-available under the PolyForm Noncommercial License.",
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Discord Webhook & Components V2 Builder",
         "operatingSystem": "Web",
@@ -161,9 +162,9 @@
           "Export and import message JSON",
           "Send directly to a Discord webhook",
           "Edit a message you already posted — restore and update in place",
-          "Private by design — drafts stay in your browser and aren't uploaded to our servers",
+          "Local-by-default editor with browser-only working drafts and saved messages",
           "Built for large communities and teams",
-          "Runs entirely in the browser — no backend or account",
+          "Core builder needs no account; optional connected services add scheduling and collaboration",
           "Free for noncommercial use — source-available (no commercial use)"
         ]
       }
@@ -183,10 +184,10 @@
           },
           {
             "@type": "Question",
-            "name": "Do I need to write JSON or run a backend?",
+            "name": "Do I need to install software or host a bot?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. The builder is fully visual and runs entirely in your browser. There is no JSON to write, no backend to host, and no account to create."
+              "text": "No. The core visual builder runs in a web browser and needs no account or self-hosted bot. Optional interactive plugins, scheduling, server libraries, and collaboration use DWEEB's connected services."
             }
           },
           {
@@ -202,7 +203,7 @@
             "name": "Is DWEEB free?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. The full builder is free and runs entirely in your browser — design, preview, send, share, and every Components V2 component, with no sign-up and no feature ever locked behind a plan. Optional Plus and Pro upgrades (per Discord server) only raise quotas on extras like scheduled posts and saved messages."
+              "text": "Yes. The full browser-based builder is free — design, preview, send, share, and use every Components V2 component with no sign-up and no feature locked behind a plan. Optional Plus and Pro upgrades (per Discord server) only raise quotas on extras like scheduled posts and saved messages."
             }
           },
           {
@@ -242,7 +243,7 @@
             "name": "Is DWEEB private? Where is my data stored?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "DWEEB is private by design. It runs in your browser, so your message drafts and saved data stay on your device and are never uploaded to our servers, and share links keep their data in the URL fragment. The only data that leaves your browser is what you opt into sending — signing in with Discord, the AI assistant, a plugin you attach (a plugin runs as its own external service and receives the data it needs, such as a webhook URL you pick for it), or a feature that stores what you save with it, like scheduled posts or the message library. No account is required, which makes DWEEB well suited to sensitive announcements and to large communities and teams."
+              "text": "DWEEB's core editor is local by default: the working draft, browser saves, recent webhook URLs, attachments, and AI keys stay on your device. Default hash share links keep message data in the URL fragment. Features such as sending, short links, schedules, server libraries, Activities, feedback, AI, billing, and plugins transmit or store the data they need; the Privacy Policy explains each one."
             }
           },
           {
@@ -284,7 +285,7 @@
         "name": "DWEEB",
         "alternateName": "Discord Webhook Embed Builder",
         "url": "https://dweeb.faizo.net/",
-        "description": "The visual Discord webhook & embed builder for Components V2 — design, preview, and send rich messages in a pixel-accurate live preview, entirely in your browser.",
+        "description": "The visual browser-based Discord webhook & embed builder for Components V2 — design, preview, and send rich messages in a pixel-accurate live preview.",
         "inLanguage": "en",
         "publisher": { "@id": "https://faizo.net/#organization" }
       }
@@ -294,7 +295,7 @@
         "@context": "https://schema.org",
         "@type": "HowTo",
         "name": "How to build and send a Discord webhook message with Components V2",
-        "description": "Visually design a Discord Components V2 webhook message in DWEEB — add containers, sections, buttons, select menus and media, preview it live, then send it to your webhook. No JSON or account required.",
+        "description": "Visually design a Discord Components V2 webhook message in DWEEB — add containers, sections, buttons, select menus and media, preview it live, then send it to your webhook. No account is required for the core builder.",
         "image": "https://dweeb.faizo.net/og-image.png",
         "totalTime": "PT2M",
         "tool": [
@@ -337,15 +338,14 @@
           DWEEB (Discord Webhook Embed Builder) is a free, source-available, browser-based visual editor for
           crafting Discord webhook messages with Components V2. Design rich messages with containers, sections,
           buttons, and media, watch a pixel-accurate live preview, then export or share the
-          result through a single URL — no JSON, no backend, and no account required.
+          result through a single URL. The core editor needs no account or installation.
         </p>
         <p>
-          DWEEB is <strong>private by design</strong>: because everything runs in your browser, your message
-          drafts stay on your device and share links keep their data in the URL fragment. Nothing is
-          uploaded to our servers — no account, no database — and the only data that leaves your browser is
-          what you opt into sending (signing in with Discord, the AI assistant, or a plugin you
-          attach). That makes it a security-conscious choice for sensitive announcements and for large
-          communities and teams.
+          DWEEB is <strong>local by default</strong>: your working draft and browser saves stay on your
+          device, while default share links keep their message data in the URL fragment. Optional features
+          such as short links, schedules, server libraries, Activities, feedback, AI, billing, and plugins
+          use the connected services needed to work. The Privacy Policy explains exactly what each feature
+          sends and retains.
         </p>
         <h2>What you can do</h2>
         <ul>
@@ -354,7 +354,7 @@
           <li>See a pixel-accurate, Discord-style live preview as you edit.</li>
           <li>Share any message through a single URL, or export and import message JSON.</li>
           <li>Send messages straight to your Discord webhook, or edit one you already posted.</li>
-          <li>Keep your drafts private — they stay in your browser and aren't uploaded to our servers.</li>
+          <li>Keep working drafts and browser saves local unless you choose a server-backed feature.</li>
         </ul>
         <h2>Every Components V2 component, in one editor</h2>
         <p>
@@ -368,17 +368,17 @@
         <h3>Is DWEEB free?</h3>
         <p>
           Yes — the full builder is free for noncommercial use and source-available, requires no
-          account, and runs entirely in your browser. Optional per-server Plus/Pro upgrades only
+          account, and runs as a browser-based editor. Optional per-server Plus/Pro upgrades only
           raise quotas on extras like scheduled posts and saved messages — no feature is ever
           locked behind a plan.
         </p>
         <h3>Is DWEEB private?</h3>
         <p>
-          Yes. DWEEB is private by design — it runs in your browser, so your drafts and saved data are never
-          uploaded to our servers, and share links keep their data in the URL fragment. Data leaves your
-          browser only when you opt into a feature that sends it — signing in with Discord, the AI assistant,
-          or a plugin you attach. There's no account or database. That makes it a strong fit for
-          sensitive announcements and for large communities and teams.
+          DWEEB's core editor is local by default: working drafts, browser saves, recent webhook URLs,
+          attachments, and AI keys stay on your device. Default share links keep message data in the URL
+          fragment. Optional short links, schedules, server libraries, Activities, feedback, AI, billing,
+          and plugins transmit or store the data required for that feature; see the Privacy Policy for the
+          full inventory and retention details.
         </p>
         <h3>Do I need a Discord bot?</h3>
         <p>

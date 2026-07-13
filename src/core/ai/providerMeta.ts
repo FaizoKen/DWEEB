@@ -92,11 +92,11 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     keysUrl: "https://console.anthropic.com/settings/keys",
     keyPlaceholder: "sk-ant-…",
   },
-  // Self-hosted Ollama. Speaks the OpenAI API at /v1 and needs no key. The
-  // deployed site reaches it through the same-origin proxy, which runs on the
-  // edge — it can't see your localhost and refuses non-https/private hosts. So
-  // there's no usable default: the user must supply the public https URL of
-  // their Ollama (e.g. a Cloudflare Tunnel), hence requiresBaseUrl.
+  // Self-hosted Ollama. Speaks the OpenAI API at /v1 and needs no key. Requests
+  // go directly from the browser, so a deployed HTTPS page needs a reachable
+  // HTTPS endpoint with suitable CORS headers; it cannot call an HTTP/private
+  // endpoint as though the app were running on the same machine. There is no
+  // usable default, hence requiresBaseUrl.
   ollama: {
     label: "Ollama (self-hosted)",
     defaultModel: "llama3.2",

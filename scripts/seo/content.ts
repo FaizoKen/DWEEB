@@ -662,7 +662,7 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
     },
     {
       q: "Is DWEEB free?",
-      a: "Yes. DWEEB is free and runs entirely in your browser — no account, no JSON to write, and nothing uploaded to a server.",
+      a: "Yes. DWEEB's full visual builder is free and needs no account. Working drafts and browser saves are local by default; optional connected features such as schedules, server libraries, AI, and plugins use the data required to work.",
     },
   ];
 

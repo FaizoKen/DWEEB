@@ -122,7 +122,7 @@ export function htmlDocument(opts: {
     <footer class="site-footer">
       <p>
         <strong>DWEEB</strong> — the free visual Discord webhook &amp; embed builder for Components V2.
-        Build, preview and send rich messages in your browser. No JSON, no account, nothing uploaded.
+        Build, preview and send rich messages in a local-by-default editor. No account is required for the core builder.
       </p>
       <p class="muted">
         <a href="/">Open the builder</a> ·
@@ -364,7 +364,7 @@ export function renderIndexPage(all: ResolvedSeo[]): string {
     <header class="hero">
       <span class="chip">📋 Templates</span>
       <h1>Discord Message Templates</h1>
-      <p class="lede">A growing library of free, ready-to-use Discord message templates built with Components V2 — welcome messages, server rules, announcements, reaction-role menus, giveaways, support tickets and more. Open any template in DWEEB, customize every word, colour and link, then post it through a webhook. No JSON, no bot for the static ones, no account.</p>
+      <p class="lede">A growing library of free, ready-to-use Discord message templates built with Components V2 — welcome messages, server rules, announcements, reaction-role menus, giveaways, support tickets and more. Open any template in DWEEB, customize every word, colour and link, then post it through a webhook. Static templates need no bot, and the core builder needs no account.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="/">Open the builder →</a>
       </div>

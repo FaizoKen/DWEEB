@@ -748,7 +748,7 @@ export function resolveFeature(f: FeatureSeo): ResolvedFeature {
     ...f.faq,
     {
       q: "Is DWEEB free?",
-      a: "Yes. DWEEB is free and runs in your browser — no account, no JSON to write. Build your message, attach the feature, and send it through a webhook.",
+      a: "Yes. DWEEB's visual builder is free and needs no account. Build your message, attach the feature, and send it through a webhook; optional connected services process the data required by the feature.",
     },
   ];
 
