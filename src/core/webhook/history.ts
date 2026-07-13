@@ -59,14 +59,22 @@ function safeParse(raw: string | null): WebhookHistoryEntry[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter(
-        (e): e is WebhookHistoryEntry =>
-          e &&
-          typeof e === "object" &&
-          typeof e.id === "string" &&
-          typeof e.url === "string" &&
-          typeof e.lastUsedAt === "number",
-      )
+      .filter((e): e is WebhookHistoryEntry => {
+        if (
+          !e ||
+          typeof e !== "object" ||
+          typeof e.id !== "string" ||
+          typeof e.url !== "string" ||
+          typeof e.lastUsedAt !== "number"
+        ) {
+          return false;
+        }
+        // localStorage is user/script-controlled input. Keep the credential
+        // boundary pinned to a canonical Discord execute URL, and make sure the
+        // separately stored id cannot disagree with the URL it labels.
+        const parsedUrl = parseWebhookUrl(e.url);
+        return parsedUrl !== null && parsedUrl.id === e.id && parsedUrl.url === e.url;
+      })
       .map((e) => ({
         ...e,
         // Pre-name entries (saved before this field existed) get an empty name
@@ -101,12 +109,24 @@ function safeParse(raw: string | null): WebhookHistoryEntry[] {
 
 export function loadHistory(): WebhookHistoryEntry[] {
   if (typeof localStorage === "undefined") return [];
-  return safeParse(localStorage.getItem(STORAGE_KEY)).sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+  try {
+    return safeParse(localStorage.getItem(STORAGE_KEY)).sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+  } catch {
+    // Browsers can expose localStorage while throwing on access (privacy
+    // settings, sandboxed frames, a disabled origin). Recents are optional and
+    // must never turn a successful Discord request into an apparent failure.
+    return [];
+  }
 }
 
-function persist(entries: WebhookHistoryEntry[]): void {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+function persist(entries: WebhookHistoryEntry[]): boolean {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -149,21 +169,20 @@ export function rememberWebhook(
   };
 
   const next = [entry, ...all.filter((e) => e.id !== parsed.id)].slice(0, MAX_ENTRIES);
-  persist(next);
-  return entry;
+  return persist(next) ? entry : null;
 }
 
-export function touchWebhook(id: string): void {
+export function touchWebhook(id: string): boolean {
   const all = loadHistory();
   const idx = all.findIndex((e) => e.id === id);
-  if (idx < 0) return;
+  if (idx < 0) return false;
   const updated = { ...all[idx]!, lastUsedAt: Date.now() };
   const next = [updated, ...all.filter((e) => e.id !== id)].slice(0, MAX_ENTRIES);
-  persist(next);
+  return persist(next);
 }
 
-export function forgetWebhook(id: string): void {
-  persist(loadHistory().filter((e) => e.id !== id));
+export function forgetWebhook(id: string): boolean {
+  return persist(loadHistory().filter((e) => e.id !== id));
 }
 
 /**
@@ -215,8 +234,7 @@ export function refreshWebhook(
     return false;
   }
   all[idx] = next;
-  persist(all);
-  return true;
+  return persist(all);
 }
 
 /**
@@ -230,11 +248,16 @@ export function markWebhookGone(id: string): boolean {
   const idx = all.findIndex((e) => e.id === id);
   if (idx < 0 || all[idx]!.deletedAt) return false;
   all[idx] = { ...all[idx]!, deletedAt: Date.now() };
-  persist(all);
-  return true;
+  return persist(all);
 }
 
-export function clearHistory(): void {
-  if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(STORAGE_KEY);
+export function clearHistory(): boolean {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    return true;
+  } catch {
+    // Optional local recents must not destabilise the surrounding flow.
+    return false;
+  }
 }

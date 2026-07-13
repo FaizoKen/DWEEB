@@ -136,7 +136,6 @@ import { Field } from "@/ui/Field";
 import { TextInput } from "@/ui/TextInput";
 import { ChevronRightIcon, LockIcon, PlusIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
-import { cn } from "@/lib/cn";
 import {
   COMPONENT_TTL_DAYS,
   DISCORD_CLIENT_ID,
@@ -149,8 +148,9 @@ import { navigatePopup, openPopup, redirectFullPage, watchPopup } from "@/core/o
 import { webhookFlow } from "@/core/oauth/flows";
 import { copyText } from "@/core/serialization/clipboard";
 import { encodeJson } from "@/core/serialization";
-import { createSchedule, isScheduleConfigured } from "@/core/schedule/api";
-import { rememberSchedule } from "@/core/schedule/localStore";
+import { cancelSchedule, createSchedule, isScheduleConfigured } from "@/core/schedule/api";
+import { preserveCreatedScheduleAccess } from "@/core/schedule/accessPersistence";
+import { rememberSchedule, type LocalSchedule } from "@/core/schedule/localStore";
 import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker, WEBHOOK_CHANNEL_TYPES } from "./GuildWebhookPicker";
@@ -191,6 +191,13 @@ interface SendSuccessInfo {
   permanentStatus?: Omit<PermanentStatusProps, "messageId">;
 }
 
+interface ScheduleRecovery {
+  entry: LocalSchedule;
+  nextRunAt: number;
+  keepsPermanent: boolean;
+  rollbackError: string;
+}
+
 /** Pull the new message's snowflake from a Discord response (POST wait=true / PATCH). */
 function messageIdFromBody(body: unknown): string | undefined {
   if (body && typeof body === "object") {
@@ -225,6 +232,20 @@ function defaultScheduleAt(): string {
   d.setMinutes(0, 0, 0);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function scheduleSuccessText(
+  nextRunAt: number,
+  keepsPermanent: boolean,
+  localAccessStored: boolean,
+): string {
+  return (
+    `Scheduled for ${formatInstant(nextRunAt, browserTimezone())}.` +
+    (keepsPermanent ? " Its buttons & selects will be kept from expiring." : "") +
+    (localAccessStored
+      ? ""
+      : " This browser couldn't save a local management key, so keep signed in to manage it.")
+  );
 }
 
 export function SendPanel({
@@ -310,6 +331,7 @@ export function SendPanel({
   const [scheduling, setScheduling] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleSuccess, setScheduleSuccess] = useState<string | null>(null);
+  const [scheduleRecovery, setScheduleRecovery] = useState<ScheduleRecovery | null>(null);
   // True while a confirmed send is in flight. Keeps the confirm dialog open with
   // a loading button instead of closing it the instant "Post" is clicked.
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -817,6 +839,12 @@ export function SendPanel({
   const handleScheduleClick = () => {
     setScheduleError(null);
     setScheduleSuccess(null);
+    if (scheduleRecovery) {
+      setScheduleError(
+        "Save access to or cancel the previous scheduled post before creating another one.",
+      );
+      return;
+    }
     if (!parsedUrl) {
       setScheduleError("Choose or paste a webhook above first.");
       return;
@@ -900,28 +928,96 @@ export function SendPanel({
       // message actually having components and a known guild to spend against.
       make_permanent: hasInteractiveComponents && makePermanent && !!knownGuildId,
     });
-    setScheduling(false);
-    // Close the confirm either way — the panel surfaces the success line or the
-    // error inline (mirroring the send flow's hand-back).
-    setConfirmOpen(false);
     if (!res.ok) {
+      setScheduling(false);
+      // Close the confirm either way — the panel surfaces the success line or
+      // the error inline (mirroring the send flow's hand-back).
+      setConfirmOpen(false);
       setScheduleError(res.error);
       return;
     }
-    rememberSchedule({
+
+    const localEntry: LocalSchedule = {
       id: res.id,
       manageToken: res.manage_token,
       webhookId: parsedUrl.id,
       createdAt: Date.now(),
-    });
+    };
+    const access = await preserveCreatedScheduleAccess(
+      localEntry,
+      // A signed-in schedule remains manageable from the server-side account
+      // list even when this browser rejects its redundant local manage token.
+      authStatus === "authed",
+    );
+    setScheduling(false);
+    setConfirmOpen(false);
+    if (access.kind === "rolled-back") {
+      setScheduleError(
+        "Scheduling was canceled because this browser couldn't save its management key. Check browser storage and try again.",
+      );
+      return;
+    }
+    if (access.kind === "recovery-required") {
+      setScheduleRecovery({
+        entry: localEntry,
+        nextRunAt: res.next_run_at,
+        keepsPermanent: hasInteractiveComponents && makePermanent && !!knownGuildId,
+        rollbackError: access.rollbackError,
+      });
+      setScheduleError(
+        "The post was scheduled, but this browser couldn't save its management key and automatic cancellation failed. Keep the recovery key below until you save access or cancel the post.",
+      );
+      return;
+    }
+
     rememberWebhook(parsedUrl.url);
     setHistory(loadHistory());
     const keepsPermanent = hasInteractiveComponents && makePermanent && !!knownGuildId;
     setScheduleSuccess(
-      `Scheduled for ${formatInstant(res.next_run_at, browserTimezone())}.` +
-        (keepsPermanent ? " Its buttons & selects will be kept from expiring." : ""),
+      scheduleSuccessText(res.next_run_at, keepsPermanent, access.kind === "persisted"),
     );
-    pushToast("Post scheduled.", "success");
+    pushToast(
+      access.kind === "persisted"
+        ? "Post scheduled."
+        : "Post scheduled — keep signed in to manage it.",
+      access.kind === "persisted" ? "success" : "info",
+    );
+  };
+
+  const retryScheduleRecovery = () => {
+    if (!scheduleRecovery) return;
+    if (!rememberSchedule(scheduleRecovery.entry)) {
+      setScheduleError(
+        "This browser still couldn't save the management key. Copy it or cancel the scheduled post before closing this page.",
+      );
+      return;
+    }
+    setScheduleError(null);
+    setScheduleSuccess(
+      scheduleSuccessText(scheduleRecovery.nextRunAt, scheduleRecovery.keepsPermanent, true),
+    );
+    setScheduleRecovery(null);
+    pushToast("Schedule access saved to this browser.", "success");
+  };
+
+  const cancelScheduleRecovery = async () => {
+    if (!scheduleRecovery || scheduling) return;
+    setScheduling(true);
+    const result = await cancelSchedule(
+      scheduleRecovery.entry.id,
+      scheduleRecovery.entry.manageToken,
+    );
+    setScheduling(false);
+    if (!result.ok) {
+      setScheduleError(
+        `Couldn't cancel the scheduled post: ${result.error} Keep the recovery key and try again.`,
+      );
+      return;
+    }
+    setScheduleRecovery(null);
+    setScheduleError(null);
+    setScheduleSuccess(null);
+    pushToast("Unmanaged scheduled post canceled.", "info");
   };
 
   const handleConfirmedSend = async () => {
@@ -1350,6 +1446,12 @@ export function SendPanel({
           : `Webhook verified — ${owner.badge.toLowerCase()}. Saved.`,
         "success",
       );
+    } else {
+      setState({
+        kind: "error",
+        message:
+          "The webhook was verified, but this browser couldn't save it. Check browser storage and try again.",
+      });
     }
   };
 
@@ -1545,30 +1647,38 @@ export function SendPanel({
       {mode === "new" && isScheduleConfigured() ? (
         <div className={styles.scheduleArea}>
           <div className={styles.modeToggle} role="radiogroup" aria-label="When to post">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={when === "now"}
-              className={cn(styles.modeOption, when === "now" && styles.modeOptionActive)}
-              onClick={() => setWhen("now")}
+            <label
+              className={styles.modeOption}
+              title={scheduleRecovery ? "Resolve the scheduled-post recovery first." : undefined}
             >
+              <input
+                className={styles.modeInput}
+                type="radio"
+                name="send-timing"
+                value="now"
+                checked={when === "now"}
+                disabled={scheduleRecovery != null}
+                onChange={() => setWhen("now")}
+              />
               <strong>Send now</strong>
               <span>Post immediately.</span>
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={when === "later"}
-              className={cn(styles.modeOption, when === "later" && styles.modeOptionActive)}
-              onClick={() => {
-                setWhen("later");
-                setScheduleError(null);
-                setScheduleSuccess(null);
-              }}
-            >
+            </label>
+            <label className={styles.modeOption}>
+              <input
+                className={styles.modeInput}
+                type="radio"
+                name="send-timing"
+                value="later"
+                checked={when === "later"}
+                onChange={() => {
+                  setWhen("later");
+                  setScheduleError(null);
+                  setScheduleSuccess(null);
+                }}
+              />
               <strong>Schedule</strong>
               <span>Post at a set date &amp; time.</span>
-            </button>
+            </label>
           </div>
 
           {when === "later" ? (
@@ -1592,10 +1702,6 @@ export function SendPanel({
                 <p className={styles.scheduleNote}>
                   Stored on our server (encrypted) only until it posts, then deleted.
                 </p>
-                {scheduleError ? <div className={styles.error}>{scheduleError}</div> : null}
-                {scheduleSuccess ? (
-                  <div className={styles.scheduleSuccess}>{scheduleSuccess}</div>
-                ) : null}
               </>
             ) : (
               <Callout tone="info" role="note">
@@ -1603,6 +1709,54 @@ export function SendPanel({
                 message on our server until it fires, so it needs an account.
               </Callout>
             )
+          ) : null}
+
+          {when === "later" && scheduleError ? (
+            <div className={styles.error} role="alert">
+              {scheduleError}
+            </div>
+          ) : null}
+          {when === "later" && scheduleSuccess ? (
+            <div className={styles.scheduleSuccess}>{scheduleSuccess}</div>
+          ) : null}
+          {scheduleRecovery ? (
+            <div className={styles.scheduleRecovery} role="alert">
+              <strong>Emergency schedule recovery key</strong>
+              <span>
+                This key controls the scheduled post. Keep it private. Automatic cancellation
+                failed: {scheduleRecovery.rollbackError}
+              </span>
+              <code>
+                {scheduleRecovery.entry.id}:{scheduleRecovery.entry.manageToken}
+              </code>
+              <div className={styles.scheduleRecoveryActions}>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const value = `${scheduleRecovery.entry.id}:${scheduleRecovery.entry.manageToken}`;
+                    void copyText(value).then((ok) =>
+                      pushToast(
+                        ok ? "Recovery key copied." : "Couldn't copy — select the key manually.",
+                        ok ? "success" : "error",
+                      ),
+                    );
+                  }}
+                >
+                  Copy key
+                </Button>
+                <Button size="sm" onClick={retryScheduleRecovery} disabled={scheduling}>
+                  Retry saving access
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => void cancelScheduleRecovery()}
+                  disabled={scheduling}
+                >
+                  {scheduling ? "Canceling…" : "Cancel scheduled post"}
+                </Button>
+              </div>
+            </div>
           ) : null}
 
           {/* The list of scheduled posts lives in the gallery's Scheduled tab,
@@ -1944,10 +2098,17 @@ export function SendPanel({
               size="sm"
               onClick={() => {
                 if (!parsedUrl) return;
-                forgetWebhook(parsedUrl.id);
+                if (!forgetWebhook(parsedUrl.id)) {
+                  pushToast(
+                    "Couldn't remove the webhook — check browser storage and try again.",
+                    "error",
+                  );
+                  return;
+                }
                 setHistory(loadHistory());
                 setUrl("");
                 setState({ kind: "idle" });
+                pushToast("Webhook removed from this browser.", "info");
               }}
             >
               Remove from recents
@@ -2150,6 +2311,7 @@ export function SendPanel({
                 onClick={handleScheduleClick}
                 disabled={
                   scheduling ||
+                  scheduleRecovery != null ||
                   saving ||
                   !parsedUrl ||
                   knownGone ||

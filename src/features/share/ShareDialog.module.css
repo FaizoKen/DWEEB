@@ -52,7 +52,7 @@
   font-weight: 600;
 }
 .lead a {
-  color: var(--app-accent);
+  color: var(--app-accent-text);
 }
 
 .aboutLinks {
@@ -111,7 +111,7 @@
   gap: 12px;
   flex-wrap: wrap;
   margin: 4px calc(-1 * var(--modal-pad, 20px)) calc(-1 * var(--modal-pad, 20px));
-  padding: 12px var(--modal-pad, 20px) calc(12px + env(safe-area-inset-bottom, 0px));
+  padding: 12px var(--modal-pad, 20px) calc(12px + var(--app-saib));
   background: var(--app-bg-elevated);
   border-top: 1px solid var(--app-border);
 }

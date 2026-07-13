@@ -214,10 +214,19 @@ export function useScheduledPosts(
     const results = await Promise.all(
       history.map((s) => cancelSchedule(s.id, getManageToken(s.id))),
     );
-    for (const s of history) forgetSchedule(s.id);
-    const ids = new Set(history.map((s) => s.id));
-    setItems((prev) => prev.filter((i) => !ids.has(i.id)));
-    return results.filter((r) => !r.ok).length;
+    const removedIds = new Set<string>();
+    results.forEach((result, index) => {
+      if (!result.ok) return;
+      const schedule = history[index];
+      if (!schedule) return;
+      removedIds.add(schedule.id);
+      // Server deletion is authoritative. A blocked localStorage cleanup may
+      // leave a stale token, but the next load will see 404 and retry cleanup;
+      // never hide rows whose server deletion actually failed.
+      forgetSchedule(schedule.id);
+    });
+    setItems((prev) => prev.filter((item) => !removedIds.has(item.id)));
+    return results.length - removedIds.size;
   }, []);
 
   const upcoming = useMemo(() => guildItems.filter((s) => UPCOMING.has(s.status)), [guildItems]);

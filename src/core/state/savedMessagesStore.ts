@@ -34,18 +34,30 @@ export interface SavedMessageRecord {
 
 interface SavedMessagesState {
   entries: SavedMessageRecord[];
-  /** Persist `message` under `name`, returning the new record. */
-  save(name: string, message: WebhookMessage): SavedMessageRecord;
+  /** Persist `message` under `name`. Memory changes only after storage commits. */
+  save(name: string, message: WebhookMessage): SavedMessageSaveResult;
   /** Re-hydrate a saved entry into an editable message. Returns null if the
    *  stored payload is malformed or the id is unknown. */
   load(id: string): WebhookMessage | null;
-  remove(id: string): void;
-  rename(id: string, name: string): void;
+  remove(id: string): boolean;
+  rename(id: string, name: string): boolean;
 }
+
+export type SavedMessageSaveResult =
+  | { ok: true; record: SavedMessageRecord }
+  | { ok: false; error: string };
+
+const STORAGE_ERROR =
+  "This browser couldn't store the message. Check its storage permissions or free some space, then try again.";
 
 function readRaw(): SavedMessageRecord[] {
   if (typeof localStorage === "undefined") return [];
-  const raw = localStorage.getItem(STORAGE_KEY);
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return [];
+  }
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -64,13 +76,15 @@ function readRaw(): SavedMessageRecord[] {
   }
 }
 
-function writeRaw(entries: SavedMessageRecord[]): void {
-  if (typeof localStorage === "undefined") return;
+function writeRaw(entries: SavedMessageRecord[]): boolean {
+  if (typeof localStorage === "undefined") return false;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    return true;
   } catch {
-    // Quota exceeded or storage disabled — swallow; the in-memory list still
-    // reflects the change for the current session.
+    // Quota exceeded or storage disabled. The caller must leave its in-memory
+    // state unchanged so the UI never presents an ephemeral entry as saved.
+    return false;
   }
 }
 
@@ -92,9 +106,9 @@ export const useSavedMessagesStore = create<SavedMessagesState>((set, get) => ({
     };
     // Newest first so the menu list reads chronologically.
     const next = [record, ...get().entries];
-    writeRaw(next);
+    if (!writeRaw(next)) return { ok: false, error: STORAGE_ERROR };
     set({ entries: next });
-    return record;
+    return { ok: true, record };
   },
 
   load(id) {
@@ -109,13 +123,15 @@ export const useSavedMessagesStore = create<SavedMessagesState>((set, get) => ({
 
   remove(id) {
     const next = get().entries.filter((e) => e.id !== id);
-    writeRaw(next);
+    if (!writeRaw(next)) return false;
     set({ entries: next });
+    return true;
   },
 
   rename(id, name) {
     const next = get().entries.map((e) => (e.id === id ? { ...e, name, savedAt: Date.now() } : e));
-    writeRaw(next);
+    if (!writeRaw(next)) return false;
     set({ entries: next });
+    return true;
   },
 }));

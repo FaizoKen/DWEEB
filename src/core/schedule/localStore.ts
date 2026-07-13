@@ -1,11 +1,11 @@
 /**
  * Local registry of schedules created from this browser.
  *
- * A scheduled post is owned by its **manage token** (returned once at creation;
- * the server keeps only a hash). To let an anonymous user manage their schedules
- * later we stash `{ id, manageToken }` here, mirroring `core/webhook/history.ts`.
- * Signed-in users also get a server-side cross-device list (`listMine`), but this
- * registry is what makes management work with no account at all.
+ * A scheduled post is owned by the signed-in Discord account and also gets a
+ * one-time **manage token** (the server keeps only a hash). We stash
+ * `{ id, manageToken }` here, mirroring `core/webhook/history.ts`, as a local
+ * recovery capability. The account-owned server list (`listMine`) remains the
+ * authoritative cross-device path.
  *
  * The token is a bearer capability, so this is the same trust level as the
  * webhook history already in `localStorage` — it never leaves the browser except
@@ -48,23 +48,32 @@ function safeParse(raw: string | null): LocalSchedule[] {
 
 export function loadLocalSchedules(): LocalSchedule[] {
   if (typeof localStorage === "undefined") return [];
-  return safeParse(localStorage.getItem(STORAGE_KEY)).sort((a, b) => b.createdAt - a.createdAt);
+  try {
+    return safeParse(localStorage.getItem(STORAGE_KEY)).sort((a, b) => b.createdAt - a.createdAt);
+  } catch {
+    return [];
+  }
 }
 
-function persist(entries: LocalSchedule[]): void {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, MAX_ENTRIES)));
+function persist(entries: LocalSchedule[]): boolean {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, MAX_ENTRIES)));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-/** Record a freshly-created schedule + its manage token. */
-export function rememberSchedule(entry: LocalSchedule): void {
+/** Record a freshly-created schedule + its manage token durably. */
+export function rememberSchedule(entry: LocalSchedule): boolean {
   const all = loadLocalSchedules().filter((e) => e.id !== entry.id);
-  persist([entry, ...all]);
+  return persist([entry, ...all]);
 }
 
 /** Forget a schedule (after it's canceled). */
-export function forgetSchedule(id: string): void {
-  persist(loadLocalSchedules().filter((e) => e.id !== id));
+export function forgetSchedule(id: string): boolean {
+  return persist(loadLocalSchedules().filter((e) => e.id !== id));
 }
 
 /** The manage token for a locally-known schedule, if any. */

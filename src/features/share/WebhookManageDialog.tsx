@@ -108,12 +108,17 @@ export function WebhookManageDialog({
       return;
     }
     // Reflect Discord's authoritative values back into the saved entry.
-    refreshWebhook(entry.id, {
+    const refreshed = refreshWebhook(entry.id, {
       name: typeof res.webhook.name === "string" ? res.webhook.name : undefined,
       avatar: webhookAvatarHash(res.webhook),
     });
     onChange();
-    pushToast("Webhook updated on Discord.", "success");
+    pushToast(
+      refreshed
+        ? "Webhook updated on Discord."
+        : "Webhook updated on Discord, but this browser couldn't update its saved copy.",
+      refreshed ? "success" : "error",
+    );
     onClose();
   };
 
@@ -124,13 +129,17 @@ export function WebhookManageDialog({
     setBusy(null);
     // 404/401 means it's already gone — treat as done and clean up locally.
     if (res.ok || res.status === 404 || res.status === 401) {
-      forgetWebhook(entry.id);
+      const forgotten = forgetWebhook(entry.id);
       onChange();
       pushToast(
-        res.ok ? "Webhook deleted on Discord." : "Webhook was already gone — removed.",
-        "info",
+        forgotten
+          ? res.ok
+            ? "Webhook deleted on Discord."
+            : "Webhook was already gone — removed."
+          : "Webhook is gone on Discord, but this browser couldn't remove the stale recent entry.",
+        forgotten ? "info" : "error",
       );
-      onClose();
+      if (forgotten) onClose();
       return;
     }
     pushToast(res.error, "error");

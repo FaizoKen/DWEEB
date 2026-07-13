@@ -16,7 +16,6 @@ import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { isLibraryConfigured } from "@/core/library/api";
 import { useLibraryStore } from "@/core/library/libraryStore";
-import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Field";
 import { Modal } from "@/ui/Modal";
@@ -43,12 +42,9 @@ export function SaveMessageDialog({ open, onClose }: { open: boolean; onClose: (
   const serverName = useAuthStore((s) => s.guilds.find((g) => g.id === connectedGuildId)?.name);
 
   const [name, setName] = useState("");
-  // Default to the shared server draft when it's an option — teammates and the
-  // Activity can pick it up. Falls back to a browser draft when no server
-  // library is available (the toggle is hidden then, so it must be "local").
-  const [destination, setDestination] = useState<SaveMode>(
-    serverSaveAvailable ? "server" : "local",
-  );
+  // Keep saving local by default. Server storage is an explicit choice because
+  // it shares the draft with everyone who manages the connected server.
+  const [destination, setDestination] = useState<SaveMode>("local");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -57,7 +53,7 @@ export function SaveMessageDialog({ open, onClose }: { open: boolean; onClose: (
   useEffect(() => {
     if (open) {
       setName("");
-      setDestination(serverSaveAvailable ? "server" : "local");
+      setDestination("local");
       setError(null);
       setBusy(false);
       // Modal grabs focus on its dialog by default; defer so we win.
@@ -82,7 +78,8 @@ export function SaveMessageDialog({ open, onClose }: { open: boolean; onClose: (
       pushToast(`Saved "${trimmed}" to the ${serverName ?? "server"} library`, "success");
       return null;
     }
-    saveEntry(trimmed, currentMessage);
+    const result = saveEntry(trimmed, currentMessage);
+    if (!result.ok) return result.error;
     onClose();
     pushToast(`Saved "${trimmed}"`, "success");
     return null;
@@ -115,32 +112,38 @@ export function SaveMessageDialog({ open, onClose }: { open: boolean; onClose: (
       <form className={styles.saveForm} onSubmit={submit}>
         {serverSaveAvailable ? (
           <div className={styles.destToggle} role="radiogroup" aria-label="Where to save">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={destination === "server"}
-              className={cn(styles.destOption, destination === "server" && styles.destOptionActive)}
-              onClick={() => {
-                setDestination("server");
-                setError(null);
-              }}
-            >
-              <strong>Server draft</strong>
-              <span>Shared in {serverName ?? "this server"}.</span>
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={destination === "local"}
-              className={cn(styles.destOption, destination === "local" && styles.destOptionActive)}
-              onClick={() => {
-                setDestination("local");
-                setError(null);
-              }}
-            >
+            <label className={styles.destOption}>
+              <input
+                className={styles.destInput}
+                type="radio"
+                name="save-destination"
+                value="local"
+                checked={destination === "local"}
+                disabled={busy}
+                onChange={() => {
+                  setDestination("local");
+                  setError(null);
+                }}
+              />
               <strong>Browser draft</strong>
               <span>Saved on this device only.</span>
-            </button>
+            </label>
+            <label className={styles.destOption}>
+              <input
+                className={styles.destInput}
+                type="radio"
+                name="save-destination"
+                value="server"
+                checked={destination === "server"}
+                disabled={busy}
+                onChange={() => {
+                  setDestination("server");
+                  setError(null);
+                }}
+              />
+              <strong>Server draft</strong>
+              <span>Shared in {serverName ?? "this server"}.</span>
+            </label>
           </div>
         ) : null}
         <Field

@@ -40,6 +40,12 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
     const { update, applying } = get();
     if (!update || applying) return;
     set({ applying: true });
-    void update(true);
+    void update(true).catch(() => {
+      // Keep the waiting update available for a retry. A registration can fail
+      // transiently (offline, worker race, browser storage trouble); it must not
+      // strand the persistent button in a disabled "Updating…" state or surface
+      // as an unrelated global crash report.
+      set({ applying: false, available: true });
+    });
   },
 }));

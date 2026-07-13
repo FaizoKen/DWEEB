@@ -5,9 +5,12 @@
  * "delete this node" path can't safely free the blob without checking the rest
  * of the tree.
  *
- * Cheap alternative: after every message mutation, walk the tree and tell the
- * registry which blob ids are still in use. Anything else gets freed (from both
- * the in-memory map and IndexedDB).
+ * Cheap alternative: after every message/history/browser-save mutation, walk
+ * the live tree, every undo/redo snapshot, and every named browser draft, then
+ * tell the registry which blob ids are still reachable. Anything else gets
+ * freed (from both the in-memory map and IndexedDB). History is part of the
+ * root set because deleting a component pushes its old tree onto `past`;
+ * browser saves are roots because loading one later must restore its files.
  *
  * On mount we first `hydrateAttachments()` — pulling persisted uploads back
  * into the registry so the draft's `session://` URLs resolve again — then run
@@ -18,29 +21,65 @@
  */
 
 import { useEffect } from "react";
-import { useMessageStore } from "@/core/state/messageStore";
+import { useMessageStore, type MessageState } from "@/core/state/messageStore";
+import { useSavedMessagesStore, type SavedMessageRecord } from "@/core/state/savedMessagesStore";
 import { garbageCollect, hydrateAttachments } from "@/core/state/attachmentStore";
 import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 
 export function useAttachmentGc(): void {
   useEffect(() => {
     let cancelled = false;
+    const reconcile = () =>
+      garbageCollect(
+        collectReferencedMediaUrls(
+          useMessageStore.getState(),
+          useSavedMessagesStore.getState().entries,
+        ),
+      );
     void hydrateAttachments().then(() => {
       if (cancelled) return;
-      garbageCollect(collectMediaUrls(useMessageStore.getState().message));
+      reconcile();
     });
-    const unsubscribe = useMessageStore.subscribe((state, prev) => {
-      if (state.message === prev.message) return;
-      garbageCollect(collectMediaUrls(state.message));
+    const unsubscribeMessage = useMessageStore.subscribe((state, prev) => {
+      if (
+        state.message === prev.message &&
+        state.past === prev.past &&
+        state.future === prev.future
+      ) {
+        return;
+      }
+      reconcile();
+    });
+    const unsubscribeSaved = useSavedMessagesStore.subscribe((state, prev) => {
+      if (state.entries !== prev.entries) reconcile();
     });
     return () => {
       cancelled = true;
-      unsubscribe();
+      unsubscribeMessage();
+      unsubscribeSaved();
     };
   }, []);
 }
 
-function* collectMediaUrls(message: WebhookMessage): Generator<string> {
+/**
+ * Every message snapshot the user can currently reach. Exported so the
+ * delete -> Undo contract can be pinned without mounting the React hook.
+ *
+ * Persisted history is deliberately included after reload too: messageStore
+ * hydrates `past`/`future` before this hook runs, so IndexedDB bytes remain
+ * available for every history frame that survived historyStorage's caps.
+ */
+export function* collectReferencedMediaUrls(
+  state: Pick<MessageState, "message" | "past" | "future">,
+  savedMessages: readonly Pick<SavedMessageRecord, "payload">[] = [],
+): Generator<string> {
+  yield* collectMediaUrls(state.message);
+  for (const frame of state.past) yield* collectMediaUrls(frame.message);
+  for (const frame of state.future) yield* collectMediaUrls(frame.message);
+  for (const saved of savedMessages) yield* collectMediaUrls(saved.payload);
+}
+
+function* collectMediaUrls(message: WebhookMessage | unknown): Generator<string> {
   const visit = function* (node: unknown): Generator<string> {
     if (!node || typeof node !== "object") return;
     const obj = node as Record<string, unknown>;
@@ -65,5 +104,8 @@ function* collectMediaUrls(message: WebhookMessage): Generator<string> {
     }
     if (obj.accessory) yield* visit(obj.accessory);
   };
-  for (const top of message.components) yield* visit(top);
+  if (!message || typeof message !== "object") return;
+  const components = (message as { components?: unknown }).components;
+  if (!Array.isArray(components)) return;
+  for (const top of components) yield* visit(top);
 }

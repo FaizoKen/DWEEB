@@ -230,9 +230,14 @@ export function WebhookRecents({
   if (history.length === 0) return null;
 
   const handleForget = (entry: WebhookHistoryEntry) => {
-    forgetWebhook(entry.id);
+    const forgotten = forgetWebhook(entry.id);
     onChange();
-    pushToast("Webhook removed from this browser.", "info");
+    pushToast(
+      forgotten
+        ? "Webhook removed from this browser."
+        : "Couldn't remove the webhook — check browser storage and try again.",
+      forgotten ? "info" : "error",
+    );
   };
 
   const renderRow = (entry: WebhookHistoryEntry) => {

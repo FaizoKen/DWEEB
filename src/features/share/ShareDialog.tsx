@@ -16,7 +16,7 @@
  * `replaceMessageFromRestore`) on import.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
@@ -51,7 +51,7 @@ import {
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { alignConnectedGuild } from "@/core/guild/originGuild";
-import { SUPPORT_INVITE_URL, isFeedbackConfigured } from "@/core/feedback/submit";
+import { SUPPORT_INVITE_URL, useFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { type GuildWebhook } from "@/core/guild/api";
 import { LockIcon } from "@/ui/Icon";
@@ -67,6 +67,16 @@ import { Callout } from "./Callout";
 import styles from "./ShareDialog.module.css";
 
 type Tab = "send" | "update" | "restore" | "share" | "json" | "import" | "about";
+
+const SHARE_TABS: readonly { id: Tab; label: string }[] = [
+  { id: "send", label: "Send" },
+  { id: "update", label: "Update" },
+  { id: "restore", label: "Restore" },
+  { id: "share", label: "Share link" },
+  { id: "json", label: "JSON export" },
+  { id: "import", label: "Import" },
+  { id: "about", label: "About" },
+];
 
 interface ShareDialogProps {
   open: boolean;
@@ -98,6 +108,7 @@ export function ShareDialog({
   onRequestRemoveInteractive,
   initialWebhook,
 }: ShareDialogProps) {
+  const tabsetId = useId();
   const [tab, setTab] = useState<Tab>(initialTab);
 
   // Snap to the requested tab whenever the dialog re-opens, so opening from
@@ -107,30 +118,52 @@ export function ShareDialog({
   }, [open, initialTab]);
   return (
     <Modal open={open} onClose={onClose} title="Share / Send / Export">
-      <div className={styles.tabs} role="tablist">
-        <TabButton active={tab === "send"} onClick={() => setTab("send")}>
-          Send
-        </TabButton>
-        <TabButton active={tab === "update"} onClick={() => setTab("update")}>
-          Update
-        </TabButton>
-        <TabButton active={tab === "restore"} onClick={() => setTab("restore")}>
-          Restore
-        </TabButton>
-        <TabButton active={tab === "share"} onClick={() => setTab("share")}>
-          Share link
-        </TabButton>
-        <TabButton active={tab === "json"} onClick={() => setTab("json")}>
-          JSON export
-        </TabButton>
-        <TabButton active={tab === "import"} onClick={() => setTab("import")}>
-          Import
-        </TabButton>
-        <TabButton active={tab === "about"} onClick={() => setTab("about")}>
-          About
-        </TabButton>
+      <div
+        className={styles.tabs}
+        role="tablist"
+        aria-label="Share and send tools"
+        onKeyDown={(event) => {
+          const target = (event.target as HTMLElement).closest<HTMLElement>("[role='tab']");
+          const current = target?.dataset.tab as Tab | undefined;
+          const index = current ? SHARE_TABS.findIndex((item) => item.id === current) : -1;
+          if (index < 0) return;
+          let next: Tab | undefined;
+          if (event.key === "ArrowRight") {
+            next = SHARE_TABS[(index + 1) % SHARE_TABS.length]?.id;
+          } else if (event.key === "ArrowLeft") {
+            next = SHARE_TABS[(index - 1 + SHARE_TABS.length) % SHARE_TABS.length]?.id;
+          } else if (event.key === "Home") {
+            next = SHARE_TABS[0]?.id;
+          } else if (event.key === "End") {
+            next = SHARE_TABS.at(-1)?.id;
+          } else {
+            return;
+          }
+          if (!next) return;
+          event.preventDefault();
+          setTab(next);
+          document.getElementById(`${tabsetId}-tab-${next}`)?.focus({ preventScroll: true });
+        }}
+      >
+        {SHARE_TABS.map((item) => (
+          <TabButton
+            key={item.id}
+            id={`${tabsetId}-tab-${item.id}`}
+            panelId={`${tabsetId}-panel`}
+            tab={item.id}
+            active={tab === item.id}
+            onClick={() => setTab(item.id)}
+          >
+            {item.label}
+          </TabButton>
+        ))}
       </div>
-      <div className={styles.body}>
+      <div
+        id={`${tabsetId}-panel`}
+        className={styles.body}
+        role="tabpanel"
+        aria-labelledby={`${tabsetId}-tab-${tab}`}
+      >
         {tab === "send" ? (
           <SendPanel
             mode="new"
@@ -157,10 +190,16 @@ export function ShareDialog({
 }
 
 function TabButton({
+  id,
+  panelId,
+  tab,
   active,
   children,
   onClick,
 }: {
+  id: string;
+  panelId: string;
+  tab: Tab;
   active: boolean;
   children: React.ReactNode;
   onClick: () => void;
@@ -168,8 +207,12 @@ function TabButton({
   return (
     <button
       type="button"
+      id={id}
       role="tab"
       aria-selected={active}
+      aria-controls={panelId}
+      tabIndex={active ? 0 : -1}
+      data-tab={tab}
       className={cn(styles.tab, active && styles.tabActive)}
       onClick={onClick}
     >
@@ -313,6 +356,7 @@ function JsonExportPanel() {
  * place as Import/Export.
  */
 function AboutPanel({ onClose }: { onClose: () => void }) {
+  const feedbackOn = useFeedbackConfigured();
   const openFeedback = useFeedbackStore((s) => s.openFeedback);
   return (
     <>
@@ -323,12 +367,12 @@ function AboutPanel({ onClose }: { onClose: () => void }) {
         message back to edit it in place), and share any design as a single link.
       </p>
       <p className={styles.lead}>
-        <strong>Private by design.</strong> Everything runs in your browser — message drafts,
-        webhook URLs, and share links never reach our servers (share state lives in the URL hash;
-        webhook tokens go only to Discord). No account, no database, nothing uploaded. The one
-        exception is opt-in: creating a <em>short link</em> uploads that message so it can be served
-        from a tiny URL, and it's auto-deleted after 7 days — for sensitive announcements, stick
-        with the default hash link.
+        <strong>Local by default.</strong> Your working draft, browser saves, recent webhook URLs,
+        attachments, and AI keys stay on this device. Default share links keep their message data in
+        the URL hash. Features you choose — such as sending, short links, schedules, server
+        libraries, Activities, feedback, AI, billing, and plugins — transmit or store the data they
+        need. Short links are auto-deleted after 7 days; for sensitive designs, use the default hash
+        link and read the Privacy Policy before enabling connected features.
       </p>
       <p className={styles.lead}>
         And yes, it stands for <em>Discord Webhook Embed Builder</em>. 🤓
@@ -350,7 +394,7 @@ function AboutPanel({ onClose }: { onClose: () => void }) {
       </p>
       <p className={styles.lead}>
         Found a bug or have an idea?{" "}
-        {isFeedbackConfigured() ? (
+        {feedbackOn ? (
           <>
             <button
               type="button"
@@ -789,6 +833,10 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
           ? `Verified “${remoteName}” — ${owner.badge.toLowerCase()}. Saved.`
           : `Webhook verified — ${owner.badge.toLowerCase()}. Saved.`,
         "success",
+      );
+    } else {
+      setError(
+        "The webhook was verified, but this browser couldn't save it. Check browser storage and try again.",
       );
     }
   };

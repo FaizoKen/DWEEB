@@ -75,7 +75,7 @@ export type ResolveShortLinkResult = { ok: true; token: string } | { ok: false; 
  * `index.html`, if that script ran for this page load. Single-consumer: taking
  * it clears the slot so a failed early fetch can be retried fresh.
  */
-function takeEarlyResolve(): Promise<Response> | null {
+function takeEarlyResolve(): Promise<Response | null> | null {
   const early = window.__dweebShortLink;
   if (!early) return null;
   window.__dweebShortLink = undefined;
@@ -91,7 +91,7 @@ export async function resolveShortLink(id: string): Promise<ResolveShortLinkResu
   // Prefer the early fetch (started before the app bundle even loaded); a
   // network failure there falls through to one fresh attempt.
   const early = takeEarlyResolve();
-  if (early) res = await early.catch(() => null);
+  if (early) res = await early;
   if (!res) {
     try {
       res = await fetch(`${PROXY_BASE_URL}/api/shortlink/${encodeURIComponent(id)}`);
