@@ -45,6 +45,17 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - **Mobile AI preview clearance**: the floating assistant covers the lower preview, so while it
   is open the preview scroll area must reserve the assistant's shared height + safe-area-aware
   bottom offset. The final rendered message must be scrollable fully above the assistant card.
+- **ResizeObserver state must hop a frame.** Resize notifications are delivered mid-frame, after
+  layout and before paint: a `setState` *inside* the callback re-renders and runs layout effects in
+  the same delivery cycle, so if that resizes the observed element (the action bars' collapse
+  ladder does — it changes the bar's content), the browser gives up and fires a global
+  "ResizeObserver loop completed with undelivered notifications" error. Nothing is broken, but it
+  lands on `window.onerror` → a crash beacon → a prod alert. Both bars measure via
+  `lib/useBarWidth`, which defers to `requestAnimationFrame`; keep new observers on that hook (or
+  the same rAF hop) rather than calling `setState` in the callback. Belt and braces: known browser
+  non-errors (the RO loop notice) are dropped by the crash reporter (`core/telemetry/crashReport.ts`)
+  *and* by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
+  cache, so stale clients keep beaconing long after a fix.
 - **Adding an interaction plugin** touches the crate, compose service/volume + dispatcher
   `ROUTES`, Caddyfile, registry, `server/gatus/config.yaml`, `plugins-ci.yml` matrix,
   `.github/workflows/plugin-<id>.yml`, and `deploy.yml`'s workflow list. A link plugin is

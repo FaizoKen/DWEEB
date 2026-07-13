@@ -121,6 +121,37 @@ export function crashSignature(kind: CrashKind, message: string, stack: string):
   return `${kind}|${message}|${firstFrame}`;
 }
 
+/**
+ * Browser-emitted signals that arrive on `window.onerror` but are not crashes —
+ * nothing threw, nothing is broken, and the app carries on. Reporting them costs
+ * a beacon, a log line, and (via the log alerter) a page for a non-event, so they
+ * are dropped before the throttle ever sees them.
+ *
+ * Kept deliberately tiny and exact-prefix-matched: this list suppresses real
+ * signal if it grows loose, so an entry earns its place only by being a *spec'd*
+ * non-error the browser reports as one.
+ *
+ *  - **ResizeObserver loop** — fired when a resize callback changes the size of
+ *    an element it observes, so the browser can't finish delivering in that
+ *    frame. It settles on the next frame by design. Ours are engineered not to
+ *    do this (see `lib/useBarWidth`), but any observer on the page can emit it —
+ *    a component we add later, a library, an extension — and it is never
+ *    actionable as a crash. Both spellings are the same condition: Chrome's
+ *    legacy wording, then the current spec's.
+ */
+const NON_CRASH_MESSAGES = [
+  "ResizeObserver loop completed with undelivered notifications",
+  "ResizeObserver loop limit exceeded",
+];
+
+/** Whether `message` is a browser non-error we deliberately don't report. */
+export function isNonCrashMessage(message: string): boolean {
+  const trimmed = message.trim();
+  // Some browsers prefix the message with "Uncaught " (or a script-error tag)
+  // before it reaches `onerror`, so match on containment, not equality.
+  return NON_CRASH_MESSAGES.some((known) => trimmed.includes(known));
+}
+
 /** Build the content-free wire payload from an untrusted thrown value. */
 export function buildCrashPayload(input: CrashInput): CrashPayload {
   const { message, stack } = describeError(input.error);

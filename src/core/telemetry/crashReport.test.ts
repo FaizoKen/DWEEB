@@ -5,6 +5,7 @@ import {
   crashSignature,
   CrashThrottle,
   describeError,
+  isNonCrashMessage,
   topFrames,
   type CrashInput,
 } from "./crashReport";
@@ -118,6 +119,27 @@ describe("buildCrashPayload", () => {
     const p = buildCrashPayload({ ...base, path: "/templates" });
     expect(p.path).toBe("/templates");
     expect(p.path).not.toContain("#");
+  });
+});
+
+describe("isNonCrashMessage", () => {
+  it("drops the ResizeObserver loop notice in both spellings", () => {
+    // Not a crash: the browser reports an undelivered resize notification, which
+    // settles on the next frame. Reporting it pages us for a non-event.
+    expect(isNonCrashMessage("ResizeObserver loop completed with undelivered notifications")).toBe(
+      true,
+    );
+    expect(isNonCrashMessage("ResizeObserver loop limit exceeded")).toBe(true);
+  });
+
+  it("still drops it when the browser wraps the message", () => {
+    expect(isNonCrashMessage("Uncaught ResizeObserver loop limit exceeded")).toBe(true);
+  });
+
+  it("keeps real errors, including ones that merely mention ResizeObserver", () => {
+    expect(isNonCrashMessage("Cannot read properties of undefined (reading 'id')")).toBe(false);
+    expect(isNonCrashMessage("ResizeObserver is not defined")).toBe(false);
+    expect(isNonCrashMessage("")).toBe(false);
   });
 });
 

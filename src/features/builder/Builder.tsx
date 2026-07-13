@@ -57,6 +57,7 @@ import { useInstallStore } from "@/features/install/installStore";
 import { useInstallState } from "@/features/install/useInstallState";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
 import { measureNeededWidth } from "@/lib/measureBarFit";
+import { useBarWidth } from "@/lib/useBarWidth";
 import styles from "./Builder.module.css";
 
 /** One utility action in the bar's right cluster: an inline icon button while
@@ -354,18 +355,11 @@ function ActionBar({
   const inlineUtilities = utilities.slice(0, foldMax - foldedCount);
   const foldedUtilities = utilities.slice(foldMax - foldedCount);
   const primaryIconOnly = level >= maxLevel;
-  // Bumped by the ResizeObserver below whenever the bar's *width* changes; drives
-  // a fresh measurement pass. (Width only — collapsing changes the bar's content,
-  // not its width, so this never feeds back on itself.)
-  const [barWidth, setBarWidth] = useState(0);
-
-  useLayoutEffect(() => {
-    const bar = barRef.current;
-    if (!bar) return;
-    const ro = new ResizeObserver(() => setBarWidth(bar.clientWidth));
-    ro.observe(bar);
-    return () => ro.disconnect();
-  }, []);
+  // Bumped whenever the bar's *width* changes; drives a fresh measurement pass.
+  // (Width only — collapsing changes the bar's content, not its width, so this
+  // never feeds back on itself.) The measurement is deliberately taken off the
+  // resize-notification cycle — see `useBarWidth`.
+  const barWidth = useBarWidth(barRef);
 
   // A signature of everything that changes the *inline* bar's width, so a state
   // flip (Send↔Update revealing New, the plan pill or destination chip

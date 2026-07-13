@@ -71,16 +71,46 @@ const VERSION_MAX: usize = 24;
 const SURFACE_MAX: usize = 12;
 const PATH_MAX: usize = 120;
 
+/// Browser signals that reach `window.onerror` but are not crashes: nothing
+/// threw and the page carries on. The frontend already declines to send these
+/// (`core/telemetry/crashReport.ts`), but this endpoint is public and the
+/// frontend is served from a service-worker cache — an old client keeps beaconing
+/// them long after the fix ships, and every `web_crash` line pages the maintainer
+/// through the log alerter. So the proxy, which owns what lands in the log, drops
+/// them too.
+///
+/// `ResizeObserver loop …` is fired when a resize callback resizes an element it
+/// observes; the browser defers the notification a frame and moves on. Both
+/// spellings are the same condition (Chrome's legacy wording, then the spec's).
+/// Keep this list short and exact — anything vague here silently eats real crashes.
+const NON_CRASH_MESSAGES: [&str; 2] = [
+    "ResizeObserver loop completed with undelivered notifications",
+    "ResizeObserver loop limit exceeded",
+];
+
+/// Whether this beacon is one of the known browser non-errors. Substring, not
+/// equality: browsers prefix the message ("Uncaught …") on some paths.
+fn is_non_crash(message: &str) -> bool {
+    NON_CRASH_MESSAGES
+        .iter()
+        .any(|known| message.contains(known))
+}
+
 /// `POST /api/telemetry/crash` — record one frontend crash.
 ///
 /// See the module docs for why this is unauthenticated and content-free. The
 /// handler's whole job is to clamp and log: it never touches Discord, never
 /// reads state, and always answers `204` so the beacon can't perturb the app
-/// that emitted it.
+/// that emitted it. Known browser non-errors (see [`NON_CRASH_MESSAGES`]) are
+/// accepted and dropped — same `204`, no log line.
 pub async fn crash_report(
     State(_st): State<AppState>,
     Json(body): Json<CrashBody>,
 ) -> Result<Response, AppError> {
+    if is_non_crash(&body.message) {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+
     let kind = clamp_field(&body.kind, KIND_MAX);
     let message = clamp_field(&body.message, MESSAGE_MAX);
     let stack = clamp_field(&body.stack, STACK_MAX);
@@ -134,5 +164,26 @@ mod tests {
     #[test]
     fn clamp_empty_stays_empty() {
         assert_eq!(clamp_field("", 10), "");
+    }
+
+    #[test]
+    fn resize_observer_notice_is_not_a_crash() {
+        // The beacon that started this: a benign browser signal, not a crash.
+        assert!(is_non_crash(
+            "ResizeObserver loop completed with undelivered notifications"
+        ));
+        assert!(is_non_crash("ResizeObserver loop limit exceeded"));
+        // Browsers prefix the message on some paths.
+        assert!(is_non_crash("Uncaught ResizeObserver loop limit exceeded"));
+    }
+
+    #[test]
+    fn real_crashes_still_log() {
+        assert!(!is_non_crash(
+            "Cannot read properties of undefined (reading 'id')"
+        ));
+        // Mentioning the API isn't the same as being the loop notice.
+        assert!(!is_non_crash("ResizeObserver is not defined"));
+        assert!(!is_non_crash(""));
     }
 }

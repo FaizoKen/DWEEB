@@ -27,6 +27,7 @@ import {
   buildCrashPayload,
   crashSignature,
   CrashThrottle,
+  isNonCrashMessage,
   type CrashKind,
   type CrashPayload,
 } from "./crashReport";
@@ -99,6 +100,10 @@ function report(kind: CrashKind, error: unknown): void {
       surface: isActivityMode() ? "activity" : "web",
       version: appVersion(),
     });
+    // Some things the browser hands to `onerror` aren't crashes at all (the
+    // ResizeObserver loop notice). Drop them before the throttle so they can't
+    // spend a slot the next real crash needs.
+    if (isNonCrashMessage(payload.message)) return;
     const sig = crashSignature(kind, payload.message, payload.stack);
     if (!throttle.shouldSend(sig)) return;
     send(payload);

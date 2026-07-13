@@ -52,6 +52,7 @@ import { PlanBadge } from "@/features/plan/PlanBadge";
 import { fetchActivityPlan } from "@/core/activity/api";
 import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
 import { measureNeededWidth } from "@/lib/measureBarFit";
+import { useBarWidth } from "@/lib/useBarWidth";
 import type { PlanInfo } from "@/core/guild/api";
 import styles from "./ActivityBar.module.css";
 
@@ -144,17 +145,11 @@ export function ActivityBar() {
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const [level, setLevel] = useState(0);
-  // Bumped by the ResizeObserver whenever the bar's width changes, driving a
-  // fresh fit measurement. (Width only — collapsing changes the bar's content,
-  // not its width, so this never feeds back on itself.)
-  const [barWidth, setBarWidth] = useState(0);
-  useLayoutEffect(() => {
-    const bar = barRef.current;
-    if (!bar) return;
-    const ro = new ResizeObserver(() => setBarWidth(bar.clientWidth));
-    ro.observe(bar);
-    return () => ro.disconnect();
-  }, []);
+  // Bumped whenever the bar's width changes, driving a fresh fit measurement.
+  // (Width only — collapsing changes the bar's content, not its width, so this
+  // never feeds back on itself.) The measurement is deliberately taken off the
+  // resize-notification cycle — see `useBarWidth`.
+  const barWidth = useBarWidth(barRef);
 
   // A DM / group-DM launch has no guild of its own, so the user first picks a
   // destination *server* (DMs can't receive a webhook post), then a channel.
