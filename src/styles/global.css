@@ -189,6 +189,11 @@
 /* Mobile: single pane visible, preview slides up from the bottom as a sheet. */
 @media (max-width: 900px) {
   .app-shell {
+    /* Shared geometry for the floating AI card and the preview's matching
+     * scroll clearance. Keep these in one place so the last rendered message
+     * can always move fully above the card. */
+    --app-ai-mobile-height: min(68dvh, 560px);
+    --app-ai-mobile-bottom: calc(10px + var(--app-saib));
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
   }
@@ -247,6 +252,13 @@
   .app-shell[data-ai-open="true"] .app-shell__pane--preview {
     height: 100dvh;
     border-radius: 0;
+  }
+
+  /* The assistant covers most of the lower preview on a phone. Add a spacer
+   * equal to that covered area so scrolling to the end lifts the final
+   * message above the card instead of leaving it hidden underneath. */
+  .app-shell[data-ai-open="true"] [data-preview-scroll] {
+    padding-bottom: calc(var(--app-ai-mobile-height) + var(--app-ai-mobile-bottom) + 16px);
   }
 
   /* The preview sheet sits above the default toolbar layer, so lift the fab

@@ -42,6 +42,9 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - **Safe-area overlays**: portaled/fixed overlays must use the `--app-sait`/`--app-saib` and
   `--app-sail`/`--app-sair` tokens from `tokens.css`, never raw
   `env(safe-area-inset-*)`; the floor is stamped via `html[data-activity-platform]`.
+- **Mobile AI preview clearance**: the floating assistant covers the lower preview, so while it
+  is open the preview scroll area must reserve the assistant's shared height + safe-area-aware
+  bottom offset. The final rendered message must be scrollable fully above the assistant card.
 - **Adding an interaction plugin** touches the crate, compose service/volume + dispatcher
   `ROUTES`, Caddyfile, registry, `server/gatus/config.yaml`, `plugins-ci.yml` matrix,
   `.github/workflows/plugin-<id>.yml`, and `deploy.yml`'s workflow list. A link plugin is

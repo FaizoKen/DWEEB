@@ -434,10 +434,10 @@
   .panel {
     top: auto;
     right: 10px;
-    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    bottom: var(--app-ai-mobile-bottom, calc(10px + var(--app-saib)));
     left: auto;
     width: min(94vw, 400px);
-    height: min(68dvh, 560px);
+    height: var(--app-ai-mobile-height, min(68dvh, 560px));
     max-height: calc(100dvh - 20px);
     border-left: none;
     border: 1px solid var(--app-border);
