@@ -56,6 +56,8 @@ be in.
 | POST   | `/api/shortlink`              | —    | `201 { id, expires_at }` — stores a share token for 7 days |
 | GET    | `/api/shortlink/:id`          | —    | `{ token }`, or 404 once expired/unknown |
 | POST   | `/api/telemetry/crash`        | —    | `204` — records a content-free frontend crash report to the log (target `web_crash`) |
+| POST   | `/api/feedback`               | —    | `204` — validates and relays an anonymous feedback report |
+| POST   | `/api/activity/feedback`      | Activity bearer | `204` — relays feedback with a verified Discord sender stamp |
 | POST   | `/api/schedules`              | opt. | `201 { id, manage_token, next_run_at }` — schedule a post (manage token returned once) |
 | GET    | `/api/schedules`              | ✓    | the signed-in user's schedules (cross-device) |
 | GET    | `/api/guilds/:id/schedules`   | ✓    | every schedule for a server (Manage Webhooks gated) |
@@ -84,6 +86,20 @@ require a login — so it's guarded by the per-IP rate limiter, a strict
 share-token shape + size check (this can't be used as a general blob store),
 and a total-row cap (`SHORTLINK_MAX_ENTRIES`). Set `SHORTLINK_TTL_DAYS=0` to
 disable the feature (the endpoints answer 501).
+
+### Feedback
+
+Both browser surfaces send feedback through the proxy; the Discord webhook URL
+is held only in `FEEDBACK_WEBHOOK_URL` and never appears in a frontend build.
+The wire body is limited to 8 KiB and accepts only `category`, `summary`,
+`details`, and optional `contact`. The server maps the category to one known
+forum tag, constructs the thread payload, and always disables mentions.
+
+The anonymous web route and bearer-gated Activity route share a dedicated
+per-IP abuse budget in addition to the normal global API limiter. A single
+instance starts with three reports and refills one every five minutes; with
+Redis, the shared fleet permits three per fixed 15-minute window. Unset
+`FEEDBACK_WEBHOOK_URL` to disable relay delivery (both routes answer 501).
 
 ### Scheduled posts
 

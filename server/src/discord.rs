@@ -663,8 +663,8 @@ impl Discord {
 
     /// Post `payload` to a full incoming-webhook URL the proxy holds as config
     /// (e.g. `FEEDBACK_WEBHOOK_URL`), rather than an id+token pair resolved per
-    /// channel. Used by the embedded Activity's feedback relay: the sandboxed
-    /// iframe can't reach discord.com directly, so the proxy forwards the report.
+    /// channel. Used by the web and Activity feedback relays so the credential
+    /// never ships to either browser surface.
     /// `?wait=true` makes Discord confirm the post (opening a forum thread) and
     /// surface a structured error instead of a fire-and-forget 204.
     pub async fn post_webhook_url(&self, url: &str, payload: &Value) -> Result<(), AppError> {
@@ -673,11 +673,13 @@ impl Discord {
         let full = format!("{url}{sep}wait=true");
         let resp = send_with_retry(self.http.post(&full).json(payload))
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            // A reqwest transport error can include its request URL. Never put
+            // that error in an API response: this URL contains the webhook token.
+            .map_err(|_| AppError::BadGateway("could not reach Discord's webhook API".into()))?;
         if resp.status().is_success() {
             return Ok(());
         }
-        Err(webhook_error_from(resp).await)
+        Err(configured_webhook_error_from(resp).await)
     }
 
     /// Best-effort channel name for a `webhook.incoming` webhook's channel, so
@@ -1318,6 +1320,40 @@ async fn webhook_error_from(resp: reqwest::Response) -> AppError {
             retry_after: None,
         },
         other => AppError::BadGateway(format!("Discord error {other}: {message}")),
+    }
+}
+
+/// A configured webhook is an internal delivery detail, unlike the guild
+/// webhook-management calls above. Keep its failure response useful but generic:
+/// neither the configured URL nor upstream diagnostics belong in an anonymous
+/// API response, and bot-permission advice would be misleading here.
+async fn configured_webhook_error_from(resp: reqwest::Response) -> AppError {
+    let status = resp.status();
+    let retry_after = if status.as_u16() == 429 {
+        resp.headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<f64>().ok())
+    } else {
+        None
+    };
+
+    if status.as_u16() != 429 {
+        tracing::warn!(
+            status = status.as_u16(),
+            "configured Discord webhook rejected request"
+        );
+    }
+
+    match status.as_u16() {
+        429 => AppError::Status {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: "Feedback delivery is busy — try again shortly.".into(),
+            retry_after,
+        },
+        400 => AppError::BadGateway("the feedback destination rejected the report".into()),
+        401 | 403 | 404 => AppError::BadGateway("the feedback destination is unavailable".into()),
+        other => AppError::BadGateway(format!("feedback delivery failed (Discord {other})")),
     }
 }
 

@@ -103,13 +103,9 @@ pub struct Config {
     /// Days a collaboration draft is kept after its last edit before the sweeper
     /// deletes it — a session nobody has touched this long won't be resumed.
     pub activity_draft_retention_days: i64,
-    /// Feedback forum webhook the embedded Activity relays "Send feedback" reports
-    /// to. The web app posts feedback to this webhook straight from the browser
-    /// (`VITE_FEEDBACK_WEBHOOK_URL`), but a sandboxed Activity iframe can't reach
-    /// discord.com directly, so `activity_feedback` forwards the report on the
-    /// browser's behalf. Held server-side so the browser never names the
-    /// destination — it can't be turned into an open relay. None (unset) ⇒ the
-    /// Activity's feedback endpoint answers 501.
+    /// Server-held feedback forum webhook used by both browser surfaces. This is
+    /// a credential and is never included in a frontend build. None (unset) ⇒
+    /// the feedback endpoints answer 501.
     pub feedback_webhook_url: Option<String>,
 
     // ── Authorization policy ───────────────────────────────────────────────
@@ -297,7 +293,16 @@ impl Config {
             opt_env("ACTIVITY_DRAFT_DB_PATH").unwrap_or_else(|| "activity-drafts.db".to_string());
         let activity_draft_max_entries = parse_or("ACTIVITY_DRAFT_MAX_ENTRIES", 20_000);
         let activity_draft_retention_days = parse_or("ACTIVITY_DRAFT_RETENTION_DAYS", 7);
-        let feedback_webhook_url = opt_env("FEEDBACK_WEBHOOK_URL");
+        let feedback_webhook_url = match opt_env("FEEDBACK_WEBHOOK_URL") {
+            Some(url) if valid_feedback_webhook_url(&url) => Some(url.trim().to_string()),
+            Some(_) => {
+                return Err(
+                    "FEEDBACK_WEBHOOK_URL must be an https://discord.com/api/webhooks/... URL"
+                        .into(),
+                )
+            }
+            None => None,
+        };
 
         let require_manage_guild = parse_bool("REQUIRE_MANAGE_GUILD", true);
 
@@ -481,4 +486,57 @@ fn split_list(s: &str) -> Vec<String> {
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty())
         .collect()
+}
+
+/// Keep the server-held relay pinned to Discord rather than accepting an
+/// arbitrary configured request target. The path check also catches accidental
+/// channel/message URLs without ever echoing a secret value in an error.
+fn valid_feedback_webhook_url(value: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(value.trim()) else {
+        return false;
+    };
+    if url.scheme() != "https"
+        || url.host_str() != Some("discord.com")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+
+    let Some(segments) = url.path_segments() else {
+        return false;
+    };
+    let segments: Vec<_> = segments.collect();
+    matches!(segments.as_slice(), ["api", "webhooks", id, token]
+        if !id.is_empty()
+            && id.bytes().all(|b| b.is_ascii_digit())
+            && !token.is_empty()
+            && token.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_feedback_webhook_url;
+
+    #[test]
+    fn feedback_webhook_is_pinned_to_discord_execute_urls() {
+        assert!(valid_feedback_webhook_url(
+            "https://discord.com/api/webhooks/123/abc_DEF-456"
+        ));
+        assert!(!valid_feedback_webhook_url(
+            "https://example.com/api/webhooks/123/abc"
+        ));
+        assert!(!valid_feedback_webhook_url(
+            "http://discord.com/api/webhooks/123/abc"
+        ));
+        assert!(!valid_feedback_webhook_url(
+            "https://discord.com/api/webhooks/not-an-id/abc"
+        ));
+        assert!(!valid_feedback_webhook_url(
+            "https://discord.com/api/webhooks/123/abc?wait=true"
+        ));
+    }
 }

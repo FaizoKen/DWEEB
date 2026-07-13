@@ -332,9 +332,7 @@ impl ScheduleStore {
     /// `LibraryStore::ping`): a `SELECT 1` on the shared connection, so it also
     /// proves the store isn't wedged behind a stuck lock.
     pub fn ping(&self) -> Result<(), String> {
-        self.lock()
-            .query_row("SELECT 1", [], |_| Ok(()))
-            .map_err(e2s)
+        self.pool.ping()
     }
 
     /// The per-server active-schedule quota, surfaced so the management UI can

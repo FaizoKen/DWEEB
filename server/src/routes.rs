@@ -114,17 +114,28 @@ pub async fn health() -> impl IntoResponse {
     axum::Json(json!({ "status": "ok" }))
 }
 
+/// Public, non-sensitive runtime feature flags. The frontend uses this instead
+/// of assuming every optional server integration is enabled just because the
+/// proxy itself is reachable.
+pub async fn capabilities(State(st): State<AppState>) -> impl IntoResponse {
+    axum::Json(json!({
+        "feedback": st.config.feedback_webhook_url.is_some(),
+    }))
+}
+
 /// Readiness probe — unlike `/health` (bare liveness), this proves each present
 /// SQLite store is open and answering, so an orchestrator or uptime monitor
 /// (Gatus) can tell "process alive" apart from "a data volume is wedged /
-/// unwritable / the store's lock is stuck". Each probe is a trivial `SELECT 1`
+/// the store's pool is stuck". Each probe is a trivial `SELECT 1`
 /// run off the async path via `spawn_blocking` — deliberately, since the very
 /// failure this catches (a jammed store `Mutex`) would otherwise block the
 /// executor thread if we locked inline. Absent stores (feature off) are skipped,
 /// not failed. Returns 503 with the list of unready components if any probe
-/// fails, so a monitor can see *which* store is down. No auth: it exposes only
+/// fails, so a monitor can see *which* store is down. This is a responsiveness
+/// check, not a proof that the volume is writable. No auth: it exposes only
 /// up/down, never data.
 pub async fn ready(State(st): State<AppState>) -> Response {
+    const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
     let mut failed: Vec<&'static str> = Vec::new();
 
     // Probe an optional store by cloning its `Arc` into a blocking task. Each
@@ -133,10 +144,13 @@ pub async fn ready(State(st): State<AppState>) -> Response {
     macro_rules! probe {
         ($opt:expr, $name:literal) => {
             if let Some(store) = $opt.clone() {
-                let outcome = tokio::task::spawn_blocking(move || store.ping())
-                    .await
-                    .map_err(|e| format!("probe task failed: {e}"))
-                    .and_then(|r| r);
+                let task = tokio::task::spawn_blocking(move || store.ping());
+                let outcome = match tokio::time::timeout(PROBE_TIMEOUT, task).await {
+                    Ok(joined) => joined
+                        .map_err(|e| format!("probe task failed: {e}"))
+                        .and_then(|r| r),
+                    Err(_) => Err("probe timed out".to_string()),
+                };
                 if let Err(e) = outcome {
                     tracing::warn!(store = $name, error = %e, "readiness probe failed");
                     failed.push($name);
@@ -152,10 +166,13 @@ pub async fn ready(State(st): State<AppState>) -> Response {
 
     // Stripe's mirror store lives inside `StripeState`, so it's probed directly.
     if let Some(stripe) = st.stripe.clone() {
-        let outcome = tokio::task::spawn_blocking(move || stripe.store.ping())
-            .await
-            .map_err(|e| format!("probe task failed: {e}"))
-            .and_then(|r| r);
+        let task = tokio::task::spawn_blocking(move || stripe.store.ping());
+        let outcome = match tokio::time::timeout(PROBE_TIMEOUT, task).await {
+            Ok(joined) => joined
+                .map_err(|e| format!("probe task failed: {e}"))
+                .and_then(|r| r),
+            Err(_) => Err("probe timed out".to_string()),
+        };
         if let Err(e) = outcome {
             tracing::warn!(store = "stripe", error = %e, "readiness probe failed");
             failed.push("stripe");

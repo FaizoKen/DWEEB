@@ -110,10 +110,7 @@ impl ShortLinkStore {
     /// Cheap connectivity probe for the readiness endpoint (see
     /// `LibraryStore::ping`): a `SELECT 1` on the shared connection.
     pub fn ping(&self) -> Result<(), String> {
-        self.pool
-            .get()
-            .query_row("SELECT 1", [], |_| Ok(()))
-            .map_err(|e| e.to_string())
+        self.pool.ping()
     }
 
     /// Store `token` under a fresh id; returns `(id, expires_at)`.

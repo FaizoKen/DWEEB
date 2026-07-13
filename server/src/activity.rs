@@ -354,106 +354,6 @@ fn clamp_field(s: &str, max: usize) -> String {
     s.chars().filter(|c| !c.is_control()).take(max).collect()
 }
 
-// ── Feedback relay (POST /api/activity/feedback) ─────────────────────────────
-
-/// Discord caps a forum `thread_name` at 100 chars and a non-Nitro message
-/// `content` at 2000; we clamp both here (the FE clamps too, but the proxy is the
-/// authority on what actually reaches Discord). A forum channel has few tags, so
-/// only a handful of tag ids are ever meaningful.
-const FEEDBACK_THREAD_NAME_MAX: usize = 100;
-const FEEDBACK_CONTENT_MAX: usize = 2000;
-const FEEDBACK_MAX_TAGS: usize = 5;
-
-#[derive(Deserialize)]
-pub struct FeedbackBody {
-    /// The forum post's title (the tag emoji + user's summary — see the web form).
-    #[serde(default)]
-    thread_name: String,
-    /// The report body, already assembled by the FE (details + its own footer).
-    #[serde(default)]
-    content: String,
-    /// The forum's own tag snowflakes to pre-sort the post under. Optional.
-    #[serde(default)]
-    applied_tags: Vec<String>,
-}
-
-/// `POST /api/activity/feedback` `{ thread_name, content, applied_tags }` — relay
-/// a "Send feedback" report from the embedded Activity to DWEEB's feedback forum.
-///
-/// The web app posts feedback straight to the forum webhook from the browser, but
-/// a sandboxed Activity iframe can't reach discord.com directly (the same reason
-/// `activity_post` exists), so the proxy forwards it. The destination webhook is
-/// held server-side (`FEEDBACK_WEBHOOK_URL`) — the browser never sees or names it,
-/// so this can't be turned into an open relay to arbitrary webhooks. Bearer-gated
-/// (only a signed-in Activity user can post) and we stamp the caller's *verified*
-/// Discord identity onto the report, since the web form's self-typed contact could
-/// be anyone. Answers `204` on a created post.
-pub async fn activity_feedback(
-    State(st): State<AppState>,
-    jar: PrivateCookieJar,
-    headers: HeaderMap,
-    Json(body): Json<FeedbackBody>,
-) -> Result<Response, AppError> {
-    if !st.config.activities_enabled {
-        return Err(not_enabled());
-    }
-    let Some(webhook_url) = st.config.feedback_webhook_url.as_deref() else {
-        return Err(AppError::Status {
-            status: StatusCode::NOT_IMPLEMENTED,
-            message: "Feedback isn't available on this deployment.".into(),
-            retry_after: None,
-        });
-    };
-    // Identify the sender — also gates the endpoint to real Activity users, so it
-    // can't be scripted into a feedback-forum spam cannon.
-    let session = resolve_identity(&st, &jar, &headers).await?;
-
-    let thread_name: String = body
-        .thread_name
-        .trim()
-        .chars()
-        .take(FEEDBACK_THREAD_NAME_MAX)
-        .collect();
-    let details = body.content.trim();
-    if thread_name.is_empty() || details.is_empty() {
-        return Err(bad_request("thread_name and content are required"));
-    }
-
-    // Append the verified sender under the report as quiet subtext, then hard-cap
-    // the whole thing to Discord's content limit (the stamp always survives — the
-    // details are trimmed to make room). The web form can only carry a self-typed
-    // contact; here we know exactly who sent it.
-    let stamp = format!(
-        "\n-# ✅ {} ({}) · via DWEEB in Discord",
-        session.name, session.uid
-    );
-    let room = FEEDBACK_CONTENT_MAX.saturating_sub(stamp.chars().count());
-    let mut content: String = details.chars().take(room).collect();
-    content.push_str(&stamp);
-
-    // Forward only well-formed tag snowflakes so a malformed body can't 400 the
-    // webhook; drop anything else.
-    let applied_tags: Vec<String> = body
-        .applied_tags
-        .into_iter()
-        .filter(|t| is_snowflake(t))
-        .take(FEEDBACK_MAX_TAGS)
-        .collect();
-
-    let mut payload = json!({
-        "thread_name": thread_name,
-        "content": content,
-        // Feedback must never ping anyone, even if the body contains a mention.
-        "allowed_mentions": { "parse": [] },
-    });
-    if !applied_tags.is_empty() {
-        payload["applied_tags"] = json!(applied_tags);
-    }
-
-    st.discord.post_webhook_url(webhook_url, &payload).await?;
-    Ok(StatusCode::NO_CONTENT.into_response())
-}
-
 // ── Publish (POST /api/activity/post) ───────────────────────────────────────
 
 /// Discord's hard cap on files per message — reject anything past it before
@@ -2124,6 +2024,11 @@ fn ip_is_public(ip: IpAddr) -> bool {
 /// response we'll relay back to the iframe.
 const MAX_PLUGIN_HTML_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PLUGIN_RESP_BYTES: usize = 1024 * 1024;
+const PLUGIN_EDIT_TOKEN_HEADER: &str = "x-dweeb-plugin-edit-token";
+
+fn valid_plugin_edit_token(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
 
 #[derive(Deserialize)]
 pub struct PluginUrlQuery {
@@ -2255,8 +2160,8 @@ pub async fn activity_plugin_frame(
 /// shim rewrites them to this endpoint, which forwards the method + JSON body to
 /// the real plugin host and relays the response. Same allow-list + SSRF + size
 /// bounds as the page loader. Cookies and the Activity bearer are deliberately
-/// **not** forwarded — these plugin endpoints are unauthenticated, and we never
-/// hand a plugin the user's Discord token.
+/// **not** forwarded; the only credential admitted is the plugin's own edit
+/// token, which grants no Discord or Activity access.
 pub async fn activity_plugin_fetch(
     State(st): State<AppState>,
     method: Method,
@@ -2284,6 +2189,15 @@ pub async fn activity_plugin_fetch(
     // Forward only the content type — never cookies or the Activity bearer.
     if let Some(ct) = headers.get(header::CONTENT_TYPE) {
         req = req.header(header::CONTENT_TYPE, ct);
+    }
+    // This is the only credential header the relay admits. Authorization,
+    // cookies, and the Activity bearer are never forwarded to a plugin.
+    if let Some(edit_token) = headers
+        .get(PLUGIN_EDIT_TOKEN_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| valid_plugin_edit_token(value))
+    {
+        req = req.header(PLUGIN_EDIT_TOKEN_HEADER, edit_token);
     }
     if !body.is_empty() {
         req = req.body(body.to_vec());
@@ -3262,6 +3176,14 @@ mod tests {
         assert!(!plugin_host_allowed("dweeb.faizo.net.evil.com", &allow));
         assert!(!plugin_host_allowed("notdweeb.faizo.net", &allow));
         assert!(!plugin_host_allowed("example.com", &allow));
+    }
+
+    #[test]
+    fn plugin_edit_token_header_accepts_only_bounded_hex() {
+        assert!(valid_plugin_edit_token(&"a".repeat(64)));
+        assert!(!valid_plugin_edit_token(&"a".repeat(63)));
+        assert!(!valid_plugin_edit_token(&"a".repeat(65)));
+        assert!(!valid_plugin_edit_token(&format!("{}z", "a".repeat(63))));
     }
 
     #[test]

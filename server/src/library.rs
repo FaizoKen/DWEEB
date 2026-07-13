@@ -267,13 +267,11 @@ impl LibraryStore {
     }
 
     /// Cheap connectivity probe for the readiness endpoint: proves the DB file
-    /// is open and answering (catches an unwritable volume / wedged lock) without
+    /// is open and answering (catches a busy/wedged pool) without
     /// touching any real data. Runs on the shared connection like every other
     /// call, so a probe that returns also means the store isn't dead-locked.
     pub fn ping(&self) -> Result<(), String> {
-        self.lock()
-            .query_row("SELECT 1", [], |_| Ok(()))
-            .map_err(e2s)
+        self.pool.ping()
     }
 
     /// The standalone per-server draft quota, surfaced so the list can show

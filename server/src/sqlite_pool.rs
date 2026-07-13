@@ -26,7 +26,7 @@
 //! its own page + statement cache).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock, TryLockError};
 
 use rusqlite::Connection;
 
@@ -106,6 +106,32 @@ impl SqlitePool {
         // recovering it if poisoned.
         let idx = start % n;
         self.conns[idx].lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Try to check out any connection without waiting. Health probes use this
+    /// so a pool whose workers are all wedged reports unready instead of
+    /// creating another thread blocked on the same mutex.
+    pub fn try_get(&self) -> Option<MutexGuard<'_, Connection>> {
+        let start = self.next.fetch_add(1, Ordering::Relaxed);
+        let n = self.conns.len();
+        for k in 0..n {
+            let idx = (start.wrapping_add(k)) % n;
+            match self.conns[idx].try_lock() {
+                Ok(guard) => return Some(guard),
+                Err(TryLockError::Poisoned(poison)) => return Some(poison.into_inner()),
+                Err(TryLockError::WouldBlock) => {}
+            }
+        }
+        None
+    }
+
+    /// Non-blocking connectivity probe used by each optional SQLite store.
+    pub fn ping(&self) -> Result<(), String> {
+        let conn = self
+            .try_get()
+            .ok_or_else(|| "all SQLite connections are busy".to_string())?;
+        conn.query_row("SELECT 1", [], |_| Ok(()))
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -187,6 +213,20 @@ mod tests {
         // Distinct underlying connections => distinct guard addresses.
         assert!(!std::ptr::eq(&*a as *const _, &*b as *const _));
         drop((a, b));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn nonblocking_probe_fails_when_every_connection_is_held() {
+        let path = temp_path("busy-probe");
+        let _ = std::fs::remove_file(&path);
+        let pool = SqlitePool::open(path.to_str().unwrap(), 1, init_wal).unwrap();
+        let held = pool.get();
+
+        assert_eq!(pool.ping().unwrap_err(), "all SQLite connections are busy");
+
+        drop(held);
+        assert!(pool.ping().is_ok());
         let _ = std::fs::remove_file(&path);
     }
 }

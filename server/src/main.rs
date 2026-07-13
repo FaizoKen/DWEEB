@@ -20,6 +20,7 @@ mod config;
 mod discord;
 mod entitlement;
 mod error;
+mod feedback;
 mod library;
 mod ratelimit;
 mod reconcile;
@@ -54,16 +55,23 @@ use crate::config::Config;
 use crate::discord::Discord;
 use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
 use crate::routes::{
-    bootstrap, channels, custom_apps_add, custom_apps_list, custom_apps_remove, emojis,
-    guild_activity_invite, health, list_guilds, permanent_add, permanent_list, permanent_reenable,
-    permanent_remove, ready, roles, webhook_create, webhook_delete, webhook_modify, webhooks_list,
-    AppState, DispatcherApi,
+    bootstrap, capabilities, channels, custom_apps_add, custom_apps_list, custom_apps_remove,
+    emojis, guild_activity_invite, health, list_guilds, permanent_add, permanent_list,
+    permanent_reenable, permanent_remove, ready, roles, webhook_create, webhook_delete,
+    webhook_modify, webhooks_list, AppState, DispatcherApi,
 };
 use crate::schedule::{
     schedule_create, schedule_delete, schedule_get, schedule_list, schedule_list_for_guild,
     schedule_patch, ScheduleStore,
 };
 use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
+
+/// Feedback creates a public forum post, so it gets a much tighter per-IP
+/// budget than ordinary API reads. The in-memory token bucket starts at three
+/// and refills one every five minutes; Redis enforces three per fixed 15-minute
+/// window across replicas. The global limiter still applies as well.
+const FEEDBACK_RATE_CAP: u32 = 3;
+const FEEDBACK_RATE_WINDOW: Duration = Duration::from_secs(15 * 60);
 
 fn main() {
     // `dweeb-proxy healthcheck` is invoked by the Docker HEALTHCHECK on every
@@ -120,7 +128,7 @@ async fn run() {
     // through Redis so multiple instances coordinate; otherwise both are
     // process-local. The connection manager is cloned into each (cheap; it's an
     // Arc internally with its own reconnection loop).
-    let (cache, limiter) = match &config.redis_url {
+    let (cache, limiter, feedback_limiter) = match &config.redis_url {
         Some(url) => {
             let conn = match connect_redis(url).await {
                 Ok(c) => c,
@@ -136,9 +144,19 @@ async fn run() {
                     ttl_secs: config.cache_ttl.as_secs(),
                 },
                 Limiter::Redis {
+                    conn: conn.clone(),
+                    key_prefix: "",
+                    // Preserve the existing Redis limiter's fixed-window cap.
+                    limit: config
+                        .rate_limit_per_min
+                        .saturating_add(config.rate_limit_burst),
+                    window_secs: 60,
+                },
+                Limiter::Redis {
                     conn,
-                    per_min: config.rate_limit_per_min,
-                    burst: config.rate_limit_burst,
+                    key_prefix: "feedback",
+                    limit: FEEDBACK_RATE_CAP,
+                    window_secs: FEEDBACK_RATE_WINDOW.as_secs(),
                 },
             )
         }
@@ -148,9 +166,14 @@ async fn run() {
                 config.rate_limit_per_min,
                 config.rate_limit_burst,
             )),
+            Limiter::Memory(RateLimiter::for_window(
+                FEEDBACK_RATE_CAP,
+                FEEDBACK_RATE_WINDOW,
+            )),
         ),
     };
     let limiter = Arc::new(limiter);
+    let feedback_limiter = Arc::new(feedback_limiter);
 
     // Cookie signing + encryption key, built from the configured secret
     // (validated to be ≥64 bytes in `Config::from_env`).
@@ -392,6 +415,7 @@ async fn run() {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/api/capabilities", get(capabilities))
         // Readiness: verifies each present SQLite store answers a `SELECT 1`, so
         // a monitor can distinguish "up" from "a data volume is wedged". 503 (with
         // the failing store) when a probe fails; see `routes::ready`.
@@ -419,6 +443,18 @@ async fn run() {
         .route(
             "/api/telemetry/crash",
             post(telemetry::crash_report).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
+        )
+        // Anonymous feedback relay. The browser sends only category, summary,
+        // details, and optional contact; the handler constructs the Discord
+        // payload and owns the destination credential. A route-local limiter is
+        // deliberately much tighter than the global API budget.
+        .route(
+            "/api/feedback",
+            post(feedback::web_feedback)
+                // 8 KiB covers the allowed character counts even when every
+                // character occupies four UTF-8 bytes, while remaining tight.
+                .layer(axum::extract::DefaultBodyLimit::max(8 * 1024))
+                .layer(from_fn_with_state(feedback_limiter.clone(), rate_limit)),
         )
         // Scheduled posts (opt-in; webhook + payload sealed at rest, fired by a
         // background worker). Create/list need only an optional session; per-row
@@ -543,13 +579,14 @@ async fn run() {
             post(activity::activity_telemetry)
                 .layer(axum::extract::DefaultBodyLimit::max(2 * 1024)),
         )
-        // Feedback relay: the sandboxed iframe can't post to the feedback forum
-        // webhook on discord.com directly (same reason /post exists), so the proxy
-        // forwards a "Send feedback" report to the server-held FEEDBACK_WEBHOOK_URL.
-        // Bearer-gated; the body is a short report, so it's bounded tight.
+        // Activity feedback uses the same closed report schema and server-held
+        // destination as the web route, then adds the verified Discord sender.
+        // It remains bearer-gated and shares the strict feedback-only limiter.
         .route(
             "/api/activity/feedback",
-            post(activity::activity_feedback).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+            post(feedback::activity_feedback)
+                .layer(axum::extract::DefaultBodyLimit::max(8 * 1024))
+                .layer(from_fn_with_state(feedback_limiter, rate_limit)),
         )
         // DWEEB's own Stripe billing (per-server, MEE6/Dyno-style). Start an
         // embedded Checkout bound to a server, list the user's premium servers,

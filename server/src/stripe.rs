@@ -200,9 +200,7 @@ impl StripeStore {
     /// Cheap connectivity probe for the readiness endpoint (see
     /// `LibraryStore::ping`): a `SELECT 1` on the shared connection.
     pub fn ping(&self) -> Result<(), String> {
-        self.lock()
-            .query_row("SELECT 1", [], |_| Ok(()))
-            .map_err(|e| e.to_string())
+        self.pool.ping()
     }
 
     /// Sum of `price_slots[price_id]` over a **server's** active/trialing subs —

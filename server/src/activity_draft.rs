@@ -83,9 +83,7 @@ impl ActivityDraftStore {
     /// Cheap connectivity probe for the readiness endpoint (see
     /// `LibraryStore::ping`): a `SELECT 1` on the shared connection.
     pub fn ping(&self) -> Result<(), String> {
-        self.lock()
-            .query_row("SELECT 1", [], |_| Ok(()))
-            .map_err(|e| e.to_string())
+        self.pool.ping()
     }
 
     /// Upsert the sealed draft for `instance`. Updating an existing instance is
