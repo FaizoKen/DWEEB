@@ -106,6 +106,20 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   in-dialog re-pick). The full list appears only when no bar pick exists yet (it's then the
   first pick), and that decision is frozen per dialog open so an in-dialog pick doesn't yank
   the list away mid-flow.
+- **Env config fails loudly, never silently.** `config.rs` trims every value (`normalize`), and a
+  *present but unparseable* value is a boot error rather than a fall back to the default —
+  `parse_bool` accepts only `1/true/yes/on` + `0/false/no/off` and rejects anything else. This is
+  load-bearing, not pedantry: an untrimmed `REQUIRE_MANAGE_GUILD=true ` used to parse as **false**
+  and silently switch off the gate restricting users to servers they manage (same shape drops
+  `Secure` off the session cookie via `COOKIE_SECURE`). Don't reintroduce a "default on anything
+  unrecognized" parser.
+- **Durable stores must have absolute paths.** Every `*_DB_PATH` (shortlink, schedule, library,
+  activity-draft, stripe) defaults to a bare filename, which resolves against the container's
+  working directory — *not* the mounted volume — so the data is destroyed on the next deploy with
+  no error. compose passes `${X:-/data/x.db}`; the server now also checks itself and logs a loud
+  boot WARN naming each enabled store on a relative path. `STRICT_DB_PATHS=true` promotes that to a
+  hard boot failure (set it in prod once every path is absolute). Add any new durable store to
+  `DurableStores` in `config.rs`.
 - **Proxy health vs readiness.** `/health` is bare liveness (static 200, no deps). `/ready`
   probes every *present* SQLite store (shortlinks, schedules, activity drafts, library, Stripe
   mirror) with a nonblocking pool checkout + `SELECT 1` under a two-second per-store deadline,

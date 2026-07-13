@@ -3,6 +3,7 @@
 //! changes. See `.env.example` for the full list with explanations.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 
 /// Which browser origins may call the proxy (the CORS allow-list).
@@ -263,7 +264,7 @@ impl Config {
             }
         };
 
-        let cache_ttl = Duration::from_secs(parse_or("CACHE_TTL_SECS", 60));
+        let cache_ttl = Duration::from_secs(parse_or("CACHE_TTL_SECS", 60)?);
 
         let client_id = req_env("DISCORD_CLIENT_ID")?;
         let client_secret = req_env("DISCORD_CLIENT_SECRET")?;
@@ -276,23 +277,34 @@ impl Config {
         if session_secret.len() < 64 {
             return Err("SESSION_SECRET must be at least 64 characters".into());
         }
-        let session_ttl = Duration::from_secs(parse_or::<u64>("SESSION_TTL_HOURS", 168) * 3600);
-        let cookie_secure = parse_bool("COOKIE_SECURE", true);
-        let cookie_samesite = match opt_env("COOKIE_SAMESITE").as_deref() {
-            Some("none") | Some("None") => SameSitePolicy::None,
-            _ => SameSitePolicy::Lax,
+        let session_ttl = Duration::from_secs(parse_or::<u64>("SESSION_TTL_HOURS", 168)? * 3600);
+        let cookie_secure = parse_bool("COOKIE_SECURE", true)?;
+        // Unset ⇒ Lax. A *set* value must be one we understand: silently falling
+        // back to Lax on a typo would break cross-site auth in a way that looks
+        // like a random logout bug, not a config error.
+        let cookie_samesite = match opt_env("COOKIE_SAMESITE") {
+            None => SameSitePolicy::Lax,
+            Some(raw) => match raw.to_ascii_lowercase().as_str() {
+                "lax" => SameSitePolicy::Lax,
+                "none" => SameSitePolicy::None,
+                _ => {
+                    return Err(format!(
+                        "COOKIE_SAMESITE must be \"lax\" or \"none\", got {raw:?}"
+                    ))
+                }
+            },
         };
         let cookie_domain = opt_env("COOKIE_DOMAIN");
 
-        let activities_enabled = parse_bool("ACTIVITIES_ENABLED", true);
+        let activities_enabled = parse_bool("ACTIVITIES_ENABLED", true)?;
         let activity_plugin_hosts = opt_env("ACTIVITY_PLUGIN_HOSTS")
             .map(|s| split_list(&s))
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| vec!["dweeb.faizo.net".to_string()]);
         let activity_draft_db_path =
             opt_env("ACTIVITY_DRAFT_DB_PATH").unwrap_or_else(|| "activity-drafts.db".to_string());
-        let activity_draft_max_entries = parse_or("ACTIVITY_DRAFT_MAX_ENTRIES", 20_000);
-        let activity_draft_retention_days = parse_or("ACTIVITY_DRAFT_RETENTION_DAYS", 7);
+        let activity_draft_max_entries = parse_or("ACTIVITY_DRAFT_MAX_ENTRIES", 20_000)?;
+        let activity_draft_retention_days = parse_or("ACTIVITY_DRAFT_RETENTION_DAYS", 7)?;
         let feedback_webhook_url = match opt_env("FEEDBACK_WEBHOOK_URL") {
             Some(url) if valid_feedback_webhook_url(&url) => Some(url.trim().to_string()),
             Some(_) => {
@@ -304,37 +316,37 @@ impl Config {
             None => None,
         };
 
-        let require_manage_guild = parse_bool("REQUIRE_MANAGE_GUILD", true);
+        let require_manage_guild = parse_bool("REQUIRE_MANAGE_GUILD", true)?;
 
-        let rate_limit_per_min = parse_or("RATE_LIMIT_PER_MIN", 60);
-        let rate_limit_burst = parse_or("RATE_LIMIT_BURST", 20);
-        let discord_max_concurrency = parse_or("DISCORD_MAX_CONCURRENCY", 10);
+        let rate_limit_per_min = parse_or("RATE_LIMIT_PER_MIN", 60)?;
+        let rate_limit_burst = parse_or("RATE_LIMIT_BURST", 20)?;
+        let discord_max_concurrency = parse_or("DISCORD_MAX_CONCURRENCY", 10)?;
 
         let redis_url = opt_env("REDIS_URL");
 
-        let shortlink_ttl_days = parse_or("SHORTLINK_TTL_DAYS", 7);
+        let shortlink_ttl_days = parse_or("SHORTLINK_TTL_DAYS", 7)?;
         let shortlink_db_path =
             opt_env("SHORTLINK_DB_PATH").unwrap_or_else(|| "shortlinks.db".to_string());
-        let shortlink_max_entries = parse_or("SHORTLINK_MAX_ENTRIES", 50_000);
+        let shortlink_max_entries = parse_or("SHORTLINK_MAX_ENTRIES", 50_000)?;
 
-        let schedules_enabled = parse_bool("SCHEDULES_ENABLED", true);
+        let schedules_enabled = parse_bool("SCHEDULES_ENABLED", true)?;
         let schedule_db_path =
             opt_env("SCHEDULE_DB_PATH").unwrap_or_else(|| "schedules.db".to_string());
-        let schedule_max_entries = parse_or("SCHEDULE_MAX_ENTRIES", 5_000);
-        let schedule_max_per_webhook = parse_or("SCHEDULE_MAX_PER_WEBHOOK", 25);
-        let schedule_max_per_guild = parse_or("SCHEDULE_MAX_PER_GUILD", 5);
-        let schedule_max_horizon_days = parse_or("SCHEDULE_MAX_HORIZON_DAYS", 366);
-        let scheduler_tick_secs = parse_or("SCHEDULER_TICK_SECS", 15);
-        let scheduler_lease_secs = parse_or("SCHEDULER_LEASE_SECS", 120);
-        let scheduler_batch = parse_or("SCHEDULER_BATCH", 25);
-        let schedule_retention_days = parse_or("SCHEDULE_RETENTION_DAYS", 7);
+        let schedule_max_entries = parse_or("SCHEDULE_MAX_ENTRIES", 5_000)?;
+        let schedule_max_per_webhook = parse_or("SCHEDULE_MAX_PER_WEBHOOK", 25)?;
+        let schedule_max_per_guild = parse_or("SCHEDULE_MAX_PER_GUILD", 5)?;
+        let schedule_max_horizon_days = parse_or("SCHEDULE_MAX_HORIZON_DAYS", 366)?;
+        let scheduler_tick_secs = parse_or("SCHEDULER_TICK_SECS", 15)?;
+        let scheduler_lease_secs = parse_or("SCHEDULER_LEASE_SECS", 120)?;
+        let scheduler_batch = parse_or("SCHEDULER_BATCH", 25)?;
+        let schedule_retention_days = parse_or("SCHEDULE_RETENTION_DAYS", 7)?;
 
-        let library_enabled = parse_bool("LIBRARY_ENABLED", true);
+        let library_enabled = parse_bool("LIBRARY_ENABLED", true)?;
         let library_db_path =
             opt_env("LIBRARY_DB_PATH").unwrap_or_else(|| "library.db".to_string());
-        let library_max_entries = parse_or("LIBRARY_MAX_ENTRIES", 100_000);
-        let library_max_per_guild = parse_or("LIBRARY_MAX_PER_GUILD", 100);
-        let library_posted_per_guild = parse_or("LIBRARY_POSTED_PER_GUILD", 100);
+        let library_max_entries = parse_or("LIBRARY_MAX_ENTRIES", 100_000)?;
+        let library_max_per_guild = parse_or("LIBRARY_MAX_PER_GUILD", 100)?;
+        let library_posted_per_guild = parse_or("LIBRARY_POSTED_PER_GUILD", 100)?;
 
         let dispatcher_url = opt_env("DISPATCHER_URL").map(|u| u.trim_end_matches('/').to_string());
         let dispatcher_token = opt_env("DISPATCHER_API_TOKEN");
@@ -361,35 +373,48 @@ impl Config {
         }
         let stripe_tax_rate_id = opt_env("STRIPE_TAX_RATE_ID");
         let stripe_db_path = opt_env("STRIPE_DB_PATH").unwrap_or_else(|| "stripe.db".to_string());
-        let stripe_backfill_ttl_secs = parse_or("STRIPE_BACKFILL_TTL_SECS", 86_400);
-        let entitlement_cache_secs = parse_or("ENTITLEMENT_CACHE_SECS", 300);
+        let stripe_backfill_ttl_secs = parse_or("STRIPE_BACKFILL_TTL_SECS", 86_400)?;
+        let entitlement_cache_secs = parse_or("ENTITLEMENT_CACHE_SECS", 300)?;
         let plan_limits = PlanLimits {
             free: TierLimits {
-                schedules: parse_or("PLAN_FREE_SCHEDULES", 3),
-                permanent: parse_or("PLAN_FREE_PERMANENT", 5),
-                custom_bots: parse_or("PLAN_FREE_CUSTOM_BOTS", 1),
-                coeditors: parse_or("PLAN_FREE_COEDITORS", 2),
-                library: parse_or("PLAN_FREE_LIBRARY", 10),
-                library_posted: parse_or("PLAN_FREE_LIBRARY_POSTED", 10),
+                schedules: parse_or("PLAN_FREE_SCHEDULES", 3)?,
+                permanent: parse_or("PLAN_FREE_PERMANENT", 5)?,
+                custom_bots: parse_or("PLAN_FREE_CUSTOM_BOTS", 1)?,
+                coeditors: parse_or("PLAN_FREE_COEDITORS", 2)?,
+                library: parse_or("PLAN_FREE_LIBRARY", 10)?,
+                library_posted: parse_or("PLAN_FREE_LIBRARY_POSTED", 10)?,
             },
             plus: TierLimits {
-                schedules: parse_or("PLAN_PLUS_SCHEDULES", 30),
-                permanent: parse_or("PLAN_PLUS_PERMANENT", 25),
-                custom_bots: parse_or("PLAN_PLUS_CUSTOM_BOTS", 2),
-                coeditors: parse_or("PLAN_PLUS_COEDITORS", 6),
-                library: parse_or("PLAN_PLUS_LIBRARY", 100),
-                library_posted: parse_or("PLAN_PLUS_LIBRARY_POSTED", 100),
+                schedules: parse_or("PLAN_PLUS_SCHEDULES", 30)?,
+                permanent: parse_or("PLAN_PLUS_PERMANENT", 25)?,
+                custom_bots: parse_or("PLAN_PLUS_CUSTOM_BOTS", 2)?,
+                coeditors: parse_or("PLAN_PLUS_COEDITORS", 6)?,
+                library: parse_or("PLAN_PLUS_LIBRARY", 100)?,
+                library_posted: parse_or("PLAN_PLUS_LIBRARY_POSTED", 100)?,
             },
             pro: TierLimits {
                 // 0 = unlimited (mapped to i64::MAX at each gate).
-                schedules: parse_or("PLAN_PRO_SCHEDULES", 0),
-                permanent: parse_or("PLAN_PRO_PERMANENT", 0),
-                custom_bots: parse_or("PLAN_PRO_CUSTOM_BOTS", 5),
-                coeditors: parse_or("PLAN_PRO_COEDITORS", 25),
-                library: parse_or("PLAN_PRO_LIBRARY", 0),
-                library_posted: parse_or("PLAN_PRO_LIBRARY_POSTED", 0),
+                schedules: parse_or("PLAN_PRO_SCHEDULES", 0)?,
+                permanent: parse_or("PLAN_PRO_PERMANENT", 0)?,
+                custom_bots: parse_or("PLAN_PRO_CUSTOM_BOTS", 5)?,
+                coeditors: parse_or("PLAN_PRO_COEDITORS", 25)?,
+                library: parse_or("PLAN_PRO_LIBRARY", 0)?,
+                library_posted: parse_or("PLAN_PRO_LIBRARY_POSTED", 0)?,
             },
         };
+
+        check_durable_store_paths(
+            &DurableStores {
+                shortlink: (shortlink_ttl_days > 0).then_some(shortlink_db_path.as_str()),
+                schedule: schedules_enabled.then_some(schedule_db_path.as_str()),
+                library: library_enabled.then_some(library_db_path.as_str()),
+                activity_draft: activities_enabled.then_some(activity_draft_db_path.as_str()),
+                stripe: stripe_secret_key
+                    .is_some()
+                    .then_some(stripe_db_path.as_str()),
+            },
+            parse_bool("STRICT_DB_PATHS", false)?,
+        )?;
 
         Ok(Config {
             bot_token,
@@ -449,34 +474,170 @@ impl Config {
     }
 }
 
-/// Required variable: error out if missing or blank.
-fn req_env(key: &str) -> Result<String, String> {
-    match std::env::var(key) {
-        Ok(v) if !v.trim().is_empty() => Ok(v),
-        _ => Err(format!("{key} is required")),
+/// The SQLite files that hold a *durable promise* — a scheduled post that must
+/// fire, a saved draft, a 7-day short link, the billing mirror. Only the stores
+/// actually switched on are listed; a disabled feature's path is never opened,
+/// so it has nothing to lose. `None` ⇒ that store is off.
+struct DurableStores<'a> {
+    shortlink: Option<&'a str>,
+    schedule: Option<&'a str>,
+    library: Option<&'a str>,
+    activity_draft: Option<&'a str>,
+    stripe: Option<&'a str>,
+}
+
+impl<'a> DurableStores<'a> {
+    /// `(env key, configured path)` for each enabled store.
+    fn enabled(&self) -> Vec<(&'static str, &'a str)> {
+        [
+            ("SHORTLINK_DB_PATH", self.shortlink),
+            ("SCHEDULE_DB_PATH", self.schedule),
+            ("LIBRARY_DB_PATH", self.library),
+            ("ACTIVITY_DRAFT_DB_PATH", self.activity_draft),
+            ("STRIPE_DB_PATH", self.stripe),
+        ]
+        .into_iter()
+        .filter_map(|(key, path)| path.map(|p| (key, p)))
+        .collect()
     }
+}
+
+/// Refuse — or at least shout — when a durable store is pointed at a *relative*
+/// path.
+///
+/// Each of these paths defaults to a bare filename, which resolves against the
+/// process's working directory. In a container that directory is part of the
+/// image's writable layer, not the mounted volume, so the file is destroyed on
+/// the next deploy: scheduled posts never fire, saved drafts vanish, short links
+/// 404, the billing mirror empties. Nothing errors — the store just comes back
+/// empty, which is the worst possible way to lose data.
+///
+/// Today production is safe only because compose happens to pass
+/// `${SHORTLINK_DB_PATH:-/data/shortlinks.db}` and friends. That is a property of
+/// a file the server has never seen. Drop one line from it and the loss is
+/// silent, so make the server itself hold the invariant.
+///
+/// Warn by default (a hard failure here would take down a running deployment
+/// that is quietly relying on a default), and let `STRICT_DB_PATHS=true` promote
+/// it to a boot failure once an operator has confirmed every path is absolute.
+fn check_durable_store_paths(stores: &DurableStores<'_>, strict: bool) -> Result<(), String> {
+    let ephemeral: Vec<&str> = stores
+        .enabled()
+        .into_iter()
+        .filter(|(_, path)| !is_durable_path(path))
+        .map(|(key, _)| key)
+        .collect();
+    if ephemeral.is_empty() {
+        return Ok(());
+    }
+
+    let keys = ephemeral.join(", ");
+    if strict {
+        return Err(format!(
+            "STRICT_DB_PATHS is on, but these stores have a relative path and would not \
+             survive a redeploy: {keys}. Point each at an absolute path on the persistent \
+             volume (e.g. /data/<name>.db)."
+        ));
+    }
+    tracing::warn!(
+        target: "config",
+        stores = %keys,
+        "relative DB path(s): these files resolve against the working directory, which is \
+         NOT the persistent volume in a container — the data is silently lost on the next \
+         deploy. Set each to an absolute path (e.g. /data/<name>.db). Set STRICT_DB_PATHS=true \
+         to make this a hard boot failure."
+    );
+    Ok(())
+}
+
+/// Does this path survive a redeploy — i.e. is it anchored somewhere other than
+/// the process's working directory?
+///
+/// Deliberately *not* just `Path::is_absolute()`. That is evaluated with the host
+/// platform's rules, and the proxy is developed on Windows but deployed in a
+/// Linux container: `Path::new("/data/x.db").is_absolute()` is `false` on
+/// Windows (it wants a drive letter), so the real production path would trip a
+/// "your data is ephemeral" warning on every developer's machine and be ignored.
+/// A leading `/` is what actually matters in the container, so check that first
+/// and fall back to the platform rule (which accepts `D:\data\x.db` locally).
+fn is_durable_path(path: &str) -> bool {
+    path.starts_with('/') || Path::new(path).is_absolute()
+}
+
+/// Required variable: error out if missing or blank. The value is **trimmed** —
+/// see [`opt_env`] for why that matters.
+fn req_env(key: &str) -> Result<String, String> {
+    std::env::var(key)
+        .ok()
+        .as_deref()
+        .and_then(normalize)
+        .ok_or_else(|| format!("{key} is required"))
+}
+
+/// The one place an env value's surrounding whitespace is dealt with: blank (or
+/// whitespace-only) ⇒ `None`, otherwise the trimmed value.
+fn normalize(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 /// Optional variable: `None` if missing or blank.
+///
+/// The value is **trimmed**. This is not cosmetic: a `.env` line with a stray
+/// trailing space used to survive all the way into [`parse_bool`], where
+/// `"true "` matched none of the truthy spellings and quietly became `false`.
+/// On `REQUIRE_MANAGE_GUILD` that silently disables the authorization gate that
+/// restricts a user to servers they actually manage; on `COOKIE_SECURE` it drops
+/// the `Secure` flag off the session cookie. One invisible keystroke must never
+/// be able to do that.
 fn opt_env(key: &str) -> Option<String> {
-    match std::env::var(key) {
-        Ok(v) if !v.trim().is_empty() => Some(v),
-        _ => None,
+    std::env::var(key).ok().as_deref().and_then(normalize)
+}
+
+/// Parse an env var into `T`. Missing or blank ⇒ `default`.
+///
+/// A value that is *present but unparseable* is a boot error, never a silent
+/// fall back to `default`: an operator who typed `RATE_LIMIT_PER_MIN=600x` asked
+/// for something, and quietly running at 60 instead is worse than not booting.
+fn parse_or<T: std::str::FromStr>(key: &str, default: T) -> Result<T, String> {
+    parse_value(key, opt_env(key).as_deref(), default)
+}
+
+/// Pure core of [`parse_or`], split out so it is testable without mutating
+/// process-global environment state. `raw` is already normalized.
+fn parse_value<T: std::str::FromStr>(
+    key: &str,
+    raw: Option<&str>,
+    default: T,
+) -> Result<T, String> {
+    match raw {
+        None => Ok(default),
+        Some(raw) => raw
+            .parse::<T>()
+            .map_err(|_| format!("{key} is set to an invalid value ({raw:?})")),
     }
 }
 
-/// Parse an env var into `T`, falling back to `default` when missing/invalid.
-fn parse_or<T: std::str::FromStr>(key: &str, default: T) -> T {
-    opt_env(key)
-        .and_then(|s| s.parse::<T>().ok())
-        .unwrap_or(default)
+/// Parse a boolean env var. Missing or blank ⇒ `default`.
+///
+/// Accepts `1`/`true`/`yes`/`on` and `0`/`false`/`no`/`off`, any case. Anything
+/// else is a boot error rather than an implicit `false` — the old behaviour made
+/// every typo silently mean "off", which for the several flags that default to
+/// `true` (authorization, `Secure` cookies, whole features) is a downgrade you
+/// would never see in a log.
+fn parse_bool(key: &str, default: bool) -> Result<bool, String> {
+    bool_value(key, opt_env(key).as_deref(), default)
 }
 
-/// Parse a boolean env var (`true`/`1`/`yes` ⇒ true), falling back to `default`.
-fn parse_bool(key: &str, default: bool) -> bool {
-    match opt_env(key).map(|s| s.to_ascii_lowercase()) {
-        Some(v) => matches!(v.as_str(), "1" | "true" | "yes" | "on"),
-        None => default,
+/// Pure core of [`parse_bool`]. `raw` is already normalized.
+fn bool_value(key: &str, raw: Option<&str>, default: bool) -> Result<bool, String> {
+    match raw {
+        None => Ok(default),
+        Some(raw) => match raw.to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err(format!("{key} must be a boolean (true/false), got {raw:?}")),
+        },
     }
 }
 
@@ -519,7 +680,105 @@ fn valid_feedback_webhook_url(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_feedback_webhook_url;
+    use super::{
+        bool_value, check_durable_store_paths, is_durable_path, normalize, parse_value,
+        valid_feedback_webhook_url, DurableStores,
+    };
+
+    /// Only the stores a test actually cares about; the rest are "off".
+    fn stores<'a>(schedule: Option<&'a str>, library: Option<&'a str>) -> DurableStores<'a> {
+        DurableStores {
+            shortlink: None,
+            schedule,
+            library,
+            activity_draft: None,
+            stripe: None,
+        }
+    }
+
+    #[test]
+    fn env_values_are_trimmed_and_blanks_are_absent() {
+        assert_eq!(normalize("  true  ").as_deref(), Some("true"));
+        assert_eq!(normalize("true").as_deref(), Some("true"));
+        assert_eq!(normalize("   "), None);
+        assert_eq!(normalize(""), None);
+    }
+
+    /// The regression that motivated trimming: a `.env` line with a trailing
+    /// space used to make `REQUIRE_MANAGE_GUILD=true ` parse as **false**, which
+    /// silently switched off the gate restricting users to servers they manage.
+    #[test]
+    fn a_trailing_space_cannot_flip_a_boolean_off() {
+        let raw = normalize("true ");
+        assert_eq!(
+            bool_value("REQUIRE_MANAGE_GUILD", raw.as_deref(), true),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn booleans_accept_known_spellings_in_any_case() {
+        for on in ["1", "true", "TRUE", "Yes", "on"] {
+            assert_eq!(bool_value("K", Some(on), false), Ok(true), "{on}");
+        }
+        for off in ["0", "false", "FALSE", "No", "off"] {
+            assert_eq!(bool_value("K", Some(off), true), Ok(false), "{off}");
+        }
+    }
+
+    /// A typo must not silently mean "off" — that is how a `true`-by-default
+    /// security flag gets disabled without a trace in the logs.
+    #[test]
+    fn an_unrecognized_boolean_is_a_boot_error() {
+        assert!(bool_value("K", Some("flase"), true).is_err());
+        assert!(bool_value("K", Some("enabled"), true).is_err());
+        assert_eq!(bool_value("K", None, true), Ok(true));
+    }
+
+    /// Likewise a malformed number: running at the default while the operator
+    /// believes their value took effect is worse than refusing to boot.
+    #[test]
+    fn an_unparseable_number_is_a_boot_error_not_a_silent_default() {
+        assert!(parse_value::<u32>("RATE_LIMIT_PER_MIN", Some("600x"), 60).is_err());
+        assert_eq!(parse_value("RATE_LIMIT_PER_MIN", Some("600"), 60), Ok(600));
+        assert_eq!(parse_value("RATE_LIMIT_PER_MIN", None, 60), Ok(60));
+    }
+
+    /// The deployment target is a Linux container, so a leading `/` must read as
+    /// durable **on every host**, including the Windows dev machine where
+    /// `Path::is_absolute()` alone would say otherwise.
+    #[test]
+    fn posix_absolute_paths_are_durable_on_any_host() {
+        assert!(is_durable_path("/data/schedules.db"));
+        assert!(!is_durable_path("schedules.db"));
+        assert!(!is_durable_path("./schedules.db"));
+    }
+
+    #[test]
+    fn absolute_store_paths_pass_in_either_mode() {
+        let s = stores(Some("/data/schedules.db"), Some("/data/library.db"));
+        assert!(check_durable_store_paths(&s, false).is_ok());
+        assert!(check_durable_store_paths(&s, true).is_ok());
+    }
+
+    #[test]
+    fn a_relative_store_path_warns_by_default_and_fails_under_strict() {
+        let s = stores(Some("schedules.db"), Some("/data/library.db"));
+        assert!(check_durable_store_paths(&s, false).is_ok());
+
+        let err = check_durable_store_paths(&s, true).unwrap_err();
+        assert!(err.contains("SCHEDULE_DB_PATH"), "{err}");
+        // The absolute one is durable, so it must not be named.
+        assert!(!err.contains("LIBRARY_DB_PATH"), "{err}");
+    }
+
+    /// A disabled feature never opens its file, so its path cannot lose data
+    /// and must not block a boot that has nothing to do with it.
+    #[test]
+    fn a_disabled_store_is_not_checked() {
+        let s = stores(None, None);
+        assert!(check_durable_store_paths(&s, true).is_ok());
+    }
 
     #[test]
     fn feedback_webhook_is_pinned_to_discord_execute_urls() {
