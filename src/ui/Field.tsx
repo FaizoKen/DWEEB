@@ -33,7 +33,10 @@ interface FieldProps {
 
 interface AccessibleElementProps {
   id?: string;
-  children?: ReactNode;
+  /** Not just `ReactNode`: the children we walk are whatever the caller put in
+   *  the tree, and a render-prop component (`Menu`, a nested `Field`) carries a
+   *  *function* here. Saying so keeps `wireControl` honest about what it meets. */
+  children?: ReactNode | ((...args: never[]) => ReactNode);
   "aria-describedby"?: string;
   "aria-errormessage"?: string;
   "aria-invalid"?: boolean | "true" | "false";
@@ -45,8 +48,12 @@ function mergeIds(existing: string | undefined, generated: string[]): string | u
 }
 
 /** Inject accessibility props into the rendered element carrying controlId.
- * Recursing also handles Field children that wrap an input beside a button. */
-function wireControl(
+ * Recursing also handles Field children that wrap an input beside a button.
+ *
+ * Exported for `Field.test.ts`: `Field` itself calls `useId`, so it can only run
+ * inside a renderer, while this — the part that rewrites other people's props,
+ * and the part that broke — is pure and testable on its own. */
+export function wireControl(
   node: ReactNode,
   controlId: string,
   describedByIds: string[],
@@ -64,6 +71,16 @@ function wireControl(
         "aria-invalid": errorId ? true : props["aria-invalid"],
       });
     }
+
+    // A render-prop child (`Menu`, a nested `Field`) holds a *function* in
+    // `children`, not a tree, and there is nothing here to recurse into — the
+    // subtree only exists once that component calls it. Descending anyway is not
+    // merely useless, it is destructive: `Children.map` wraps the function into
+    // `[fn]`, and the clone below would write that array back over `children`,
+    // so the component ends up invoking an array. That is exactly how opening
+    // the emoji picker took the whole app down with "children is not a
+    // function" — the throw lands in the child, far from this line.
+    if (typeof props.children === "function") return child;
 
     if (props.children === undefined) return child;
     return cloneElement(element, {

@@ -56,6 +56,18 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   non-errors (the RO loop notice) are dropped by the crash reporter (`core/telemetry/crashReport.ts`)
   *and* by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
   cache, so stale clients keep beaconing long after a fix.
+- **`Field` rewrites the caller's element tree — it must never descend into a render prop.**
+  `ui/Field`'s `wireControl` walks the tree its render-prop child returns and clones
+  `aria-describedby`/`aria-errormessage`/`aria-invalid` onto the element carrying the control id.
+  A `children` that is a **function** (`Menu`, a nested `Field`) is not a tree — the subtree only
+  exists once that component *calls* it. Recursing anyway is destructive, not just useless: we run
+  **Preact**, whose `Children.map` wraps a lone child into an array, so the clone writes `[fn]` back
+  over `children` and the component then invokes an array. This shipped in 0.12.0 and took the whole
+  app down to the ErrorBoundary (`TypeError: children is not a function`) the first time anyone
+  opened the emoji picker — `EmojiField` renders a `<Menu>` inside its `<Field>`. Note the throw
+  surfaces in the *child*, far from the line at fault. Guarded by `src/ui/Field.test.ts`, which runs
+  against `preact/compat` (aliased in `vitest.config.ts`) because React's `Children.map` does not
+  wrap and would hide the bug.
 - **Adding an interaction plugin** touches the crate, compose service/volume + dispatcher
   `ROUTES`, Caddyfile, registry, `server/gatus/config.yaml`, `plugins-ci.yml` matrix,
   `.github/workflows/plugin-<id>.yml`, and `deploy.yml`'s workflow list. A link plugin is
