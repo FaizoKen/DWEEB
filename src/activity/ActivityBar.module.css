@@ -33,10 +33,9 @@
   flex: none;
 }
 
-/* The left corner's server slot while the launching server's meta is still
-   resolving — holds the glyph skeleton so the indicator doesn't pop in from an
-   empty gap. Once it lands (and always on a DM launch) the compact GuildPicker
-   takes the slot: the server is a dropdown, not a fixed badge. */
+/* Static server badge (guild launch) — the launching server's icon in the left
+   corner as a "posting here" indicator. Non-interactive (the server is fixed);
+   the DM launch uses the compact GuildPicker in this slot instead. */
 .serverBadge {
   display: inline-flex;
   align-items: center;

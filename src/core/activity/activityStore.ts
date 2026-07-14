@@ -57,13 +57,7 @@ import {
 import { browserTimezone } from "@/core/schedule/recurrence";
 import { libraryEntryMessage } from "@/core/library/libraryStore";
 import type { LibraryEntryView } from "@/core/library/api";
-import {
-  startCollab,
-  stopCollab,
-  broadcastTarget,
-  roomTarget,
-  type CollabParticipant,
-} from "./collab";
+import { startCollab, stopCollab, broadcastTarget, type CollabParticipant } from "./collab";
 import { setActivityToken } from "./runtime";
 import { startHandshakeTrace } from "./telemetry";
 
@@ -136,15 +130,12 @@ interface ActivityState {
   /** True while a restore is fetching a message back from Discord. */
   restoring: boolean;
   lastPost: ActivityPostResult | null;
-  /** The guild the next post goes to. Seeded to the launching guild in a server
-   *  launch; in a DM launch it's null until the user picks a destination server
-   *  they manage (from `guilds`) — DMs have no guild of their own to post into.
-   *  Re-pointable either way through the bar's server picker.
-   *
-   *  Moving it OFF the launching guild makes the destination *personal*: the room
-   *  keeps its own shared channel (peers may not even be members of the server you
-   *  picked, so it can't be broadcast to them — see `setTargetChannel`). Coming
-   *  back to the launching guild re-adopts the room's channel. */
+  /** The guild the next post goes to. In a server launch this is the launching
+   *  guild, and it is FIXED: the collaboration room is keyed to that guild and its
+   *  shared destination is a channel id alone, so a post aimed at another server
+   *  could not be shared with the room (see `setTargetGuild`). In a DM launch it's
+   *  null until the user picks a destination server they manage (from `guilds`) —
+   *  DMs have no guild of their own to post into. */
   targetGuildId: string | null;
   /** Where the next post goes. Seeded to the launching channel in a server
    *  launch, but re-pointable at any channel in `targetGuildId` through the bar's
@@ -152,14 +143,11 @@ interface ActivityState {
    *  destination server *and* channel are picked). */
   targetChannelId: string | null;
   /** The user's postable servers — those with the DWEEB bot where they hold
-   *  Manage Webhooks. Loaded on every launch: a DM launch *must* pick a
-   *  destination from it, and a server launch offers it in the bar's server
-   *  picker so the post can be re-pointed at another server (the launching one is
-   *  merely the default). A server launch gets it free — the same guild fetch that
-   *  resolves the launching server's meta produces it. */
+   *  Manage Webhooks (the gate the post enforces). Only loaded on a DM launch,
+   *  where a destination must be chosen. Empty in a server launch (the guild is
+   *  fixed — there's nothing to choose from). */
   guilds: PickerGuild[];
-  /** True while the server list is loading (DM launch; a server launch fills it
-   *  alongside its guild meta, tracked by `targetGuildMetaLoading`). */
+  /** True while the DM-launch server list is loading. */
   guildsLoading: boolean;
   /** Display meta (name + icon) for the current target guild, shown by the
    *  header's top-right server indicator. For a server launch it's the launching
@@ -171,15 +159,12 @@ interface ActivityState {
    *  guild-launch path sets this — a DM launch resolves its meta synchronously from
    *  the already-loaded postable list. */
   targetGuildMetaLoading: boolean;
-  /** True when the *destination* guild doesn't have the DWEEB bot — there's
-   *  nothing to post into until it's added, and the guild bootstrap would just
-   *  404. Drives the bar's "Add DWEEB to this server" call-to-action instead of a
-   *  dead-end error. In practice only the launching guild can be in this state:
-   *  every other pickable destination comes from `guilds`, which is pre-filtered to
-   *  servers that already have the bot — so picking one of those clears it, and
-   *  picking the bot-less launching guild back brings it (and its CTA) back. False
-   *  while presence is still unknown (we stay optimistic then — the proxy is the
-   *  real guard). */
+  /** True on a server launch whose launching guild doesn't have the DWEEB bot —
+   *  there's nothing to post into until it's added, and the guild bootstrap would
+   *  just 404. Drives the bar's "Add DWEEB to this server" call-to-action instead
+   *  of a dead-end error. Always false on a DM launch (its destination picker only
+   *  lists servers that already have the bot) and while presence is still unknown
+   *  (we stay optimistic then — the proxy is the real guard). */
   botMissing: boolean;
   /** An application id the server just confirmed connected as a custom bot (a
    *  live push from the connect callback over the collab socket). The post
@@ -267,27 +252,25 @@ interface ActivityState {
    *  own "Connected" toast. */
   recheckBot(): Promise<void>;
   /** Open Discord's "Add to Server" flow so the user can add DWEEB to another
-   *  server — the destination picker's "Add a server" action. Unlike
-   *  {@link addBotToServer} it pre-selects nothing, so the user picks any server
-   *  they manage (a DM launch has no guild of its own; a server launch is adding a
-   *  server other than the one it launched in). Routes through the host SDK — the
-   *  sandboxed iframe can't open discord.com itself. Pairs with
+   *  server — the DM-launch destination picker's "Add a server" action. Unlike
+   *  {@link addBotToServer} it pre-selects nothing (a DM launch has no guild of
+   *  its own), so the user picks any server they manage. Routes through the host
+   *  SDK — the sandboxed iframe can't open discord.com itself. Pairs with
    *  {@link refreshPostableGuilds}, which the bar re-runs on return so the newly
    *  added server appears in the picker without a relaunch. */
   addServer(): Promise<void>;
-  /** Re-fetch the postable server list, force-fresh, and quietly swap it in (no
-   *  loading flash) — used after {@link addServer} so a just-added server slots
-   *  into the already-open picker. Failures keep the current list. */
+  /** Re-fetch the DM-launch postable server list, force-fresh, and quietly swap
+   *  it in (no loading flash) — used after {@link addServer} so a just-added
+   *  server slots into the already-open picker. Failures keep the current list. */
   refreshPostableGuilds(): Promise<void>;
   /** Clear {@link connectedBot} once the post dialog has consumed the push. */
   clearConnectedBot(): void;
   /** Re-point `publish()` at a different channel in the target guild. */
   setTargetChannel(channelId: string): void;
-  /** Pick the destination server: loads its channels + preview data and resets the
-   *  channel selection. Available on both launch kinds — a DM launch has no server
-   *  of its own to post into, and a server launch defaults to the one it launched
-   *  in but can be re-pointed (see {@link targetGuildId} for what that does to the
-   *  room's shared destination). */
+  /** Pick the destination server (DM launch only): loads its channels + preview
+   *  data and resets the channel selection. A server launch ignores this — its
+   *  destination server is the guild it launched in, permanently (see
+   *  {@link targetGuildId}). */
   setTargetGuild(guildId: string): void;
 }
 
@@ -497,13 +480,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         onRoster: (participants) => set({ participants }),
         onConnectedChange: (collabConnected) => set({ collabConnected }),
         // A peer moved the shared destination — apply it locally WITHOUT
-        // re-broadcasting (that would echo back to the room and loop). Only while
-        // our own destination is still the launching server: a composer who has
-        // re-pointed at another server keeps their personal destination (the
-        // room's channel id doesn't even exist there). Collab still tracks the
-        // room's channel, so coming back re-adopts it (see `setTargetGuild`).
+        // re-broadcasting (that would echo back to the room and loop). Safe to
+        // apply unconditionally: the frame only ever carries a channel in the
+        // launching guild, which is the one server this Activity can post to.
         onTarget: (channelId) => {
-          if (!onLaunchGuild(get())) return;
           if (get().targetChannelId !== channelId) set({ targetChannelId: channelId });
         },
         // The room is full for the host's plan tier — keep editing solo.
@@ -969,11 +949,6 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   async recheckBot() {
     const guildId = get().context?.guildId;
     if (!guildId || get().targetGuildMetaLoading) return;
-    // Only while the destination is still the launching server. `loadTargetGuildMeta`
-    // writes the *launching* server's meta into the bar's indicator, so running it
-    // after the user has re-pointed at another server would overwrite the picked
-    // one's name/icon (and its post gate) with the launching server's.
-    if (!onLaunchGuild(get())) return;
     // Force-fresh: a just-added bot may not show in the proxy's cached guild list
     // yet. `loadTargetGuildMeta` clears `botMissing` and connects when it's now
     // present — the CTA gives way to the bar and the bootstrap's "Connected" toast
@@ -1023,69 +998,42 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   setTargetChannel(channelId) {
     set({ targetChannelId: channelId });
-    // The destination is shared with the room only while it's still the LAUNCHING
-    // server — that's the server the room is keyed to, and the one every peer is
-    // certainly a member of. Once this composer re-points to another server the
-    // destination is personal (a channel id from a server the others may not even
-    // be in means nothing to them), so it isn't broadcast; the room keeps its own.
-    // No-op on a DM launch too (collaborators don't share a postable server) — see
-    // `broadcastTarget`. Skip the broadcast for an edit-only user: moving a shared
-    // destination is a posting decision, so only someone who can post may re-point
-    // the room (the picker is read-only for them too — this guards the path as
-    // defence in depth).
-    if (get().canPostToTarget !== false && onLaunchGuild(get())) broadcastTarget(channelId);
+    // On a server launch the destination is shared: tell the room so everyone's
+    // editor re-points to the same channel. No-op on a DM launch (collaborators
+    // don't share a postable server) — see `broadcastTarget`. Skip the broadcast
+    // for an edit-only user: moving a shared destination is a posting decision, so
+    // only someone who can post may re-point the room (the picker is read-only for
+    // them too — this guards the path as defence in depth).
+    if (get().canPostToTarget !== false) broadcastTarget(channelId);
   },
 
   setTargetGuild(guildId) {
     if (get().targetGuildId === guildId) return;
-    const launchGuildId = get().context?.guildId ?? null;
-    const backOnLaunchGuild = guildId === launchGuildId;
-    // The picked server's meta (name + icon for the bar's indicator, and whether
-    // it can be posted to). `guilds` — the postable list — covers every server the
-    // picker offers except one: the launching server itself, which is listed even
-    // when it's NOT postable (no bot, or no Manage Webhooks) because it's where the
-    // Activity was launched. Switching back to it must restore its indicator and
-    // its "Add DWEEB" state, so fall back to the user's FULL guild list (seeded
-    // from the same launch fetch — see `seedAuthGuilds`), which holds every server
-    // they're in. Not `targetGuildMeta`: that's the meta of the server we're
-    // leaving, so reading it here would carry the old server's name, icon, and bot
-    // presence onto the newly picked one.
-    const meta =
-      get().guilds.find((g) => g.id === guildId) ??
-      useAuthStore.getState().guilds.find((g) => g.id === guildId) ??
-      null;
-    // Unknown meta ⇒ stay optimistic (the proxy is the real guard), exactly as
-    // `loadTargetGuildMeta` does. Otherwise: no bot ⇒ nothing to post into;
-    // else honour the permission flag (absent → no access).
-    const botPresent = meta ? meta.bot_present : true;
+    // DM launch only. A server launch posts into the server it launched in, full
+    // stop: the room is keyed to that guild and its shared destination frame
+    // carries a channel id and nothing else, so a post aimed at another server
+    // couldn't travel with the people you're editing with — they may not even be
+    // members of it, and a channel id from it would mean nothing to them (or,
+    // worse, name one of *their* channels). Posting somewhere else is a job for
+    // the web app, which is bound to no server. The bar shows a static badge on a
+    // guild launch, so this is only reachable from the DM picker; the guard keeps
+    // the invariant with the store that owns it rather than with the one caller.
+    if (get().context?.guildId) return;
+    // Switching destination drops the old channel pick and loads the new
+    // server's channels + mapping data (which also re-resolves the preview). The
+    // chosen server's meta (for the header indicator) is already in `guilds`.
+    const meta = get().guilds.find((g) => g.id === guildId) ?? null;
     set({
       targetGuildId: guildId,
-      // Back on the launching server ⇒ re-adopt the room's shared channel (or,
-      // before anyone has moved it, the launching channel). Any other server ⇒ no
-      // channel yet: its channels are a different set entirely, so the user picks
-      // one. Either way the old pick never carries across servers.
-      targetChannelId: backOnLaunchGuild
-        ? (roomTarget() ?? get().context?.channelId ?? null)
-        : null,
+      targetChannelId: null,
       targetGuildMeta: meta,
-      botMissing: !botPresent,
-      canPostToTarget: botPresent ? (meta ? (meta.can_manage_webhooks ?? false) : true) : false,
+      // `guilds` is pre-filtered to servers the user can post to (see
+      // `loadPostableGuilds`), so a picked one is postable by construction.
+      canPostToTarget: true,
     });
-    // Load the server's channels + mapping data (which also re-resolves the
-    // preview) — unless we know the bot isn't there, where that fetch just 404s
-    // and the bar's "Add DWEEB" CTA covers the case instead.
-    if (botPresent) void useGuildStore.getState().connect(guildId);
+    void useGuildStore.getState().connect(guildId);
   },
 }));
-
-/** Whether the post destination is still the server the Activity was launched in
- *  — the one the collaboration room is keyed to, and so the only one whose channel
- *  can be shared with the room. False on a DM launch (no launching guild) and once
- *  the composer re-points at another server. */
-function onLaunchGuild(state: ActivityState): boolean {
-  const launchGuildId = state.context?.guildId ?? null;
-  return launchGuildId != null && state.targetGuildId === launchGuildId;
-}
 
 /** Load a server launch's launching-guild meta (name + icon) for the header's
  *  top-right server indicator, resolve whether the user can post there, and —
@@ -1114,11 +1062,6 @@ async function loadTargetGuildMeta(
   try {
     const all = await fetchUserGuilds(force);
     seedAuthGuilds(all);
-    // The bar's server picker offers the same destinations a DM launch gets, so
-    // the post can be re-pointed at another server from inside Discord. It rides
-    // this fetch — the launching server's meta and the postable list come out of
-    // the same guild list, so the picker costs no extra request.
-    set({ guilds: postableGuilds(all) });
     const meta = all.find((g) => g.id === guildId);
     if (meta) {
       botPresent = meta.bot_present;
@@ -1157,18 +1100,16 @@ function seedAuthGuilds(all: PickerGuild[]): void {
 }
 
 /** The servers a post can actually go to: the DWEEB bot is present and the user
- *  holds Manage Webhooks (the gate the post enforces). Everything the bar's server
- *  picker offers, on either launch kind — bar the launching server itself, which
- *  it always shows even when it fails this test (that's what the "Add DWEEB" CTA
- *  is for). */
+ *  holds Manage Webhooks (the gate the post enforces). Everything the DM launch's
+ *  server picker offers. */
 function postableGuilds(all: PickerGuild[]): PickerGuild[] {
   return all.filter((g) => g.bot_present && g.can_manage_webhooks);
 }
 
 /** Load the user's postable servers for a DM launch, which can't post anywhere
- *  until one is picked. (A server launch gets the same list off the guild fetch in
- *  `loadTargetGuildMeta`, so it doesn't come through here.) Failures are
- *  non-fatal: the picker just shows its empty state. */
+ *  until one is picked. (A server launch has a fixed destination server, so it
+ *  never needs this list.) Failures are non-fatal: the picker just shows its
+ *  empty state. */
 async function loadPostableGuilds(set: (partial: Partial<ActivityState>) => void): Promise<void> {
   set({ guildsLoading: true });
   try {

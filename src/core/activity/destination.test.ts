@@ -1,21 +1,22 @@
 /**
- * The Activity's post destination — what changes when the bar's server picker
- * moves it, and (crucially) what the collaboration room is told about it.
+ * The Activity's post destination — where a post goes, and what the collaboration
+ * room is told about it.
  *
  * The room is keyed to the server the Activity launched in, and its shared
- * destination frame carries a channel id and nothing else. So a channel is only
- * meaningful to peers while the destination is still that launching server: once a
- * composer re-points at another server, their destination is personal and must NOT
- * be broadcast — a channel id from a server the others may not even be members of
- * would silently move *their* post. These tests pin that boundary, plus the state
- * that rides along with a switch (bot presence, the post gate, the channel).
+ * destination frame carries a channel id and nothing else. So the destination
+ * *server* is fixed for the whole session: a post aimed at another server couldn't
+ * be shared with the people you're editing with — they may not even be members of
+ * it, and a channel id from it would mean nothing to them (or, worse, name one of
+ * *their* channels). Only the channel moves, and it moves for everyone. These
+ * tests pin that boundary: the launching guild can't be swapped, a channel change
+ * reaches the room, and the only launch kind that picks a server is a DM (which has
+ * no room destination to share in the first place).
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { broadcastTargetMock, roomTargetMock, connectMock } = vi.hoisted(() => ({
+const { broadcastTargetMock, connectMock } = vi.hoisted(() => ({
   broadcastTargetMock: vi.fn(),
-  roomTargetMock: vi.fn<() => string | null>(),
   connectMock: vi.fn(),
 }));
 
@@ -23,7 +24,6 @@ vi.mock("./collab", () => ({
   startCollab: vi.fn(),
   stopCollab: vi.fn(),
   broadcastTarget: broadcastTargetMock,
-  roomTarget: roomTargetMock,
 }));
 vi.mock("@/core/guild/guildStore", () => ({
   useGuildStore: { getState: () => ({ connect: connectMock }) },
@@ -50,7 +50,6 @@ vi.mock("./api", () => ({
 vi.mock("@/ui/Toast", () => ({ pushToast: vi.fn() }));
 
 import { useActivityStore } from "./activityStore";
-import { useAuthStore } from "@/core/auth/authStore";
 import type { PickerGuild } from "@/core/guild/api";
 
 const LAUNCH_GUILD = "111111111111111111";
@@ -59,7 +58,7 @@ const LAUNCH_CHANNEL = "900000000000000001";
 const ROOM_CHANNEL = "900000000000000002";
 const OTHER_CHANNEL = "900000000000000003";
 
-/** The launching server as the picker sees it: postable (bot in, can post). */
+/** The launching server as the bar's badge sees it: postable (bot in, can post). */
 const launchGuild: PickerGuild = {
   id: LAUNCH_GUILD,
   name: "Launch server",
@@ -67,7 +66,7 @@ const launchGuild: PickerGuild = {
   bot_present: true,
   can_manage_webhooks: true,
 };
-/** Another server the user can post to — what a switch targets. */
+/** Another server the user can post to — the destination a DM launch picks. */
 const otherGuild: PickerGuild = {
   id: OTHER_GUILD,
   name: "Other server",
@@ -76,25 +75,33 @@ const otherGuild: PickerGuild = {
   can_manage_webhooks: true,
 };
 
-/** A settled server launch: posting into the launching server's channel, with the
- *  postable list loaded. `overrides` bend it into the state under test; `all` is
- *  the user's FULL guild list, which every launch seeds into the auth store and
- *  which is where a switch back to a *non*-postable launching server reads its
- *  meta from. */
-function seedServerLaunch(
-  overrides: Parameters<typeof useActivityStore.setState>[0] = {},
-  all: PickerGuild[] = [launchGuild, otherGuild],
-) {
-  useAuthStore.setState({ guilds: all, guildsStatus: "ready", guildsError: null });
+/** A settled server launch: posting into the launching server's channel.
+ *  `overrides` bend it into the state under test. */
+function seedServerLaunch(overrides: Parameters<typeof useActivityStore.setState>[0] = {}) {
   useActivityStore.setState({
     context: { guildId: LAUNCH_GUILD, channelId: LAUNCH_CHANNEL, instanceId: "inst" },
     targetGuildId: LAUNCH_GUILD,
     targetChannelId: LAUNCH_CHANNEL,
     targetGuildMeta: launchGuild,
-    guilds: [launchGuild, otherGuild],
+    // A server launch has a fixed destination, so it never loads a server list.
+    guilds: [],
     botMissing: false,
     canPostToTarget: true,
     ...overrides,
+  });
+}
+
+/** A DM / group-DM launch: no guild of its own, so a destination server must be
+ *  picked from the postable list before anything can be posted. */
+function seedDmLaunch() {
+  useActivityStore.setState({
+    context: { guildId: null, channelId: "dm", instanceId: "inst" },
+    targetGuildId: null,
+    targetChannelId: null,
+    targetGuildMeta: null,
+    guilds: [otherGuild],
+    botMissing: false,
+    canPostToTarget: null,
   });
 }
 
@@ -102,89 +109,47 @@ describe("activity post destination", () => {
   beforeEach(() => {
     broadcastTargetMock.mockReset();
     connectMock.mockReset();
-    roomTargetMock.mockReset();
-    roomTargetMock.mockReturnValue(null);
   });
 
-  it("shares a channel change with the room while the destination is the launching server", () => {
+  it("shares a channel change with the room", () => {
     seedServerLaunch();
     useActivityStore.getState().setTargetChannel(ROOM_CHANNEL);
     expect(useActivityStore.getState().targetChannelId).toBe(ROOM_CHANNEL);
     expect(broadcastTargetMock).toHaveBeenCalledWith(ROOM_CHANNEL);
   });
 
-  it("keeps the destination off the room once it moves to another server", () => {
+  it("keeps the destination server fixed to the launching guild", () => {
     seedServerLaunch();
+    // Nothing in the bar offers this on a guild launch (the server is a static
+    // badge), and the store refuses it too: the room could not follow the post to
+    // another server, so the two must never come apart.
     useActivityStore.getState().setTargetGuild(OTHER_GUILD);
-
-    const s = useActivityStore.getState();
-    expect(s.targetGuildId).toBe(OTHER_GUILD);
-    expect(s.targetGuildMeta).toEqual(otherGuild);
-    // The old channel belongs to the old server — it must not carry across.
-    expect(s.targetChannelId).toBeNull();
-    // The new server's channels/emoji load for the picker and preview.
-    expect(connectMock).toHaveBeenCalledWith(OTHER_GUILD);
-
-    // Picking a channel THERE is this composer's business alone: peers aren't in
-    // that server, and the room keeps its own destination.
-    useActivityStore.getState().setTargetChannel(OTHER_CHANNEL);
-    expect(useActivityStore.getState().targetChannelId).toBe(OTHER_CHANNEL);
-    expect(broadcastTargetMock).not.toHaveBeenCalled();
-  });
-
-  it("re-adopts the room's channel on returning to the launching server", () => {
-    seedServerLaunch();
-    // Meanwhile the room has moved its shared destination.
-    roomTargetMock.mockReturnValue(ROOM_CHANNEL);
-
-    useActivityStore.getState().setTargetGuild(OTHER_GUILD);
-    useActivityStore.getState().setTargetGuild(LAUNCH_GUILD);
 
     const s = useActivityStore.getState();
     expect(s.targetGuildId).toBe(LAUNCH_GUILD);
-    expect(s.targetChannelId).toBe(ROOM_CHANNEL);
-    expect(s.canPostToTarget).toBe(true);
-    // Back on the room's server, changes are shared again.
-    useActivityStore.getState().setTargetChannel(OTHER_CHANNEL);
-    expect(broadcastTargetMock).toHaveBeenCalledWith(OTHER_CHANNEL);
+    expect(s.targetChannelId).toBe(LAUNCH_CHANNEL);
+    expect(s.targetGuildMeta).toEqual(launchGuild);
+    // No other server's channels/emoji are loaded — the preview stays resolved
+    // against the server everyone in the room is actually in.
+    expect(connectMock).not.toHaveBeenCalled();
   });
 
-  it("falls back to the launching channel when the room never moved", () => {
-    seedServerLaunch();
-    useActivityStore.getState().setTargetGuild(OTHER_GUILD);
-    useActivityStore.getState().setTargetGuild(LAUNCH_GUILD);
-    expect(useActivityStore.getState().targetChannelId).toBe(LAUNCH_CHANNEL);
-  });
-
-  it("switching to a server with the bot clears the Add-DWEEB state", () => {
-    // Launched in a server that never had the bot: nothing to post into, so the
-    // bar shows "Add DWEEB" and the postable list excludes it — though the user's
-    // full guild list still knows the server (that's where its meta comes from).
+  it("keeps the destination server fixed even when the launching guild lacks the bot", () => {
+    // The "Add DWEEB" state: nothing to post into yet. The way out is adding the
+    // bot (the bar's CTA), never re-pointing the post at a server that has it.
     const botless: PickerGuild = { ...launchGuild, bot_present: false, can_manage_webhooks: false };
-    seedServerLaunch(
-      {
-        targetGuildMeta: botless,
-        guilds: [otherGuild],
-        targetChannelId: null,
-        botMissing: true,
-        canPostToTarget: false,
-      },
-      [botless, otherGuild],
-    );
+    seedServerLaunch({
+      targetGuildMeta: botless,
+      targetChannelId: null,
+      botMissing: true,
+      canPostToTarget: false,
+    });
 
     useActivityStore.getState().setTargetGuild(OTHER_GUILD);
-    expect(useActivityStore.getState().botMissing).toBe(false);
-    expect(useActivityStore.getState().canPostToTarget).toBe(true);
-    expect(connectMock).toHaveBeenCalledWith(OTHER_GUILD);
 
-    // Picking the bot-less launching server back restores its CTA — and doesn't
-    // fetch its data (that call would just 404).
-    connectMock.mockClear();
-    useActivityStore.getState().setTargetGuild(LAUNCH_GUILD);
     const s = useActivityStore.getState();
+    expect(s.targetGuildId).toBe(LAUNCH_GUILD);
     expect(s.botMissing).toBe(true);
-    expect(s.canPostToTarget).toBe(false);
-    expect(s.targetGuildMeta?.id).toBe(LAUNCH_GUILD);
     expect(connectMock).not.toHaveBeenCalled();
   });
 
@@ -197,18 +162,24 @@ describe("activity post destination", () => {
     expect(broadcastTargetMock).not.toHaveBeenCalled();
   });
 
-  it("a DM launch has no room destination to share", () => {
-    useActivityStore.setState({
-      context: { guildId: null, channelId: "dm", instanceId: "inst" },
-      targetGuildId: OTHER_GUILD,
-      targetChannelId: null,
-      targetGuildMeta: otherGuild,
-      guilds: [otherGuild],
-      botMissing: false,
-      canPostToTarget: true,
-    });
+  it("a DM launch picks its destination server — the one launch kind that does", () => {
+    seedDmLaunch();
+    useActivityStore.getState().setTargetGuild(OTHER_GUILD);
+
+    const s = useActivityStore.getState();
+    expect(s.targetGuildId).toBe(OTHER_GUILD);
+    expect(s.targetGuildMeta).toEqual(otherGuild);
+    // The picked server's channels are a fresh set — no channel until one's chosen.
+    expect(s.targetChannelId).toBeNull();
+    // `guilds` is pre-filtered to servers the user can post to.
+    expect(s.canPostToTarget).toBe(true);
+    // Its channels/emoji load for the picker and preview.
+    expect(connectMock).toHaveBeenCalledWith(OTHER_GUILD);
+
     useActivityStore.getState().setTargetChannel(OTHER_CHANNEL);
     expect(useActivityStore.getState().targetChannelId).toBe(OTHER_CHANNEL);
-    expect(broadcastTargetMock).not.toHaveBeenCalled();
+    // Nothing reaches the room: a DM's peers share no postable server, so there's
+    // no destination to agree on. (That no-op is collab's — `broadcastTarget`
+    // needs a room guild to send into — which is mocked out here.)
   });
 });

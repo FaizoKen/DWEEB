@@ -39,17 +39,18 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - **Activity API calls**: the Activity iframe uses bearer auth; cookie-only `/api/guilds/*`
   routes silently 401 inside it. Every Activity-reachable feature needs an `/api/activity/*`
   twin or a dual-credential route, and its FE call must go through `proxyFetch`.
-- **The Activity's shared destination is channel-only, and only within the launching guild.**
+- **The Activity's destination server is the launching guild — fixed. Only the channel moves.**
   The collab room is keyed to the server the Activity launched in, and its `target` frame carries a
-  channel id and nothing else — so a channel is only meaningful to peers while the destination is
-  still that server. The bar's server picker can re-point a post at any *other* server the user can
-  post to; when it does, the destination goes **personal**: the store stops broadcasting it, ignores
-  inbound `target` frames, and the channel picker drops its "shared" marker (peers may not even be
-  members of the server you picked — broadcasting a channel id from it would silently move *their*
-  post). Collab keeps tracking the room's own channel (`roomTarget()`), so returning to the launching
-  server re-adopts it. Never widen the `target` frame to carry a guild: a peer who isn't in that
-  guild can't load its channels, and their post gate can't be resolved. Guarded by
-  `core/activity/destination.test.ts`.
+  channel id and nothing else, so the whole room posts into that one server. A guild launch shows a
+  **static server badge** (no dropdown) plus a channel picker whose pick is shared with the room; only
+  a **DM/group-DM launch** gets a server picker, since it has no guild of its own to post into.
+  Do not add a server switcher to the Activity bar — this was tried (d76adda) and reverted. A post
+  aimed at another server can't travel with the room, so the post and the collaboration silently come
+  apart, and both workarounds are worse: broadcasting that channel id would move *their* post (peers
+  may not even be members of the server you picked), and a `target` frame widened to carry a guild
+  leaves a peer outside it unable to load its channels or resolve their post gate. Posting to another
+  server is the web app's job — it's bound to no server, and the bar's "Open on web" hands the draft
+  over. Guarded by `core/activity/destination.test.ts`.
 - **Safe-area overlays**: portaled/fixed overlays must use the `--app-sait`/`--app-saib` and
   `--app-sail`/`--app-sair` tokens from `tokens.css`, never raw
   `env(safe-area-inset-*)`; the floor is stamped via `html[data-activity-platform]`.
