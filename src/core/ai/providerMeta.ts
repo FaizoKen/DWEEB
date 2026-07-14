@@ -43,7 +43,7 @@ export interface ProviderMeta {
 export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
   groq: {
     label: "Groq (LPU Cloud)",
-    defaultModel: "llama-3.3-70b-versatile",
+    defaultModel: "openai/gpt-oss-120b",
     defaultBaseUrl: "https://api.groq.com/openai/v1",
     requiresBaseUrl: false,
     requiresKey: true,
