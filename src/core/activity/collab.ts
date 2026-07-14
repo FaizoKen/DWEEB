@@ -174,12 +174,24 @@ export function startCollab(options: StartOptions): void {
 
 /** Broadcast a new shared post destination to the room, so everyone's editor
  *  re-points to the same channel. No-op on a DM launch (collaborators don't share
- *  a postable server, so there's nothing to agree on) and when nothing changed. */
+ *  a postable server, so there's nothing to agree on) and when nothing changed.
+ *  The caller only calls this while its destination is still the *launching*
+ *  server — a composer who re-points to another server keeps that destination to
+ *  themselves, so {@link currentTarget} always names a launching-guild channel. */
 export function broadcastTarget(channelId: string): void {
   if (!opts?.guildId) return;
   if (currentTarget === channelId) return;
   currentTarget = channelId;
   send({ type: "target", cid, channelId });
+}
+
+/** The room's agreed post destination — the launching-guild channel peers are
+ *  pointed at, tracked from our own broadcasts and inbound `target` frames. Null
+ *  on a DM launch, and before any destination is known. Read when a composer who
+ *  had re-pointed to another server comes *back* to the launching one, so they
+ *  re-adopt the room's channel instead of a stale personal pick. */
+export function roomTarget(): string | null {
+  return currentTarget;
 }
 
 /** Tear everything down (socket, store subscription, timers). */

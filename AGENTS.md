@@ -39,6 +39,17 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - **Activity API calls**: the Activity iframe uses bearer auth; cookie-only `/api/guilds/*`
   routes silently 401 inside it. Every Activity-reachable feature needs an `/api/activity/*`
   twin or a dual-credential route, and its FE call must go through `proxyFetch`.
+- **The Activity's shared destination is channel-only, and only within the launching guild.**
+  The collab room is keyed to the server the Activity launched in, and its `target` frame carries a
+  channel id and nothing else — so a channel is only meaningful to peers while the destination is
+  still that server. The bar's server picker can re-point a post at any *other* server the user can
+  post to; when it does, the destination goes **personal**: the store stops broadcasting it, ignores
+  inbound `target` frames, and the channel picker drops its "shared" marker (peers may not even be
+  members of the server you picked — broadcasting a channel id from it would silently move *their*
+  post). Collab keeps tracking the room's own channel (`roomTarget()`), so returning to the launching
+  server re-adopts it. Never widen the `target` frame to carry a guild: a peer who isn't in that
+  guild can't load its channels, and their post gate can't be resolved. Guarded by
+  `core/activity/destination.test.ts`.
 - **Safe-area overlays**: portaled/fixed overlays must use the `--app-sait`/`--app-saib` and
   `--app-sail`/`--app-sair` tokens from `tokens.css`, never raw
   `env(safe-area-inset-*)`; the floor is stamped via `html[data-activity-platform]`.

@@ -14,7 +14,7 @@
  * directory's Scheduled tab.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { useGuildStore } from "@/core/guild/guildStore";
@@ -42,7 +42,7 @@ import {
   UndoIcon,
 } from "@/ui/Icon";
 import { ChannelPicker } from "@/features/guild/ChannelPicker";
-import { GuildPicker, ServerGlyph, ServerGlyphSkeleton } from "./GuildPicker";
+import { GuildPicker, ServerGlyphSkeleton } from "./GuildPicker";
 import { ActivityGallery } from "./ActivityGallery";
 import { RestoreDialog } from "./RestoreDialog";
 import { SaveDraftDialog } from "./SaveDraftDialog";
@@ -152,7 +152,10 @@ export function ActivityBar() {
   const barWidth = useBarWidth(barRef);
 
   // A DM / group-DM launch has no guild of its own, so the user first picks a
-  // destination *server* (DMs can't receive a webhook post), then a channel.
+  // destination *server* (DMs can't receive a webhook post), then a channel. A
+  // server launch defaults to the server it launched in — but the same picker lets
+  // the post be re-pointed at any other server the user can post to.
+  const launchGuildId = useActivityStore((s) => s.context?.guildId ?? null);
   const isDm = useActivityStore((s) => s.context != null && s.context.guildId == null);
   const guilds = useActivityStore((s) => s.guilds);
   const guildsLoading = useActivityStore((s) => s.guildsLoading);
@@ -162,6 +165,23 @@ export function ActivityBar() {
   const refreshPostableGuilds = useActivityStore((s) => s.refreshPostableGuilds);
   const targetGuildMeta = useActivityStore((s) => s.targetGuildMeta);
   const targetGuildMetaLoading = useActivityStore((s) => s.targetGuildMetaLoading);
+
+  // The room's shared destination only holds while the post is still going to the
+  // LAUNCHING server — the one the room is keyed to and every peer is in. Re-point
+  // at another server and the destination is this composer's alone: peers may not
+  // even be members there, so the store stops broadcasting it (see
+  // `setTargetChannel`) and the channel picker drops its "shared" marker.
+  const roomShared = launchGuildId != null && targetGuildId === launchGuildId;
+
+  // What the server dropdown lists: every server the user can post to, plus — on a
+  // server launch — the launching server itself, which isn't in that list when it's
+  // missing the bot or the user can't post there. It's still where the Activity is
+  // running, so it stays visible as the current destination (with the bar's "Add
+  // DWEEB" CTA next to it), and can be picked again after wandering off.
+  const pickerGuilds = useMemo(() => {
+    if (!targetGuildMeta || guilds.some((g) => g.id === targetGuildMeta.id)) return guilds;
+    return [targetGuildMeta, ...guilds];
+  }, [guilds, targetGuildMeta]);
 
   // The DWEEB bot isn't in the launching server: there's nothing to post into
   // until it's added, so the primary action becomes "Add DWEEB" rather than a
@@ -212,14 +232,14 @@ export function ActivityBar() {
     };
   }, [botMissing, recheckBot, recheckArm]);
 
-  // DM launch: once the user taps "Add a server" in the picker, refresh the
+  // Once the user taps "Add a server" in the destination picker, refresh the
   // postable list when they return — on focus/visibility (coming back from the
   // add-bot flow) plus a bounded safety-net poll for clients that don't fire
   // those events. Mirrors the botMissing auto-recheck above and is capped the
   // same way, so an abandoned add doesn't poll the proxy forever; the free
   // focus/visibility watch keeps working past the cap, and re-tapping re-arms.
   useEffect(() => {
-    if (!isDm || addArm === 0) return;
+    if (addArm === 0) return;
     const check = () => void refreshPostableGuilds();
     const onVisibility = () => {
       if (document.visibilityState === "visible") check();
@@ -239,7 +259,7 @@ export function ActivityBar() {
       window.removeEventListener("focus", check);
       window.clearInterval(poll);
     };
-  }, [isDm, addArm, refreshPostableGuilds]);
+  }, [addArm, refreshPostableGuilds]);
 
   // The destination server's plan, for the quiet plan indicator (PlanBadge). A
   // display-only read that fails soft — any error just leaves it null and the
@@ -395,11 +415,13 @@ export function ActivityBar() {
 
   // A signature of everything that changes the *inline* bar's width, so a state
   // flip (Post↔Update revealing New/View, the plan pill appearing, feedback
-  // toggling, the destination renaming) re-runs the fit measurement below — not
-  // just a raw width change. The channel name matters because the left reserve
-  // tracks the cluster's natural width.
+  // toggling, the destination moving or renaming) re-runs the fit measurement below
+  // — not just a raw width change. The channel name matters because the left
+  // reserve tracks the cluster's natural width; the server id because switching
+  // servers collapses or expands the picker's own trigger (a picked server shows as
+  // its icon alone, an unpicked one as "Pick a server").
   const planVisible = !!(plan && !botMissing && targetGuildId);
-  const layoutKey = `${canUpdate}|${botMissing}|${blockedFromPosting}|${showView}|${planVisible}|${feedbackOn}|${isDm}|${channelName ?? ""}`;
+  const layoutKey = `${canUpdate}|${botMissing}|${blockedFromPosting}|${showView}|${planVisible}|${feedbackOn}|${isDm}|${targetGuildId ?? ""}|${channelName ?? ""}`;
 
   // Measure whether the inline layout fits, collapsing one step when it can't:
   // on any width/content change, optimistically restore the full row, then —
@@ -480,14 +502,19 @@ export function ActivityBar() {
   return (
     <div ref={barRef} className={styles.bar} data-compact={tightened ? "" : undefined}>
       <div ref={leftRef} className={styles.left}>
-        {/* Server indicator, left corner — which server the post lands in. On a
-            DM launch it's the destination picker, collapsed to the chosen
-            server's icon + dropdown arrow (or a "Pick a server" prompt before
-            one's chosen). On a guild launch it's a static icon for the launching
-            server — no dropdown, since the server is fixed. */}
-        {isDm ? (
+        {/* Server indicator, left corner — which server the post lands in, and a
+            dropdown to change it. Collapsed to the destination's icon + arrow once
+            one is chosen (a DM launch shows a "Pick a server" prompt until then).
+            A server launch defaults to the server it launched in, but the post can
+            be re-pointed at any other server the user can post to — which quietly
+            un-shares the destination from the room (see `roomShared`). A server
+            launch holds a skeleton until its server's meta lands, so the indicator
+            doesn't pop in from an empty gap; should that lookup fail outright the
+            slot stays empty (the destination still works — the meta is context,
+            not a blocker — and a "Pick a server" prompt would be a lie). */}
+        {isDm || targetGuildMeta ? (
           <GuildPicker
-            guilds={guilds}
+            guilds={pickerGuilds}
             loading={guildsLoading}
             selectedId={targetGuildId}
             onSelect={setTargetGuild}
@@ -497,28 +524,23 @@ export function ActivityBar() {
             }}
             compact
           />
-        ) : targetGuildMeta ? (
-          <span className={styles.serverBadge} title={`Posting to ${targetGuildMeta.name}`}>
-            <ServerGlyph guild={targetGuildMeta} size={28} />
-          </span>
         ) : targetGuildMetaLoading ? (
-          // Meta still resolving on a guild launch — hold a skeleton in the slot so
-          // the indicator doesn't pop in from an empty gap once it lands.
           <span className={styles.serverBadge}>
             <ServerGlyphSkeleton size={28} />
           </span>
         ) : null}
 
-        {/* The channel the post lands in. On a DM launch there are no channels to
-            offer until a destination *server* is picked, so the dropdown only
-            appears once one is. On a server launch the destination is synced across
-            the room (`shared`), so the picker shows a "shared" marker and changing
-            it re-points everyone. */}
-        {!isDm || targetGuildId ? (
+        {/* The channel the post lands in — offered once a destination server is
+            known (always immediately on a server launch; on a DM launch only once
+            a server is picked). While the destination is the launching server it's
+            synced across the room (`shared`), so the picker shows a "shared" marker
+            and changing it re-points everyone; re-pointed at another server the
+            destination is this composer's alone, so the marker goes. */}
+        {targetGuildId ? (
           <ChannelPicker
             selectedId={targetChannelId}
             onSelect={setTargetChannel}
-            shared={!isDm}
+            shared={roomShared}
             // Edit-only collaborators see the destination but can't move it —
             // re-pointing a shared room is a posting decision they don't hold.
             // Also inert until the bot's in the server (no channels are loaded).

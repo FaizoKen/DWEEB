@@ -29,6 +29,7 @@ import { guildIconUrl, isValidGuildId, type AuthUser, type PickerGuild } from "@
 import { Menu } from "@/ui/Menu";
 import {
   CheckCircleIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   LogInIcon,
   PlusIcon,
@@ -259,7 +260,11 @@ export function AccountMenu() {
     );
   }
 
-  // Signed in — the avatar opens the account/server popover.
+  // Signed in — the avatar opens the account/server popover. The chevron is what
+  // says so: the trigger is otherwise just a picture, and the server list behind it
+  // (switch server, add the bot to another one) was going unfound. It also pairs the
+  // control with the channel chip beside it, which has carried one all along — the
+  // two now read as one destination cluster: this server, this channel.
   return (
     <>
       <Menu
@@ -268,15 +273,15 @@ export function AccountMenu() {
           <button
             ref={triggerRef}
             type="button"
-            className={styles.trigger}
+            className={cn(styles.trigger, styles.triggerMenu)}
             title={
               connectedGuild
-                ? `${user?.name ?? "Account"} — ${connectedGuild.name}`
-                : (user?.name ?? "Account")
+                ? `${user?.name ?? "Account"} — ${connectedGuild.name} · click to switch server`
+                : `${user?.name ?? "Account"} — click to pick a server`
             }
             aria-label={
               connectedGuild
-                ? `Account — connected to ${connectedGuild.name}`
+                ? `Account — connected to ${connectedGuild.name}. Switch server`
                 : "Account and server settings"
             }
           >
@@ -288,6 +293,7 @@ export function AccountMenu() {
             ) : (
               <Avatar user={user} size={28} className={styles.reveal} />
             )}
+            <ChevronDownIcon size={14} className={styles.chevron} />
           </button>
         }
       >

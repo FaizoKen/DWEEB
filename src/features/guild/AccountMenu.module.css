@@ -21,6 +21,24 @@
   background: var(--app-bg-hover);
   color: var(--app-text);
 }
+
+/* The signed-in trigger, which opens the account + server popover: a chevron
+   marks it as a dropdown (the avatar alone read as decoration, hiding the server
+   list), so the square icon box grows into a chip. Matches the channel picker's
+   trigger beside it — together they read as "this server, this channel". */
+.triggerMenu {
+  width: auto;
+  gap: 3px;
+  padding: 0 4px 0 3px;
+}
+.triggerMenu[aria-expanded="true"] {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+.chevron {
+  color: var(--app-text-subtle);
+  flex: none;
+}
 .trigger:focus-visible {
   outline: none;
   box-shadow: var(--app-focus-ring);
