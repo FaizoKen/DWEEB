@@ -15,8 +15,8 @@
  * treating a downward drag here as a scroll. */
 .mobileBar {
   display: none;
-  grid-template-columns: 1fr auto 1fr;
   align-items: center;
+  justify-content: center;
   padding: 14px 14px 12px;
   min-height: 32px;
   flex-shrink: 0;
@@ -24,39 +24,37 @@
   cursor: grab;
 }
 
-/* The pill that signals the sheet can be dragged down to dismiss. */
+/* The pill that signals the sheet can be dragged down to dismiss — and is
+ * itself the dismiss control, so there's no Close chip cluttering the sheet.
+ * It stays a real <button> because swiping is touch-only: keyboard and
+ * screen-reader users need something to activate, and the sheet's open
+ * animation focuses it (`[data-preview-close]`). */
 .grabber {
-  grid-column: 2;
   width: 44px;
   height: 5px;
+  padding: 0;
+  border: 0;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.35);
-}
-
-.mobileClose {
-  grid-column: 3;
-  grid-row: 1;
-  justify-self: end;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: var(--discord-radius-sm);
-  background: var(--discord-button-secondary);
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
   cursor: pointer;
-  touch-action: manipulation;
+  position: relative;
+  transition: background 120ms ease;
 }
 
-.mobileClose:hover {
-  background: var(--discord-button-secondary-hover);
+/* Grow the tap target past the 5px-tall pill without growing the pill. */
+.grabber::before {
+  content: "";
+  position: absolute;
+  inset: -14px -28px;
 }
 
-.mobileClose:focus-visible {
+.grabber:hover {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.grabber:focus-visible {
   outline: 2px solid var(--discord-text-link);
-  outline-offset: 2px;
+  outline-offset: 6px;
 }
 
 .scroll {

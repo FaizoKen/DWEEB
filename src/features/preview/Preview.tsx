@@ -7,7 +7,9 @@
  * doesn't trigger preview re-renders.
  *
  * On mobile this pane becomes a bottom sheet (see `app-shell__pane--preview`
- * in global.css). The optional `onClose` is the dismissal handler; `swipeProps`
+ * in global.css). The optional `onClose` is the dismissal handler, reached by
+ * swiping the sheet down, pressing Escape, or activating the drag handle (which
+ * doubles as the close button — there is deliberately no Close chip). `swipeProps`
  * wires the whole sheet for swipe-down-to-dismiss — the handler itself yields
  * to native scrolling whenever the message isn't at its top.
  */
@@ -114,15 +116,14 @@ export function Preview({ onClose, swipeProps, message: messageOverride }: Previ
       <div className={styles.surface} data-preview-root {...swipeProps}>
         {onClose ? (
           <div className={styles.mobileBar}>
-            <span className={styles.grabber} aria-hidden="true" />
             <button
               type="button"
-              className={styles.mobileClose}
+              className={styles.grabber}
               data-preview-close="true"
               onClick={onClose}
-            >
-              Close
-            </button>
+              aria-label="Close preview"
+              title="Close preview"
+            />
           </div>
         ) : null}
         <div className={styles.scroll} data-preview-scroll onClick={clearSelectionOnBackdrop}>

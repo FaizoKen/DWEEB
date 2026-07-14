@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import type { TouchEvent as ReactTouchEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from "react";
 
 // Must match the `@media (max-width: 900px)` breakpoint in global.css /
 // Preview.module.css / ActivityApp.module.css that switches the preview from
@@ -46,6 +46,8 @@ export function usePreviewSwipeToClose(onClose: () => void) {
   // null = undecided, true = eligible to engage, false = abandon for this gesture.
   const eligible = useRef<boolean | null>(null);
   const inScrollArea = useRef(false);
+  // Deadline (epoch ms) before which a click is the tail of a swipe, not a tap.
+  const swallowClickUntil = useRef(0);
 
   const isMobileSheetLayout = () =>
     typeof window !== "undefined" && window.matchMedia(MOBILE_SHEET_QUERY).matches;
@@ -109,6 +111,10 @@ export function usePreviewSwipeToClose(onClose: () => void) {
     const el = sheetRef.current;
     if (!active.current || !el) return;
     active.current = false;
+    // The drag handle is also the sheet's close button, and the message body
+    // holds selectable components — the finger ends the swipe still over one of
+    // them, so the browser follows up with a click. That click is not a tap.
+    swallowClickUntil.current = Date.now() + 400;
     const height = el.offsetHeight || window.innerHeight;
     const shouldClose = deltaY.current > Math.min(160, height * 0.3);
     el.style.transition = "";
@@ -126,9 +132,25 @@ export function usePreviewSwipeToClose(onClose: () => void) {
     }
   };
 
+  // Capture phase, on the sheet root: runs before the handle's own onClick (and
+  // before the preview's backdrop/selection clicks) so a post-swipe click can be
+  // cancelled outright.
+  const onClickCapture = (e: ReactMouseEvent) => {
+    if (Date.now() >= swallowClickUntil.current) return;
+    swallowClickUntil.current = 0;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   return {
     sheetRef,
-    swipeProps: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd },
+    swipeProps: {
+      onTouchStart,
+      onTouchMove,
+      onTouchEnd,
+      onTouchCancel: onTouchEnd,
+      onClickCapture,
+    },
   };
 }
 
@@ -170,7 +192,8 @@ export function usePreviewSheetA11y(
       sheet?.focus({ preventScroll: true });
 
       // The live Preview is latched on in an effect so its exit animation can
-      // finish. One frame later its explicit Close button is available.
+      // finish. One frame later its drag handle (the sheet's close control) is
+      // available.
       const frame = requestAnimationFrame(() => {
         sheet
           ?.querySelector<HTMLButtonElement>("[data-preview-close='true']")
@@ -184,7 +207,7 @@ export function usePreviewSheetA11y(
     const frame = requestAnimationFrame(() => {
       // Selecting a preview component intentionally moves focus to its editor.
       // Never overwrite an explicit focus destination outside the closing
-      // sheet; explicit Close/Escape/swipe leave focus in the sheet or body.
+      // sheet; the handle/Escape/swipe leave focus in the sheet or body.
       const current = document.activeElement;
       if (
         current instanceof HTMLElement &&
