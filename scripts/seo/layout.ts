@@ -32,6 +32,53 @@ export function jsonLd(data: unknown): string {
   return `<script type="application/ld+json">${json}</script>`;
 }
 
+/**
+ * The site's identity graph, emitted on **every** generated page.
+ *
+ * The template/feature pages reference `SITE.orgId` and `#website` as `publisher`
+ * / `author` / `isPartOf`, but nothing here used to *define* those nodes — the
+ * `@id`s dangled, so the only place they resolved was whatever Google inferred
+ * from the URL. Defining them inline keeps the whole site pointing at one
+ * consistent "DWEEB" entity that lives on dweeb.faizo.net, instead of letting the
+ * resolution fall through to the parent domain (which redirects to GitHub — the
+ * reason Search once printed "GitHub" as our site name).
+ */
+export function identityLd(): object[] {
+  return [
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "@id": SITE.websiteId,
+      name: SITE.name,
+      alternateName: ["DWEEB — Discord Webhook Embed Builder", "Discord Webhook Embed Builder"],
+      url: `${SITE.origin}/`,
+      inLanguage: "en",
+      publisher: { "@id": SITE.orgId },
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "@id": SITE.orgId,
+      name: SITE.name,
+      url: `${SITE.origin}/`,
+      logo: {
+        "@type": "ImageObject",
+        url: `${SITE.origin}/icon-512.png`,
+        width: 512,
+        height: 512,
+      },
+      founder: { "@id": SITE.personId },
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "Person",
+      "@id": SITE.personId,
+      name: "Faizo",
+      url: `${SITE.origin}/`,
+    },
+  ];
+}
+
 const HOWTO_STEPS = [
   {
     name: "Open it in DWEEB",
@@ -106,7 +153,7 @@ export function htmlDocument(opts: {
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
-    ${opts.jsonLd.join("\n    ")}
+    ${[...identityLd().map(jsonLd), ...opts.jsonLd].join("\n    ")}
     <style>${PAGE_CSS}</style>
   </head>
   <body>

@@ -116,6 +116,63 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
 
+    <!-- Site name in Google Search — the name printed above the result URL.
+         `WebSite` on the home page is the strongest signal Google has for it, so
+         it stays FIRST and self-contained. This is load-bearing, not cosmetic:
+         we are a SUBDOMAIN, and Google falls back to the *domain-level* site
+         name when a subdomain's own signals are weak or ambiguous — and
+         `faizo.net` serves no site, it 301s to github.com/faizoken. That made
+         Google resolve the parent domain to GitHub's entity and print "GitHub"
+         above every dweeb.faizo.net result.
+         Hence the rule for the whole graph below: no `@id`, `url`, `publisher`,
+         `author`, or `sameAs` may resolve to github.com or to bare faizo.net.
+         Every entity is anchored on dweeb.faizo.net, or the site's identity
+         collapses back into GitHub's. A repo link in prose or a `license` URL is
+         fine — `sameAs` is not: it asserts *this site is that page*. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "@id": "https://dweeb.faizo.net/#website",
+        "name": "DWEEB",
+        "alternateName": [
+          "DWEEB — Discord Webhook Embed Builder",
+          "Discord Webhook Embed Builder",
+          "dweeb.faizo.net"
+        ],
+        "url": "https://dweeb.faizo.net/",
+        "description": "The visual browser-based Discord webhook & embed builder for Components V2 — design, preview, and send rich messages in a pixel-accurate live preview.",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://dweeb.faizo.net/#organization" }
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "@id": "https://dweeb.faizo.net/#organization",
+        "name": "DWEEB",
+        "url": "https://dweeb.faizo.net/",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://dweeb.faizo.net/icon-512.png",
+          "width": 512,
+          "height": 512
+        },
+        "founder": { "@id": "https://dweeb.faizo.net/#faizo" },
+        "sameAs": ["https://discord.gg/2wB7rHRDg2"]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Person",
+        "@id": "https://dweeb.faizo.net/#faizo",
+        "name": "Faizo",
+        "url": "https://dweeb.faizo.net/",
+        "sameAs": ["https://github.com/FaizoKen"]
+      }
+    </script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -144,9 +201,8 @@
         "inLanguage": "en",
         "isAccessibleForFree": true,
         "license": "https://github.com/FaizoKen/DWEEB/blob/main/LICENSE",
-        "sameAs": ["https://github.com/FaizoKen/DWEEB"],
-        "author": { "@id": "https://faizo.net/#organization" },
-        "publisher": { "@id": "https://faizo.net/#organization" },
+        "author": { "@id": "https://dweeb.faizo.net/#faizo" },
+        "publisher": { "@id": "https://dweeb.faizo.net/#organization" },
         "offers": {
           "@type": "AggregateOffer",
           "lowPrice": "0",
@@ -255,39 +311,6 @@
             }
           }
         ]
-      }
-    </script>
-    <script type="application/ld+json">
-      {
-        "@context": "https://schema.org",
-        "@type": "Organization",
-        "@id": "https://faizo.net/#organization",
-        "name": "Faizo",
-        "url": "https://faizo.net",
-        "logo": {
-          "@type": "ImageObject",
-          "url": "https://dweeb.faizo.net/icon-512.png",
-          "width": 512,
-          "height": 512
-        },
-        "sameAs": [
-          "https://github.com/FaizoKen",
-          "https://github.com/FaizoKen/DWEEB",
-          "https://discord.gg/2wB7rHRDg2"
-        ]
-      }
-    </script>
-    <script type="application/ld+json">
-      {
-        "@context": "https://schema.org",
-        "@type": "WebSite",
-        "@id": "https://dweeb.faizo.net/#website",
-        "name": "DWEEB",
-        "alternateName": "Discord Webhook Embed Builder",
-        "url": "https://dweeb.faizo.net/",
-        "description": "The visual browser-based Discord webhook & embed builder for Components V2 — design, preview, and send rich messages in a pixel-accurate live preview.",
-        "inLanguage": "en",
-        "publisher": { "@id": "https://faizo.net/#organization" }
       }
     </script>
     <script type="application/ld+json">

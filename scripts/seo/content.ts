@@ -16,12 +16,23 @@
 import { TEMPLATES, type MessageTemplate } from "@/data/presets";
 import { collectComponentKinds } from "./render-message";
 
-/** Production origin — keep in sync with `index.html` canonical / sitemap. */
+/**
+ * Production origin — keep in sync with `index.html` canonical / sitemap.
+ *
+ * `orgId`/`personId`/`websiteId` must stay anchored on **dweeb.faizo.net**, never
+ * on bare `faizo.net` and never on github.com. We're a subdomain, and Google
+ * falls back to the domain-level site name when a subdomain's identity is weak —
+ * `faizo.net` 301s to github.com/faizoken, so anchoring the publisher there made
+ * Google print "GitHub" as the site name above our results. See the long comment
+ * in `index.html`'s JSON-LD.
+ */
 export const SITE = {
   origin: "https://dweeb.faizo.net",
   name: "DWEEB",
   ogImage: "https://dweeb.faizo.net/og-image.png",
-  orgId: "https://faizo.net/#organization",
+  websiteId: "https://dweeb.faizo.net/#website",
+  orgId: "https://dweeb.faizo.net/#organization",
+  personId: "https://dweeb.faizo.net/#faizo",
   githubUrl: "https://github.com/FaizoKen/DWEEB",
 } as const;
 
