@@ -762,8 +762,10 @@ impl CloseTask {
                 discord::locked_message(&self.ticket.instance_id, &self.closer_id, &self.reason);
             let _ = rest::post_message(&self.state.http, &token, channel, &msg).await;
         } else {
-            // Delete the channel outright.
-            let _ = self.state.store.delete_ticket(channel);
+            // Delete the channel outright. The row is kept (status "closed"),
+            // not deleted: it is the anti-spam ledger, and dropping it would
+            // reset the open-cooldown the moment a ticket closes.
+            let _ = self.state.store.set_status(channel, "closed");
             let reason = format!("Ticket closed by {}", self.closer_name);
             if let Err(e) = rest::delete_channel(&self.state.http, &token, channel, &reason).await {
                 tracing::warn!(?e, "delete channel on close");
@@ -906,13 +908,33 @@ fn handle_delete(state: &AppState, interaction: &discord::Interaction, id: &str)
         ))
         .into_response();
     };
+    // Only a recorded ticket channel may be deleted. Without this check a
+    // forged `tickets:delete:<id>` custom_id fired from any channel would make
+    // the bot delete *that* channel — staff-for-tickets must never imply
+    // delete-any-channel. (Close and reopen already do the same lookup.)
+    match state.store.get_ticket(&channel_id) {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return Json(discord::ephemeral_text(
+                "This doesn't look like a ticket channel.",
+            ))
+            .into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "delete lookup");
+            return Json(discord::ephemeral_text("Something went wrong on my end."))
+                .into_response();
+        }
+    }
     let closer_name = interaction.actor_name();
     let state2 = state.clone();
     tokio::spawn(async move {
         let Some(token) = state2.config.default_bot_token.clone() else {
             return;
         };
-        let _ = state2.store.delete_ticket(&channel_id);
+        // Keep the row (status "closed") — it's the anti-spam ledger; see
+        // `CloseTask::run` for the same rationale on delete-mode close.
+        let _ = state2.store.set_status(&channel_id, "closed");
         let reason = format!("Ticket deleted by {closer_name}");
         if let Err(e) = rest::delete_channel(&state2.http, &token, &channel_id, &reason).await {
             tracing::warn!(?e, "delete channel");

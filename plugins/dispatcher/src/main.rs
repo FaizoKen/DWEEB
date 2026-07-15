@@ -1001,16 +1001,24 @@ async fn custom_apps_add(
         Ok(o) => o,
         Err(err) => return internal_error(err),
     };
-    if let store::AddApp::Added = outcome {
-        // Keep the hot-path map in lockstep with the registry.
-        app.custom_keys
-            .write()
-            .unwrap()
-            .insert(application_id.to_string(), (key, public_key));
-    }
     match app.store.custom_apps_list(&guild_id) {
         Ok(rows) => match outcome {
-            store::AddApp::Added => custom_apps_json(&rows, cap).into_response(),
+            store::AddApp::Added => {
+                // Keep the hot-path map in lockstep with the registry — but only
+                // for an *active* registration. Re-registering a suspended
+                // (over-plan-cap) app updates its key in place without serving
+                // it; only a reconcile (a real plan change) may switch it back on.
+                let active = rows
+                    .iter()
+                    .any(|r| r.application_id == application_id && !r.suspended);
+                if active {
+                    app.custom_keys
+                        .write()
+                        .unwrap()
+                        .insert(application_id.to_string(), (key, public_key));
+                }
+                custom_apps_json(&rows, cap).into_response()
+            }
             store::AddApp::Full => (
                 StatusCode::CONFLICT,
                 custom_apps_error_json(&rows, cap, "quota_full"),

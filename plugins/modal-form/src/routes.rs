@@ -220,11 +220,12 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
 }
 
 /// Modal submit → forward the answers to the webhook, then reply with the
-/// configured message. The forward is best-effort (short timeout); it must never
-/// block or fail the user-facing reply, which Discord expects within ~3s. For a
-/// one-response-per-person form, the submission is recorded only when the
-/// forward actually reached the destination, so a transient failure can't lock
-/// the member out forever.
+/// configured message. The forward runs on a short timeout so the user-facing
+/// reply always lands within Discord's ~3s window — but when it *fails*, the
+/// reply says so (never the configured "thanks" — that would silently swallow
+/// the submission). For a one-response-per-person form, the submission is
+/// recorded only when the forward actually reached the destination, so a
+/// transient failure can't lock the member out forever.
 async fn handle_modal_submit(state: &AppState, interaction: &discord::Interaction) -> Response {
     let Some(data) = interaction.data.as_ref() else {
         return Json(discord::ephemeral_text("Empty submission.")).into_response();
@@ -276,7 +277,19 @@ async fn handle_modal_submit(state: &AppState, interaction: &discord::Interactio
         }
     };
 
-    if cfg.limit_one && forwarded_ok {
+    // A failed forward means the answers went nowhere — say so instead of
+    // sending the configured "thanks, recorded" reply, which would silently
+    // swallow the submission. Nothing was recorded (the one-per-person mark
+    // below only lands on success), so trying again is safe and honest.
+    if !forwarded_ok {
+        return Json(discord::ephemeral_text(
+            "\u{26A0}\u{FE0F} Your answers couldn't be delivered just now, so nothing was \
+             recorded — please submit the form again in a moment.",
+        ))
+        .into_response();
+    }
+
+    if cfg.limit_one {
         if let Some(uid) = interaction.actor_id() {
             if let Err(e) = state.store.record_submission(id, uid) {
                 tracing::warn!(error = %e, "record submission");

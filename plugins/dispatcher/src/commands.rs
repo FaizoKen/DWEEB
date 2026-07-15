@@ -310,7 +310,10 @@ fn message_info(app: &App, interaction: &Value) -> Response {
     let mut button = None;
     if let (Some(guild_id), Some(_)) = (guild_id, app.component_ttl_ms) {
         if let Ok(rows) = app.store.list(guild_id) {
-            lines.push(slots_line(rows.len(), app.permanent_cap_for(guild_id)));
+            lines.push(slots_line(
+                active_slots(&rows),
+                app.permanent_cap_for(guild_id),
+            ));
         }
         let permissions: u128 = interaction
             .pointer("/member/permissions")
@@ -481,7 +484,7 @@ fn refresh_info_reply(
     let slots = app
         .store
         .list(guild_id)
-        .map(|rows| slots_line(rows.len(), app.permanent_cap_for(guild_id)))
+        .map(|rows| slots_line(active_slots(&rows), app.permanent_cap_for(guild_id)))
         .ok();
     let patched: Vec<&str> = text
         .lines()
@@ -661,6 +664,14 @@ fn expiry_line(
 /// its tail — keep the wording in sync with the match there.
 fn slots_line(used: usize, total: u32) -> String {
     format!("-# {used}/{total} never-expire slots used in this server.")
+}
+
+/// Active grants only — suspended (over-plan-cap) rows don't consume quota in
+/// the store, so counting them here would show "5/2 used" after a downgrade
+/// and disagree with what [`store::Store::add`] actually enforces. Matches the
+/// `used` field the /permanent management API reports.
+fn active_slots(rows: &[crate::store::PermanentRow]) -> usize {
+    rows.iter().filter(|r| !r.suspended).count()
 }
 
 /// The permanent-slot toggle button matching the store's current state, or
@@ -1104,7 +1115,7 @@ fn usage_suffix(app: &App, guild_id: &str) -> String {
     match app.store.list(guild_id) {
         Ok(rows) => format!(
             " ({}/{} slots used.)",
-            rows.len(),
+            active_slots(&rows),
             app.permanent_cap_for(guild_id)
         ),
         Err(_) => String::new(),

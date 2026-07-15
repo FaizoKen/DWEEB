@@ -186,7 +186,9 @@ pub struct MaskedInstance {
 }
 
 /// Lifecycle state of a ticket. `"open"` and `"locked"` both count as "in use"
-/// for the per-user open cap; a deleted ticket has no row at all.
+/// for the per-user open cap; a deleted channel's row is kept as `"closed"` —
+/// it no longer counts against the cap, but it stays in the ledger so the open
+/// cooldown can't be reset by closing a ticket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ticket {
     pub channel_id: String,
@@ -381,12 +383,6 @@ impl Store {
             (channel_id, status),
         )?;
         Ok(n > 0)
-    }
-
-    pub fn delete_ticket(&self, channel_id: &str) -> rusqlite::Result<()> {
-        let conn = self.lock();
-        conn.execute("DELETE FROM tickets WHERE channel_id = ?1", [channel_id])?;
-        Ok(())
     }
 
     /// How many tickets this member currently holds open (status open or locked)

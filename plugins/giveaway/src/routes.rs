@@ -33,7 +33,9 @@ use serde_json::{json, Value};
 
 use crate::config::Config;
 use crate::discord::{self, Action, Eligibility};
-use crate::store::{unix_millis, Giveaway, InstanceConfig, MaskedInstance, Status, Store};
+use crate::store::{
+    unix_millis, Giveaway, InstanceConfig, MaskedInstance, Requirements, Status, Store,
+};
 use crate::validate;
 
 #[derive(Clone)]
@@ -458,17 +460,58 @@ fn handle_toggle(
         .into_response();
     };
 
-    if join {
-        let _ = state.store.enter(id, uid);
-    } else {
-        let _ = state.store.leave(id, uid);
-    }
-
     let is_host = discord::is_host(
         interaction.actor_roles(),
         interaction.actor_permissions(),
         &g.config.host_roles,
     );
+
+    if join {
+        // The Join button only renders on the (host-only) panel, but a custom_id
+        // is client-forgeable — never trust that alone. Re-run the same gate a
+        // public Enter click passes before recording anything: a host skips the
+        // role/account-age requirements (it's their giveaway), but nobody joins
+        // one that's ended, cancelled, or past its deadline.
+        let no_requirements = Requirements::default();
+        let reqs = if is_host {
+            &no_requirements
+        } else {
+            &g.config.requirements
+        };
+        match discord::check_eligibility(
+            g.status,
+            g.config.ends_at,
+            unix_millis(),
+            interaction.actor_roles(),
+            discord::snowflake_to_unix_ms(uid),
+            reqs,
+        ) {
+            Eligibility::Ok => {
+                let _ = state.store.enter(id, uid);
+            }
+            Eligibility::MissingRoles => {
+                return Json(discord::ephemeral_text(&discord::missing_roles_message(
+                    &g.config.requirements,
+                )))
+                .into_response()
+            }
+            Eligibility::AccountTooNew { needed_days } => {
+                return Json(discord::ephemeral_text(&format!(
+                    "\u{1F512} Your account is too new to enter — it has to be at least {needed_days} day{} old.",
+                    if needed_days == 1 { "" } else { "s" }
+                )))
+                .into_response()
+            }
+            Eligibility::Over | Eligibility::EntriesClosed => {
+                return Json(discord::ephemeral_text(
+                    "This giveaway isn't accepting entries anymore.",
+                ))
+                .into_response()
+            }
+        }
+    } else {
+        let _ = state.store.leave(id, uid);
+    }
     if is_host {
         // Re-render the host panel in place (entered flag flipped).
         let entered = state.store.is_entered(id, uid).unwrap_or(join);
@@ -476,6 +519,12 @@ fn handle_toggle(
         let panel =
             discord::host_panel(id, g.status, entered, count, g.config.winner_count as usize);
         Json(as_update(panel)).into_response()
+    } else if join {
+        // A plain member only ever reaches Join through a forged custom_id (the
+        // button rides the host panel), but they passed the gate above, so the
+        // entry stands — confirm it truthfully instead of claiming they left.
+        let count = state.store.count_entries(id).unwrap_or(1);
+        Json(as_update(discord::already_in_panel(id, count))).into_response()
     } else {
         // A plain member left via the already-entered notice.
         Json(as_update(discord::left_notice())).into_response()
@@ -1274,6 +1323,56 @@ mod tests {
         assert!(s.contains("[ended]"), "{s}");
         assert!(s.contains("Giveaway ended"), "{s}");
         assert!(s.contains("\"disabled\":true"), "{s}");
+    }
+
+    #[test]
+    fn join_control_rechecks_eligibility_for_non_hosts() {
+        let state = test_state();
+        let id = "abc";
+        let mut cfg = config_with(None);
+        cfg.requirements = Requirements {
+            roles: vec![crate::store::RoleRef {
+                id: "555".into(),
+                name: "Sub".into(),
+                color: 0,
+            }],
+            require_all: false,
+            min_account_age_days: 0,
+        };
+        state.store.create(id, &cfg).unwrap();
+
+        // A plain member forging the host panel's join custom_id is still gated
+        // on the role requirement — refused, and no entry is recorded.
+        let denied = body_json(handle_component(&state, &control_click(id, "join", "0")));
+        assert!(denied.to_string().contains("<@&555>"), "{denied}");
+        assert_eq!(state.store.count_entries(id).unwrap(), 0);
+    }
+
+    #[test]
+    fn join_control_refuses_a_closed_giveaway_even_for_hosts() {
+        let state = test_state();
+        let id = "abc";
+        state.store.create(id, &config_with(None)).unwrap();
+        state.store.set_cancelled(id).unwrap();
+
+        let denied = body_json(handle_component(
+            &state,
+            &control_click(id, "join", MANAGE_GUILD),
+        ));
+        assert!(
+            denied.to_string().contains("isn't accepting entries"),
+            "{denied}"
+        );
+        assert_eq!(state.store.count_entries(id).unwrap(), 0);
+    }
+
+    #[test]
+    fn join_control_still_admits_an_eligible_member() {
+        let state = test_state();
+        let id = "abc";
+        state.store.create(id, &config_with(None)).unwrap();
+        let _ = handle_component(&state, &control_click(id, "join", "0"));
+        assert_eq!(state.store.count_entries(id).unwrap(), 1);
     }
 
     #[test]

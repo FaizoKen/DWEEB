@@ -103,7 +103,14 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - Stateful plugin instance ids in Discord `custom_id` are public bindings, never edit authority.
   Protocol-v2 services return a separate 256-bit management token once, store only its SHA-256
   digest, and require it for updates; a legacy/cache-miss edit must create and rebind a new
-  instance. Saved-webhook approval responses travel over an iframe-created `MessagePort`, not
+  instance. **Current state (audited 2026-07-16):** modal-form and self-role are v2; picker,
+  quick-replies, giveaway, and tickets still declare `apiVersion: 1` and use the unguessable
+  instance id as the update capability — but a `custom_id` is readable by every member who can
+  see the message, so anyone in the guild can rewrite those instances' configs via
+  `PUT /api/instances/:id`. Migrating them to v2 needs each plugin's embedded `config.html` +
+  backend + both registries updated together, and the plugin services deployed **before** the
+  v2 web manifest (see the deploy-ordering rule above). Treat this as the next security debt to
+  pay down; don't add new v1 stateful plugins. Saved-webhook approval responses travel over an iframe-created `MessagePort`, not
   `contentWindow`. Deploy compatible plugin services/static pages before the v2 web manifest.
 - Plugin-library presets and `init.preset` seeding stay; the duplicate in-config “Quick start”
   bars stay removed.
