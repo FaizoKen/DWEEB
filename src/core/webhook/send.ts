@@ -74,6 +74,21 @@ export function parseMessageChannelId(input: string): string | null {
   return m?.[1] ?? null;
 }
 
+/**
+ * Pull the guild (server) segment out of a Discord message *link*
+ * (`…/channels/{guild}/{channel}/{message}`). Returns the guild snowflake, the
+ * literal `"@me"` for a DM / group-DM link (which has no guild), or null for a
+ * bare message id. The embedded Activity's Restore uses it to tell a link into
+ * *this* server (where only the channel needs switching) from one into a
+ * different server, which its fixed collaboration room can't follow.
+ */
+export function parseMessageGuildId(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const m = /discord(?:app)?\.com\/channels\/(\d{15,25}|@me)\/\d{15,25}\/\d{15,25}/i.exec(trimmed);
+  return m?.[1] ?? null;
+}
+
 export interface SendOptions {
   /** Optional thread id to post into (forum/thread channels). */
   threadId?: string;

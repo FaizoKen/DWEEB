@@ -217,8 +217,15 @@ interface ActivityState {
    *  editor (`input` is a message id or a Discord message link). The proxy
    *  resolves the webhook, so — unlike the web app — no URL is needed. On success
    *  the editor is wired to update that message in place ({@link lastPost}).
-   *  Throws with a user-facing message on failure so the caller can surface it. */
-  restore(input: string): Promise<void>;
+   *  Throws with a user-facing message on failure so the caller can surface it.
+   *
+   *  `switchToChannelId` restores from a *different* channel in this same server
+   *  than the room is currently aimed at — the case where the pasted link points
+   *  elsewhere (the dialog confirms the move first, since only the channel may
+   *  travel; the server is fixed). On success the room's shared destination is
+   *  re-pointed to that channel so the in-place Update lights up and everyone here
+   *  follows along. Omit it for an ordinary same-channel restore. */
+  restore(input: string, opts?: { switchToChannelId?: string }): Promise<void>;
   /** Load a server-library entry into the shared editor (collab broadcasts it
    *  to the room). A posted entry in the target server also re-wires the
    *  toolbar to update that live message in place ({@link lastPost}), exactly
@@ -693,10 +700,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 
-  async restore(input) {
+  async restore(input, opts = {}) {
     const guildId = get().targetGuildId;
-    const channelId = get().targetChannelId;
-    if (!guildId || !channelId) {
+    const roomChannelId = get().targetChannelId;
+    if (!guildId || !roomChannelId) {
       throw new Error("Pick a channel to restore from first.");
     }
     // Restore reads through the channel's DWEEB webhook, so the proxy gates it on
@@ -704,16 +711,21 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (get().canPostToTarget === false) {
       throw new Error("You need the “Manage Webhooks” permission to restore a message here.");
     }
-    // Accept a bare snowflake or a full message link. A link whose channel
-    // segment differs from the picked channel names the THREAD the message
-    // lives in — that's exactly how a forum/media post's link looks (Discord
-    // uses the thread id as the link's channel part) — so pass it along: the
-    // proxy needs it to locate a thread message. A matching segment (or a bare
-    // id) restores from the channel itself, as before.
     const messageId = parseMessageIdInput(input);
     if (!messageId) {
       throw new Error("Enter a message ID or a Discord message link.");
     }
+    // Which channel we actually read from. A message pasted from a *different*
+    // channel in this server (`switchToChannelId`, confirmed in the dialog) reads
+    // from there; otherwise it's the room's current channel. Only the channel may
+    // move — the server stays fixed (see `setTargetGuild`).
+    const channelId = opts.switchToChannelId ?? roomChannelId;
+    // Accept a bare snowflake or a full message link. A link whose channel
+    // segment differs from the channel we're reading names the THREAD the message
+    // lives in — that's exactly how a forum/media post's link looks (Discord uses
+    // the thread id as the link's channel part) — so pass it along: the proxy
+    // needs it to locate a thread message. A matching segment (or a bare id)
+    // restores from the channel itself, as before.
     const linkChannelId = parseMessageChannelId(input);
     const threadId = linkChannelId && linkChannelId !== channelId ? linkChannelId : null;
     if (get().restoring) return;
@@ -724,6 +736,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       // Load it into the shared editor — collab broadcasts the new draft to
       // everyone in the room (a top-level structural change, so a full snapshot).
       useMessageStore.getState().replaceMessage(decoded);
+      // Restored from another channel in this server: now that Discord has
+      // confirmed the message really is there, move the room's shared destination
+      // to it so the in-place Update lights up (it keys on the destination
+      // matching the message's channel) and everyone here follows to it. Only on
+      // success, so a miss never strands the room on a channel it never posted in.
+      if (channelId !== roomChannelId) get().setTargetChannel(channelId);
       // Wire the toolbar to update THIS message: `lastPost` carries the webhook
       // (and the custom bot, when one authored it) so the next edit PATCHes it
       // in place under the same identity instead of posting a copy (same

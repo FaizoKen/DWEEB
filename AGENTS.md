@@ -50,7 +50,15 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   may not even be members of the server you picked), and a `target` frame widened to carry a guild
   leaves a peer outside it unable to load its channels or resolve their post gate. Posting to another
   server is the web app's job — it's bound to no server, and the bar's "Open on web" hands the draft
-  over. Guarded by `core/activity/destination.test.ts`.
+  over. Guarded by `core/activity/destination.test.ts`. Because the channel *does* move, the
+  Activity's **Restore** (`RestoreDialog` + `core/activity/restoreTarget.ts`) turns a pasted message
+  link into a channel switch instead of a dead end: a link into a *sibling channel of this same
+  server* used to be mistaken for a `thread_id` and handed to Discord, which answered 400 "Unknown
+  Channel" — now `planRestore` classifies it and the dialog **confirms switching the room to that
+  channel** before reading (only on a hit does the room actually move, keeping the in-place Update
+  wired). A link's channel segment that isn't a known channel is still treated as a thread (forum/media
+  post); a link into a *different server* is refused with a pointer to "Open on web". Only the channel
+  is ever offered — never the server.
 - **Safe-area overlays**: portaled/fixed overlays must use the `--app-sait`/`--app-saib` and
   `--app-sail`/`--app-sair` tokens from `tokens.css`, never raw
   `env(safe-area-inset-*)`; the floor is stamped via `html[data-activity-platform]`.

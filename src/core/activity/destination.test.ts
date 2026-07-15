@@ -50,6 +50,7 @@ vi.mock("./api", () => ({
 vi.mock("@/ui/Toast", () => ({ pushToast: vi.fn() }));
 
 import { useActivityStore } from "./activityStore";
+import { restorePostedMessage } from "./api";
 import type { PickerGuild } from "@/core/guild/api";
 
 const LAUNCH_GUILD = "111111111111111111";
@@ -116,6 +117,64 @@ describe("activity post destination", () => {
     useActivityStore.getState().setTargetChannel(ROOM_CHANNEL);
     expect(useActivityStore.getState().targetChannelId).toBe(ROOM_CHANNEL);
     expect(broadcastTargetMock).toHaveBeenCalledWith(ROOM_CHANNEL);
+  });
+
+  it("restoring from a sibling channel moves the room there — on success", async () => {
+    seedServerLaunch();
+    // The restored message really is in the other channel (a different channel in
+    // the *same* server, which the dialog confirmed switching to).
+    vi.mocked(restorePostedMessage).mockResolvedValueOnce({
+      message: { components: [] },
+      message_id: "700000000000000001",
+      channel_id: OTHER_CHANNEL,
+      guild_id: LAUNCH_GUILD,
+      url: null,
+      webhook_id: "hook",
+      application_id: null,
+      thread_id: null,
+    });
+
+    await useActivityStore
+      .getState()
+      .restore(`https://discord.com/channels/${LAUNCH_GUILD}/${OTHER_CHANNEL}/700000000000000001`, {
+        switchToChannelId: OTHER_CHANNEL,
+      });
+
+    const s = useActivityStore.getState();
+    // Read from the sibling channel, not the room's original one…
+    expect(restorePostedMessage).toHaveBeenCalledWith(
+      LAUNCH_GUILD,
+      OTHER_CHANNEL,
+      "700000000000000001",
+      null,
+    );
+    // …and now the room follows to it (shared, so the move reaches everyone), with
+    // the toolbar wired to update the restored message in place.
+    expect(s.targetChannelId).toBe(OTHER_CHANNEL);
+    expect(broadcastTargetMock).toHaveBeenCalledWith(OTHER_CHANNEL);
+    expect(s.lastPost?.channel_id).toBe(OTHER_CHANNEL);
+  });
+
+  it("a failed sibling-channel restore leaves the room where it was", async () => {
+    seedServerLaunch();
+    vi.mocked(restorePostedMessage).mockRejectedValueOnce(new Error("not found"));
+
+    await expect(
+      useActivityStore
+        .getState()
+        .restore(
+          `https://discord.com/channels/${LAUNCH_GUILD}/${OTHER_CHANNEL}/700000000000000001`,
+          {
+            switchToChannelId: OTHER_CHANNEL,
+          },
+        ),
+    ).rejects.toThrow("not found");
+
+    // The room never moved — a miss must not strand it on a channel it never
+    // posted in (the switch only commits once Discord confirms the message).
+    const s = useActivityStore.getState();
+    expect(s.targetChannelId).toBe(LAUNCH_CHANNEL);
+    expect(broadcastTargetMock).not.toHaveBeenCalled();
   });
 
   it("keeps the destination server fixed to the launching guild", () => {

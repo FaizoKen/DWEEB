@@ -21,3 +21,29 @@
   color: var(--app-text-muted);
   font-weight: 600;
 }
+
+/* The other channel a restore is about to switch to, called out in the confirm
+   view. A prominent chip so the destination is unmistakable before the move. */
+.channelRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--app-space-2) var(--app-space-3);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-subtle);
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.channelRow > svg {
+  color: var(--app-text-subtle);
+  flex: none;
+}
+
+.channelName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
