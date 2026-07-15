@@ -55,13 +55,17 @@
 }
 
 .close {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--app-radius-sm);
   color: var(--app-text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* The × glyph otherwise inherits the small body font and looks lost in the
+     button. Size it explicitly so it fills the target. */
+  font-size: 22px;
+  line-height: 1;
 }
 .close:hover {
   background: var(--app-bg-hover);
