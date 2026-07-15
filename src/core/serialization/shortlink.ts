@@ -69,6 +69,8 @@ export async function createShortLink(token: string): Promise<CreateShortLinkRes
 }
 
 export type ResolveShortLinkResult = { ok: true; token: string } | { ok: false; error: string };
+const RESOLVE_TIMEOUT_MS = 8_000;
+const EARLY_WAIT_TIMEOUT_MS = 3_000;
 
 /**
  * The in-flight response started by the inline early-resolve script in
@@ -82,6 +84,20 @@ function takeEarlyResolve(): Promise<Response | null> | null {
   return early;
 }
 
+async function awaitEarlyResolve(early: Promise<Response | null>): Promise<Response | null> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      early,
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), EARLY_WAIT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 /** Fetch the share token behind a short-link id. Never throws. */
 export async function resolveShortLink(id: string): Promise<ResolveShortLinkResult> {
   if (!isShortLinkConfigured()) {
@@ -91,12 +107,18 @@ export async function resolveShortLink(id: string): Promise<ResolveShortLinkResu
   // Prefer the early fetch (started before the app bundle even loaded); a
   // network failure there falls through to one fresh attempt.
   const early = takeEarlyResolve();
-  if (early) res = await early;
+  if (early) res = await awaitEarlyResolve(early);
   if (!res) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
     try {
-      res = await fetch(`${PROXY_BASE_URL}/api/shortlink/${encodeURIComponent(id)}`);
+      res = await fetch(`${PROXY_BASE_URL}/api/shortlink/${encodeURIComponent(id)}`, {
+        signal: controller.signal,
+      });
     } catch {
       return { ok: false, error: "Couldn't reach the short-link service." };
+    } finally {
+      clearTimeout(timeout);
     }
   }
   const data = (await res.json().catch(() => null)) as { token?: string; error?: string } | null;

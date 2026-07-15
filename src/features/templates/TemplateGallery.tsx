@@ -1,8 +1,8 @@
 /**
  * Template Gallery — the app's full-screen landing screen.
  *
- * Opens on every visit (see `App`) so a user always starts from a deliberate
- * choice instead of a cold editor. It blends three sources into one
+ * Auto-opens on a useful first/fresh visit (see `App`) so a new user starts
+ * from a deliberate choice instead of a cold editor. It blends four sources into one
  * app-store-style grid:
  *
  *  - **Posted** — the connected server's shared library history (messages sent
@@ -24,7 +24,7 @@
  * Every card carries a **live, faithful thumbnail** — the real `Preview`
  * renderer scaled down and made `inert`, so what you see is exactly what you'll
  * get. Search spans name / description / tags. Interactive templates are tagged
- * "Bot needed" and name the plugin they pair with.
+ * "Interactive" and name the plugin they pair with.
  *
  * Built to stay fast on a large (Plus/Pro) shelf: entry hydration and search
  * text are cached per immutable entry, each card's haystack is precomputed (a
@@ -94,6 +94,7 @@ import {
 } from "./galleryCards";
 import { ScheduleHistory } from "./GalleryScheduled";
 import { useTemplateGalleryStore } from "./templateGalleryStore";
+import { trackAnalytics } from "@/core/telemetry/analytics";
 import { useTemplateSetupStore } from "./templateSetupStore";
 import styles from "./TemplateGallery.module.css";
 
@@ -273,8 +274,18 @@ export function TemplateGallery() {
     [connectedGuildId],
   );
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(
+    typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
+  );
   const chipsRef = useRef<HTMLDivElement | null>(null);
   const [chipScroll, setChipScroll] = useState({ left: false, right: false });
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("dweeb:surface-ready", { detail: { surface: "directory" } }),
+    );
+  }, []);
 
   const updateChipScroll = useCallback(() => {
     const row = chipsRef.current;
@@ -316,13 +327,48 @@ export function TemplateGallery() {
     };
   }, []);
 
-  // Escape closes the gallery from anywhere within it.
+  // Keep keyboard focus inside the modal and restore the invoking control when
+  // it closes. The editor shell is also inert while this is mounted (App.tsx).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeGallery();
+      if (e.key === "Escape") {
+        closeGallery();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusable = Array.from(
+        panelRef.current?.querySelectorAll<HTMLElement>(
+          'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((node) => !node.hidden && node.getClientRects().length > 0);
+      if (!focusable.length) return;
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      if (
+        e.shiftKey &&
+        (document.activeElement === first || !panelRef.current?.contains(document.activeElement))
+      ) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      const opener = openerRef.current;
+      // App removes `inert` from the background in the same close commit. Hop a
+      // frame so browsers do not reject focus while the opener is still inside
+      // an inert ancestor; also resolve the fallback after the editor remounts.
+      requestAnimationFrame(() => {
+        const restoreTarget = opener?.isConnected
+          ? opener
+          : document.querySelector<HTMLElement>('[aria-label="Component builder"] button');
+        restoreTarget?.focus({ preventScroll: true });
+      });
+    };
   }, [closeGallery]);
 
   // Saved messages, re-hydrated to editable form for their thumbnails (cached
@@ -577,6 +623,7 @@ export function TemplateGallery() {
         ),
         onPick: () => {
           replaceMessage(t.message);
+          trackAnalytics("template_applied", { template_id: t.id, source: "gallery" });
           closeGallery();
           // A template with plugin slots still has setup to finish — wiring an
           // interactive component's plugin, or completing a link plugin's
@@ -818,7 +865,7 @@ export function TemplateGallery() {
           if (e.target === e.currentTarget) closeGallery();
         }}
       >
-        <div className={styles.panel}>
+        <div ref={panelRef} className={styles.panel}>
           <header className={styles.header}>
             <div className={styles.headingRow}>
               <div className={styles.heading}>
@@ -851,6 +898,13 @@ export function TemplateGallery() {
                 <CloseIcon size={20} />
               </button>
             </div>
+
+            <nav className={styles.discoveryLinks} aria-label="Explore DWEEB">
+              <a href="/discord-webhook-builder/">Webhook builder</a>
+              <a href="/templates/">Templates</a>
+              <a href="/features/">Features</a>
+              <a href="/guides/">Guides</a>
+            </nav>
 
             <div className={styles.controls}>
               <div className={styles.search}>
@@ -1105,7 +1159,12 @@ export function TemplateGallery() {
             {shown.length > 0 ? (
               <div className={styles.grid}>
                 {visibleCards.map((c, i) => (
-                  <GalleryCard key={c.key} card={c} eagerThumb={i < EAGER_THUMBNAILS} />
+                  <GalleryCard
+                    key={c.key}
+                    card={c}
+                    eagerThumb={i < EAGER_THUMBNAILS}
+                    priorityThumb={i === 0}
+                  />
                 ))}
                 {shown.length > visibleCards.length ? (
                   // Keyed on the revealed count so each reveal re-arms a fresh

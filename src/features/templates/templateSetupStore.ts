@@ -18,14 +18,18 @@ import { create } from "zustand";
 interface TemplateSetupState {
   /** Id of the template being set up; null = the flow is closed. */
   templateId: string | null;
+  /** Plugin a feature landing promised; its row is ordered first. */
+  preferredPluginId: string | null;
   /** Open the setup flow for a template the gallery has just applied. */
-  begin(templateId: string): void;
+  begin(templateId: string, preferredPluginId?: string): void;
   /** Close the setup modal (done / skip / dismiss); leaves the editor in front. */
   close(): void;
 }
 
 export const useTemplateSetupStore = create<TemplateSetupState>((set) => ({
   templateId: null,
-  begin: (templateId) => set({ templateId }),
-  close: () => set({ templateId: null }),
+  preferredPluginId: null,
+  begin: (templateId, preferredPluginId) =>
+    set({ templateId, preferredPluginId: preferredPluginId ?? null }),
+  close: () => set({ templateId: null, preferredPluginId: null }),
 }));

@@ -95,10 +95,10 @@ export function messageSearchText(message: WebhookMessage): string {
  *  entries; mounting every card at once (each hosts a live preview) makes
  *  opening the gallery a multi-second layout, so the grid grows page by page
  *  as the user scrolls (see the load-more sentinel). */
-export const CARD_PAGE_SIZE = 48;
+export const CARD_PAGE_SIZE = 24;
 /** The first screenful of thumbnails mounts eagerly so the gallery never opens
  *  onto blank preview windows; everything past it lazy-mounts on approach. */
-export const EAGER_THUMBNAILS = 12;
+export const EAGER_THUMBNAILS = 3;
 
 /** Compact "2m ago" / "yesterday" / "Mar 4" stamp for continue/saved cards. */
 export function formatRelative(savedAt: number): string {
@@ -118,9 +118,11 @@ export function formatRelative(savedAt: number): string {
 export const GalleryCard = memo(function GalleryCard({
   card,
   eagerThumb,
+  priorityThumb,
 }: {
   card: CardData;
   eagerThumb?: boolean;
+  priorityThumb?: boolean;
 }) {
   // The card is an article with one full-card primary button and separate
   // management buttons layered above it. This keeps the whole visual card
@@ -171,7 +173,11 @@ export const GalleryCard = memo(function GalleryCard({
       />
       <div className={styles.cardPreview}>
         {card.message ? (
-          <TemplateThumbnail message={card.message} eager={eagerThumb} />
+          <TemplateThumbnail
+            message={card.message}
+            eager={eagerThumb}
+            prioritizeMedia={priorityThumb}
+          />
         ) : (
           // A scheduled card whose payload is still loading (or has none to
           // preview) — a calm placeholder in place of the live thumbnail.
@@ -342,9 +348,11 @@ export function LoadMoreSentinel({
 const TemplateThumbnail = memo(function TemplateThumbnail({
   message,
   eager,
+  prioritizeMedia,
 }: {
   message: WebhookMessage;
   eager?: boolean;
+  prioritizeMedia?: boolean;
 }) {
   const [live, setLive] = useState(eager === true);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -361,7 +369,7 @@ const TemplateThumbnail = memo(function TemplateThumbnail({
     <div className={styles.thumbViewport} ref={viewportRef}>
       {live ? (
         <div className={styles.thumbStage} ref={makeInert}>
-          <Preview message={message} />
+          <Preview message={message} prioritizeMedia={prioritizeMedia} />
         </div>
       ) : null}
     </div>

@@ -2,10 +2,9 @@
  * HTML for the static template pages: the per-template page, the `/templates`
  * index, and the shared (inlined) stylesheet.
  *
- * The pages are script-free by design — pure HTML + inline CSS — so they're
- * fast, fully crawlable without JS, and carry a strict CSP. The only
- * interactivity is the "Open in DWEEB" link, which deep-links into the SPA
- * (`/?template=<id>`, handled by `useTemplateDeepLink`).
+ * The content is pure pre-rendered HTML + inline CSS, so it is fast and fully
+ * crawlable without JavaScript. The only script is the site's small deferred,
+ * privacy-gated analytics loader; no application bundle ships on these pages.
  */
 
 import { TEMPLATE_CATEGORIES } from "@/data/presets";
@@ -13,10 +12,12 @@ import { escapeHtml } from "./render-message";
 import {
   CATEGORY_BLURB,
   SITE,
+  TEMPLATES_LASTMOD,
   TEMPLATES_OG_INDEX,
   type FaqEntry,
   type ResolvedSeo,
 } from "./content";
+import type { ResolvedFeature } from "./features";
 
 const TEMPLATES_INDEX_PATH = "/templates/";
 const TEMPLATES_INDEX_URL = `${SITE.origin}${TEMPLATES_INDEX_PATH}`;
@@ -33,7 +34,7 @@ export function jsonLd(data: unknown): string {
 }
 
 /**
- * The site's identity graph, emitted on **every** generated page.
+ * The site's publisher identity graph, emitted on every generated page.
  *
  * The template/feature pages reference `SITE.orgId` and `#website` as `publisher`
  * / `author` / `isPartOf`, but nothing here used to *define* those nodes — the
@@ -41,7 +42,10 @@ export function jsonLd(data: unknown): string {
  * from the URL. Defining them inline keeps the whole site pointing at one
  * consistent "DWEEB" entity that lives on dweeb.faizo.net, instead of letting the
  * resolution fall through to the parent domain (which redirects to GitHub — the
- * reason Search once printed "GitHub" as our site name).
+ * reason Search once printed "GitHub" as our site name). The canonical
+ * WebApplication entity is fully defined once on `/`; page-level `about`
+ * properties reference its stable @id instead of publishing a second,
+ * conflicting offer graph on every URL.
  */
 export function identityLd(): object[] {
   return [
@@ -79,7 +83,7 @@ export function identityLd(): object[] {
   ];
 }
 
-const HOWTO_STEPS = [
+const HOWTO_START = [
   {
     name: "Open it in DWEEB",
     text: "Click “Open in DWEEB” to load the template into the visual editor — no sign-up, no install.",
@@ -88,15 +92,33 @@ const HOWTO_STEPS = [
     name: "Make it yours",
     text: "Edit the text, colours, emoji, links and images to match your server. The live preview updates as you type.",
   },
-  {
-    name: "Paste your webhook URL",
-    text: "In Discord, go to Server Settings → Integrations → Webhooks, copy a webhook URL, and paste it into DWEEB.",
-  },
-  {
-    name: "Send it",
-    text: "Hit Send and the message posts straight to your channel. You can also share it as a link or export the JSON.",
-  },
 ];
+
+function howToSteps(seo: ResolvedSeo): { name: string; text: string }[] {
+  const destination =
+    seo.deliveryMode === "app-owned"
+      ? {
+          name: "Connect an app-owned destination",
+          text: `Follow DWEEB's guided setup for ${seo.pairsWith ?? "the matching plugin"}, then choose a connected server and channel. Discord rejects interactive components on person-created webhooks.`,
+        }
+      : seo.deliveryMode === "external-link"
+        ? {
+            name: "Finish the linked-service setup",
+            text: `Configure ${seo.pairsWith ?? "the external integration"} for your server when DWEEB opens its setup step, then choose any Discord webhook as the destination.`,
+          }
+        : {
+            name: "Paste your webhook URL",
+            text: "In Discord, go to Server Settings → Integrations → Webhooks, copy a webhook URL, and paste it into DWEEB.",
+          };
+  return [
+    ...HOWTO_START,
+    destination,
+    {
+      name: "Send it",
+      text: "Review the live preview, then hit Send. You can also save it, share it as a link, schedule it, or export the message JSON.",
+    },
+  ];
+}
 
 /**
  * Wrap a head/body in the shared document shell: meta, canonical, OG/Twitter,
@@ -107,8 +129,13 @@ export function htmlDocument(opts: {
   description: string;
   canonical: string;
   ogImage: string;
-  keywords?: string[];
+  imageAlt: string;
   ogType: "article" | "website";
+  pageType: "template" | "feature" | "guide" | "landing";
+  pageId: string;
+  publishedTime?: string;
+  modifiedTime?: string;
+  section?: string;
   jsonLd: string[];
   body: string;
 }): string {
@@ -116,13 +143,16 @@ export function htmlDocument(opts: {
     "default-src 'self'",
     "img-src 'self' https: data:",
     "style-src 'self' 'unsafe-inline'",
-    "script-src 'none'",
+    "script-src 'self' https://www.googletagmanager.com",
+    "connect-src https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com",
     "base-uri 'self'",
     "form-action 'self'",
   ].join("; ");
+  const entry = encodeURIComponent(`${opts.pageType}:${opts.pageId}`);
+  const builderUrl = `/?entry=${entry}`;
 
   return `<!doctype html>
-<html lang="en">
+<html lang="en" data-page-type="${attr(opts.pageType)}" data-page-id="${attr(opts.pageId)}">
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="${attr(csp)}" />
@@ -133,36 +163,50 @@ export function htmlDocument(opts: {
 
     <title>${escapeHtml(opts.title)}</title>
     <meta name="description" content="${attr(opts.description)}" />
-    ${opts.keywords && opts.keywords.length ? `<meta name="keywords" content="${attr(opts.keywords.join(", "))}" />` : ""}
-    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <link rel="canonical" href="${attr(opts.canonical)}" />
+    <link rel="alternate" hreflang="en" href="${attr(opts.canonical)}" />
+    <link rel="alternate" hreflang="x-default" href="${attr(opts.canonical)}" />
 
     <meta property="og:type" content="${opts.ogType}" />
     <meta property="og:site_name" content="${SITE.name}" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:title" content="${attr(opts.title)}" />
     <meta property="og:description" content="${attr(opts.description)}" />
     <meta property="og:url" content="${attr(opts.canonical)}" />
     <meta property="og:image" content="${attr(opts.ogImage)}" />
+    <meta property="og:image:secure_url" content="${attr(opts.ogImage)}" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="${attr(opts.imageAlt)}" />
+    ${opts.ogType === "article" && opts.publishedTime ? `<meta property="article:published_time" content="${attr(opts.publishedTime)}" />` : ""}
+    ${opts.ogType === "article" && opts.modifiedTime ? `<meta property="article:modified_time" content="${attr(opts.modifiedTime)}" />` : ""}
+    ${opts.ogType === "article" && opts.section ? `<meta property="article:section" content="${attr(opts.section)}" />` : ""}
+    ${opts.ogType === "website" && opts.modifiedTime ? `<meta property="og:updated_time" content="${attr(opts.modifiedTime)}" />` : ""}
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${attr(opts.title)}" />
     <meta name="twitter:description" content="${attr(opts.description)}" />
     <meta name="twitter:image" content="${attr(opts.ogImage)}" />
+    <meta name="twitter:image:alt" content="${attr(opts.imageAlt)}" />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <script defer src="/gtag-init.js"></script>
 
     ${[...identityLd().map(jsonLd), ...opts.jsonLd].join("\n    ")}
     <style>${PAGE_CSS}</style>
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site">
       <a class="brand" href="/" aria-label="DWEEB home">DWEEB</a>
       <nav class="site-nav">
+        <a href="/discord-webhook-builder/">Builder</a>
         <a href="/features/">Features</a>
         <a href="${TEMPLATES_INDEX_PATH}">Templates</a>
-        <a class="nav-cta" href="/">Open the builder</a>
+        <a href="/guides/">Guides</a>
+        <a class="nav-cta" href="${builderUrl}" data-analytics="${attr(opts.pageType)}" data-analytics-id="${attr(opts.pageId)}" data-analytics-location="nav">Open the builder</a>
       </nav>
     </header>
     ${opts.body}
@@ -172,9 +216,11 @@ export function htmlDocument(opts: {
         Build, preview and send rich messages in a local-by-default editor. No account is required for the core builder.
       </p>
       <p class="muted">
-        <a href="/">Open the builder</a> ·
+        <a href="${builderUrl}" data-analytics="${attr(opts.pageType)}" data-analytics-id="${attr(opts.pageId)}" data-analytics-location="footer">Open the builder</a> ·
+        <a href="/discord-webhook-builder/">Webhook builder</a> ·
         <a href="/features/">Features</a> ·
         <a href="${TEMPLATES_INDEX_PATH}">All templates</a> ·
+        <a href="/guides/">Guides</a> ·
         <a href="/privacy">Privacy</a> ·
         <a href="/terms">Terms</a> ·
         <a href="${SITE.githubUrl}" rel="noopener" target="_blank">GitHub</a>
@@ -201,7 +247,10 @@ export function breadcrumbNav(trail: { name: string; url?: string }[]): string {
   const parts = trail.map((t, i) => {
     const last = i === trail.length - 1;
     const label = escapeHtml(t.name);
-    const node = last || !t.url ? `<span aria-current="page">${label}</span>` : `<a href="${attr(t.url)}">${label}</a>`;
+    const node =
+      last || !t.url
+        ? `<span aria-current="page">${label}</span>`
+        : `<a href="${attr(t.url)}">${label}</a>`;
     return node;
   });
   return `<nav class="crumbs" aria-label="Breadcrumb">${parts.join('<span class="crumb-sep" aria-hidden="true">›</span>')}</nav>`;
@@ -237,33 +286,43 @@ export function renderTemplatePage(
   seo: ResolvedSeo,
   messageHtml: string,
   related: ResolvedSeo[],
+  relatedFeatures: ResolvedFeature[],
 ): string {
-  const botBadge = seo.requiresBot
-    ? `<span class="badge badge-bot" title="Includes interactive components">Interactive · needs a bot</span>`
-    : `<span class="badge badge-ok">Works with any webhook</span>`;
+  const botBadge =
+    seo.deliveryMode === "app-owned"
+      ? `<span class="badge badge-bot" title="Discord requires an application-owned webhook">App-owned webhook required</span>`
+      : seo.deliveryMode === "external-link"
+        ? `<span class="badge badge-setup">${escapeHtml(seo.pairsWith ?? "Integration")} setup required</span>`
+        : `<span class="badge badge-ok">Works with any webhook</span>`;
 
-  const botCallout = seo.requiresBot
-    ? `<aside class="callout">
-        <strong>Heads up — this one's interactive.</strong>
-        It includes a clickable ${seo.pairsWith ? `${escapeHtml(seo.pairsWith)} ` : ""}component, so a Discord bot or app must own the webhook for clicks to respond.
-        DWEEB detects this and walks you through pairing it with the ${seo.pairsWith ? `<strong>${escapeHtml(seo.pairsWith)}</strong>` : "matching"} plugin.
+  const botCallout =
+    seo.deliveryMode === "app-owned"
+      ? `<aside class="callout">
+        <strong>This message needs an application-owned webhook.</strong>
+        It contains an interactive ${seo.pairsWith ? `${escapeHtml(seo.pairsWith)} ` : ""}button or menu. Discord rejects interactive components on a person-created webhook; DWEEB walks you through connecting a compatible destination and configuring the ${seo.pairsWith ? `<strong>${escapeHtml(seo.pairsWith)}</strong>` : "matching"} plugin before send.
       </aside>`
-    : "";
+      : seo.deliveryMode === "external-link"
+        ? `<aside class="callout callout-setup">
+        <strong>Set up ${escapeHtml(seo.pairsWith ?? "the linked service")} first.</strong>
+        The message itself works with any Discord webhook, but the linked action depends on an external integration. DWEEB opens the required server setup when you choose this template.
+      </aside>`
+        : "";
 
   const whenToUse = `<section class="block"><h2>When to use it</h2><ul class="ticks">${seo.whenToUse
     .map((w) => `<li>${escapeHtml(w)}</li>`)
     .join("")}</ul></section>`;
 
   const whatsInside = `<section class="block"><h2>What's inside</h2>
-    <p>Built with Discord's Components V2 layout system:</p>
+    <p>Built with Discord's <a href="/guides/discord-components-v2/">Components V2 layout system</a>:</p>
     <ul class="chips">${seo.componentKinds.map((k) => `<li>${escapeHtml(k)}</li>`).join("")}</ul></section>`;
 
   const tips = `<section class="block"><h2>Tips</h2><ul class="ticks">${seo.tips
     .map((t) => `<li>${escapeHtml(t)}</li>`)
     .join("")}</ul></section>`;
 
+  const steps = howToSteps(seo);
   const howto = `<section class="block"><h2>How to use this template</h2>
-    <ol class="steps">${HOWTO_STEPS.map((s) => `<li><strong>${escapeHtml(s.name)}.</strong> ${escapeHtml(s.text)}</li>`).join("")}</ol></section>`;
+    <ol class="steps">${steps.map((s) => `<li><strong>${escapeHtml(s.name)}.</strong> ${escapeHtml(s.text)}</li>`).join("")}</ol></section>`;
 
   const relatedSection = related.length
     ? `<section class="block"><h2>Related templates</h2><div class="card-grid">${related
@@ -273,8 +332,16 @@ export function renderTemplatePage(
         )
         .join("")}</div></section>`
     : "";
+  const featureSection = relatedFeatures.length
+    ? `<section class="block"><h2>Set up the interaction</h2><p>This template is already paired with the matching DWEEB workflow:</p><div class="card-grid">${relatedFeatures
+        .map(
+          (feature) =>
+            `<a class="mini-card" href="${attr(feature.path)}"><span class="mini-emoji" aria-hidden="true">${escapeHtml(feature.emoji)}</span><span class="mini-body"><span class="mini-name">${escapeHtml(feature.h1)}</span><span class="mini-cat">Setup, permissions and working example</span></span></a>`,
+        )
+        .join("")}</div></section>`
+    : "";
 
-  const body = `<main class="wrap">
+  const body = `<main id="main-content" class="wrap">
     ${breadcrumbNav([
       { name: "Home", url: "/" },
       { name: "Templates", url: TEMPLATES_INDEX_PATH },
@@ -289,7 +356,7 @@ export function renderTemplatePage(
         <h1>${escapeHtml(seo.h1)}</h1>
         <p class="lede">${escapeHtml(seo.intro)}</p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="${attr(seo.appUrl)}">Open in DWEEB →</a>
+          <a class="btn btn-primary" href="${attr(seo.appUrl)}" data-analytics="template" data-analytics-id="${attr(seo.slug)}" data-analytics-location="hero">Use this template free →</a>
           <a class="btn btn-ghost" href="${TEMPLATES_INDEX_PATH}">Browse all templates</a>
         </div>
       </header>
@@ -309,10 +376,11 @@ export function renderTemplatePage(
       <section class="cta-band">
         <h2>Ready to use this template?</h2>
         <p>Open it in DWEEB, customize it for your server, and send it in under a minute.</p>
-        <a class="btn btn-primary btn-lg" href="${attr(seo.appUrl)}">Open “${escapeHtml(seo.h1.replace(/ Template$/, ""))}” in DWEEB →</a>
+        <a class="btn btn-primary btn-lg" href="${attr(seo.appUrl)}" data-analytics="template" data-analytics-id="${attr(seo.slug)}" data-analytics-location="body">Use “${escapeHtml(seo.h1.replace(/ Template$/, ""))}” →</a>
       </section>
 
       ${faqSection(seo.faq)}
+      ${featureSection}
       ${relatedSection}
     </article>
   </main>`;
@@ -325,28 +393,16 @@ export function renderTemplatePage(
     description: seo.description,
     url: seo.url,
     image: seo.ogImage,
+    thumbnailUrl: seo.ogImage,
+    dateModified: TEMPLATES_LASTMOD,
+    mainEntityOfPage: { "@type": "WebPage", "@id": `${seo.url}#webpage` },
     inLanguage: "en",
     keywords: seo.keywords.join(", "),
     isAccessibleForFree: true,
     about: "Discord Components V2 message template",
-    isPartOf: { "@type": "WebSite", "@id": `${SITE.origin}/#website` },
+    isPartOf: { "@type": "WebSite", "@id": SITE.websiteId },
     author: { "@id": SITE.orgId },
     publisher: { "@id": SITE.orgId },
-  };
-
-  const howtoLd = {
-    "@context": "https://schema.org",
-    "@type": "HowTo",
-    name: `How to use the ${seo.h1} in Discord`,
-    description: `Open the ${seo.h1} in DWEEB, customize it, and send it to your Discord server through a webhook.`,
-    image: seo.ogImage,
-    totalTime: "PT2M",
-    step: HOWTO_STEPS.map((s, i) => ({
-      "@type": "HowToStep",
-      position: i + 1,
-      name: s.name,
-      text: s.text,
-    })),
   };
 
   return htmlDocument({
@@ -354,8 +410,12 @@ export function renderTemplatePage(
     description: seo.description,
     canonical: seo.url,
     ogImage: seo.ogImage,
-    keywords: seo.keywords,
+    imageAlt: `${seo.h1} preview in the DWEEB Discord message builder`,
     ogType: "article",
+    pageType: "template",
+    pageId: seo.slug,
+    modifiedTime: TEMPLATES_LASTMOD,
+    section: seo.category,
     jsonLd: [
       jsonLd(
         breadcrumbLd([
@@ -365,7 +425,6 @@ export function renderTemplatePage(
         ]),
       ),
       jsonLd(creativeWork),
-      jsonLd(howtoLd),
       jsonLd(faqLd(seo.faq)),
     ],
     body,
@@ -377,19 +436,20 @@ export function renderTemplatePage(
 // ────────────────────────────────────────────────────────────────────────────
 
 export function renderIndexPage(all: ResolvedSeo[]): string {
-  const title = `Discord Message Templates — ${all.length} free Components V2 templates | DWEEB`;
-  const description = `${all.length} free, customizable Discord message templates — welcome messages, rules, announcements, reaction roles, giveaways, tickets and more. Open any one in DWEEB, edit it, and post through a webhook.`;
+  const title = `Discord Message Templates — ${all.length} Free Designs | DWEEB`;
+  const description = `Browse ${all.length} free Discord message templates for welcomes, rules, announcements, roles, giveaways, tickets and more. Customize one and send it by webhook.`;
 
   const groups = TEMPLATE_CATEGORIES.map((cat) => ({
     cat,
     blurb: CATEGORY_BLURB[cat] ?? "",
     items: all.filter((t) => t.category === cat),
   })).filter((g) => g.items.length > 0);
+  const ordered = groups.flatMap((group) => group.items);
 
   const groupsHtml = groups
     .map(
       (g) => `<section class="cat-block">
-        <h2 class="cat-title">${escapeHtml(g.cat)}</h2>
+        <h2 class="cat-title">${escapeHtml(g.cat === "Roles" ? "Role integrations" : g.cat)}</h2>
         ${g.blurb ? `<p class="cat-blurb">${escapeHtml(g.blurb)}</p>` : ""}
         <div class="card-grid">${g.items
           .map(
@@ -398,7 +458,13 @@ export function renderIndexPage(all: ResolvedSeo[]): string {
                 <span class="tpl-emoji" aria-hidden="true">${escapeHtml(t.emoji)}</span>
                 <span class="tpl-name">${escapeHtml(t.h1.replace(/ Template$/, ""))}</span>
                 <span class="tpl-desc">${escapeHtml(t.description)}</span>
-                ${t.requiresBot ? `<span class="badge badge-bot">Interactive</span>` : ""}
+                ${
+                  t.deliveryMode === "app-owned"
+                    ? `<span class="badge badge-bot">App-owned webhook</span>`
+                    : t.deliveryMode === "external-link"
+                      ? `<span class="badge badge-setup">Setup required</span>`
+                      : `<span class="badge badge-ok">Any webhook</span>`
+                }
               </a>`,
           )
           .join("")}</div>
@@ -406,14 +472,14 @@ export function renderIndexPage(all: ResolvedSeo[]): string {
     )
     .join("");
 
-  const body = `<main class="wrap">
+  const body = `<main id="main-content" class="wrap">
     ${breadcrumbNav([{ name: "Home", url: "/" }, { name: "Templates" }])}
     <header class="hero">
       <span class="chip">📋 Templates</span>
       <h1>Discord Message Templates</h1>
-      <p class="lede">A growing library of free, ready-to-use Discord message templates built with Components V2 — welcome messages, server rules, announcements, reaction-role menus, giveaways, support tickets and more. Open any template in DWEEB, customize every word, colour and link, then post it through a webhook. Static templates need no bot, and the core builder needs no account.</p>
+      <p class="lede">A growing library of free, ready-to-use Discord message templates built with Components V2 — welcome messages, server rules, announcements, role menus, giveaways, support tickets and more. Open any template in DWEEB, customize every word, colour and link, then send it to Discord. Each card makes its webhook and integration requirements clear.</p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="/">Open the builder →</a>
+        <a class="btn btn-primary" href="/?entry=template%3Aindex" data-analytics="template" data-analytics-id="index" data-analytics-location="hero">Build a Discord message →</a>
       </div>
     </header>
     ${groupsHtml}
@@ -430,7 +496,7 @@ export function renderIndexPage(all: ResolvedSeo[]): string {
     mainEntity: {
       "@type": "ItemList",
       numberOfItems: all.length,
-      itemListElement: all.map((t, i) => ({
+      itemListElement: ordered.map((t, i) => ({
         "@type": "ListItem",
         position: i + 1,
         url: t.url,
@@ -444,7 +510,11 @@ export function renderIndexPage(all: ResolvedSeo[]): string {
     description,
     canonical: TEMPLATES_INDEX_URL,
     ogImage: TEMPLATES_OG_INDEX,
+    imageAlt: `A gallery of ${all.length} customizable Discord message templates in DWEEB`,
     ogType: "website",
+    pageType: "template",
+    pageId: "index",
+    modifiedTime: TEMPLATES_LASTMOD,
     jsonLd: [
       jsonLd(
         breadcrumbLd([
@@ -495,11 +565,14 @@ img{max-width:100%}
 .chip{display:inline-block;background:var(--panel);border:1px solid var(--border);color:var(--muted);font-size:13px;padding:5px 12px;border-radius:999px;font-weight:600}
 .badge{display:inline-block;font-size:12px;padding:5px 11px;border-radius:999px;font-weight:600}
 .badge-bot{background:#3a2d12;color:#f0b232;border:1px solid #5a4418}
-.badge-ok{background:#13321f;color:#3ba55d;border:1px solid #1d4a2e}
+.badge-setup{background:#2d2342;color:#c9a7ff;border:1px solid #4d3a70}
+.badge-ok{background:#13321f;color:#49c96c;border:1px solid #1d4a2e}
 h1{font-size:clamp(28px,5vw,40px);margin:6px 0 14px;letter-spacing:-.5px}
 .lede{font-size:18px;color:var(--muted);margin:0 0 22px;max-width:62ch}
+.byline{margin:-10px 0 20px;color:var(--dim);font-size:13px}
 
 .cta-row{display:flex;flex-wrap:wrap;gap:12px}
+.cta-note{margin:10px 0 0;color:var(--dim);font-size:13px}
 .btn{display:inline-block;padding:12px 20px;border-radius:10px;font-weight:600;font-size:15px;border:1px solid transparent;cursor:pointer}
 .btn:hover{text-decoration:none}
 .btn-primary{background:var(--accent);color:#fff!important}
@@ -510,6 +583,8 @@ h1{font-size:clamp(28px,5vw,40px);margin:6px 0 14px;letter-spacing:-.5px}
 
 .callout{background:#2b2412;border:1px solid #5a4418;border-radius:var(--radius);padding:14px 18px;margin:0 0 26px;color:#f5e3bf;font-size:15px}
 .callout strong{color:#fbe6b8}
+.callout-setup{background:#251f33;border-color:#4d3a70;color:#ded2f2}
+.callout-setup strong{color:#e7d9ff}
 
 .block{margin:30px 0;padding-top:6px}
 .block h2{font-size:22px;margin:0 0 14px}
@@ -521,6 +596,16 @@ h1{font-size:clamp(28px,5vw,40px);margin:6px 0 14px;letter-spacing:-.5px}
 .steps{margin:0;padding-left:22px;display:grid;gap:11px}
 .steps li{padding-left:4px}
 .steps strong{color:#f2f3f5}
+.prose p{color:var(--muted);max-width:74ch;margin:0 0 14px}
+.prose p+p{margin-top:12px}
+.table-scroll{overflow-x:auto;margin:16px 0 20px;border:1px solid var(--border);border-radius:12px}
+table{width:100%;border-collapse:collapse;min-width:620px;background:var(--panel);font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:11px 13px;border-bottom:1px solid var(--border)}
+th{color:#f2f3f5;background:#292b30}
+td{color:var(--muted)}
+tbody tr:last-child td{border-bottom:0}
+.code-block{overflow:auto;margin:16px 0 20px;padding:18px;background:#111214;border:1px solid var(--border);border-radius:12px;color:#e3e5e8;line-height:1.55;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:2}
+.sources ul{margin:0;padding-left:22px;display:grid;gap:8px}
 
 .preview-block{margin:8px 0 30px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--panel)}
 .preview-head{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);padding:10px 16px;border-bottom:1px solid var(--border);font-weight:700}
@@ -551,7 +636,10 @@ h1{font-size:clamp(28px,5vw,40px);margin:6px 0 14px;letter-spacing:-.5px}
 .tpl-emoji{font-size:26px}
 .tpl-name{font-weight:700;color:#f2f3f5;font-size:16px}
 .tpl-desc{font-size:13px;color:var(--muted)}
-.tpl-card .badge-bot{position:absolute;top:14px;right:14px}
+.tpl-card>.badge{position:absolute;top:14px;right:14px}
+
+.skip-link{position:fixed;left:12px;top:10px;z-index:20;transform:translateY(-160%);background:#fff;color:#111;padding:8px 12px;border-radius:8px;font-weight:700}
+.skip-link:focus{transform:none}
 
 .cat-block{margin:34px 0}
 .cat-title{font-size:24px;margin:0 0 4px}
@@ -631,6 +719,10 @@ h1{font-size:clamp(28px,5vw,40px);margin:6px 0 14px;letter-spacing:-.5px}
 
 .dwx-file{display:flex;align-items:center;gap:10px;background:#1e1f22;border:1px solid var(--border);border-radius:8px;padding:10px 13px;color:var(--muted);font-size:14px}
 
+@media(max-width:700px){
+  .site-nav>a:not(.nav-cta){display:none}
+  .site{backdrop-filter:none}
+}
 @media(max-width:560px){
   .site{padding:14px 16px}
   .wrap{padding:20px 16px 8px}

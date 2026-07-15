@@ -676,7 +676,12 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
             {shown.length > 0 ? (
               <div className={styles.grid}>
                 {visibleCards.map((c, i) => (
-                  <GalleryCard key={c.key} card={c} eagerThumb={i < EAGER_THUMBNAILS} />
+                  <GalleryCard
+                    key={c.key}
+                    card={c}
+                    eagerThumb={i < EAGER_THUMBNAILS}
+                    priorityThumb={i === 0}
+                  />
                 ))}
                 {shown.length > visibleCards.length ? (
                   // Keyed on the revealed count so each reveal re-arms a fresh

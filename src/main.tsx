@@ -3,7 +3,10 @@ import { createRoot } from "react-dom/client";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { isActivityMode } from "@/core/activity/runtime";
 import { installCrashReporter } from "@/core/telemetry/reporter";
+import { trackAnalytics } from "@/core/telemetry/analytics";
 import "@/styles/global.css";
+
+const bootStartedAt = performance.now();
 
 // Trap uncaught errors and dropped promises as early as possible — before either
 // surface boots — so a crash during startup is reported too. Self-gates to a
@@ -45,6 +48,15 @@ async function bootActivity(): Promise<void> {
 }
 
 async function bootWeb(): Promise<void> {
+  // Start the editor chunk immediately. The common path used to wait for two
+  // OAuth chunks, install/acquisition helpers and service-worker registration
+  // before even discovering App, leaving the first paint idle on cold mobile
+  // connections. OAuth-return popups are rare; accepting this speculative
+  // fetch there removes a full serial network stage for every real visit.
+  const appPromise = import("@/app/App");
+  const installPromptPromise = import("@/core/pwa/installPrompt");
+  const acquisitionPromise = import("@/core/seo/acquisition");
+
   // When we're an OAuth popup returning (webhook create / login / add-bot), hand
   // the result back to the window that opened us and close — never boot the full
   // app in the popup. These flows are web-only, so they're imported here rather
@@ -67,27 +79,74 @@ async function bootWeb(): Promise<void> {
   // (which happens well after this runs), and capturing it lets the Builder's
   // "Install app" menu replay the real native dialog on demand (see
   // core/pwa/installPrompt). A no-op on browsers that never fire it.
-  const { captureInstallPrompt } = await import("@/core/pwa/installPrompt");
+  const [{ App }, { captureInstallPrompt }, { captureSeoAcquisition }] = await Promise.all([
+    appPromise,
+    installPromptPromise,
+    acquisitionPromise,
+  ]);
   captureInstallPrompt();
-
-  // Register the precache service worker (production only — the dev SW would
-  // fight HMR). A new deploy installs in the background and waits (see the
-  // `registerType: "prompt"` rationale in vite.config.ts), so this never
-  // hot-swaps chunks under an open tab. When it's ready we surface a persistent
-  // Discord-style "Update" button (see `UpdatePrompt`); clicking it activates the
-  // waiting worker via this same `updateSW` and reloads onto the new build.
-  if (import.meta.env.PROD) {
-    const [{ registerSW }, { useUpdateStore }] = await Promise.all([
-      import("virtual:pwa-register"),
-      import("@/core/state/updateStore"),
-    ]);
-    const updateSW = registerSW({
-      onNeedRefresh() {
-        useUpdateStore.getState().markReady(updateSW);
-      },
+  captureSeoAcquisition();
+  let finishedBoot = false;
+  const finishBoot = (event: Event) => {
+    if (finishedBoot) return;
+    finishedBoot = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new Event("dweeb:app-ready"));
+        const surface =
+          event instanceof CustomEvent && event.detail?.surface === "directory"
+            ? "directory"
+            : "builder";
+        trackAnalytics("app_surface_ready", {
+          boot_ms: performance.now() - bootStartedAt,
+          surface,
+        });
+        schedulePwaRegistration();
+      });
     });
-  }
-
-  const { App } = await import("@/app/App");
+  };
+  // App reports when either the editor or the lazy first-visit gallery has
+  // actually committed. Measuring the lightweight Suspense placeholder would
+  // understate boot time and let analytics/precache race the critical surface.
+  window.addEventListener("dweeb:surface-ready", finishBoot, { once: true });
+  // A directory view is an interactive landing surface, not builder
+  // activation. Count `builder_ready` only once the actual editor commits.
+  window.addEventListener(
+    "dweeb:builder-ready",
+    () => trackAnalytics("builder_ready", { boot_ms: performance.now() - bootStartedAt }),
+    { once: true },
+  );
   mount(<App />);
+}
+
+/**
+ * Install/update the offline worker only after the first app paint. Workbox
+ * downloads every precache entry during registration; doing that before mount
+ * made optional offline bytes compete with the editor and its media for LCP.
+ */
+function schedulePwaRegistration(): void {
+  if (!import.meta.env.PROD) return;
+  const run = () => void registerWebPwa();
+  // A first visit commits a lightweight shell before its lazy gallery becomes
+  // interactive. Give that critical chunk a real head start; rIC alone can run
+  // immediately in the network gap and make Workbox's full precache compete.
+  globalThis.setTimeout(() => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(run, { timeout: 5_000 });
+    } else {
+      globalThis.setTimeout(run, 1_500);
+    }
+  }, 8_000);
+}
+
+async function registerWebPwa(): Promise<void> {
+  const [{ registerSW }, { useUpdateStore }] = await Promise.all([
+    import("virtual:pwa-register"),
+    import("@/core/state/updateStore"),
+  ]);
+  const updateSW = registerSW({
+    onNeedRefresh() {
+      useUpdateStore.getState().markReady(updateSW);
+    },
+  });
 }

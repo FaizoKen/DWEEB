@@ -3,13 +3,16 @@ import { useMessageStore } from "@/core/state/messageStore";
 import { cn } from "@/lib/cn";
 import { useResolvedMediaUrl } from "./useResolvedMediaUrl";
 import styles from "./ThumbnailRenderer.module.css";
+import { usePreviewMediaPriority } from "../mediaPriorityContext";
 
 export function ThumbnailRenderer({ node }: { node: ThumbnailComponent }) {
   // Reveal follows the editor selection: clicking the thumbnail selects it
   // (which reveals it), and selecting anything else re-blurs it.
   const selectedId = useMessageStore((s) => s.selectedId);
   const obscured = node.spoiler === true && selectedId !== node._id;
-  const src = useResolvedMediaUrl(node.media.url ?? "");
+  const url = node.media.url ?? "";
+  const src = useResolvedMediaUrl(url);
+  const priority = usePreviewMediaPriority(url);
   const usesAttachmentId = !node.media.url && typeof node.media.attachment_id === "string";
   const hasAlt = Boolean(node.description);
   return (
@@ -18,7 +21,8 @@ export function ThumbnailRenderer({ node }: { node: ThumbnailComponent }) {
         <img
           src={src}
           alt={node.description || ""}
-          loading="lazy"
+          loading={priority ? "eager" : "lazy"}
+          fetchPriority={priority ? "high" : "auto"}
           decoding="async"
           referrerPolicy="no-referrer"
         />

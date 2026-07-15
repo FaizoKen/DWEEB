@@ -18,6 +18,7 @@ import { cn } from "@/lib/cn";
 import { usePreviewClose } from "../previewCloseContext";
 import { useResolvedMediaUrl } from "./useResolvedMediaUrl";
 import { mediaKindFromName, mediaNameFromUrl } from "./mediaKind";
+import { usePreviewMediaPriority } from "../mediaPriorityContext";
 import styles from "./MediaGalleryRenderer.module.css";
 
 export function MediaGalleryRenderer({ node }: { node: MediaGalleryComponent }) {
@@ -79,6 +80,7 @@ function GalleryItem({
   // reveals it), and selecting another item/node re-blurs this one.
   const obscured = item.spoiler === true && !selected;
   const url = item.media.url ?? "";
+  const priority = usePreviewMediaPriority(url);
   const src = useResolvedMediaUrl(url);
   const usesAttachmentId = !item.media.url && typeof item.media.attachment_id === "string";
   const hasAlt = Boolean(item.description);
@@ -118,7 +120,8 @@ function GalleryItem({
           <img
             src={src}
             alt={item.description || ""}
-            loading="lazy"
+            loading={priority ? "eager" : "lazy"}
+            fetchPriority={priority ? "high" : "auto"}
             decoding="async"
             referrerPolicy="no-referrer"
           />

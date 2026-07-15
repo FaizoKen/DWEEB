@@ -46,18 +46,18 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   a **DM/group-DM launch** gets a server picker, since it has no guild of its own to post into.
   Do not add a server switcher to the Activity bar — this was tried (d76adda) and reverted. A post
   aimed at another server can't travel with the room, so the post and the collaboration silently come
-  apart, and both workarounds are worse: broadcasting that channel id would move *their* post (peers
+  apart, and both workarounds are worse: broadcasting that channel id would move _their_ post (peers
   may not even be members of the server you picked), and a `target` frame widened to carry a guild
   leaves a peer outside it unable to load its channels or resolve their post gate. Posting to another
   server is the web app's job — it's bound to no server, and the bar's "Open on web" hands the draft
-  over. Guarded by `core/activity/destination.test.ts`. Because the channel *does* move, the
+  over. Guarded by `core/activity/destination.test.ts`. Because the channel _does_ move, the
   Activity's **Restore** (`RestoreDialog` + `core/activity/restoreTarget.ts`) turns a pasted message
-  link into a channel switch instead of a dead end: a link into a *sibling channel of this same
-  server* used to be mistaken for a `thread_id` and handed to Discord, which answered 400 "Unknown
+  link into a channel switch instead of a dead end: a link into a _sibling channel of this same
+  server_ used to be mistaken for a `thread_id` and handed to Discord, which answered 400 "Unknown
   Channel" — now `planRestore` classifies it and the dialog **confirms switching the room to that
   channel** before reading (only on a hit does the room actually move, keeping the in-place Update
   wired). A link's channel segment that isn't a known channel is still treated as a thread (forum/media
-  post); a link into a *different server* is refused with a pointer to "Open on web". Only the channel
+  post); a link into a _different server_ is refused with a pointer to "Open on web". Only the channel
   is ever offered — never the server.
 - **Safe-area overlays**: portaled/fixed overlays must use the `--app-sait`/`--app-saib` and
   `--app-sail`/`--app-sair` tokens from `tokens.css`, never raw
@@ -66,7 +66,7 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   is open the preview scroll area must reserve the assistant's shared height + safe-area-aware
   bottom offset. The final rendered message must be scrollable fully above the assistant card.
 - **ResizeObserver state must hop a frame.** Resize notifications are delivered mid-frame, after
-  layout and before paint: a `setState` *inside* the callback re-renders and runs layout effects in
+  layout and before paint: a `setState` _inside_ the callback re-renders and runs layout effects in
   the same delivery cycle, so if that resizes the observed element (the action bars' collapse
   ladder does — it changes the bar's content), the browser gives up and fires a global
   "ResizeObserver loop completed with undelivered notifications" error. Nothing is broken, but it
@@ -74,18 +74,18 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `lib/useBarWidth`, which defers to `requestAnimationFrame`; keep new observers on that hook (or
   the same rAF hop) rather than calling `setState` in the callback. Belt and braces: known browser
   non-errors (the RO loop notice) are dropped by the crash reporter (`core/telemetry/crashReport.ts`)
-  *and* by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
+  _and_ by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
   cache, so stale clients keep beaconing long after a fix.
 - **`Field` rewrites the caller's element tree — it must never descend into a render prop.**
   `ui/Field`'s `wireControl` walks the tree its render-prop child returns and clones
   `aria-describedby`/`aria-errormessage`/`aria-invalid` onto the element carrying the control id.
   A `children` that is a **function** (`Menu`, a nested `Field`) is not a tree — the subtree only
-  exists once that component *calls* it. Recursing anyway is destructive, not just useless: we run
+  exists once that component _calls_ it. Recursing anyway is destructive, not just useless: we run
   **Preact**, whose `Children.map` wraps a lone child into an array, so the clone writes `[fn]` back
   over `children` and the component then invokes an array. This shipped in 0.12.0 and took the whole
   app down to the ErrorBoundary (`TypeError: children is not a function`) the first time anyone
   opened the emoji picker — `EmojiField` renders a `<Menu>` inside its `<Field>`. Note the throw
-  surfaces in the *child*, far from the line at fault. Guarded by `src/ui/Field.test.ts`, which runs
+  surfaces in the _child_, far from the line at fault. Guarded by `src/ui/Field.test.ts`, which runs
   against `preact/compat` (aliased in `vitest.config.ts`) because React's `Children.map` does not
   wrap and would hide the bug.
 - **Adding an interaction plugin** touches the crate, compose service/volume + dispatcher
@@ -105,6 +105,31 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   (build **throws** if a template has no SEO entry), check `scripts/seo/features.ts` and
   `video/src/data.ts` references, and regenerate committed OG images with
   `bun add -d sharp && bun scripts/gen-template-og.ts && bun remove sharp`.
+- **Static discovery is a build contract.** `scripts/gen-template-pages.ts` generates the
+  template and feature catalogues, `/guides/*`, `/discord-webhook-builder/`, and the image
+  sitemap. Build-critical generator code is covered by `tsconfig.seo.json`; `bun run build` then
+  runs `scripts/seo/audit.ts`, which fails on broken sitemap
+  targets/internal links, duplicate or missing metadata, invalid JSON-LD, missing/wrong-size
+  social cards, stale/future dates, late charset declarations, thin detail pages, and orphaned
+  templates. Add new discovery routes to that generator rather than hand-writing unverified
+  files in `dist/`; keep source-backed guide claims and `lastmod` dates honest.
+- **Search attribution is first-party and privacy-bounded.** Static CTAs use
+  `entry=<landing|template|feature|guide>:<public-slug>` (never internal UTM tags), and optional
+  `intent=` values may only open a non-mutating app surface. `gtag-init.js` drops hashes,
+  Discord/OAuth/billing identifiers, arbitrary queries, and exact short-link ids by sending only
+  the controlled canonical plus a referrer's origin; acquisition ids and product-event fields use
+  exact allowlists. Keep GA Enhanced Measurement disabled (especially outbound clicks, site search,
+  and history pageviews), because those automatic events bypass the repository's field filters.
+  Never add message content, webhook URLs/tokens, guild/app/message ids, share payloads, or
+  free-form text to analytics.
+- **The service worker has a narrow navigation allowlist.** Only `/` and valid `/s/<id>` routes
+  may fall back to the SPA shell (`src/core/seo/navigationRoutes.ts`). Every current or future
+  discovery/legal route must receive its real static HTML. Registration has a real post-paint
+  delay so precaching cannot race the lazy first-visit gallery; the full versioned-chunk precache
+  protects old open tabs across deployments.
+- Successful Pages deploys submit the deployed sitemap through IndexNow using the public root
+  key and `scripts/seo/submit-indexnow.mjs`. The notification is best-effort and must never fail
+  or roll back an otherwise healthy deploy.
 - **Share-token golden fixtures**: regenerate only via `bun run gen:golden` after a version bump — never hand-edit.
 - **Bot permission union** is `805306385`; changing it requires editing
   `src/core/guild/config.ts` + 4 plugin `config.rs` files and per-server bot re-invites.
@@ -150,7 +175,7 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   first pick), and that decision is frozen per dialog open so an in-dialog pick doesn't yank
   the list away mid-flow.
 - **Env config fails loudly, never silently.** `config.rs` trims every value (`normalize`), and a
-  *present but unparseable* value is a boot error rather than a fall back to the default —
+  _present but unparseable_ value is a boot error rather than a fall back to the default —
   `parse_bool` accepts only `1/true/yes/on` + `0/false/no/off` and rejects anything else. This is
   load-bearing, not pedantry: an untrimmed `REQUIRE_MANAGE_GUILD=true ` used to parse as **false**
   and silently switch off the gate restricting users to servers they manage (same shape drops
@@ -158,13 +183,13 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   unrecognized" parser.
 - **Durable stores must have absolute paths.** Every `*_DB_PATH` (shortlink, schedule, library,
   activity-draft, stripe) defaults to a bare filename, which resolves against the container's
-  working directory — *not* the mounted volume — so the data is destroyed on the next deploy with
+  working directory — _not_ the mounted volume — so the data is destroyed on the next deploy with
   no error. compose passes `${X:-/data/x.db}`; the server now also checks itself and logs a loud
   boot WARN naming each enabled store on a relative path. `STRICT_DB_PATHS=true` promotes that to a
   hard boot failure (set it in prod once every path is absolute). Add any new durable store to
   `DurableStores` in `config.rs`.
 - **Proxy health vs readiness.** `/health` is bare liveness (static 200, no deps). `/ready`
-  probes every *present* SQLite store (shortlinks, schedules, activity drafts, library, Stripe
+  probes every _present_ SQLite store (shortlinks, schedules, activity drafts, library, Stripe
   mirror) with a nonblocking pool checkout + `SELECT 1` under a two-second per-store deadline,
   so a busy/stuck store returns `503 {"failed":[…]}` even while `/health` still 200s. This proves
   responsiveness, not filesystem writability. Each store exposes an inherent `ping()`; add one
@@ -172,7 +197,7 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   (`server/gatus/config.yaml`, asserts `[BODY].status == ready`).
 - **Global request timeout has exemptions.** `main` wraps the normal routes in a `TimeoutLayer`
   (`REQUEST_TIMEOUT`, 60s) as a backstop for wedged handlers. The room WebSocket and the two
-  32 MiB upload routes (`/api/activity/post`, `/api/activity/edit`) are merged *after* the layer
+  32 MiB upload routes (`/api/activity/post`, `/api/activity/edit`) are merged _after_ the layer
   via `untimed_routes()` and must stay there — a persistent socket / slow large upload must not
   be cut off. Any new long-lived or large-upload route belongs in `untimed_routes()`, not the
   main chain.

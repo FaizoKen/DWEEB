@@ -14,8 +14,9 @@
  * they include a clickable (custom_id) button or a select menu designed to pair
  * with a DWEEB plugin (Tickets, Self Role, Giveaway, Quick Replies…). Those are
  * tagged `requiresBot` because Discord only delivers component interactions to
- * the app that owns the webhook — the gallery surfaces that with a "Bot needed"
- * badge and a "Pairs with …" hint so a beginner knows what to wire up next.
+ * the app that owns the webhook — the gallery surfaces that as "Interactive"
+ * with a "Pairs with …" hint. This flag means an app-owned destination is
+ * required; it does not by itself mean the user must install a server bot.
  */
 
 import {
@@ -47,12 +48,12 @@ const ACCENT = {
 export const TEMPLATE_CATEGORIES = [
   "Featured",
   "Welcome",
-  "Roles",
   "Community",
   "Events",
   "Support",
   "Commerce",
   "Fun",
+  "Roles",
 ] as const;
 
 export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];

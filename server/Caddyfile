@@ -11,7 +11,13 @@
 # cost, less time on the wire) and pin HTTPS.
 (site_defaults) {
 	encode zstd gzip
-	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# These hosts serve APIs, interaction endpoints, plugin configuration
+		# iframes, and operational dashboards — never public discovery content.
+		# Keep them out of search indexes even when an HTML route returns 200.
+		X-Robots-Tag "noindex, nofollow, noarchive"
+	}
 }
 
 # The Discord app's single Interactions Endpoint URL — its own hostname under

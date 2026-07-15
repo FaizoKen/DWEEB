@@ -81,6 +81,8 @@ interface ShareDialogProps {
    * clicked (Send / Share / Restore).
    */
   initialTab?: Tab;
+  /** Feature landing pages can open Send directly in schedule mode. */
+  initialSendWhen?: "now" | "later";
   /**
    * Forwarded to the Send panel: invoked when the user opts to clear the
    * interactive components a non-app webhook can't deliver. The App closes
@@ -99,6 +101,7 @@ export function ShareDialog({
   open,
   onClose,
   initialTab = "send",
+  initialSendWhen = "now",
   onRequestRemoveInteractive,
   initialWebhook,
 }: ShareDialogProps) {
@@ -164,6 +167,7 @@ export function ShareDialog({
             onRequestRemoveInteractive={onRequestRemoveInteractive}
             initialWebhook={initialWebhook}
             onCloseDialog={onClose}
+            initialWhen={initialSendWhen}
           />
         ) : null}
         {tab === "update" ? (

@@ -31,6 +31,7 @@ export const SITE = {
   name: "DWEEB",
   ogImage: "https://dweeb.faizo.net/og-image.png",
   websiteId: "https://dweeb.faizo.net/#website",
+  appId: "https://dweeb.faizo.net/#webapp",
   orgId: "https://dweeb.faizo.net/#organization",
   personId: "https://dweeb.faizo.net/#faizo",
   githubUrl: "https://github.com/FaizoKen/DWEEB",
@@ -42,7 +43,7 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-07-04";
+export const TEMPLATES_LASTMOD = "2026-07-15";
 
 export interface FaqEntry {
   q: string;
@@ -76,7 +77,7 @@ export const CATEGORY_BLURB: Record<string, string> = {
   Featured: "Hand-picked starting points and a full tour of the editor.",
   Welcome: "Greet new members, lay down the rules, and gate access.",
   Roles:
-    "Verify accounts and hand out roles automatically — Genshin, Steam, YouTube, Twitch, birthdays and more, powered by RoleLogic link plugins.",
+    "RoleLogic integrations for Genshin, Steam, YouTube, Twitch and more. These templates post through any webhook, but their linked role actions require RoleLogic setup.",
   Community: "Announcements, changelogs, intros, role menus, suggestions and staff applications.",
   Events: "Events, polls and giveaways that drive engagement.",
   Support: "Help desks and FAQs that cut repeat questions.",
@@ -87,7 +88,7 @@ export const CATEGORY_BLURB: Record<string, string> = {
 export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   showcase: {
     slug: "discord-components-v2-example",
-    title: "Discord Components V2 Example — every block in one message | DWEEB",
+    title: "Discord Components V2 Example & Visual Builder | DWEEB",
     h1: "Discord Components V2 Example Message",
     description:
       "A free Discord Components V2 example showing every building block — containers, sections, buttons, media galleries and more. Open it in DWEEB and customize.",
@@ -146,7 +147,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     title: "Discord Verification Message — one-click verify button | DWEEB",
     h1: "Discord Verification Gate Template",
     description:
-      "A one-click Discord verification message: members tap a verify button, RoleLogic checks where they joined from and grants the matching role. No bot needed on the webhook.",
+      "A one-click Discord verification panel that uses RoleLogic to check member origin and grant a matching role. Posts by webhook; RoleLogic setup required.",
     intro:
       "Gate your server behind a single verify button, powered by the RoleLogic Member Origin Role service. New members tap it, verify in the browser, and get their origin role automatically — while admins track who verified from a dashboard linked right in the message. The button is a plain link, so it posts through any webhook and never expires.",
     whenToUse: [
@@ -160,7 +161,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     title: "Discord Top.gg Vote Rewards — voter role panel | DWEEB",
     h1: "Top.gg Vote Rewards Template",
     description:
-      "A vote-for-us Discord panel that rewards Top.gg voters with a temporary role via RoleLogic. Plain link button — posts through any webhook, no bot needed.",
+      "A vote-for-us Discord panel that rewards Top.gg voters with a temporary role. Posts through any webhook; RoleLogic setup is required for the reward.",
     intro:
       "Turn Top.gg votes into a perk members actually chase. This panel links straight to your server's (or bot's) Top.gg vote page, and the RoleLogic Top.gg Voter Role service grants a temporary Voter role when the vote lands — expiring on a timer you pick, from an hour to a week, so members come back and vote again.",
     whenToUse: [
@@ -202,7 +203,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     title: "Discord Twitch Follower & Sub Roles — real-time | DWEEB",
     h1: "Twitch Follower Role Template",
     description:
-      "A link-your-Twitch panel that grants follower and Tier 1/2/3 subscriber roles in real time via RoleLogic and Twitch EventSub. No bot on the webhook.",
+      "A link-your-Twitch panel for follower and Tier 1/2/3 subscriber roles. Posts through any webhook; RoleLogic and Twitch setup are required.",
     intro:
       "Give your stream community live-updating roles. Members link Twitch once and RoleLogic keeps their Discord roles in sync through EventSub — follows and Tier 1/2/3 subs land in real time, and roles update automatically when a sub lapses or upgrades.",
     whenToUse: [
@@ -272,7 +273,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     title: "Discord Application Form & Quiz Role Template | DWEEB",
     h1: "Form & Quiz Role Template",
     description:
-      "A fill-in-the-form Discord panel: applications, rules quizzes and surveys built in RoleLogic auto-grade answers and grant the role instantly. No bot needed.",
+      "A Discord panel for RoleLogic applications, rules quizzes and surveys that can grade answers and grant roles. Posts by webhook; RoleLogic setup required.",
     intro:
       "Let the form hand out the role. Build an application, rules quiz, poll or survey in RoleLogic, point this panel's button at it, and submissions are auto-graded — grant on a passing score, on specific answers, or on simple submission, with one response per person to keep it fair.",
     whenToUse: [
@@ -411,7 +412,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   "server-directory": {
     slug: "discord-server-directory-template",
-    title: "Discord Server Directory — find any channel, role or member | DWEEB",
+    title: "Discord Server Directory Template & Select Menus | DWEEB",
     h1: "Discord Server Directory Template",
     description:
       "A Discord server directory in one message: search channels, roles and members from select menus and get private, clickable results. Pairs with the Picker plugin.",
@@ -440,10 +441,10 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   "staff-apps": {
     slug: "discord-staff-application-template",
-    title: "Discord Staff Application Template — pop-up form, one per person | DWEEB",
+    title: "Discord Staff Application Form Template | DWEEB",
     h1: "Discord Staff Application Template",
     description:
-      "A Discord staff application template: a recruitment panel whose Apply button opens a pop-up questionnaire, limited to one application per person. Pairs with Modal Form.",
+      "A Discord staff application panel with a pop-up questionnaire, review-channel delivery and an optional one-application-per-person limit.",
     intro:
       "Recruit moderators the organised way. This panel pitches the role — what you look for, what applicants get — and its Apply button opens a full pop-up questionnaire: name, timezone, availability, experience and motivation. Submissions arrive in your review channel, and each member can only apply once, so there's no application channel to police.",
     whenToUse: [
@@ -499,10 +500,10 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   "help-center": {
     slug: "discord-help-center-template",
-    title: "Discord Help Center Template — instant FAQ + topic tickets | DWEEB",
+    title: "Discord Help Center: FAQ & Ticket Template | DWEEB",
     h1: "Discord Help Center Template",
     description:
-      "A complete Discord help center in one message: a self-serve FAQ menu answers common questions instantly, and a topic menu opens private tickets. Two plugins, one panel.",
+      "A Discord help center with a self-serve FAQ menu and private topic tickets. Configure DWEEB's Quick Replies and Tickets plugins in one panel.",
     intro:
       "Turn one message into your server's entire support desk. The first menu answers the questions you get every day on the spot — privately, instantly, no staff needed. The second opens a private ticket on the member's chosen topic for everything the FAQ can't solve. Members self-serve first and escalate second, so your team only sees the tickets that actually need a human.",
     whenToUse: [
@@ -571,7 +572,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   spotlight: {
     slug: "discord-member-spotlight-template",
-    title: "Discord Member Spotlight Template — feature community work | DWEEB",
+    title: "Discord Member Spotlight & Showcase Template | DWEEB",
     h1: "Discord Member Spotlight Template",
     description:
       "A Discord member spotlight template with a borderless gallery to feature community work. Free, no bot needed — customize it and post through any webhook.",
@@ -608,6 +609,10 @@ export interface ResolvedSeo {
   category: string;
   emoji: string;
   requiresBot: boolean;
+  /** How this exact template can be posted and what must be configured first. */
+  deliveryMode: "plain" | "app-owned" | "external-link";
+  /** Registry ids used for reciprocal template → feature/internal links. */
+  pluginIds: string[];
   pairsWith?: string;
   componentKinds: string[];
 }
@@ -633,6 +638,14 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
 
   const path = `/templates/${o.slug}/`;
   const componentKinds = collectComponentKinds(template.message);
+  const pluginIds = uniq((template.pluginSlots ?? []).map((slot) => slot.pluginId));
+  const hasInteractiveSlot = template.pluginSlots?.some((slot) => slot.kind !== "link") ?? false;
+  const hasLinkSlot = template.pluginSlots?.some((slot) => slot.kind === "link") ?? false;
+  const deliveryMode: ResolvedSeo["deliveryMode"] = hasInteractiveSlot
+    ? "app-owned"
+    : hasLinkSlot
+      ? "external-link"
+      : "plain";
 
   const keywords = uniq(
     [
@@ -648,9 +661,12 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
   );
 
   // Bot/webhook framing reused in tips + FAQ.
-  const botNote = template.requiresBot
-    ? `This template includes interactive components, so the ${template.pairsWith ? `${template.pairsWith} ` : ""}button or menu needs a Discord bot or app to own the webhook — a plain webhook can post the message, but clicks won't respond until it's wired up. DWEEB walks you through pairing it with the ${template.pairsWith ?? "matching"} plugin.`
-    : "It posts through any Discord webhook — no bot, app or account required.";
+  const botNote =
+    deliveryMode === "app-owned"
+      ? `This template contains interactive components. Discord rejects it on a person-created webhook; use an application-owned webhook and configure the ${template.pairsWith ?? "matching"} plugin in DWEEB before sending.`
+      : deliveryMode === "external-link"
+        ? `The message posts through any Discord webhook, but its ${template.pairsWith ?? "external integration"} link only works after that service is configured for your server. DWEEB opens the required setup step when you choose the template.`
+        : "It posts through any Discord webhook. No bot or application-owned webhook is required for this static message.";
 
   const tips = uniq([
     ...(o.tips ?? []),
@@ -663,9 +679,12 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
     ...(o.faq ?? []),
     {
       q: "Do I need a bot to use this template?",
-      a: template.requiresBot
-        ? `Posting the message works with any webhook, but its interactive parts (the ${template.pairsWith ? `${template.pairsWith} ` : ""}button or menu) only respond when a Discord bot or app owns the webhook. DWEEB detects this and helps you wire it to the ${template.pairsWith ?? "matching"} plugin.`
-        : "No. This template uses only layout, text, media and link buttons, so it posts through any Discord webhook — no bot, app or account needed.",
+      a:
+        deliveryMode === "app-owned"
+          ? `It needs an application-owned webhook because it contains interactive components; Discord rejects those components on a person-created webhook. DWEEB detects the requirement and guides you through configuring ${template.pairsWith ?? "the matching plugin"}. Some handlers also need the DWEEB bot installed for server permissions.`
+          : deliveryMode === "external-link"
+            ? `You can post the message through any webhook because its button is a normal link. The linked ${template.pairsWith ?? "external service"} must still be configured for your server before the action behind that link works.`
+            : "No. This template contains only layout, text, media and link buttons, so any Discord webhook can post it. No application-owned webhook is required.",
     },
     {
       q: `How do I use this ${template.name} template?`,
@@ -682,7 +701,9 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
     slug: o.slug,
     path,
     url: `${SITE.origin}${path}`,
-    appUrl: `${SITE.origin}/?template=${encodeURIComponent(template.id)}`,
+    appUrl:
+      `${SITE.origin}/?template=${encodeURIComponent(template.id)}` +
+      `&entry=${encodeURIComponent(`template:${o.slug}`)}`,
     ogImage: `${SITE.origin}/templates-og/${o.slug}.png`,
     title: o.title,
     h1: o.h1,
@@ -695,6 +716,8 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
     category: template.category,
     emoji: template.emoji,
     requiresBot: !!template.requiresBot,
+    deliveryMode,
+    pluginIds,
     pairsWith: template.pairsWith,
     componentKinds,
   };

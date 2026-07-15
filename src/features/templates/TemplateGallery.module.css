@@ -88,6 +88,21 @@
   max-width: 60ch;
 }
 
+.discoveryLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 9px;
+  font-size: var(--app-text-xs);
+}
+.discoveryLinks a {
+  color: var(--app-accent-text);
+  text-decoration: none;
+}
+.discoveryLinks a:hover {
+  text-decoration: underline;
+}
+
 .close {
   flex-shrink: 0;
   display: inline-flex;
@@ -1087,6 +1102,8 @@
      client's native top bar and home indicator. */
   .backdrop {
     padding: calc(16px + var(--app-sait)) 16px calc(16px + var(--app-saib));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
   .panel {
     width: 100%;

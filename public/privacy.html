@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-page-type="legal" data-page-id="privacy">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -8,12 +8,15 @@
     <title>Privacy Policy — DWEEB</title>
     <meta
       name="description"
-      content="How DWEEB (Discord Webhook Embed Builder) handles your data. Your drafts and saved data stay in your browser; opt-in features may send data to third parties. Read the full privacy policy."
+      content="How DWEEB handles browser-local drafts, optional connected features, analytics, crash reports, retention and third-party services."
     />
-    <meta name="robots" content="index, follow" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
     <link rel="canonical" href="https://dweeb.faizo.net/privacy" />
+    <link rel="alternate" hreflang="en" href="https://dweeb.faizo.net/privacy" />
+    <link rel="alternate" hreflang="x-default" href="https://dweeb.faizo.net/privacy" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="DWEEB" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:title" content="Privacy Policy — DWEEB" />
     <meta
       property="og:description"
@@ -21,6 +24,11 @@
     />
     <meta property="og:url" content="https://dweeb.faizo.net/privacy" />
     <meta property="og:image" content="https://dweeb.faizo.net/og-image.png" />
+    <meta property="og:image:secure_url" content="https://dweeb.faizo.net/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="DWEEB visual Discord webhook builder" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Privacy Policy — DWEEB" />
     <meta
@@ -28,14 +36,38 @@
       content="How DWEEB handles your data. Drafts stay in your browser; opt-in features may send data to third parties."
     />
     <meta name="twitter:image" content="https://dweeb.faizo.net/og-image.png" />
+    <meta name="twitter:image:alt" content="DWEEB visual Discord webhook builder" />
+    <script defer src="/gtag-init.js"></script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "BreadcrumbList",
         "itemListElement": [
-          { "@type": "ListItem", "position": 1, "name": "DWEEB", "item": "https://dweeb.faizo.net/" },
-          { "@type": "ListItem", "position": 2, "name": "Privacy Policy", "item": "https://dweeb.faizo.net/privacy" }
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "DWEEB",
+            "item": "https://dweeb.faizo.net/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Privacy Policy",
+            "item": "https://dweeb.faizo.net/privacy"
+          }
         ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "@id": "https://dweeb.faizo.net/privacy#webpage",
+        "name": "Privacy Policy — DWEEB",
+        "url": "https://dweeb.faizo.net/privacy",
+        "dateModified": "2026-07-15",
+        "inLanguage": "en",
+        "isPartOf": { "@id": "https://dweeb.faizo.net/#website" }
       }
     </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -59,7 +91,14 @@
         background: var(--bg);
         color: var(--text);
         font-family:
-          "gg sans", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          "gg sans",
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
         line-height: 1.65;
         -webkit-font-smoothing: antialiased;
       }
@@ -149,7 +188,7 @@
     <main>
       <a class="back" href="/">← Back to DWEEB</a>
       <h1>Privacy Policy</h1>
-      <p class="meta">Last updated: 13 July 2026</p>
+      <p class="meta">Last updated: 15 July 2026</p>
 
       <div class="tldr">
         <strong>The short version.</strong> The core editor is local by default and does not require
@@ -163,8 +202,9 @@
 
       <p>
         This policy explains what DWEEB (the "Discord Webhook Embed Builder," "we," "us"), hosted at
-        <a href="https://dweeb.faizo.net">dweeb.faizo.net</a>, does with information when you use the
-        site. DWEEB is free for noncommercial use and source-available; the source code is available at
+        <a href="https://dweeb.faizo.net">dweeb.faizo.net</a>, does with information when you use
+        the site. DWEEB is free for noncommercial use and source-available; the source code is
+        available at
         <a href="https://github.com/FaizoKen/DWEEB" target="_blank" rel="noopener noreferrer"
           >github.com/FaizoKen/DWEEB</a
         >.
@@ -196,16 +236,16 @@
         below describe each case.
       </p>
       <p>
-        <strong>Plugins.</strong> A plugin configuration iframe may request only the editor resources
-        declared in its bundled manifest. Saved-webhook lists contain labels, not tokens. If a plugin
-        needs a webhook credential, DWEEB names the plugin and destination and asks you before sharing
-        that one URL. A stateful plugin retains an approved URL in its own configuration so it can
-        keep handling interactions. Removing the component or clearing browser data does not delete
-        that server-side plugin record. The bundled Modal Form and Self Role services store these
-        plugin configurations in their SQLite databases; treat the plugin operator as a recipient of
-        the credential. Delete or replace the webhook in Discord to revoke access. Plugin
-        configuration and interaction services process the other data needed for the action, so
-        attach and configure only plugins you trust.
+        <strong>Plugins.</strong> A plugin configuration iframe may request only the editor
+        resources declared in its bundled manifest. Saved-webhook lists contain labels, not tokens.
+        If a plugin needs a webhook credential, DWEEB names the plugin and destination and asks you
+        before sharing that one URL. A stateful plugin retains an approved URL in its own
+        configuration so it can keep handling interactions. Removing the component or clearing
+        browser data does not delete that server-side plugin record. The bundled Modal Form and Self
+        Role services store these plugin configurations in their SQLite databases; treat the plugin
+        operator as a recipient of the credential. Delete or replace the webhook in Discord to
+        revoke access. Plugin configuration and interaction services process the other data needed
+        for the action, so attach and configure only plugins you trust.
       </p>
 
       <h2>2. Share links</h2>
@@ -230,14 +270,14 @@
       <h2>3. Sending messages to Discord</h2>
       <p>
         In the web app, clicking <strong>Send</strong>, <strong>Restore</strong>, or update normally
-        makes your browser talk directly to Discord's webhook API. Your webhook URL, message content,
-        and any uploaded files go to Discord. Activity publishing and scheduled posts must instead
-        pass through our proxy so they can work while embedded or after your browser closes. This is
-        governed by
+        makes your browser talk directly to Discord's webhook API. Your webhook URL, message
+        content, and any uploaded files go to Discord. Activity publishing and scheduled posts must
+        instead pass through our proxy so they can work while embedded or after your browser closes.
+        This is governed by
         <a href="https://discord.com/privacy" target="_blank" rel="noopener noreferrer"
           >Discord's Privacy Policy</a
-        >. A webhook URL is a credential — treat it like a password and only share it with people you
-        trust.
+        >. A webhook URL is a credential — treat it like a password and only share it with people
+        you trust.
       </p>
       <p>
         Messages can contain image, video, and other media URLs. Opening a preview or shared design
@@ -250,11 +290,11 @@
         If you choose to sign in with Discord to load a server's roles, channels, and emojis, we use
         Discord's OAuth flow. From it we receive your Discord user ID, your username/display name,
         your avatar, an access token, and the list of servers you can manage. This information is
-        stored in an <strong>encrypted, HttpOnly session cookie</strong> kept in your browser — we do
-        not maintain a server-side account database. The access token is used only to confirm you
-        belong to a server before returning its data, and that data is briefly cached on our proxy to
-        reduce calls to Discord. Signing out clears the session. If you never sign in, none of this
-        applies.
+        stored in an <strong>encrypted, HttpOnly session cookie</strong> kept in your browser — we
+        do not maintain a server-side account database. The access token is used only to confirm you
+        belong to a server before returning its data, and that data is briefly cached on our proxy
+        to reduce calls to Discord. Signing out clears the session. If you never sign in, none of
+        this applies.
       </p>
 
       <h2>5. Server-backed features (optional)</h2>
@@ -270,37 +310,40 @@
           <strong>Server message library.</strong> Server drafts and a rolling history of messages
           posted through DWEEB store the message payload and, where needed for later editing, the
           webhook URL. Sensitive values are sealed at rest. Drafts remain until a server manager
-          deletes them; posted history evicts older entries as the server's plan window fills. People
-          who can manage that Discord server can access its library.
+          deletes them; posted history evicts older entries as the server's plan window fills.
+          People who can manage that Discord server can access its library.
         </li>
         <li>
           <strong>Discord Activity.</strong> Collaborative room state and presence are relayed in
           real time. Recoverable Activity drafts are stored server-side and normally expire after 7
-          days without activity. Publishing and editing are proxied to Discord and may be recorded in
-          the server's posted-message history.
+          days without activity. Publishing and editing are proxied to Discord and may be recorded
+          in the server's posted-message history.
         </li>
         <li>
           <strong>Feedback.</strong> When you submit the feedback form, we receive the category,
-          summary, details, and optional contact you enter. Normal proxy logs may also contain request
-          metadata such as an IP address and browser user agent. The report is relayed to our feedback
-          forum and retained there so maintainers and community members with access to that forum can
-          respond and help improve DWEEB. When you submit from the Discord Activity, the report also
-          includes your verified Discord display name and user ID. Do not include secrets.
+          summary, details, and optional contact you enter. Normal proxy logs may also contain
+          request metadata such as an IP address and browser user agent. The report is relayed to
+          our feedback forum and retained there so maintainers and community members with access to
+          that forum can respond and help improve DWEEB. When you submit from the Discord Activity,
+          the report also includes your verified Discord display name and user ID. Do not include
+          secrets.
         </li>
         <li>
-          <strong>Plans and billing.</strong> Stripe processes checkout and payment details. We keep a
-          limited subscription mirror containing the identifiers and status needed to bind a plan to
-          a Discord server and enforce its quotas; DWEEB does not receive or store full card details.
+          <strong>Plans and billing.</strong> Stripe processes checkout and payment details. We keep
+          a limited subscription mirror containing the identifiers and status needed to bind a plan
+          to a Discord server and enforce its quotas; DWEEB does not receive or store full card
+          details.
         </li>
       </ul>
 
       <h2>6. The AI assistant (optional)</h2>
       <p>
         The optional AI assistant is bring-your-own-key. When you use it, your prompt and your API
-        key are sent <strong>directly from your browser</strong> to the provider or compatible gateway
-        you selected (e.g. OpenAI, Anthropic, Google, Groq, OpenRouter, or your Ollama endpoint).
-        DWEEB does not proxy or store those prompts or keys. Your use of a provider is subject to that
-        provider's privacy policy and terms. A custom endpoint is controlled by whoever operates it.
+        key are sent <strong>directly from your browser</strong> to the provider or compatible
+        gateway you selected (e.g. OpenAI, Anthropic, Google, Groq, OpenRouter, or your Ollama
+        endpoint). DWEEB does not proxy or store those prompts or keys. Your use of a provider is
+        subject to that provider's privacy policy and terms. A custom endpoint is controlled by
+        whoever operates it.
       </p>
 
       <h2>7. Analytics</h2>
@@ -311,30 +354,31 @@
         device and browser type, and may set cookies. This is governed by
         <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer"
           >Google's Privacy Policy</a
-        >. DWEEB does not load Google Analytics when your browser sends Do Not Track or Global
+        >. DWEEB sends a page's public canonical URL rather than the live address bar, reduces a
+        referring URL to its site origin, and limits product events to fixed public fields. Draft
+        hashes, webhook and OAuth values, Discord identifiers, and message text are not analytics
+        fields. DWEEB does not load Google Analytics when your browser sends Do Not Track or Global
         Privacy Control. You can also opt out using the
-        <a
-          href="https://tools.google.com/dlpage/gaoptout"
-          target="_blank"
-          rel="noopener noreferrer"
+        <a href="https://tools.google.com/dlpage/gaoptout" target="_blank" rel="noopener noreferrer"
           >Google Analytics opt-out browser add-on</a
-        > or a content blocker.
+        >
+        or a content blocker.
       </p>
 
       <h2>8. Crash reports (diagnostics)</h2>
       <p>
-        Because DWEEB's editor UI runs in your browser, a bug that breaks it is otherwise
-        invisible to us. When an unexpected runtime error occurs, DWEEB sends a small, automatic
+        Because DWEEB's editor UI runs in your browser, a bug that breaks it is otherwise invisible
+        to us. When an unexpected runtime error occurs, DWEEB sends a small, automatic
         <strong>crash report</strong> to our proxy so we can find and fix it. A report contains only
         technical diagnostics: the error message and a few lines of the code stack trace, the app
         version, and the page <em>path</em> (for example <code>/templates</code>). It
         <strong>never includes your message content</strong> — in particular it never includes the
         <code>#</code> hash fragment where a draft or share link lives — and it carries no account,
-        webhook URL, API key, or other input you typed. Reports are de-duplicated and rate-limited so
-        a single bug can't flood us, and they're written to our short-lived server logs, not a user
-        profile. Because they contain no personal data and are essential to keeping the app working,
-        crash reports aren't separately opt-in. DWEEB suppresses them when your browser sends Do Not
-        Track or Global Privacy Control; a content blocker can suppress them too.
+        webhook URL, API key, or other input you typed. Reports are de-duplicated and rate-limited
+        so a single bug can't flood us, and they're written to our short-lived server logs, not a
+        user profile. Because they contain no personal data and are essential to keeping the app
+        working, crash reports aren't separately opt-in. DWEEB suppresses them when your browser
+        sends Do Not Track or Global Privacy Control; a content blocker can suppress them too.
       </p>
 
       <h2>9. Hosting and server logs</h2>
@@ -358,12 +402,36 @@
       <h2>11. Third-party services</h2>
       <p>DWEEB relies on these third parties, each with its own privacy policy:</p>
       <ul>
-        <li><a href="https://discord.com/privacy" target="_blank" rel="noopener noreferrer">Discord</a> — webhooks, sign-in, and server data.</li>
-        <li><a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Analytics</a> — usage analytics.</li>
-        <li><a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener noreferrer">GitHub Pages</a> — hosting and content delivery.</li>
-        <li><a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer">Stripe</a> — optional checkout and subscription management.</li>
+        <li>
+          <a href="https://discord.com/privacy" target="_blank" rel="noopener noreferrer"
+            >Discord</a
+          >
+          — webhooks, sign-in, and server data.
+        </li>
+        <li>
+          <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer"
+            >Google Analytics</a
+          >
+          — usage analytics.
+        </li>
+        <li>
+          <a
+            href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"
+            target="_blank"
+            rel="noopener noreferrer"
+            >GitHub Pages</a
+          >
+          — hosting and content delivery.
+        </li>
+        <li>
+          <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer">Stripe</a>
+          — optional checkout and subscription management.
+        </li>
         <li>Whichever AI provider you select, if you use the AI assistant.</li>
-        <li>Any plugin you choose to attach to a component — each runs as an independent service with its own privacy policy.</li>
+        <li>
+          Any plugin you choose to attach to a component — each runs as an independent service with
+          its own privacy policy.
+        </li>
         <li>Hosts of external media URLs included in messages you preview or open.</li>
       </ul>
 
@@ -371,14 +439,14 @@
       <p>
         Local data persists until you remove it or clear this site's browser storage. Short links
         expire after 7 days. Activity drafts normally expire after 7 inactive days. Completed or
-        failed schedules are normally swept after 7 days; active schedules remain until completion or
-        cancellation. Server-library drafts remain until deleted, while posted history is a rolling
-        plan-sized window. Stateful plugin configuration remains in that plugin service until its
-        operator removes it; DWEEB currently has no automatic plugin-record deletion when you remove
-        a component. Revoking the Discord webhook immediately makes a retained URL unusable.
-        Subscription records are retained as needed to administer plans, resolve disputes, and meet
-        legal obligations. Operational, security, feedback, and crash-report logs are retained only
-        as long as reasonably needed for those purposes.
+        failed schedules are normally swept after 7 days; active schedules remain until completion
+        or cancellation. Server-library drafts remain until deleted, while posted history is a
+        rolling plan-sized window. Stateful plugin configuration remains in that plugin service
+        until its operator removes it; DWEEB currently has no automatic plugin-record deletion when
+        you remove a component. Revoking the Discord webhook immediately makes a retained URL
+        unusable. Subscription records are retained as needed to administer plans, resolve disputes,
+        and meet legal obligations. Operational, security, feedback, and crash-report logs are
+        retained only as long as reasonably needed for those purposes.
       </p>
 
       <h2>13. Children</h2>
@@ -414,6 +482,8 @@
 
       <footer>
         <a href="/">DWEEB</a>
+        <a href="/discord-webhook-builder/">Webhook Builder</a>
+        <a href="/guides/">Guides</a>
         <a href="/terms">Terms of Service</a>
         <a href="https://github.com/FaizoKen/DWEEB" target="_blank" rel="noopener noreferrer"
           >Source on GitHub</a

@@ -26,11 +26,19 @@ import { resolveSeo, SITE, TEMPLATES_LASTMOD, type ResolvedSeo } from "./seo/con
 import { renderIndexPage, renderTemplatePage } from "./seo/layout";
 import { resolveAllFeatures, FEATURES_LASTMOD } from "./seo/features";
 import { renderFeaturePage, renderFeaturesIndexPage } from "./seo/features-layout";
+import { GUIDES, GUIDES_LASTMOD, PRODUCT_LANDING } from "./seo/guides";
+import {
+  renderGuidePage,
+  renderGuidesIndexPage,
+  renderProductLandingPage,
+} from "./seo/guides-layout";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
 
-const LEGAL_LASTMOD = "2026-06-11";
+const BUILD_DATE = new Date().toISOString().slice(0, 10);
+const PRIVACY_LASTMOD = "2026-07-15";
+const TERMS_LASTMOD = "2026-07-13";
 const MAX_RELATED = 4;
 
 function xmlEscape(s: string): string {
@@ -42,20 +50,65 @@ function xmlEscape(s: string): string {
     .replace(/'/g, "&apos;");
 }
 
-/** Up to {@link MAX_RELATED} related templates: same category first, then the
- *  rest of the catalogue, never the page itself. */
+function stableHash(value: string): number {
+  let hash = 2166136261;
+  for (const char of value) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return hash >>> 0;
+}
+
+/** Similarity-led and deterministically rotated so late catalogue entries also
+ * receive contextual links instead of every page pointing at the first four. */
 function pickRelated(current: ResolvedSeo, all: ResolvedSeo[]): ResolvedSeo[] {
-  const others = all.filter((t) => t.id !== current.id);
-  const sameCat = others.filter((t) => t.category === current.category);
-  const rest = others.filter((t) => t.category !== current.category);
-  return [...sameCat, ...rest].slice(0, MAX_RELATED);
+  const meaningful = (keyword: string) =>
+    ![
+      "discord",
+      "discord template",
+      "discord components v2",
+      "discord webhook",
+      "discord message builder",
+    ].includes(keyword);
+  const currentKeywords = new Set(current.keywords.filter(meaningful));
+  const ranked = all
+    .filter((candidate) => candidate.id !== current.id)
+    .map((candidate) => {
+      const sharedPlugins = candidate.pluginIds.filter((id) =>
+        current.pluginIds.includes(id),
+      ).length;
+      const sharedComponents = candidate.componentKinds.filter((kind) =>
+        current.componentKinds.includes(kind),
+      ).length;
+      const sharedKeywords = candidate.keywords.filter(
+        (keyword) => meaningful(keyword) && currentKeywords.has(keyword),
+      ).length;
+      const score =
+        sharedPlugins * 24 +
+        (candidate.category === current.category ? 8 : 0) +
+        sharedKeywords * 3 +
+        sharedComponents * 2 +
+        (candidate.deliveryMode === current.deliveryMode ? 1 : 0);
+      return { candidate, score, tie: stableHash(`${current.id}|${candidate.id}`) };
+    })
+    .sort((a, b) => b.score - a.score || a.tie - b.tie)
+    .map(({ candidate }) => candidate);
+  // Reserve one slot for the next catalogue item. This creates a complete
+  // crawlable ring (every detail page receives at least one contextual inbound
+  // link) while the other slots remain driven by topical similarity.
+  const index = all.findIndex((item) => item.id === current.id);
+  const neighbour = all[(index + 1) % all.length];
+  const picked = ranked.slice(0, MAX_RELATED - 1);
+  if (
+    neighbour &&
+    neighbour.id !== current.id &&
+    !picked.some((item) => item.id === neighbour.id)
+  ) {
+    picked.push(neighbour);
+  }
+  return picked.slice(0, MAX_RELATED);
 }
 
 interface SitemapEntry {
   loc: string;
   lastmod: string;
-  changefreq: string;
-  priority: string;
   images?: string[];
 }
 
@@ -67,9 +120,7 @@ function buildSitemap(entries: SitemapEntry[]): string {
         .join("\n");
       return `  <url>
     <loc>${xmlEscape(e.loc)}</loc>
-    <lastmod>${e.lastmod}</lastmod>
-    <changefreq>${e.changefreq}</changefreq>
-    <priority>${e.priority}</priority>${images ? "\n" + images : ""}
+    <lastmod>${e.lastmod}</lastmod>${images ? "\n" + images : ""}
   </url>`;
     })
     .join("\n");
@@ -101,13 +152,17 @@ async function main(): Promise<void> {
 
   const all: ResolvedSeo[] = TEMPLATES.map(resolveSeo);
   const byId = new Map(TEMPLATES.map((t) => [t.id, t]));
+  const features = resolveAllFeatures();
 
   // Per-template pages.
   for (const seo of all) {
     const template = byId.get(seo.id)!;
     const messageHtml = renderMessageHtml(template.message);
     const related = pickRelated(seo, all);
-    const html = renderTemplatePage(seo, messageHtml, related);
+    const relatedFeatures = features.filter(
+      (feature) => !!feature.pluginId && seo.pluginIds.includes(feature.pluginId),
+    );
+    const html = renderTemplatePage(seo, messageHtml, related, relatedFeatures);
     await writePage(join("templates", seo.slug, "index.html"), html);
   }
 
@@ -116,7 +171,6 @@ async function main(): Promise<void> {
 
   // ── Feature pages (/features/<slug>/ + /features index) ──────────────────
   const seoById = new Map(all.map((s) => [s.id, s]));
-  const features = resolveAllFeatures();
   for (const feature of features) {
     const previewTpl = feature.previewTemplateId ? byId.get(feature.previewTemplateId) : undefined;
     const previewHtml = previewTpl ? renderMessageHtml(previewTpl.message) : null;
@@ -131,57 +185,73 @@ async function main(): Promise<void> {
   }
   await writePage(join("features", "index.html"), renderFeaturesIndexPage(features));
 
+  // ── Search-led guide cluster + core commercial-intent landing page ───────
+  for (const guide of GUIDES) {
+    await writePage(join("guides", guide.slug, "index.html"), renderGuidePage(guide, GUIDES));
+  }
+  await writePage(join("guides", "index.html"), renderGuidesIndexPage(GUIDES));
+  await writePage(join("discord-webhook-builder", "index.html"), renderProductLandingPage());
+
   // Full sitemap: home + legal + templates index + every template page.
   const sitemap = buildSitemap([
     {
       loc: `${SITE.origin}/`,
-      lastmod: TEMPLATES_LASTMOD,
-      changefreq: "weekly",
-      priority: "1.0",
+      // Vite stamps the app shell's WebApplication + Open Graph modification
+      // dates on every release; keep the sitemap's signal identical.
+      lastmod: BUILD_DATE,
       images: [`${SITE.origin}/og-image.png`, `${SITE.origin}/screenshot.png`],
     },
     {
       loc: `${SITE.origin}/templates/`,
       lastmod: TEMPLATES_LASTMOD,
-      changefreq: "weekly",
-      priority: "0.9",
+      images: [`${SITE.origin}/templates-og/templates.png`],
     },
     ...all.map((t) => ({
       loc: t.url,
       lastmod: TEMPLATES_LASTMOD,
-      changefreq: "monthly",
-      priority: "0.7",
+      images: [t.ogImage],
     })),
     {
       loc: `${SITE.origin}/features/`,
       lastmod: FEATURES_LASTMOD,
-      changefreq: "weekly",
-      priority: "0.9",
+      images: [`${SITE.origin}/features-og/features.png`],
     },
     ...features.map((f) => ({
       loc: f.url,
       lastmod: FEATURES_LASTMOD,
-      changefreq: "monthly",
-      priority: "0.7",
+      images: [f.ogImage],
     })),
     {
+      loc: `${SITE.origin}/guides/`,
+      lastmod: GUIDES_LASTMOD,
+      images: [`${SITE.origin}/guides-og/guides.png`],
+    },
+    ...GUIDES.map((guide) => ({
+      loc: guide.url,
+      lastmod: guide.modified,
+      images: [guide.ogImage],
+    })),
+    {
+      loc: PRODUCT_LANDING.url,
+      lastmod: GUIDES_LASTMOD,
+      images: [PRODUCT_LANDING.ogImage],
+    },
+    {
       loc: `${SITE.origin}/privacy`,
-      lastmod: LEGAL_LASTMOD,
-      changefreq: "yearly",
-      priority: "0.3",
+      lastmod: PRIVACY_LASTMOD,
+      images: [SITE.ogImage],
     },
     {
       loc: `${SITE.origin}/terms`,
-      lastmod: LEGAL_LASTMOD,
-      changefreq: "yearly",
-      priority: "0.3",
+      lastmod: TERMS_LASTMOD,
+      images: [SITE.ogImage],
     },
   ]);
   await writeFile(join(DIST, "sitemap.xml"), sitemap, "utf8");
 
   console.log(
-    `[seo] generated ${all.length} template pages + ${features.length} feature pages ` +
-      `+ /templates & /features indexes + sitemap.xml (${all.length + features.length + 5} urls)`,
+    `[seo] generated ${all.length} templates + ${features.length} features + ${GUIDES.length} guides ` +
+      `+ 4 section/landing pages + home/legal + sitemap.xml (${all.length + features.length + GUIDES.length + 7} urls)`,
   );
 }
 

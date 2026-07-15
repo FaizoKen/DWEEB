@@ -20,7 +20,7 @@
  *     `useAutoSaveDraft` so a refresh restores the in-progress message.
  */
 
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Builder } from "@/features/builder/Builder";
 import { SendCoachMark } from "@/features/builder/SendCoachMark";
 import { useWelcomeAutoOpen } from "@/features/welcome/useWelcomeAutoOpen";
@@ -108,11 +108,25 @@ import { useAutoSaveDraft } from "./useAutoSaveDraft";
 import { useAttachmentGc } from "./useAttachmentGc";
 import { useTemplateDeepLink, readTemplateParam } from "./useTemplateDeepLink";
 import { usePlansDeepLink, readPlansParam } from "./usePlansDeepLink";
+import { readFeatureIntent, stripFeatureIntent } from "./featureIntent";
+import { trackAnalytics } from "@/core/telemetry/analytics";
 
 export function App() {
-  useShareUrlBootstrap();
+  // Share/short links outrank template links when a malformed URL contains
+  // both. Until the selected source settles, keep the showcase's media-heavy
+  // preview out of the tree so it can never flash or download first.
+  const [bootstrapKind] = useState<"share" | "template" | null>(() => {
+    if (readShareTokenFromHash(window.location.hash) || readShortLinkId(window.location.pathname)) {
+      return "share";
+    }
+    return readTemplateParam(window.location.search) ? "template" : null;
+  });
+  const [bootstrapPending, setBootstrapPending] = useState(bootstrapKind !== null);
+  const settleBootstrap = useCallback(() => setBootstrapPending(false), []);
+
+  useShareUrlBootstrap(bootstrapKind === "share", settleBootstrap);
   useDraftOriginBootstrap();
-  useTemplateDeepLink();
+  useTemplateDeepLink(bootstrapKind === "template", settleBootstrap);
   usePlansDeepLink();
   useKeyboardShortcuts();
   useAutoSaveDraft();
@@ -121,6 +135,28 @@ export function App() {
   // landing gallery; see the hook for the gating.
   useWelcomeAutoOpen();
 
+  // Decide the first-visit gallery before the first editor render. The gallery
+  // still opens from an effect (state ownership stays in its store), but the
+  // heavyweight Builder and live Preview remain unmounted in that one-frame
+  // gap and for as long as the full-screen gallery is visible.
+  const [initialGalleryOpening, setInitialGalleryOpening] = useState(() => {
+    if (bootstrapKind || hasReturn(webhookFlow)) return false;
+    if (
+      readPlansParam(window.location.search) ||
+      readCustomBotParam(window.location.search) ||
+      readFeatureIntent(window.location.search)
+    ) {
+      return false;
+    }
+    return shouldAutoOpenGallery();
+  });
+  // On the initial landing-gallery path, avoid paying to mount the full editor
+  // behind a modal the visitor has not dismissed. This latch deliberately
+  // differs from `galleryOpen`: later/manual gallery opens preserve the already
+  // mounted editor, its local UI state, and the opener used for focus return.
+  const [deferEditorForInitialGallery, setDeferEditorForInitialGallery] =
+    useState(initialGalleryOpening);
+
   // The Share dialog is shared by every editor CTA; `shareInitialTab` picks
   // which panel each entry point lands on so each button feels dedicated even
   // though they reuse the same dialog.
@@ -128,6 +164,7 @@ export function App() {
   const [shareInitialTab, setShareInitialTab] = useState<
     "send" | "update" | "share" | "restore" | "json" | "about"
   >("send");
+  const [shareInitialWhen, setShareInitialWhen] = useState<"now" | "later">("now");
   // Latches true on first open so the lazy chunk is fetched once and the dialog
   // stays mounted thereafter (preserving SendPanel's in-progress input).
   const [shareMounted, setShareMounted] = useState(false);
@@ -176,6 +213,20 @@ export function App() {
   // and is reopenable any time from the Builder action bar or the Saved menu.
   const galleryOpen = useTemplateGalleryStore((s) => s.open);
   const openGallery = useTemplateGalleryStore((s) => s.openGallery);
+  const backgroundSuppressed = bootstrapPending || deferEditorForInitialGallery;
+  useEffect(() => {
+    if (deferEditorForInitialGallery && !initialGalleryOpening && !galleryOpen) {
+      setDeferEditorForInitialGallery(false);
+    }
+  }, [deferEditorForInitialGallery, galleryOpen, initialGalleryOpening]);
+  useEffect(() => {
+    if (!backgroundSuppressed) {
+      window.dispatchEvent(
+        new CustomEvent("dweeb:surface-ready", { detail: { surface: "builder" } }),
+      );
+      window.dispatchEvent(new Event("dweeb:builder-ready"));
+    }
+  }, [backgroundSuppressed]);
 
   // The quick-feedback dialog, summoned from the Builder's "More" menu or the
   // About panel. Mounted lazily only while open (its in-progress text resets on
@@ -240,10 +291,14 @@ export function App() {
     setPreviewOpen(true);
   };
 
-  const openShareDialog = (tab: typeof shareInitialTab) => {
+  const openShareDialog = (tab: typeof shareInitialTab, when: "now" | "later" = "now") => {
     setShareMounted(true);
     setShareInitialTab(tab);
+    setShareInitialWhen(when);
     setShareOpen(true);
+    if (tab === "send" || tab === "update") {
+      trackAnalytics("send_dialog_opened", { mode: tab, when });
+    }
   };
 
   // Apply a webhook handed back by the `webhook.incoming` flow — whether from the
@@ -302,24 +357,12 @@ export function App() {
   // we'd be interrupting a dedicated flow: a share/short link being decoded into
   // the editor, or a webhook redirect about to open the Send panel.
   useEffect(() => {
-    if (hasReturn(webhookFlow)) return;
-    if (readShareTokenFromHash(window.location.hash) || readShortLinkId(window.location.pathname)) {
-      return;
-    }
-    // A `?template=` deep link (from a static template page's "Open in DWEEB"
-    // CTA) loads that template straight into the editor — don't shove the
-    // gallery in front of it.
-    if (readTemplateParam(window.location.search)) return;
-    // A `?plans=` deep link (the Activity's "Upgrade" hand-off) opens the pricing
-    // modal — don't also throw the gallery in front of it.
-    if (readPlansParam(window.location.search)) return;
-    // The Activity's custom-bot handoff opens a guild-scoped setup dialog.
-    if (readCustomBotParam(window.location.search)) return;
-    if (!shouldAutoOpenGallery()) return;
+    if (!initialGalleryOpening) return;
     markGalleryAutoOpened();
     openGallery();
+    setInitialGalleryOpening(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialGalleryOpening]);
 
   // Post-setup nudge: the editor's preview is the desktop's side column already,
   // but a mobile sheet — raise it so the user sees the message before tapping
@@ -346,31 +389,55 @@ export function App() {
     openAi();
   };
 
+  // Preserve the exact promise made by a static feature landing page. These
+  // intents only open UI; none posts, connects or mutates external state.
+  useEffect(() => {
+    const intent = readFeatureIntent(window.location.search);
+    if (!intent) return;
+    window.history.replaceState(null, "", stripFeatureIntent(window.location.href));
+    if (intent === "ai") {
+      openAiWithPreview();
+    } else if (intent === "json" || intent === "restore") {
+      openShareDialog(intent);
+    } else {
+      openShareDialog("send", intent === "schedule" ? "later" : "now");
+    }
+    // One-shot landing intent. Local callbacks intentionally read initial state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <>
       <main
         className="app-shell"
         data-preview-open={previewOpen ? "true" : "false"}
         data-ai-open={aiOpen ? "true" : "false"}
+        aria-busy={bootstrapPending ? "true" : undefined}
+        inert={galleryOpen || initialGalleryOpening ? true : undefined}
       >
         <h1 className="sr-only">
-          DWEEB — the visual Discord webhook and embed builder. Build, preview, and send rich
-          Discord messages with Components V2: containers, sections, buttons, select menus, and
-          media.
+          DWEEB — the visual Discord Components V2 builder. Build, preview, and send rich Discord
+          messages with containers, sections, buttons, select menus, and media.
         </h1>
         <section
           className="app-shell__pane app-shell__pane--builder"
           aria-label="Component builder"
           inert={isMobileSheet && previewOpen ? true : undefined}
         >
-          <Builder
-            onShare={() => openShareDialog("share")}
-            onJson={() => openShareDialog("json")}
-            onSend={() => openShareDialog("send")}
-            onUpdate={() => openShareDialog("update")}
-            onRestore={() => openShareDialog("restore")}
-            onAbout={() => openShareDialog("about")}
-          />
+          {backgroundSuppressed ? (
+            <div className="app-bootstrap" role="status">
+              {bootstrapPending ? "Loading your message…" : "Loading templates…"}
+            </div>
+          ) : (
+            <Builder
+              onShare={() => openShareDialog("share")}
+              onJson={() => openShareDialog("json")}
+              onSend={() => openShareDialog("send")}
+              onUpdate={() => openShareDialog("update")}
+              onRestore={() => openShareDialog("restore")}
+              onAbout={() => openShareDialog("about")}
+            />
+          )}
         </section>
         {/* Dismiss scrim for the mobile preview sheet. The sheet only rises to
           85dvh, leaving the top of the builder (action bar + username/avatar)
@@ -388,7 +455,7 @@ export function App() {
           tabIndex={isMobileSheet ? -1 : undefined}
           inert={isMobileSheet && !previewOpen ? true : undefined}
         >
-          {!isMobileSheet || previewMounted ? (
+          {!backgroundSuppressed && (!isMobileSheet || previewMounted) ? (
             <Preview
               onClose={isMobileSheet ? closePreview : undefined}
               swipeProps={isMobileSheet ? swipeProps : undefined}
@@ -407,7 +474,9 @@ export function App() {
             that opens the full preview sheet. Mobile only — on desktop the
             preview is already a permanent side column. Sits above the action
             row, so the corner reads as a stacked widget. */}
-          {isMobileSheet && !previewOpen ? <MiniPreview onOpen={openPreview} /> : null}
+          {!backgroundSuppressed && isMobileSheet && !previewOpen ? (
+            <MiniPreview onOpen={openPreview} />
+          ) : null}
 
           <div className="fab-row">
             {/* "Collaborate in Discord" shortcut, beneath the mini preview on mobile —
@@ -415,7 +484,7 @@ export function App() {
               It stays in the bottom-right action row on desktop, and only renders
               when the proxy can actually mint the invite — the same gate the menu
               item uses. On mobile it hides behind the full preview sheet. */}
-            {(!isMobileSheet || !previewOpen) && collaborateUrl ? (
+            {!backgroundSuppressed && (!isMobileSheet || !previewOpen) && collaborateUrl ? (
               <button
                 type="button"
                 className="collab-fab"
@@ -427,16 +496,18 @@ export function App() {
               </button>
             ) : null}
 
-            <button
-              type="button"
-              className="ai-fab"
-              onClick={openAiWithPreview}
-              data-preview-opener="ai"
-              aria-label="Open the AI assistant"
-            >
-              <SparkleIcon size={20} />
-              <span>AI Assistant</span>
-            </button>
+            {!backgroundSuppressed ? (
+              <button
+                type="button"
+                className="ai-fab"
+                onClick={openAiWithPreview}
+                data-preview-opener="ai"
+                aria-label="Open the AI assistant"
+              >
+                <SparkleIcon size={20} />
+                <span>AI Assistant</span>
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -446,6 +517,7 @@ export function App() {
               open={shareOpen}
               onClose={() => setShareOpen(false)}
               initialTab={shareInitialTab}
+              initialSendWhen={shareInitialWhen}
               onRequestRemoveInteractive={requestRemoveInteractive}
               initialWebhook={incomingWebhook}
             />
@@ -457,11 +529,6 @@ export function App() {
               open={confirmStripOpen}
               onClose={() => setConfirmStripOpen(false)}
             />
-          </Suspense>
-        ) : null}
-        {galleryOpen ? (
-          <Suspense fallback={null}>
-            <TemplateGallery />
           </Suspense>
         ) : null}
         {setupTemplateId ? (
@@ -498,6 +565,17 @@ export function App() {
         <UpdatePrompt />
         <ToastViewport />
       </main>
+      {galleryOpen || initialGalleryOpening ? (
+        <Suspense
+          fallback={
+            <div className="gallery-bootstrap" role="status">
+              Opening your message directory…
+            </div>
+          }
+        >
+          <TemplateGallery />
+        </Suspense>
+      ) : null}
     </>
   );
 }

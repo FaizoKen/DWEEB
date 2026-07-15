@@ -149,6 +149,7 @@ import { webhookFlow } from "@/core/oauth/flows";
 import { copyText } from "@/core/serialization/clipboard";
 import { encodeJson } from "@/core/serialization";
 import { cancelSchedule, createSchedule, isScheduleConfigured } from "@/core/schedule/api";
+import { trackAnalytics } from "@/core/telemetry/analytics";
 import { preserveCreatedScheduleAccess } from "@/core/schedule/accessPersistence";
 import { rememberSchedule, type LocalSchedule } from "@/core/schedule/localStore";
 import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
@@ -253,6 +254,7 @@ export function SendPanel({
   onRequestRemoveInteractive,
   initialWebhook,
   onCloseDialog,
+  initialWhen = "now",
 }: {
   /**
    * Which webhook-message operation this panel performs — POST a brand-new
@@ -281,6 +283,8 @@ export function SendPanel({
    * the gallery's Posted tab.
    */
   onCloseDialog?: () => void;
+  /** Initial send timing for an explicit Schedule landing-page intent. */
+  initialWhen?: "now" | "later";
 } = {}) {
   const message = useMessageStore((s) => s.message);
   const restoredFrom = useMessageStore((s) => s.restoredFrom);
@@ -326,7 +330,8 @@ export function SendPanel({
   const [success, setSuccess] = useState<SendSuccessInfo | null>(null);
   // Send-now vs schedule-for-later. The primary button converts to "Schedule
   // post" while "later" is picked. Only meaningful for a brand-new post.
-  const [when, setWhen] = useState<"now" | "later">("now");
+  const [when, setWhen] = useState<"now" | "later">(initialWhen);
+  useEffect(() => setWhen(initialWhen), [initialWhen]);
   const [scheduleAt, setScheduleAt] = useState<string>(defaultScheduleAt);
   const [scheduling, setScheduling] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -976,6 +981,7 @@ export function SendPanel({
     setScheduleSuccess(
       scheduleSuccessText(res.next_run_at, keepsPermanent, access.kind === "persisted"),
     );
+    trackAnalytics("message_scheduled", { recurrence: "once" });
     pushToast(
       access.kind === "persisted"
         ? "Post scheduled."
@@ -1374,6 +1380,7 @@ export function SendPanel({
           messageId: postedMessageId,
           permanentStatus,
         });
+        trackAnalytics("message_posted", { mode });
       } else if (result.status === 0 && /cancel/i.test(result.error)) {
         // Aborted via the dialog's Cancel — not an error worth surfacing.
         setState({ kind: "idle" });

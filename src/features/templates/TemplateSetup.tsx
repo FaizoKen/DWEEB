@@ -90,6 +90,7 @@ type Slot = InteractiveSlot | LinkSlot;
 
 export function TemplateSetup({ templateId }: { templateId: string }) {
   const close = useTemplateSetupStore((s) => s.close);
+  const preferredPluginId = useTemplateSetupStore((s) => s.preferredPluginId);
   const nudgeToSend = useSendNudgeStore((s) => s.nudge);
   const patchNode = useMessageStore((s) => s.patchNode);
   const message = useMessageStore((s) => s.message);
@@ -104,7 +105,7 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
   const slots = useMemo<Slot[]>(() => {
     if (!template?.pluginSlots?.length) return [];
     const msg = useMessageStore.getState().message;
-    return template.pluginSlots.flatMap((slot): Slot[] => {
+    const resolved = template.pluginSlots.flatMap((slot): Slot[] => {
       if (slot.kind === "link") {
         // A link slot names only the plugin — the live component is the Link
         // button already carrying that plugin's URL (the template ships it
@@ -129,7 +130,14 @@ export function TemplateSetup({ templateId }: { templateId: string }) {
         },
       ];
     });
-  }, [template]);
+    return preferredPluginId
+      ? resolved.sort(
+          (a, b) =>
+            Number(b.manifest.id === preferredPluginId) -
+            Number(a.manifest.id === preferredPluginId),
+        )
+      : resolved;
+  }, [preferredPluginId, template]);
 
   // Which slot's config UI is open (index into `slots`), or null for checklist.
   const [configuring, setConfiguring] = useState<number | null>(null);

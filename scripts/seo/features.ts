@@ -73,8 +73,10 @@ export interface FeatureSeo {
   keywords: string[];
   /** Registry id when this feature is a plugin — cross-links paired templates. */
   pluginId?: string;
-  /** Whether the feature needs a Discord bot/app to respond to clicks. */
+  /** Whether the feature needs a server bot install beyond an app-owned webhook. */
   requiresBot: boolean;
+  /** Optional prerequisite shown prominently beside the delivery-mode setup. */
+  setupNote?: { badge: string; title: string; text: string };
   /** Template id to render as a live preview + drive the "Open in DWEEB" CTA. */
   previewTemplateId?: string;
   /** Builder deep-link path. Defaults to `?template=<previewTemplateId>` or `/`. */
@@ -89,11 +91,11 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "🎭",
     category: "Onboarding & roles",
     accent: 0x5865f2,
-    title: "Discord Self Roles & Reaction Roles — button & menu role bot | DWEEB",
+    title: "Discord Self Roles: Button & Dropdown Role Menu | DWEEB",
     h1: "Discord Self Roles & Reaction Roles",
     tagline: "Let members give themselves roles from a button or menu.",
     description:
-      "Add self-assignable Discord roles from a button or select menu — toggle, give or take, pick-limits, per-role emoji, a role gate and auto-expiring roles. The modern reaction-roles replacement.",
+      "Build a Discord self-role button or dropdown with pick limits, role gates and expiring roles—a modern, visual replacement for reaction roles.",
     intro:
       "Self Role lets members pick their own roles straight from a button or a dropdown menu — no emoji reactions, no clutter. It's the modern replacement for old reaction-role bots: a click toggles, grants or removes a role instantly, unlocking the channels and pings each member actually wants. Build the message visually in DWEEB, wire the button or menu to the Self Role plugin, and it just works.",
     howItWorks: [
@@ -159,11 +161,11 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "🎫",
     category: "Support",
     accent: 0x3ba55d,
-    title: "Discord Ticket Bot — private support tickets from a button | DWEEB",
+    title: "Discord Ticket Bot: Private Support Panels | DWEEB",
     h1: "Discord Ticket Bot",
     tagline: "Open a private support ticket from a button or topic menu.",
     description:
-      "A Discord ticket system: members open a private support channel from a button or topic menu, with an optional intake form, staff claim and close-with-transcript. Build the panel in DWEEB.",
+      "Build a Discord ticket panel that opens private support channels with intake forms, staff claiming and close-with-transcript workflows.",
     intro:
       "Tickets turns a single button into a full support desk. When a member clicks, DWEEB's Tickets plugin spins up a private channel just for them and your staff — no public back-and-forth, no DMs. Add an intake form so people arrive with the details you need, let staff claim a ticket, and close it with a saved transcript. Design the panel visually, then attach the plugin.",
     howItWorks: [
@@ -224,13 +226,13 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "💬",
     category: "Support",
     accent: 0x00a8fc,
-    title: "Discord Auto-Reply & Canned Responses — FAQ button bot | DWEEB",
+    title: "Discord FAQ Button & Canned Reply Tool | DWEEB",
     h1: "Discord Auto-Reply & Canned Responses",
     tagline: "Attach canned answers to a button or self-serve FAQ menu.",
     description:
-      "Attach canned replies to a Discord button or topic menu — each one sends text, links and {user}/{server} variables, privately or publicly, with optional role-gating. No bot needed.",
+      "Build a self-serve Discord FAQ button or menu with private or public canned replies, variables and optional role gating—no bot hosting required.",
     intro:
-      "Quick Replies puts your most-repeated answers one click away. Attach a canned response to a button or a topic menu and DWEEB sends it back instantly — server rules, how to get roles, how to reach staff — privately to the person who asked or publicly to the channel. It supports {user} and {server} variables and optional role-gating, and because the replies are plain messages, no bot is required.",
+      "Quick Replies puts your most-repeated answers one click away. Attach a canned response to a button or topic menu and DWEEB returns it instantly—server rules, how to get roles, or how to reach staff—privately or publicly. DWEEB's hosted app handles the click through an app-owned webhook, so you install no server bot and host no code yourself.",
     howItWorks: [
       {
         name: "Write the replies",
@@ -250,7 +252,7 @@ export const FEATURES: FeatureSeo[] = [
       "Private (only the clicker sees it) or public replies",
       "{user} and {server} variables for a personal touch",
       "Optional role-gating so only certain members can trigger a reply",
-      "Works with any webhook — no bot required",
+      "DWEEB-hosted interaction handling—no bot installation or hosting",
     ],
     whenToUse: [
       "Building a self-serve FAQ menu in your support channel",
@@ -260,7 +262,7 @@ export const FEATURES: FeatureSeo[] = [
     faq: [
       {
         q: "Do I need a bot for canned replies?",
-        a: "No. Quick Replies sends plain messages, so it works through any webhook. A bot is only needed if you want to role-gate who can trigger a reply.",
+        a: "You do not install or host a bot. Discord still requires an app-owned webhook for an interactive button; DWEEB creates the compatible destination and hosts the reply handler for you.",
       },
       {
         q: "Can replies be private?",
@@ -277,7 +279,7 @@ export const FEATURES: FeatureSeo[] = [
     ],
     pluginId: "quick-replies",
     requiresBot: false,
-    previewTemplateId: "faq",
+    previewTemplateId: "help-center",
   },
 
   // ── Forms & intake ────────────────────────────────────────────────────────
@@ -287,13 +289,13 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "📋",
     category: "Forms & intake",
     accent: 0xf0b232,
-    title: "Discord Form Bot — pop-up application & submission forms | DWEEB",
+    title: "Discord Form Bot for Applications & Suggestions | DWEEB",
     h1: "Discord Form Bot",
     tagline: "Pop up a form on click and forward the answers to a channel.",
     description:
-      "Pop up a Discord form on a button click — staff applications, suggestions, bug reports, ban appeals — and forward the answers to a channel, named or anonymous, with a private reply. One response per person, optionally.",
+      "Create Discord pop-up forms for applications, suggestions and reports, then forward named or anonymous submissions to a channel.",
     intro:
-      "Modal Form turns a button into a proper form. Click it and a pop-up modal appears; submit it and the answers are forwarded neatly to a channel of your choice — named or anonymous — while the member gets a private thank-you. It's perfect for staff applications, suggestion boxes, bug reports, member reports and ban appeals, with an optional one-response-per-person limit.",
+      "Modal Form turns a button into a proper form. Click it and a pop-up modal appears; submit it and the answers are forwarded neatly to a channel of your choice — named or anonymous — while the member gets a private thank-you. DWEEB's hosted app handles the interaction through an app-owned webhook, so you do not install or host a server bot.",
     howItWorks: [
       {
         name: "Add a button",
@@ -323,7 +325,7 @@ export const FEATURES: FeatureSeo[] = [
     faq: [
       {
         q: "Do I need a bot for a form?",
-        a: "Yes. Pop-up modals are an interactive component, so the button needs a Discord bot or app. DWEEB detects this and helps you pair it with the Modal Form plugin.",
+        a: "You do not install or host a server bot. Discord requires an app-owned webhook for the interactive button; DWEEB creates that destination and its hosted Modal Form plugin handles the modal and submissions.",
       },
       {
         q: "Can submissions be anonymous?",
@@ -343,7 +345,8 @@ export const FEATURES: FeatureSeo[] = [
       "discord submission form",
     ],
     pluginId: "modal-form",
-    requiresBot: true,
+    requiresBot: false,
+    previewTemplateId: "staff-apps",
   },
 
   // ── Engagement ────────────────────────────────────────────────────────────
@@ -353,11 +356,11 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "🎉",
     category: "Engagement",
     accent: 0xeb459e,
-    title: "Discord Giveaway Bot — one-click button entry & auto draw | DWEEB",
+    title: "Discord Giveaway Bot with Button Entry | DWEEB",
     h1: "Discord Giveaway Bot",
     tagline: "Run a giveaway from a button with a live count and fair draw.",
     description:
-      "Run a Discord giveaway from a button: one-click entry, a live entrant count, entry requirements, a fair random draw of N winners, reroll and cancel. Build the giveaway message in DWEEB.",
+      "Build a Discord giveaway with one-click button entry, live counts, eligibility rules, automatic winner draws, rerolls and cancellation.",
     intro:
       "Giveaway turns a button into a complete raffle. Members enter in a single tap, the entrant count updates live, and when time's up the plugin draws a fair random winner — or several — automatically. No reactions to tally, no manual picking. Set entry requirements, reroll if you need to, and cancel any time. Design the giveaway message in DWEEB and attach the plugin.",
     howItWorks: [
@@ -389,7 +392,7 @@ export const FEATURES: FeatureSeo[] = [
     faq: [
       {
         q: "Do I need a bot for a giveaway?",
-        a: "Yes. Tracking entries and drawing a winner needs a Discord bot or app, so the Enter button is wired to the Giveaway plugin. DWEEB detects the interactive button and helps you pair it.",
+        a: "The core entry, count and draw flow needs no server bot install or self-hosting. DWEEB's hosted Giveaway plugin handles the button through an app-owned webhook. Optional role-based eligibility depends on the guided server integration being available.",
       },
       {
         q: "Can I require a role to enter?",
@@ -409,7 +412,7 @@ export const FEATURES: FeatureSeo[] = [
       "discord giveaway button",
     ],
     pluginId: "giveaway",
-    requiresBot: true,
+    requiresBot: false,
     previewTemplateId: "giveaway-button",
   },
 
@@ -420,13 +423,13 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "🔎",
     category: "Utilities",
     accent: 0x5865f2,
-    title: "Discord Select Menus — user, role, channel pickers & directory | DWEEB",
+    title: "Discord Select Menu Builder & Server Directory | DWEEB",
     h1: "Discord Select-Menu Picker",
     tagline: "Turn user, role, mentionable and channel selects into a directory.",
     description:
-      "Attach to a Discord User, Role, Mentionable or Channel select menu and a member's picks come back as clickable mentions in a private confirmation — the basis of a searchable server directory. No bot needed.",
+      "Build Discord user, role, mentionable and channel select menus that return private clickable results—a visual server-directory foundation.",
     intro:
-      "Picker brings Discord's auto-populated select menus to life. Attach it to a User, Role, Mentionable or Channel select and whatever a member picks comes straight back as clickable mentions in a private reply — the building block for a searchable server directory. All four native select types work together in one message, and because the result is a plain reply, no bot is required.",
+      "Picker brings Discord's auto-populated select menus to life. Attach it to a User, Role, Mentionable or Channel select and a member's choice comes back as clickable mentions in a private reply—the building block for a searchable server directory. DWEEB's hosted app handles the interaction through an app-owned webhook, with no server bot install or code to host.",
     howItWorks: [
       {
         name: "Add a select menu",
@@ -445,7 +448,7 @@ export const FEATURES: FeatureSeo[] = [
       "Works with all four auto-populated selects: User, Role, Mentionable, Channel",
       "Picks come back as clickable mentions",
       "Private confirmation, visible only to whoever selected",
-      "No configuration and no bot needed",
+      "No configuration, server bot install or self-hosting",
     ],
     whenToUse: [
       "Giving a big server a single 'find anything' directory",
@@ -455,7 +458,7 @@ export const FEATURES: FeatureSeo[] = [
     faq: [
       {
         q: "Do I need a bot for select menus?",
-        a: "No. Picker replies with a plain confirmation message, so it works through any webhook. The auto-populated selects are filled by Discord itself.",
+        a: "You do not install or host a bot. Discord fills the menu, while DWEEB's hosted app receives the interaction through an app-owned webhook and returns the private confirmation.",
       },
       {
         q: "Which select types are supported?",
@@ -480,11 +483,11 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "📡",
     category: "Utilities",
     accent: 0x949ba4,
-    title: "Discord Latency Check — measure bot response time | DWEEB",
+    title: "Discord Bot Latency Check & Response Timer | DWEEB",
     h1: "Discord Latency Check",
     tagline: "A button that reports round-trip latency in detail.",
     description:
-      "A Discord latency-check button: click it for a detailed response-time report — click to server, dispatcher hop and handler time. A simple way to confirm your interactions stack is healthy.",
+      "Add a Discord latency-check button that reports click-to-server, dispatcher and handler timing so you can verify an interaction stack.",
     intro:
       "Latency Check is a diagnostic button. Click it and it replies with a detailed breakdown of how long each hop took — from the click reaching the server, through the dispatcher, to the handler responding. It's a quick, honest way to confirm your DWEEB interactions stack is wired up and healthy.",
     howItWorks: [
@@ -512,7 +515,7 @@ export const FEATURES: FeatureSeo[] = [
     faq: [
       {
         q: "Do I need a bot for this?",
-        a: "Yes. Measuring handler time requires a Discord bot or app to receive the click, so the button is wired to the Latency Check plugin.",
+        a: "You do not install or host a server bot. DWEEB's hosted app receives the click through an app-owned webhook and the Latency Check plugin returns the timing report.",
       },
     ],
     keywords: [
@@ -522,7 +525,7 @@ export const FEATURES: FeatureSeo[] = [
       "discord interaction latency",
     ],
     pluginId: "ping-pong",
-    requiresBot: true,
+    requiresBot: false,
   },
 
   // ── Publishing (core features, not plugins) ───────────────────────────────
@@ -532,11 +535,11 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "🗓️",
     category: "Publishing",
     accent: 0x3ba55d,
-    title: "Schedule Discord Messages — post a webhook message later | DWEEB",
+    title: "Schedule Discord Messages by Webhook | DWEEB",
     h1: "Schedule Discord Messages",
     tagline: "Build a message now and have DWEEB post it later.",
     description:
-      "Schedule a Discord webhook message to post later. Build it visually in DWEEB, pick a time, and it sends itself — with a per-server list of upcoming posts you can manage. No bot or always-on host needed.",
+      "Schedule a Discord webhook message for later. Build it visually, choose a time, and manage upcoming posts—no always-on bot or browser required.",
     intro:
       "Build your announcement, event or reminder now and let DWEEB post it at the right moment. The Send panel has a 'Send now / Schedule' toggle: pick a future time and the message is queued and delivered for you, even with your browser closed. Each server gets a list of its upcoming scheduled posts so you can see and manage what's coming — all without running a bot or hosting anything yourself.",
     howItWorks: [
@@ -589,7 +592,7 @@ export const FEATURES: FeatureSeo[] = [
     ],
     requiresBot: false,
     previewTemplateId: "announcement",
-    appPath: "/?template=announcement",
+    appPath: "/?template=announcement&intent=schedule",
   },
   {
     id: "webhook-manager",
@@ -597,11 +600,11 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "🪝",
     category: "Publishing",
     accent: 0x00a8fc,
-    title: "Discord Webhook Manager — create, reuse & manage webhooks | DWEEB",
+    title: "Discord Webhook Manager: Create, Edit & Delete | DWEEB",
     h1: "Discord Webhook Manager",
     tagline: "Pick a channel and DWEEB finds or creates the webhook for you.",
     description:
-      "Manage your Discord webhooks from DWEEB: pick a channel and it reuses or creates the right webhook automatically, then list, edit, delete or purge them — all gated on your own Manage Webhooks permission.",
+      "Create, reuse, rename and delete Discord webhooks by channel in DWEEB, gated by your own Manage Webhooks permission.",
     intro:
       "Stop hunting through Server Settings for webhook URLs. DWEEB's webhook manager is channel-first: pick a channel and it automatically reuses an existing webhook or creates a fresh one for you, deduplicated so you don't pile up copies. From there you can list, edit, delete or purge webhooks behind a clear disclosure. Everything is gated on your own Manage Webhooks permission, so you only ever touch what you're allowed to.",
     howItWorks: [
@@ -649,7 +652,7 @@ export const FEATURES: FeatureSeo[] = [
       "delete discord webhook",
     ],
     requiresBot: false,
-    appPath: "/",
+    appPath: "/?intent=manage-webhooks",
   },
   {
     id: "ai-assistant",
@@ -657,13 +660,13 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "✨",
     category: "Publishing",
     accent: 0xc9659a,
-    title: "AI Discord Message Writer — generate Components V2 messages | DWEEB",
+    title: "AI Discord Message Generator for Components V2 | DWEEB",
     h1: "AI Discord Message Writer",
     tagline: "Describe what you want and let the assistant draft it.",
     description:
-      "Describe the Discord message you want and DWEEB's AI assistant drafts it as Components V2 — containers, sections, buttons and media — ready to refine in the visual editor and send through a webhook.",
+      "Use your own AI provider or Ollama endpoint to draft editable Discord Components V2 messages directly in DWEEB's visual editor.",
     intro:
-      "Not sure where to start? Tell DWEEB's AI assistant what you're after — 'a welcome message with a banner and three get-started steps', 'an event announcement with RSVP buttons' — and it drafts a complete Components V2 message for you. The result drops straight into the visual editor, where you tweak the wording, colours and links before sending. It's the fastest way from idea to a polished message.",
+      "Not sure where to start? Connect your own AI provider or local Ollama endpoint, then tell DWEEB's assistant what you're after — 'a welcome message with a banner and three get-started steps' or 'an event announcement with RSVP buttons'. The draft drops into the visual editor, where every word, colour and link stays editable before sending.",
     howItWorks: [
       {
         name: "Describe it",
@@ -691,6 +694,10 @@ export const FEATURES: FeatureSeo[] = [
     ],
     faq: [
       {
+        q: "What do I need to use the AI writer?",
+        a: "Bring an API key for Groq, OpenAI, Anthropic, Google Gemini or OpenRouter, or connect an OpenAI-compatible endpoint. A local Ollama endpoint can be used without a key. The key stays in your browser and requests go directly to the provider you choose.",
+      },
+      {
         q: "Does the AI send anything to Discord by itself?",
         a: "No. The assistant only drafts the message into the editor. Nothing is posted until you review it and hit Send through your webhook.",
       },
@@ -699,6 +706,11 @@ export const FEATURES: FeatureSeo[] = [
         a: "Yes. Everything the assistant makes is a normal DWEEB message — every word, colour and link stays fully editable.",
       },
     ],
+    setupNote: {
+      badge: "Bring your own AI provider",
+      title: "Connect a provider before generating.",
+      text: "Choose Groq, OpenAI, Anthropic, Google Gemini, OpenRouter, an OpenAI-compatible endpoint or local Ollama. Most need your own API key; Ollama can be keyless. DWEEB stores the setting only in this browser and sends prompts directly to that provider.",
+    },
     keywords: [
       "ai discord message",
       "discord message generator",
@@ -707,7 +719,7 @@ export const FEATURES: FeatureSeo[] = [
       "generate discord message",
     ],
     requiresBot: false,
-    appPath: "/",
+    appPath: "/?intent=ai",
   },
 ];
 
@@ -717,6 +729,8 @@ export interface ResolvedFeature extends FeatureSeo {
   url: string;
   appUrl: string;
   ogImage: string;
+  /** What Discord destination/handler the feature actually needs. */
+  deliveryMode: "plain" | "app-owned" | "bot-install";
   /** Keywords merged with baseline DWEEB keywords. */
   resolvedKeywords: string[];
   /** FAQ with the generic "is it free?" appended. */
@@ -729,26 +743,35 @@ function uniq<T>(items: T[]): T[] {
 
 export function resolveFeature(f: FeatureSeo): ResolvedFeature {
   const path = `/features/${f.slug}/`;
-  const appUrl = `${SITE.origin}${
-    f.appPath ?? (f.previewTemplateId ? `/?template=${encodeURIComponent(f.previewTemplateId)}` : "/")
-  }`;
+  const baseAppPath =
+    f.appPath ??
+    (f.previewTemplateId ? `/?template=${encodeURIComponent(f.previewTemplateId)}` : "/");
+  const appPath =
+    f.pluginId && f.previewTemplateId
+      ? `${baseAppPath}${baseAppPath.includes("?") ? "&" : "?"}setup=${encodeURIComponent(f.pluginId)}`
+      : baseAppPath;
+  const separator = appPath.includes("?") ? "&" : "?";
+  const appUrl = `${SITE.origin}${appPath}${separator}entry=${encodeURIComponent(`feature:${f.slug}`)}`;
 
   const resolvedKeywords = uniq(
-    [
-      ...f.keywords,
-      f.h1,
-      "discord",
-      "discord webhook",
-      "discord components v2",
-      "dweeb",
-    ].map((k) => k.toLowerCase()),
+    [...f.keywords, f.h1, "discord", "discord webhook", "discord components v2", "dweeb"].map((k) =>
+      k.toLowerCase(),
+    ),
   );
+
+  const deliveryMode = f.requiresBot ? "bot-install" : f.pluginId ? "app-owned" : "plain";
+  const freeAnswer =
+    deliveryMode === "bot-install"
+      ? "Yes. Build the message for free, then follow the guided app installation and plugin setup. Plans only raise per-server quotas; they do not lock this feature."
+      : deliveryMode === "app-owned"
+        ? "Yes. Build the message for free and let DWEEB create a compatible app-owned destination for the hosted interaction. No server bot install or self-hosting is required."
+        : "Yes. DWEEB's visual builder is free and needs no account. Optional connected services and plans only add server-backed capacity; they do not lock the feature.";
 
   const resolvedFaq: FaqEntry[] = [
     ...f.faq,
     {
       q: "Is DWEEB free?",
-      a: "Yes. DWEEB's visual builder is free and needs no account. Build your message, attach the feature, and send it through a webhook; optional connected services process the data required by the feature.",
+      a: freeAnswer,
     },
   ];
 
@@ -758,6 +781,7 @@ export function resolveFeature(f: FeatureSeo): ResolvedFeature {
     url: `${SITE.origin}${path}`,
     appUrl,
     ogImage: `${SITE.origin}/features-og/${f.slug}.png`,
+    deliveryMode,
     resolvedKeywords,
     resolvedFaq,
   };
@@ -769,6 +793,6 @@ export function resolveAllFeatures(): ResolvedFeature[] {
 }
 
 /** Last time the feature catalogue was reviewed — used for sitemap `<lastmod>`. */
-export const FEATURES_LASTMOD = "2026-06-26";
+export const FEATURES_LASTMOD = "2026-07-15";
 
 export { ACCENT_BLURPLE };

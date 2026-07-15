@@ -64,6 +64,28 @@
   background: var(--discord-bg-primary);
 }
 
+.app-bootstrap {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: 24px;
+  color: var(--app-text-muted);
+  font-weight: 600;
+}
+
+.gallery-bootstrap {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-z-tooltip);
+  display: grid;
+  place-items: center;
+  padding: calc(24px + var(--app-sait)) calc(24px + var(--app-sair)) calc(24px + var(--app-saib))
+    calc(24px + var(--app-sail));
+  background: var(--app-bg);
+  color: var(--app-text-muted);
+  font-weight: 600;
+}
+
 /* Dismiss scrim for the mobile preview sheet — activated in the @media block
  * below. Hidden entirely on desktop, where the preview is a permanent side
  * column with nothing to dismiss. */

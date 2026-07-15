@@ -15,6 +15,10 @@ on:
     paths: &web-paths
       - "src/**"
       - "public/**"
+      # Static search pages, their content model, sitemap generation, and the
+      # SEO regression audit all live outside src/. Without this path an
+      # SEO-only change can pass locally yet never build or deploy.
+      - "scripts/**"
       - "index.html"
       - "package.json"
       - "bun.lock"
@@ -112,8 +116,11 @@ jobs:
     # The Pages publish step (actions/deploy-pages) regularly takes 5+ minutes,
     # so a 5-minute cap kept guillotining it mid-deploy and leaving prod on the
     # previous build. Match deploy-pages' own internal 10-minute timeout.
-    timeout-minutes: 10
+    # Leave propagation time for the best-effort, build-matched IndexNow check
+    # after deploy-pages' own 10-minute publish window.
+    timeout-minutes: 15
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
@@ -124,3 +131,13 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Check out indexing notifier
+        uses: actions/checkout@v4
+
+      # Public key verification + the live post-deploy sitemap let Bing and
+      # other IndexNow engines discover additions/updates immediately. Search
+      # notification is best-effort and must never roll back a healthy deploy.
+      - name: Notify IndexNow
+        continue-on-error: true
+        run: node scripts/seo/submit-indexnow.mjs

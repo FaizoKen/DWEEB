@@ -2,7 +2,8 @@
   "files": [],
   "references": [
     { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.seo.json" }
   ],
   // Solution-style file: `tsc -b` builds the referenced projects with their own
   // configs, so these options don't affect the typecheck. They exist purely so

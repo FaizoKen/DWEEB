@@ -25,7 +25,9 @@ import { proxiedMediaUrl } from "@/core/activity/runtime";
 import { collectMessagePlaceholders, substituteMessage } from "@/core/plugins/placeholders";
 import type { WebhookMessage } from "@/core/schema/types";
 import { ComponentRenderer } from "./renderers/ComponentRenderer";
+import { mediaKindFromName, mediaNameFromUrl } from "./renderers/mediaKind";
 import { PreviewCloseContext } from "./previewCloseContext";
+import { PreviewMediaPriorityContext } from "./mediaPriorityContext";
 import styles from "./Preview.module.css";
 
 interface PreviewProps {
@@ -40,9 +42,20 @@ interface PreviewProps {
    * preview tracks the editor store as usual.
    */
   message?: WebhookMessage;
+  /**
+   * Give the first image in a read-only message preview eager/high priority.
+   * Gallery cards leave this off except for the first visible card so dozens
+   * of thumbnails cannot compete with the directory's LCP image.
+   */
+  prioritizeMedia?: boolean;
 }
 
-export function Preview({ onClose, swipeProps, message: messageOverride }: PreviewProps = {}) {
+export function Preview({
+  onClose,
+  swipeProps,
+  message: messageOverride,
+  prioritizeMedia = false,
+}: PreviewProps = {}) {
   const storeMessage = useMessageStore(selectMessage);
   const message = messageOverride ?? storeMessage;
   const select = useMessageStore((s) => s.select);
@@ -85,6 +98,10 @@ export function Preview({ onClose, swipeProps, message: messageOverride }: Previ
   const sentTime = useMemo(
     () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     [],
+  );
+  const priorityMedia = useMemo(
+    () => (messageOverride && !prioritizeMedia ? null : firstImageUrl(rendered)),
+    [messageOverride, prioritizeMedia, rendered],
   );
 
   // Clicking empty preview space — anywhere that isn't a rendered component
@@ -165,17 +182,55 @@ export function Preview({ onClose, swipeProps, message: messageOverride }: Previ
                 <span className={styles.badge}>APP</span>
                 <time className={styles.time}>{sentTime}</time>
               </header>
-              <div className={styles.content}>
-                {rendered.components.length === 0 ? (
-                  <p className={styles.empty}>This message has no components yet.</p>
-                ) : (
-                  rendered.components.map((c) => <ComponentRenderer key={c._id} node={c} />)
-                )}
-              </div>
+              <PreviewMediaPriorityContext.Provider value={priorityMedia}>
+                <div className={styles.content}>
+                  {rendered.components.length === 0 ? (
+                    <p className={styles.empty}>This message has no components yet.</p>
+                  ) : (
+                    rendered.components.map((c) => <ComponentRenderer key={c._id} node={c} />)
+                  )}
+                </div>
+              </PreviewMediaPriorityContext.Provider>
             </div>
           </article>
         </div>
       </div>
     </PreviewCloseContext.Provider>
   );
+}
+
+/** First render-order image URL, used as the single live-preview LCP candidate. */
+function firstImageUrl(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const media = record.media;
+  if (media && typeof media === "object") {
+    const url = (media as Record<string, unknown>).url;
+    const contentType = (media as Record<string, unknown>).content_type;
+    if (
+      typeof url === "string" &&
+      url &&
+      mediaKindFromName(
+        mediaNameFromUrl(url),
+        typeof contentType === "string" ? contentType : undefined,
+      ) !== "video"
+    ) {
+      return url;
+    }
+  }
+  // Preserve component render order: Section children precede its accessory;
+  // Containers and Action Rows walk their children in array order.
+  for (const key of ["components", "items", "accessory"] as const) {
+    const child = record[key];
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        const found = firstImageUrl(item);
+        if (found) return found;
+      }
+    } else {
+      const found = firstImageUrl(child);
+      if (found) return found;
+    }
+  }
+  return null;
 }

@@ -52,14 +52,14 @@ function stripShortLinkFromPath(): void {
   window.history.replaceState(null, "", window.location.origin + "/");
 }
 
-export function useShareUrlBootstrap(): void {
+export function useShareUrlBootstrap(enabled = true, onSettled?: () => void): void {
   const replaceMessage = useMessageStore((s) => s.replaceMessage);
   const replaceMessageFromRestore = useMessageStore((s) => s.replaceMessageFromRestore);
   const setPendingEditOrigin = useMessageStore((s) => s.setPendingEditOrigin);
   const ran = useRef(false);
 
   useEffect(() => {
-    if (ran.current) return;
+    if (!enabled || ran.current) return;
     ran.current = true;
 
     // An "Edit in DWEEB" link (either shape) carries the message's edit origin
@@ -134,27 +134,37 @@ export function useShareUrlBootstrap(): void {
           "error",
         );
         stripShortLinkFromPath();
+        onSettled?.();
         return;
       }
       void (async () => {
-        const resolved = await resolveShortLink(shortId);
-        if (resolved.ok) {
-          await decodeAndApply(resolved.token);
-        } else {
-          pushToast(`Couldn't load shared link: ${resolved.error}`, "error");
+        try {
+          const resolved = await resolveShortLink(shortId);
+          if (resolved.ok) {
+            await decodeAndApply(resolved.token);
+          } else {
+            pushToast(`Couldn't load shared link: ${resolved.error}`, "error");
+          }
+          // Either way, clear the id (and any origin/guild hash) so a reload
+          // starts clean.
+          stripShortLinkFromPath();
+        } finally {
+          onSettled?.();
         }
-        // Either way, clear the id (and any origin/guild hash) so a reload
-        // starts clean.
-        stripShortLinkFromPath();
       })();
       return;
     }
 
     // Hash link: the token is right here in the URL.
     const token = readShareTokenFromHash(window.location.hash);
-    if (!token) return;
-    void decodeAndApply(token).then((ok) => {
-      if (ok) clearShareTokenFromHash();
-    });
-  }, [replaceMessage, replaceMessageFromRestore, setPendingEditOrigin]);
+    if (!token) {
+      onSettled?.();
+      return;
+    }
+    void decodeAndApply(token)
+      .then((ok) => {
+        if (ok) clearShareTokenFromHash();
+      })
+      .finally(() => onSettled?.());
+  }, [enabled, onSettled, replaceMessage, replaceMessageFromRestore, setPendingEditOrigin]);
 }
