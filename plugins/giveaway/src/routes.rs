@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 use crate::config::Config;
 use crate::discord::{self, Action, Eligibility};
 use crate::store::{
-    unix_millis, Giveaway, InstanceConfig, MaskedInstance, Requirements, Status, Store,
+    unix_millis, EditLookup, Giveaway, InstanceConfig, MaskedInstance, Requirements, Status, Store,
 };
 use crate::validate;
 
@@ -90,6 +90,7 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "targets": ["button"],
             "configUrl": format!("{base}/config.html"),
             "customIdPrefix": "giveaway:",
+            "apiVersion": 2,
             "placeholders": [
                 { "token": "prize", "label": "Prize", "sample": "the prize" },
                 { "token": "entries", "label": "Entry count", "sample": "0" },
@@ -147,7 +148,8 @@ pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectReque
 
 // ── /api/instances ───────────────────────────────────────────────────────────
 
-/// Create a new giveaway. Returns `{ id }`; the caller wraps it as
+/// Create a new giveaway. The edit credential is returned exactly once here;
+/// SQLite stores only its SHA-256 digest. The caller wraps the id as
 /// `custom_id = "giveaway:<id>"`.
 pub async fn create_instance(
     State(state): State<AppState>,
@@ -157,8 +159,13 @@ pub async fn create_instance(
         return bad_request(e);
     }
     let id = new_instance_id();
-    match state.store.create(&id, &cfg) {
-        Ok(()) => (StatusCode::CREATED, Json(json!({ "id": id }))).into_response(),
+    let edit_token = new_edit_token();
+    match state.store.create(&id, &edit_token, &cfg) {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(json!({ "id": id, "managementToken": edit_token })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!(error = %e, "create instance");
             storage_error()
@@ -167,18 +174,32 @@ pub async fn create_instance(
 }
 
 /// Replace a giveaway's config (reconfigure). Entries, status and winners are
-/// preserved.
+/// preserved. The instance id is a public binding (it lives in the message's
+/// `custom_id`), so this requires the separate edit token.
 pub async fn update_instance(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    headers: HeaderMap,
     Json(cfg): Json<InstanceConfig>,
 ) -> Response {
+    let Some(edit_token) = edit_token_from_headers(&headers) else {
+        return edit_forbidden();
+    };
+    match state.store.authorize_edit(&id, edit_token) {
+        Ok(EditLookup::Authorized) => {}
+        Ok(EditLookup::Unknown) => return not_found(),
+        Ok(EditLookup::Forbidden) => return edit_forbidden(),
+        Err(e) => {
+            tracing::error!(error = %e, "update authorization lookup");
+            return storage_error();
+        }
+    }
     if let Err(e) = validate::validate_config(&cfg) {
         return bad_request(e);
     }
-    match state.store.update_config(&id, &cfg) {
+    match state.store.update_config(&id, edit_token, &cfg) {
         Ok(true) => Json(json!({ "id": id })).into_response(),
-        Ok(false) => not_found(),
+        Ok(false) => edit_forbidden(),
         Err(e) => {
             tracing::error!(error = %e, "update instance");
             storage_error()
@@ -963,11 +984,33 @@ fn rand_below(bound: usize) -> usize {
 }
 
 fn new_instance_id() -> String {
-    // 128 bits of entropy. This id lives in the (Discord-side) custom_id and is
-    // the capability to reconfigure, so it must be unguessable.
+    // The id is an opaque public binding, not the edit credential.
     let mut bytes = [0u8; 16];
     getrandom::getrandom(&mut bytes).expect("CSPRNG unavailable");
     hex::encode(bytes)
+}
+
+fn new_edit_token() -> String {
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).expect("CSPRNG unavailable");
+    hex::encode(bytes)
+}
+
+const EDIT_TOKEN_HEADER: &str = "x-dweeb-plugin-edit-token";
+
+fn edit_token_from_headers(headers: &HeaderMap) -> Option<&str> {
+    let token = headers.get(EDIT_TOKEN_HEADER)?.to_str().ok()?;
+    (token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())).then_some(token)
+}
+
+fn edit_forbidden() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "error": "This browser does not have edit access. Save again to create a replacement instance."
+        })),
+    )
+        .into_response()
 }
 
 fn clamp(s: &str, max: usize) -> String {
@@ -1006,6 +1049,8 @@ mod tests {
     use crate::store::Requirements;
 
     const MANAGE_GUILD: &str = "32"; // 1 << 5
+    const TEST_EDIT_TOKEN: &str =
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
     fn test_state() -> AppState {
         let store = Store::open(":memory:").expect("open store");
@@ -1103,7 +1148,7 @@ mod tests {
         let id = "abc";
         state
             .store
-            .create(id, &config_with(Some(template(id))))
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template(id))))
             .unwrap();
 
         let resp = handle_component(&state, &enter_click(id, "555", "0", template(id)));
@@ -1126,7 +1171,7 @@ mod tests {
         let id = "abc";
         state
             .store
-            .create(id, &config_with(Some(template(id))))
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template(id))))
             .unwrap();
         for u in ["100", "200", "300"] {
             state.store.enter(id, u).unwrap();
@@ -1167,7 +1212,10 @@ mod tests {
     fn without_a_template_only_the_button_restamps() {
         let state = test_state();
         let id = "xyz";
-        state.store.create(id, &config_with(None)).unwrap();
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(None))
+            .unwrap();
 
         let live = live_components(id, "My own giveaway copy");
         let v = body_json(handle_component(&state, &enter_click(id, "555", "0", live)));
@@ -1199,7 +1247,7 @@ mod tests {
         let id = "abc";
         state
             .store
-            .create(id, &config_with(Some(template(id))))
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template(id))))
             .unwrap();
         state.store.enter(id, "100").unwrap();
         // With an interaction token, a manager's Enter click replies with an
@@ -1223,7 +1271,7 @@ mod tests {
         let id = "abc";
         state
             .store
-            .create(id, &config_with(Some(template(id))))
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template(id))))
             .unwrap();
         // No interaction token (so we can't refresh the message) ⇒ reply with the
         // control panel directly, exactly as before the refresh existed.
@@ -1241,7 +1289,7 @@ mod tests {
         let id = "abc";
         state
             .store
-            .create(id, &config_with(Some(template(id))))
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template(id))))
             .unwrap();
         state.store.enter(id, "100").unwrap();
 
@@ -1273,7 +1321,7 @@ mod tests {
         let id = "abc";
         state
             .store
-            .create(id, &config_with(Some(template(id))))
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template(id))))
             .unwrap();
         state.store.enter(id, "100").unwrap();
         // Host opens the panel (captures a refresher), then draws: the out-of-band
@@ -1294,7 +1342,7 @@ mod tests {
         let id = "abc";
         state
             .store
-            .create(id, &config_with(Some(template(id))))
+            .create(id, TEST_EDIT_TOKEN, &config_with(Some(template(id))))
             .unwrap();
         let msg = discord::MessageRef {
             content: Some(String::new()),
@@ -1339,7 +1387,7 @@ mod tests {
             require_all: false,
             min_account_age_days: 0,
         };
-        state.store.create(id, &cfg).unwrap();
+        state.store.create(id, TEST_EDIT_TOKEN, &cfg).unwrap();
 
         // A plain member forging the host panel's join custom_id is still gated
         // on the role requirement — refused, and no entry is recorded.
@@ -1352,7 +1400,10 @@ mod tests {
     fn join_control_refuses_a_closed_giveaway_even_for_hosts() {
         let state = test_state();
         let id = "abc";
-        state.store.create(id, &config_with(None)).unwrap();
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(None))
+            .unwrap();
         state.store.set_cancelled(id).unwrap();
 
         let denied = body_json(handle_component(
@@ -1370,7 +1421,10 @@ mod tests {
     fn join_control_still_admits_an_eligible_member() {
         let state = test_state();
         let id = "abc";
-        state.store.create(id, &config_with(None)).unwrap();
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(None))
+            .unwrap();
         let _ = handle_component(&state, &control_click(id, "join", "0"));
         assert_eq!(state.store.count_entries(id).unwrap(), 1);
     }
@@ -1379,7 +1433,10 @@ mod tests {
     fn live_message_data_without_template_restamps_button_only() {
         let state = test_state();
         let id = "xyz";
-        state.store.create(id, &config_with(None)).unwrap();
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(None))
+            .unwrap();
         let msg = discord::MessageRef {
             content: Some("My own copy".into()),
             components: Some(live_components(id, "My own copy")),

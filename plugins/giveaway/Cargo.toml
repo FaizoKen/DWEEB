@@ -1,6 +1,6 @@
 [package]
 name = "dweeb-giveaway"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "DWEEB plugin: run a giveaway from a button — live entrant count, entry requirements (role / account age / one-per-person), a fair random draw of N winners, reroll, cancel, and optional winner DMs."
 
@@ -26,9 +26,11 @@ hex = "0.4"
 # Single-file embedded store — no separate DB server to pay for. `bundled`
 # compiles SQLite from source, so the image needs no system libsqlite.
 rusqlite = { version = "0.31", features = ["bundled"] }
-# CSPRNG for unguessable instance ids (the reconfigure capability) AND for the
-# unbiased winner draw.
+# CSPRNG for opaque instance ids, separate edit credentials, AND the unbiased
+# winner draw.
 getrandom = "0.2"
+# Store only a one-way digest of each edit credential.
+sha2 = "0.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

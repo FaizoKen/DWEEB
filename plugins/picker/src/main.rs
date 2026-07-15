@@ -18,8 +18,9 @@
 //!   • the Discord **interactions** endpoint (`POST /interactions`).
 //!
 //! State is a single SQLite file (the per-menu reply config); no secret is ever
-//! stored. The instance id inside the component's `custom_id` is the capability
-//! to reconfigure it, so it carries 128 bits of CSPRNG entropy.
+//! stored. The instance id inside the component's `custom_id` is a **public
+//! binding** only — reconfiguring requires the separate protocol-v2 management
+//! token, of which only a SHA-256 digest is kept.
 
 mod config;
 mod discord;

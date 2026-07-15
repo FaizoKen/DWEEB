@@ -1,11 +1,13 @@
 //! SQLite-backed store.
 //!
 //! Three tables, one file:
-//!   • `instances` — one JSON config blob per panel, keyed by a 128-bit random
-//!     token that lives inside the component's `custom_id`. That id is the
-//!     *capability* to read/replace this panel's config, so it must stay
-//!     unguessable. The shared bot does all the Discord work, so no secret is
-//!     stored per instance and reads need no masking (see [`MaskedInstance`]).
+//!   • `instances` — one JSON config blob per panel, keyed by the opaque id in
+//!     the component's `custom_id`. That id is a **public binding** — every
+//!     guild member who can see the message can read it — so it must never be
+//!     edit authority: a separate random edit token (protocol v2) authorizes
+//!     reconfiguration, and only its SHA-256 digest is stored. The shared bot
+//!     does all the Discord work, so no secret is stored per instance and reads
+//!     need no masking (see [`MaskedInstance`]).
 //!   • `tickets` — one row per opened ticket, keyed by its channel id. This is
 //!     also the anti-spam ledger: the open-count and cooldown checks are pure
 //!     queries over it (no separate table to keep in sync).
@@ -16,6 +18,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// One role that can see and work every ticket from this panel. `name`/`color`
 /// are cached at save time so the config UI renders nicely without a live fetch;
@@ -204,6 +207,16 @@ pub struct Ticket {
     pub created_at: i64,
 }
 
+/// Outcome of an edit-authorization check.
+pub enum EditLookup {
+    Authorized,
+    Unknown,
+    /// Wrong credential — or a migrated legacy row (null digest), which
+    /// deliberately cannot be updated in place; the config UI then creates a
+    /// replacement instance and rebinds the component.
+    Forbidden,
+}
+
 pub struct Store {
     conn: Mutex<Connection>,
 }
@@ -211,31 +224,7 @@ pub struct Store {
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             CREATE TABLE IF NOT EXISTS instances (
-                 id          TEXT PRIMARY KEY,
-                 created_at  INTEGER NOT NULL,
-                 config      TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS tickets (
-                 channel_id  TEXT PRIMARY KEY,
-                 instance_id TEXT NOT NULL,
-                 guild_id    TEXT NOT NULL,
-                 number      INTEGER NOT NULL,
-                 opener_id   TEXT NOT NULL,
-                 topic       TEXT NOT NULL DEFAULT '',
-                 claimed_by  TEXT,
-                 status      TEXT NOT NULL DEFAULT 'open',
-                 created_at  INTEGER NOT NULL
-             );
-             CREATE INDEX IF NOT EXISTS tickets_by_opener
-                 ON tickets (instance_id, opener_id, status);
-             CREATE TABLE IF NOT EXISTS counters (
-                 instance_id TEXT PRIMARY KEY,
-                 next_number INTEGER NOT NULL
-             );",
-        )?;
+        init_schema(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -255,22 +244,61 @@ impl Store {
 
     // ── instances ────────────────────────────────────────────────────────────
 
-    pub fn create(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<()> {
+    /// Insert a new instance and store only the edit-token digest.
+    pub fn create(
+        &self,
+        id: &str,
+        edit_token: &str,
+        config: &InstanceConfig,
+    ) -> rusqlite::Result<()> {
         let json = serde_json::to_string(config).expect("serialize config");
+        let token_hash = hash_edit_token(edit_token);
         let now = unix_millis();
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO instances (id, created_at, config) VALUES (?1, ?2, ?3)",
-            (id, now, json),
+            "INSERT INTO instances (id, created_at, config, edit_token_hash)
+             VALUES (?1, ?2, ?3, ?4)",
+            (id, now, json, token_hash),
         )?;
         Ok(())
     }
 
-    /// Replace an existing instance's config. Returns false if the id is unknown.
-    pub fn update(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<bool> {
-        let json = serde_json::to_string(config).expect("serialize config");
+    /// Check the separate edit credential for an id, without touching the config.
+    pub fn authorize_edit(&self, id: &str, edit_token: &str) -> rusqlite::Result<EditLookup> {
         let conn = self.lock();
-        let n = conn.execute("UPDATE instances SET config = ?2 WHERE id = ?1", (id, json))?;
+        let row: Option<Option<String>> = conn
+            .query_row(
+                "SELECT edit_token_hash FROM instances WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })?;
+        Ok(match row {
+            None => EditLookup::Unknown,
+            Some(None) => EditLookup::Forbidden,
+            Some(Some(hash)) if edit_token_matches(edit_token, &hash) => EditLookup::Authorized,
+            Some(Some(_)) => EditLookup::Forbidden,
+        })
+    }
+
+    /// Atomically replace only when the edit-token digest matches.
+    pub fn update(
+        &self,
+        id: &str,
+        edit_token: &str,
+        config: &InstanceConfig,
+    ) -> rusqlite::Result<bool> {
+        let json = serde_json::to_string(config).expect("serialize config");
+        let token_hash = hash_edit_token(edit_token);
+        let conn = self.lock();
+        let n = conn.execute(
+            "UPDATE instances SET config = ?2 WHERE id = ?1 AND edit_token_hash = ?3",
+            (id, json, token_hash),
+        )?;
         Ok(n > 0)
     }
 
@@ -414,6 +442,69 @@ impl Store {
     }
 }
 
+fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         CREATE TABLE IF NOT EXISTS instances (
+             id              TEXT PRIMARY KEY,
+             created_at      INTEGER NOT NULL,
+             config          TEXT NOT NULL,
+             edit_token_hash TEXT
+         );
+         CREATE TABLE IF NOT EXISTS tickets (
+             channel_id  TEXT PRIMARY KEY,
+             instance_id TEXT NOT NULL,
+             guild_id    TEXT NOT NULL,
+             number      INTEGER NOT NULL,
+             opener_id   TEXT NOT NULL,
+             topic       TEXT NOT NULL DEFAULT '',
+             claimed_by  TEXT,
+             status      TEXT NOT NULL DEFAULT 'open',
+             created_at  INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS tickets_by_opener
+             ON tickets (instance_id, opener_id, status);
+         CREATE TABLE IF NOT EXISTS counters (
+             instance_id TEXT PRIMARY KEY,
+             next_number INTEGER NOT NULL
+         );",
+    )?;
+    // Migration for databases created before the edit-token column. Legacy rows
+    // keep a null digest, which `authorize_edit` reports as Forbidden.
+    if !has_column(conn, "instances", "edit_token_hash")? {
+        conn.execute("ALTER TABLE instances ADD COLUMN edit_token_hash TEXT", [])?;
+    }
+    Ok(())
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for name in names {
+        if name? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn hash_edit_token(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+fn edit_token_matches(token: &str, stored_hash: &str) -> bool {
+    let candidate = Sha256::digest(token.as_bytes());
+    let mut stored = [0u8; 32];
+    if hex::decode_to_slice(stored_hash, &mut stored).is_err() {
+        return false;
+    }
+    candidate
+        .iter()
+        .zip(stored.iter())
+        .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
+}
+
 pub fn unix_millis() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -482,6 +573,66 @@ mod tests {
             s.get_ticket("c1").unwrap().unwrap().claimed_by.as_deref(),
             Some("staff42")
         );
+    }
+
+    const TOKEN: &str = "abababababababababababababababababababababababababababababababab";
+
+    fn panel_config() -> InstanceConfig {
+        serde_json::from_value(serde_json::json!({
+            "target": "button",
+            "guild_id": "123456789012345678",
+            "welcome": "Hi {user}",
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn migrates_legacy_rows_without_granting_edit_access() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE instances (
+                id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, config TEXT NOT NULL
+             );
+             INSERT INTO instances VALUES ('legacy', 1, '{}');",
+        )
+        .unwrap();
+        init_schema(&conn).unwrap();
+        assert!(has_column(&conn, "instances", "edit_token_hash").unwrap());
+        let s = Store {
+            conn: Mutex::new(conn),
+        };
+        assert!(matches!(
+            s.authorize_edit("legacy", TOKEN).unwrap(),
+            EditLookup::Forbidden
+        ));
+        assert!(!s.update("legacy", TOKEN, &panel_config()).unwrap());
+    }
+
+    #[test]
+    fn stores_only_hash_and_requires_token_for_updates() {
+        let s = Store::open(":memory:").unwrap();
+        s.create("one", TOKEN, &panel_config()).unwrap();
+        let stored: String = s
+            .lock()
+            .query_row(
+                "SELECT edit_token_hash FROM instances WHERE id = 'one'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, hash_edit_token(TOKEN));
+        assert_ne!(stored, TOKEN);
+        assert!(matches!(
+            s.authorize_edit("one", "wrong").unwrap(),
+            EditLookup::Forbidden
+        ));
+        assert!(matches!(
+            s.authorize_edit("missing", TOKEN).unwrap(),
+            EditLookup::Unknown
+        ));
+        assert!(!s.update("one", "wrong", &panel_config()).unwrap());
+        assert!(s.update("one", TOKEN, &panel_config()).unwrap());
+        assert!(s.get("one").unwrap().is_some());
     }
 
     #[test]

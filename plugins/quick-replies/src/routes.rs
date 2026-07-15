@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use crate::config::Config;
 use crate::discord::{self, ReplyContext};
 use crate::rest;
-use crate::store::{InstanceConfig, MaskedInstance, Store};
+use crate::store::{EditLookup, InstanceConfig, MaskedInstance, Store};
 use crate::validate;
 
 /// Every minted `custom_id` starts with this; the dispatcher routes on it.
@@ -49,7 +49,8 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "targets": ["button", "string_select"],
             "configUrl": format!("{base}/config.html"),
             "customIdPrefix": PREFIX,
-            "managesSelectOptions": true
+            "managesSelectOptions": true,
+            "apiVersion": 2
         }]
     }))
 }
@@ -102,7 +103,8 @@ pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectReque
 
 // ── /api/instances ───────────────────────────────────────────────────────────
 
-/// Create a new instance. Returns `{ id }`; the caller wraps it as
+/// Create a new instance. The edit credential is returned exactly once here;
+/// SQLite stores only its SHA-256 digest. The caller wraps the id as
 /// `custom_id = "quickreplies:<id>"`.
 pub async fn create_instance(
     State(state): State<AppState>,
@@ -112,8 +114,13 @@ pub async fn create_instance(
         return bad_request(e);
     }
     let id = new_instance_id();
-    match state.store.create(&id, &cfg) {
-        Ok(()) => (StatusCode::CREATED, Json(json!({ "id": id }))).into_response(),
+    let edit_token = new_edit_token();
+    match state.store.create(&id, &edit_token, &cfg) {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(json!({ "id": id, "managementToken": edit_token })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!(error = %e, "create instance");
             storage_error()
@@ -121,18 +128,32 @@ pub async fn create_instance(
     }
 }
 
-/// Replace an instance's config.
+/// Replace an instance's config. The instance id is a public binding (it lives
+/// in the message's `custom_id`), so this requires the separate edit token.
 pub async fn update_instance(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    headers: HeaderMap,
     Json(cfg): Json<InstanceConfig>,
 ) -> Response {
+    let Some(edit_token) = edit_token_from_headers(&headers) else {
+        return edit_forbidden();
+    };
+    match state.store.authorize_edit(&id, edit_token) {
+        Ok(EditLookup::Authorized) => {}
+        Ok(EditLookup::Unknown) => return not_found(),
+        Ok(EditLookup::Forbidden) => return edit_forbidden(),
+        Err(e) => {
+            tracing::error!(error = %e, "update authorization lookup");
+            return storage_error();
+        }
+    }
     if let Err(e) = validate::validate_config(&cfg) {
         return bad_request(e);
     }
-    match state.store.update(&id, &cfg) {
+    match state.store.update(&id, edit_token, &cfg) {
         Ok(true) => Json(json!({ "id": id })).into_response(),
-        Ok(false) => not_found(),
+        Ok(false) => edit_forbidden(),
         Err(e) => {
             tracing::error!(error = %e, "update instance");
             storage_error()
@@ -260,11 +281,33 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 fn new_instance_id() -> String {
-    // 128 bits of entropy. This id lives in the (Discord-side) custom_id and is
-    // the capability to reconfigure, so it must be unguessable.
+    // The id is an opaque public binding, not the edit credential.
     let mut bytes = [0u8; 16];
     getrandom::getrandom(&mut bytes).expect("CSPRNG unavailable");
     hex::encode(bytes)
+}
+
+fn new_edit_token() -> String {
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).expect("CSPRNG unavailable");
+    hex::encode(bytes)
+}
+
+const EDIT_TOKEN_HEADER: &str = "x-dweeb-plugin-edit-token";
+
+fn edit_token_from_headers(headers: &HeaderMap) -> Option<&str> {
+    let token = headers.get(EDIT_TOKEN_HEADER)?.to_str().ok()?;
+    (token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())).then_some(token)
+}
+
+fn edit_forbidden() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "error": "This browser does not have edit access. Save again to create a replacement instance."
+        })),
+    )
+        .into_response()
 }
 
 fn bad_request(message: String) -> Response {

@@ -299,6 +299,10 @@
       let nonce = null;
       let hostOrigin = "*";
       let instanceId = null;
+      let protocolVersion = 1;
+      // Browser-local edit credential for `instanceId` (protocol v2). Absent ⇒
+      // saving creates a replacement instance instead of updating in place.
+      let managementToken = null;
 
       // ── Capabilities (from /api/meta) ───────────────────────────────────
       let defaultBot = false;
@@ -821,7 +825,7 @@
       };
 
       // ── DWEEB protocol ──────────────────────────────────────────────────
-      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
 
       window.addEventListener("message", async (event) => {
         const msg = event.data;
@@ -836,6 +840,11 @@
 
         nonce = msg.nonce;
         hostOrigin = event.origin;
+        protocolVersion = msg.apiVersion === 2 ? 2 : 1;
+        managementToken =
+          protocolVersion >= 2 && /^[0-9a-f]{64}$/.test(msg.managementToken || "")
+            ? msg.managementToken
+            : null;
         if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
         target = msg.target === "string_select" ? "string_select" : "button";
         $("welcome").value = welcome;
@@ -1083,16 +1092,41 @@
         };
 
         setBusy(true);
-        const url = instanceId ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
+        // In-place update needs the browser-local edit credential; without it
+        // (legacy instance, another browser, cleared storage) save a fresh
+        // replacement panel and let DWEEB rebind the component. NOTE: a
+        // replacement starts a fresh ticket-number sequence and open-ticket
+        // ledger — the 403 notice below says so.
+        const canUpdate = !!(instanceId && managementToken);
+        const url = canUpdate ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
         fetch(url, {
-          method: instanceId ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
+          method: canUpdate ? "PUT" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(canUpdate ? { "X-DWEEB-Plugin-Edit-Token": managementToken } : {}),
+          },
           body: JSON.stringify(body),
         })
           .then(async (res) => {
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) { setBusy(false); return fail(data.error || `Server returned ${res.status}.`); }
+            if (!res.ok) {
+              setBusy(false);
+              if (res.status === 403) {
+                managementToken = null;
+                return fail(
+                  "Edit access is no longer available in this browser. Save again to create a replacement panel — its ticket numbering starts fresh.",
+                );
+              }
+              return fail(data.error || `Server returned ${res.status}.`);
+            }
             const id = data.id || instanceId;
+            const nextManagementToken = /^[0-9a-f]{64}$/.test(data.managementToken || "")
+              ? data.managementToken
+              : managementToken;
+            if (protocolVersion >= 2 && !nextManagementToken) {
+              setBusy(false);
+              return fail("The plugin service did not return edit access. Reload and try again.");
+            }
             const desc = isSelect()
               ? `${cleanTopics.length} topic${cleanTopics.length === 1 ? "" : "s"}`
               : (staffRoles.length ? `${staffRoles.length} staff role${staffRoles.length === 1 ? "" : "s"}` : "private support");
@@ -1116,6 +1150,9 @@
                       })),
                       fields: { min_values: 1, max_values: 1 },
                     }
+                  : {}),
+                ...(protocolVersion >= 2 && nextManagementToken
+                  ? { managementToken: nextManagementToken }
                   : {}),
               },
               hostOrigin,

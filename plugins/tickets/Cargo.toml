@@ -1,6 +1,6 @@
 [package]
 name = "dweeb-tickets"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "DWEEB plugin: private support tickets from a button or topic menu. Opens a per-ticket private channel, optional intake form, staff claim, close with transcript, anti-spam limits."
 
@@ -26,8 +26,10 @@ hex = "0.4"
 # Single-file embedded store — no separate DB server to pay for. `bundled`
 # compiles SQLite from source, so the image needs no system libsqlite.
 rusqlite = { version = "0.31", features = ["bundled"] }
-# CSPRNG for unguessable instance ids (the capability that gates reconfigure).
+# CSPRNG for opaque instance ids and separate edit credentials.
 getrandom = "0.2"
+# Store only a one-way digest of each edit credential.
+sha2 = "0.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

@@ -155,6 +155,10 @@
       let nonce = null;
       let hostOrigin = "*";
       let instanceId = null; // set when reconfiguring
+      let protocolVersion = 1;
+      // Browser-local edit credential for `instanceId` (protocol v2). Absent ⇒
+      // saving creates a replacement instance instead of updating in place.
+      let managementToken = null;
       // One of: user_select | role_select | mentionable_select | channel_select
       let target = "user_select";
 
@@ -220,7 +224,7 @@
       }
 
       // ── DWEEB protocol ──────────────────────────────────────────────────
-      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
 
       window.addEventListener("message", async (event) => {
         const msg = event.data;
@@ -236,6 +240,11 @@
         if (msg.type !== "dweeb:plugin:init") return;
         nonce = msg.nonce;
         hostOrigin = event.origin;
+        protocolVersion = msg.apiVersion === 2 ? 2 : 1;
+        managementToken =
+          protocolVersion >= 2 && /^[0-9a-f]{64}$/.test(msg.managementToken || "")
+            ? msg.managementToken
+            : null;
         if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
         if (VALID_TARGETS.includes(msg.target)) target = msg.target;
 
@@ -333,24 +342,49 @@
 
         setBusy(true);
         try {
-          const url = instanceId ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
+          // In-place update needs the browser-local edit credential; without it
+          // (legacy instance, another browser, cleared storage) save a fresh
+          // replacement instance and let DWEEB rebind the component.
+          const canUpdate = !!(instanceId && managementToken);
+          const url = canUpdate
+            ? `/api/instances/${encodeURIComponent(instanceId)}`
+            : "/api/instances";
           const res = await fetch(url, {
-            method: instanceId ? "PUT" : "POST",
-            headers: { "Content-Type": "application/json" },
+            method: canUpdate ? "PUT" : "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(canUpdate ? { "X-DWEEB-Plugin-Edit-Token": managementToken } : {}),
+            },
             body: JSON.stringify(payload),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
             setBusy(false);
+            if (res.status === 403) {
+              managementToken = null;
+              return fail(
+                "Edit access is no longer available in this browser. Save again to create a replacement menu.",
+              );
+            }
             return fail(data.error || `Server returned ${res.status}.`);
           }
           const id = data.id || instanceId;
+          const nextManagementToken = /^[0-9a-f]{64}$/.test(data.managementToken || "")
+            ? data.managementToken
+            : managementToken;
+          if (protocolVersion >= 2 && !nextManagementToken) {
+            setBusy(false);
+            return fail("The plugin service did not return edit access. Reload and try again.");
+          }
           parent.postMessage(
             {
               type: "dweeb:plugin:save",
               nonce,
               customId: PREFIX + id,
               summary: { label: "Picker", description: summaryDescription() },
+              ...(protocolVersion >= 2 && nextManagementToken
+                ? { managementToken: nextManagementToken }
+                : {}),
             },
             hostOrigin,
           );

@@ -269,6 +269,10 @@
       let nonce = null;
       let hostOrigin = "*";
       let instanceId = null; // set when reconfiguring
+      let protocolVersion = 1;
+      // Browser-local edit credential for `instanceId` (protocol v2). Absent ⇒
+      // saving creates a replacement instance instead of updating in place.
+      let managementToken = null;
 
       // ── Capabilities (from /api/meta) ───────────────────────────────────
       let defaultBot = false; // deployment runs a shared bot (for role picker + DMs)
@@ -492,7 +496,7 @@
       }
 
       // ── DWEEB protocol ──────────────────────────────────────────────────
-      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 1 }, "*");
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
 
       window.addEventListener("message", async (event) => {
         const msg = event.data;
@@ -508,6 +512,11 @@
         if (msg.type !== "dweeb:plugin:init") return;
         nonce = msg.nonce;
         hostOrigin = event.origin;
+        protocolVersion = msg.apiVersion === 2 ? 2 : 1;
+        managementToken =
+          protocolVersion >= 2 && /^[0-9a-f]{64}$/.test(msg.managementToken || "")
+            ? msg.managementToken
+            : null;
         if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
 
         await loadMeta();
@@ -708,18 +717,42 @@
 
         setBusy(true);
         try {
-          const url = instanceId ? `/api/instances/${encodeURIComponent(instanceId)}` : "/api/instances";
+          // In-place update needs the browser-local edit credential; without it
+          // (legacy instance, another browser, cleared storage) save a fresh
+          // replacement giveaway and let DWEEB rebind the button. NOTE: a
+          // replacement starts with an empty entry list — the 403 notice below
+          // says so before anything is overwritten.
+          const canUpdate = !!(instanceId && managementToken);
+          const url = canUpdate
+            ? `/api/instances/${encodeURIComponent(instanceId)}`
+            : "/api/instances";
           const res = await fetch(url, {
-            method: instanceId ? "PUT" : "POST",
-            headers: { "Content-Type": "application/json" },
+            method: canUpdate ? "PUT" : "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(canUpdate ? { "X-DWEEB-Plugin-Edit-Token": managementToken } : {}),
+            },
             body: JSON.stringify(body),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
             setBusy(false);
+            if (res.status === 403) {
+              managementToken = null;
+              return fail(
+                "Edit access is no longer available in this browser. Save again to create a replacement giveaway — note it starts with a fresh (empty) entry list.",
+              );
+            }
             return fail(data.error || `Server returned ${res.status}.`);
           }
           const id = data.id || instanceId;
+          const nextManagementToken = /^[0-9a-f]{64}$/.test(data.managementToken || "")
+            ? data.managementToken
+            : managementToken;
+          if (protocolVersion >= 2 && !nextManagementToken) {
+            setBusy(false);
+            return fail("The plugin service did not return edit access. Reload and try again.");
+          }
           // Static values for the host's first paint of any `{token}` text — the
           // real prize / winner count / host. The dynamic ones (entries, winners,
           // status) fall back to their manifest samples until a click renders them.
@@ -736,6 +769,9 @@
                 description: `${prize.slice(0, 60)} · ${winnerCount} winner${winnerCount === 1 ? "" : "s"}`,
               },
               values,
+              ...(protocolVersion >= 2 && nextManagementToken
+                ? { managementToken: nextManagementToken }
+                : {}),
             },
             hostOrigin,
           );

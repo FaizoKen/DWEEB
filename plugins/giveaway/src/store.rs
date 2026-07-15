@@ -1,18 +1,21 @@
 //! SQLite-backed store.
 //!
 //! Two tables. `instances` holds one JSON config blob per giveaway plus its
-//! small mutable runtime state (status + drawn winners), keyed by a 128-bit
-//! random token that lives inside the component's `custom_id` — that id is the
-//! *capability* to read/replace this giveaway's config, so it must stay
-//! unguessable. `entries` is the per-user ledger: one row per (giveaway, member)
-//! enforces **one entry per person** structurally (a PRIMARY KEY), and is what
-//! the draw reads and the live count counts.
+//! small mutable runtime state (status + drawn winners), keyed by the opaque id
+//! in the component's `custom_id`. That id is a **public binding** — every
+//! guild member who can see the message can read it — so it must never be edit
+//! authority: a separate random edit token (protocol v2) authorizes
+//! reconfiguration, and only its SHA-256 digest is stored. `entries` is the
+//! per-user ledger: one row per (giveaway, member) enforces **one entry per
+//! person** structurally (a PRIMARY KEY), and is what the draw reads and the
+//! live count counts.
 
 use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 /// One role referenced by a giveaway — an entry-requirement role or a host role.
 /// `name`/`color` are cached at save time purely so the config UI can render
@@ -157,6 +160,16 @@ pub struct MaskedInstance {
     pub winners: Vec<String>,
 }
 
+/// Outcome of an edit-authorization check.
+pub enum EditLookup {
+    Authorized,
+    Unknown,
+    /// Wrong credential — or a migrated legacy row (null digest), which
+    /// deliberately cannot be updated in place; the config UI then creates a
+    /// replacement instance and rebinds the component.
+    Forbidden,
+}
+
 pub struct Store {
     conn: Mutex<Connection>,
 }
@@ -164,22 +177,7 @@ pub struct Store {
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             CREATE TABLE IF NOT EXISTS instances (
-                 id          TEXT PRIMARY KEY,
-                 created_at  INTEGER NOT NULL,
-                 config      TEXT NOT NULL,
-                 status      TEXT NOT NULL DEFAULT 'open',
-                 winners     TEXT NOT NULL DEFAULT '[]'
-             );
-             CREATE TABLE IF NOT EXISTS entries (
-                 instance_id TEXT NOT NULL,
-                 user_id     TEXT NOT NULL,
-                 created_at  INTEGER NOT NULL,
-                 PRIMARY KEY (instance_id, user_id)
-             );",
-        )?;
+        init_schema(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -198,24 +196,63 @@ impl Store {
             .unwrap_or_else(|poison| poison.into_inner())
     }
 
-    /// Insert a new giveaway (status `open`, no winners) under a fresh id.
-    pub fn create(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<()> {
+    /// Insert a new giveaway (status `open`, no winners) under a fresh id, and
+    /// store only the edit-token digest.
+    pub fn create(
+        &self,
+        id: &str,
+        edit_token: &str,
+        config: &InstanceConfig,
+    ) -> rusqlite::Result<()> {
         let json = serde_json::to_string(config).expect("serialize config");
+        let token_hash = hash_edit_token(edit_token);
         let now = unix_millis();
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO instances (id, created_at, config, status, winners) VALUES (?1, ?2, ?3, 'open', '[]')",
-            (id, now, json),
+            "INSERT INTO instances (id, created_at, config, status, winners, edit_token_hash)
+             VALUES (?1, ?2, ?3, 'open', '[]', ?4)",
+            (id, now, json, token_hash),
         )?;
         Ok(())
     }
 
-    /// Replace a giveaway's config (reconfigure). Leaves entries, status, and
-    /// winners untouched. Returns false if the id is unknown.
-    pub fn update_config(&self, id: &str, config: &InstanceConfig) -> rusqlite::Result<bool> {
-        let json = serde_json::to_string(config).expect("serialize config");
+    /// Check the separate edit credential for an id, without touching the config.
+    pub fn authorize_edit(&self, id: &str, edit_token: &str) -> rusqlite::Result<EditLookup> {
         let conn = self.lock();
-        let n = conn.execute("UPDATE instances SET config = ?2 WHERE id = ?1", (id, json))?;
+        let row: Option<Option<String>> = conn
+            .query_row(
+                "SELECT edit_token_hash FROM instances WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })?;
+        Ok(match row {
+            None => EditLookup::Unknown,
+            Some(None) => EditLookup::Forbidden,
+            Some(Some(hash)) if edit_token_matches(edit_token, &hash) => EditLookup::Authorized,
+            Some(Some(_)) => EditLookup::Forbidden,
+        })
+    }
+
+    /// Replace a giveaway's config (reconfigure), only when the edit-token
+    /// digest matches. Leaves entries, status, and winners untouched.
+    pub fn update_config(
+        &self,
+        id: &str,
+        edit_token: &str,
+        config: &InstanceConfig,
+    ) -> rusqlite::Result<bool> {
+        let json = serde_json::to_string(config).expect("serialize config");
+        let token_hash = hash_edit_token(edit_token);
+        let conn = self.lock();
+        let n = conn.execute(
+            "UPDATE instances SET config = ?2 WHERE id = ?1 AND edit_token_hash = ?3",
+            (id, json, token_hash),
+        )?;
         Ok(n > 0)
     }
 
@@ -322,10 +359,150 @@ impl Store {
     }
 }
 
+fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         CREATE TABLE IF NOT EXISTS instances (
+             id              TEXT PRIMARY KEY,
+             created_at      INTEGER NOT NULL,
+             config          TEXT NOT NULL,
+             status          TEXT NOT NULL DEFAULT 'open',
+             winners         TEXT NOT NULL DEFAULT '[]',
+             edit_token_hash TEXT
+         );
+         CREATE TABLE IF NOT EXISTS entries (
+             instance_id TEXT NOT NULL,
+             user_id     TEXT NOT NULL,
+             created_at  INTEGER NOT NULL,
+             PRIMARY KEY (instance_id, user_id)
+         );",
+    )?;
+    // Migration for databases created before the edit-token column. Legacy rows
+    // keep a null digest, which `authorize_edit` reports as Forbidden.
+    if !has_column(conn, "instances", "edit_token_hash")? {
+        conn.execute("ALTER TABLE instances ADD COLUMN edit_token_hash TEXT", [])?;
+    }
+    Ok(())
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for name in names {
+        if name? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn hash_edit_token(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+fn edit_token_matches(token: &str, stored_hash: &str) -> bool {
+    let candidate = Sha256::digest(token.as_bytes());
+    let mut stored = [0u8; 32];
+    if hex::decode_to_slice(stored_hash, &mut stored).is_err() {
+        return false;
+    }
+    candidate
+        .iter()
+        .zip(stored.iter())
+        .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
+}
+
 pub fn unix_millis() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TOKEN: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+    fn config(prize: &str) -> InstanceConfig {
+        InstanceConfig {
+            target: "button".into(),
+            guild_id: "123456789012345678".into(),
+            guild_name: String::new(),
+            prize: prize.into(),
+            winner_count: 1,
+            description: None,
+            host_user_id: None,
+            ends_at: None,
+            requirements: Requirements::default(),
+            host_roles: vec![],
+            dm_winners: false,
+            announcement: None,
+            message_template: None,
+        }
+    }
+
+    #[test]
+    fn migrates_legacy_rows_without_granting_edit_access() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE instances (
+                id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, config TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open', winners TEXT NOT NULL DEFAULT '[]'
+             );
+             CREATE TABLE entries (
+                instance_id TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+                PRIMARY KEY (instance_id, user_id)
+             );
+             INSERT INTO instances (id, created_at, config) VALUES ('legacy', 1, '{}');",
+        )
+        .unwrap();
+        init_schema(&conn).unwrap();
+        assert!(has_column(&conn, "instances", "edit_token_hash").unwrap());
+        let store = Store {
+            conn: Mutex::new(conn),
+        };
+        assert!(matches!(
+            store.authorize_edit("legacy", TOKEN).unwrap(),
+            EditLookup::Forbidden
+        ));
+        assert!(!store.update_config("legacy", TOKEN, &config("x")).unwrap());
+    }
+
+    #[test]
+    fn stores_only_hash_and_requires_token_for_updates() {
+        let store = Store::open(":memory:").unwrap();
+        store.create("one", TOKEN, &config("Before")).unwrap();
+        let stored: String = store
+            .lock()
+            .query_row(
+                "SELECT edit_token_hash FROM instances WHERE id = 'one'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, hash_edit_token(TOKEN));
+        assert_ne!(stored, TOKEN);
+        assert!(matches!(
+            store.authorize_edit("one", "wrong").unwrap(),
+            EditLookup::Forbidden
+        ));
+        assert!(matches!(
+            store.authorize_edit("missing", TOKEN).unwrap(),
+            EditLookup::Unknown
+        ));
+        assert!(!store
+            .update_config("one", "wrong", &config("Wrong"))
+            .unwrap());
+        assert!(store.update_config("one", TOKEN, &config("After")).unwrap());
+        assert_eq!(store.get("one").unwrap().unwrap().config.prize, "After");
+        // Reconfiguring never disturbs the runtime state.
+        assert!(matches!(
+            store.get("one").unwrap().unwrap().status,
+            Status::Open
+        ));
+    }
 }
