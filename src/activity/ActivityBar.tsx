@@ -8,7 +8,8 @@
  * Discord the context is fixed and publishing is one server-side call, so this
  * stays focused on "edit together, then post". It keeps the server-scoped
  * library actions that are useful in the room: save the current message as a
- * named draft, browse the Message directory, or restore a posted message.
+ * named draft, browse the Message directory, or restore a posted message, plus
+ * the pure-client JSON import/export (the same panel the web Share dialog uses).
  * Scheduling rides inside the post confirm (its "When → Schedule" choice)
  * rather than as bar chrome; existing schedules are managed in the Message
  * directory's Scheduled tab.
@@ -28,6 +29,7 @@ import { Menu, MenuItem } from "@/ui/Menu";
 import { pushToast } from "@/ui/Toast";
 import {
   BookmarkIcon,
+  BracesIcon,
   ExternalLinkIcon,
   GlobeIcon,
   HistoryIcon,
@@ -46,6 +48,7 @@ import { GuildPicker, ServerGlyph, ServerGlyphSkeleton } from "./GuildPicker";
 import { ActivityGallery } from "./ActivityGallery";
 import { RestoreDialog } from "./RestoreDialog";
 import { SaveDraftDialog } from "./SaveDraftDialog";
+import { JsonDialog } from "./JsonDialog";
 import { PostConfirm } from "./PostConfirm";
 import { PostSuccess } from "./PostSuccess";
 import { PlanBadge } from "@/features/plan/PlanBadge";
@@ -288,6 +291,10 @@ export function ActivityBar() {
   // The server-library "Message directory" dialog. Reads the same Manage-Webhooks
   // gate as Restore (the proxy enforces it), so it shares the disabled states.
   const [libraryOpen, setLibraryOpen] = useState(false);
+  // Import / export the shared draft as JSON — pure client-side (no server call,
+  // no permission gate); an import replaces the draft and collab syncs it to the
+  // room. Available in every launch state, even before a destination is picked.
+  const [jsonOpen, setJsonOpen] = useState(false);
   // The pre-post confirm dialog: non-null while a post awaits confirmation. The
   // actual POST/PATCH runs from `confirmPost` once the user confirms.
   const [pending, setPending] = useState<PendingPost | null>(null);
@@ -372,6 +379,13 @@ export function ActivityBar() {
       label: "Open on web for full features",
       menuLabel: "Open on web",
       run: () => void openOnWeb(),
+    },
+    {
+      key: "json",
+      icon: BracesIcon,
+      label: "Import or export the message as JSON",
+      menuLabel: "Import / export JSON",
+      run: () => setJsonOpen(true),
     },
     ...(feedbackOn
       ? [
@@ -734,6 +748,7 @@ export function ActivityBar() {
         onClose={() => setSaveOpen(false)}
       />
       <RestoreDialog open={restoreOpen} onClose={() => setRestoreOpen(false)} />
+      <JsonDialog open={jsonOpen} onClose={() => setJsonOpen(false)} />
       {/* Full-screen, like the web app's gallery; mounted only while open so
           each visit starts fresh (default tab, empty search, page one). */}
       {libraryOpen ? <ActivityGallery onClose={() => setLibraryOpen(false)} /> : null}
