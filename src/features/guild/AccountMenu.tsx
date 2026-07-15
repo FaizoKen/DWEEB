@@ -154,7 +154,6 @@ export function AccountMenu() {
   // outcome as the old post-add redirect, but without leaving the page. Parked as
   // a pending id too, so a reload mid-connect still lands on it. Reads the stores
   // live so the one-shot subscription never goes stale.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(
     () =>
       subscribePopupResult(botAddFlow, (r) => {

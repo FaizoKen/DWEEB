@@ -237,6 +237,10 @@ export function useValidationView(): ValidationView {
     getAttachmentSnapshot,
     getAttachmentSnapshot,
   );
+  // `attachmentsVersion` isn't read in the body — it's an intentional
+  // invalidation key so validation recomputes when the attachment registry
+  // mutates (see the store subscription above), not only when `message` does.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   return useMemo(() => buildValidationView(message), [message, attachmentsVersion]);
 }
 

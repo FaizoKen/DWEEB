@@ -14,6 +14,7 @@
     "seo:audit": "bun scripts/seo/audit.ts",
     "preview": "vite preview --host",
     "typecheck": "tsc -b --noEmit",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:golden": "bun scripts/gen-golden-fixtures.ts",
@@ -31,13 +32,18 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^20.16.10",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react-swc": "^3.7.1",
+    "eslint": "9",
+    "eslint-plugin-react-hooks": "5",
+    "globals": "^17.7.0",
     "prettier": "^3.3.3",
     "terser": "^5.48.0",
     "typescript": "^5.6.3",
+    "typescript-eslint": "8",
     "vite": "6.4.3",
     "vite-plugin-pwa": "^0.21",
     "vitest": "3.2.6"

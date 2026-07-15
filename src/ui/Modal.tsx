@@ -152,7 +152,10 @@ export function Modal({
     const active = document.activeElement;
     lastFocused.current = active instanceof HTMLElement ? active : null;
 
-    const layer: ModalLayer = { token: tokenRef.current, backdrop, dialog };
+    // Stable per-instance identity (a Symbol set once at mount) — capture it so
+    // the cleanup below matches on the same value without reading the ref late.
+    const token = tokenRef.current;
+    const layer: ModalLayer = { token, backdrop, dialog };
     layers.push(layer);
 
     // Move focus before making the opener's body surface inert.
@@ -208,7 +211,7 @@ export function Modal({
       window.removeEventListener("keydown", onKeyDown, true);
       document.removeEventListener("focusin", onFocusIn, true);
 
-      const index = layers.findIndex((candidate) => candidate.token === tokenRef.current);
+      const index = layers.findIndex((candidate) => candidate.token === token);
       const wasTopmost = index === layers.length - 1;
       if (index >= 0) layers.splice(index, 1);
       syncBodyModality();

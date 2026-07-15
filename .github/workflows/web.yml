@@ -25,6 +25,8 @@ on:
       - "tsconfig*.json"
       - "vite.config.ts"
       - "vitest.config.ts"
+      - "eslint.config.js"
+      - ".prettierrc.json"
       - ".github/workflows/web.yml"
   pull_request:
     branches: [main]
@@ -69,6 +71,17 @@ jobs:
 
       - name: Typecheck
         run: bun run typecheck
+
+      # Prettier is the formatting gate (config in .prettierrc.json). Kept
+      # separate from the build so a pure formatting slip fails fast and loud.
+      - name: Format check
+        run: bun run format:check
+
+      # ESLint enforces the React hooks rules (rules-of-hooks + exhaustive-deps)
+      # and `no-explicit-any`; other recommended rules are advisory warnings
+      # that don't fail the build. See eslint.config.js for the rationale.
+      - name: Lint
+        run: bun run lint
 
       # Unit suite over the framework-free core: share-link serialization
       # (incl. the frozen golden-token contract), schema validation, and

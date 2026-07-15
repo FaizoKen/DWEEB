@@ -203,5 +203,5 @@ function makeBlobId(): string {
  */
 function sanitizeFilename(name: string): string {
   const trimmed = name.trim() || "file";
-  return trimmed.replace(/[^\w.\-]/g, "_");
+  return trimmed.replace(/[^\w.-]/g, "_");
 }

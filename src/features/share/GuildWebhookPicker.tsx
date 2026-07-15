@@ -253,6 +253,10 @@ export function GuildWebhookPicker({
   // Discord withholds (below) and to describe a *selected* webhook that isn't in
   // this server's list — restore mode's cross-server "Selected webhook" card.
   // Re-read when the selection changes so a just-remembered webhook is found.
+  // `loadHistory()` reads localStorage, which the memo can't observe; `webhooks`
+  // and `activeId` are intentional re-read triggers so a just-remembered webhook
+  // (or a changed selection) is picked up, per the note above.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const history = useMemo(() => loadHistory(), [webhooks, activeId]);
 
   const recovered = useMemo(() => {

@@ -336,7 +336,6 @@ export function App() {
   // just re-read it and flip to "authed". A blocked-popup full-page login is
   // handled by the reload's `init()` instead — here we only clear the
   // `#dweeb_login` marker it leaves, and note a cancel.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(
     () =>
       subscribePopupResult(loginFlow, (r) => void useAuthStore.getState().completeLogin("ok" in r)),
@@ -347,7 +346,6 @@ export function App() {
     if (r && "error" in r) {
       pushToast("Sign-in didn’t finish — you can try again.", "info");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Landing screen: auto-open the Template Gallery when it's actually useful —

@@ -538,7 +538,7 @@ export function PostConfirm({
   const selectedIdentityName =
     postAs === null
       ? "DWEEB"
-      : (customIdentities.find((b) => b.application_id === postAs)?.name?.trim() || "your bot");
+      : customIdentities.find((b) => b.application_id === postAs)?.name?.trim() || "your bot";
 
   const title =
     mode === "update"

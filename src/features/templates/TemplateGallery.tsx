@@ -358,6 +358,9 @@ export function TemplateGallery() {
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
+      // Deliberately read the opener at *close* time (not effect-setup) so focus
+      // returns to whatever last opened the gallery.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       const opener = openerRef.current;
       // App removes `inert` from the background in the same close commit. Hop a
       // frame so browsers do not reject focus while the opener is still inside

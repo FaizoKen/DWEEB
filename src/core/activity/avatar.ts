@@ -23,7 +23,7 @@ export function userAvatarUrl(id: string, avatar: string | null, size = 64): str
  *  So the slot shows an actual avatar rather than a placeholder even for accounts
  *  that never set a picture. */
 export function defaultAvatarUrl(id: string): string {
-  let index = 0;
+  let index: number;
   try {
     index = Number((BigInt(id) >> 22n) % 6n);
   } catch {

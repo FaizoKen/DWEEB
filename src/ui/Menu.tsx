@@ -115,6 +115,10 @@ export function Menu({ trigger, align = "end", children }: MenuProps) {
       window.removeEventListener("resize", onReflow);
       window.removeEventListener("scroll", onReflow, true);
     };
+    // Listeners are (re)bound once per open/close. The handlers only touch
+    // stable refs and setters (`setOpen`, `triggerElement()`, `panelRef`), so
+    // binding to `open` alone is intentional — not a stale-closure risk.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // Measure the panel and place it before paint so the user never sees it jump.

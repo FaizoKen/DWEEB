@@ -414,6 +414,9 @@ export function SendPanel({
     getAttachmentSnapshot,
     getAttachmentSnapshot,
   );
+  // `attachmentsVersion` is an intentional invalidation key (not read in the
+  // body) so validation recomputes when blobs hydrate/GC, per the note above.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const validation = useMemo(() => validateMessage(message), [message, attachmentsVersion]);
   const blockingIssues = validation.issues.filter((i) => i.severity === "error");
   // Local uploads (session:// blobs) live only in this browser, so they can't be

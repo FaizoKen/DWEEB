@@ -20,6 +20,12 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - `bun run dev` — web FE (Vite). `bun run dev:activity` — Activity mode. `bun run dev:server` — Rust proxy.
 - `bun run build` — typecheck + Vite build + SEO template pages (`scripts/gen-template-pages.ts`).
 - `bun run test` — Vitest (core logic, stores, and feature contracts). `bun run typecheck`, `bun run format:check`.
+- `bun run lint` — ESLint (flat config, `eslint.config.js`). Enforces the React hooks rules
+  (`rules-of-hooks` + `exhaustive-deps`) and `no-explicit-any` as **errors**; other recommended
+  rules are advisory warnings. Suppress an *intentional* hooks case with a
+  `// eslint-disable-next-line react-hooks/exhaustive-deps` **plus a one-line reason** — never a
+  bare disable (a linter now actually runs, so bare/dead disables are themselves flagged).
+  `format:check` + `lint` are CI gates in `web.yml`; run both before pushing FE changes.
 - Rust has no root workspace. In `server/` and each `plugins/<crate>/`, run
   `cargo fmt --all --check` **before every push**, `cargo clippy --all-targets -- -D warnings`,
   and `cargo test --locked`.
