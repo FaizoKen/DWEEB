@@ -481,13 +481,14 @@ export function ActivityBar() {
   };
 
   // Run the confirmed SCHEDULE (the confirm's "When → Schedule" choice): store
-  // the message server-side to post at `at`. Success is a toast rather than the
-  // post-success dialog — nothing has landed in the channel yet, so there's no
-  // message to view; a failure toasts (from the store) and leaves the confirm
-  // open to adjust the time and retry.
-  const confirmSchedule = async (makePermanent: boolean, at: number) => {
+  // the message server-side to post at `at`, as `postAs` (a connected custom
+  // bot, or null for DWEEB). Success is a toast rather than the post-success
+  // dialog — nothing has landed in the channel yet, so there's no message to
+  // view; a failure toasts (from the store) and leaves the confirm open to
+  // adjust the time and retry.
+  const confirmSchedule = async (makePermanent: boolean, at: number, postAs: string | null) => {
     if (!pending) return;
-    const firesAt = await schedulePost(at, makePermanent);
+    const firesAt = await schedulePost(at, makePermanent, postAs);
     if (firesAt != null) {
       setPending(null);
       pushToast(
@@ -763,7 +764,7 @@ export function ActivityBar() {
         channelType={channelType}
         busy={publishing}
         onConfirm={(makePermanent, postAs) => void confirmPost(makePermanent, postAs)}
-        onSchedule={(makePermanent, at) => void confirmSchedule(makePermanent, at)}
+        onSchedule={(makePermanent, at, postAs) => void confirmSchedule(makePermanent, at, postAs)}
         onCancel={() => setPending(null)}
         onManageOnWeb={() => void openOnWeb()}
         onManageCustomBots={() => {

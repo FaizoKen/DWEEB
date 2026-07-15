@@ -1043,6 +1043,24 @@ async fn clear_activity_hook(st: &AppState, guild: &str, application_id: &str) {
         .await;
 }
 
+/// Resolve a custom bot's Activity webhook and bring it to `channel_id`,
+/// returning the `(webhook_id, token)` a post can execute through right away.
+/// This is exactly what a live `activity_post`/`activity_edit` does before it
+/// executes ([`require_custom_hook`] + [`ensure_custom_hook_in_channel`]) — the
+/// scheduler calls it at fire time so a scheduled custom-bot post lands under
+/// the bot in the intended channel even though the single roaming webhook may
+/// have drifted elsewhere in the meantime.
+pub(crate) async fn resolve_custom_hook_for_channel(
+    st: &AppState,
+    guild: &str,
+    application_id: &str,
+    channel_id: &str,
+) -> Result<(String, String), AppError> {
+    let hook = require_custom_hook(st, guild, application_id).await?;
+    ensure_custom_hook_in_channel(st, guild, application_id, &hook, channel_id).await?;
+    Ok((hook.webhook_id, hook.token))
+}
+
 /// Resolve a ready-to-use custom hook for a post/edit, mapping every
 /// non-ready state to an actionable, user-facing error.
 async fn require_custom_hook(
@@ -1532,6 +1550,13 @@ pub struct ScheduleBody {
     /// the claim), keeping its interactive components past the TTL.
     #[serde(default)]
     make_permanent: bool,
+    /// Post as one of the server's registered custom bots instead of DWEEB: the
+    /// app's id, whose Activity webhook was connected beforehand. Empty/absent =
+    /// the standard DWEEB identity. The worker re-resolves and re-homes the bot's
+    /// roaming webhook to the destination channel at fire time (see
+    /// [`resolve_custom_hook_for_channel`]).
+    #[serde(default)]
+    application_id: String,
 }
 
 /// `POST /api/activity/schedule` `{ guild_id, channel_id, message, start_at, tz }`
@@ -1546,10 +1571,14 @@ pub struct ScheduleBody {
 /// sealing, per-server plan quota, and worker). Gated identically to a live post
 /// (Manage Webhooks in the guild).
 ///
-/// Always the standard DWEEB identity, never a custom bot: a custom bot's single
-/// Activity webhook roams between channels on demand, so by the time a schedule
-/// fires it may sit in a different channel — the post would land in the wrong
-/// place. The channel-bound DWEEB webhook can't drift like that.
+/// Posts as DWEEB by default, or as one of the server's registered custom bots
+/// when `application_id` is set. A custom bot's single Activity webhook roams
+/// between channels on demand, so — unlike a channel-bound DWEEB webhook — the
+/// stored URL can't be trusted at fire time; instead the row records the app id
+/// and destination channel, and the worker re-resolves the bot's live webhook
+/// and re-homes it to that channel just before it posts (see the schedule
+/// worker). Here we only validate up front that the bot is actually connected,
+/// so the user gets an immediate error rather than a silent fire-time failure.
 ///
 /// Answers `201 { id, next_run_at }`. No manage token is echoed — the schedule is
 /// owned by the (bearer-verified) creator (and manageable by any Manage-Webhooks
@@ -1573,6 +1602,7 @@ pub async fn activity_schedule(
     if !body.message.is_object() {
         return Err(bad_request("message must be a JSON object"));
     }
+    let custom_app = parse_application_id(&body.application_id)?;
 
     authorize_activity_webhooks(&st, session.clone(), &guild).await?;
     // Same forum/media rule as a live post: the sealed payload must carry the
@@ -1580,7 +1610,19 @@ pub async fn activity_schedule(
     // opening the new forum post then.
     ensure_postable_channel(&st, &guild, &channel_id, &body.message).await?;
 
-    let (webhook_id, token) = require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?;
+    // Resolve the webhook this schedule will ride. For a custom bot, only
+    // *validate* it's connected and capture its current (webhook_id, token) —
+    // don't move the roaming hook now; the worker re-homes it to the channel at
+    // fire time. For DWEEB, reuse/mint the channel-bound webhook as a live post
+    // does. Either way the stored URL is a starting point; the sealed row also
+    // records the app id + channel so the worker knows how to fire it.
+    let (webhook_id, token) = match custom_app.as_deref() {
+        Some(app) => {
+            let hook = require_custom_hook(&st, &guild, app).await?;
+            (hook.webhook_id, hook.token)
+        }
+        None => require_dweeb_webhook(&st, &session.uid, &guild, &channel_id).await?,
+    };
 
     let created = crate::schedule::create_for_owner(
         &st,
@@ -1598,6 +1640,8 @@ pub async fn activity_schedule(
             dest_label: body.dest_label,
             guild_id: Some(guild),
             make_permanent: body.make_permanent,
+            application_id: custom_app,
+            channel_id: Some(channel_id),
         },
     )
     .await?;

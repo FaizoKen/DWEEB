@@ -48,6 +48,10 @@ export interface ScheduleView {
   created_at: number;
   /** Whether the worker will keep the posted message's components permanent. */
   make_permanent?: boolean;
+  /** The custom bot this schedule fires as (its application id), or null/absent
+   *  for DWEEB. Set only by Activity-created schedules; the worker re-homes the
+   *  bot's roaming webhook to the destination channel at fire time. */
+  application_id?: string | null;
   owned: boolean;
   /** Present only on a single-schedule GET — the decrypted message payload. */
   payload?: unknown;

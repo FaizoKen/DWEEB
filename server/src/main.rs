@@ -317,37 +317,10 @@ async fn run() {
     } else {
         None
     };
-    if let Some(store) = &schedules {
-        // A dedicated client with a modest timeout: the worker is off the 3s
-        // interaction budget, but a hung POST mustn't hold a row's lease.
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .user_agent(concat!(
-                "dweeb-proxy-scheduler/",
-                env!("CARGO_PKG_VERSION"),
-                " (+https://github.com/FaizoKen/DWEEB)"
-            ))
-            .build()
-            .expect("failed to build scheduler HTTP client");
-        schedule_worker::spawn(
-            Arc::clone(store),
-            key.clone(),
-            http,
-            // The permanent-slot relay, so a `make_permanent` schedule can keep
-            // its components alive when it fires (None → it just posts normally).
-            dispatcher.clone(),
-            // Consulted at fire time so a make-permanent schedule respects the
-            // owner's plan tier when spending a never-expire slot.
-            entitlements.clone(),
-            // A fired schedule's post lands in the server's message library too
-            // (best-effort), so "what did the scheduler send?" has one answer.
-            library.clone(),
-            config.scheduler_tick_secs,
-            config.scheduler_lease_secs,
-            config.scheduler_batch,
-            config.schedule_retention_days,
-        );
-    }
+    // The scheduled-post worker is spawned *after* `AppState` is built (below):
+    // a custom-bot schedule re-resolves and re-homes the bot's roaming Activity
+    // webhook at fire time, which needs Discord + the dispatcher registry — i.e.
+    // the whole `AppState`, not just the schedule store.
 
     // Persisted Activity collaboration drafts: a small SQLite file (on the same
     // persistent volume as the short links / schedules) so a collaboration room
@@ -412,6 +385,32 @@ async fn run() {
         key,
         config: Arc::new(config),
     };
+
+    // Now that `AppState` exists, start the scheduled-post delivery worker. It
+    // holds a clone of the state so a fired custom-bot schedule can re-resolve and
+    // re-home the bot's roaming webhook to the destination channel before posting
+    // (a DWEEB schedule just posts to its channel-bound sealed URL).
+    if state.schedules.is_some() {
+        // A dedicated client with a modest timeout: the worker is off the 3s
+        // interaction budget, but a hung POST mustn't hold a row's lease.
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .user_agent(concat!(
+                "dweeb-proxy-scheduler/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://github.com/FaizoKen/DWEEB)"
+            ))
+            .build()
+            .expect("failed to build scheduler HTTP client");
+        schedule_worker::spawn(
+            state.clone(),
+            http,
+            state.config.scheduler_tick_secs,
+            state.config.scheduler_lease_secs,
+            state.config.scheduler_batch,
+            state.config.schedule_retention_days,
+        );
+    }
 
     let app = Router::new()
         .route("/health", get(health))

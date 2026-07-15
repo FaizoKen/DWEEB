@@ -166,12 +166,13 @@ export interface ActivityScheduleResult {
 }
 
 /** `POST /api/activity/schedule` — store the built message server-side and post
- *  it later (one-time), through the same DWEEB-owned webhook a live post rides.
- *  The proxy resolves the webhook itself — the iframe never sees credentials —
- *  and the schedule lands in the same store the web app's Scheduled tab manages.
- *  Always posts as DWEEB (a custom bot's roaming webhook could drift to another
- *  channel before the schedule fires). `makePermanent` asks the worker to spend
- *  a never-expire slot on the message once it's posted. */
+ *  it later (one-time). The proxy resolves the destination webhook itself — the
+ *  iframe never sees credentials — and the schedule lands in the same store the
+ *  web app's Scheduled tab manages. Posts as DWEEB by default, or as a connected
+ *  custom bot when `applicationId` is set: the worker re-homes that bot's roaming
+ *  webhook to this channel at fire time, so it still lands under the bot in the
+ *  right place. `makePermanent` asks the worker to spend a never-expire slot on
+ *  the message once it's posted. */
 export async function schedulePostToChannel(
   guildId: string,
   channelId: string,
@@ -180,6 +181,7 @@ export async function schedulePostToChannel(
   tz: string,
   destLabel?: string,
   makePermanent = false,
+  applicationId: string | null = null,
 ): Promise<ActivityScheduleResult> {
   let res: Response;
   try {
@@ -194,6 +196,7 @@ export async function schedulePostToChannel(
         tz,
         dest_label: destLabel,
         make_permanent: makePermanent,
+        application_id: applicationId ?? "",
       }),
     });
   } catch {

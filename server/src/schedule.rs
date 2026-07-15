@@ -59,7 +59,8 @@ const LIST_LIMIT: usize = 200;
 const COLS: &str = "id, manage_token_hash, owner_user_id, webhook_id, webhook_sealed, thread_id, \
      payload_sealed, title, dest_label, tz, recurrence_json, next_run_at, status, lease_until, \
      attempts, last_status, last_error, last_run_at, last_message_id, runs_count, end_at, \
-     max_runs, created_at, updated_at, guild_id, make_permanent, last_channel_id";
+     max_runs, created_at, updated_at, guild_id, make_permanent, last_channel_id, \
+     application_id, channel_id";
 
 // ── Row model ────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,18 @@ pub struct Row {
     /// never-expire slots on the freshly-posted message (see `schedule_worker`).
     /// Only honourable when `guild_id` is known and the dispatcher is configured.
     pub make_permanent: bool,
+    /// Post as one of the destination server's registered custom bots instead of
+    /// DWEEB: the app's id. `None` = the standard DWEEB identity. Set only by the
+    /// Activity's `/api/activity/schedule` (the web app carries identity in the
+    /// webhook URL itself). When set, the worker re-resolves the bot's roaming
+    /// Activity webhook and re-homes it to `channel_id` at fire time rather than
+    /// trusting the stored URL.
+    pub application_id: Option<String>,
+    /// The destination channel the post targets. Redundant for a DWEEB schedule
+    /// (its webhook is channel-bound), but load-bearing for a custom-bot schedule:
+    /// the bot's single webhook roams, so this is where the worker re-homes it
+    /// before firing. `None` on older/web rows.
+    pub channel_id: Option<String>,
 }
 
 fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
@@ -130,6 +143,8 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         guild_id: r.get(24)?,
         make_permanent: r.get::<_, i64>(25)? != 0,
         last_channel_id: r.get(26)?,
+        application_id: r.get(27)?,
+        channel_id: r.get(28)?,
     })
 }
 
@@ -157,6 +172,13 @@ pub struct ClaimedJob {
     /// worker records after a successful send (display-only).
     pub title: Option<String>,
     pub dest_label: Option<String>,
+    /// Post as this custom bot instead of DWEEB (its app id). When set, the
+    /// worker re-resolves the bot's roaming webhook and re-homes it to
+    /// `channel_id` before executing, instead of posting to the sealed URL.
+    pub application_id: Option<String>,
+    /// The destination channel — where a custom-bot schedule re-homes the bot's
+    /// webhook before firing. `None` for a DWEEB/web schedule.
+    pub channel_id: Option<String>,
 }
 
 /// Everything `create` needs (secrets already sealed by the handler).
@@ -178,6 +200,8 @@ pub struct NewSchedule {
     pub created_at: i64,
     pub guild_id: Option<String>,
     pub make_permanent: bool,
+    pub application_id: Option<String>,
+    pub channel_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -258,7 +282,9 @@ impl ScheduleStore {
                  updated_at        INTEGER NOT NULL,
                  guild_id          TEXT,
                  make_permanent    INTEGER NOT NULL DEFAULT 0,
-                 last_channel_id   TEXT
+                 last_channel_id   TEXT,
+                 application_id    TEXT,
+                 channel_id        TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_posts(status, next_run_at);
              CREATE INDEX IF NOT EXISTS idx_sched_owner ON scheduled_posts(owner_user_id);
@@ -310,6 +336,33 @@ impl ScheduleStore {
         if has_channel == 0 {
             conn.execute_batch("ALTER TABLE scheduled_posts ADD COLUMN last_channel_id TEXT;")
                 .map_err(|e| format!("migrate last_channel_id: {e}"))?;
+        }
+        // Migrate DBs created before custom-bot scheduling (`application_id` names
+        // the bot to post as; `channel_id` is where the worker re-homes its
+        // roaming webhook at fire time).
+        let has_app: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('scheduled_posts') \
+                 WHERE name = 'application_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_app == 0 {
+            conn.execute_batch("ALTER TABLE scheduled_posts ADD COLUMN application_id TEXT;")
+                .map_err(|e| format!("migrate application_id: {e}"))?;
+        }
+        let has_channel_id: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('scheduled_posts') \
+                 WHERE name = 'channel_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_channel_id == 0 {
+            conn.execute_batch("ALTER TABLE scheduled_posts ADD COLUMN channel_id TEXT;")
+                .map_err(|e| format!("migrate channel_id: {e}"))?;
         }
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM scheduled_posts", [], |r| r.get(0))
@@ -390,8 +443,9 @@ impl ScheduleStore {
              (id, manage_token_hash, owner_user_id, webhook_id, webhook_sealed, thread_id, \
               payload_sealed, title, dest_label, tz, recurrence_json, next_run_at, status, \
               attempts, runs_count, end_at, max_runs, created_at, updated_at, guild_id, \
-              make_permanent) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active',0,0,?13,?14,?15,?15,?16,?17)",
+              make_permanent, application_id, channel_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active',0,0,?13,?14,?15,?15,?16,?17,\
+              ?18,?19)",
             params![
                 n.id,
                 n.manage_token_hash,
@@ -410,6 +464,8 @@ impl ScheduleStore {
                 n.created_at,
                 n.guild_id,
                 n.make_permanent as i64,
+                n.application_id,
+                n.channel_id,
             ],
         )
         .map_err(|e| CreateError::Storage(e.to_string()))?;
@@ -603,7 +659,7 @@ impl ScheduleStore {
                 .query_row(
                     "SELECT id, webhook_id, webhook_sealed, thread_id, payload_sealed, tz, \
                      recurrence_json, end_at, max_runs, runs_count, attempts, guild_id, \
-                     make_permanent, owner_user_id, title, dest_label \
+                     make_permanent, owner_user_id, title, dest_label, application_id, channel_id \
                      FROM scheduled_posts WHERE id=?1",
                     [id],
                     |r| {
@@ -624,6 +680,8 @@ impl ScheduleStore {
                             owner_user_id: r.get(13)?,
                             title: r.get(14)?,
                             dest_label: r.get(15)?,
+                            application_id: r.get(16)?,
+                            channel_id: r.get(17)?,
                         })
                     },
                 )
@@ -753,6 +811,17 @@ pub struct CreateBody {
     /// Only honoured when `guild_id` is set (no guild → nowhere to spend a slot).
     #[serde(default)]
     pub make_permanent: bool,
+    /// Post as one of the destination server's registered custom bots (its app
+    /// id) instead of DWEEB. Set only by the Activity's server-side schedule path;
+    /// requires `guild_id` + `channel_id` so the worker can re-home the bot's
+    /// roaming webhook at fire time. `None` = DWEEB.
+    #[serde(default)]
+    pub application_id: Option<String>,
+    /// Destination channel — where a custom-bot schedule re-homes the bot's
+    /// webhook before firing. `None` for a DWEEB/web schedule (channel is implied
+    /// by the webhook URL).
+    #[serde(default)]
+    pub channel_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -905,6 +974,28 @@ pub(crate) async fn create_for_owner(
     // row honestly records that it won't keep the message permanent.
     let make_permanent = body.make_permanent && guild_id.is_some();
 
+    // Custom-bot identity + destination channel (Activity schedules only). Both
+    // must be snowflakes when present, and posting as a custom bot needs the
+    // guild + channel so the worker can re-home the bot's roaming webhook at fire
+    // time — reject the incoherent case rather than silently dropping to DWEEB.
+    let channel_id = body.channel_id.filter(|c| !c.is_empty());
+    if let Some(c) = &channel_id {
+        if !is_snowflake(c) {
+            return Err(bad_request("That channel ID looks wrong."));
+        }
+    }
+    let application_id = body.application_id.filter(|a| !a.is_empty());
+    if let Some(a) = &application_id {
+        if !is_snowflake(a) {
+            return Err(bad_request("That application ID looks wrong."));
+        }
+        if guild_id.is_none() || channel_id.is_none() {
+            return Err(bad_request(
+                "Posting as a custom bot needs a destination server and channel.",
+            ));
+        }
+    }
+
     // The destination server's plan tier caps how many scheduled posts it may
     // hold (per-server premium). `None` when entitlement is disabled, or when the
     // post has no known guild (nothing to bill) → the store default applies, so a
@@ -932,6 +1023,8 @@ pub(crate) async fn create_for_owner(
         created_at: now,
         guild_id,
         make_permanent,
+        application_id,
+        channel_id,
     };
 
     let res = tokio::task::spawn_blocking(move || store.create_with_limit(&new, limit_override))
@@ -1320,6 +1413,9 @@ fn view(row: &Row, owned: bool) -> Value {
         "max_runs": row.max_runs,
         "created_at": row.created_at,
         "make_permanent": row.make_permanent,
+        // The custom bot this fires as (null = DWEEB), so the management UI can
+        // show the posting identity. The channel/webhook stay masked as ever.
+        "application_id": row.application_id,
         "owned": owned,
     })
 }
@@ -1426,6 +1522,8 @@ mod tests {
             created_at: 1000,
             guild_id: Some("guild-9".into()),
             make_permanent: false,
+            application_id: None,
+            channel_id: None,
         }
     }
 
@@ -1438,6 +1536,25 @@ mod tests {
         assert_eq!(row.status, "active");
         assert_eq!(row.next_run_at, 5000);
         assert!(store.get("missing").unwrap().is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn custom_bot_identity_persists_to_row_and_claim() {
+        let (store, path) = temp_store("custombot");
+        let mut s = sample("cb", "111", 5000);
+        s.application_id = Some("999888777666555444".into());
+        s.channel_id = Some("555444333222111000".into());
+        store.create(&s).unwrap();
+        // Stored on the row…
+        let row = store.get("cb").unwrap().unwrap();
+        assert_eq!(row.application_id.as_deref(), Some("999888777666555444"));
+        assert_eq!(row.channel_id.as_deref(), Some("555444333222111000"));
+        // …and carried on the claimed job, so the worker can re-home the hook.
+        let jobs = store.claim_due(6000, 60, 10).unwrap();
+        let job = jobs.iter().find(|j| j.id == "cb").expect("cb was due");
+        assert_eq!(job.application_id.as_deref(), Some("999888777666555444"));
+        assert_eq!(job.channel_id.as_deref(), Some("555444333222111000"));
         let _ = std::fs::remove_file(path);
     }
 

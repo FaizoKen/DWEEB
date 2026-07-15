@@ -18,9 +18,12 @@
  *
  * A brand-new post also chooses *when*: now (the default) or a one-time
  * scheduled post at a picked instant — the proxy then holds the message
- * (sealed) and posts it later through the same DWEEB webhook, no browser
- * needed. Existing schedules are managed in the Message directory's
- * Scheduled tab (see `ActivityGallery`).
+ * (sealed) and posts it later, no browser needed. Both the live and scheduled
+ * post also choose *who* they go out as via "Post as": DWEEB, or a connected
+ * custom bot (a scheduled custom-bot post has its roaming webhook re-homed to
+ * the channel at fire time, so it lands under the bot in the right place).
+ * Existing schedules are managed in the Message directory's Scheduled tab (see
+ * `ActivityGallery`).
  *
  * Presentational: it owns no post logic. Confirming hands back to the bar,
  * which runs `publish()` / `update()` / `schedule()` and, on success, opens
@@ -78,8 +81,10 @@ export interface PostConfirmProps {
   onConfirm: (makePermanent: boolean, postAs: string | null) => void;
   /** Confirm a SCHEDULED post instead (the "When → Schedule" choice, brand-new
    *  posts only): store the message server-side and post it at `at` (unix
-   *  seconds). Scheduled posts always go out as DWEEB, so there's no `postAs`. */
-  onSchedule: (makePermanent: boolean, at: number) => void;
+   *  seconds). `postAs` carries the same "Post as" choice a live post gets — a
+   *  connected custom bot's application id, or null for DWEEB (the worker re-homes
+   *  the bot's roaming webhook to the channel at fire time). */
+  onSchedule: (makePermanent: boolean, at: number, postAs: string | null) => void;
   onCancel: () => void;
   /** Hand off to the full web app — used by the "Manage on web" action when every
    *  never-expire slot is taken (managing/freeing slots lives on the web). */
@@ -524,10 +529,16 @@ export function PostConfirm({
   const customIdentities = (identities ?? []).filter(
     (i): i is Extract<ActivityIdentity, { kind: "custom" }> => i.kind === "custom",
   );
-  // A scheduled post always goes out as DWEEB (a custom bot's roaming Activity
-  // webhook could sit in another channel by fire time), so the "Post as" row
-  // gives way to the schedule area's own note while "Schedule" is picked.
-  const showIdentity = offersIdentity && !scheduling;
+  // "Post as" is offered for both a live post and a scheduled one. A scheduled
+  // custom-bot post is safe because the server re-resolves and re-homes the bot's
+  // roaming webhook to the destination channel at fire time (see the schedule
+  // worker) — so the row stays regardless of the Now/Schedule choice.
+  const showIdentity = offersIdentity;
+  // The identity the post will go out as, for the schedule note's wording.
+  const selectedIdentityName =
+    postAs === null
+      ? "DWEEB"
+      : (customIdentities.find((b) => b.application_id === postAs)?.name?.trim() || "your bot");
 
   const title =
     mode === "update"
@@ -570,7 +581,11 @@ export function PostConfirm({
       setScheduleError("That time is in the past — pick a future time.");
       return;
     }
-    onSchedule(showPermanent ? makePermanent : false, Math.floor(at / 1000));
+    onSchedule(
+      showPermanent ? makePermanent : false,
+      Math.floor(at / 1000),
+      showIdentity ? postAs : null,
+    );
   };
 
   return (
@@ -706,8 +721,8 @@ export function PostConfirm({
                     </p>
                   ) : null}
                   <p className={styles.idHint}>
-                    Posts once at this time (your local time), as DWEEB. Manage or cancel it in the
-                    Message directory's Scheduled tab.
+                    Posts once at this time (your local time), as {selectedIdentityName}. Manage or
+                    cancel it in the Message directory's Scheduled tab.
                   </p>
                 </div>
               ) : null}

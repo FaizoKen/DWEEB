@@ -199,9 +199,16 @@ interface ActivityState {
   /** Store the current message server-side to post LATER (one-time) into the
    *  chosen channel — the confirm dialog's "Schedule" choice. `startAt` is the
    *  fire time in unix seconds. Resolves with the validated fire time on
-   *  success, or null when it was guarded/failed (surfaced as a toast). Always
-   *  posts as DWEEB; managing/cancelling the schedule lives on the web. */
-  schedule(startAt: number, makePermanent?: boolean): Promise<number | null>;
+   *  success, or null when it was guarded/failed (surfaced as a toast).
+   *  `postAs` is the confirm dialog's "Post as" choice — a connected custom
+   *  bot's application id, or null for DWEEB (the worker re-homes the bot's
+   *  roaming webhook to the channel at fire time). Managing/cancelling the
+   *  schedule lives in the Message directory's Scheduled tab. */
+  schedule(
+    startAt: number,
+    makePermanent?: boolean,
+    postAs?: string | null,
+  ): Promise<number | null>;
   /** PATCH the message last posted from this Activity with the current draft.
    *  Only meaningful while {@link lastPost} matches the chosen destination.
    *  Returns the result on success / null on failure, like {@link publish}. */
@@ -585,7 +592,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 
-  async schedule(startAt, makePermanent = false) {
+  async schedule(startAt, makePermanent = false, postAs = null) {
     const guildId = get().targetGuildId;
     if (!guildId) {
       pushToast("Pick a server to post to first.", "error");
@@ -629,6 +636,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         browserTimezone(),
         destLabel,
         makePermanent,
+        postAs,
       );
       return result.next_run_at;
     } catch (e) {

@@ -24,7 +24,8 @@ use std::time::Duration;
 use axum_extra::extract::cookie::Key;
 use serde_json::Value;
 
-use crate::routes::DispatcherApi;
+use crate::error::AppError;
+use crate::routes::{AppState, DispatcherApi};
 use crate::schedule::{unix_now, ClaimedJob, ScheduleStore};
 use crate::schedule_rule::{next_after, Recurrence};
 use crate::schedule_validate::validate_webhook;
@@ -43,23 +44,25 @@ const BACKOFF_CAP_SECS: i64 = 3600;
 const SWEEP_INTERVAL_SECS: i64 = 3600;
 
 /// Spawn the worker loop. `http` should carry a modest timeout (the worker is
-/// off the 3s interaction budget, but a hung POST shouldn't hold a lease).
-/// `dispatcher` is the permanent-slot relay, used to keep a posted message's
-/// components alive when the schedule asked for it — `None` on deployments
-/// without the dispatcher, where `make_permanent` schedules simply post normally.
-#[allow(clippy::too_many_arguments)]
+/// off the 3s interaction budget, but a hung POST shouldn't hold a lease). The
+/// whole `AppState` is held because a custom-bot schedule re-resolves and
+/// re-homes the bot's roaming Activity webhook at fire time (Discord + the
+/// dispatcher registry); everything else the loop needs (schedule store, seal
+/// key, permanent-slot relay, message library) is read from it. `state.schedules`
+/// must be `Some` — the caller only spawns the worker when scheduling is enabled.
 pub fn spawn(
-    store: Arc<ScheduleStore>,
-    key: Key,
+    state: AppState,
     http: reqwest::Client,
-    dispatcher: Option<Arc<DispatcherApi>>,
-    entitlements: Arc<crate::entitlement::Entitlement>,
-    library: Option<Arc<crate::library::LibraryStore>>,
     tick_secs: u64,
     lease_secs: i64,
     batch: usize,
     retention_days: i64,
 ) {
+    let Some(store) = state.schedules.clone() else {
+        tracing::warn!("schedule worker spawned without a store — not starting");
+        return;
+    };
+    let key = state.key.clone();
     let period = Duration::from_secs(tick_secs.max(MIN_TICK_SECS));
     let retention_secs = retention_days.max(0) * 86_400;
     tokio::spawn(async move {
@@ -69,18 +72,7 @@ pub fn spawn(
         let mut last_sweep: i64 = 0;
         loop {
             ticker.tick().await;
-            if let Err(e) = drain_once(
-                &store,
-                &key,
-                &http,
-                dispatcher.as_ref(),
-                &entitlements,
-                library.as_ref(),
-                lease_secs,
-                batch,
-            )
-            .await
-            {
+            if let Err(e) = drain_once(&state, &store, &key, &http, lease_secs, batch).await {
                 tracing::warn!(error = %e, "scheduler tick failed");
             }
             let now = unix_now();
@@ -99,14 +91,11 @@ pub fn spawn(
 }
 
 /// Claim and process one batch of due schedules.
-#[allow(clippy::too_many_arguments)]
 async fn drain_once(
+    state: &AppState,
     store: &Arc<ScheduleStore>,
     key: &Key,
     http: &reqwest::Client,
-    dispatcher: Option<&Arc<DispatcherApi>>,
-    entitlements: &Arc<crate::entitlement::Entitlement>,
-    library: Option<&Arc<crate::library::LibraryStore>>,
     lease_secs: i64,
     batch: usize,
 ) -> Result<(), String> {
@@ -116,58 +105,23 @@ async fn drain_once(
         .await
         .map_err(|e| e.to_string())??;
     for job in jobs {
-        process(
-            store,
-            key,
-            http,
-            dispatcher,
-            entitlements,
-            library,
-            job,
-            now,
-        )
-        .await;
+        process(state, store, key, http, job, now).await;
     }
     Ok(())
 }
 
 /// Fire one claimed occurrence and record the outcome.
-#[allow(clippy::too_many_arguments)]
 async fn process(
+    state: &AppState,
     store: &Arc<ScheduleStore>,
     key: &Key,
     http: &reqwest::Client,
-    dispatcher: Option<&Arc<DispatcherApi>>,
-    entitlements: &Arc<crate::entitlement::Entitlement>,
-    library: Option<&Arc<crate::library::LibraryStore>>,
     job: ClaimedJob,
     now: i64,
 ) {
-    // Open the sealed webhook + payload. A failure here means the key changed
-    // (SESSION_SECRET rotated) or the row was tampered — neither will ever
-    // succeed, so it's permanent.
-    let Some(url) = seal::open(key, &job.webhook_sealed) else {
-        fail(
-            store,
-            &job.id,
-            now,
-            None,
-            "Couldn't decrypt the stored webhook (was SESSION_SECRET rotated?).",
-        )
-        .await;
-        return;
-    };
-    if validate_webhook(&url).is_err() {
-        fail(
-            store,
-            &job.id,
-            now,
-            None,
-            "The stored webhook is not a Discord webhook URL.",
-        )
-        .await;
-        return;
-    }
+    // Decrypt the message payload — needed on every path. A failure here means
+    // the key changed (SESSION_SECRET rotated) or the row was tampered — neither
+    // will ever succeed, so it's permanent.
     let Some(payload_str) = seal::open(key, &job.payload_sealed) else {
         fail(
             store,
@@ -184,9 +138,64 @@ async fn process(
         return;
     };
 
+    // Resolve the webhook this occurrence posts through.
+    //
+    //  - A custom-bot schedule (`application_id` + `channel_id` set) posts as one
+    //    of the server's bots, whose single Activity webhook roams between
+    //    channels — so the sealed URL is a stale snapshot. Re-resolve the live
+    //    webhook from the registry and bring it to the destination channel *now*,
+    //    exactly as a live post does, then post through that. A definitive
+    //    problem (bot disconnected, suspended, deleted) stops the series; an
+    //    upstream blip retries.
+    //  - A DWEEB (or web) schedule rides its channel-bound sealed URL, which
+    //    can't drift, so it's authoritative.
+    let post_url = match (&job.application_id, &job.guild_id, &job.channel_id) {
+        (Some(app), Some(guild), Some(channel)) => {
+            match crate::activity::resolve_custom_hook_for_channel(state, guild, app, channel).await
+            {
+                Ok((wid, token)) => format!("https://discord.com/api/webhooks/{wid}/{token}"),
+                Err(e) => {
+                    let reason = format!("Couldn't post as the server's custom bot: {e}");
+                    if hook_error_is_transient(&e) {
+                        let retry_at = now + backoff_secs(job.attempts);
+                        transient(store, &job, now, retry_at, None, &reason).await;
+                    } else {
+                        fail(store, &job.id, now, None, &reason).await;
+                    }
+                    return;
+                }
+            }
+        }
+        _ => {
+            let Some(url) = seal::open(key, &job.webhook_sealed) else {
+                fail(
+                    store,
+                    &job.id,
+                    now,
+                    None,
+                    "Couldn't decrypt the stored webhook (was SESSION_SECRET rotated?).",
+                )
+                .await;
+                return;
+            };
+            if validate_webhook(&url).is_err() {
+                fail(
+                    store,
+                    &job.id,
+                    now,
+                    None,
+                    "The stored webhook is not a Discord webhook URL.",
+                )
+                .await;
+                return;
+            }
+            url.trim().to_string()
+        }
+    };
+
     // `with_components=true` is mandatory for Components V2; `wait=true` makes
     // Discord echo the created message so we can record its id.
-    let mut send_url = format!("{}?with_components=true&wait=true", url.trim());
+    let mut send_url = format!("{post_url}?with_components=true&wait=true");
     if let Some(thread) = &job.thread_id {
         send_url.push_str("&thread_id=");
         send_url.push_str(thread);
@@ -210,8 +219,8 @@ async fn process(
                 // Keep the components alive when asked — best-effort, never fails
                 // the post. The outcome rides into the row's run detail as a note.
                 let note = maybe_make_permanent(
-                    dispatcher,
-                    entitlements,
+                    state.dispatcher.as_ref(),
+                    &state.entitlements,
                     &job,
                     msg_id.as_deref(),
                     channel_id.as_deref(),
@@ -219,12 +228,13 @@ async fn process(
                 .await;
                 // Land the post in the server's message library too (best-effort),
                 // so a fired schedule shows up on the shared shelf like any other
-                // posted message. Reuses the row's sealed payload/webhook as-is.
+                // posted message. Reuses the row's sealed payload/webhook as-is;
+                // `application_id` tags it so a later edit rides the same identity.
                 if let (Some(guild), Some(mid)) = (&job.guild_id, msg_id.as_deref()) {
                     crate::library::record_fired_schedule(
-                        library,
-                        entitlements,
-                        dispatcher,
+                        state.library.as_ref(),
+                        &state.entitlements,
+                        state.dispatcher.as_ref(),
                         guild,
                         channel_id.as_deref(),
                         mid,
@@ -235,6 +245,7 @@ async fn process(
                         job.title.as_deref(),
                         job.dest_label.as_deref(),
                         job.owner_user_id.as_deref(),
+                        job.application_id.as_deref(),
                     )
                     .await;
                 }
@@ -472,6 +483,19 @@ fn retry_after_secs(resp: &reqwest::Response) -> i64 {
         .clamp(1, BACKOFF_CAP_SECS)
 }
 
+/// Whether a custom-bot hook-resolution failure is worth retrying. Upstream
+/// blips (couldn't reach the dispatcher/Discord, or a 5xx from either) are
+/// transient; a definitive answer — the bot isn't connected, is suspended, was
+/// deleted, or any other 4xx — is permanent, so the series stops rather than
+/// hammering forever.
+fn hook_error_is_transient(e: &AppError) -> bool {
+    match e {
+        AppError::BadGateway(_) | AppError::Internal(_) => true,
+        AppError::Status { status, .. } => status.is_server_error(),
+        AppError::Unauthorized(_) | AppError::Forbidden(_) => false,
+    }
+}
+
 /// A short, human-readable failure reason from a Discord error response.
 fn summarize(code: u16, body: &str) -> String {
     let trimmed: String = body.trim().chars().take(300).collect();
@@ -498,6 +522,33 @@ mod tests {
     }
 
     #[test]
+    fn hook_error_classification_splits_transient_from_permanent() {
+        use axum::http::StatusCode;
+        // Upstream blips → retry.
+        assert!(hook_error_is_transient(&AppError::BadGateway(
+            "down".into()
+        )));
+        assert!(hook_error_is_transient(&AppError::Internal("oops".into())));
+        assert!(hook_error_is_transient(&AppError::Status {
+            status: StatusCode::BAD_GATEWAY,
+            message: "upstream".into(),
+            retry_after: None,
+        }));
+        // Definitive answers (bot not connected / suspended / any other 4xx) → stop.
+        assert!(!hook_error_is_transient(&AppError::Forbidden(
+            "suspended".into()
+        )));
+        assert!(!hook_error_is_transient(&AppError::Unauthorized(
+            "nope".into()
+        )));
+        assert!(!hook_error_is_transient(&AppError::Status {
+            status: StatusCode::CONFLICT,
+            message: "not connected".into(),
+            retry_after: None,
+        }));
+    }
+
+    #[test]
     fn compute_next_respects_max_runs_and_once() {
         let once = ClaimedJob {
             id: "x".into(),
@@ -516,6 +567,8 @@ mod tests {
             owner_user_id: None,
             title: None,
             dest_label: None,
+            application_id: None,
+            channel_id: None,
         };
         assert_eq!(compute_next(&once, 1000), None);
 

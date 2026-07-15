@@ -688,6 +688,7 @@ pub async fn record_fired_schedule(
     title: Option<&str>,
     dest_label: Option<&str>,
     created_by: Option<&str>,
+    application_id: Option<&str>,
 ) {
     let Some(store) = library else {
         return;
@@ -702,9 +703,12 @@ pub async fn record_fired_schedule(
         payload_sealed: payload_sealed.to_string(),
         webhook_sealed: Some(webhook_sealed.to_string()),
         webhook_id: Some(webhook_id.to_string()),
-        // Schedules always fire as DWEEB (a custom bot's roaming webhook could
-        // have drifted to another channel by fire time).
-        application_id: None,
+        // The custom bot the schedule fired as, or None for DWEEB. The worker
+        // re-homes the bot's roaming webhook to the destination channel at fire
+        // time, so a custom-bot schedule really does post under it — and tagging
+        // the entry here lets a later edit from the shelf ride the same identity
+        // (the edit path re-resolves the hook by `application_id`).
+        application_id: application_id.map(str::to_string),
         channel_id: channel_id.map(str::to_string),
         message_id: Some(message_id.to_string()),
         thread_id: thread_id.map(str::to_string),
