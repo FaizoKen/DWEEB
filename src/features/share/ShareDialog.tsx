@@ -8,8 +8,8 @@
  *  - Restore     : GET a previously-posted webhook message back into the
  *                  editor by webhook URL + message ID/link.
  *  - Share link  : compressed URL containing the entire message state.
- *  - JSON export : the wire-format payload, ready to POST manually.
- *  - Import      : paste either a share token or a raw JSON payload.
+ *  - JSON        : the wire-format payload — copy/download to export, or edit /
+ *                  paste over it (JSON, share token, or V1 payload) to import.
  *
  * The dialog is stateless w.r.t. the message — it reads from the store on
  * open and pushes the parsed message back through `replaceMessage` (or
@@ -66,15 +66,14 @@ import { GuildIdentity } from "./GuildIdentity";
 import { Callout } from "./Callout";
 import styles from "./ShareDialog.module.css";
 
-type Tab = "send" | "update" | "restore" | "share" | "json" | "import" | "about";
+type Tab = "send" | "update" | "restore" | "share" | "json" | "about";
 
 const SHARE_TABS: readonly { id: Tab; label: string }[] = [
   { id: "send", label: "Send" },
   { id: "update", label: "Update" },
   { id: "restore", label: "Restore" },
   { id: "share", label: "Share link" },
-  { id: "json", label: "JSON export" },
-  { id: "import", label: "Import" },
+  { id: "json", label: "JSON" },
   { id: "about", label: "About" },
 ];
 
@@ -181,8 +180,7 @@ export function ShareDialog({
         ) : null}
         {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}
         {tab === "share" ? <ShareLinkPanel /> : null}
-        {tab === "json" ? <JsonExportPanel /> : null}
-        {tab === "import" ? <ImportPanel onDone={onClose} /> : null}
+        {tab === "json" ? <JsonPanel onDone={onClose} /> : null}
         {tab === "about" ? <AboutPanel onClose={onClose} /> : null}
       </div>
     </Modal>
@@ -309,46 +307,6 @@ function ShareLinkPanel() {
   );
 }
 
-function JsonExportPanel() {
-  const message = useMessageStore((s) => s.message);
-  const json = useMemo(() => encodeJson(message), [message]);
-  return (
-    <>
-      <p className={styles.lead}>
-        POST this body to your webhook URL with the <code>?with_components=true</code> query
-        parameter. The required <code>flags</code> (Components V2, plus silent-send if enabled) are
-        already included below — Discord rejects the payload without them.
-      </p>
-      <TextArea readOnly rows={14} value={json} className={styles.mono} />
-      <div className={styles.actions}>
-        <Button
-          variant="primary"
-          onClick={async () => {
-            if (await copyText(json)) pushToast("JSON copied", "success");
-            else pushToast("Copy failed", "error");
-          }}
-        >
-          Copy JSON
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            const blob = new Blob([json], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "webhook-message.json";
-            a.click();
-            URL.revokeObjectURL(url);
-          }}
-        >
-          Download file
-        </Button>
-      </div>
-    </>
-  );
-}
-
 /**
  * About panel — surfaces a short description of the app, the author
  * credit, the source-available/GitHub link, the support-server invite, and the
@@ -433,29 +391,39 @@ function AboutPanel({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * Import panel.
+ * JSON panel — combined export + import.
  *
- * Accepts three shapes:
- *  1. A share URL or bare share token — decoded via `decodeShare`.
- *  2. A Components V2 JSON payload — decoded via `decodeJson`.
- *  3. A pre-V2 (V1) webhook payload (`content` / `embeds` / `poll` /
+ * The field is prefilled with the current message's wire-format payload, so the
+ * default action is export: **Copy** or **Download** the JSON. Edit or paste
+ * over it and **Replace message** to import instead.
+ *
+ * Import accepts three shapes:
+ *  1. A Components V2 JSON payload — decoded via `decodeJson`.
+ *  2. A pre-V2 (V1) webhook payload (`content` / `embeds` / `poll` /
  *     `stickers`). The panel detects these as the user types, shows a
  *     preview of what the converter will do, and offers a typed
  *     "Convert to V2 and import" action so the conversion never happens
- *     by surprise.
- *
- * For (3), the converter `convertV1Payload` rewrites the payload into a V2
- * component tree, returning a list of notes describing every conversion or
- * drop so users can spot data loss (poll, video, icons) before committing.
+ *     by surprise. `convertV1Payload` rewrites the payload into a V2 component
+ *     tree, returning notes describing every conversion or drop so users can
+ *     spot data loss (poll, video, icons) before committing.
+ *  3. A share URL or bare share token pasted in — decoded via `decodeShare`.
  */
-function ImportPanel({ onDone }: { onDone: () => void }) {
+function JsonPanel({ onDone }: { onDone: () => void }) {
+  const message = useMessageStore((s) => s.message);
   const replace = useMessageStore((s) => s.replaceMessage);
-  const [text, setText] = useState("");
+  // The live wire-format export. The dialog blocks editing the message behind
+  // it, so this is frozen while the panel is open — safe to seed the field once.
+  const exported = useMemo(() => encodeJson(message), [message]);
+  const [text, setText] = useState(exported);
   const [error, setError] = useState<string | null>(null);
 
   // Live V1 detection — only meaningful when the input parses as JSON. Share
   // tokens / share URLs go through their own paths and never preview V1.
   const v1Preview = useMemo(() => analyseInput(text), [text]);
+
+  // Once the field diverges from the live export, the user is importing, so the
+  // import action takes primary emphasis; until then export (Copy) leads.
+  const importing = v1Preview.kind === "v1" || text.trim() !== exported.trim();
 
   const handleImport = () => {
     const value = text.trim();
@@ -478,8 +446,8 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
     // editor never silently drops `content`/`embeds`/etc.
     if (v1Preview.kind === "v1") {
       try {
-        const { message, notes } = convertV1Payload(v1Preview.parsed);
-        replace(message);
+        const { message: converted, notes } = convertV1Payload(v1Preview.parsed);
+        replace(converted);
         const dropped = notes.filter((n) => n.level === "warning").length;
         pushToast(
           dropped > 0
@@ -517,27 +485,56 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
     onDone();
   }
 
+  const copyJson = async () => {
+    if (await copyText(text)) pushToast("JSON copied", "success");
+    else pushToast("Copy failed", "error");
+  };
+
+  const downloadJson = () => {
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "webhook-message.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <>
       <p className={styles.lead}>
-        Paste a share URL, a share token, or a webhook JSON payload. V1 payloads (with{" "}
-        <code>content</code>, <code>embeds</code>, <code>poll</code>, or <code>stickers</code>) are
-        auto-converted to V2 — the panel previews what happens before you commit.
+        The wire-format payload for the current message. <strong>Copy</strong> or{" "}
+        <strong>Download</strong> to export — POST it to your webhook URL with{" "}
+        <code>?with_components=true</code> (the required <code>flags</code> are already included).
+        Or edit / paste over it (JSON, a share link, or a V1 payload) and{" "}
+        <strong>Replace message</strong> to import. V1 payloads (with <code>content</code>,{" "}
+        <code>embeds</code>, <code>poll</code>, or <code>stickers</code>) are auto-converted to V2 —
+        the panel previews what happens before you commit.
       </p>
       <TextArea
-        rows={10}
+        rows={14}
+        className={styles.mono}
         placeholder='{ "components": [ … ] }  ·  or  { "content": "...", "embeds": [...] }'
         invalid={!!error}
         value={text}
-        onChange={(e) => setText(e.currentTarget.value)}
+        onChange={(e) => {
+          setText(e.currentTarget.value);
+          if (error) setError(null);
+        }}
       />
       {v1Preview.kind === "v1" ? (
         <V1ConversionPreview fields={v1Preview.detection.fields} notes={v1Preview.notes} />
       ) : null}
       {error ? <div className={styles.error}>{error}</div> : null}
       <div className={styles.actions}>
-        <Button variant="primary" onClick={handleImport}>
+        <Button variant={importing ? "primary" : "secondary"} onClick={handleImport}>
           {v1Preview.kind === "v1" ? "Convert to V2 and import" : "Replace message"}
+        </Button>
+        <Button variant={importing ? "secondary" : "primary"} onClick={copyJson}>
+          Copy JSON
+        </Button>
+        <Button variant="secondary" onClick={downloadJson}>
+          Download file
         </Button>
       </div>
     </>

@@ -26,7 +26,7 @@ import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
 import {
   BookmarkIcon,
-  DownloadIcon,
+  BracesIcon,
   FilmIcon,
   HistoryIcon,
   InfoIcon,
@@ -40,7 +40,6 @@ import {
   SupportIcon,
   TrashIcon,
   UndoIcon,
-  UploadIcon,
   UsersIcon,
 } from "@/ui/Icon";
 import { Menu, MenuItem, MenuDivider } from "@/ui/Menu";
@@ -75,10 +74,8 @@ interface UtilityAction {
 interface BuilderProps {
   /** Opens the Share / Export dialog on the Share-link tab. */
   onShare: () => void;
-  /** Opens the Share / Export dialog on the JSON export tab. */
-  onExport: () => void;
-  /** Opens the Share / Export dialog on the Import tab. */
-  onImport: () => void;
+  /** Opens the Share / Export dialog on the combined JSON import/export tab. */
+  onJson: () => void;
   /** Opens the Share / Export dialog focused on the Send panel (post as new). */
   onSend: () => void;
   /** Opens the Share / Export dialog on the Update tab (edit in place). */
@@ -89,15 +86,7 @@ interface BuilderProps {
   onAbout: () => void;
 }
 
-export function Builder({
-  onShare,
-  onExport,
-  onImport,
-  onSend,
-  onUpdate,
-  onRestore,
-  onAbout,
-}: BuilderProps) {
+export function Builder({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: BuilderProps) {
   return (
     <div className={styles.builder}>
       {/* ActionBar occupies the grid's first (auto) row; the tree fills the 1fr
@@ -107,8 +96,7 @@ export function Builder({
       <div className={styles.header}>
         <ActionBar
           onShare={onShare}
-          onExport={onExport}
-          onImport={onImport}
+          onJson={onJson}
           onSend={onSend}
           onUpdate={onUpdate}
           onRestore={onRestore}
@@ -121,15 +109,7 @@ export function Builder({
   );
 }
 
-function ActionBar({
-  onShare,
-  onExport,
-  onImport,
-  onSend,
-  onUpdate,
-  onRestore,
-  onAbout,
-}: BuilderProps) {
+function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: BuilderProps) {
   const undo = useMessageStore((s) => s.undo);
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
@@ -495,22 +475,13 @@ function ActionBar({
                   </MenuItem>
                 ) : null}
                 <MenuItem
-                  icon={<DownloadIcon />}
+                  icon={<BracesIcon />}
                   onSelect={() => {
                     close();
-                    onExport();
+                    onJson();
                   }}
                 >
-                  Export JSON
-                </MenuItem>
-                <MenuItem
-                  icon={<UploadIcon />}
-                  onSelect={() => {
-                    close();
-                    onImport();
-                  }}
-                >
-                  Import…
+                  Import / export JSON
                 </MenuItem>
                 <MenuItem
                   icon={<TrashIcon />}
