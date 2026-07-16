@@ -304,6 +304,58 @@ export const GalleryCard = memo(function GalleryCard({
 });
 
 /**
+ * Chip-row placeholder for the gallery's one skeleton pass — pill shapes where
+ * the real filter chips land once the server-fed shelves have answered (which
+ * chips exist at all is a server answer, so real chips can't paint earlier
+ * without popping in one by one).
+ */
+export function GalleryChipsSkeleton() {
+  return (
+    <>
+      {[76, 98, 88].map((width, i) => (
+        <span
+          key={i}
+          className={`${styles.skeletonBlock} ${styles.skeletonChip}`}
+          style={{ width }}
+          aria-hidden
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * Card-grid placeholder for the same skeleton pass — card-shaped blocks in the
+ * real grid so the reveal swaps content without reflowing the panel. The
+ * count roughly fills one screenful; the grid never scrolls in this state.
+ */
+export function GalleryGridSkeleton({ cards = 8 }: { cards?: number }) {
+  return (
+    <div className={styles.grid} role="status" aria-label="Loading your messages…">
+      {Array.from({ length: cards }, (_, i) => (
+        <div key={i} className={styles.skeletonCard} aria-hidden>
+          <div className={`${styles.skeletonBlock} ${styles.skeletonThumb}`} />
+          <div className={styles.skeletonBody}>
+            <div
+              className={`${styles.skeletonBlock} ${styles.skeletonLine}`}
+              style={{ width: "55%" }}
+            />
+            <div
+              className={`${styles.skeletonBlock} ${styles.skeletonLine}`}
+              style={{ width: "85%" }}
+            />
+            <div
+              className={`${styles.skeletonBlock} ${styles.skeletonLine}`}
+              style={{ width: "40%" }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * Full-width row at the grid's tail that reveals the next page of cards —
  * automatically as it scrolls near (via the shared observer), or by click
  * (the keyboard / no-IntersectionObserver fallback). The parent keys it on the

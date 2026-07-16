@@ -73,6 +73,12 @@
   font-weight: 600;
 }
 
+/* Suspense fallback while the gallery's lazy chunk loads. Deliberately
+ * transparent: the gallery backdrop fades itself in on mount, so a dim or
+ * opaque fallback here would flash dark → light → dark across the handoff
+ * (the old opaque var(--app-bg) fill read as a big black screen). Just a
+ * quiet hint pill, faded in after a beat so a cached chunk (the usual case —
+ * the SW precaches it) never even flashes it. */
 .gallery-bootstrap {
   position: fixed;
   inset: 0;
@@ -81,9 +87,32 @@
   place-items: center;
   padding: calc(24px + var(--app-sait)) calc(24px + var(--app-sair)) calc(24px + var(--app-saib))
     calc(24px + var(--app-sail));
-  background: var(--app-bg);
+}
+
+.gallery-bootstrap__hint {
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow-lg);
   color: var(--app-text-muted);
+  font-size: var(--app-text-sm);
   font-weight: 600;
+  opacity: 0;
+  animation: gallery-bootstrap-hint-in 200ms ease 150ms forwards;
+}
+
+@keyframes gallery-bootstrap-hint-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery-bootstrap__hint {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 /* Dismiss scrim for the mobile preview sheet — activated in the @media block

@@ -59,6 +59,8 @@ import {
   CARD_PAGE_SIZE,
   EAGER_THUMBNAILS,
   GalleryCard,
+  GalleryChipsSkeleton,
+  GalleryGridSkeleton,
   LoadMoreSentinel,
   messageSearchText,
   searchHaystack,
@@ -470,6 +472,24 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     if (filter !== activeFilter) setFilter(activeFilter);
   }, [activeFilter, filter, libraryPending, schedulePending]);
 
+  // Which chips exist and which tab the gallery lands on are both server
+  // answers, so painting real content before they arrive meant opening on
+  // Templates and swapping to Posted a beat later. Instead the directory holds
+  // one skeleton pass until the server-fed lists settle — and once revealed it
+  // never goes back (later refreshes merge in place).
+  const directoryPending = libraryPending || schedulePending;
+  const [revealed, setRevealed] = useState(() => !directoryPending);
+  useEffect(() => {
+    if (!directoryPending) setRevealed(true);
+  }, [directoryPending]);
+  // Fail-open: a hung request must never hold the skeleton hostage — reveal
+  // whatever has arrived and let the usual fail-soft states take over.
+  useEffect(() => {
+    if (revealed) return;
+    const t = setTimeout(() => setRevealed(true), 4000);
+    return () => clearTimeout(t);
+  }, [revealed]);
+
   const shown = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
     const base =
@@ -577,7 +597,7 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
                   value={query}
                   onChange={(e) => setQuery(e.currentTarget.value)}
                   placeholder={
-                    postedCards.length || draftCards.length
+                    !revealed || postedCards.length || draftCards.length
                       ? "Search this server's messages & templates…"
                       : `Search ${TEMPLATES.length} templates…`
                   }
@@ -599,167 +619,186 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
               </div>
 
               <div className={styles.chips} role="group" aria-label="Filter by category">
-                {filters.map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    aria-pressed={activeFilter === f}
-                    className={[
-                      styles.chip,
-                      f === SERVER_DRAFTS_FILTER ? styles.chipSaved : "",
-                      f === POSTED_FILTER ? styles.chipPosted : "",
-                      f === SCHEDULED_FILTER ? styles.chipScheduled : "",
-                      activeFilter === f ? styles.chipActive : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    onClick={() => setFilter(f)}
-                  >
-                    {f}
-                  </button>
-                ))}
+                {!revealed ? (
+                  <GalleryChipsSkeleton />
+                ) : (
+                  filters.map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      aria-pressed={activeFilter === f}
+                      className={[
+                        styles.chip,
+                        f === SERVER_DRAFTS_FILTER ? styles.chipSaved : "",
+                        f === POSTED_FILTER ? styles.chipPosted : "",
+                        f === SCHEDULED_FILTER ? styles.chipScheduled : "",
+                        activeFilter === f ? styles.chipActive : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      onClick={() => setFilter(f)}
+                    >
+                      {f}
+                    </button>
+                  ))
+                )}
               </div>
             </div>
           </header>
 
-          <div className={styles.body}>
-            {/* Per-tab usage read-out, mirroring the web gallery. Shown once the
-                shelf has loaded for the target server. */}
-            {targetGuildId && libGuild === targetGuildId && libLoaded ? (
-              <>
-                {activeFilter === POSTED_FILTER ? (
-                  <p
-                    className={styles.tabMeter}
-                    title="Posted messages sync automatically — the newest posts, oldest roll off."
-                  >
-                    <strong>Posted history:</strong> {libPosted.used}
-                    {libPosted.quota != null ? ` / ${libPosted.quota}` : ""}
-                  </p>
-                ) : null}
-                {activeFilter === SERVER_DRAFTS_FILTER ? (
-                  <p
-                    className={styles.tabMeter}
-                    data-over={
-                      libDrafts.quota != null && libDrafts.used > libDrafts.quota ? "" : undefined
-                    }
-                    title={
-                      libDrafts.quota != null && libDrafts.used > libDrafts.quota
-                        ? "More server drafts than the plan allows — they stay readable, but content can't be changed until you delete down to the limit or upgrade."
-                        : "Server drafts are yours to add and remove."
-                    }
-                  >
-                    <strong>Server drafts:</strong> {libDrafts.used}
-                    {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
-                    {libDrafts.quota != null && libDrafts.used > libDrafts.quota
-                      ? " · over limit"
-                      : ""}
-                  </p>
-                ) : null}
-              </>
-            ) : null}
-
-            {/* The Scheduled tab's usage line — live timed posts against the
-                plan cap. Independent of the library gate above (its own fetch). */}
-            {activeFilter === SCHEDULED_FILTER &&
-            (sched.upcoming.length > 0 || sched.history.length > 0) ? (
-              <p
-                className={styles.tabMeter}
-                title="Each scheduled post fires once at its set time, then drops into the history below."
-              >
-                <strong>Scheduled posts:</strong>{" "}
-                {sched.quota != null
-                  ? `${sched.activeCount} / ${sched.quota} used`
-                  : `${sched.activeCount} active`}
-              </p>
-            ) : null}
-
-            {shown.length > 0 ? (
-              <div className={styles.grid}>
-                {visibleCards.map((c, i) => (
-                  <GalleryCard
-                    key={c.key}
-                    card={c}
-                    eagerThumb={i < EAGER_THUMBNAILS}
-                    priorityThumb={i === 0}
-                  />
-                ))}
-                {shown.length > visibleCards.length ? (
-                  // Keyed on the revealed count so each reveal re-arms a fresh
-                  // sentinel for the following page.
-                  <LoadMoreSentinel
-                    key={visibleCards.length}
-                    remaining={shown.length - visibleCards.length}
-                    onReveal={revealMore}
-                  />
-                ) : null}
-              </div>
-            ) : activeFilter === SCHEDULED_FILTER && sched.history.length > 0 && !query.trim() ? (
-              // Nothing upcoming, but the history section below still has rows.
-              <p className={styles.emptyInline}>No upcoming scheduled posts — history is below.</p>
+          <div className={styles.body} aria-busy={!revealed || undefined}>
+            {!revealed ? (
+              <GalleryGridSkeleton />
             ) : (
-              <div className={styles.empty}>
-                <SearchIcon size={28} aria-hidden />
-                {query.trim() ? (
+              <>
+                {/* Per-tab usage read-out, mirroring the web gallery. Shown once the
+                shelf has loaded for the target server. */}
+                {targetGuildId && libGuild === targetGuildId && libLoaded ? (
                   <>
-                    <p className={styles.emptyTitle}>No matches for “{query.trim()}”.</p>
-                    <button
-                      type="button"
-                      className={styles.emptyReset}
-                      onClick={() => setQuery("")}
-                    >
-                      Clear search
-                    </button>
+                    {activeFilter === POSTED_FILTER ? (
+                      <p
+                        className={styles.tabMeter}
+                        title="Posted messages sync automatically — the newest posts, oldest roll off."
+                      >
+                        <strong>Posted history:</strong> {libPosted.used}
+                        {libPosted.quota != null ? ` / ${libPosted.quota}` : ""}
+                      </p>
+                    ) : null}
+                    {activeFilter === SERVER_DRAFTS_FILTER ? (
+                      <p
+                        className={styles.tabMeter}
+                        data-over={
+                          libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                            ? ""
+                            : undefined
+                        }
+                        title={
+                          libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                            ? "More server drafts than the plan allows — they stay readable, but content can't be changed until you delete down to the limit or upgrade."
+                            : "Server drafts are yours to add and remove."
+                        }
+                      >
+                        <strong>Server drafts:</strong> {libDrafts.used}
+                        {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
+                        {libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                          ? " · over limit"
+                          : ""}
+                      </p>
+                    ) : null}
                   </>
-                ) : activeFilter === SCHEDULED_FILTER ? (
-                  <p className={styles.emptyTitle}>
-                    {schedulePending
-                      ? "Loading scheduled posts…"
-                      : "No scheduled posts yet — pick “Schedule” in the post dialog to time one."}
-                  </p>
-                ) : libraryPending && activeFilter !== TEMPLATE_FILTER ? (
-                  <p className={styles.emptyTitle}>Loading the server library…</p>
-                ) : (
-                  <p className={styles.emptyTitle}>
-                    Nothing here yet — post a message and it lands in this history automatically.
-                  </p>
-                )}
-              </div>
-            )}
+                ) : null}
 
-            {/* Posted / failed schedules have no message to preview (the server
+                {/* The Scheduled tab's usage line — live timed posts against the
+                plan cap. Independent of the library gate above (its own fetch). */}
+                {activeFilter === SCHEDULED_FILTER &&
+                (sched.upcoming.length > 0 || sched.history.length > 0) ? (
+                  <p
+                    className={styles.tabMeter}
+                    title="Each scheduled post fires once at its set time, then drops into the history below."
+                  >
+                    <strong>Scheduled posts:</strong>{" "}
+                    {sched.quota != null
+                      ? `${sched.activeCount} / ${sched.quota} used`
+                      : `${sched.activeCount} active`}
+                  </p>
+                ) : null}
+
+                {shown.length > 0 ? (
+                  <div className={styles.grid}>
+                    {visibleCards.map((c, i) => (
+                      <GalleryCard
+                        key={c.key}
+                        card={c}
+                        eagerThumb={i < EAGER_THUMBNAILS}
+                        priorityThumb={i === 0}
+                      />
+                    ))}
+                    {shown.length > visibleCards.length ? (
+                      // Keyed on the revealed count so each reveal re-arms a fresh
+                      // sentinel for the following page.
+                      <LoadMoreSentinel
+                        key={visibleCards.length}
+                        remaining={shown.length - visibleCards.length}
+                        onReveal={revealMore}
+                      />
+                    ) : null}
+                  </div>
+                ) : activeFilter === SCHEDULED_FILTER &&
+                  sched.history.length > 0 &&
+                  !query.trim() ? (
+                  // Nothing upcoming, but the history section below still has rows.
+                  <p className={styles.emptyInline}>
+                    No upcoming scheduled posts — history is below.
+                  </p>
+                ) : (
+                  <div className={styles.empty}>
+                    <SearchIcon size={28} aria-hidden />
+                    {query.trim() ? (
+                      <>
+                        <p className={styles.emptyTitle}>No matches for “{query.trim()}”.</p>
+                        <button
+                          type="button"
+                          className={styles.emptyReset}
+                          onClick={() => setQuery("")}
+                        >
+                          Clear search
+                        </button>
+                      </>
+                    ) : activeFilter === SCHEDULED_FILTER ? (
+                      <p className={styles.emptyTitle}>
+                        {schedulePending
+                          ? "Loading scheduled posts…"
+                          : "No scheduled posts yet — pick “Schedule” in the post dialog to time one."}
+                      </p>
+                    ) : libraryPending && activeFilter !== TEMPLATE_FILTER ? (
+                      <p className={styles.emptyTitle}>Loading the server library…</p>
+                    ) : (
+                      <p className={styles.emptyTitle}>
+                        Nothing here yet — post a message and it lands in this history
+                        automatically.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Posted / failed schedules have no message to preview (the server
                 deletes it once it fires), so they live as compact rows below the
                 upcoming grid — view on Discord (through the SDK; the sandboxed
                 iframe can't navigate out itself), remove, or clear the lot. */}
-            {activeFilter === SCHEDULED_FILTER && sched.history.length > 0 ? (
-              <div className={styles.scheduleHistoryWrap}>
-                <ScheduleHistory
-                  history={sched.history}
-                  ttlDays={null}
-                  retentionDays={sched.retentionDays}
-                  busyId={sched.busyId}
-                  onRemove={(s) => {
-                    void sched.cancel(s).then((ok) => {
-                      if (!ok) pushToast("Couldn't remove it — try again.", "error");
-                    });
-                  }}
-                  onClear={async () => {
-                    const failed = await sched.clearHistory(sched.history);
-                    pushToast(
-                      failed === 0
-                        ? "Cleared posted & failed schedules."
-                        : `Cleared some; ${failed} couldn't be removed.`,
-                      failed === 0 ? "success" : "info",
-                    );
-                  }}
-                  openLink={(url) => void openExternalLink(url)}
-                />
-              </div>
-            ) : null}
+                {activeFilter === SCHEDULED_FILTER && sched.history.length > 0 ? (
+                  <div className={styles.scheduleHistoryWrap}>
+                    <ScheduleHistory
+                      history={sched.history}
+                      ttlDays={null}
+                      retentionDays={sched.retentionDays}
+                      busyId={sched.busyId}
+                      onRemove={(s) => {
+                        void sched.cancel(s).then((ok) => {
+                          if (!ok) pushToast("Couldn't remove it — try again.", "error");
+                        });
+                      }}
+                      onClear={async () => {
+                        const failed = await sched.clearHistory(sched.history);
+                        pushToast(
+                          failed === 0
+                            ? "Cleared posted & failed schedules."
+                            : `Cleared some; ${failed} couldn't be removed.`,
+                          failed === 0 ? "success" : "info",
+                        );
+                      }}
+                      openLink={(url) => void openExternalLink(url)}
+                    />
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
 
           <footer className={styles.footer}>
             <span className={styles.footerHint}>
-              {shown.length} {shown.length === 1 ? "result" : "results"}
+              {revealed
+                ? `${shown.length} ${shown.length === 1 ? "result" : "results"}`
+                : "Loading your messages…"}
             </span>
             <button type="button" className={styles.blankBtn} onClick={startBlank}>
               <PlusIcon size={16} />

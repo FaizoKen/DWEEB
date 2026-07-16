@@ -87,6 +87,8 @@ import {
   CARD_PAGE_SIZE,
   EAGER_THUMBNAILS,
   GalleryCard,
+  GalleryChipsSkeleton,
+  GalleryGridSkeleton,
   LoadMoreSentinel,
   messageSearchText,
   searchHaystack,
@@ -777,6 +779,25 @@ export function TemplateGallery() {
   // open, so hold on Scheduled until it settles instead of bouncing to Posted.
   const schedulePending = scheduleOn && !sched.loaded;
 
+  // Which chips exist and which tab the gallery lands on are both server
+  // answers, so painting real content before they arrive meant opening on
+  // Templates and swapping to Posted a beat later. Instead the directory holds
+  // one skeleton pass until the server-fed lists settle — and once revealed it
+  // never goes back (later refreshes merge in place). Without a connected
+  // server there's nothing to wait for and the reveal is immediate.
+  const directoryPending = libraryPending || (scheduleOn && !!connectedGuildId && !sched.loaded);
+  const [revealed, setRevealed] = useState(() => !directoryPending);
+  useEffect(() => {
+    if (!directoryPending) setRevealed(true);
+  }, [directoryPending]);
+  // Fail-open: a hung request must never hold the skeleton hostage — reveal
+  // whatever has arrived and let the usual fail-soft states take over.
+  useEffect(() => {
+    if (revealed) return;
+    const t = setTimeout(() => setRevealed(true), 4000);
+    return () => clearTimeout(t);
+  }, [revealed]);
+
   // If the requested filter disappears (e.g. last saved message removed), fall
   // through to the first real chip so the gallery never opens on a combined view.
   useEffect(() => {
@@ -920,7 +941,7 @@ export function TemplateGallery() {
                   value={query}
                   onChange={(e) => setQuery(e.currentTarget.value)}
                   placeholder={
-                    postedCards.length || savedCards.length
+                    !revealed || postedCards.length || savedCards.length
                       ? "Search your messages & templates…"
                       : `Search ${TEMPLATES.length} templates…`
                   }
@@ -961,30 +982,34 @@ export function TemplateGallery() {
                   aria-label="Filter templates by category"
                   onScroll={updateChipScroll}
                 >
-                  {filters.map((f) => (
-                    <button
-                      key={f}
-                      type="button"
-                      aria-pressed={activeFilter === f}
-                      className={[
-                        styles.chip,
-                        // The Saved/Posted pseudo-categories carry their own tints
-                        // (teal / green) so a user's own messages stand out from the
-                        // curated template categories.
-                        f === BROWSER_DRAFTS_FILTER || f === SERVER_DRAFTS_FILTER
-                          ? styles.chipSaved
-                          : "",
-                        f === POSTED_FILTER ? styles.chipPosted : "",
-                        f === SCHEDULED_FILTER ? styles.chipScheduled : "",
-                        activeFilter === f ? styles.chipActive : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      onClick={() => setFilter(f)}
-                    >
-                      {f}
-                    </button>
-                  ))}
+                  {!revealed ? (
+                    <GalleryChipsSkeleton />
+                  ) : (
+                    filters.map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        aria-pressed={activeFilter === f}
+                        className={[
+                          styles.chip,
+                          // The Saved/Posted pseudo-categories carry their own tints
+                          // (teal / green) so a user's own messages stand out from the
+                          // curated template categories.
+                          f === BROWSER_DRAFTS_FILTER || f === SERVER_DRAFTS_FILTER
+                            ? styles.chipSaved
+                            : "",
+                          f === POSTED_FILTER ? styles.chipPosted : "",
+                          f === SCHEDULED_FILTER ? styles.chipScheduled : "",
+                          activeFilter === f ? styles.chipActive : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        onClick={() => setFilter(f)}
+                      >
+                        {f}
+                      </button>
+                    ))
+                  )}
                 </div>
 
                 {chipScroll.right ? (
@@ -1002,244 +1027,262 @@ export function TemplateGallery() {
             </div>
           </header>
 
-          <div className={styles.body}>
-            {/* Per-tab usage read-out, moved out of the shared footer so each
+          <div className={styles.body} aria-busy={!revealed || undefined}>
+            {!revealed ? (
+              <GalleryGridSkeleton />
+            ) : (
+              <>
+                {/* Per-tab usage read-out, moved out of the shared footer so each
                 tab shows only its own numbers. A quiet line above the list, not
                 a box, so it doesn't compete with the never-expire / scheduled
                 strips below. Shown once the shelf has loaded for the connected
                 server (a non-manager never sees a meter for a list they can't
                 read). */}
-            {connectedGuildId && libGuild === connectedGuildId && libLoaded ? (
-              <>
-                {activeFilter === POSTED_FILTER ? (
-                  <p
-                    className={styles.tabMeter}
-                    title="Posted messages sync automatically — the newest posts, oldest roll off. Never-expire messages stay put."
-                  >
-                    <strong>Posted history:</strong>{" "}
-                    {Math.max(0, libPosted.used - pinnedPostedCount)}
-                    {libPosted.quota != null ? ` / ${libPosted.quota}` : ""}
-                  </p>
+                {connectedGuildId && libGuild === connectedGuildId && libLoaded ? (
+                  <>
+                    {activeFilter === POSTED_FILTER ? (
+                      <p
+                        className={styles.tabMeter}
+                        title="Posted messages sync automatically — the newest posts, oldest roll off. Never-expire messages stay put."
+                      >
+                        <strong>Posted history:</strong>{" "}
+                        {Math.max(0, libPosted.used - pinnedPostedCount)}
+                        {libPosted.quota != null ? ` / ${libPosted.quota}` : ""}
+                      </p>
+                    ) : null}
+                    {activeFilter === SERVER_DRAFTS_FILTER ? (
+                      <p
+                        className={styles.tabMeter}
+                        data-over={
+                          libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                            ? ""
+                            : undefined
+                        }
+                        title={
+                          libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                            ? "More server drafts than the plan allows — they stay readable, but content can't be changed until you delete down to the limit or upgrade."
+                            : "Server drafts are yours to add and remove."
+                        }
+                      >
+                        <strong>Server drafts:</strong> {libDrafts.used}
+                        {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
+                        {libDrafts.quota != null && libDrafts.used > libDrafts.quota
+                          ? " · over limit"
+                          : ""}
+                      </p>
+                    ) : null}
+                  </>
                 ) : null}
-                {activeFilter === SERVER_DRAFTS_FILTER ? (
-                  <p
-                    className={styles.tabMeter}
-                    data-over={
-                      libDrafts.quota != null && libDrafts.used > libDrafts.quota ? "" : undefined
-                    }
-                    title={
-                      libDrafts.quota != null && libDrafts.used > libDrafts.quota
-                        ? "More server drafts than the plan allows — they stay readable, but content can't be changed until you delete down to the limit or upgrade."
-                        : "Server drafts are yours to add and remove."
-                    }
-                  >
-                    <strong>Server drafts:</strong> {libDrafts.used}
-                    {libDrafts.quota != null ? ` / ${libDrafts.quota}` : ""}
-                    {libDrafts.quota != null && libDrafts.used > libDrafts.quota
-                      ? " · over limit"
-                      : ""}
-                  </p>
-                ) : null}
-              </>
-            ) : null}
 
-            {/* The Posted tab doubles as the never-expire slot manager: usage,
+                {/* The Posted tab doubles as the never-expire slot manager: usage,
                 the upgrade path when full, and any slots whose message has no
                 card here (nothing else could free those). Hidden when the
                 feature is off or this user can't manage the server's slots. */}
-            {activeFilter === POSTED_FILTER && canManageSlots && permanent ? (
-              <div className={styles.slotStrip}>
-                <div className={styles.slotStripHead}>
-                  <span className={styles.slotStripText}>
-                    <strong>Never expire:</strong>{" "}
-                    {isUnlimitedCap(permanent.cap)
-                      ? `${permanent.used} used`
-                      : `${permanent.used}/${permanent.cap} slots used`}
-                    {" · "}buttons &amp; selects stop working {permanent.ttl_days} days after
-                    sending unless the message holds a slot — assign or free one right on its card.
-                  </span>
-                  {!isUnlimitedCap(permanent.cap) && permanent.used >= permanent.cap ? (
-                    <button
-                      type="button"
-                      className={styles.slotStripUpgrade}
-                      onClick={() => {
-                        closeGallery();
-                        if (connectedGuildId) usePlanStore.getState().openPricing(connectedGuildId);
-                      }}
-                    >
-                      Upgrade for more
-                    </button>
-                  ) : null}
-                </div>
-                {permanent.suspended ? (
-                  <p className={styles.slotStripNote}>
-                    {permanent.suspended} never-expire{" "}
-                    {permanent.suspended === 1 ? "message is" : "messages are"} paused — the server
-                    holds more than its current plan allows. Nothing was deleted; upgrading restores
-                    the oldest ones first.
-                  </p>
-                ) : null}
-                {orphanSlots.length > 0 ? (
-                  <div className={styles.orphanBlock}>
-                    <p className={styles.slotStripNote}>
-                      {orphanSlots.length === 1
-                        ? "1 never-expire slot points at a message"
-                        : `${orphanSlots.length} never-expire slots point at messages`}{" "}
-                      that {orphanSlots.length === 1 ? "isn't" : "aren't"} in this history — free
-                      {orphanSlots.length === 1 ? " it" : " them"} here if the message is gone.
-                    </p>
-                    <ul className={styles.orphanList}>
-                      {orphanSlots.map((item) => {
-                        const url = `https://discord.com/channels/${connectedGuildId}/${item.channel_id}/${item.message_id}`;
-                        return (
-                          <li key={item.message_id} className={styles.orphanItem}>
-                            <a
-                              className={styles.orphanLink}
-                              href={url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(ev) => handleDiscordLinkClick(ev, url)}
-                            >
-                              Open on Discord ↗
-                            </a>
-                            {item.suspended ? (
-                              <span className={styles.orphanPaused}>Paused</span>
-                            ) : null}
-                            <span className={styles.orphanMeta}>
-                              added{" "}
-                              {new Date(item.added_at).toLocaleDateString([], {
-                                dateStyle: "medium",
-                              })}
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={slotBusy}
-                              title="Puts the message back on the expiry clock, counted from its send date"
-                              onClick={() => void freeNeverExpire(item.message_id)}
-                            >
-                              Free slot
-                            </Button>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                {activeFilter === POSTED_FILTER && canManageSlots && permanent ? (
+                  <div className={styles.slotStrip}>
+                    <div className={styles.slotStripHead}>
+                      <span className={styles.slotStripText}>
+                        <strong>Never expire:</strong>{" "}
+                        {isUnlimitedCap(permanent.cap)
+                          ? `${permanent.used} used`
+                          : `${permanent.used}/${permanent.cap} slots used`}
+                        {" · "}buttons &amp; selects stop working {permanent.ttl_days} days after
+                        sending unless the message holds a slot — assign or free one right on its
+                        card.
+                      </span>
+                      {!isUnlimitedCap(permanent.cap) && permanent.used >= permanent.cap ? (
+                        <button
+                          type="button"
+                          className={styles.slotStripUpgrade}
+                          onClick={() => {
+                            closeGallery();
+                            if (connectedGuildId)
+                              usePlanStore.getState().openPricing(connectedGuildId);
+                          }}
+                        >
+                          Upgrade for more
+                        </button>
+                      ) : null}
+                    </div>
+                    {permanent.suspended ? (
+                      <p className={styles.slotStripNote}>
+                        {permanent.suspended} never-expire{" "}
+                        {permanent.suspended === 1 ? "message is" : "messages are"} paused — the
+                        server holds more than its current plan allows. Nothing was deleted;
+                        upgrading restores the oldest ones first.
+                      </p>
+                    ) : null}
+                    {orphanSlots.length > 0 ? (
+                      <div className={styles.orphanBlock}>
+                        <p className={styles.slotStripNote}>
+                          {orphanSlots.length === 1
+                            ? "1 never-expire slot points at a message"
+                            : `${orphanSlots.length} never-expire slots point at messages`}{" "}
+                          that {orphanSlots.length === 1 ? "isn't" : "aren't"} in this history —
+                          free
+                          {orphanSlots.length === 1 ? " it" : " them"} here if the message is gone.
+                        </p>
+                        <ul className={styles.orphanList}>
+                          {orphanSlots.map((item) => {
+                            const url = `https://discord.com/channels/${connectedGuildId}/${item.channel_id}/${item.message_id}`;
+                            return (
+                              <li key={item.message_id} className={styles.orphanItem}>
+                                <a
+                                  className={styles.orphanLink}
+                                  href={url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(ev) => handleDiscordLinkClick(ev, url)}
+                                >
+                                  Open on Discord ↗
+                                </a>
+                                {item.suspended ? (
+                                  <span className={styles.orphanPaused}>Paused</span>
+                                ) : null}
+                                <span className={styles.orphanMeta}>
+                                  added{" "}
+                                  {new Date(item.added_at).toLocaleDateString([], {
+                                    dateStyle: "medium",
+                                  })}
+                                </span>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={slotBusy}
+                                  title="Puts the message back on the expiry clock, counted from its send date"
+                                  onClick={() => void freeNeverExpire(item.message_id)}
+                                >
+                                  Free slot
+                                </Button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
-              </div>
-            ) : null}
 
-            {/* The Scheduled tab's usage line — its own version of the Posted
+                {/* The Scheduled tab's usage line — its own version of the Posted
                 slot strip: how many timed posts are live against the plan cap,
                 with the same upgrade hop when the server is at the limit. */}
-            {activeFilter === SCHEDULED_FILTER &&
-            (sched.upcoming.length > 0 || sched.history.length > 0) ? (
-              <div className={styles.slotStrip}>
-                <div className={styles.slotStripHead}>
-                  <span className={styles.slotStripText}>
-                    <strong>Scheduled posts:</strong>{" "}
-                    {sched.quota != null
-                      ? `${sched.activeCount}/${sched.quota} used`
-                      : `${sched.activeCount} active`}
-                    {" · "}each fires once at its set time, then drops into the history below.
-                  </span>
-                  {sched.quota != null && sched.activeCount >= sched.quota ? (
-                    <button
-                      type="button"
-                      className={styles.slotStripUpgrade}
-                      onClick={() => {
-                        closeGallery();
-                        if (connectedGuildId) usePlanStore.getState().openPricing(connectedGuildId);
-                      }}
-                    >
-                      Upgrade for more
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            {shown.length > 0 ? (
-              <div className={styles.grid}>
-                {visibleCards.map((c, i) => (
-                  <GalleryCard
-                    key={c.key}
-                    card={c}
-                    eagerThumb={i < EAGER_THUMBNAILS}
-                    priorityThumb={i === 0}
-                  />
-                ))}
-                {shown.length > visibleCards.length ? (
-                  // Keyed on the revealed count so each reveal re-arms a fresh
-                  // sentinel for the following page.
-                  <LoadMoreSentinel
-                    key={visibleCards.length}
-                    remaining={shown.length - visibleCards.length}
-                    onReveal={revealMore}
-                  />
+                {activeFilter === SCHEDULED_FILTER &&
+                (sched.upcoming.length > 0 || sched.history.length > 0) ? (
+                  <div className={styles.slotStrip}>
+                    <div className={styles.slotStripHead}>
+                      <span className={styles.slotStripText}>
+                        <strong>Scheduled posts:</strong>{" "}
+                        {sched.quota != null
+                          ? `${sched.activeCount}/${sched.quota} used`
+                          : `${sched.activeCount} active`}
+                        {" · "}each fires once at its set time, then drops into the history below.
+                      </span>
+                      {sched.quota != null && sched.activeCount >= sched.quota ? (
+                        <button
+                          type="button"
+                          className={styles.slotStripUpgrade}
+                          onClick={() => {
+                            closeGallery();
+                            if (connectedGuildId)
+                              usePlanStore.getState().openPricing(connectedGuildId);
+                          }}
+                        >
+                          Upgrade for more
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                 ) : null}
-              </div>
-            ) : activeFilter === SCHEDULED_FILTER && sched.history.length > 0 && !query.trim() ? (
-              // Nothing upcoming, but the history section below still has rows.
-              <p className={styles.emptyInline}>No upcoming scheduled posts — history is below.</p>
-            ) : (
-              <div className={styles.empty}>
-                <SearchIcon size={28} aria-hidden />
-                {query.trim() ? (
-                  <>
-                    <p className={styles.emptyTitle}>No matches for “{query.trim()}”.</p>
-                    <button
-                      type="button"
-                      className={styles.emptyReset}
-                      onClick={() => {
-                        setQuery("");
-                      }}
-                    >
-                      Clear search
-                    </button>
-                  </>
-                ) : activeFilter === SCHEDULED_FILTER ? (
-                  <p className={styles.emptyTitle}>No scheduled posts yet.</p>
-                ) : (
-                  // Reachable on the Posted tab when it exists only for the
-                  // orphaned-slot strip above — no posted cards to show yet.
-                  <p className={styles.emptyTitle}>No posted messages in this history yet.</p>
-                )}
-              </div>
-            )}
 
-            {/* Posted / failed schedules have no message to preview (the server
+                {shown.length > 0 ? (
+                  <div className={styles.grid}>
+                    {visibleCards.map((c, i) => (
+                      <GalleryCard
+                        key={c.key}
+                        card={c}
+                        eagerThumb={i < EAGER_THUMBNAILS}
+                        priorityThumb={i === 0}
+                      />
+                    ))}
+                    {shown.length > visibleCards.length ? (
+                      // Keyed on the revealed count so each reveal re-arms a fresh
+                      // sentinel for the following page.
+                      <LoadMoreSentinel
+                        key={visibleCards.length}
+                        remaining={shown.length - visibleCards.length}
+                        onReveal={revealMore}
+                      />
+                    ) : null}
+                  </div>
+                ) : activeFilter === SCHEDULED_FILTER &&
+                  sched.history.length > 0 &&
+                  !query.trim() ? (
+                  // Nothing upcoming, but the history section below still has rows.
+                  <p className={styles.emptyInline}>
+                    No upcoming scheduled posts — history is below.
+                  </p>
+                ) : (
+                  <div className={styles.empty}>
+                    <SearchIcon size={28} aria-hidden />
+                    {query.trim() ? (
+                      <>
+                        <p className={styles.emptyTitle}>No matches for “{query.trim()}”.</p>
+                        <button
+                          type="button"
+                          className={styles.emptyReset}
+                          onClick={() => {
+                            setQuery("");
+                          }}
+                        >
+                          Clear search
+                        </button>
+                      </>
+                    ) : activeFilter === SCHEDULED_FILTER ? (
+                      <p className={styles.emptyTitle}>No scheduled posts yet.</p>
+                    ) : (
+                      // Reachable on the Posted tab when it exists only for the
+                      // orphaned-slot strip above — no posted cards to show yet.
+                      <p className={styles.emptyTitle}>No posted messages in this history yet.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Posted / failed schedules have no message to preview (the server
                 deletes it once it fires), so they live as compact rows below the
                 upcoming grid — view on Discord, remove, or clear the lot. */}
-            {activeFilter === SCHEDULED_FILTER && sched.history.length > 0 ? (
-              <div className={styles.scheduleHistoryWrap}>
-                <ScheduleHistory
-                  history={sched.history}
-                  ttlDays={permanent?.ttl_days ?? null}
-                  retentionDays={sched.retentionDays}
-                  busyId={sched.busyId}
-                  onRemove={(s) => {
-                    void sched.cancel(s).then((ok) => {
-                      if (!ok) pushToast("Couldn't remove it — try again.", "error");
-                    });
-                  }}
-                  onClear={async () => {
-                    const failed = await sched.clearHistory(sched.history);
-                    pushToast(
-                      failed === 0
-                        ? "Cleared posted & failed schedules."
-                        : `Cleared some; ${failed} couldn't be removed.`,
-                      failed === 0 ? "success" : "info",
-                    );
-                  }}
-                />
-              </div>
-            ) : null}
+                {activeFilter === SCHEDULED_FILTER && sched.history.length > 0 ? (
+                  <div className={styles.scheduleHistoryWrap}>
+                    <ScheduleHistory
+                      history={sched.history}
+                      ttlDays={permanent?.ttl_days ?? null}
+                      retentionDays={sched.retentionDays}
+                      busyId={sched.busyId}
+                      onRemove={(s) => {
+                        void sched.cancel(s).then((ok) => {
+                          if (!ok) pushToast("Couldn't remove it — try again.", "error");
+                        });
+                      }}
+                      onClear={async () => {
+                        const failed = await sched.clearHistory(sched.history);
+                        pushToast(
+                          failed === 0
+                            ? "Cleared posted & failed schedules."
+                            : `Cleared some; ${failed} couldn't be removed.`,
+                          failed === 0 ? "success" : "info",
+                        );
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
 
           <footer className={styles.footer}>
             <span className={styles.footerHint}>
-              {shown.length} {shown.length === 1 ? "result" : "results"}
+              {revealed
+                ? `${shown.length} ${shown.length === 1 ? "result" : "results"}`
+                : "Loading your messages…"}
             </span>
             <button type="button" className={styles.blankBtn} onClick={startBlank}>
               <PlusIcon size={16} />

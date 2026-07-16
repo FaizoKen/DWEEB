@@ -567,7 +567,7 @@ export function App() {
         <Suspense
           fallback={
             <div className="gallery-bootstrap" role="status">
-              Opening your message directory…
+              <span className="gallery-bootstrap__hint">Opening your message directory…</span>
             </div>
           }
         >

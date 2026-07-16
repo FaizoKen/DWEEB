@@ -1074,6 +1074,59 @@
   box-shadow: var(--app-focus-ring);
 }
 
+/* ── Loading skeleton ───────────────────────────────────────────────────────
+ * One quiet pass shown on a cold open while the server-fed shelves load —
+ * which chips even exist and which tab the gallery lands on are both server
+ * answers, so painting real content earlier meant opening on Templates and
+ * swapping to Posted a beat later. Shapes mirror the chip row and the card
+ * grid so the reveal doesn't reflow the panel. */
+.skeletonBlock {
+  position: relative;
+  overflow: hidden;
+  background: var(--app-bg-input);
+  border-radius: 6px;
+}
+.skeletonBlock::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--app-text) 7%, transparent),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: skeletonSweep 1.4s ease infinite;
+}
+.skeletonChip {
+  flex: 0 0 auto;
+  height: 32px;
+  border-radius: 999px;
+}
+.skeletonCard {
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-lg);
+  overflow: hidden;
+}
+.skeletonThumb {
+  height: 196px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--app-border);
+}
+.skeletonBody {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px;
+}
+.skeletonLine {
+  height: 12px;
+}
+
 /* ── Animations ─────────────────────────────────────────────────────────── */
 @keyframes galleryFade {
   from {
@@ -1090,6 +1143,16 @@
   from {
     opacity: 0;
     transform: translateY(8px);
+  }
+}
+@keyframes skeletonSweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeletonBlock::after {
+    animation: none;
   }
 }
 
@@ -1133,7 +1196,8 @@
     grid-template-columns: 1fr;
     gap: 14px;
   }
-  .cardPreview {
+  .cardPreview,
+  .skeletonThumb {
     height: 184px;
   }
   /* No hover on touch — keep the delete button and the never-expire toggle's
