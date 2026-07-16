@@ -108,6 +108,17 @@ export interface LinkPluginManifest {
    */
   statusUrl?: string;
   /**
+   * Optional per-server **management page** — an `https` URL template
+   * (typically carrying `{server_id}`) pointing at where an admin manages
+   * this integration for one specific server (e.g. RoleLogic's
+   * `dashboard/{server_id}/role-links`). When a server is connected, the
+   * chip's action deep-links here — labeled **Manage** once the status probe
+   * says the server is set up, **Set up** otherwise — instead of the generic
+   * `setupUrl`, which typically lands on a create-from-scratch flow. With no
+   * connected server (or no `manageUrl`), `setupUrl` remains the fallback.
+   */
+  manageUrl?: string;
+  /**
    * Optional configuration iframe — the link analogue of the interactive
    * manifest's `configUrl` (docs/plugins.md long reserved this extension:
    * "a configUrl whose save returns a url instead of a customId"). When
@@ -148,6 +159,17 @@ const URL_TOKEN_RE = /\{([a-z0-9_]{1,32})\}/g;
 export function linkUrlPrefix(url: string): string {
   const i = url.indexOf("{");
   return i === -1 ? url : url.slice(0, i);
+}
+
+/**
+ * Resolve a guild-scoped URL template (`statusUrl`, `manageUrl`) against a
+ * server id. Only `{server_id}` is substituted — it's the one core token a
+ * per-server URL can need; any other token left over makes the URL unusable,
+ * so the caller gets `null` rather than a literal `{token}` shipped upstream.
+ */
+export function resolveGuildUrlTemplate(template: string, guildId: string): string | null {
+  const url = template.replaceAll("{server_id}", encodeURIComponent(guildId));
+  return url.includes("{") ? null : url;
 }
 
 // Scheme + host must be literal — a token may never rewrite where the link
@@ -194,6 +216,7 @@ export function parseLinkManifest(raw: unknown): LinkPluginManifest | null {
     ...(isAllowedUrl(o.setupUrl) ? { setupUrl: o.setupUrl } : {}),
     ...(isNonEmptyString(o.setupHint) ? { setupHint: o.setupHint.slice(0, MAX_SETUP_HINT) } : {}),
     ...(isValidUrlTemplate(o.statusUrl) ? { statusUrl: o.statusUrl } : {}),
+    ...(isValidUrlTemplate(o.manageUrl) ? { manageUrl: o.manageUrl } : {}),
     ...(isAllowedUrl(o.configUrl) ? { configUrl: o.configUrl } : {}),
     ...(linkResources ? { resources: linkResources } : {}),
   };

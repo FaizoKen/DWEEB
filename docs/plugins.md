@@ -62,25 +62,25 @@ renders nothing). `configUrl` (and any `icon`/`homepage`) must be `https://`, or
 
 ### Manifest fields
 
-| Field            | Required | Notes |
-|------------------|----------|-------|
-| `schemaVersion`  | yes      | Must be `1`. |
-| `id`             | yes      | Stable kebab id, unique in the registry. First wins on duplicate. |
-| `name`           | yes      | Shown in the picker and the attached chip. |
-| `description`    | no       | One line under the name. |
-| `version`        | no       | Your plugin's semver. Informational. |
-| `icon`           | no       | `https` image URL. |
-| `homepage`       | no       | `https` docs/support link. |
-| `publisher`      | no       | Author/brand label. |
-| `defaultEmoji`   | no       | A unicode emoji (or `<:name:id>` token) the editor stamps onto a **button** when your plugin is freshly attached to a blank one, so a picked action arrives already labelled + emojied. A preset's own `emoji` wins over it; an emoji the user already set is never overwritten. |
-| `targets`        | yes      | Which component kinds you support (see below). At least one. |
-| `resources`      | no       | Editor-data resources the config iframe may request. Access is default-deny; every requested resource must be declared here. See “Reading editor data.” |
-| `configUrl`      | yes      | `https` (or `http://localhost`) iframe URL for configuration. |
-| `customIdPrefix` | yes      | Every `custom_id` you mint must start with this. How DWEEB re-binds on reload and how it validates your saves. Keep it short and unique, e.g. `"rolemenu:"`. |
-| `apiVersion`     | no       | Highest protocol version you speak. Defaults to `1`. |
-| `managesSelectOptions` | no | `string_select` plugins only. Set `true` to own the menu's option list: your `save` may return `options`, and DWEEB **wires them onto the select and locks the options editor** (see §3). Omit for a select plugin that leaves options to the user. |
-| `managesFields`  | no       | Component fields you own beyond `custom_id`/options, as a string array. Each named field is set from your `save` payload's `fields` and **locked** in the inspector, so the user can't edit it and break your binding — e.g. a menu that grants exactly one role declares `["min_values", "max_values"]` and saves `fields: { min_values: 1, max_values: 1 }`. Lockable today: `min_values`, `max_values`, `placeholder`, `disabled`. Unknown names are dropped. |
-| `presets`        | no       | Ready-made configurations of your plugin shown as their own entries in the plugin library (and pickable on a template). Each is `{ id, name, description?, emoji?, targets? }`. DWEEB shows the display fields and, when the user picks one, passes the `id` to your iframe in `init.preset` — your iframe owns the actual field data and applies it (see §3). `targets` restricts a preset to certain component kinds (a topic-menu preset only on `string_select`); omit to apply to all your targets. Unknown/duplicate ids are dropped. |
+| Field                  | Required | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`        | yes      | Must be `1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `id`                   | yes      | Stable kebab id, unique in the registry. First wins on duplicate.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `name`                 | yes      | Shown in the picker and the attached chip.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `description`          | no       | One line under the name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `version`              | no       | Your plugin's semver. Informational.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `icon`                 | no       | `https` image URL.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `homepage`             | no       | `https` docs/support link.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `publisher`            | no       | Author/brand label.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `defaultEmoji`         | no       | A unicode emoji (or `<:name:id>` token) the editor stamps onto a **button** when your plugin is freshly attached to a blank one, so a picked action arrives already labelled + emojied. A preset's own `emoji` wins over it; an emoji the user already set is never overwritten.                                                                                                                                                                                                                                                            |
+| `targets`              | yes      | Which component kinds you support (see below). At least one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `resources`            | no       | Editor-data resources the config iframe may request. Access is default-deny; every requested resource must be declared here. See “Reading editor data.”                                                                                                                                                                                                                                                                                                                                                                                     |
+| `configUrl`            | yes      | `https` (or `http://localhost`) iframe URL for configuration.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `customIdPrefix`       | yes      | Every `custom_id` you mint must start with this. How DWEEB re-binds on reload and how it validates your saves. Keep it short and unique, e.g. `"rolemenu:"`.                                                                                                                                                                                                                                                                                                                                                                                |
+| `apiVersion`           | no       | Highest protocol version you speak. Defaults to `1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `managesSelectOptions` | no       | `string_select` plugins only. Set `true` to own the menu's option list: your `save` may return `options`, and DWEEB **wires them onto the select and locks the options editor** (see §3). Omit for a select plugin that leaves options to the user.                                                                                                                                                                                                                                                                                         |
+| `managesFields`        | no       | Component fields you own beyond `custom_id`/options, as a string array. Each named field is set from your `save` payload's `fields` and **locked** in the inspector, so the user can't edit it and break your binding — e.g. a menu that grants exactly one role declares `["min_values", "max_values"]` and saves `fields: { min_values: 1, max_values: 1 }`. Lockable today: `min_values`, `max_values`, `placeholder`, `disabled`. Unknown names are dropped.                                                                            |
+| `presets`              | no       | Ready-made configurations of your plugin shown as their own entries in the plugin library (and pickable on a template). Each is `{ id, name, description?, emoji?, targets? }`. DWEEB shows the display fields and, when the user picks one, passes the `id` to your iframe in `init.preset` — your iframe owns the actual field data and applies it (see §3). `targets` restricts a preset to certain component kinds (a topic-menu preset only on `string_select`); omit to apply to all your targets. Unknown/duplicate ids are dropped. |
 
 A manifest that fails validation is silently dropped — it just won't appear in
 the picker.
@@ -100,7 +100,7 @@ the URL-based **link plugins** below.)
 
 Everything above describes the interactive kind of plugin. The registry also
 accepts a second, much smaller kind: a **link plugin** (`"kind": "link"`),
-which gives a *Link button* its destination. It is nothing but an `https` URL
+which gives a _Link button_ its destination. It is nothing but an `https` URL
 template served by an external service — clicking the button opens that URL in
 the member's browser, and everything after the click (identifying the member,
 acting on the server) happens on the external service. DWEEB is not involved
@@ -108,7 +108,7 @@ at all past the click, which buys three properties the interactive plugins
 can't have:
 
 - **No DWEEB backend footprint.** No dispatcher route, no Caddy site, no
-  compose service, no health check. The §5 six-edit table collapses to *one*
+  compose service, no health check. The §5 six-edit table collapses to _one_
   edit: list the manifest in `registry.json` and rebuild the web app.
 - **Works through any webhook.** No `custom_id` means no interaction to route,
   so the message doesn't need an app-owned webhook.
@@ -133,29 +133,30 @@ can't have:
 
 ### Manifest fields (link kind)
 
-| Field       | Required | Notes |
-|-------------|----------|-------|
-| `schemaVersion` | yes  | Must be `1`. |
-| `kind`      | yes      | Must be `"link"`. (Entries without a `kind` are the interactive plugins above.) |
-| `id`        | yes      | Stable kebab id, unique in the registry. |
-| `name`      | yes      | Shown in the library and the attached chip. |
-| `description` | no     | One line under the name. |
-| `version` / `icon` / `homepage` / `publisher` | no | Same meaning as the interactive manifest. |
-| `defaultEmoji` | no    | Unicode emoji (or `<:name:id>` token) stamped onto the Link button on a fresh attach — same behaviour as the interactive manifest's `defaultEmoji`. Never overwrites an emoji the user set. |
-| `url`       | yes      | The URL template written onto the button — see below. |
-| `setupUrl`  | no       | The service's admin page where a server manager registers their server (invites your bot, configures the feature). Surfaced as a **Set up** action on the chip and a *Needs setup* tag in the library. |
-| `setupHint` | no       | One line shown under the chip instead of the stock "set it up first" note. |
-| `statusUrl` | no       | Public, CORS-open probe URL template (may carry `{server_id}`) the editor fetches to turn the chip's static warning into a live **Ready / Needs setup** state. See [Setup status probe](#setup-status-probe-statusurl). |
-| `configUrl` | no       | `https` config-iframe URL, the link analogue of the interactive `configUrl` — its `save` returns a **`url`** instead of a `customId`. Adds a **Configure** action to the chip. See [Config iframes for link plugins](#config-iframes-for-link-plugins-configurl). |
-| `resources` | no       | Editor data the config iframe may request. For link plugins the allow-list is capped at content-free context — currently just `guild`; credentials and message content can never be declared. |
+| Field                                         | Required | Notes                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`                               | yes      | Must be `1`.                                                                                                                                                                                                                                                                                                                                                          |
+| `kind`                                        | yes      | Must be `"link"`. (Entries without a `kind` are the interactive plugins above.)                                                                                                                                                                                                                                                                                       |
+| `id`                                          | yes      | Stable kebab id, unique in the registry.                                                                                                                                                                                                                                                                                                                              |
+| `name`                                        | yes      | Shown in the library and the attached chip.                                                                                                                                                                                                                                                                                                                           |
+| `description`                                 | no       | One line under the name.                                                                                                                                                                                                                                                                                                                                              |
+| `version` / `icon` / `homepage` / `publisher` | no       | Same meaning as the interactive manifest.                                                                                                                                                                                                                                                                                                                             |
+| `defaultEmoji`                                | no       | Unicode emoji (or `<:name:id>` token) stamped onto the Link button on a fresh attach — same behaviour as the interactive manifest's `defaultEmoji`. Never overwrites an emoji the user set.                                                                                                                                                                           |
+| `url`                                         | yes      | The URL template written onto the button — see below.                                                                                                                                                                                                                                                                                                                 |
+| `setupUrl`                                    | no       | The service's admin page where a server manager registers their server (invites your bot, configures the feature). Surfaced as a **Set up** action on the chip and a _Needs setup_ tag in the library.                                                                                                                                                                |
+| `setupHint`                                   | no       | One line shown under the chip instead of the stock "set it up first" note.                                                                                                                                                                                                                                                                                            |
+| `statusUrl`                                   | no       | Public, CORS-open probe URL template (may carry `{server_id}`) the editor fetches to turn the chip's static warning into a live **Ready / Needs setup** state. See [Setup status probe](#setup-status-probe-statusurl).                                                                                                                                               |
+| `manageUrl`                                   | no       | Per-server management page URL template (may carry `{server_id}`). With a server connected, the chip's action deep-links here — labeled **Manage** when the probe says the server is set up, **Set up** otherwise — instead of the generic `setupUrl`, which typically lands on a create-from-scratch flow. `setupUrl` remains the fallback with no connected server. |
+| `configUrl`                                   | no       | `https` config-iframe URL, the link analogue of the interactive `configUrl` — its `save` returns a **`url`** instead of a `customId`. Adds a **Configure** action to the chip. See [Config iframes for link plugins](#config-iframes-for-link-plugins-configurl).                                                                                                     |
+| `resources`                                   | no       | Editor data the config iframe may request. For link plugins the allow-list is capped at content-free context — currently just `guild`; credentials and message content can never be declared.                                                                                                                                                                         |
 
 ### The `url` template is the whole binding
 
 Exactly as the interactive plugins own a `custom_id`, a link plugin owns the
 button's `url` — DWEEB stores nothing else. The owning plugin is re-derived by
 prefix-matching the URL against the template's literal prefix (everything
-before the first `{token}`) — on reload of a draft or share link, and *live as
-the URL is edited*: unlike an opaque custom_id, a URL is human-meaningful, so
+before the first `{token}`) — on reload of a draft or share link, and _live as
+the URL is edited_: unlike an opaque custom_id, a URL is human-meaningful, so
 the field stays freely editable and the attachment simply follows it. Paste a
 finished link and the matching chip (and its param fields) fill in by
 themselves; paste another plugin's URL and the chip swaps; edit away from any
@@ -177,10 +178,10 @@ to the template.
 
 **When the destination isn't on your host**, put the token right after the
 foreign host so the literal prefix is the host itself — the Top.gg entry is
-`https://top.gg/{vote_page}`, which makes the chip claim *any* top.gg URL:
+`https://top.gg/{vote_page}`, which makes the chip claim _any_ top.gg URL:
 the admin pastes their server's or bot's vote page and the binding follows.
 (Trade-off: every top.gg link button shows that chip, which is the point —
-the plugin *is* "a top.gg link, rewarded".) Alternatively, if the unknown
+the plugin _is_ "a top.gg link, rewarded".) Alternatively, if the unknown
 part is per-server config your service already holds, a page on your own
 host (`…/vote?guild={server_id}`) that 302s to the real destination keeps
 the URL fully predictable with nothing to paste at all.
@@ -224,14 +225,14 @@ using the guild id the URL carries:
    check your per-server state.
 
 Fill-me slots are the zero-backend floor. A service that can do better has
-two additive upgrades: a `statusUrl` probe (below) so the editor can *see*
+two additive upgrades: a `statusUrl` probe (below) so the editor can _see_
 per-server state, and a `configUrl` iframe (below) whose `save` returns the
 finished `url` so the admin never hand-pastes at all.
 
 ### Setup status probe (`statusUrl`)
 
 DWEEB has no way to check an external service's per-server state, so the
-attached chip historically showed a *permanent* "set it up first" warning.
+attached chip historically showed a _permanent_ "set it up first" warning.
 A manifest `statusUrl` closes that gap. It's a URL template (same rules as
 `url`; in practice it carries `{server_id}`) pointing at a **public,
 credential-less** endpoint on your service:
@@ -250,17 +251,25 @@ fetches the URL (no cookies, 8s timeout). Your service answers:
 with `Access-Control-Allow-Origin: *` and a short `Cache-Control`
 (`public, max-age=60` is right). `configured: true` renders the chip line
 **"Set up for <server> — the link is live"** and hides the stock warning;
-`false` renders a **"Not set up … yet"** caution. Anything else — non-200,
-bad JSON, a non-boolean `configured`, the service being down, or CORS
-refused (as inside a Discord Activity, whose CSP blocks external hosts) —
-degrades to exactly the pre-probe chip. The probe is strictly best-effort
-display; it never gates editing or sending.
+`false` renders a **"Not set up … yet"** caution. An optional integer
+`role_count` enriches the ready line ("2 linked roles live"). Anything
+else — non-200, bad JSON, a non-boolean `configured`, the service being
+down, or CORS refused (as inside a Discord Activity, whose CSP blocks
+external hosts) — degrades to exactly the pre-probe chip. The probe is
+strictly best-effort display; it never gates editing or sending.
+
+The editor re-probes (cache-bypassing) when its window regains focus, so
+the expected loop — chip says _Needs setup_, admin opens your dashboard in
+a new tab, sets it up, comes back — flips the chip on return rather than a
+TTL later. Pair the probe with a `manageUrl` (see the manifest table) so
+that dashboard trip lands on the _connected server's_ management page
+instead of a generic create flow.
 
 Because the endpoint is public, return only what any visitor could already
 observe by loading your verify page with that guild id — a boolean (and, if
 you like, a count), never configuration contents. Validate the `guild`
 query as a snowflake. Extra response fields are ignored today; the host only
-reads `configured`.
+reads `configured` and `role_count`.
 
 ### Config iframes for link plugins (`configUrl`)
 
@@ -295,7 +304,7 @@ worked example is RoleLogic's Form-Respondent-Role picker
 
 ## 2. The `custom_id` is the whole binding
 
-DWEEB stores **nothing** plugin-specific on the message. The binding *is* the
+DWEEB stores **nothing** plugin-specific on the message. The binding _is_ the
 component's `custom_id`, which you mint. Because it ships to Discord, it must:
 
 - start with your `customIdPrefix`,
@@ -437,13 +446,13 @@ for it with a `request`; DWEEB replies with a matching `response` (same
 plugin's manifest `resources` array. The OAuth session and AI provider keys are
 **never** exposed.
 
-| `resource`      | `data` returned |
-|-----------------|-----------------|
-| `savedMessages` | `[{ id, name, savedAt, payload }]` — the user's named saved messages (Components V2 wire payloads). |
-| `savedWebhooks` | `[{ id, name, channelName?, guildName? }]` — safe labels for webhooks saved in this browser. Execute URLs are deliberately omitted. |
-| `savedWebhook`  | `{ id, url }` for one `resourceId`. DWEEB shows a host-controlled confirmation naming the plugin and destination before releasing this credential. Declare both `savedWebhooks` and `savedWebhook` for a picker. |
-| `message`       | The message currently being built, as a clean Discord wire payload. |
-| `component`     | `{ target, customId }` for the component you're attached to. |
+| `resource`      | `data` returned                                                                                                                                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `savedMessages` | `[{ id, name, savedAt, payload }]` — the user's named saved messages (Components V2 wire payloads).                                                                                                                   |
+| `savedWebhooks` | `[{ id, name, channelName?, guildName? }]` — safe labels for webhooks saved in this browser. Execute URLs are deliberately omitted.                                                                                   |
+| `savedWebhook`  | `{ id, url }` for one `resourceId`. DWEEB shows a host-controlled confirmation naming the plugin and destination before releasing this credential. Declare both `savedWebhooks` and `savedWebhook` for a picker.      |
+| `message`       | The message currently being built, as a clean Discord wire payload.                                                                                                                                                   |
+| `component`     | `{ target, customId }` for the component you're attached to.                                                                                                                                                          |
 | `guild`         | `{ id, name }` of the server the editor is connected to, or `null` if none. Lets a plugin target "this server" without the user pasting an id (e.g. Self Role auto-fills it). A guild id is public, not a credential. |
 
 > A webhook URL embeds a token. Never place URLs in picker option data. Request
@@ -458,7 +467,10 @@ plugin's manifest `resources` array. The OAuth session and AI provider keys are
 ```js
 // Ask for the user's saved messages, e.g. to offer a "reply with…" picker.
 const requestId = crypto.randomUUID();
-parent.postMessage({ type: "dweeb:plugin:request", nonce, requestId, resource: "savedMessages" }, hostOrigin);
+parent.postMessage(
+  { type: "dweeb:plugin:request", nonce, requestId, resource: "savedMessages" },
+  hostOrigin,
+);
 
 window.addEventListener("message", (e) => {
   const m = e.data;
@@ -500,7 +512,7 @@ That half lives entirely in your service and is outside DWEEB's scope.
 
 ## Placeholders: message text that follows your values
 
-A plugin can let the user drop **placeholders** into their *own* message text —
+A plugin can let the user drop **placeholders** into their _own_ message text —
 `{prize}`, `{entries}`, `{winners}` — and have them filled with the plugin's
 values, both at send time and **live** after the message is posted (the Giveaway
 plugin's `{winners}` settles in once a draw happens). It's opt-in and additive: a
@@ -508,10 +520,10 @@ plugin that declares none behaves exactly as before.
 
 There are two substitution moments, and they belong to different owners:
 
-| Moment | Who | What |
-|---|---|---|
-| **First paint** | DWEEB (host) | At send + in the live preview, DWEEB replaces each declared `{token}` with the value your `save` returned, falling back to the manifest `sample`. So no raw `{token}` ever reaches Discord. |
-| **Live render** | your plugin | Once posted, only you can keep the message current — a webhook message is editable solely via an `UPDATE_MESSAGE` reply to a click on it. You re-render your own stored copy on each interaction. DWEEB is not involved. |
+| Moment          | Who          | What                                                                                                                                                                                                                     |
+| --------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **First paint** | DWEEB (host) | At send + in the live preview, DWEEB replaces each declared `{token}` with the value your `save` returned, falling back to the manifest `sample`. So no raw `{token}` ever reaches Discord.                              |
+| **Live render** | your plugin  | Once posted, only you can keep the message current — a webhook message is editable solely via an `UPDATE_MESSAGE` reply to a click on it. You re-render your own stored copy on each interaction. DWEEB is not involved. |
 
 This split is forced by the platform: DWEEB stores nothing on the message but the
 `custom_id`, and a bot can't edit a webhook-authored message out of band. So
@@ -524,15 +536,15 @@ after the draw; the public announcement carries the instant news).
 Independent of any plugin, DWEEB offers a built-in **core** set of server/channel
 tokens on every message:
 
-| Token                | Resolves to                                  |
-| -------------------- | -------------------------------------------- |
-| `{server}`           | Server name                                  |
-| `{server_id}`        | Server ID                                    |
-| `{server_icon}`      | Server icon URL (usable as an avatar/image)  |
-| `{channel}`          | Channel name                                 |
-| `{channel_id}`       | Channel ID                                   |
-| `{channel_mention}`  | Clickable `<#id>`                            |
-| `{channel_category}` | Name of the channel's parent category        |
+| Token                | Resolves to                                 |
+| -------------------- | ------------------------------------------- |
+| `{server}`           | Server name                                 |
+| `{server_id}`        | Server ID                                   |
+| `{server_icon}`      | Server icon URL (usable as an avatar/image) |
+| `{channel}`          | Channel name                                |
+| `{channel_id}`       | Channel ID                                  |
+| `{channel_mention}`  | Clickable `<#id>`                           |
+| `{channel_category}` | Name of the channel's parent category       |
 
 Server tokens resolve from the connected guild in the preview; channel tokens
 resolve from the destination webhook at send. This namespace is **reserved** — a
@@ -552,13 +564,13 @@ identifiers (`custom_id`, snowflake lists) are intentionally left alone.
 
 A message can carry the core tokens **and** one or more plugins' tokens at once.
 Resolution is deterministic: providers are walked **core first, then each plugin
-in binding order**, and the *first* to claim a token wins. The `{}` insert palette
+in binding order**, and the _first_ to claim a token wins. The `{}` insert palette
 groups tokens under their provider's name and dedupes against that same order, so
 what the user inserts is what resolves. Keep your token names specific (`raffle_status`,
 not `status`) to avoid colliding with another plugin on the same message.
 
 Because your live re-render rebuilds the **whole** message from your stored template
-but only knows your *own* tokens, DWEEB hands you a template in which every token
+but only knows your _own_ tokens, DWEEB hands you a template in which every token
 you don't own — the core tokens and any other plugin's — is **already baked to its
 first-paint value**; only your own tokens stay raw. So a `{server}` sitting next to
 your `{winners}` keeps its value on your lazy refresh instead of decaying to a
@@ -575,10 +587,10 @@ literal `{server}`. You don't have to do anything for this — just request the
 ]
 ```
 
-| Field | Notes |
-|---|---|
-| `token` | `^[a-z0-9_]{1,32}$`. Written `{token}` in message text. |
-| `label` | Human name for the authoring UI. |
+| Field    | Notes                                                                                                                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `token`  | `^[a-z0-9_]{1,32}$`. Written `{token}` in message text.                                                                                                                                    |
+| `label`  | Human name for the authoring UI.                                                                                                                                                           |
 | `sample` | Optional. Shown at first paint before a live value exists (dynamic tokens), or as a fallback when no per-instance value was cached. A token with no value and no sample renders literally. |
 
 Unknown/malformed `{…}` is left **verbatim** everywhere, so stray braces in prose
@@ -590,12 +602,19 @@ Your `save` message may carry a `values` map (token → string) for the values y
 know at config time (the real prize, the winner count). DWEEB sanitizes them
 (string-typed, length-clamped, `@everyone`/`@here` defanged so a value can't smuggle
 a mass ping) and caches them per binding next to the `summary`. Omit a token and it
-falls back to the manifest `sample` — that's how a *dynamic* value (`{winners}`)
+falls back to the manifest `sample` — that's how a _dynamic_ value (`{winners}`)
 shows a friendly stand-in until your service renders it for real.
 
 ```js
-parent.postMessage({ type: "dweeb:plugin:save", nonce, customId,
-  values: { prize: "a Nitro month", winner_count: "3" } }, hostOrigin);
+parent.postMessage(
+  {
+    type: "dweeb:plugin:save",
+    nonce,
+    customId,
+    values: { prize: "a Nitro month", winner_count: "3" },
+  },
+  hostOrigin,
+);
 ```
 
 ### Render it live (your service)
@@ -606,20 +625,20 @@ reroll). Capture the user's message once on save — request the `message` resou
 (§3) and keep its `components`, with **your** `{tokens}` intact (other providers'
 tokens arrive already baked, as above) — store it, and on every interaction
 re-render it with the current values, replying `UPDATE_MESSAGE`.
-Render from the *template* each time, never from the already-rendered message, so
+Render from the _template_ each time, never from the already-rendered message, so
 the result is idempotent (the count restamps, winners swap on a reroll). Set
 `allowed_mentions.parse = []` on that edit so a re-render can never ping
 `@everyone`. The Giveaway plugin (`render_bound_message` / `substitute` in
 `plugins/giveaway/src/discord.rs`) is the worked example.
 
-> **Drift:** the template is captured at *save* time. If the user edits the
+> **Drift:** the template is captured at _save_ time. If the user edits the
 > message text afterward without reopening your config, your first re-render uses
 > the stale copy. Re-capture on every save; treat it as the same expendable,
 > same-device convenience as the summary cache.
 
 ### You often don't need a live render at all
 
-Live re-rendering is only worth it for values that **change after posting** *and*
+Live re-rendering is only worth it for values that **change after posting** _and_
 whose change is driven by **a click on that same message** (the giveaway's entrant
 count and winners). Two cases that are simpler:
 
@@ -627,7 +646,7 @@ count and winners). Two cases that are simpler:
   `{roles}`). Just send them in `values` on save; DWEEB paints them at first
   paint and you store no template, render nothing. This is the common, easy case.
 - **Values whose change isn't a click on the message** — e.g. a count that moves
-  on an action taken *elsewhere* (a ticket closed from inside its own channel, a
+  on an action taken _elsewhere_ (a ticket closed from inside its own channel, a
   form submitted in a modal). A webhook message can only be edited in reply to a
   click on it, so such a placeholder would drift out of sync and mislead. Don't
   offer it; the universal `{server}`/`{channel}` tokens still work in the message.
@@ -648,14 +667,14 @@ recurs per plugin.
 
 Adding a plugin (say `ping-pong`, prefix `pingpong:`) is six edits:
 
-| # | File | Edit |
-|---|---|---|
-| 1 | `server/compose.yml` | Copy the `modal-form` service block: new image (CI workflow publishes `ghcr.io/<owner>/dweeb-<id>`), own volume if it has state. |
-| 2 | `server/Caddyfile` | Copy a plugin block: `pingpong.{$PLUGINS_DOMAIN} { import site_defaults; reverse_proxy ping-pong:8090 }`. |
-| 3 | `server/compose.yml` (dispatcher) | Add `"pingpong:": "http://ping-pong:8090"` to `ROUTES`. |
-| 4 | `src/core/plugins/registry.json` | Add the manifest with `configUrl: https://pingpong.dweeb.faizo.net/config.html`. |
-| 5 | `server/gatus/config.yaml` | Copy a `plugins`-group endpoint hitting `https://pingpong.{$PLUGINS_DOMAIN}/health`, so the new plugin shows on the status page and alerts on failure. |
-| 6 | `.github/workflows/plugins-ci.yml` | Add the plugin id to the `matrix.plugin` list so fmt/clippy/tests gate it like every other crate. |
+| #   | File                               | Edit                                                                                                                                                   |
+| --- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `server/compose.yml`               | Copy the `modal-form` service block: new image (CI workflow publishes `ghcr.io/<owner>/dweeb-<id>`), own volume if it has state.                       |
+| 2   | `server/Caddyfile`                 | Copy a plugin block: `pingpong.{$PLUGINS_DOMAIN} { import site_defaults; reverse_proxy ping-pong:8090 }`.                                              |
+| 3   | `server/compose.yml` (dispatcher)  | Add `"pingpong:": "http://ping-pong:8090"` to `ROUTES`.                                                                                                |
+| 4   | `src/core/plugins/registry.json`   | Add the manifest with `configUrl: https://pingpong.dweeb.faizo.net/config.html`.                                                                       |
+| 5   | `server/gatus/config.yaml`         | Copy a `plugins`-group endpoint hitting `https://pingpong.{$PLUGINS_DOMAIN}/health`, so the new plugin shows on the status page and alerts on failure. |
+| 6   | `.github/workflows/plugins-ci.yml` | Add the plugin id to the `matrix.plugin` list so fmt/clippy/tests gate it like every other crate.                                                      |
 
 Then `docker compose pull && docker compose up -d` on the server (Caddy issues
 the new subdomain's certificate automatically) and push so the frontend
@@ -671,7 +690,7 @@ headers untouched, so verification works exactly as if Discord called the
 plugin directly.
 
 One wrinkle since **custom bots**: a guild may register its own Discord app
-(dashboard → *Custom bot*), and those interactions are signed with *that*
+(dashboard → _Custom bot_), and those interactions are signed with _that_
 app's key, not the deployment's `DISCORD_PUBLIC_KEY`. The dispatcher
 therefore forwards which key verified the request in `x-dweeb-public-key`,
 vouched for by the shared `DISPATCHER_FORWARD_SECRET` in
@@ -683,7 +702,7 @@ fail its verification.
 
 ## 6. The quality bar (the reference plugin)
 
-§1–5 are the *minimum* to make a plugin function. They are not the bar for
+§1–5 are the _minimum_ to make a plugin function. They are not the bar for
 adding one to the bundled registry. Because the registry is curated, a listed
 plugin can receive real credentials (a singular `savedWebhook` only after the
 host-owned user confirmation) and, if it touches Discord, may use a shared bot
@@ -691,20 +710,20 @@ token. A plugin that ships is held to the standard below.
 
 **[`plugins/self-role/`](../plugins/self-role/) is the reference
 implementation — start there and copy its shape.** It is the smallest plugin
-that exercises *everything*: stateful config, the config iframe with editor-data
+that exercises _everything_: stateful config, the config iframe with editor-data
 reads, signature verification, custom-app attestation, and Discord REST calls
 under a hard latency budget. Its file layout is the suggested skeleton:
 
-| File | Responsibility |
-|---|---|
-| `main.rs` | Wiring only: env → router → listen, plus graceful shutdown. |
-| `config.rs` | Parse env once at startup; fail fast with a clear message. |
-| `store.rs` | Persistence. Small surface (`create` / `get` / `update`). |
-| `discord.rs` | Signature verify, request shapes, and the **pure** decision logic. |
-| `rest.rs` | The thin outbound HTTP layer (the only I/O that can fail slowly). |
-| `validate.rs` | Validate everything the browser sends before it is stored. |
-| `routes.rs` | HTTP handlers — the imperative shell that glues the above. |
-| `static/config.html` | The config iframe, embedded in the binary (`include_str!`). |
+| File                 | Responsibility                                                     |
+| -------------------- | ------------------------------------------------------------------ |
+| `main.rs`            | Wiring only: env → router → listen, plus graceful shutdown.        |
+| `config.rs`          | Parse env once at startup; fail fast with a clear message.         |
+| `store.rs`           | Persistence. Small surface (`create` / `get` / `update`).          |
+| `discord.rs`         | Signature verify, request shapes, and the **pure** decision logic. |
+| `rest.rs`            | The thin outbound HTTP layer (the only I/O that can fail slowly).  |
+| `validate.rs`        | Validate everything the browser sends before it is stored.         |
+| `routes.rs`          | HTTP handlers — the imperative shell that glues the above.         |
+| `static/config.html` | The config iframe, embedded in the binary (`include_str!`).        |
 
 The other bundled plugins are narrower references: [`ping-pong`](../plugins/ping-pong/)
 (minimal stateless), [`modal-form`](../plugins/modal-form/) (the iframe + a
@@ -713,12 +732,13 @@ forwarding flow), [`dispatcher`](../plugins/dispatcher/) (routing).
 ### Checklist
 
 **Security**
+
 - [ ] Verify the Ed25519 signature on the **raw body, before JSON parsing**;
       missing/bad signature → `401`, fail closed.
 - [ ] Honor custom-app attestation: prefer the forwarded `x-dweeb-public-key`
       **only** when `x-dweeb-forward-auth` matches in **constant time** (§5).
 - [ ] Treat the iframe as untrusted input: `validate.rs` rejects anything
-      malformed *before* it is stored; the interaction path re-derives trust from
+      malformed _before_ it is stored; the interaction path re-derives trust from
       the payload (e.g. intersect a select's submitted values with the menu's
       managed set — never act on a raw client-supplied id).
 - [ ] Keep secrets in env, never in the database, never in a browser response.
@@ -732,7 +752,8 @@ forwarding flow), [`dispatcher`](../plugins/dispatcher/) (routing).
       `innerHTML`.
 
 **Robustness**
-- [ ] An interaction must answer inside Discord's ~3s window *after* the
+
+- [ ] An interaction must answer inside Discord's ~3s window _after_ the
       dispatcher hop — give the outbound HTTP client a sub-3s timeout (self-role
       uses 2.5s) and fan out independent calls concurrently.
 - [ ] Map failure causes to **distinct, actionable** replies. Don't collapse
@@ -743,7 +764,8 @@ forwarding flow), [`dispatcher`](../plugins/dispatcher/) (routing).
 - [ ] Serve `GET /health`. Exit non-zero on a fatal config error at startup.
 
 **UX & footprint**
-- [ ] User-facing strings name the problem *and* the fix in plain language.
+
+- [ ] User-facing strings name the problem _and_ the fix in plain language.
 - [ ] Optimize the release binary for size (`opt-level="z"`, `lto`, `strip`) and
       ship a multi-stage `debian-slim` image — plugins target the cheapest tiers.
 
@@ -768,7 +790,7 @@ VPS, and it is the default every new plugin should use.
 > **Reach for Postgres only to run multiple replicas of one plugin behind a load
 > balancer (horizontal scale / HA).** Local-file SQLite breaks there because each
 > replica gets its own file — that, or a shared/relational data model across
-> plugins, is the *only* reason to take on an external database. It is not
+> plugins, is the _only_ reason to take on an external database. It is not
 > warranted by data size or write rate at this scale: a config read is an
 > in-process microsecond lookup, and a network round-trip to Postgres would eat
 > into the 3s interaction budget for nothing. Don't pre-migrate; the `store.rs`

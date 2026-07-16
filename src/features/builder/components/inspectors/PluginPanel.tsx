@@ -45,6 +45,7 @@ import { clearPluginEditToken } from "@/core/plugins/editTokenCache";
 import type { PluginManifest } from "@/core/plugins/manifest";
 import {
   matchLinkPlugin,
+  resolveGuildUrlTemplate,
   unfilledLinkTokens,
   type LinkPluginManifest,
 } from "@/core/plugins/linkManifest";
@@ -656,11 +657,28 @@ function LinkAttachedChip({
   // Live per-server setup state, resolved against the connected guild.
   // "unknown" (no probe, no connected server, probe failed) renders exactly
   // the pre-probe chip. See useLinkPluginStatus.
-  const setupStatus = useLinkPluginStatus(manifest);
+  const { status: setupStatus, roleCount } = useLinkPluginStatus(manifest);
   const connectedGuildId = useGuildStore((s) => s.guildId);
   const authGuilds = useAuthStore((s) => s.guilds);
   const connectedName =
     authGuilds.find((g) => g.id === connectedGuildId)?.name ?? "the connected server";
+
+  // With a server connected, the chip's action deep-links to the service's
+  // page *for that server* (manageUrl) rather than the generic setupUrl,
+  // which usually lands on a create-from-scratch flow. Once the probe says
+  // the server is set up, the same action reads "Manage" — role links exist
+  // there to manage, not to set up.
+  const manageUrl =
+    manifest.manageUrl && connectedGuildId
+      ? resolveGuildUrlTemplate(manifest.manageUrl, connectedGuildId)
+      : null;
+  const actionUrl = manageUrl ?? setupUrl;
+  const actionLabel = manageUrl && setupStatus === "ready" ? "Manage" : "Set up";
+
+  const readyLine =
+    typeof roleCount === "number" && roleCount > 0
+      ? `Set up for ${connectedName} — ${roleCount} linked ${roleCount === 1 ? "role" : "roles"} live`
+      : `Set up for ${connectedName} — the link is live`;
 
   return (
     <>
@@ -680,7 +698,7 @@ function LinkAttachedChip({
                 <AlertTriangleIcon size={12} className={styles.chipTargetIcon} aria-hidden />
               ) : null}
               {setupStatus === "ready"
-                ? `Set up for ${connectedName} — the link is live`
+                ? readyLine
                 : `Not set up for ${connectedName} yet — the link won't do anything`}
             </span>
           ) : null}
@@ -692,16 +710,16 @@ function LinkAttachedChip({
               Configure
             </Button>
           ) : null}
-          {setupUrl ? (
+          {actionUrl ? (
             // `openExternalUrl`, not a raw `window.open`: inside the Activity's
             // sandboxed iframe a `window.open` is silently blocked, so the link
             // has to go through the host SDK (this panel renders on both surfaces).
             <Button
               size="sm"
               variant={onConfigure ? "ghost" : "secondary"}
-              onClick={() => void openExternalUrl(setupUrl)}
+              onClick={() => void openExternalUrl(actionUrl)}
             >
-              Set up
+              {actionLabel}
             </Button>
           ) : null}
           <Button size="sm" variant="ghost" onClick={onDetach}>
@@ -711,7 +729,7 @@ function LinkAttachedChip({
       </div>
       {/* When the probe answered "ready" the stock warning would cry wolf, so it
           only shows while the per-server state is unverified or needs work. */}
-      {setupUrl && setupStatus !== "ready" ? (
+      {actionUrl && setupStatus !== "ready" ? (
         <p className={styles.muted}>
           {manifest.setupHint ??
             `The link only works once your server is set up with ${by} — “Set up” takes you there.`}{" "}

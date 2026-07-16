@@ -7,7 +7,8 @@
  * `statusUrl` closes that gap: a public, credential-less endpoint the service
  * exposes (`{"configured": true|false}` JSON with open CORS) that this module
  * probes for the connected server, so the chip can show a real
- * **Ready / Needs setup** state.
+ * **Ready / Needs setup** state — plus the optional `role_count` the service
+ * reports, so "ready" can say *how much* is set up ("2 linked roles").
  *
  * Strictly best-effort by design. Any failure — the service is down, CORS is
  * refused (e.g. inside a Discord Activity, whose CSP blocks external hosts),
@@ -16,12 +17,23 @@
  *
  * Results are cached per (probe URL) with a short TTL so chip re-renders and
  * repeated opens don't spam the service, and concurrent callers share one
- * in-flight fetch.
+ * in-flight fetch. A `fresh` probe bypasses both this cache and the browser's
+ * HTTP cache — used when the admin returns from the service's dashboard, so a
+ * just-created role link flips the chip immediately instead of after the TTL.
  */
 
 import type { LinkPluginManifest } from "./linkManifest";
+import { resolveGuildUrlTemplate } from "./linkManifest";
 
 export type LinkPluginStatus = "ready" | "needs-setup" | "unknown";
+
+export interface LinkPluginStatusResult {
+  status: LinkPluginStatus;
+  /** How many role links the service reports for the guild, when it says. */
+  roleCount?: number;
+}
+
+const UNKNOWN: LinkPluginStatusResult = { status: "unknown" };
 
 /** How long a resolved probe answer is trusted before re-fetching. */
 const TTL_MS = 60_000;
@@ -31,12 +43,12 @@ const FAILURE_TTL_MS = 20_000;
 const TIMEOUT_MS = 8_000;
 
 interface CacheEntry {
-  status: LinkPluginStatus;
+  result: LinkPluginStatusResult;
   expiresAt: number;
 }
 
 const cache = new Map<string, CacheEntry>();
-const inFlight = new Map<string, Promise<LinkPluginStatus>>();
+const inFlight = new Map<string, Promise<LinkPluginStatusResult>>();
 
 /** Test seam: drop all cached/in-flight probe state. */
 export function clearLinkStatusCache(): void {
@@ -46,65 +58,76 @@ export function clearLinkStatusCache(): void {
 
 /**
  * The concrete probe URL for a guild, or `null` when the manifest has no
- * `statusUrl`. Only `{server_id}` is substituted — it's the one core token a
- * per-server probe can need; any other token left in the template makes the
- * URL unusable and disables the probe rather than sending a literal `{token}`.
+ * `statusUrl` (or the template still carries a non-`{server_id}` token).
  */
 export function linkPluginStatusUrl(manifest: LinkPluginManifest, guildId: string): string | null {
-  const template = manifest.statusUrl;
-  if (!template) return null;
-  const url = template.replaceAll("{server_id}", encodeURIComponent(guildId));
-  return url.includes("{") ? null : url;
+  return manifest.statusUrl ? resolveGuildUrlTemplate(manifest.statusUrl, guildId) : null;
 }
 
-/** Strict parse of the probe body: `configured` must be a literal boolean. */
-function parseProbeBody(body: unknown): LinkPluginStatus {
-  if (!body || typeof body !== "object") return "unknown";
-  const configured = (body as Record<string, unknown>).configured;
-  if (configured === true) return "ready";
-  if (configured === false) return "needs-setup";
-  return "unknown";
+/** Strict parse of the probe body: `configured` must be a literal boolean;
+ *  `role_count` is kept only when it's a sane non-negative integer. */
+function parseProbeBody(body: unknown): LinkPluginStatusResult {
+  if (!body || typeof body !== "object") return UNKNOWN;
+  const record = body as Record<string, unknown>;
+  if (record.configured !== true && record.configured !== false) return UNKNOWN;
+  const rawCount = record.role_count;
+  const roleCount =
+    typeof rawCount === "number" && Number.isInteger(rawCount) && rawCount >= 0 && rawCount <= 1000
+      ? rawCount
+      : undefined;
+  return {
+    status: record.configured ? "ready" : "needs-setup",
+    ...(roleCount !== undefined ? { roleCount } : {}),
+  };
 }
 
-async function probe(url: string): Promise<LinkPluginStatus> {
+async function probe(url: string, fresh: boolean): Promise<LinkPluginStatusResult> {
   try {
     const response = await fetch(url, {
       // Public boolean only — never send cookies or auth to the service.
       credentials: "omit",
-      // The service sets its own short Cache-Control; let the browser honor it.
+      // Normally let the browser honor the service's short Cache-Control; a
+      // fresh probe (admin just came back from the dashboard) skips it so the
+      // flip shows immediately.
+      ...(fresh ? { cache: "no-store" as RequestCache } : {}),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!response.ok) return "unknown";
+    if (!response.ok) return UNKNOWN;
     return parseProbeBody((await response.json()) as unknown);
   } catch {
-    return "unknown";
+    return UNKNOWN;
   }
 }
 
 /**
  * Resolve the setup status of `manifest` for `guildId`. Never rejects; every
- * failure mode is `"unknown"`.
+ * failure mode is `"unknown"`. `fresh: true` bypasses the TTL and HTTP caches
+ * (concurrent callers still share one in-flight fetch).
  */
 export function fetchLinkPluginStatus(
   manifest: LinkPluginManifest,
   guildId: string,
-): Promise<LinkPluginStatus> {
+  opts?: { fresh?: boolean },
+): Promise<LinkPluginStatusResult> {
   const url = linkPluginStatusUrl(manifest, guildId);
-  if (!url) return Promise.resolve("unknown");
+  if (!url) return Promise.resolve(UNKNOWN);
+  const fresh = opts?.fresh === true;
 
-  const cached = cache.get(url);
-  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.status);
+  if (!fresh) {
+    const cached = cache.get(url);
+    if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.result);
+  }
 
   const pending = inFlight.get(url);
   if (pending) return pending;
 
-  const request = probe(url).then((status) => {
+  const request = probe(url, fresh).then((result) => {
     inFlight.delete(url);
     cache.set(url, {
-      status,
-      expiresAt: Date.now() + (status === "unknown" ? FAILURE_TTL_MS : TTL_MS),
+      result,
+      expiresAt: Date.now() + (result.status === "unknown" ? FAILURE_TTL_MS : TTL_MS),
     });
-    return status;
+    return result;
   });
   inFlight.set(url, request);
   return request;

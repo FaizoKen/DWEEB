@@ -278,6 +278,7 @@
       "url": "https://plugin-rolelogic.faizo.net/member-origin-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fmember-origin-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/member-origin-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -294,6 +295,7 @@
       "url": "https://top.gg/{vote_page}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftopgg-voter-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/topgg-voter-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Connect your Top.gg vote webhook on the RoleLogic dashboard, then paste your server's or bot's Top.gg vote page over the button URL below."
     },
     {
@@ -310,6 +312,7 @@
       "url": "https://plugin-rolelogic.faizo.net/genshin-player-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fgenshin-player-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/genshin-player-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -326,6 +329,7 @@
       "url": "https://plugin-rolelogic.faizo.net/youtube-subscriber-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fyoutube-subscriber-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/youtube-subscriber-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -342,6 +346,7 @@
       "url": "https://plugin-rolelogic.faizo.net/twitch-follower-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftwitch-follower-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/twitch-follower-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -358,6 +363,7 @@
       "url": "https://plugin-rolelogic.faizo.net/steam-player-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fsteam-player-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/steam-player-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -374,6 +380,7 @@
       "url": "https://plugin-rolelogic.faizo.net/referral-code-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Freferral-code-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/referral-code-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic and create your codes from its dashboard — until then the redeem link does nothing."
     },
     {
@@ -390,6 +397,7 @@
       "url": "https://plugin-rolelogic.faizo.net/roblox-player-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Froblox-player-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/roblox-player-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -406,6 +414,7 @@
       "url": "https://plugin-rolelogic.faizo.net/tiktok-creator-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftiktok-creator-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/tiktok-creator-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -422,6 +431,7 @@
       "url": "https://plugin-rolelogic.faizo.net/form-respondent-role/f/{form_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/form-respondent-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "configUrl": "https://plugin-rolelogic.faizo.net/form-respondent-role/dweeb/picker",
       "resources": ["guild"],
       "setupHint": "Pick one of your server's forms with Configure — or build one on the RoleLogic dashboard and paste its link (…/f/YOUR-FORM-ID) over the button URL below."
@@ -440,6 +450,7 @@
       "url": "https://plugin-rolelogic.faizo.net/kick-channel-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fkick-channel-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/kick-channel-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -456,6 +467,7 @@
       "url": "https://plugin-rolelogic.faizo.net/birthday-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fbirthday-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/birthday-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the birthday link does nothing."
     },
     {
@@ -472,6 +484,7 @@
       "url": "https://plugin-rolelogic.faizo.net/osu-player-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fosu-player-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/osu-player-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -488,6 +501,7 @@
       "url": "https://plugin-rolelogic.faizo.net/bluesky-account-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fbluesky-account-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/bluesky-account-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -504,6 +518,7 @@
       "url": "https://plugin-rolelogic.faizo.net/github-contributor-role/verify?guild={server_id}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fgithub-contributor-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/github-contributor-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic for your server once from its dashboard — until then the verify link does nothing."
     },
     {
@@ -520,6 +535,7 @@
       "url": "https://plugin-rolelogic.faizo.net/stripe-subscriber-role/verify",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fstripe-subscriber-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/stripe-subscriber-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Connect your Stripe account on the RoleLogic dashboard — until then the status link does nothing."
     },
     {
@@ -536,6 +552,7 @@
       "url": "https://plugin-rolelogic.faizo.net/lootlabs-reward-role/claim/{claim_link}",
       "setupUrl": "https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Flootlabs-reward-role",
       "statusUrl": "https://plugin-rolelogic.faizo.net/lootlabs-reward-role/dweeb/status?guild={server_id}",
+      "manageUrl": "https://rolelogic.faizo.net/dashboard/{server_id}/role-links",
       "setupHint": "Set up RoleLogic and your Loot Labs link from its dashboard, then paste the claim link it gives you over the button URL below."
     },
     {

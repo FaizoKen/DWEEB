@@ -5,6 +5,7 @@ import {
   linkUrlPrefix,
   matchLinkPlugin,
   parseLinkManifest,
+  resolveGuildUrlTemplate,
   unfilledLinkTokens,
   type LinkPluginManifest,
 } from "./linkManifest";
@@ -33,6 +34,21 @@ describe("link manifest parsing", () => {
     // A tokenized host would let the probe be pointed anywhere — dropped.
     expect(parsed({ statusUrl: "https://{host}/status" }).statusUrl).toBeUndefined();
     expect(parsed({ statusUrl: "ftp://service.example/x" }).statusUrl).toBeUndefined();
+  });
+
+  it("parses the optional manageUrl template, holding it to the url bar", () => {
+    expect(
+      parsed({ manageUrl: "https://service.example/dashboard/{server_id}/role-links" }).manageUrl,
+    ).toBe("https://service.example/dashboard/{server_id}/role-links");
+    expect(parsed({ manageUrl: "https://{host}/dashboard" }).manageUrl).toBeUndefined();
+    expect(parsed({}).manageUrl).toBeUndefined();
+  });
+
+  it("resolveGuildUrlTemplate substitutes only {server_id} and refuses leftovers", () => {
+    expect(
+      resolveGuildUrlTemplate("https://s.example/dashboard/{server_id}/role-links", "123"),
+    ).toBe("https://s.example/dashboard/123/role-links");
+    expect(resolveGuildUrlTemplate("https://s.example/d/{server_id}/{page}", "123")).toBeNull();
   });
 
   it("parses the optional configUrl and restricts resources to the link allow-list", () => {
