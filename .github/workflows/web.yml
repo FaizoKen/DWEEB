@@ -58,10 +58,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Pinned exact version: `latest` makes setup-bun list oven-sh/bun's
+      # tags via api.github.com on every run, which fails the whole deploy
+      # whenever that endpoint hiccups (503'd two deploys on 2026-07-17).
+      # An exact version downloads straight from the release URL instead.
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.5
 
       # `--frozen-lockfile` makes the install fail if `bun.lock` is out of
       # sync with `package.json`. That catches forgotten lockfile updates
