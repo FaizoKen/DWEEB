@@ -186,6 +186,19 @@
   background: rgba(35, 165, 89, 0.14);
 }
 
+.notApplied {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-warning-text);
+  background: var(--app-warning-soft);
+}
+
 /* ── Streaming indicators ────────────────────────────────────────────── */
 /* Typing dots shown inside an assistant bubble that has no prose yet. */
 .typing {

@@ -19,12 +19,14 @@ import type { AiProvider, AiSettings, ChatMessage } from "./types";
 import { PROVIDERS } from "./providerMeta";
 
 /**
- * Sampling temperature for every provider. The assistant's job is to emit a
- * strict JSON schema, not creative prose, so determinism wins: cheap/free
- * models in particular adhere to the Components V2 shape far more reliably when
- * they sample narrowly. This is applied to ALL providers — previously only the
- * OpenAI-compatible path set a temperature, so Anthropic and Gemini ran at
- * their ~1.0 defaults, which measurably hurt schema accuracy on smaller models.
+ * Sampling temperature for the OpenAI-compatible and Gemini paths. The
+ * assistant's job is to emit a strict JSON schema, not creative prose, so
+ * determinism wins: cheap/free models in particular adhere to the Components V2
+ * shape far more reliably when they sample narrowly.
+ *
+ * Anthropic deliberately does NOT get this: Claude models from Opus 4.7 onward
+ * removed `temperature`/`top_p`/`top_k` and 400 any request carrying them, so
+ * the Anthropic adapter omits sampling parameters entirely.
  */
 const GENERATION_TEMPERATURE = 0.2;
 
@@ -52,9 +54,19 @@ function resolvedBaseUrl(settings: AiSettings): string {
   return trimSlash(chosen);
 }
 
-/** Turn the in-panel transcript into provider-neutral turns. */
+/**
+ * Turn the in-panel transcript into provider-neutral turns.
+ *
+ * Assistant turns send the RAW reply (prose + JSON payload fence), not the
+ * display prose — the panel strips the JSON for readability, but the model must
+ * keep seeing the payloads it produced or follow-ups like "do it" / "make that
+ * button red" refer to something the model can no longer see.
+ */
 export function toTurns(messages: ChatMessage[]): AiTurn[] {
-  return messages.map((m) => ({ role: m.role, content: m.content }));
+  return messages.map((m) => ({
+    role: m.role,
+    content: (m.role === "assistant" ? m.raw : undefined) ?? m.content,
+  }));
 }
 
 /**
@@ -315,10 +327,14 @@ async function callAnthropic(
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     },
+    // No `temperature` here: current Claude models (Opus 4.7+, Sonnet 5,
+    // Fable 5) removed the sampling parameters and reject requests carrying
+    // them with a 400 — with it set, the assistant looked "broken" for every
+    // Anthropic user on a current model. Omitting it is accepted by all
+    // Claude models, old and new.
     body: JSON.stringify({
       model: settings.model,
-      max_tokens: 4096,
-      temperature: GENERATION_TEMPERATURE,
+      max_tokens: 8192,
       stream: Boolean(onToken),
       system,
       messages: turns.map((t) => ({ role: t.role, content: t.content })),

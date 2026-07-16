@@ -84,7 +84,10 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
   },
   anthropic: {
     label: "Anthropic (Claude)",
-    defaultModel: "claude-3-5-sonnet-latest",
+    // Keep this a currently-served model id: the previous default
+    // ("claude-3-5-sonnet-latest") pointed at a model retired in Oct 2025, so
+    // every new Anthropic user got a 404 out of the box.
+    defaultModel: "claude-opus-4-8",
     defaultBaseUrl: "https://api.anthropic.com",
     requiresBaseUrl: false,
     requiresKey: true,

@@ -27,15 +27,19 @@ function tolerantJsonParse(input: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    // Fall through to the lenient, string-aware pass below.
+    // Fall through to the lenient, string-aware passes below.
   }
-  let out = "";
+
+  // Pass 1: strip comments. Runs BEFORE the trailing-comma pass, so a comma
+  // separated from its closer only by a comment (`}, /* note */ ]`) is still
+  // recognized as trailing.
+  let noComments = "";
   let inString = false;
   let escaped = false;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (inString) {
-      out += ch;
+      noComments += ch;
       if (escaped) escaped = false;
       else if (ch === "\\") escaped = true;
       else if (ch === '"') inString = false;
@@ -43,7 +47,7 @@ function tolerantJsonParse(input: string): unknown {
     }
     if (ch === '"') {
       inString = true;
-      out += ch;
+      noComments += ch;
       continue;
     }
     if (ch === "/" && text[i + 1] === "/") {
@@ -56,10 +60,31 @@ function tolerantJsonParse(input: string): unknown {
       i++; // skip the closing slash
       continue;
     }
+    noComments += ch;
+  }
+
+  // Pass 2: drop trailing commas.
+  let out = "";
+  inString = false;
+  escaped = false;
+  for (let i = 0; i < noComments.length; i++) {
+    const ch = noComments[i];
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
     if (ch === ",") {
       let j = i + 1;
-      while (j < text.length && /\s/.test(text[j]!)) j++;
-      if (text[j] === "}" || text[j] === "]") continue; // drop the trailing comma
+      while (j < noComments.length && /\s/.test(noComments[j]!)) j++;
+      if (noComments[j] === "}" || noComments[j] === "]") continue; // drop it
     }
     out += ch;
   }
@@ -78,8 +103,13 @@ function looksLikeMessage(value: unknown): boolean {
 export function extractReply(raw: string): ParsedAssistantReply {
   const text = raw ?? "";
   let payload: unknown | null = null;
-  let strippedRanges: Array<[number, number]> = [];
+  const strippedRanges: Array<[number, number]> = [];
 
+  // Collect every fence that parses into a message. The contract tells the
+  // model to put the payload LAST, so when a reply carries several candidates
+  // (a "before/after" pair, an example followed by the real thing) the last one
+  // wins — but all of them are stripped from the prose, because raw JSON walls
+  // are never useful chat text.
   for (const match of text.matchAll(FENCE_RE)) {
     const body = match[1];
     if (body === undefined) continue;
@@ -92,8 +122,7 @@ export function extractReply(raw: string): ParsedAssistantReply {
     if (looksLikeMessage(parsed)) {
       payload = parsed;
       const start = match.index ?? 0;
-      strippedRanges = [[start, start + match[0].length]];
-      break;
+      strippedRanges.push([start, start + match[0].length]);
     }
   }
 
@@ -113,11 +142,45 @@ export function extractReply(raw: string): ParsedAssistantReply {
     }
   }
 
-  let prose = text;
+  // Splice the stripped ranges out in one pass. (The old single-range logic
+  // rebuilt `prose` from `text` on every iteration, which silently restored
+  // earlier removals when more than one range existed.)
+  let prose = "";
+  let cursor = 0;
   for (const [start, end] of strippedRanges) {
-    prose = text.slice(0, start) + text.slice(end);
+    prose += text.slice(cursor, start);
+    cursor = end;
   }
+  prose += text.slice(cursor);
   return { text: prose.trim(), payload };
+}
+
+/**
+ * Heuristic: does this prose ANNOUNCE a message edit?
+ *
+ * The failure this guards against (seen in production): the model replies
+ * "Sure! Here's a streamlined version with just the essentials." — and no JSON
+ * block. Nothing is applied, the user believes it was, and every follow-up
+ * ("do it") produces another empty announcement. When a settled reply has no
+ * payload but its prose announces one, the store runs a single recovery turn
+ * asking for the JSON (with a NO_CHANGE escape hatch, so a false positive here
+ * costs one cheap request and nothing else).
+ */
+const ANNOUNCE_RES = [
+  // "Here's a streamlined version…", "here is the updated message…"
+  /\b(here('|’)s|here is)\b[^.?!\n]{0,80}\b(version|message|update|json|payload)\b/i,
+  /\b(here('|’)s|here is)\b[^.?!\n]{0,80}\b(simplified|streamlined|updated|revised|cleaner|simpler|pared)\b/i,
+  // "I've simplified…", "I have removed…", "I'll update it to…"
+  /\bi('|’)?(ve|ll| have| will)\b[^.?!\n]{0,60}\b(made|updated?|create[d]?|built?|add(ed)?|remov(e|ed)|chang(e|ed)|simplif(y|ied)|streamlin(e|ed)|trim(med)?|revis(e|ed)|redesign(ed)?|rework(ed)?|clean(ed)?|appl(y|ied)|swap(ped)?|replac(e|ed))\b/i,
+  // "Updated version:", "new message below", "Done!" / "All set."
+  /\b(updated|revised|simplified|streamlined|pared[- ]down|trimmed|new) (version|message)\b/i,
+  /^(done|all set|all done)\b/i,
+];
+
+export function announcesEdit(prose: string): boolean {
+  const text = (prose ?? "").trim();
+  if (!text || text.endsWith("?")) return false;
+  return ANNOUNCE_RES.some((re) => re.test(text));
 }
 
 /**

@@ -214,6 +214,18 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   in-dialog re-pick). The full list appears only when no bar pick exists yet (it's then the
   first pick), and that decision is frozen per dialog open so an in-dialog pick doesn't yank
   the list away mid-flow.
+- **AI assistant (src/core/ai) reliability contract.** The chat panel strips the model's
+  JSON payload from the displayed bubble, but provider history must carry the RAW reply —
+  `ChatMessage.raw` + `toTurns` — or follow-ups like "do it" leave the model blind to its
+  own previous JSON (this shipped broken and produced announce-only loops). A settled reply
+  that _announces_ an edit ("Here's a streamlined version…") with no ```json block gets ONE
+  recovery turn (`buildMissingPayloadPrompt`, with a `NO_CHANGE` escape so false positives
+  are harmless); if still payloadless it must render the honest "Message not changed" chip
+  (`failedEdit`), never prose that masquerades as an applied edit. The Anthropic adapter
+  must NOT send `temperature`/`top_p`/`top_k` (Claude Opus 4.7+ / Sonnet 5 / Fable 5 reject
+  them with a 400), and provider default-model ids must be currently-served models (the old
+  `claude-3-5-sonnet-latest` default 404'd — it retired 2025-10). Guarded by
+  `src/core/ai/aiStore.test.ts` + `extractReply.test.ts`.
 - **Env config fails loudly, never silently.** `config.rs` trims every value (`normalize`), and a
   _present but unparseable_ value is a boot error rather than a fall back to the default —
   `parse_bool` accepts only `1/true/yes/on` + `0/false/no/off` and rejects anything else. This is

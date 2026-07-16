@@ -36,10 +36,26 @@ export interface ChatMessage {
   /** Conversational text, with any message-payload JSON block stripped out. */
   content: string;
   /**
+   * The assistant's full raw reply, INCLUDING the JSON payload fence that is
+   * stripped from `content` for display. This is what goes back to the provider
+   * as conversation history — without it the model never sees the JSON it
+   * previously produced, so follow-ups like "do it" or "make the button red
+   * instead" degrade into vague re-answers.
+   */
+  raw?: string;
+  /**
    * Set on assistant turns that produced a message edit. Drives the inline
    * "updated the message" affordance without re-parsing the content.
    */
   appliedMessage?: boolean;
+  /**
+   * Set when the turn clearly intended an edit (the reply announced one, or
+   * carried a payload) but nothing importable made it into the editor even
+   * after the automatic recovery turns. Drives an honest "message not changed"
+   * affordance so prose like "Here's a streamlined version!" can't silently
+   * masquerade as an applied edit.
+   */
+  failedEdit?: boolean;
   /** Validation issue count when an edit was applied with warnings/errors. */
   issueCount?: number;
   /**

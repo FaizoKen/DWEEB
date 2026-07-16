@@ -24,6 +24,12 @@ the user design a Discord message that uses the **Components V2** layout system
 - Whenever the user wants you to create or change the message, include EXACTLY ONE
   fenced code block tagged \`json\` containing the COMPLETE updated message object
   (never a partial diff). Put that block LAST, with nothing after it.
+- THE APP APPLIES CHANGES ONLY FROM THAT JSON BLOCK. Prose alone does nothing:
+  never say you updated, simplified, or changed the message without including the
+  block in the SAME reply. Do not describe a change and stop — make it.
+- When the user confirms or asks you to proceed ("do it", "yes", "go ahead",
+  "apply it"), they mean the change you proposed: emit the COMPLETE updated
+  message as the \`json\` block immediately. Do not re-describe it.
 - The block must be strict, parseable JSON: double-quoted keys/strings, no trailing
   commas, no comments, no \`...\` placeholders. Outside that block, do not paste large JSON.
 - If the user is only asking a question and no message change is needed, omit the
@@ -122,7 +128,31 @@ export function buildSystemPrompt(current: WebhookMessage): string {
   } catch {
     currentJson = '{ "components": [] }';
   }
-  return `${SCHEMA_GUIDE}\n\n## CURRENT MESSAGE (the editor's live state)\n\`\`\`json\n${currentJson}\n\`\`\``;
+  return (
+    `${SCHEMA_GUIDE}\n\n## CURRENT MESSAGE (the editor's live state)\n` +
+    "This is the live editor state right now — any json block you emitted earlier " +
+    "has already been applied to it. Base your next edit on THIS, not on memory.\n" +
+    `\`\`\`json\n${currentJson}\n\`\`\``
+  );
+}
+
+/**
+ * Build the follow-up prompt for a missing-payload recovery turn.
+ *
+ * Cheap models sometimes ANNOUNCE an edit ("Here's a streamlined version!")
+ * without emitting the JSON block — so nothing reaches the editor while the
+ * chat claims otherwise. When the store detects that, it sends this single
+ * nudge. The NO_CHANGE escape keeps a false-positive detection harmless: the
+ * model can simply decline instead of inventing an unwanted edit.
+ */
+export function buildMissingPayloadPrompt(): string {
+  return (
+    "Your previous reply described a change but did not include the ```json block, " +
+    "so NOTHING was applied to the editor — the app only applies changes carried " +
+    "in that block. If the message should change, reply now with the COMPLETE " +
+    "updated message as a single ```json block, with nothing after it. If you did " +
+    "not intend to change the message, reply with exactly NO_CHANGE and nothing else."
+  );
 }
 
 /**

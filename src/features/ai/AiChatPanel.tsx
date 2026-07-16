@@ -56,7 +56,9 @@ export function AiChatPanel() {
     : latestMessage?.role === "assistant" && !latestMessage.streaming
       ? latestMessage.appliedMessage
         ? "AI response complete. The message was updated."
-        : "AI response complete."
+        : latestMessage.failedEdit
+          ? "AI response complete. The message was not changed."
+          : "AI response complete."
       : "";
 
   // Keep the transcript pinned to the latest turn.
@@ -294,6 +296,12 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                 ? ` · ${message.issueCount} validation issue${message.issueCount === 1 ? "" : "s"}`
                 : ""}
             </span>
+          </div>
+        ) : message.failedEdit ? (
+          // The reply promised an edit but nothing importable arrived — say so,
+          // or prose like "Here's a streamlined version!" reads as applied.
+          <div className={styles.notApplied}>
+            <span>Message not changed — try rephrasing or add detail</span>
           </div>
         ) : null}
       </div>

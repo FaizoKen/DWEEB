@@ -143,8 +143,8 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
     const [
       { callAI, toTurns },
-      { buildSystemPrompt, buildRepairPrompt },
-      { extractReply, streamingProse },
+      { buildSystemPrompt, buildRepairPrompt, buildMissingPayloadPrompt },
+      { extractReply, streamingProse, announcesEdit },
     ] = engine;
 
     const { settings } = get();
@@ -197,7 +197,21 @@ export const useAiStore = create<AiState>((set, get) => ({
     // commit happens only once, after every pass resolves).
     const showBubble = (
       analysis: Analysis,
-      { raw, partial, streaming }: { raw: string; partial: boolean; streaming: boolean },
+      {
+        raw,
+        partial,
+        streaming,
+        settledRaw,
+        failedEdit = false,
+      }: {
+        raw: string;
+        partial: boolean;
+        streaming: boolean;
+        /** Raw reply to persist as provider-facing history (settle only). */
+        settledRaw?: string;
+        /** Turn intended an edit but nothing importable arrived (settle only). */
+        failedEdit?: boolean;
+      },
     ) => {
       const settled = !streaming;
       const appliedMessage = settled && analysis.message !== null;
@@ -214,7 +228,11 @@ export const useAiStore = create<AiState>((set, get) => ({
             ? {
                 ...m,
                 content,
+                // The raw reply (incl. its JSON fence) is what future turns
+                // send back to the provider — see `toTurns`.
+                raw: settled ? (settledRaw ?? m.raw) : m.raw,
                 appliedMessage,
+                failedEdit: settled ? failedEdit : undefined,
                 issueCount: appliedMessage ? analysis.issueCount : undefined,
                 streaming,
               }
@@ -255,7 +273,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       if (cancelled && raw.trim()) {
         const partial = analyze(raw);
         commitMessage(partial);
-        showBubble(partial, { raw, partial: true, streaming: false });
+        showBubble(partial, { raw, partial: true, streaming: false, settledRaw: raw });
         set({ thinking: false });
       } else {
         set((s) => ({
@@ -267,19 +285,57 @@ export const useAiStore = create<AiState>((set, get) => ({
       return;
     }
 
-    let analysis = analyze(result.text ?? raw);
+    // `finalRaw` tracks the raw reply whose payload `analysis` currently
+    // reflects — it becomes the assistant turn's provider-facing history.
+    let finalRaw = result.text ?? raw;
+    let analysis = analyze(finalRaw);
+    // Did this turn mean to change the message? True when a payload arrived or
+    // the prose announced an edit; drives the honest "not changed" state if the
+    // turn still settles without an importable message.
+    let editIntended = analysis.hasPayload;
+
+    // Missing-payload recovery: the reply ANNOUNCED an edit ("Here's a
+    // streamlined version!") but carried no JSON at all — the classic "the
+    // assistant says it did something but nothing happened" failure. Send one
+    // follow-up demanding the payload; NO_CHANGE lets the model decline, which
+    // keeps a false-positive announcement detection harmless.
+    if (!analysis.hasPayload && announcesEdit(analysis.prose)) {
+      editIntended = true;
+      // Keep the caret alive (with the first pass's prose) while we recover.
+      showBubble(analysis, { raw, partial: false, streaming: true });
+      const nudgeTurns: AiTurn[] = [
+        ...toTurns(history),
+        { role: "assistant", content: finalRaw },
+        { role: "user", content: buildMissingPayloadPrompt() },
+      ];
+      inflight = new AbortController();
+      const nudge = await callAI(settings, system, nudgeTurns, inflight.signal);
+      inflight = null;
+      if (nudge.ok) {
+        const next = analyze(nudge.text ?? "");
+        if (next.hasPayload) {
+          // Adopt the payload but keep the first pass's conversational prose —
+          // the recovery is invisible polish, not a new chat turn.
+          analysis = { ...next, prose: analysis.prose || next.prose };
+          finalRaw = nudge.text ?? "";
+        } else if (/^no[_\s-]?change\b/i.test(next.prose.trim())) {
+          // The model says the announcement wasn't an edit after all — believe
+          // it: no payload, but no false "not changed" badge either.
+          editIntended = false;
+        }
+      }
+    }
 
     // Self-repair: when the payload won't pass validation, hand the exact errors
     // back and let the model correct them. The validator's messages are precise,
     // so even a cheap model usually fixes them — turning "updated · N issues"
-    // into a clean message. Bounded to MAX_REPAIR_TURNS, and only adopted when
-    // the result is importable and strictly closer to valid. The editor isn't
+    // into a clean message. Bounded to MAX_REPAIR_TURNS. The editor isn't
     // touched until the loop settles, so a broken first pass never flashes into
     // the preview and the whole turn collapses to a single undo step.
     if (analysis.errors.length > 0) {
       // Keep the caret alive (with the first pass's prose) while we refine.
       showBubble(analysis, { raw, partial: false, streaming: true });
-      let priorRaw = result.text ?? raw;
+      let priorRaw = finalRaw;
       for (let attempt = 0; attempt < MAX_REPAIR_TURNS && analysis.errors.length > 0; attempt++) {
         // Show the model the payload it needs to fix as the CURRENT MESSAGE.
         const broken = analysis.message ?? useMessageStore.getState().message;
@@ -299,15 +355,27 @@ export const useAiStore = create<AiState>((set, get) => ({
         if (!repair.ok) break; // cancelled or failed — keep the best-effort message
         const next = analyze(repair.text ?? "");
         priorRaw = repair.text ?? "";
-        if (!next.message || next.errors.length >= analysis.errors.length) break;
+        // Adopt only importable repairs — and an importable message always
+        // beats an unimportable one, whatever the error counts say (the old
+        // `>=` rule silently discarded a valid repair of an unparseable first
+        // pass because both carried exactly one "error").
+        if (!next.message) break;
+        if (analysis.message !== null && next.errors.length >= analysis.errors.length) break;
         // Adopt the cleaner payload but keep the first pass's conversational
         // prose — the repair is invisible polish, not a new chat turn.
+        finalRaw = priorRaw;
         analysis = { ...next, prose: analysis.prose };
       }
     }
 
     commitMessage(analysis);
-    showBubble(analysis, { raw, partial: false, streaming: false });
+    showBubble(analysis, {
+      raw,
+      partial: false,
+      streaming: false,
+      settledRaw: finalRaw,
+      failedEdit: editIntended && analysis.message === null,
+    });
     set({ thinking: false });
   },
 
