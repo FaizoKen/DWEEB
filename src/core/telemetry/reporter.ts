@@ -23,11 +23,13 @@
 import { proxyFetch } from "@/core/net/proxyFetch";
 import { isProxyConfigured } from "@/core/guild/config";
 import { isActivityMode } from "@/core/activity/runtime";
+import { isStaleChunkReloadInProgress } from "@/core/pwa/staleChunkRecovery";
 import {
   buildCrashPayload,
   crashSignature,
   CrashThrottle,
   isNonCrashMessage,
+  isStaleChunkMessage,
   type CrashKind,
   type CrashPayload,
 } from "./crashReport";
@@ -104,6 +106,11 @@ function report(kind: CrashKind, error: unknown): void {
     // ResizeObserver loop notice). Drop them before the throttle so they can't
     // spend a slot the next real crash needs.
     if (isNonCrashMessage(payload.message)) return;
+    // A stale-chunk rejection the recovery is already reloading past is a
+    // self-healing deploy-skew non-event — beaconing it would page for nothing.
+    // With no reload in flight (recovery exhausted or disarmed) it reports
+    // normally, because then something genuinely needs looking at.
+    if (isStaleChunkMessage(payload.message) && isStaleChunkReloadInProgress()) return;
     const sig = crashSignature(kind, payload.message, payload.stack);
     if (!throttle.shouldSend(sig)) return;
     send(payload);

@@ -6,6 +6,7 @@ import {
   CrashThrottle,
   describeError,
   isNonCrashMessage,
+  isStaleChunkMessage,
   topFrames,
   type CrashInput,
 } from "./crashReport";
@@ -140,6 +141,39 @@ describe("isNonCrashMessage", () => {
     expect(isNonCrashMessage("Cannot read properties of undefined (reading 'id')")).toBe(false);
     expect(isNonCrashMessage("ResizeObserver is not defined")).toBe(false);
     expect(isNonCrashMessage("")).toBe(false);
+  });
+});
+
+describe("isStaleChunkMessage", () => {
+  it("matches every engine's failed dynamic-import wording, with the URL attached", () => {
+    // Chromium — the exact shape the prod crash alerts carried.
+    expect(
+      isStaleChunkMessage(
+        "Failed to fetch dynamically imported module: https://dweeb.faizo.net/assets/flows-CUcFDGpr.js",
+      ),
+    ).toBe(true);
+    // Firefox.
+    expect(
+      isStaleChunkMessage("error loading dynamically imported module: https://x/assets/a.js"),
+    ).toBe(true);
+    // Safari.
+    expect(isStaleChunkMessage("Importing a module script failed.")).toBe(true);
+    // Vite's preload helper, for a chunk's CSS dependency.
+    expect(isStaleChunkMessage("Unable to preload CSS for /assets/App-abc123.css")).toBe(true);
+  });
+
+  it("still matches when the browser wraps the message", () => {
+    expect(
+      isStaleChunkMessage(
+        "Uncaught (in promise) TypeError: Failed to fetch dynamically imported module: https://x/a.js",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps unrelated errors, including other fetch failures", () => {
+    expect(isStaleChunkMessage("Failed to fetch")).toBe(false); // a plain network error
+    expect(isStaleChunkMessage("Cannot read properties of undefined (reading 'id')")).toBe(false);
+    expect(isStaleChunkMessage("")).toBe(false);
   });
 });
 

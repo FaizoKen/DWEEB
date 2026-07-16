@@ -152,6 +152,32 @@ export function isNonCrashMessage(message: string): boolean {
   return NON_CRASH_MESSAGES.some((known) => trimmed.includes(known));
 }
 
+/**
+ * How each engine words a dynamic `import()` whose chunk failed to fetch —
+ * the signature of deploy skew (a stale shell requesting a purged hashed
+ * chunk). Matched case-insensitively on containment: the message carries the
+ * chunk URL and browsers vary the "Uncaught (in promise) TypeError:" framing.
+ * The last entry is Vite's own preload-helper wording for a failed CSS dep.
+ */
+const STALE_CHUNK_MESSAGES = [
+  "failed to fetch dynamically imported module", // Chromium
+  "error loading dynamically imported module", // Firefox
+  "importing a module script failed", // Safari
+  "unable to preload css", // Vite preload helper
+];
+
+/**
+ * Whether `message` is a failed lazy-chunk load. Not unconditionally dropped
+ * like `isNonCrashMessage` — the reporter suppresses it only while the
+ * stale-chunk recovery (`core/pwa/staleChunkRecovery.ts`) is reloading past it;
+ * the same failure with recovery exhausted still reports, because then it's
+ * signal (SW precache gap, broken deploy) rather than routine deploy skew.
+ */
+export function isStaleChunkMessage(message: string): boolean {
+  const lower = message.toLowerCase();
+  return STALE_CHUNK_MESSAGES.some((known) => lower.includes(known));
+}
+
 /** Build the content-free wire payload from an untrusted thrown value. */
 export function buildCrashPayload(input: CrashInput): CrashPayload {
   const { message, stack } = describeError(input.error);

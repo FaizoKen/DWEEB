@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { isActivityMode } from "@/core/activity/runtime";
 import { installCrashReporter } from "@/core/telemetry/reporter";
+import { installStaleChunkRecovery } from "@/core/pwa/staleChunkRecovery";
 import { trackAnalytics } from "@/core/telemetry/analytics";
 import "@/styles/global.css";
 
@@ -12,6 +13,13 @@ const bootStartedAt = performance.now();
 // surface boots — so a crash during startup is reported too. Self-gates to a
 // production build with a configured proxy; a no-op otherwise.
 installCrashReporter();
+
+// Arm deploy-skew recovery before the first dynamic import below: a stale
+// cached shell whose hashed chunks were purged by a newer deploy gets one
+// automatic reload onto the fresh build instead of dying at boot (see
+// core/pwa/staleChunkRecovery). Must precede `bootActivity`/`bootWeb`, whose
+// imports are exactly the ones that fail in that state.
+installStaleChunkRecovery();
 
 // Discord launches the Activity at our domain root with `?frame_id=…` in the
 // query (the Developer Portal's Root Mapping points there). Detect that and boot

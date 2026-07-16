@@ -82,6 +82,18 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   non-errors (the RO loop notice) are dropped by the crash reporter (`core/telemetry/crashReport.ts`)
   _and_ by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
   cache, so stale clients keep beaconing long after a fix.
+- **Deploy skew self-heals with one boot reload — don't page for it.** GitHub Pages caches
+  `index.html` ~10 min and every deploy purges the old hashed chunks, so a visitor who isn't
+  SW-controlled yet can boot a stale shell whose lazy `import()`s 404 ("Failed to fetch
+  dynamically imported module" — this paged the maintainer repeatedly on 0.12.0).
+  `core/pwa/staleChunkRecovery.ts` (armed first thing in `main.tsx`) listens for Vite's
+  `vite:preloadError` and reloads once — guarded per version via sessionStorage so it can
+  never loop, and only **before** `dweeb:surface-ready` so an automatic reload can't destroy
+  a user's in-progress message. The crash reporter drops stale-chunk beacons *only while that
+  reload is in flight* (`isStaleChunkMessage` + `isStaleChunkReloadInProgress`); the same
+  failure with recovery exhausted still reports, because then it's real signal (SW precache
+  gap, broken deploy). Keep new boot-path dynamic imports behind this ordering, and don't
+  "simplify" the suppression into an unconditional drop.
 - **`Field` rewrites the caller's element tree — it must never descend into a render prop.**
   `ui/Field`'s `wireControl` walks the tree its render-prop child returns and clones
   `aria-describedby`/`aria-errormessage`/`aria-invalid` onto the element carrying the control id.
