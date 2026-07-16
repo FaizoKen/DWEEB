@@ -47,6 +47,35 @@ function devHttps(): ServerOptions["https"] {
 // early-resolve snippet in index.html). The hashes let the strict policy permit
 // those specific scripts without opening the door to 'unsafe-inline' — computed
 // at build time below so they track the exact emitted bytes.
+/**
+ * Every https origin the bundled registry points a config iframe at — both the
+ * interactive plugins' `configUrl`s and the link plugins' — so `frame-src`
+ * tracks the registry instead of being hand-maintained. This is what makes a
+ * registry entry with a config iframe on a new host (e.g. RoleLogic's form
+ * picker on plugin-rolelogic.faizo.net) actually render: without its origin
+ * here the modal shows a browser-blocked blank frame. Dev/localhost entries
+ * are skipped (the CSP is only injected on production builds anyway).
+ */
+function registryConfigOrigins(): string[] {
+  const registry = createRequire(import.meta.url)("./src/core/plugins/registry.json") as {
+    plugins?: { configUrl?: unknown }[];
+  };
+  const origins = new Set<string>();
+  for (const plugin of registry.plugins ?? []) {
+    if (typeof plugin.configUrl !== "string") continue;
+    try {
+      const url = new URL(plugin.configUrl);
+      if (url.protocol !== "https:") continue;
+      // Covered by the frame-src wildcard below — keep the policy short.
+      if (url.hostname.endsWith(".dweeb.faizo.net")) continue;
+      origins.add(url.origin);
+    } catch {
+      // Malformed configUrl — the registry parser drops the entry at runtime.
+    }
+  }
+  return [...origins].sort();
+}
+
 function buildCsp(inlineScriptHashes: readonly string[]): string {
   return [
     "default-src 'self'",
@@ -65,10 +94,16 @@ function buildCsp(inlineScriptHashes: readonly string[]): string {
     // self-hosted proxy on any host works too). `https:` already covers Stripe's
     // API + telemetry hosts (api.stripe.com, m.stripe.com, …).
     "connect-src 'self' https: wss:",
-    // Plugins render their config UI in iframes under *.dweeb.faizo.net; Stripe's
-    // embedded Checkout renders its payment form + 3-D Secure step in iframes from
+    // Plugins render their config UI in iframes under *.dweeb.faizo.net (plus
+    // any other config-iframe origin the bundled registry declares — derived
+    // below so the policy can't silently lag the registry); Stripe's embedded
+    // Checkout renders its payment form + 3-D Secure step in iframes from
     // js.stripe.com / checkout.stripe.com / hooks.stripe.com.
-    "frame-src 'self' https://*.dweeb.faizo.net https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com",
+    [
+      "frame-src 'self' https://*.dweeb.faizo.net",
+      ...registryConfigOrigins(),
+      "https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com",
+    ].join(" "),
     "base-uri 'self'",
     "form-action 'self'",
   ].join("; ");
