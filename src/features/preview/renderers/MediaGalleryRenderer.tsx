@@ -90,6 +90,17 @@ function GalleryItem({
   const obscured = item.spoiler === true && !selected;
   const [sourceAspect, setSourceAspect] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
+  // A cached image can be `complete` before the load listener attaches, so
+  // `onLoad` alone would miss it and leave the fallback geometry — read the
+  // element's state directly on mount as well.
+  const readImageState = (el: HTMLImageElement | null) => {
+    if (!el || !el.complete) return;
+    if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+      setSourceAspect(el.naturalWidth / el.naturalHeight);
+    } else if (el.currentSrc) {
+      setFailed(true);
+    }
+  };
   const url = item.media.url ?? "";
   const priority = usePreviewMediaPriority(url);
   const src = useResolvedMediaUrl(url);
@@ -137,6 +148,7 @@ function GalleryItem({
           <video src={src} muted playsInline preload="metadata" />
         ) : (
           <img
+            ref={readImageState}
             src={src}
             alt={item.description || ""}
             loading={priority ? "eager" : "lazy"}
@@ -146,11 +158,9 @@ function GalleryItem({
             onError={() => setFailed(true)}
             onLoad={(e) => {
               setFailed(false);
-              if (matchSourceAspect) {
-                const el = e.currentTarget;
-                if (el.naturalWidth > 0 && el.naturalHeight > 0) {
-                  setSourceAspect(el.naturalWidth / el.naturalHeight);
-                }
+              const el = e.currentTarget;
+              if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+                setSourceAspect(el.naturalWidth / el.naturalHeight);
               }
             }}
           />

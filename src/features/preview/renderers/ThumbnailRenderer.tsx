@@ -16,6 +16,11 @@ export function ThumbnailRenderer({ node }: { node: ThumbnailComponent }) {
   const src = useResolvedMediaUrl(url);
   const priority = usePreviewMediaPriority(url);
   const [failed, setFailed] = useState(false);
+  // A cached broken image can be `complete` (with zero natural size) before
+  // the error listener attaches — check the element's state on mount too.
+  const readImageState = (el: HTMLImageElement | null) => {
+    if (el && el.complete && el.naturalWidth === 0 && el.currentSrc) setFailed(true);
+  };
   const usesAttachmentId = !node.media.url && typeof node.media.attachment_id === "string";
   const hasAlt = Boolean(node.description);
   return (
@@ -28,6 +33,7 @@ export function ThumbnailRenderer({ node }: { node: ThumbnailComponent }) {
         </div>
       ) : src ? (
         <img
+          ref={readImageState}
           src={src}
           alt={node.description || ""}
           loading={priority ? "eager" : "lazy"}
