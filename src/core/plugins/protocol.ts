@@ -119,6 +119,27 @@ export interface PluginSaveMessage {
   managementToken?: string;
 }
 
+/**
+ * The `save` a **link plugin's** config iframe sends — same message type, but
+ * the binding it hands back is the button's `url` instead of a `custom_id`
+ * (docs/plugins.md: "a configUrl whose save returns a url"). The host
+ * validates the URL against the manifest's own template prefix before
+ * adopting it (`linkManifest.isValidLinkSaveUrl`). `summary` and `guildId`
+ * carry the same meaning as on {@link PluginSaveMessage}; the interactive-only
+ * fields (`options`, `fields`, `values`, `managementToken`) don't apply to a
+ * Link button and are ignored.
+ */
+export interface LinkPluginSaveMessage {
+  type: typeof PLUGIN_MSG.save;
+  nonce: string;
+  /** The finished button URL DWEEB should adopt. */
+  url: string;
+  /** Optional richer label for the attached-plugin chip. */
+  summary?: PluginSummary;
+  /** The guild this URL was configured for, when guild-scoped. */
+  guildId?: string;
+}
+
 export interface PluginCancelMessage {
   type: typeof PLUGIN_MSG.cancel;
   nonce: string;
@@ -182,6 +203,20 @@ export interface PluginInitMessage {
    * create a replacement instance instead of updating the public id in place.
    */
   managementToken?: string;
+  /**
+   * Set to `"link"` when the host is configuring a **link plugin** (a Link
+   * button bound by URL). The iframe's `save` must then carry a `url` instead
+   * of a `customId` — see {@link LinkPluginSaveMessage}. Absent for the
+   * interactive plugins, which predate the field.
+   */
+  kind?: "link";
+  /**
+   * Link plugins only: the button's current URL, when it already carries a
+   * finished binding (never the raw template of a fresh attach). The iframe
+   * can parse its own instance reference out of it to pre-select the current
+   * configuration — the link analogue of `customId`.
+   */
+  linkUrl?: string;
 }
 
 export interface PluginResponseMessage {
@@ -238,6 +273,17 @@ export function isSaveMessage(v: unknown, nonce: string): v is PluginSaveMessage
     v.nonce === nonce &&
     typeof v.customId === "string" &&
     v.customId.length > 0
+  );
+}
+
+/** A link plugin's save: expected nonce and a non-empty `url` (the binding). */
+export function isLinkSaveMessage(v: unknown, nonce: string): v is LinkPluginSaveMessage {
+  return (
+    isObject(v) &&
+    v.type === PLUGIN_MSG.save &&
+    v.nonce === nonce &&
+    typeof v.url === "string" &&
+    v.url.length > 0
   );
 }
 

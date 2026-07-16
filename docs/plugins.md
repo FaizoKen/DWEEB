@@ -145,6 +145,9 @@ can't have:
 | `url`       | yes      | The URL template written onto the button — see below. |
 | `setupUrl`  | no       | The service's admin page where a server manager registers their server (invites your bot, configures the feature). Surfaced as a **Set up** action on the chip and a *Needs setup* tag in the library. |
 | `setupHint` | no       | One line shown under the chip instead of the stock "set it up first" note. |
+| `statusUrl` | no       | Public, CORS-open probe URL template (may carry `{server_id}`) the editor fetches to turn the chip's static warning into a live **Ready / Needs setup** state. See [Setup status probe](#setup-status-probe-statusurl). |
+| `configUrl` | no       | `https` config-iframe URL, the link analogue of the interactive `configUrl` — its `save` returns a **`url`** instead of a `customId`. Adds a **Configure** action to the chip. See [Config iframes for link plugins](#config-iframes-for-link-plugins-configurl). |
+| `resources` | no       | Editor data the config iframe may request. For link plugins the allow-list is capped at content-free context — currently just `guild`; credentials and message content can never be declared. |
 
 ### The `url` template is the whole binding
 
@@ -220,12 +223,75 @@ using the guild id the URL carries:
    repeats the same warning next to the attached chip because it has no way to
    check your per-server state.
 
-A link plugin has no config iframe. Per-instance values are covered by
-fill-me slots (above) for per-button input, or a redirect on your own host
-for per-server config; if a service ever needs richer authoring than that,
-the natural extension is an optional `configUrl` whose `save` returns a `url`
-instead of a `customId` — additive to this schema, not designed until
-something needs it.
+Fill-me slots are the zero-backend floor. A service that can do better has
+two additive upgrades: a `statusUrl` probe (below) so the editor can *see*
+per-server state, and a `configUrl` iframe (below) whose `save` returns the
+finished `url` so the admin never hand-pastes at all.
+
+### Setup status probe (`statusUrl`)
+
+DWEEB has no way to check an external service's per-server state, so the
+attached chip historically showed a *permanent* "set it up first" warning.
+A manifest `statusUrl` closes that gap. It's a URL template (same rules as
+`url`; in practice it carries `{server_id}`) pointing at a **public,
+credential-less** endpoint on your service:
+
+```json
+"statusUrl": "https://plugins.example.com/role-menu/dweeb/status?guild={server_id}"
+```
+
+When the editor has a connected server, it substitutes the guild id and
+fetches the URL (no cookies, 8s timeout). Your service answers:
+
+```json
+{ "configured": true }
+```
+
+with `Access-Control-Allow-Origin: *` and a short `Cache-Control`
+(`public, max-age=60` is right). `configured: true` renders the chip line
+**"Set up for <server> — the link is live"** and hides the stock warning;
+`false` renders a **"Not set up … yet"** caution. Anything else — non-200,
+bad JSON, a non-boolean `configured`, the service being down, or CORS
+refused (as inside a Discord Activity, whose CSP blocks external hosts) —
+degrades to exactly the pre-probe chip. The probe is strictly best-effort
+display; it never gates editing or sending.
+
+Because the endpoint is public, return only what any visitor could already
+observe by loading your verify page with that guild id — a boolean (and, if
+you like, a count), never configuration contents. Validate the `guild`
+query as a snowflake. Extra response fields are ignored today; the host only
+reads `configured`.
+
+### Config iframes for link plugins (`configUrl`)
+
+A value the admin must supply (which form? which page?) doesn't have to be
+a hand-pasted fill-me slot: a link plugin may declare a `configUrl` and get
+the same sandboxed config iframe as the interactive plugins — the chip
+gains **Configure**, and picking the plugin in the library opens the iframe
+immediately. The page speaks the exact same `dweeb:plugin:*` protocol
+(§3), with three differences:
+
+- `init` carries `kind: "link"`, and — when the button already holds a
+  finished binding — `linkUrl` (the current URL) instead of `customId`, so
+  the iframe can pre-select the current configuration.
+- `save` returns a **`url`** instead of a `customId`. The host validates it
+  the way it validates a returned custom_id: it must be within Discord's
+  512-char cap, start with **your manifest's own literal template prefix**
+  (a config iframe can refine its binding, never repoint the button at a
+  foreign host), and carry no unfilled non-core `{token}`. `summary` and
+  `guildId` work as in §3; the interactive-only fields (`options`,
+  `fields`, `values`, `managementToken`) don't apply to a Link button.
+- Editor-data requests are capped at content-free context: a link manifest
+  may declare only `guild`. Credentials (`savedWebhook*`) and message
+  content can't be declared and are refused.
+
+One flow the sandbox shapes: the iframe has no first-party cookie context,
+so if your picker needs the admin's identity, run your sign-in through a
+**popup to your own origin** (`allow-popups` is granted) and hand a
+short-lived bearer back to the iframe over `postMessage` — then keep a
+paste-the-link fallback in the page for popup-blocked environments. The
+worked example is RoleLogic's Form-Respondent-Role picker
+(`/dweeb/picker` + `/dweeb/bridge` + `/dweeb/forms` in that service).
 
 ## 2. The `custom_id` is the whole binding
 

@@ -48,6 +48,7 @@
 import { LIMITS } from "@/core/schema/limits";
 import { isAllowedUrl, PLUGIN_MANIFEST_SCHEMA_VERSION } from "./manifest";
 import { CORE_PLACEHOLDER_TOKENS } from "./placeholders";
+import type { PluginResource } from "./resources";
 
 /** Registry `kind` discriminator for link plugins. Absent means "service". */
 export const LINK_PLUGIN_KIND = "link" as const;
@@ -96,7 +97,42 @@ export interface LinkPluginManifest {
   setupUrl?: string;
   /** Optional one-liner shown under the chip instead of the stock setup note. */
   setupHint?: string;
+  /**
+   * Optional per-server setup probe. An `https` URL template (core tokens
+   * only — in practice `{server_id}`) the editor fetches, credential-less,
+   * when a server is connected: a `200 {"configured": true|false}` JSON body
+   * turns the chip's static "set it up first" note into a live
+   * **Ready / Needs setup** state. Anything else (offline service, CORS
+   * refusal, missing field) degrades to today's behavior — the probe is
+   * strictly best-effort and never blocks anything. See `linkStatus.ts`.
+   */
+  statusUrl?: string;
+  /**
+   * Optional configuration iframe — the link analogue of the interactive
+   * manifest's `configUrl` (docs/plugins.md long reserved this extension:
+   * "a configUrl whose save returns a url instead of a customId"). When
+   * present, the attached chip offers **Configure**, and the page speaks the
+   * same `dweeb:plugin:*` protocol except that its `save` carries a `url`,
+   * which must start with this manifest's own literal template prefix (see
+   * {@link isValidLinkSaveUrl}). Absent for a plugin whose fill-me-slot
+   * paste flow is enough.
+   */
+  configUrl?: string;
+  /**
+   * Editor data the config iframe may request — same default-deny gate as the
+   * interactive manifest, but restricted to {@link LINK_PLUGIN_RESOURCES}
+   * (content-free context only; a link plugin can never request credentials).
+   */
+  resources?: PluginResource[];
 }
+
+/**
+ * The only resources a link plugin's config iframe may declare. Deliberately
+ * narrower than the interactive allow-list: a link plugin's save is just a
+ * URL, so it gets read-only *context* (which server is connected), never
+ * message content or webhook credentials.
+ */
+export const LINK_PLUGIN_RESOURCES: readonly PluginResource[] = ["guild"];
 
 const MAX_SETUP_HINT = 200;
 
@@ -141,6 +177,8 @@ export function parseLinkManifest(raw: unknown): LinkPluginManifest | null {
   if (!isNonEmptyString(o.id) || !isNonEmptyString(o.name)) return null;
   if (!isValidUrlTemplate(o.url)) return null;
 
+  const linkResources = parseLinkResources(o.resources);
+
   return {
     schemaVersion: PLUGIN_MANIFEST_SCHEMA_VERSION,
     kind: LINK_PLUGIN_KIND,
@@ -155,7 +193,21 @@ export function parseLinkManifest(raw: unknown): LinkPluginManifest | null {
     ...(isNonEmptyString(o.defaultEmoji) ? { defaultEmoji: o.defaultEmoji.slice(0, 32) } : {}),
     ...(isAllowedUrl(o.setupUrl) ? { setupUrl: o.setupUrl } : {}),
     ...(isNonEmptyString(o.setupHint) ? { setupHint: o.setupHint.slice(0, MAX_SETUP_HINT) } : {}),
+    ...(isValidUrlTemplate(o.statusUrl) ? { statusUrl: o.statusUrl } : {}),
+    ...(isAllowedUrl(o.configUrl) ? { configUrl: o.configUrl } : {}),
+    ...(linkResources ? { resources: linkResources } : {}),
   };
+}
+
+/** Parse a link manifest's `resources`, keeping only the link allow-list. */
+function parseLinkResources(value: unknown): PluginResource[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const resources = [
+    ...new Set(
+      value.filter((r): r is PluginResource => LINK_PLUGIN_RESOURCES.includes(r as PluginResource)),
+    ),
+  ];
+  return resources.length ? resources : undefined;
 }
 
 /**
@@ -222,4 +274,27 @@ export function unfilledLinkTokens(url: string): string[] {
     if (!out.includes(token)) out.push(token);
   }
   return out;
+}
+
+/**
+ * Is `url` acceptable as the `save` result of this link plugin's config
+ * iframe? The URL is the whole binding, so the bar mirrors what the interactive
+ * host applies to a returned `custom_id` (length + the plugin's declared
+ * prefix):
+ *
+ *  - bounded by Discord's button-URL cap,
+ *  - starts with **this manifest's own literal template prefix** — a config
+ *    iframe can refine its own binding (fill the form id, point deeper into
+ *    its service) but can never repoint the button at a foreign destination,
+ *  - carries no unfilled non-core `{token}` — a save must be a *finished*
+ *    URL, not another template (core tokens still resolve at send and are
+ *    fine).
+ *
+ * The prefix check subsumes the https-scheme requirement: a valid template's
+ * prefix is already literal-`https` (or localhost in dev).
+ */
+export function isValidLinkSaveUrl(manifest: LinkPluginManifest, url: unknown): url is string {
+  if (typeof url !== "string" || url.length === 0 || url.length > LIMITS.BUTTON_URL) return false;
+  if (!url.startsWith(linkUrlPrefix(manifest.url))) return false;
+  return unfilledLinkTokens(url).length === 0;
 }

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isLinkSaveMessage,
   isRequestMessage,
+  isSaveMessage,
   negotiatePluginApiVersion,
   PLUGIN_MSG,
   sanitizeManagementToken,
@@ -50,5 +52,20 @@ describe("plugin resource request validation", () => {
     expect(negotiatePluginApiVersion(2, 2, 1)).toBeNull();
     expect(negotiatePluginApiVersion(2, 3, 3)).toBeNull();
     expect(negotiatePluginApiVersion(2, 2, undefined)).toBeNull();
+  });
+
+  it("distinguishes a link save (url) from an interactive save (customId)", () => {
+    const nonce = "session-nonce";
+    const linkSave = { type: PLUGIN_MSG.save, nonce, url: "https://service.example/f/abc" };
+    const interactiveSave = { type: PLUGIN_MSG.save, nonce, customId: "example:abc" };
+
+    expect(isLinkSaveMessage(linkSave, nonce)).toBe(true);
+    expect(isSaveMessage(linkSave, nonce)).toBe(false);
+    expect(isSaveMessage(interactiveSave, nonce)).toBe(true);
+    expect(isLinkSaveMessage(interactiveSave, nonce)).toBe(false);
+
+    // Same nonce gate as every inbound message.
+    expect(isLinkSaveMessage(linkSave, "other-nonce")).toBe(false);
+    expect(isLinkSaveMessage({ ...linkSave, url: "" }, nonce)).toBe(false);
   });
 });

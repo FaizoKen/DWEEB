@@ -185,6 +185,20 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `window.opener`.
 - Link-plugin URLs stay freely editable and the binding follows the URL. Keep one uniform
   link-plugin UI; do not reintroduce per-plugin parameter panels.
+- **Link plugins have two optional manifest upgrades** (docs/plugins.md): `statusUrl` — a
+  public CORS-open probe (`{"configured": bool}`) that flips the chip to a live
+  Ready/Needs-setup state (strictly best-effort: every failure renders as the old static
+  hint; it must never gate editing or send); and `configUrl` — a config iframe whose `save`
+  returns a **url** validated against the manifest's own template prefix
+  (`isValidLinkSaveUrl`), with resources capped at `guild` (never credentials/message
+  content). The link host lives in `useLinkPluginConfig.ts`, deliberately separate from the
+  interactive `usePluginConfig.ts` — don't merge them. All RoleLogic entries carry
+  `statusUrl` (server side: `/{plugin}/dweeb/status` in each RoleLogic-Plugins crate);
+  Form-Respondent-Role additionally serves the picker iframe (`/dweeb/picker` + popup
+  `/dweeb/bridge` auth + `/dweeb/forms`). Inside the production Activity these iframes load
+  through the plugin proxy, so the RoleLogic host must be in its server-side allowlist
+  before the picker works there; the probe is CSP-blocked in the Activity and degrades to
+  "unknown" by design.
 - **Discovery marketing**: lead with DWEEB's visual Discord message builder for webhooks,
   embeds, and Components V2. Do not use "without the JSON" copy, and do not present the
   collaborative "Build Together" Activity feature as DWEEB's main functionality. Keep

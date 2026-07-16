@@ -43,7 +43,11 @@ import {
 import { LIMITS } from "@/core/schema/limits";
 import { clearPluginEditToken } from "@/core/plugins/editTokenCache";
 import type { PluginManifest } from "@/core/plugins/manifest";
-import { matchLinkPlugin, type LinkPluginManifest } from "@/core/plugins/linkManifest";
+import {
+  matchLinkPlugin,
+  unfilledLinkTokens,
+  type LinkPluginManifest,
+} from "@/core/plugins/linkManifest";
 import { matchPlugin, pluginsForTarget, targetOf, type PluginTarget } from "@/core/plugins/targets";
 import { isButton } from "@/core/schema/guards";
 import {
@@ -60,9 +64,12 @@ import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
 import { AlertTriangleIcon, ChevronRightIcon, PuzzleIcon } from "@/ui/Icon";
 import { PluginConfigModal } from "@/features/plugins/PluginConfigModal";
+import { LinkPluginConfigModal } from "@/features/plugins/LinkPluginConfigModal";
 import { PluginIcon } from "@/features/plugins/PluginIcon";
 import { PluginLibraryModal } from "@/features/plugins/PluginLibraryModal";
 import type { PluginSaveResult } from "@/features/plugins/usePluginConfig";
+import type { LinkPluginSaveResult } from "@/features/plugins/useLinkPluginConfig";
+import { useLinkPluginStatus } from "@/features/plugins/useLinkPluginStatus";
 import { CustomIdField } from "./CustomIdField";
 import { emojiFromString } from "./EmojiField";
 import styles from "./PluginPanel.module.css";
@@ -208,6 +215,24 @@ interface Configuring {
   presentation?: Presentation;
 }
 
+/** A link plugin's config-iframe session in flight. `presentation` is set for
+ *  a fresh attach only, exactly like the interactive {@link Configuring}. */
+interface ConfiguringLink {
+  manifest: LinkPluginManifest;
+  presentation?: Presentation;
+}
+
+/** The button's URL when it's a *finished* binding worth echoing to the config
+ *  iframe as `init.linkUrl` — not the manifest's raw template, and not a
+ *  half-filled template still carrying a fill-me `{token}`. */
+function finishedLinkUrl(
+  manifest: LinkPluginManifest,
+  url: string | undefined,
+): string | undefined {
+  if (!url || url === manifest.url) return undefined;
+  return unfilledLinkTokens(url).length === 0 ? url : undefined;
+}
+
 export function PluginPanel({ node }: Props) {
   const patch = useMessageStore((s) => s.patchNode);
   const replace = useMessageStore((s) => s.replaceNode);
@@ -217,6 +242,7 @@ export function PluginPanel({ node }: Props) {
   const reload = usePluginRegistry((s) => s.reload);
 
   const [configuring, setConfiguring] = useState<Configuring | null>(null);
+  const [configuringLink, setConfiguringLink] = useState<ConfiguringLink | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   // The raw custom_id is the secondary, hand-wiring path — kept collapsed so the
   // ready-made plugin card stays the focus. Only shown for id-bearing components.
@@ -320,21 +346,47 @@ export function PluginPanel({ node }: Props) {
     writeCustomId(DETACH_DEFAULTS[target]);
   };
 
-  const handleDetachLink = () => patch<LinkButtonComponent>(node._id, { url: DETACHED_URL });
+  const handleDetachLink = () => {
+    if (linkStyle && node.url) clearPluginSummary(node.url);
+    patch<LinkButtonComponent>(node._id, { url: DETACHED_URL });
+  };
 
   // Adopt a link plugin: convert an interactive button to a Link (or just
   // repoint an existing Link button), naming + enabling it on a fresh attach.
+  // A plugin with a config iframe opens it right away — the picked action
+  // should arrive configured, mirroring the interactive attach flow.
   const attachLink = (manifest: LinkPluginManifest) => {
     if (!isBtn) return;
-    const overrides = presentationFields({
+    const presentation: Presentation = {
       label: manifest.name,
       emoji: manifest.defaultEmoji,
-    });
+    };
+    const overrides = presentationFields(presentation);
     if (linkStyle) {
       patch<LinkButtonComponent>(node._id, { url: manifest.url, ...overrides });
     } else {
       replace<LinkButtonComponent>(node._id, toLinkButton(node, manifest.url, overrides));
     }
+    if (manifest.configUrl) setConfiguringLink({ manifest, presentation });
+  };
+
+  // Adopt what a link plugin's config iframe handed back: the URL is the whole
+  // binding (already validated against the manifest prefix by the hook); the
+  // summary/guild ride in the same expendable cache the interactive chips use,
+  // keyed by the URL. A fresh attach also restamps the button's presentation so
+  // a summary label ("Staff Application") wins over the manifest name.
+  const handleLinkSave = (ctx: ConfiguringLink) => (result: LinkPluginSaveResult) => {
+    if (!isBtn) return;
+    if (linkStyle && node.url && node.url !== result.url) clearPluginSummary(node.url);
+    const shown = ctx.presentation
+      ? presentationFields(ctx.presentation, result.summary?.label)
+      : {};
+    patch<LinkButtonComponent>(node._id, { url: result.url, ...shown });
+    if (result.summary || result.guildId) {
+      const summary = result.summary ?? { label: ctx.manifest.name };
+      setPluginSummary(result.url, ctx.manifest.id, summary, result.guildId);
+    }
+    setConfiguringLink(null);
   };
 
   // Open the config iframe for a picked interactive plugin, carrying the
@@ -364,7 +416,16 @@ export function PluginPanel({ node }: Props) {
       />
     );
   } else if (attachedLink) {
-    chooser = <LinkAttachedChip manifest={attachedLink} onDetach={handleDetachLink} />;
+    chooser = (
+      <LinkAttachedChip
+        manifest={attachedLink}
+        url={linkStyle ? node.url : undefined}
+        onConfigure={
+          attachedLink.configUrl ? () => setConfiguringLink({ manifest: attachedLink }) : undefined
+        }
+        onDetach={handleDetachLink}
+      />
+    );
   } else if (status === "loading") {
     chooser = <p className={styles.muted}>Loading plugins…</p>;
   } else if (status === "error") {
@@ -469,6 +530,16 @@ export function PluginPanel({ node }: Props) {
           onClose={() => setConfiguring(null)}
         />
       ) : null}
+
+      {configuringLink && isBtn ? (
+        <LinkPluginConfigModal
+          key={`link:${configuringLink.manifest.id}`}
+          manifest={configuringLink.manifest}
+          linkUrl={linkStyle ? finishedLinkUrl(configuringLink.manifest, node.url) : undefined}
+          onSave={handleLinkSave(configuringLink)}
+          onClose={() => setConfiguringLink(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -550,37 +621,86 @@ function AttachedChip({
   );
 }
 
-/** The attached-plugin chip for a Link button — a link plugin has no config
- *  iframe, so its per-server half lives on the external service, reached via
- *  "Set up". Mirrors the interactive {@link AttachedChip} visually. */
+/** The attached-plugin chip for a Link button. A link plugin's per-server half
+ *  lives on the external service, reached via "Set up" — and, when the manifest
+ *  declares a `statusUrl`, probed live so the chip shows a real
+ *  **Ready / Needs setup** state for the connected server instead of a
+ *  permanent warning. A manifest `configUrl` additionally offers **Configure**
+ *  (the service's own picker iframe). Mirrors the interactive
+ *  {@link AttachedChip} visually. */
 function LinkAttachedChip({
   manifest,
+  url,
+  onConfigure,
   onDetach,
 }: {
   manifest: LinkPluginManifest;
+  /** The button's current URL — keys the expendable per-binding summary. */
+  url: string | undefined;
+  /** Present when the manifest declares a config iframe. */
+  onConfigure?: () => void;
   onDetach: () => void;
 }) {
   const by = manifest.publisher ?? manifest.name;
   // Captured as locals so the click handlers close over a definite string (the
   // guards below already narrow them, but TS won't carry that into a callback).
   const { setupUrl, homepage } = manifest;
+
+  // Per-binding summary a config iframe handed back on save (keyed by the URL —
+  // the binding — exactly as interactive chips key by custom_id). Expendable:
+  // a miss falls back to the manifest's own name/description.
+  const cached = getPluginSummary(url);
+  const label = cached?.summary.label ?? manifest.name;
+  const detail = cached?.summary.description ?? manifest.description;
+
+  // Live per-server setup state, resolved against the connected guild.
+  // "unknown" (no probe, no connected server, probe failed) renders exactly
+  // the pre-probe chip. See useLinkPluginStatus.
+  const setupStatus = useLinkPluginStatus(manifest);
+  const connectedGuildId = useGuildStore((s) => s.guildId);
+  const authGuilds = useAuthStore((s) => s.guilds);
+  const connectedName =
+    authGuilds.find((g) => g.id === connectedGuildId)?.name ?? "the connected server";
+
   return (
     <>
       <div className={styles.chip}>
-        <PluginIcon manifest={manifest} />
+        <PluginIcon manifest={manifest} summaryIcon={cached?.summary.icon} />
         <div className={styles.chipText}>
-          <span className={styles.chipName}>{manifest.name}</span>
-          {manifest.description ? (
-            <span className={styles.chipDesc}>{manifest.description}</span>
+          <span className={styles.chipName}>{label}</span>
+          {detail ? <span className={styles.chipDesc}>{detail}</span> : null}
+          {setupStatus !== "unknown" ? (
+            <span
+              className={cn(
+                styles.chipTarget,
+                setupStatus === "needs-setup" && styles.chipTargetWarn,
+              )}
+            >
+              {setupStatus === "needs-setup" ? (
+                <AlertTriangleIcon size={12} className={styles.chipTargetIcon} aria-hidden />
+              ) : null}
+              {setupStatus === "ready"
+                ? `Set up for ${connectedName} — the link is live`
+                : `Not set up for ${connectedName} yet — the link won't do anything`}
+            </span>
           ) : null}
           <span className={styles.chipMeta}>via {by} — external link service</span>
         </div>
         <div className={styles.chipActions}>
+          {onConfigure ? (
+            <Button size="sm" variant="secondary" onClick={onConfigure}>
+              Configure
+            </Button>
+          ) : null}
           {setupUrl ? (
             // `openExternalUrl`, not a raw `window.open`: inside the Activity's
             // sandboxed iframe a `window.open` is silently blocked, so the link
             // has to go through the host SDK (this panel renders on both surfaces).
-            <Button size="sm" variant="secondary" onClick={() => void openExternalUrl(setupUrl)}>
+            <Button
+              size="sm"
+              variant={onConfigure ? "ghost" : "secondary"}
+              onClick={() => void openExternalUrl(setupUrl)}
+            >
               Set up
             </Button>
           ) : null}
@@ -589,10 +709,9 @@ function LinkAttachedChip({
           </Button>
         </div>
       </div>
-      {/* DWEEB can't verify the external service's per-server state, so the one
-          thing that can go quietly wrong — posting the button before the server
-          is registered — is called out persistently, not just in the library. */}
-      {setupUrl ? (
+      {/* When the probe answered "ready" the stock warning would cry wolf, so it
+          only shows while the per-server state is unverified or needs work. */}
+      {setupUrl && setupStatus !== "ready" ? (
         <p className={styles.muted}>
           {manifest.setupHint ??
             `The link only works once your server is set up with ${by} — “Set up” takes you there.`}{" "}
