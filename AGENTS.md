@@ -65,6 +65,21 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   wired). A link's channel segment that isn't a known channel is still treated as a thread (forum/media
   post); a link into a _different server_ is refused with a pointer to "Open on web". Only the channel
   is ever offered — never the server.
+- **Preview fidelity is measured, not styled.** The `--discord-*` tokens in `tokens.css` and the
+  preview renderer CSS mirror values **measured off the live Discord web client** (dark theme,
+  2026 visual refresh: chat bg `#121214`, containers `#242429` + `rgba(148,148,156,.12)` border,
+  translucent blurple code fills, link `#4d96ee`, buttons 32px/8px-radius with translucent
+  secondary). Don't "improve" them by eye — re-measure. Workflow (2026-07-17 audit): drive the
+  editor via `import("/src/core/state/messageStore.ts")` + `attachEditorFields` on a Vite dev tab,
+  post the same JSON to a test webhook with `?with_components=true`, then read Discord's rendered
+  DOM/`getComputedStyle` (convert its `oklab()` colors via a canvas) rather than eyeballing
+  screenshots. Discord-verified markdown quirks live in
+  `src/features/preview/markdown/parse.test.ts` — `*` needs a non-space after the opener while
+  `_` needs word boundaries, ` `` ` spans, autolinks drop trailing `.,:;"')]`, consecutive
+  ordered items merge into a preceding bullet list, inline styles cross newlines, CV2 text
+  displays never render jumbo emoji (unicode emoji are 1.375em, wrapped by the renderer). Known
+  accepted gaps: no code-block syntax highlighting, native emoji glyphs instead of Twemoji
+  artwork (Activity CSP blocks third-party CDNs), `gg sans` falls back to Noto Sans.
 - **Safe-area overlays**: portaled/fixed overlays must use the `--app-sait`/`--app-saib` and
   `--app-sail`/`--app-sair` tokens from `tokens.css`, never raw
   `env(safe-area-inset-*)`; the floor is stamped via `html[data-activity-platform]`.

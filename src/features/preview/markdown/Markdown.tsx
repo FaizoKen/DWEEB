@@ -113,7 +113,9 @@ function renderInline(nodes: InlineNode[]): ReactNode {
 
 /** Inline text spoiler. Click/tap to reveal, click/tap again to re-hide — the
  * same on desktop and touch (no hover). Inline text isn't a selectable node, so
- * unlike the media spoilers its reveal is a local toggle. */
+ * unlike the media spoilers its reveal is a local toggle. The inner wrapper is
+ * what actually hides (opacity), so links/mentions/emoji inside can't leak
+ * their own colors through the obscuring box — Discord hides everything. */
 function TextSpoiler({ children }: { children: ReactNode }) {
   const [revealed, setRevealed] = useState(false);
   return (
@@ -121,7 +123,35 @@ function TextSpoiler({ children }: { children: ReactNode }) {
       className={cn(styles.spoiler, revealed && styles.spoilerRevealed)}
       onClick={() => setRevealed((r) => !r)}
     >
-      {children}
+      <span className={styles.spoilerContent}>{children}</span>
+    </span>
+  );
+}
+
+/* Unicode emoji get Discord's 1.375em treatment (a 22px glyph on 16px text).
+ * Match a pictograph with emoji presentation — plus its skin-tone/VS16
+ * modifiers and any ZWJ continuation — or a two-letter flag. Symbols without
+ * emoji presentation (©, ™) stay plain text, mirroring Discord. */
+const EMOJI_UNIT =
+  "(?:\\p{Emoji_Presentation}|\\p{Extended_Pictographic}\\uFE0F)(?:\\p{Emoji_Modifier}|\\uFE0F)*";
+const EMOJI_SEQ = `\\p{Regional_Indicator}{2}|${EMOJI_UNIT}(?:\\u200D${EMOJI_UNIT})*`;
+const EMOJI_SPLIT = new RegExp(`(${EMOJI_SEQ})`, "gu");
+const EMOJI_ONLY = new RegExp(`^(?:${EMOJI_SEQ})$`, "u");
+
+function renderTextWithEmoji(value: string, key: number): ReactNode {
+  const parts = value.split(EMOJI_SPLIT);
+  if (parts.length === 1) return <span key={key}>{value}</span>;
+  return (
+    <span key={key}>
+      {parts.map((part, i) =>
+        part && EMOJI_ONLY.test(part) ? (
+          <span key={i} className={styles.unicodeEmoji}>
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )}
     </span>
   );
 }
@@ -129,7 +159,7 @@ function TextSpoiler({ children }: { children: ReactNode }) {
 function renderInlineNode(node: InlineNode, key: number): ReactNode {
   switch (node.kind) {
     case "text":
-      return <span key={key}>{node.value}</span>;
+      return renderTextWithEmoji(node.value, key);
     case "break":
       return <br key={key} />;
     case "bold":

@@ -1,14 +1,27 @@
 .container {
   background: var(--discord-bg-secondary);
-  border-left: 4px solid transparent;
+  border: 1px solid var(--discord-border-subtle);
   border-radius: var(--discord-radius);
   overflow: hidden;
-  max-width: 560px;
-  position: relative; /* anchor the spoiler pill overlay */
+  max-width: 600px;
+  position: relative; /* anchor the accent stripe + spoiler pill overlay */
+}
+
+/* Discord draws the accent as a 4px stripe *overlaying* the padding (an
+   absolute ::before), so accented and plain containers keep the same 16px
+   content inset. `--container-accent` is set inline by the renderer. */
+.accent::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--container-accent);
 }
 
 .body {
-  padding: 12px 16px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -16,7 +29,7 @@
 
 @media (max-width: 480px) {
   .body {
-    padding: 10px 12px;
+    padding: 12px;
     gap: 6px;
   }
 }

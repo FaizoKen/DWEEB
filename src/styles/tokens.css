@@ -110,28 +110,46 @@
   --app-sair: var(--discord-safe-area-inset-right, env(safe-area-inset-right, 0px));
 
   /* ── Discord preview surface ──────────────────────────────────────── */
-  --discord-bg-primary: #313338;
-  --discord-bg-secondary: #2b2d31;
-  --discord-bg-tertiary: #1e1f22;
-  --discord-bg-mention: rgba(88, 101, 242, 0.3);
+  /* Values measured from the live Discord web client's dark theme (2026
+     visual refresh) via computed styles — see AGENTS.md "Preview fidelity".
+     Keep these in sync with Discord, not with what looks nice in DWEEB. */
+  --discord-bg-primary: #121214;
+  --discord-bg-secondary: #242429;
+  --discord-bg-tertiary: #1a1a1e;
+  --discord-bg-mention: rgba(88, 100, 242, 0.24);
   --discord-bg-mention-soft: rgba(88, 101, 242, 0.15);
-  --discord-bg-code: #1e1f22;
-  --discord-bg-quote: #4e5058;
+  --discord-bg-code: rgba(89, 102, 242, 0.08);
+  --discord-bg-quote: #474851;
+  --discord-bg-spoiler-hidden: #666770;
+  --discord-bg-spoiler-revealed: rgba(148, 148, 156, 0.12);
+  --discord-bg-select: rgba(0, 0, 0, 0.12);
 
-  --discord-text-normal: #dbdee1;
-  --discord-text-muted: #949ba4;
-  --discord-text-link: #00a8fc;
+  --discord-border-subtle: rgba(148, 148, 156, 0.12);
+  --discord-border-code: rgba(150, 150, 160, 0.2);
+  --discord-border-input: rgba(150, 150, 160, 0.2);
+  --discord-divider: rgba(151, 151, 159, 0.2);
+
+  --discord-text-normal: #efeff1;
+  /* Headings, usernames, secondary-button labels — brighter than body text. */
+  --discord-text-strong: #fbfbfb;
+  --discord-text-muted: #abacb2;
+  /* Header timestamp / attachment metadata — dimmer than regular muted. */
+  --discord-text-faint: #81828a;
+  --discord-text-link: #4d96ee;
+  --discord-text-mention: #a9bbff;
   --discord-text-positive: #23a559;
 
   --discord-accent: #5865f2;
   --discord-button-primary: #5865f2;
-  --discord-button-primary-hover: #4752c4;
-  --discord-button-secondary: #4e5058;
-  --discord-button-secondary-hover: #6d6f78;
-  --discord-button-success: #248046;
-  --discord-button-success-hover: #1a6334;
-  --discord-button-danger: #da373c;
-  --discord-button-danger-hover: #a12828;
+  --discord-button-primary-hover: #4654c9;
+  --discord-button-secondary: rgba(151, 151, 159, 0.12);
+  --discord-button-secondary-hover: rgba(151, 151, 159, 0.2);
+  --discord-button-success: #008545;
+  --discord-button-success-hover: #006d39;
+  --discord-button-danger: #d22d39;
+  --discord-button-danger-hover: #ad2530;
+  --discord-button-border: rgba(255, 255, 255, 0.08);
+  --discord-button-border-secondary: rgba(153, 153, 153, 0.04);
 
   --discord-radius-sm: 4px;
   --discord-radius: 8px;

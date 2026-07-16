@@ -51,20 +51,26 @@ export function formatTimestamp(unix: number, style: string): string {
 }
 
 /**
- * "in 3 days" / "2 hours ago" — picks the coarsest sensible unit and leaves the
- * wording and pluralization to `Intl.RelativeTimeFormat`. A positive delta is
- * the future ("in …"), a negative one the past ("… ago").
+ * "in 3 days" / "2 hours ago" — wording and pluralization come from
+ * `Intl.RelativeTimeFormat`, but the unit cutoffs mirror Discord's
+ * moment-style humanize thresholds: 45s→minute, 45min→hour, 22h→day
+ * (so 23h renders "in 1 day", like Discord's "in a day"), 26d→month,
+ * 320d→year. A positive delta is the future, a negative one the past.
  */
 function formatRelative(unix: number): string {
   const deltaSec = unix - Date.now() / 1000;
   const abs = Math.abs(deltaSec);
+  const sign = deltaSec < 0 ? -1 : 1;
   const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "always" });
   const at = (value: number, unit: Intl.RelativeTimeFormatUnit) =>
-    rtf.format(Math.round(value), unit);
-  if (abs < 60) return at(deltaSec, "second");
-  if (abs < 3600) return at(deltaSec / 60, "minute");
-  if (abs < 86_400) return at(deltaSec / 3600, "hour");
-  if (abs < 2_592_000) return at(deltaSec / 86_400, "day");
-  if (abs < 31_536_000) return at(deltaSec / 2_592_000, "month");
-  return at(deltaSec / 31_536_000, "year");
+    rtf.format(sign * Math.max(1, Math.round(value)), unit);
+  const minutes = abs / 60;
+  const hours = abs / 3600;
+  const days = abs / 86_400;
+  if (abs < 45) return at(abs, "second");
+  if (minutes < 45) return at(minutes, "minute");
+  if (hours < 22) return at(hours, "hour");
+  if (days < 26) return at(days, "day");
+  if (days < 320) return at(days / 30, "month");
+  return at(days / 365, "year");
 }

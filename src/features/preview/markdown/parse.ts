@@ -269,14 +269,22 @@ export function parseInline(input: string): InlineNode[] {
       continue;
     }
 
-    // Code span — earliest because anything inside is literal
+    // Code span — earliest because anything inside is literal. Discord also
+    // supports double-backtick spans (`` ` `` inside), so a run of two opens a
+    // span closed by the next double run, letting single backticks stay literal
+    // within it.
     if (ch === "`") {
-      const end = input.indexOf("`", i + 1);
-      if (end > i) {
-        flush();
-        out.push({ kind: "code", value: input.slice(i + 1, end) });
-        i = end + 1;
-        continue;
+      const run = input[i + 1] === "`" ? 2 : 1;
+      const open = "`".repeat(run);
+      const end = input.indexOf(open, i + run);
+      if (end > i + run - 1) {
+        const value = input.slice(i + run, end);
+        if (value.length > 0) {
+          flush();
+          out.push({ kind: "code", value });
+          i = end + run;
+          continue;
+        }
       }
     }
 
@@ -353,14 +361,36 @@ export function parseInline(input: string): InlineNode[] {
       }
     }
 
-    // Italic single `*` or `_`
-    if ((ch === "*" || ch === "_") && input[i + 1] !== ch) {
-      const close = input.indexOf(ch, i + 1);
-      if (close > i + 1) {
-        flush();
-        out.push({ kind: "italic", children: parseInline(input.slice(i + 1, close)) });
-        i = close + 1;
-        continue;
+    // Italic single `*`. Discord requires the opening `*` to be followed by a
+    // non-space character (so `2 * 3 * 4` stays literal math), but the closing
+    // `*` may be preceded by a space.
+    if (ch === "*" && input[i + 1] !== ch) {
+      const next = input[i + 1];
+      if (next !== undefined && !/\s/.test(next)) {
+        const close = input.indexOf(ch, i + 1);
+        if (close > i + 1) {
+          flush();
+          out.push({ kind: "italic", children: parseInline(input.slice(i + 1, close)) });
+          i = close + 1;
+          continue;
+        }
+      }
+    }
+
+    // Italic single `_`. Discord anchors underscores to word boundaries
+    // (`\b_…_\b`), so intra-word underscores — `snake_case_word` — stay
+    // literal, while `_ padded _` still italicizes.
+    if (ch === "_" && input[i + 1] !== ch) {
+      const prev = i > 0 ? input[i - 1]! : "";
+      if (!/[0-9A-Za-z_]/.test(prev)) {
+        const close = input.indexOf(ch, i + 1);
+        const after = close >= 0 ? input[close + 1] : undefined;
+        if (close > i + 1 && (after === undefined || !/[0-9A-Za-z_]/.test(after))) {
+          flush();
+          out.push({ kind: "italic", children: parseInline(input.slice(i + 1, close)) });
+          i = close + 1;
+          continue;
+        }
       }
     }
 
@@ -413,9 +443,11 @@ export function parseInline(input: string): InlineNode[] {
       }
     }
 
-    // Auto-link http(s)://
+    // Auto-link http(s)://. Discord's URL rule allows any non-space chars but
+    // the *final* character may not be closing punctuation (`.,:;"')]`), so
+    // `(https://x/wiki)` and `https://x/a, next` both exclude the trailer.
     if ((ch === "h" || ch === "H") && /^https?:\/\//i.test(input.slice(i))) {
-      const m = /^https?:\/\/[^\s<>()]+/i.exec(input.slice(i));
+      const m = /^https?:\/\/[^\s<]+[^<.,:;"')\]\s]/i.exec(input.slice(i));
       if (m) {
         flush();
         out.push({

@@ -1,10 +1,13 @@
+/* Measured off Discord's refresh theme: 32px tall, 60px min width, 8px
+   radius, 14px/500 label on an 18px line, 1px border, 3px/11px padding. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 4px 14px;
+  gap: 4px;
+  padding: 3px 11px;
   min-height: 32px;
+  min-width: 60px;
   max-width: 100%;
   border-radius: var(--discord-radius);
   font-size: 14px;
@@ -19,8 +22,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border: none;
-  line-height: 1;
+  border: 1px solid var(--discord-button-border);
+  line-height: 18px;
 }
 
 .btn:hover {
@@ -36,6 +39,8 @@
 
 .secondary {
   background: var(--discord-button-secondary);
+  border-color: var(--discord-button-border-secondary);
+  color: var(--discord-text-strong);
 }
 .secondary:hover {
   background: var(--discord-button-secondary-hover);
@@ -57,6 +62,8 @@
 
 .link {
   background: var(--discord-button-secondary);
+  border-color: var(--discord-button-border-secondary);
+  color: var(--discord-text-strong);
 }
 .link:hover {
   background: var(--discord-button-secondary-hover);
@@ -70,20 +77,25 @@
 .disabled {
   opacity: 0.5;
   pointer-events: none;
+  cursor: not-allowed;
 }
 
+/* Discord sizes button emoji at 1.375em of the 14px label (19.25px). */
 .emoji {
-  font-size: 16px;
+  font-size: 1.375em;
   line-height: 1;
 }
 
 .emojiImg {
-  width: 18px;
-  height: 18px;
+  width: 1.375em;
+  height: 1.375em;
   object-fit: contain;
   flex-shrink: 0;
 }
 
+/* Link-button external arrow: 16px glyph, 8px from the label (4px comes
+   from the flex gap). */
 .external {
+  margin-left: 4px;
   opacity: 0.8;
 }

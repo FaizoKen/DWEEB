@@ -1,17 +1,10 @@
 .sectionThumbnail,
 .sectionButton {
   display: grid;
+  grid-template-columns: 1fr auto;
   gap: 12px;
+  /* Discord top-aligns every accessory — buttons included. */
   align-items: start;
-}
-
-.sectionThumbnail {
-  grid-template-columns: 1fr auto;
-}
-
-.sectionButton {
-  grid-template-columns: 1fr auto;
-  align-items: center;
 }
 
 .text {

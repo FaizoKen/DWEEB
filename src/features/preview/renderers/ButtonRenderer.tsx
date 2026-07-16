@@ -53,8 +53,8 @@ export function ButtonRenderer({ node }: { node: ButtonComponent }) {
           className={styles.external}
           aria-hidden="true"
           viewBox="0 0 24 24"
-          width="14"
-          height="14"
+          width="16"
+          height="16"
         >
           <path
             d="M14 4h6v6M20 4l-9 9M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"

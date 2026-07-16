@@ -44,7 +44,7 @@ export function FileRenderer({ node }: { node: FileComponent }) {
     <div className={cn(styles.file, obscured && styles.spoiler)}>
       <div className={styles.card}>
         <div className={styles.icon} aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+          <svg viewBox="0 0 24 24" width="30" height="38" fill="none">
             <path
               d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9l-6-6z"
               stroke="currentColor"

@@ -1,7 +1,8 @@
 .thumb {
-  width: 86px;
-  height: 86px;
-  border-radius: var(--discord-radius-sm);
+  /* Discord renders section thumbnails at 85×85 with an 8px radius. */
+  width: 85px;
+  height: 85px;
+  border-radius: var(--discord-radius);
   overflow: hidden;
   flex-shrink: 0;
   background: var(--discord-bg-tertiary);
@@ -18,17 +19,17 @@
 }
 
 .altBadge {
+  /* Discord's reduced-size ALT chip: 18px tall, 12px/600, 4px radius. */
   position: absolute;
   bottom: 4px;
   left: 4px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: rgba(0, 0, 0, 0.7);
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
   color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  line-height: 1.2;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
   pointer-events: none;
   transition: opacity 200ms ease;
 }

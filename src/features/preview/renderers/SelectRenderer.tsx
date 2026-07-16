@@ -33,16 +33,12 @@ export function SelectRenderer({ node }: Props) {
         {selections.length === 0 ? (
           <span className={styles.placeholder}>{placeholder}</span>
         ) : (
-          <div className={styles.pills}>
-            {selections.map((s, i) => (
-              <span key={i} className={styles.pill}>
-                {s}
-              </span>
-            ))}
-          </div>
+          // Discord shows pre-selected values as plain label text in the
+          // closed control (no pills).
+          <span className={styles.values}>{selections.join(", ")}</span>
         )}
       </div>
-      <svg className={styles.chevron} aria-hidden="true" viewBox="0 0 24 24" width="20" height="20">
+      <svg className={styles.chevron} aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
         <path
           d="M6 9l6 6 6-6"
           fill="none"

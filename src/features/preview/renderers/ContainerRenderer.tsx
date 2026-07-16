@@ -6,6 +6,7 @@
  * that exact treatment for fidelity.
  */
 
+import type { CSSProperties } from "react";
 import type { ContainerComponent } from "@/core/schema/types";
 import { useMessageStore } from "@/core/state/messageStore";
 import { subtreeContainsId } from "@/core/schema/traversal";
@@ -30,8 +31,8 @@ export function ContainerRenderer({ node }: { node: ContainerComponent }) {
     node.spoiler === true && !(selectedId != null && subtreeContainsId(node, selectedId));
   return (
     <div
-      className={cn(styles.container, obscured && styles.spoilered)}
-      style={accent ? { borderLeftColor: accent } : undefined}
+      className={cn(styles.container, accent && styles.accent, obscured && styles.spoilered)}
+      style={accent ? ({ "--container-accent": accent } as CSSProperties) : undefined}
     >
       {/* The blur lives on the content (not the container) so the SPOILER pill —
           a sibling — stays crisp, mirroring Discord's obscured container. */}

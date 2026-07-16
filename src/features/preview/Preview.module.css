@@ -143,9 +143,9 @@
  * subtle hover underline + focus ring so the affordance is discoverable
  * without distracting from the preview. */
 .name {
-  color: #fff;
-  font-weight: 600;
-  font-size: 15px;
+  color: var(--discord-text-strong);
+  font-weight: 500;
+  font-size: 16px;
   background: none;
   border: none;
   padding: 0;
@@ -174,25 +174,26 @@
   color: #fff;
   border-radius: 4px;
   font-size: 10px;
-  font-weight: 600;
-  padding: 1px 4px;
-  letter-spacing: 0.04em;
+  font-weight: 400;
+  padding: 0 4px;
+  line-height: 15px;
 }
 
 .time {
-  color: var(--discord-text-muted);
+  color: var(--discord-text-faint);
   font-size: 12px;
 }
 
 .content {
-  /* Match Discord's message body exactly: 16px text on a 22px (1.375) line. */
+  /* Match Discord's message body exactly: 16px text on a 22px (1.375) line,
+     capped at Discord's 600px Components V2 column. */
   font-size: 16px;
   line-height: 1.375;
   color: var(--discord-text-normal);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 560px;
+  max-width: 600px;
   min-width: 0;
 }
 

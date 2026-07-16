@@ -3,14 +3,19 @@
   gap: 4px;
   border-radius: var(--discord-radius);
   overflow: hidden;
-  max-width: 520px;
+  max-width: 600px;
 }
 
 .gallery[data-count="1"] {
   grid-template-columns: 1fr;
 }
+/* Discord's 2-image layout: two equal columns in a 600×280 box. */
 .gallery[data-count="2"] {
   grid-template-columns: 1fr 1fr;
+  aspect-ratio: 15 / 7;
+}
+.gallery[data-count="2"] .item {
+  aspect-ratio: auto;
 }
 /* Discord's 3-image layout: a 2fr left hero spanning two rows beside two stacked
    1fr cells, with an overall ~12/7 box (left ≈ 2× the right column's width). */
@@ -90,7 +95,7 @@
 .gallery[data-count="1"] .item video {
   width: auto;
   height: auto;
-  max-width: min(100%, 550px);
+  max-width: min(100%, 600px);
   max-height: 350px;
   object-fit: contain;
 }
@@ -130,17 +135,17 @@
 }
 
 .altBadge {
+  /* Discord's reduced-size ALT chip: 18px tall, 12px/600, 4px radius. */
   position: absolute;
   bottom: 8px;
   left: 8px;
-  padding: 2px 6px;
+  padding: 0 4px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.6);
   color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  line-height: 1.2;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
   pointer-events: none;
   transition: opacity 200ms ease;
 }
@@ -151,11 +156,11 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  padding: 6px 14px;
+  padding: 8px 12px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.04em;
   line-height: 1.2;

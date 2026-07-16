@@ -1,19 +1,12 @@
+/* Discord's CV2 separator is a zero-height element: the component stack's own
+   8px gap provides the "small" spacing, `large` adds 8px margins, and the
+   divider variant draws a hairline via border-bottom. */
 .separator {
-  height: 8px;
+  height: 0;
 }
 .large {
-  height: 20px;
+  margin: 8px 0;
 }
 .divider {
-  position: relative;
-}
-.divider::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 1px;
-  background: var(--discord-bg-quote);
-  opacity: 0.7;
+  border-bottom: 1px solid var(--discord-divider);
 }
