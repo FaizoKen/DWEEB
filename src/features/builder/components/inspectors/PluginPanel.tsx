@@ -368,7 +368,9 @@ export function PluginPanel({ node }: Props) {
     } else {
       replace<LinkButtonComponent>(node._id, toLinkButton(node, manifest.url, overrides));
     }
-    if (manifest.configUrl) setConfiguringLink({ manifest, presentation });
+    // Web only — see the chip's onConfigure note; in the Activity the fresh
+    // attach lands with the template URL and the paste flow takes over.
+    if (manifest.configUrl && !isActivityMode()) setConfiguringLink({ manifest, presentation });
   };
 
   // Adopt what a link plugin's config iframe handed back: the URL is the whole
@@ -422,7 +424,14 @@ export function PluginPanel({ node }: Props) {
         manifest={attachedLink}
         url={linkStyle ? node.url : undefined}
         onConfigure={
-          attachedLink.configUrl ? () => setConfiguringLink({ manifest: attachedLink }) : undefined
+          // A link plugin's config iframe is a web-editor feature: inside the
+          // Activity the sandbox blocks both its popup sign-in and its
+          // cross-origin calls (and the plugin proxy rightly refuses foreign
+          // hosts), so offering the button would open a dead end. The chip's
+          // Set up action and the paste-the-URL flow still work everywhere.
+          attachedLink.configUrl && !isActivityMode()
+            ? () => setConfiguringLink({ manifest: attachedLink })
+            : undefined
         }
         onDetach={handleDetachLink}
       />
@@ -733,6 +742,11 @@ function LinkAttachedChip({
         <p className={styles.muted}>
           {manifest.setupHint ??
             `The link only works once your server is set up with ${by} — “Set up” takes you there.`}{" "}
+          {/* The config iframe is web-only (see onConfigure in PluginPanel);
+              point Activity users at the editor that has it. */}
+          {manifest.configUrl && isActivityMode()
+            ? "The in-editor picker is available on the web app — “Open on web” carries this draft over. "
+            : null}
           {homepage ? (
             <a
               className={styles.link}

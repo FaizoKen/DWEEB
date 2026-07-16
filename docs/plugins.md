@@ -302,6 +302,16 @@ paste-the-link fallback in the page for popup-blocked environments. The
 worked example is RoleLogic's Form-Respondent-Role picker
 (`/dweeb/picker` + `/dweeb/bridge` + `/dweeb/forms` in that service).
 
+Link config iframes are a **web-editor feature**: inside the Discord
+Activity the sandbox blocks both the popup sign-in and the iframe's
+cross-origin calls (and the Activity plugin proxy refuses foreign hosts),
+so the editor doesn't offer **Configure** there — the chip's Set up
+action and the freely-editable URL keep working, and the chip points at
+the web app for the picker. The host also builds its production CSP's
+`frame-src` from every `configUrl` origin in the registry
+(`vite.config.ts`), so listing a config iframe on a new host needs no
+hand-edited policy.
+
 ## 2. The `custom_id` is the whole binding
 
 DWEEB stores **nothing** plugin-specific on the message. The binding _is_ the

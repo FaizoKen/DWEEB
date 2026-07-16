@@ -22,7 +22,7 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - `bun run test` — Vitest (core logic, stores, and feature contracts). `bun run typecheck`, `bun run format:check`.
 - `bun run lint` — ESLint (flat config, `eslint.config.js`). Enforces the React hooks rules
   (`rules-of-hooks` + `exhaustive-deps`) and `no-explicit-any` as **errors**; other recommended
-  rules are advisory warnings. Suppress an *intentional* hooks case with a
+  rules are advisory warnings. Suppress an _intentional_ hooks case with a
   `// eslint-disable-next-line react-hooks/exhaustive-deps` **plus a one-line reason** — never a
   bare disable (a linter now actually runs, so bare/dead disables are themselves flagged).
   `format:check` + `lint` are CI gates in `web.yml`; run both before pushing FE changes.
@@ -89,8 +89,8 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `core/pwa/staleChunkRecovery.ts` (armed first thing in `main.tsx`) listens for Vite's
   `vite:preloadError` and reloads once — guarded per version via sessionStorage so it can
   never loop, and only **before** `dweeb:surface-ready` so an automatic reload can't destroy
-  a user's in-progress message. The crash reporter drops stale-chunk beacons *only while that
-  reload is in flight* (`isStaleChunkMessage` + `isStaleChunkReloadInProgress`); the same
+  a user's in-progress message. The crash reporter drops stale-chunk beacons _only while that
+  reload is in flight_ (`isStaleChunkMessage` + `isStaleChunkReloadInProgress`); the same
   failure with recovery exhausted still reports, because then it's real signal (SW precache
   gap, broken deploy). Keep new boot-path dynamic imports behind this ordering, and don't
   "simplify" the suppression into an unconditional drop.
@@ -195,10 +195,13 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   interactive `usePluginConfig.ts` — don't merge them. All RoleLogic entries carry
   `statusUrl` (server side: `/{plugin}/dweeb/status` in each RoleLogic-Plugins crate);
   Form-Respondent-Role additionally serves the picker iframe (`/dweeb/picker` + popup
-  `/dweeb/bridge` auth + `/dweeb/forms`). Inside the production Activity these iframes load
-  through the plugin proxy, so the RoleLogic host must be in its server-side allowlist
-  before the picker works there; the probe is CSP-blocked in the Activity and degrades to
-  "unknown" by design.
+  `/dweeb/bridge` auth + `/dweeb/forms`). **Link config iframes are web-only**: in the
+  Activity the sandbox blocks the popup sign-in and cross-origin calls, so the editor
+  hides Configure there (don't "fix" this by allowlisting the host in the Activity plugin
+  proxy — the loaded picker still couldn't authenticate); the probe is likewise
+  CSP-blocked there and degrades to "unknown" by design. The production CSP's `frame-src`
+  is derived from every registry `configUrl` origin in vite.config.ts — never
+  hand-maintain it.
 - **Discovery marketing**: lead with DWEEB's visual Discord message builder for webhooks,
   embeds, and Components V2. Do not use "without the JSON" copy, and do not present the
   collaborative "Build Together" Activity feature as DWEEB's main functionality. Keep
