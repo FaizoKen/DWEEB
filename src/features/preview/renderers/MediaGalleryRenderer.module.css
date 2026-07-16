@@ -9,13 +9,23 @@
 .gallery[data-count="1"] {
   grid-template-columns: 1fr;
 }
-/* Discord's 2-image layout: two equal columns in a 600×280 box. */
+/* Discord's 2-image layout: two equal columns at a FIXED 280px row height
+   (measured identical for landscape and portrait sources, at top level and
+   inside containers — the height never derives from width or source). */
 .gallery[data-count="2"] {
   grid-template-columns: 1fr 1fr;
-  aspect-ratio: 15 / 7;
 }
 .gallery[data-count="2"] .item {
   aspect-ratio: auto;
+  height: 280px;
+}
+
+/* Discord's 4-image layout: 2×2 grid whose cells adopt the SOURCE image's
+   aspect ratio (600×400 sources → 3:2 cells, 300×500 sources → 3:5 cells).
+   The renderer stamps the measured ratio per item once the image loads;
+   3:2 is the pre-load fallback. */
+.gallery[data-count="4"] .item {
+  aspect-ratio: 3 / 2;
 }
 /* Discord's 3-image layout: a 2fr left hero spanning two rows beside two stacked
    1fr cells, with an overall ~12/7 box (left ≈ 2× the right column's width). */
@@ -35,7 +45,9 @@
 }
 
 /* Counts 5 and 8: row of 2 wide cells on top, rows of 3 narrower cells below.
-   We use a 6-col base so 3-span (top) and 2-span (bottom) line up. */
+   We use a 6-col base so 3-span (top) and 2-span (bottom) line up. The top
+   pair matches the 2-image layout's fixed 280px height (measured); the
+   narrow cells below stay square. */
 .gallery[data-count="5"],
 .gallery[data-count="8"] {
   grid-template-columns: repeat(6, 1fr);
@@ -43,16 +55,21 @@
 .gallery[data-count="5"] .item:nth-child(-n + 2),
 .gallery[data-count="8"] .item:nth-child(-n + 2) {
   grid-column: span 3;
+  aspect-ratio: auto;
+  height: 280px;
 }
 .gallery[data-count="5"] .item:nth-child(n + 3),
 .gallery[data-count="8"] .item:nth-child(n + 3) {
   grid-column: span 2;
 }
 
+/* 7- and 10-image layouts lead with a full-width hero that keeps the SOURCE
+   image's aspect ratio (measured: a 600×400 source renders 600×400 — no
+   height cap). The renderer stamps the ratio on load; 3:2 is the fallback. */
 .gallery[data-count="7"] .item:first-child,
 .gallery[data-count="10"] .item:first-child {
   grid-column: 1 / -1;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 3 / 2;
 }
 
 .item {
@@ -210,4 +227,23 @@
   background: var(--discord-bg-tertiary);
   text-align: center;
   padding: 8px;
+}
+
+/* Discord's failed-image treatment: the cell keeps its mosaic geometry and
+   shows a centered 32px broken-image glyph on a barely-darker box. */
+.notFound {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--discord-text-muted);
+}
+/* A lone unloadable image has no intrinsic size — Discord reserves a
+   350×350 box. */
+.gallery[data-count="1"] .item .notFound {
+  width: 350px;
+  max-width: 100%;
+  height: 350px;
 }

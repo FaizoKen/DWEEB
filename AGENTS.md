@@ -77,7 +77,19 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `src/features/preview/markdown/parse.test.ts` — `*` needs a non-space after the opener while
   `_` needs word boundaries, ` `` ` spans, autolinks drop trailing `.,:;"')]`, consecutive
   ordered items merge into a preceding bullet list, inline styles cross newlines, CV2 text
-  displays never render jumbo emoji (unicode emoji are 1.375em, wrapped by the renderer). Known
+  displays never render jumbo emoji (unicode emoji are 1.375em, wrapped by the renderer).
+  Measured gallery mosaic rules (identical top-level and inside containers, which just narrow
+  the column to 566px): 1-up = natural aspect capped 600w/350h; 2-up = two columns at a
+  **fixed 280px height** (source aspect ignored); 3-up = 2fr/1fr hero at 12:7 overall; 4-up =
+  2×2 cells that **adopt the source image's aspect ratio** (stamped per item on image load,
+  3:2 fallback); 5-up = a 2-up-style 280px pair over three squares; 6/9-up = all squares;
+  7/10-up = a full-width hero at the **source aspect** (no height cap) over rows of squares. A
+  spoilered container blurs the whole card (blur(44px), accent stripe hidden) under the
+  SPOILER pill. Failure modes (also measured): an unloadable image keeps its cell geometry and
+  shows a centered 32px broken-image glyph on rgba(0,0,0,.04) — 350×350 when it's a lone image,
+  85×85 for thumbnails; an unresolvable custom emoji renders as plain `:name:` text (the
+  preview swaps on CDN 404); long button labels grow the button (rows wrap), long select
+  placeholders ellipsize. Known
   accepted gaps: no code-block syntax highlighting, native emoji glyphs instead of Twemoji
   artwork (Activity CSP blocks third-party CDNs), `gg sans` falls back to Noto Sans.
 - **Safe-area overlays**: portaled/fixed overlays must use the `--app-sait`/`--app-saib` and

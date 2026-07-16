@@ -11,11 +11,13 @@
  * We approximate that layout via CSS grid + a data-count attribute.
  */
 
+import { useState } from "react";
 import type { EditorId, MediaGalleryComponent, MediaGalleryItem } from "@/core/schema/types";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useAiStore } from "@/core/ai/aiStore";
 import { cn } from "@/lib/cn";
 import { usePreviewClose } from "../previewCloseContext";
+import { BrokenImageIcon } from "./BrokenImageIcon";
 import { useResolvedMediaUrl } from "./useResolvedMediaUrl";
 import { mediaKindFromName, mediaNameFromUrl } from "./mediaKind";
 import { usePreviewMediaPriority } from "../mediaPriorityContext";
@@ -53,11 +55,15 @@ export function MediaGalleryRenderer({ node }: { node: MediaGalleryComponent }) 
 
   return (
     <div className={styles.gallery} data-count={String(Math.min(count, 10))}>
-      {node.items.map((item) => (
+      {node.items.map((item, index) => (
         <GalleryItem
           key={item._id}
           item={item}
           selected={selectedId === item._id}
+          // Discord sizes some cells to the source image's own aspect ratio:
+          // every cell of a 4-image grid, and the full-width hero of the
+          // 7/10-image layouts. Every other count uses fixed geometry.
+          matchSourceAspect={count === 4 || ((count === 7 || count === 10) && index === 0)}
           onPick={(focusTreeRow) =>
             handlePick(item._id, item.spoiler === true && selectedId !== item._id, focusTreeRow)
           }
@@ -70,15 +76,20 @@ export function MediaGalleryRenderer({ node }: { node: MediaGalleryComponent }) 
 function GalleryItem({
   item,
   selected,
+  matchSourceAspect = false,
   onPick,
 }: {
   item: MediaGalleryItem;
   selected: boolean;
+  /** Size this cell to the loaded image's own aspect ratio (4-image grids). */
+  matchSourceAspect?: boolean;
   onPick: (focusTreeRow: boolean) => void;
 }) {
   // Reveal follows the editor selection: clicking the item selects it (which
   // reveals it), and selecting another item/node re-blurs this one.
   const obscured = item.spoiler === true && !selected;
+  const [sourceAspect, setSourceAspect] = useState<number | null>(null);
+  const [failed, setFailed] = useState(false);
   const url = item.media.url ?? "";
   const priority = usePreviewMediaPriority(url);
   const src = useResolvedMediaUrl(url);
@@ -99,6 +110,7 @@ function GalleryItem({
         obscured && styles.spoiler,
       )}
       title={item.description}
+      style={matchSourceAspect && sourceAspect ? { aspectRatio: String(sourceAspect) } : undefined}
       role="button"
       tabIndex={0}
       aria-label={`${item.description ? `${item.description}. ` : ""}Press Enter to edit this gallery item.`}
@@ -113,7 +125,14 @@ function GalleryItem({
         onPick(true);
       }}
     >
-      {src ? (
+      {src && failed ? (
+        // Discord renders an unloadable image as a dark box with a centered
+        // broken-image glyph, keeping the cell's mosaic geometry (350×350
+        // for a lone image — see the data-count="1" rule in the CSS).
+        <div className={styles.notFound} role="img" aria-label="Image failed to load">
+          <BrokenImageIcon />
+        </div>
+      ) : src ? (
         kind === "video" ? (
           <video src={src} muted playsInline preload="metadata" />
         ) : (
@@ -124,6 +143,16 @@ function GalleryItem({
             fetchPriority={priority ? "high" : "auto"}
             decoding="async"
             referrerPolicy="no-referrer"
+            onError={() => setFailed(true)}
+            onLoad={(e) => {
+              setFailed(false);
+              if (matchSourceAspect) {
+                const el = e.currentTarget;
+                if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+                  setSourceAspect(el.naturalWidth / el.naturalHeight);
+                }
+              }
+            }}
           />
         )
       ) : (
@@ -139,7 +168,7 @@ function GalleryItem({
           </svg>
         </span>
       )}
-      {hasAlt && src && (
+      {hasAlt && src && !failed && (
         // Discord pins the ALT badge top-left on video items (the play button
         // occupies the center, the bottom edge reads as scrubber territory).
         <span className={cn(styles.altBadge, kind === "video" && styles.altBadgeTop)}>ALT</span>

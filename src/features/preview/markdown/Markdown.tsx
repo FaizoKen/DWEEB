@@ -191,16 +191,7 @@ function renderInlineNode(node: InlineNode, key: number): ReactNode {
     case "guildNav":
       return <GuildNav key={key} nav={node.nav} />;
     case "emoji":
-      return (
-        <img
-          key={key}
-          className={styles.emoji}
-          src={`https://cdn.discordapp.com/emojis/${node.id}.${node.animated ? "gif" : "webp"}?size=24&quality=lossless`}
-          alt={`:${node.name}:`}
-          loading="lazy"
-          decoding="async"
-        />
-      );
+      return <CustomEmoji key={key} name={node.name} id={node.id} animated={node.animated} />;
     case "timestamp":
       return (
         <time
@@ -212,6 +203,26 @@ function renderInlineNode(node: InlineNode, key: number): ReactNode {
         </time>
       );
   }
+}
+
+/**
+ * Custom emoji image. Discord resolves emoji server-side and renders ones it
+ * can't find as plain `:name:` text — mirror that by swapping to text when
+ * the CDN 404s the id, instead of leaving a broken image.
+ */
+function CustomEmoji({ name, id, animated }: { name: string; id: string; animated: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <span>:{name}:</span>;
+  return (
+    <img
+      className={styles.emoji}
+      src={`https://cdn.discordapp.com/emojis/${id}.${animated ? "gif" : "webp"}?size=24&quality=lossless`}
+      alt={`:${name}:`}
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 function Mention({ kind, id }: { kind: MentionKind; id: string }) {
