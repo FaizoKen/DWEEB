@@ -65,19 +65,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Derive image tags/labels from the git ref. Produces :latest on the
-      # default branch, :sha-<short> always, and semver tags (e.g. 0.7.0 and
-      # 0.7) when a vX.Y.Z tag is pushed. The image name is lowercased for GHCR.
+      # Derive image tags from the git ref in plain shell rather than
+      # docker/metadata-action: that action fetches repo metadata from
+      # api.github.com, which intermittently fails from Actions runners (same
+      # reason web.yml pins bun-version). Produces :latest on the default
+      # branch, :sha-<short> always, and semver tags (e.g. 0.7.0 and 0.7) when
+      # a vX.Y.Z tag is pushed. The image name is lowercased for GHCR.
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/dweeb-modal-form
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/dweeb-modal-form"
+          tags="${image}:sha-${GITHUB_SHA::7}"
+          case "$GITHUB_REF" in
+            refs/heads/main) tags="${tags},${image}:latest" ;;
+            refs/tags/v*)
+              version="${GITHUB_REF#refs/tags/v}"
+              tags="${tags},${image}:${version},${image}:${version%.*}"
+              ;;
+          esac
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
 
       # Build context is plugins/modal-form/, where the Dockerfile and Cargo
       # manifest live. Push only when this isn't a PR. The gha cache keeps
@@ -89,6 +95,9 @@ jobs:
           file: ./plugins/modal-form/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          # Static OCI labels; .source keeps the GHCR package linked to the repo.
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
