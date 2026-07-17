@@ -24,7 +24,7 @@ export const PLUGINS: {
     color: "#3ba55d",
     desc: "Private support tickets from a button or topic menu — per-ticket channel, optional intake form, staff claim, close with transcript.",
     targets: "Button · Select",
-    presets: 6,
+    presets: 5,
   },
   {
     id: "giveaway",

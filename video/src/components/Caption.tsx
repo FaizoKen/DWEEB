@@ -4,43 +4,35 @@ import { COLORS } from "../theme";
 import { INTER } from "../fonts";
 
 type Part = string | { hl: string };
-type Word = { text: string; hl: boolean };
 
 /**
- * A kinetic lower-third that reinforces the VO. The pill rises in, then the words
- * animate up one-by-one in a quick stagger; highlighted words punch a touch
- * larger with an accent glow. Lives at screen level (outside the Camera) so it
- * stays pin-sharp and readable while the world moves behind it.
+ * Editorial super, not a transcription track. It adds one short benefit beside
+ * the product footage and moves as a single designed unit, so the viewer never
+ * has to read a second full sentence while also following the UI.
  */
 export const Caption: React.FC<{
   parts: Part[];
+  label?: string;
   delay?: number;
   out?: number; // scene-relative frame to start fading out
   accent?: string;
-}> = ({ parts, delay = 0, out, accent = COLORS.green }) => {
+}> = ({ parts, label, delay = 0, out, accent = COLORS.green }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
   const vertical = height > width;
 
-  const words: Word[] = [];
-  for (const p of parts) {
-    if (typeof p === "string") {
-      for (const w of p.split(/(\s+)/)) {
-        if (w.trim() === "") continue;
-        words.push({ text: w, hl: false });
-      }
-    } else {
-      for (const w of p.hl.split(/(\s+)/)) {
-        if (w.trim() === "") continue;
-        words.push({ text: w, hl: true });
-      }
-    }
-  }
-
-  const box = spring({ frame: frame - delay, fps, config: { damping: 20, mass: 0.7 } });
-  const exit = out
-    ? interpolate(frame, [out, out + 12], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
-    : 1;
+  const box = spring({
+    frame: frame - delay,
+    fps,
+    config: { damping: 24, mass: 0.72, stiffness: 145 },
+  });
+  const exit =
+    out !== undefined
+      ? interpolate(frame, [out, out + 12], [1, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        })
+      : 1;
   const opacity = box * exit;
   if (opacity <= 0.001) return null;
 
@@ -48,79 +40,93 @@ export const Caption: React.FC<{
     <div
       style={{
         position: "absolute",
-        // Raise off the very bottom in portrait so the caption sits in the safe
-        // zone above platform UI (Reels/Shorts/TikTok chrome).
-        bottom: vertical ? 300 : 84,
-        left: 0,
-        right: 0,
+        bottom: vertical ? 274 : 58,
+        left: vertical ? 44 : 74,
+        right: vertical ? 44 : 74,
         display: "flex",
-        justifyContent: "center",
-        padding: vertical ? "0 40px" : "0 160px",
+        justifyContent: "flex-start",
         opacity,
-        transform: `translateY(${interpolate(box, [0, 1], [40, 0])}px)`,
+        transform: `translateY(${interpolate(box, [0, 1], [26, 0])}px)`,
         zIndex: 40,
       }}
     >
       <div
         style={{
+          position: "relative",
           display: "flex",
-          alignItems: "center",
-          gap: 18,
-          // Solid-enough fill to carry contrast on its own: Remotion's headless
-          // ANGLE renderer can silently drop backdrop-filter, so the readability
-          // must not depend on the blur — the blur is a bonus when supported.
-          background: "rgba(10,11,15,0.88)",
-          backdropFilter: "blur(10px)",
-          WebkitBackdropFilter: "blur(10px)",
-          border: `1px solid ${COLORS.border}`,
-          borderRadius: 18,
-          padding: "16px 30px 16px 26px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
-          maxWidth: vertical ? 1000 : 1480,
+          flexDirection: "column",
+          gap: 7,
+          background: "linear-gradient(112deg, rgba(8,9,13,.94), rgba(8,9,13,.78))",
+          border: `1px solid ${COLORS.borderStrong}aa`,
+          borderRadius: 16,
+          padding: vertical ? "18px 22px 20px" : "16px 28px 19px",
+          boxShadow: "0 22px 70px rgba(0,0,0,.48), inset 0 1px rgba(255,255,255,.035)",
+          maxWidth: vertical ? 920 : 1180,
+          overflow: "hidden",
         }}
       >
         <div
           style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            bottom: 0,
             width: 5,
-            alignSelf: "stretch",
             borderRadius: 999,
             background: accent,
-            boxShadow: `0 0 16px ${accent}aa`,
-            flexShrink: 0,
+            boxShadow: `0 0 22px ${accent}88`,
           }}
         />
+        {label && (
+          <div
+            style={{
+              fontFamily: INTER,
+              fontSize: vertical ? 14 : 13,
+              lineHeight: 1,
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              fontWeight: 800,
+              color: accent,
+            }}
+          >
+            {label}
+          </div>
+        )}
         <div
           style={{
             fontFamily: INTER,
-            fontWeight: 600,
-            fontSize: vertical ? 34 : 38,
-            lineHeight: 1.3,
+            fontWeight: 760,
+            fontSize: vertical ? 43 : 44,
+            lineHeight: 1.13,
+            letterSpacing: "-0.025em",
             color: COLORS.text,
             display: "flex",
             flexWrap: "wrap",
             columnGap: 11,
-            rowGap: 2,
+            rowGap: 3,
           }}
         >
-          {words.map((w, i) => {
+          {parts.map((part, i) => {
             const p = spring({
-              frame: frame - delay - 6 - i * 1.6,
+              frame: frame - delay - 5 - i * 3,
               fps,
-              config: { damping: 16, mass: 0.5, stiffness: 150 },
+              config: { damping: 22, mass: 0.55, stiffness: 160 },
             });
+            const highlighted = typeof part !== "string";
+            const text = typeof part === "string" ? part : part.hl;
             return (
               <span
                 key={i}
                 style={{
                   display: "inline-block",
                   opacity: p,
-                  transform: `translateY(${interpolate(p, [0, 1], [14, 0])}px)`,
-                  color: w.hl ? accent : COLORS.text,
-                  fontWeight: w.hl ? 800 : 600,
-                  textShadow: w.hl ? `0 0 22px ${accent}66` : "none",
+                  transform: `translateY(${interpolate(p, [0, 1], [10, 0])}px)`,
+                  color: highlighted ? accent : COLORS.text,
+                  fontWeight: highlighted ? 850 : 760,
+                  textShadow: highlighted ? `0 0 26px ${accent}44` : "none",
                 }}
               >
-                {w.text}
+                {text}
               </span>
             );
           })}

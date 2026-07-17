@@ -1,162 +1,391 @@
 import React from "react";
-import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, interpolate } from "remotion";
+import { AbsoluteFill, Audio, Sequence, interpolate, staticFile, useCurrentFrame } from "remotion";
 import { Background } from "../components/Background";
 import { Camera, Shot, useVertical } from "../components/Camera";
+import { Icon } from "../components/Icon";
 import { Mascot } from "../components/Mascot";
 import { Wordmark } from "../components/Wordmark";
-import { Chip, Rise, TypeText, useSpr } from "../components/Bits";
-import { voDelay, SCENES, VO, IMPACT, CHIME } from "../timeline";
+import { useSpr } from "../components/Bits";
+import { CHIME, IMPACT, POP, SCENES, voDelay } from "../timeline";
 import { COLORS } from "../theme";
 import { INTER } from "../fonts";
 
-/** The official Google "G", for the search-bar payoff. */
-const GoogleG: React.FC<{ size?: number }> = ({ size = 36 }) => (
-  <svg width={size} height={size} viewBox="0 0 48 48">
+const HeadlineLine: React.FC<{
+  children: React.ReactNode;
+  progress: number;
+  size: number;
+  accent?: boolean;
+  tracking?: string;
+}> = ({ children, progress, size, accent = false, tracking = "-0.055em" }) => {
+  const p = Math.max(0, Math.min(1, progress));
+
+  return (
+    <div style={{ overflow: "hidden", padding: "0 .08em .04em", margin: "0 -.08em" }}>
+      <div
+        style={{
+          display: "block",
+          fontFamily: INTER,
+          fontSize: size,
+          lineHeight: 0.89,
+          letterSpacing: tracking,
+          fontWeight: 950,
+          color: accent ? COLORS.green : COLORS.text,
+          textTransform: "uppercase",
+          opacity: p,
+          transform: `translateY(${(1 - p) * 0.92}em) skewY(${(1 - p) * 4}deg)`,
+          transformOrigin: "left bottom",
+          textShadow: accent ? `0 0 42px ${COLORS.green}2e` : "0 12px 50px rgba(0,0,0,.5)",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+};
+
+/** Inline mark keeps the search action self-contained and crisp at any scale. */
+const GoogleG: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
     <path
-      fill="#EA4335"
-      d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      fill="#4285f4"
+      d="M21.6 12.227c0-.709-.064-1.391-.182-2.045H12v3.868h5.382a4.6 4.6 0 0 1-1.995 3.018v2.509h3.231c1.891-1.741 2.982-4.305 2.982-7.35Z"
     />
     <path
-      fill="#4285F4"
-      d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+      fill="#34a853"
+      d="M12 22c2.7 0 4.964-.895 6.618-2.423l-3.231-2.509c-.895.6-2.041.955-3.387.955-2.605 0-4.809-1.759-5.6-4.123H3.059v2.591A9.996 9.996 0 0 0 12 22Z"
     />
     <path
-      fill="#FBBC05"
-      d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+      fill="#fbbc05"
+      d="M6.4 13.9A6.01 6.01 0 0 1 6.086 12c0-.659.114-1.3.314-1.9V7.509H3.059A9.996 9.996 0 0 0 2 12c0 1.614.386 3.141 1.059 4.491L6.4 13.9Z"
     />
     <path
-      fill="#34A853"
-      d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      fill="#ea4335"
+      d="M12 5.977c1.468 0 2.786.505 3.823 1.496l2.868-2.868C16.959 2.991 14.695 2 12 2a9.996 9.996 0 0 0-8.941 5.509L6.4 10.1c.791-2.364 2.995-4.123 5.6-4.123Z"
     />
   </svg>
 );
 
-/** CTA — the end card: lockup, feature tags, and a Google search for "dweeb.faizo.net". */
+const SearchPanel: React.FC<{
+  progress: number;
+  vertical: boolean;
+  frame: number;
+  typeAt: number;
+}> = ({ progress, vertical, frame, typeAt }) => {
+  const p = Math.max(0, Math.min(1, progress));
+  const query = "DWEEB Discord builder";
+  const chars = Math.max(0, Math.min(query.length, Math.floor((frame - typeAt) / 1.25)));
+  const typed = query.slice(0, chars);
+  const typing = chars > 0 && chars < query.length;
+
+  return (
+    <div
+      style={{
+        width: vertical ? 620 : 550,
+        opacity: p,
+        transform: `translateY(${(1 - p) * 34}px) scale(${0.95 + p * 0.05})`,
+        transformOrigin: "center",
+        fontFamily: INTER,
+      }}
+    >
+      <div
+        style={{
+          height: vertical ? 94 : 88,
+          boxSizing: "border-box",
+          display: "flex",
+          alignItems: "center",
+          paddingLeft: vertical ? 26 : 24,
+          overflow: "hidden",
+          borderRadius: 999,
+          background: "#fff",
+          border: "1px solid rgba(255,255,255,.82)",
+          boxShadow:
+            "0 28px 85px rgba(0,0,0,.48), 0 8px 30px rgba(66,133,244,.13), inset 0 -1px rgba(0,0,0,.08)",
+        }}
+      >
+        <Icon name="search" size={vertical ? 25 : 23} color="#5f6368" />
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            marginLeft: 17,
+            color: "#202124",
+            fontSize: vertical ? 21 : 20,
+            fontWeight: 560,
+            letterSpacing: "-.01em",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {typed}
+          {typing && (
+            <span
+              style={{
+                display: "inline-block",
+                width: 2,
+                height: "1em",
+                marginLeft: 2,
+                verticalAlign: "-.12em",
+                background: frame % 12 < 8 ? "#4285f4" : "transparent",
+              }}
+            />
+          )}
+        </div>
+        <div
+          style={{
+            width: vertical ? 84 : 78,
+            alignSelf: "stretch",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderLeft: "1px solid #e2e5e9",
+            background: "#f8f9fa",
+            flexShrink: 0,
+          }}
+        >
+          <GoogleG size={vertical ? 38 : 35} />
+        </div>
+      </div>
+      <div
+        style={{
+          marginTop: 17,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 10,
+          color: COLORS.textMuted,
+          fontSize: vertical ? 17 : 16,
+          fontWeight: 700,
+          letterSpacing: ".01em",
+        }}
+      >
+        <span style={{ color: COLORS.green, fontWeight: 850 }}>dweeb.faizo.net</span>
+        <span style={{ color: COLORS.textSubtle }}>·</span>
+        Start free in your browser
+      </div>
+    </div>
+  );
+};
+
+/**
+ * An action-first end card. The promise names the product plainly, and the
+ * search bar turns discovery into the final visual action without another
+ * generic promo card.
+ */
 export const SceneCta: React.FC = () => {
   const frame = useCurrentFrame();
   const vert = useVertical();
   const d = voDelay("cta");
 
-  const drop = useSpr(4, { damping: 11, stiffness: 130, mass: 0.9 });
-  // The search bar slides in around "…right in your browser" — the VO never
-  // speaks the URL, the bar shows it. Derived from the line's length so
-  // re-recording the VO keeps the beat in place.
-  const searchAt = d + Math.round(VO.cta.frames * 0.6);
-  const searchIn = useSpr(searchAt, { damping: 13 });
+  const brandP = useSpr(5, { damping: 20, stiffness: 150 });
+  const line1P = useSpr(d - 8, { damping: 17, stiffness: 155, mass: 0.65 });
+  const line2P = useSpr(d + 2, { damping: 17, stiffness: 155, mass: 0.65 });
+  const line3P = useSpr(d + 12, { damping: 17, stiffness: 155, mass: 0.65 });
+  const line4P = useSpr(d + 20, { damping: 17, stiffness: 155, mass: 0.65 });
+  const mascotP = useSpr(d + 34, { damping: 14, stiffness: 145, mass: 0.7 });
+  const actionAt = d + 62;
+  const actionP = useSpr(actionAt, { damping: 18, stiffness: 145, mass: 0.7 });
+  const underline = interpolate(frame, [d + 16, d + 48], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
 
-  // Portrait wraps the feature tags into two rows (below), so the column stays
-  // narrower than the search bar and the lockup can fill the tall frame.
+  // The first two keyframes are the impact punch: the riser lands on frame 2
+  // and the camera recoils with it before settling into the slow drift.
   const shots: Shot[] = vert
     ? [
-        { f: 0, x: 960, y: 560, s: 1.42 },
-        { f: 34, x: 960, y: 540, s: 1.22 },
-        { f: SCENES.cta.durationInFrames - 40, x: 960, y: 540, s: 1.26 },
+        { f: 0, x: 960, y: 532, s: 1.64 },
+        { f: 14, x: 960, y: 536, s: 1.52 },
+        { f: 38, x: 960, y: 540, s: 1.5 },
+        { f: actionAt + 18, x: 960, y: 550, s: 1.54 },
+        { f: SCENES.cta.durationInFrames - 12, x: 960, y: 545, s: 1.58 },
       ]
     : [
-        { f: 0, x: 960, y: 560, s: 1.22 },
-        { f: 34, x: 960, y: 540, s: 1.0 },
-        { f: SCENES.cta.durationInFrames - 40, x: 960, y: 540, s: 1.04 },
+        { f: 0, x: 960, y: 530, s: 1.14 },
+        { f: 14, x: 960, y: 536, s: 1.02 },
+        { f: 42, x: 960, y: 540, s: 1.0 },
+        { f: actionAt + 18, x: 972, y: 540, s: 1.035 },
+        { f: SCENES.cta.durationInFrames - 12, x: 972, y: 540, s: 1.06 },
       ];
+
+  const mascotSettled = Math.max(0, Math.min(1, mascotP));
 
   return (
     <AbsoluteFill>
       <Background glow="dual" />
-      <Camera shots={shots} drift={2.5}>
-        <AbsoluteFill style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 32 }}>
-            <div
-              style={{
-                opacity: drop,
-                transform: `translateY(${interpolate(drop, [0, 1], [-200, 0])}px)`,
-              }}
-            >
-              <Mascot size={230} />
-            </div>
-            <Wordmark size={140} delay={10} />
-            <Rise delay={26}>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 12,
-                  flexWrap: vert ? "wrap" : "nowrap",
-                  justifyContent: "center",
-                  // 460 forces a balanced 2×2 (three tags still fit at ~500)
-                  maxWidth: vert ? 460 : undefined,
-                  rowGap: 12,
-                }}
-              >
-                {[
-                  { t: "Visual builder", c: COLORS.blurple },
-                  { t: "AI assistant", c: "#9b84ee" },
-                  { t: "Plugins", c: COLORS.green },
-                  { t: "Build together", c: "#eb459e" },
-                ].map((x) => (
-                  <Chip key={x.t} color={x.c} big>
-                    {x.t}
-                  </Chip>
-                ))}
-              </div>
-            </Rise>
-            <Rise delay={40} style={{ marginTop: -6 }}>
-              <div
-                style={{
-                  fontFamily: INTER,
-                  fontSize: 28,
-                  fontWeight: 600,
-                  color: COLORS.textMuted,
-                  letterSpacing: "0.01em",
-                }}
-              >
-                …and a whole lot more —{" "}
-                <span style={{ color: COLORS.text, fontWeight: 800 }}>explore it all, free</span>
-              </div>
-            </Rise>
 
-            {/* the Google search bar — "dweeb.faizo.net" types itself in, centered */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "linear-gradient(104deg, rgba(88,101,242,.09), transparent 34%, transparent 67%, rgba(87,242,135,.06))",
+          opacity: interpolate(frame, [0, 32], [0, 1], {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+          }),
+        }}
+      />
+
+      <Camera shots={shots} drift={1.5}>
+        <AbsoluteFill style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div
+            style={{
+              width: vert ? 660 : 1660,
+              height: vert ? 980 : 860,
+              position: "relative",
+              fontFamily: INTER,
+            }}
+          >
             <div
               style={{
-                opacity: searchIn,
-                transform: `translateY(${(1 - searchIn) * 22}px) scale(${0.94 + searchIn * 0.06})`,
-                position: "relative",
+                position: "absolute",
+                left: vert ? 38 : 54,
+                top: vert ? 18 : 40,
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                width: 720,
-                height: 96,
-                background: "#fff",
-                borderRadius: 999,
-                boxShadow: "0 20px 70px rgba(0,0,0,0.5)",
+                gap: 21,
+                opacity: Math.min(1, brandP),
+                transform: `translateY(${(1 - Math.min(1, brandP)) * -18}px)`,
               }}
             >
-              <div style={{ position: "absolute", left: 34, display: "flex", alignItems: "center" }}>
-                <GoogleG size={38} />
-              </div>
-              <span style={{ fontFamily: INTER, fontSize: 44, fontWeight: 500, color: "#202124" }}>
-                <TypeText text="dweeb.faizo.net" start={searchAt + 16} cps={16} caretColor="#4285f4" />
-              </span>
-              <svg
-                width={32}
-                height={32}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#9aa0a6"
-                strokeWidth={2.4}
-                strokeLinecap="round"
-                style={{ position: "absolute", right: 36 }}
+              <Wordmark size={vert ? 46 : 52} delay={3} underline={false} />
+              <div style={{ width: 1, height: 38, background: COLORS.borderStrong }} />
+              <div
+                style={{
+                  color: COLORS.textMuted,
+                  fontSize: vert ? 11 : 12,
+                  lineHeight: 1.35,
+                  fontWeight: 850,
+                  letterSpacing: ".14em",
+                }}
               >
-                <circle cx={10.5} cy={10.5} r={6.5} />
-                <path d="M15.5 15.5L21 21" />
-              </svg>
+                VISUAL DISCORD
+                <br />
+                MESSAGE BUILDER
+              </div>
             </div>
+
+            <div
+              style={{
+                position: "absolute",
+                left: vert ? 38 : 54,
+                top: vert ? 154 : 180,
+                width: vert ? 590 : 1000,
+              }}
+            >
+              {vert ? (
+                <>
+                  <HeadlineLine progress={line1P} size={79}>
+                    Build
+                  </HeadlineLine>
+                  <HeadlineLine progress={line2P} size={79}>
+                    better
+                  </HeadlineLine>
+                  <HeadlineLine progress={line3P} size={79}>
+                    Discord
+                  </HeadlineLine>
+                  <HeadlineLine progress={line4P} size={91} accent tracking="-0.065em">
+                    messages.
+                  </HeadlineLine>
+                </>
+              ) : (
+                <>
+                  <HeadlineLine progress={line1P} size={100}>
+                    Build better
+                  </HeadlineLine>
+                  <HeadlineLine progress={line2P} size={126}>
+                    Discord
+                  </HeadlineLine>
+                  <HeadlineLine progress={line3P} size={142} accent tracking="-0.07em">
+                    messages.
+                  </HeadlineLine>
+                </>
+              )}
+
+              <div
+                style={{
+                  width: vert ? 270 * underline : 390 * underline,
+                  height: vert ? 8 : 9,
+                  marginTop: vert ? 19 : 25,
+                  borderRadius: 999,
+                  background: `linear-gradient(90deg, ${COLORS.green}, ${COLORS.blurple})`,
+                  boxShadow: `0 0 26px ${COLORS.green}66`,
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                position: "absolute",
+                left: vert ? 468 : 1290,
+                top: vert ? 565 : 92,
+                zIndex: 4,
+                opacity: mascotSettled,
+                transform: `translate(${(1 - mascotSettled) * 90}px, ${(1 - mascotSettled) * 34}px) rotate(${interpolate(mascotSettled, [0, 1], [12, vert ? -5 : -7])}deg) scale(${0.72 + mascotSettled * 0.28})`,
+              }}
+            >
+              <Mascot size={vert ? 148 : 220} />
+            </div>
+
+            <div
+              style={{
+                position: "absolute",
+                left: vert ? 20 : 1065,
+                top: vert ? 730 : 430,
+                zIndex: 3,
+              }}
+            >
+              <SearchPanel
+                progress={actionP}
+                vertical={vert}
+                frame={frame}
+                typeAt={actionAt + 12}
+              />
+            </div>
+
+            {!vert && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 54,
+                  bottom: 46,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  color: COLORS.textSubtle,
+                  fontSize: 13,
+                  fontWeight: 750,
+                  letterSpacing: ".08em",
+                  opacity: Math.min(1, actionP),
+                }}
+              >
+                <span style={{ width: 34, height: 1, background: COLORS.borderStrong }} />
+                WEBHOOKS · EMBEDS · COMPONENTS V2
+              </div>
+            )}
           </div>
         </AbsoluteFill>
       </Camera>
 
+      <AbsoluteFill
+        style={{
+          background: "#dfe6ff",
+          opacity: interpolate(frame, [2, 5, 11], [0, 0.2, 0], {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+          }),
+          pointerEvents: "none",
+        }}
+      />
+
       <Sequence from={2} durationInFrames={30}>
-        <Audio src={staticFile(IMPACT)} volume={0.85} />
+        <Audio src={staticFile(IMPACT)} volume={0.88} />
       </Sequence>
-      <Sequence from={searchAt + 4} durationInFrames={24}>
-        <Audio src={staticFile(CHIME)} volume={0.5} />
+      <Sequence from={d + 34} durationInFrames={12}>
+        <Audio src={staticFile(POP)} volume={0.42} />
+      </Sequence>
+      <Sequence from={actionAt + 2} durationInFrames={24}>
+        <Audio src={staticFile(CHIME)} volume={0.58} />
       </Sequence>
     </AbsoluteFill>
   );

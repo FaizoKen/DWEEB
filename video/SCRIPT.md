@@ -1,123 +1,132 @@
-# DWEEB — Launch Film v3.2: Script & Storyboard
+# DWEEB promo film v5 - script and production guide
 
-**Runtime:** 1:19 (2,358 frames) @ 30fps, 1920×1080 (`DweebPromo`) — the exact
-frame count comes from `public/audio/manifest.json` after `npm run audio`.
-**Voice:** Microsoft Edge neural `en-US-AndrewMultilingualNeural`, +6% rate
-**Goal:** one clear story a first-time viewer can follow with zero Discord-admin
-context: *problem → product → build → describe it → make it do things → send →
-templates → build together → CTA*. Nine scenes; every name, label and behavior
-is still lifted from the codebase (registry.json, README, docs/, SendPanel).
+**Runtime:** 53.5 seconds (1,605 frames at 30 fps)
 
-v3.1 flow fixes over v3 (all in service of "clean, easy, simple"):
+**Masters:** 1920x1080 `DweebPromo` and 1080x1920 `DweebPromoVertical`
 
-- **Hook**: the plain post *swaps in place* for the rich message — one message
-  slot, one framing, the viewer's eye never moves.
-- **Build**: the camera *follows* the narration with slow glides — tree while
-  blocks land (every block arrives complete, no fix-it detour), across to the
-  preview — then eases wide so the whole editor is seen in sync and the green
-  "Ready to send" pill pops on the limits beat. Gentle, never whipping
-  between panes.
-- **Assistant**: its own scene; the panel docks to the far right exactly like
-  the real app (`AiChatPanel`). No model or provider names anywhere.
-- **Plugins**: continues the assistant's shot — a matched cut (`hold`
-  transition + shared camera framing + synced handheld-drift phase) where the
-  AI chat simply slides closed, then the Enter-giveaway button is selected and
-  the "Attach a plugin" picker opens in-editor with all 7 plugins (plus a
-  presets note that squares the grid); Giveaway is attached and the chip lands
-  on the button row.
-- **Send**: naming and sending happen *in place on the Components pane* — the
-  identity card (name/avatar) heads the pane above the tree (identity lives in
-  the real `ComponentTree`; there is no separate Message tab), and the
-  action-bar Send button drops the channel popover right under itself. One
-  fixed close framing covers the name field, Send and the popover, so the
-  camera never jumps between the three beats.
-- **Restore scene removed** (users get editing; it cost 7 seconds).
-- **Templates moved last** and made a montage: the cursor flips down the
-  gallery while a big stage previews each template's actual message live.
-- **Activity**: starts where it really starts — a voice channel; the Activity
-  is launched from the call, the embedded builder is stripped to tree +
-  preview, and the publish controls ("posting to #events" + Post→Update) live
-  in the activity header like the real app.
-- **CTA**: no more deal-with-it shades on the mascot; feature tags instead of
-  the free/no-account chips; the search bar is a proper Google bar (G logo,
-  centered "dweeb.faizo.net" — shown, never spoken); the licence fine print is gone.
+**Voice:** Microsoft Edge neural `en-US-AndrewMultilingualNeural`, +8% rate
 
-A virtual camera (`components/Camera.tsx`) lives in world space; every scene
-pushes in close on the beat being narrated and pulls wide before the cut so the
-whole editor is understood. All moves are slow eases — arrival always precedes
-the click, so clicks stay crisp. Kinetic captions reinforce each line, an
-original beat-synced score turns with every cut, and a synthesized UI-SFX kit
-(clicks, ticks, chimes, whooshes, a riser → impact into the CTA) lands on the
-actions.
+## Creative direction
 
-## Voice-over & scenes
+The film follows one ordinary Discord message from plain text to a polished,
+interactive message. Every feature advances that same artifact: choose a template,
+refine it, ask the assistant for one addition, attach real behavior, send it, then
+briefly show collaboration as an optional coda. The direct product URL closes the film.
 
-Scene cuts derive from `public/audio/manifest.json` (one CBR-mp3 per line, exact
-frame durations), so re-recording the VO re-syncs every cut automatically.
+`problem -> transformation -> product -> template -> refine -> enhance -> activate -> send -> collaborate -> CTA`
 
-| # | id | VO | Picture |
-|---|----|----|---------|
-| 1 | hook | Every day, your server posts messages that look like this. They could look like this. | Discord chat: a plain grey text post swaps in place for a rich Components V2 announcement card. |
-| 2 | reveal | This is DWEEB — the visual builder for rich Discord messages. | Mascot lands, wordmark + green underline, tagline. |
-| 3 | build | Design with Discord's real building blocks — containers, sections, media galleries, buttons, select menus — and watch a pixel-accurate preview update live, while DWEEB enforces Discord's limits for you. | The editor in one steady framing: tree assembles block-by-block (each lands complete), the preview mirrors each block; on the limits beat the floating pill pops green — Ready to send. |
-| 4 | assistant | Or just describe it — the built-in AI assistant drafts the whole message, right in your editor. | The AI Assistant docks on the right (like the real app), a prompt types, the draft lands in tree + preview at once. No model names. |
-| 5 | plugins | Now make it do things. Select a button, pick a plugin — support tickets, giveaways, role menus, pop-up forms — real behavior, set up visually. | The Enter-giveaway button is selected; the "Attach a plugin" picker opens in-editor with all 7 real plugins; Giveaway is attached, the chip lands on the row. |
-| 6 | send | When it's ready, name the message, pick a channel — DWEEB finds or creates the webhook for you. One click. Posted. | Message tab names it ("Nebula Announcements"), the action-bar Send drops a channel popover in place — a Deliver row shows "Send now / Schedule…" with Send now selected → click → the message lands in Discord with a ping. |
-| 7 | templates | And you never start from zero — flip through ready-made templates, preview the message live, and open one to make it yours. | Gallery on the left, a big live-preview stage on the right: Welcome → Role menu → Giveaway → Announcement flip by as the cursor browses, then one opens. |
-| 8 | activity | DWEEB also runs inside Discord. Open the Activity in a voice channel and build together — live presence, real-time co-editing, one-click publish. | A Staff Lounge voice call → the DWEEB Activity launches from it → the simplified embedded builder: presence rings on the tree, two edits land at once, **Post** flips to **Update**. |
-| 9 | cta | DWEEB. So many more features are waiting — all free, right in your browser. Start building today. | Riser → impact: mascot + wordmark, feature tags (Visual builder · AI assistant · Plugins · Build together) + "…and a whole lot more — explore it all, free"; a Google search bar (G logo) types **dweeb.faizo.net** centered (the URL is shown, never spoken). |
+v5 hardens that story into three cinematic moves:
 
-## Accuracy sources (per claim)
+1. **The hook is a direct before/after.** A deliberately boring text-only Discord
+   message sits on a neutral message-preview surface — no channel premise, chat noise,
+   or announcement framing. On "turn it into something better" it transforms in place
+   into the finished visual version, keeping the same author and facts while adding
+   clear hierarchy, media, and actions.
+2. **The product assembles around the message.** The reveal opens on the exact card the
+   hook ended on (screen-position-matched on both sides of the dissolve in BOTH
+   aspect ratios), then the editor physically builds itself around it - preview surface
+   first, chrome drops in, builder pane slides in, tree populates.
+3. **The editor act is one continuous take.** build → assistant → plugins → send are
+   joined by *hold cuts*: camera framing, component tree, preview geometry, and open
+   panels are pixel-matched on both sides of every boundary (each scene's first camera
+   keyframe sits at the end of the 16-frame overlap so the visible cut lands on a
+   static camera). Only real UI motion - panels docking, dialogs, the send morph -
+   marks the passage between chapters.
 
-- Component names = `src/core/schema/metadata.ts` (Container, Section, Text, Media
-  Gallery, Buttons Row, String Select…). Limits/validation = `limits.ts` /
-  `validation.ts` (+ README).
-- AI assistant = `src/features/ai/AiChatPanel.tsx` — docks to the far right of
-  the app, edits the live message directly ("Applied to your message"). BYOK is
-  real but deliberately not narrated or shown; no provider/model names on screen.
-- Plugin names & one-liners = `src/core/plugins/registry.json`; the narrated
-  four = Tickets, Giveaway, Self Role, Modal Form; the picker shows all seven.
-- Channel-first send = `/features/discord-webhook-manager` tagline: "Pick a channel
-  and DWEEB finds or creates the webhook for you" (GuildWebhookPicker). Message
-  name/avatar = the builder's Message tab (webhook identity).
-- Templates = `src/data/presets.ts` (Welcome, Server rules, Role menu, Giveaway,
-  Poll, Announcement, Patch notes, FAQ); gallery = `features/templates/TemplateGallery.tsx`.
-- Activity = docs/activity.md (launched in a voice channel, real-time co-editing,
-  presence, Post→Update, invite via +).
-- "Free to use, right in your browser" = index.html FAQ ("completely free… no
-  paywall") + the web app needing no install — no fine print on screen.
+## Voice-over and storyboard
 
-## Production notes
+Scene boundaries are derived from `public/audio/manifest.json`, so regenerating the
+voice track automatically re-times the composition.
 
-- **VO**: `scripts/generate-audio.mjs` via `msedge-tts`, one 96 kbps CBR-mp3 per
-  line — duration = bytes/12000 → frames → `manifest.json` drives the whole timeline.
-- **Music**: the licensed bed (Pavel Yudin — "Tech Corporate", Pixabay,
-  `paulyudin-tech-corporate-182507.mp3`). The music step decodes it with
-  Remotion's bundled ffmpeg, trims it to the film, bakes the duck under every
-  VO line plus head/tail fades, and writes it as `music.wav`
-  (`buildMusicFromTrack` in `scripts/audio-synth.mjs`). If the mp3 is missing,
-  a synthesized ambient fallback (chord pads + bass, no percussion) is
-  generated instead. Arrangement marks: groove at *build*, lift at *templates*,
-  breakdown under *activity*, riser → impact into *cta*.
-- **SFX**: original synthesized kit — click, tick, pop, chime, whoosh, ping
-  (message-land), riser, impact. Regenerate offline with `npm run sfx`.
-- **Camera**: per-scene keyframes, deliberately minimal since v3.1; captions
-  render at screen level (pin-sharp).
-- **Vertical (9:16)**: `DweebPromoVertical` (1080×1920) films the SAME
-  1920×1080 world (the camera's stage is fixed — see `Camera.tsx`), so every
-  world coordinate is shared and only per-scene portrait shot lists differ
-  (`useVertical()`). Templates restacks gallery-over-stage; the CTA wraps its
-  feature tags 2×2; captions sit above the platform-UI safe zone.
-  `npm run render:vertical` → `out/dweeb-promo-vertical.mp4`.
+| #   | ID          | Voice-over                                                                                                              | Picture and story beat                                                                                                                                                              |
+| --- | ----------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `hook`      | Here's a boring Discord message. Let's turn it into something better.                                                   | One plain text-only message transforms in place into a clear visual, interactive message. No channel or announcement setup distracts from the before/after.                         |
+| 2   | `reveal`    | Meet DWEEB - the visual builder for Discord webhooks, embeds, and Components V2.                                        | Match cut: the finished card holds its screen position while the DWEEB editor assembles around it. Product identity lands as the cause of the transformation.                        |
+| 3   | `templates` | Start with a ready-made template, then make every detail yours.                                                         | Three large starting points. Announcement is selected; its stock state (generic "Season 4 launch" title, one button) is exactly what the next scene personalizes.                    |
+| 4   | `build`     | Shape it with real Discord components while a pixel-accurate preview updates live, and every limit is checked for you.  | Retitle the heading (the tree label types along with it), check the gallery, then add the reward button and platform select through the real Add-component flow. Ends "Ready to send". |
+| 5   | `assistant` | Need another idea? Ask the AI assistant to add it directly to the message.                                              | Hold cut - same take. The dock slides in, a focused prompt asks for a punchier opening and a giveaway button, and the assistant edits the same draft.                                |
+| 6   | `plugins`   | Then turn that button into a real giveaway. Visual plugins power tickets, roles, forms, and more.                       | The Giveaway plugin is ATTACHED (picker dialog → tree chip → the button glows live). No click here - clicking a preview inside the editor would mean nothing.                        |
+| 7   | `send`      | Choose a channel and send. DWEEB finds or creates the webhook, then posts in one click.                                 | Channel-first send flow, the editor morphs into Discord, the exact message lands in `#announcements` - then the proof: Enter giveaway is clicked for real (confetti, ephemeral "You're entered", count ticks 128 → 129) and 🎉/🔥 reactions roll in. |
+| 8   | `activity`  | Need another pair of hands? Invite your team, then build together inside Discord - in real time.                        | Start directly in the Activity editor, click its bottom-right invite/presence dock, then show teammates arrive and edit the same message live.                                      |
+| 9   | `cta`       | Build better Discord messages. Start free today.                                                                         | Riser into an impact flash + camera recoil, an accurate product endline, then a Google-style search bar types “DWEEB Discord builder” with the G action at the far end.               |
 
-## Rebuild
+## Visual and motion system
+
+- The visual language is a restrained dark production design: aurora light, subtle
+  floor grid, fine texture, controlled depth, and DWEEB's green/blurple accents.
+- Product UI is intentionally enlarged and simplified per shot. It remains structurally
+  faithful while prioritizing legibility at normal playback size.
+- The same Nebula Season 4 campaign persists from template selection through Discord
+  delivery. Shared components (`CampaignUI`) prevent copy or art from drifting between
+  scenes; the build scene mirrors `CampaignPreview`'s exact geometry and tree order so
+  its hold cut into the assistant scene is invisible.
+- Continuity is causal, not just visual: the template ships with one button, the build
+  scene adds the reward button and select through Add component (rows appear only when
+  their components do), the AI adds the giveaway button, the plugin makes it work, and
+  that exact message is what lands in Discord.
+- Camera rules: hold-cut boundaries share identical framing (first keyframe at
+  `f: TRANSITION_FRAMES` so the entrance overlap is static); held shots either contain
+  a UI pane completely or exclude it completely - never slicing text mid-label; only
+  fast moves pick up motion blur.
+- Cursor rules: the pointer dwells on each control, then hops in a short confident
+  12-18 frame move - never a multi-second crawl - and clicks land on
+  render-verified pixel targets in both aspect ratios.
+- Preview colors use the project's measured Discord tokens, including the sanctioned
+  classic-dark canvas and container pairing.
+- Captions are short editorial supers, not full transcripts. The send scene earns a
+  second one ("Delivered - and noticed.") as the reactions land, pre-echoing the CTA.
+- Both compositions use dedicated framing and layout branches. Portrait is composed for
+  9:16 rather than presented as a simple center crop, and the hook/reveal match cut is
+  aligned independently per aspect ratio.
+
+## Audio
+
+- Voice-over is generated one line at a time by `scripts/generate-audio.mjs`.
+- The licensed music bed is trimmed to the manifest, faded, and ducked beneath every VO
+  region by `scripts/audio-synth.mjs`.
+- UI clicks, ticks, pops, chimes, message ping, riser, and CTA impact are synthesized
+  locally. Their pseudo-random detail is seeded, so rebuilding SFX is deterministic.
+- Sound only the structural turns: the hook makeover whoosh, an air whoosh + brand
+  pop for the assembly, click/pop pairs for every real interaction, chimes for applied
+  states, the message ping for delivery, soft pops for the reactions, then the riser
+  into one impact (with its two-frame photographic flash) on the end card.
+- `scripts/generate-audio.mjs --only=<ids>` re-records just those lines and reuses the
+  existing mp3 for every other one (durations come from CBR byte math, so reused files
+  re-manifest identically) - a single-line rewording cannot drift the rest of the
+  film's verified timings by a frame.
+- The final mix is set in `src/DweebPromo.tsx`; validate the rendered master with a
+  loudness pass after any narration or score change.
+
+## Product-accuracy anchors
+
+- Component names and preview behavior follow `src/core/schema`, validation, and the
+  project's measured Discord-preview conventions.
+- Template concepts come from `src/data/presets.ts`.
+- The AI assistant edits the live message directly; provider and model names are omitted.
+- Plugin claims and categories follow `src/core/plugins/registry.json`.
+- The send story follows DWEEB's real channel-first webhook flow.
+- Activity is presented as an optional collaboration feature, not the main product.
+- The CTA says `Start free`; it does not imply that paid quota tiers do not exist.
+
+## Encoding and delivery
+
+Remotion renders PNG intermediates and H.264 at CRF 17 with `yuv420p` and BT.709 color
+metadata. This avoids JPEG generation loss and keeps browser/social-platform playback
+widely compatible.
 
 ```bash
 cd video
 npm install
-npm run audio            # regenerate VO + music + SFX + manifest (network for TTS)
-npm run music            # rebuild ONLY music.wav to the existing manifest (offline)
-npm run sfx              # regenerate ONLY the SFX kit (offline)
-npm run studio           # preview in Remotion Studio
-npm run render           # -> out/dweeb-promo.mp4
+npm run audio             # regenerate VO, music, SFX, and manifest; TTS needs network
+npm run music             # rebuild only music.wav from the existing manifest
+npm run sfx               # deterministically rebuild the local SFX kit
+npm run typecheck
+npm run studio
+npm run render            # out/dweeb-promo.mp4
+npm run render:vertical   # out/dweeb-promo-vertical.mp4
+npm run still             # out/cover.png (settled CTA frame)
 ```
+
+For fast visual QA without a full render, `node scripts/stills.mjs <outDir> <comp|both>
+<frame...>` bundles once and renders any set of frames as PNGs (used to verify cursor
+targets, hold-cut boundaries, and both match cuts).

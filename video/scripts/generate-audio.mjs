@@ -27,21 +27,55 @@ const TTS_FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3;
 const BYTES_PER_SEC = 12000;
 
 // ─── Voice-over ──────────────────────────────────────────────────────────────
-// The simplified cut: one clear story — problem → product → build → describe it →
-// make it do things → send → templates → build together → CTA. Nine lines, no
-// prior Discord knowledge required. `gapAfter` (frames) gives a scene extra air
-// after its line ends — room for a payoff beat (a message landing, chips popping)
-// before the next scene leads in.
+// The continuity cut: one ordinary message gets a visual makeover, then travels
+// from a template through refinement, an AI-assisted addition, plugin behavior,
+// and finally publish.
+// Activity is a short epilogue rather than a second product story. The language
+// is intentionally compact: the picture demonstrates the feature while the VO
+// states the benefit, keeping the whole film below a minute.
 const LINES = [
-  { id: "hook",      gapAfter: 20, text: "Every day, your server posts messages that look like this. They could look like this." },
-  { id: "reveal",    gapAfter: 18, text: "This is DWEEB — the visual builder for rich Discord messages." },
-  { id: "build",     gapAfter: 16, text: "Design with Discord's real building blocks — containers, sections, media galleries, buttons, select menus — and watch a pixel-accurate preview update live, while DWEEB enforces Discord's limits for you." },
-  { id: "assistant", gapAfter: 18, text: "Or just describe it — the built-in AI assistant drafts the whole message, right in your editor." },
-  { id: "plugins",   gapAfter: 16, text: "Now make it do things. Select a button, pick a plugin — support tickets, giveaways, role menus, pop-up forms — real behavior, set up visually." },
-  { id: "send",      gapAfter: 26, text: "When it's ready, name the message, pick a channel — DWEEB finds or creates the webhook for you. One click. Posted." },
-  { id: "templates", gapAfter: 18, text: "And you never start from zero — flip through ready-made templates, preview the message live, and open one to make it yours." },
-  { id: "activity",  gapAfter: 20, text: "DWEEB also runs inside Discord. Open the Activity in a voice channel and build together — live presence, real-time co-editing, one-click publish." },
-  { id: "cta",       gapAfter: 0,  text: "DWEEB. So many more features are waiting — all free, right in your browser. Start building today." },
+  {
+    id: "hook",
+    gapAfter: 12,
+    text: "Here's a boring Discord message. Let's turn it into something better.",
+  },
+  {
+    id: "reveal",
+    gapAfter: 10,
+    text: "Meet DWEEB — the visual builder for Discord webhooks, embeds, and Components V2.",
+  },
+  {
+    id: "templates",
+    gapAfter: 10,
+    text: "Start with a ready-made template, then make every detail yours.",
+  },
+  {
+    id: "build",
+    gapAfter: 12,
+    text: "Shape it with real Discord components while a pixel-accurate preview updates live, and every limit is checked for you.",
+  },
+  {
+    id: "assistant",
+    gapAfter: 10,
+    text: "Need another idea? Ask the AI assistant to add it directly to the message.",
+  },
+  {
+    id: "plugins",
+    gapAfter: 10,
+    text: "Then turn that button into a real giveaway. Visual plugins power tickets, roles, forms, and more.",
+  },
+  {
+    id: "send",
+    gapAfter: 16,
+    text: "Choose a channel and send. DWEEB finds or creates the webhook, then posts in one click.",
+  },
+  {
+    id: "activity",
+    gapAfter: 12,
+    text: "Need another pair of hands? Invite your team, then build together inside Discord — in real time.",
+  },
+  // The destination is shown below the end-card search bar, never spoken.
+  { id: "cta", gapAfter: 0, text: "Build better Discord messages. Start free today." },
 ];
 
 const VOICE_CANDIDATES = [
@@ -50,29 +84,52 @@ const VOICE_CANDIDATES = [
   "en-US-GuyNeural",
 ];
 
-async function synth() {
-  const tts = new MsEdgeTTS();
-  let chosen = null;
-  for (const v of VOICE_CANDIDATES) {
-    try {
-      await tts.setMetadata(v, TTS_FORMAT);
-      chosen = v;
-      break;
-    } catch (e) {
-      console.warn(`voice ${v} unavailable: ${e?.message ?? e}`);
-    }
-  }
-  if (!chosen) throw new Error("No usable TTS voice found.");
-  console.log(`Using voice: ${chosen}`);
+// `--only=cta` (comma list) re-records just those lines and reuses the existing
+// mp3 for every other one, so a single-line rewording cannot drift the rest of
+// the film's verified timings by a frame. Durations always come from the CBR
+// byte math, so reused files re-manifest identically.
+const ONLY =
+  process.argv
+    .find((a) => a.startsWith("--only="))
+    ?.slice("--only=".length)
+    .split(",")
+    .filter(Boolean) ?? null;
 
-  const manifest = { fps: FPS, voice: chosen, lines: [] };
+async function synth() {
+  const toRecord = LINES.filter((line) => {
+    const file = path.join(OUT, `${line.id}.mp3`);
+    return !ONLY || ONLY.includes(line.id) || !fs.existsSync(file);
+  });
+
+  let tts = null;
+  if (toRecord.length > 0) {
+    tts = new MsEdgeTTS();
+    let chosen = null;
+    for (const v of VOICE_CANDIDATES) {
+      try {
+        await tts.setMetadata(v, TTS_FORMAT);
+        chosen = v;
+        break;
+      } catch (e) {
+        console.warn(`voice ${v} unavailable: ${e?.message ?? e}`);
+      }
+    }
+    if (!chosen) throw new Error("No usable TTS voice found.");
+    console.log(`Using voice: ${chosen}`);
+  }
+
+  const manifest = { fps: FPS, voice: "en-US-AndrewMultilingualNeural", lines: [] };
   for (const line of LINES) {
     const file = path.join(OUT, `${line.id}.mp3`);
-    const { audioFilePath } = await tts.toFile(OUT, line.text, {
-      rate: "+6%",
-      pitch: "+0Hz",
-    });
-    fs.renameSync(audioFilePath, file);
+    if (toRecord.includes(line)) {
+      const { audioFilePath } = await tts.toFile(OUT, line.text, {
+        rate: "+8%",
+        pitch: "+0Hz",
+      });
+      fs.renameSync(audioFilePath, file);
+    } else {
+      console.log(`${line.id}: reusing existing recording`);
+    }
     const bytes = fs.statSync(file).size;
     const durationSec = bytes / BYTES_PER_SEC; // 96 kbps CBR mono mp3
     // +2 safety frames: the byte estimate can undershoot the decoded tail, and
@@ -88,7 +145,7 @@ async function synth() {
     });
     console.log(`${line.id}: ${durationSec.toFixed(2)}s (${frames}f)`);
   }
-  tts.close();
+  tts?.close();
   return manifest;
 }
 
@@ -103,7 +160,7 @@ const main = async () => {
     timeline.push({ ...l, startFrame: cursor });
     cursor += l.frames + l.gapAfter;
   }
-  const totalFrames = cursor + 66; // hold on the end card
+  const totalFrames = cursor + 54; // confident hold on the end card
   manifest.timeline = timeline;
   manifest.totalFrames = totalFrames;
   manifest.totalSec = Number((totalFrames / FPS).toFixed(2));

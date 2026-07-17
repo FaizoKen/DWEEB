@@ -33,11 +33,11 @@ export const LEAD = 8;
 export const SCENE_IDS = [
   "hook",
   "reveal",
+  "templates",
   "build",
   "assistant",
   "plugins",
   "send",
-  "templates",
   "activity",
   "cta",
 ] as const;
@@ -46,7 +46,7 @@ export type SceneId = (typeof SCENE_IDS)[number];
 const starts = SCENE_IDS.map((id) => VO[id].startFrame);
 
 /** Frames the incoming scene overlaps the outgoing one (entrance transition). */
-export const TRANSITION_FRAMES = 20;
+export const TRANSITION_FRAMES = 16;
 
 function scene(i: number) {
   const from = i === 0 ? 0 : starts[i] - LEAD;

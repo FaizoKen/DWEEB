@@ -21,15 +21,23 @@ export type Channel =
       reveal?: number;
     };
 
-const ChannelIcon: React.FC<{ kind?: "text" | "voice" | "announcement"; locked?: boolean; color: string }> = ({
-  kind = "text",
-  locked,
-  color,
-}) => {
+const ChannelIcon: React.FC<{
+  kind?: "text" | "voice" | "announcement";
+  locked?: boolean;
+  color: string;
+}> = ({ kind = "text", locked, color }) => {
   if (locked) return <Icon name="lock" size={17} color={color} />;
   if (kind === "voice")
     return (
-      <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round">
+      <svg
+        width={17}
+        height={17}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={color}
+        strokeWidth={1.9}
+        strokeLinecap="round"
+      >
         <path d="M11 5.5L6.5 9H3.8v6h2.7L11 18.5z" fill={`${color}22`} />
         <path d="M15 9a4.2 4.2 0 0 1 0 6M17.7 6.8a8 8 0 0 1 0 10.4" />
       </svg>
@@ -188,7 +196,10 @@ export const DiscordShell: React.FC<{
             const reveal = c.reveal ?? 1;
             if (reveal <= 0.001) return null;
             return (
-              <div key={c.name} style={{ opacity: reveal, transform: `translateX(${(1 - reveal) * -14}px)` }}>
+              <div
+                key={c.name}
+                style={{ opacity: reveal, transform: `translateX(${(1 - reveal) * -14}px)` }}
+              >
                 <div
                   style={{
                     display: "flex",
@@ -202,10 +213,26 @@ export const DiscordShell: React.FC<{
                     fontSize: 15.5,
                   }}
                 >
-                  <ChannelIcon kind={c.kind} locked={c.locked} color={c.active ? "#fff" : COLORS.dChannel} />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                  <ChannelIcon
+                    kind={c.kind}
+                    locked={c.locked}
+                    color={c.active ? "#fff" : COLORS.dChannel}
+                  />
+                  <span
+                    style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  >
+                    {c.name}
+                  </span>
                   {c.unread && (
-                    <span style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: 4, background: "#fff" }} />
+                    <span
+                      style={{
+                        marginLeft: "auto",
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        background: "#fff",
+                      }}
+                    />
                   )}
                 </div>
                 {c.extra}
@@ -234,7 +261,15 @@ export const DiscordShell: React.FC<{
           <ChannelIcon kind={headerKind} color={COLORS.dTextMuted} />
           {header}
         </div>
-        <div style={{ flex: 1, minHeight: 0, padding: "18px 22px", overflow: "hidden", position: "relative" }}>
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            padding: "18px 22px",
+            overflow: "hidden",
+            position: "relative",
+          }}
+        >
           {children}
         </div>
         <div style={{ padding: "0 22px 20px", flexShrink: 0 }}>
@@ -271,7 +306,16 @@ export const DMsg: React.FC<{
   edited?: boolean;
   ephemeral?: boolean;
   children: React.ReactNode;
-}> = ({ author, time = "Today at 9:41 AM", app = true, avatarColor = COLORS.blurple, mascot = false, edited, ephemeral, children }) => (
+}> = ({
+  author,
+  time = "Today at 9:41 AM",
+  app = true,
+  avatarColor = COLORS.blurple,
+  mascot = false,
+  edited,
+  ephemeral,
+  children,
+}) => (
   <div style={{ display: "flex", gap: 15, fontFamily: INTER, position: "relative" }}>
     {mascot ? (
       <div
@@ -317,10 +361,18 @@ export const DMsg: React.FC<{
       </div>
       {children}
       {ephemeral && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, color: COLORS.dTextMuted, fontSize: 13 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            marginTop: 8,
+            color: COLORS.dTextMuted,
+            fontSize: 13,
+          }}
+        >
           <Icon name="eye" size={14} color={COLORS.dTextMuted} />
-          Only you can see this ·{" "}
-          <span style={{ color: COLORS.dLink }}>Dismiss message</span>
+          Only you can see this · <span style={{ color: COLORS.dLink }}>Dismiss message</span>
         </div>
       )}
     </div>
@@ -345,19 +397,38 @@ export const DContainer: React.FC<{
     }}
   >
     <div style={{ width: 4, background: accent, flexShrink: 0 }} />
-    <div style={{ flex: 1, minWidth: 0, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+    <div
+      style={{
+        flex: 1,
+        minWidth: 0,
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+      }}
+    >
       {children}
     </div>
   </div>
 );
 
-export const DHeading: React.FC<{ icon?: IconName; iconColor?: string; children: React.ReactNode; size?: number }> = ({
-  icon,
-  iconColor = COLORS.green,
-  children,
-  size = 21,
-}) => (
-  <div style={{ color: "#fff", fontWeight: 800, fontSize: size, display: "flex", alignItems: "center", gap: 9, fontFamily: INTER }}>
+export const DHeading: React.FC<{
+  icon?: IconName;
+  iconColor?: string;
+  children: React.ReactNode;
+  size?: number;
+}> = ({ icon, iconColor = COLORS.green, children, size = 21 }) => (
+  <div
+    style={{
+      color: "#fff",
+      fontWeight: 800,
+      fontSize: size,
+      display: "flex",
+      alignItems: "center",
+      gap: 9,
+      fontFamily: INTER,
+    }}
+  >
     {icon && <Icon name={icon} size={size + 2} color={iconColor} />}
     {children}
   </div>
@@ -368,7 +439,14 @@ export const DBody: React.FC<{ children: React.ReactNode; muted?: boolean; size?
   muted = false,
   size = 15.5,
 }) => (
-  <div style={{ color: muted ? COLORS.dTextMuted : COLORS.dText, fontSize: size, lineHeight: 1.45, fontFamily: INTER }}>
+  <div
+    style={{
+      color: muted ? COLORS.dTextMuted : COLORS.dText,
+      fontSize: size,
+      lineHeight: 1.45,
+      fontFamily: INTER,
+    }}
+  >
     {children}
   </div>
 );
@@ -397,7 +475,9 @@ export const DSection: React.FC<{ children: React.ReactNode; accessory: React.Re
   accessory,
 }) => (
   <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>{children}</div>
+    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+      {children}
+    </div>
     <div style={{ flexShrink: 0 }}>{accessory}</div>
   </div>
 );
@@ -430,7 +510,16 @@ export const MediaTile: React.FC<{
       }}
     />
     {icon && (
-      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.85 }}>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: 0.85,
+        }}
+      >
         <Icon name={icon} size={Math.min(46, h * 0.42)} color="#fff" />
       </div>
     )}
@@ -455,14 +544,166 @@ export const MediaTile: React.FC<{
   </div>
 );
 
+const NEBULA_STARS = new Array(18).fill(0).map((_, i) => ({
+  left: `${(i * 47 + 9) % 94}%`,
+  top: `${(i * 29 + 7) % 72}%`,
+  size: 1 + (i % 3),
+  opacity: 0.34 + (i % 4) * 0.14,
+}));
+
+const NebulaTile: React.FC<{ h: number; kind: "hero" | "sun" | "ridge" }> = ({ h, kind }) => {
+  const hero = kind === "hero";
+  const background =
+    kind === "hero"
+      ? "linear-gradient(142deg, #12172f 0%, #433b96 45%, #167f78 100%)"
+      : kind === "sun"
+        ? "linear-gradient(155deg, #211b43 0%, #a34775 52%, #f0a05b 100%)"
+        : "linear-gradient(145deg, #081a30 0%, #174f76 48%, #4d65d8 100%)";
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        height: h,
+        width: "100%",
+        overflow: "hidden",
+        borderRadius: 8,
+        background,
+      }}
+    >
+      {NEBULA_STARS.slice(0, hero ? 18 : 9).map((star, i) => (
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            left: star.left,
+            top: star.top,
+            width: star.size,
+            height: star.size,
+            borderRadius: "50%",
+            background: "#fff",
+            opacity: star.opacity,
+            boxShadow: "0 0 5px rgba(255,255,255,.55)",
+          }}
+        />
+      ))}
+      {kind === "hero" && (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              width: h * 1.05,
+              height: h * 1.05,
+              borderRadius: "50%",
+              right: -h * 0.06,
+              bottom: -h * 0.42,
+              background: "radial-gradient(circle at 36% 28%, #8fffd2, #317f9f 35%, #25265c 72%)",
+              boxShadow: "0 0 34px rgba(87,242,135,.32)",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              width: h * 1.55,
+              height: h * 0.36,
+              right: -h * 0.28,
+              bottom: h * 0.13,
+              border: `${Math.max(2, h * 0.018)}px solid rgba(230,235,255,.72)`,
+              borderRadius: "50%",
+              transform: "rotate(-13deg)",
+              boxShadow: "0 0 14px rgba(255,255,255,.16)",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: 13,
+              bottom: 11,
+              fontFamily: INTER,
+              fontSize: Math.max(9, h * 0.072),
+              fontWeight: 900,
+              letterSpacing: "0.16em",
+              color: "rgba(255,255,255,.88)",
+              textShadow: "0 2px 12px rgba(0,0,0,.5)",
+            }}
+          >
+            SEASON FOUR
+          </div>
+        </>
+      )}
+      {kind === "sun" && (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              width: h * 0.72,
+              height: h * 0.72,
+              borderRadius: "50%",
+              right: h * 0.16,
+              top: -h * 0.12,
+              background: "radial-gradient(circle at 38% 38%, #fff5c9, #ffb45d 48%, #ec5c72 100%)",
+              boxShadow: "0 0 24px rgba(255,170,91,.62)",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: "34%",
+              background: "linear-gradient(165deg, transparent 12%, #241c4d 13% 45%, #11162d 46%)",
+            }}
+          />
+        </>
+      )}
+      {kind === "ridge" && (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                "radial-gradient(circle at 74% 22%, rgba(134,218,255,.5), transparent 34%)",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: "-5%",
+              right: "42%",
+              bottom: "-12%",
+              height: "72%",
+              background: "linear-gradient(145deg, #1c2345, #0a1125)",
+              clipPath: "polygon(0 100%, 18% 46%, 34% 69%, 58% 18%, 100% 100%)",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: "32%",
+              right: "-6%",
+              bottom: "-15%",
+              height: "62%",
+              background: "linear-gradient(145deg, #234468, #101a39)",
+              clipPath: "polygon(0 100%, 30% 35%, 47% 58%, 66% 14%, 100% 100%)",
+            }}
+          />
+        </>
+      )}
+      <div style={{ position: "absolute", inset: 0, boxShadow: "inset 0 0 30px rgba(0,0,0,.2)" }} />
+    </div>
+  );
+};
+
 export const DGallery: React.FC<{ h?: number }> = ({ h = 150 }) => (
   <div style={{ display: "flex", gap: 8 }}>
     <div style={{ flex: 1.7, minWidth: 0, display: "flex" }}>
-      <MediaTile from="#5865F2" to="#23a559" h={h} icon="rocket" />
+      <NebulaTile h={h} kind="hero" />
     </div>
     <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1, minWidth: 0 }}>
-      <MediaTile from="#f0b232" to="#f04747" h={(h - 8) / 2} />
-      <MediaTile from="#00a8fc" to="#5865F2" h={(h - 8) / 2} />
+      <NebulaTile h={(h - 8) / 2} kind="sun" />
+      <NebulaTile h={(h - 8) / 2} kind="ridge" />
     </div>
   </div>
 );
@@ -534,7 +775,15 @@ export const DSelect: React.FC<{
       }}
     >
       {placeholder}
-      <span style={{ color: COLORS.dTextMuted, transform: `rotate(${openP * 180}deg)`, display: "inline-block" }}>▾</span>
+      <span
+        style={{
+          color: COLORS.dTextMuted,
+          transform: `rotate(${openP * 180}deg)`,
+          display: "inline-block",
+        }}
+      >
+        ▾
+      </span>
     </div>
     {openP > 0.02 && options.length > 0 && (
       <div
@@ -596,7 +845,13 @@ export const DSelect: React.FC<{
 
 /* ── Context menu & modal ────────────────────────────────────────────────── */
 
-export type MenuEntry = { label: string; icon?: IconName; sub?: boolean; hl?: boolean; danger?: boolean };
+export type MenuEntry = {
+  label: string;
+  icon?: IconName;
+  sub?: boolean;
+  hl?: boolean;
+  danger?: boolean;
+};
 
 export const DContextMenu: React.FC<{
   x: number;
@@ -675,9 +930,13 @@ export const DModal: React.FC<{
     >
       <div style={{ padding: "18px 20px 4px" }}>
         <div style={{ color: "#fff", fontWeight: 800, fontSize: 19 }}>{title}</div>
-        {subtitle && <div style={{ color: COLORS.dTextMuted, fontSize: 13.5, marginTop: 3 }}>{subtitle}</div>}
+        {subtitle && (
+          <div style={{ color: COLORS.dTextMuted, fontSize: 13.5, marginTop: 3 }}>{subtitle}</div>
+        )}
       </div>
-      <div style={{ padding: "12px 20px 18px", display: "flex", flexDirection: "column", gap: 13 }}>{children}</div>
+      <div style={{ padding: "12px 20px 18px", display: "flex", flexDirection: "column", gap: 13 }}>
+        {children}
+      </div>
       <div
         style={{
           padding: "13px 20px",
@@ -687,7 +946,9 @@ export const DModal: React.FC<{
           gap: 12,
         }}
       >
-        <span style={{ color: COLORS.dText, fontSize: 14.5, fontWeight: 600, padding: "9px 6px" }}>Cancel</span>
+        <span style={{ color: COLORS.dText, fontSize: 14.5, fontWeight: 600, padding: "9px 6px" }}>
+          Cancel
+        </span>
         <div
           style={{
             background: COLORS.dButtonPrimary,
@@ -705,14 +966,22 @@ export const DModal: React.FC<{
   );
 };
 
-export const DField: React.FC<{ label: string; required?: boolean; children: React.ReactNode; h?: number }> = ({
-  label,
-  required = true,
-  children,
-  h = 40,
-}) => (
+export const DField: React.FC<{
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+  h?: number;
+}> = ({ label, required = true, children, h = 40 }) => (
   <div>
-    <div style={{ color: COLORS.dTextMuted, fontSize: 12.5, fontWeight: 800, letterSpacing: "0.03em", marginBottom: 7 }}>
+    <div
+      style={{
+        color: COLORS.dTextMuted,
+        fontSize: 12.5,
+        fontWeight: 800,
+        letterSpacing: "0.03em",
+        marginBottom: 7,
+      }}
+    >
       {label.toUpperCase()}
       {required && <span style={{ color: "#fa777c" }}> *</span>}
     </div>

@@ -249,6 +249,13 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   **More ▸ Watch intro**; never auto-open or autoplay the multi-megabyte film on page load.
   Keep it lazy-mounted and use `preload="metadata"`; an explicit Watch intro action may start
   playback (while respecting reduced-motion) because the user asked for it.
+- **Promo-film story locks** (`video/`, settled 2026-07-17): the opening is a direct
+  boring-message → visual-message makeover on a neutral preview surface — never an
+  announcement being buried in `#general`. The Build Together beat starts directly in the
+  Discord Activity editor and clicks its bottom-right invite/presence dock; do not restore the
+  voice-call shelf/launch detour. The outro promise is “Build better Discord messages” and its
+  action is a Google-style search bar for “DWEEB Discord builder,” with the G at the far
+  end. Keep `video/SCRIPT.md`, generated narration/manifest, and both aspect-ratio beats aligned.
 - index.html's JSON-LD `softwareVersion`/`dateModified` and `og:updated_time` are stamped
   at build by `stampBuildMeta` (vite.config.ts) — don't hand-maintain them; the build
   throws if the patterns vanish. Marketing claims there must match the plans model

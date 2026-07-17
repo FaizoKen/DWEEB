@@ -12,7 +12,14 @@ import { AvatarDot } from "./Bits";
  * Browser chrome + the app's two-pane shell (builder left, preview right).
  * `overlay` renders last inside the window (which clips it), for docked panels
  * like the AI assistant, the plugin picker, or the Send popover.
+ *
+ * `assembly` (0..1 per part, default settled) lets the reveal scene build the
+ * editor AROUND the preview: the chrome drops in, the builder pane slides in,
+ * and the window's own border/shadow fades up with them, while the preview
+ * pane — carrying the matched card from the hook — is present from frame one.
  */
+export type WindowAssembly = { chrome?: number; left?: number };
+
 export const AppWindow: React.FC<{
   width: number;
   height: number;
@@ -21,93 +28,121 @@ export const AppWindow: React.FC<{
   right: React.ReactNode;
   leftWidth?: number;
   overlay?: React.ReactNode;
-}> = ({ width, height, url = "dweeb.faizo.net", left, right, leftWidth = 560, overlay }) => (
-  <div
-    style={{
-      width,
-      height,
-      background: COLORS.bgElevated,
-      borderRadius: 18,
-      overflow: "hidden",
-      border: `1px solid ${COLORS.borderStrong}`,
-      boxShadow: "0 40px 120px rgba(0,0,0,0.6)",
-      display: "flex",
-      flexDirection: "column",
-      fontFamily: INTER,
-      position: "relative",
-    }}
-  >
+  assembly?: WindowAssembly;
+}> = ({
+  width,
+  height,
+  url = "dweeb.faizo.net",
+  left,
+  right,
+  leftWidth = 560,
+  overlay,
+  assembly,
+}) => {
+  const chromeP = Math.max(0, Math.min(1, assembly?.chrome ?? 1));
+  const leftP = Math.max(0, Math.min(1, assembly?.left ?? 1));
+  const shellP = Math.max(chromeP, leftP);
+
+  return (
     <div
       style={{
-        height: 44,
-        background: COLORS.bgSubtle,
-        borderBottom: `1px solid ${COLORS.border}`,
+        width,
+        height,
+        // While assembling, the shell itself is still transparent so the
+        // preview pane (carrying the matched card) floats alone on the stage.
+        background: shellP < 1 ? `rgba(23,25,31,${shellP.toFixed(3)})` : COLORS.bgElevated,
+        borderRadius: 18,
+        overflow: "hidden",
+        border: `1px solid ${COLORS.borderStrong}${
+          shellP < 1
+            ? Math.round(shellP * 255)
+                .toString(16)
+                .padStart(2, "0")
+            : ""
+        }`,
+        boxShadow: `0 40px 120px rgba(0,0,0,${0.6 * shellP})`,
         display: "flex",
-        alignItems: "center",
-        padding: "0 16px",
-        gap: 16,
-        flexShrink: 0,
+        flexDirection: "column",
+        fontFamily: INTER,
+        position: "relative",
       }}
     >
-      <div style={{ display: "flex", gap: 8 }}>
-        {["#ff5f57", "#febc2e", "#28c840"].map((c) => (
-          <div key={c} style={{ width: 12, height: 12, borderRadius: "50%", background: c }} />
-        ))}
-      </div>
       <div
         style={{
-          flex: 1,
-          maxWidth: 460,
-          height: 27,
-          background: COLORS.bgInput,
-          borderRadius: 8,
+          height: 44,
+          background: COLORS.bgSubtle,
+          borderBottom: `1px solid ${COLORS.border}`,
           display: "flex",
           alignItems: "center",
-          gap: 8,
-          padding: "0 12px",
-          fontSize: 13.5,
-          color: COLORS.textMuted,
-        }}
-      >
-        <Icon name="lock" size={14} color={COLORS.green} />
-        {url}
-      </div>
-    </div>
-    <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-      <div
-        style={{
-          width: leftWidth,
+          padding: "0 16px",
+          gap: 16,
           flexShrink: 0,
-          background: COLORS.bg,
-          borderRight: `1px solid ${COLORS.border}`,
-          display: "flex",
-          flexDirection: "column",
-          padding: 16,
-          gap: 12,
-          position: "relative",
+          opacity: chromeP,
+          transform: chromeP < 1 ? `translateY(${(1 - chromeP) * -46}px)` : undefined,
         }}
       >
-        {left}
+        <div style={{ display: "flex", gap: 8 }}>
+          {["#ff5f57", "#febc2e", "#28c840"].map((c) => (
+            <div key={c} style={{ width: 12, height: 12, borderRadius: "50%", background: c }} />
+          ))}
+        </div>
+        <div
+          style={{
+            flex: 1,
+            maxWidth: 460,
+            height: 27,
+            background: COLORS.bgInput,
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "0 12px",
+            fontSize: 13.5,
+            color: COLORS.textMuted,
+          }}
+        >
+          <Icon name="lock" size={14} color={COLORS.green} />
+          {url}
+        </div>
       </div>
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          background: COLORS.dBgPrimary,
-          position: "relative",
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "center",
-          padding: 26,
-          overflow: "hidden",
-        }}
-      >
-        {right}
+      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+        <div
+          style={{
+            width: leftWidth,
+            flexShrink: 0,
+            background: COLORS.bg,
+            borderRight: `1px solid ${COLORS.border}`,
+            display: "flex",
+            flexDirection: "column",
+            padding: 16,
+            gap: 12,
+            position: "relative",
+            opacity: leftP,
+            transform: leftP < 1 ? `translateX(${(1 - leftP) * -72}px)` : undefined,
+          }}
+        >
+          {left}
+        </div>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: COLORS.dBgPrimary,
+            position: "relative",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            padding: 26,
+            overflow: "hidden",
+          }}
+        >
+          {right}
+        </div>
       </div>
+      {overlay}
     </div>
-    {overlay}
-  </div>
-);
+  );
+};
 
 /* ── Action bar (real labels from Builder.tsx) ───────────────────────────── */
 
@@ -124,7 +159,8 @@ const BarBtn: React.FC<{
       alignItems: "center",
       gap: 7,
       height: 34,
-      padding: children ? "0 13px" : "0 9px",
+      padding: children ? "0 12px" : "0 9px",
+      boxSizing: "border-box",
       borderRadius: 9,
       background: primary ? COLORS.blurple : COLORS.bgInput,
       border: primary ? "none" : `1px solid ${COLORS.border}`,
@@ -148,7 +184,7 @@ export const ActionBar: React.FC<{
   glowRestore?: boolean;
   glowMore?: boolean;
 }> = ({ sendLabel = "Send", glowSend = false, glowRestore = false, glowMore = false }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+  <div style={{ width: "100%", display: "flex", alignItems: "center", gap: 7 }}>
     <div
       style={{
         width: 34,
@@ -184,7 +220,14 @@ export const ActionBar: React.FC<{
 /** Pane header — the real app has ONE Components pane (message identity lives
  *  inside it, at the bottom of the tree), so no tab row to switch. */
 export const AppTabs: React.FC = () => (
-  <div style={{ display: "flex", gap: 18, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 9 }}>
+  <div
+    style={{
+      display: "flex",
+      gap: 18,
+      borderBottom: `1px solid ${COLORS.border}`,
+      paddingBottom: 9,
+    }}
+  >
     <span
       style={{
         fontFamily: INTER,
@@ -247,10 +290,19 @@ export const TreeRow: React.FC<TreeNodeDef & { reveal?: number }> = ({
         position: "relative",
       }}
     >
-      <span style={{ color: sel ? COLORS.green : COLORS.textMuted, fontSize: 16, width: 20, textAlign: "center" }}>
+      <span
+        style={{
+          color: sel ? COLORS.green : COLORS.textMuted,
+          fontSize: 16,
+          width: 20,
+          textAlign: "center",
+        }}
+      >
         {icon}
       </span>
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {label}
+      </span>
       {chip && (
         <span
           style={{
@@ -320,7 +372,10 @@ export const AddComponentBtn: React.FC<{ glow?: boolean }> = ({ glow = false }) 
 
 /* ── Inspector ───────────────────────────────────────────────────────────── */
 
-export const InspectorCard: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+export const InspectorCard: React.FC<{ title: string; children: React.ReactNode }> = ({
+  title,
+  children,
+}) => (
   <div
     style={{
       background: COLORS.bgElevated,
@@ -332,7 +387,15 @@ export const InspectorCard: React.FC<{ title: string; children: React.ReactNode 
       gap: 11,
     }}
   >
-    <div style={{ fontFamily: INTER, fontSize: 12.5, fontWeight: 800, letterSpacing: "0.05em", color: COLORS.textSubtle }}>
+    <div
+      style={{
+        fontFamily: INTER,
+        fontSize: 12.5,
+        fontWeight: 800,
+        letterSpacing: "0.05em",
+        color: COLORS.textSubtle,
+      }}
+    >
       {title.toUpperCase()}
     </div>
     {children}
@@ -345,7 +408,9 @@ export const Field: React.FC<{ label: string; children: React.ReactNode; grow?: 
   grow = false,
 }) => (
   <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: grow ? 1 : undefined }}>
-    <span style={{ fontFamily: INTER, fontSize: 12.5, fontWeight: 700, color: COLORS.textMuted }}>{label}</span>
+    <span style={{ fontFamily: INTER, fontSize: 12.5, fontWeight: 700, color: COLORS.textMuted }}>
+      {label}
+    </span>
     <div
       style={{
         minHeight: 36,
@@ -455,7 +520,17 @@ export const PluginCard: React.FC<{
       </div>
       <div style={{ fontWeight: 800, fontSize: 17.5, color: COLORS.text }}>{name}</div>
       {added && (
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, color: COLORS.green, fontSize: 13.5, fontWeight: 800 }}>
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            color: COLORS.green,
+            fontSize: 13.5,
+            fontWeight: 800,
+          }}
+        >
           <Icon name="check" size={16} color={COLORS.green} />
           Attached
         </div>

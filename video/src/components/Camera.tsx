@@ -1,10 +1,5 @@
 import React from "react";
-import {
-  AbsoluteFill,
-  useCurrentFrame,
-  useVideoConfig,
-  Easing,
-} from "remotion";
+import { AbsoluteFill, useCurrentFrame, useVideoConfig, Easing } from "remotion";
 
 /**
  * A virtual camera that lives in world space. Scenes lay their content out as a
@@ -12,11 +7,9 @@ import {
  * reframes *within* that frame to focus the viewer on whatever is being narrated.
  *
  * A keyframe describes the world point the camera should center `{x, y}` and how
- * far it is zoomed `s`. The camera eases between consecutive keyframes, so a list
- * of keyframes reads as a continuous, motivated camera move. A little perpetual
- * handheld drift keeps even "static" shots breathing, and fast moves pick up a
- * touch of motion blur — the two things that separate a real camera from a CSS
- * transform.
+ * far it is zoomed `s`. Product UI defaults to a locked, crisp camera; brand
+ * scenes opt into subtle drift explicitly. This keeps small text stable and makes
+ * every move feel editorial rather than handheld.
  */
 export type Shot = {
   /** Scene-relative frame at which this keyframe is reached. */
@@ -85,7 +78,7 @@ export const Camera: React.FC<{
   /** Motion-blur strength multiplier (0 to disable). */
   blur?: number;
   children: React.ReactNode;
-}> = ({ shots, drift = 5, phase = 0, blur = 1, children }) => {
+}> = ({ shots, drift = 0, phase = 0, blur = 0, children }) => {
   const frame = useCurrentFrame();
   const { width: W, height: H } = useVideoConfig();
 

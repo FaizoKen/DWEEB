@@ -42,6 +42,19 @@ export const smoothstep = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
+// Audio rebuilds are production artifacts: the same source should make the
+// same waveform. A tiny xorshift generator replaces Math.random() for noise
+// layers so SFX, fallback music, hashes, and loudness measurements are stable.
+const noiseGenerator = (seed) => {
+  let state = seed >>> 0;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return ((state >>> 0) / 0xffffffff) * 2 - 1;
+  };
+};
+
 // ─── Music score ─────────────────────────────────────────────────────────────
 // A calm ambient bed for the launch film: warm chord pads + a sustained sub
 // bass, nothing else. NO percussion of any kind — no kick, hats, claps, arps
@@ -67,7 +80,9 @@ function duckCurve(voWindows, duckTo) {
   return (t) => {
     let active = 0;
     for (const w of voWindows) {
-      const on = smoothstep(w.start - 0.25, w.start + 0.1, t) * (1 - smoothstep(w.end - 0.15, w.end + 0.45, t));
+      const on =
+        smoothstep(w.start - 0.25, w.start + 0.1, t) *
+        (1 - smoothstep(w.end - 0.15, w.end + 0.45, t));
       active = Math.max(active, on);
     }
     return 1 - active * (1 - duckTo);
@@ -86,9 +101,25 @@ export function buildMusicFromTrack(OUT, srcPath, totalSec, voWindows = []) {
   const tmp = path.join(OUT, "_track-decode.tmp.wav");
   const res = spawnSync(
     "npx",
-    ["remotion", "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-     "-i", srcPath, "-t", totalSec.toFixed(3),
-     "-ac", "2", "-ar", String(SR), "-c:a", "pcm_s16le", tmp],
+    [
+      "remotion",
+      "ffmpeg",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      srcPath,
+      "-t",
+      totalSec.toFixed(3),
+      "-ac",
+      "2",
+      "-ar",
+      String(SR),
+      "-c:a",
+      "pcm_s16le",
+      tmp,
+    ],
     { maxBuffer: 1 << 30, shell: process.platform === "win32" },
   );
   if (res.status !== 0 || !fs.existsSync(tmp)) {
@@ -136,6 +167,7 @@ export function buildMusic(OUT, totalSec, cutSecs, marks, voWindows = []) {
   const R = new Float32Array(n);
 
   const duckAt = duckCurve(voWindows, 0.45);
+  const noise = noiseGenerator(0xdbee0001);
 
   const sectionAt = (t) => {
     let s = 0;
@@ -143,7 +175,10 @@ export function buildMusic(OUT, totalSec, cutSecs, marks, voWindows = []) {
     return s;
   };
 
-  let lpL = 0, lpR = 0, hpPrev = 0, hp = 0;
+  let lpL = 0,
+    lpR = 0,
+    hpPrev = 0,
+    hp = 0;
 
   for (let i = 0; i < n; i++) {
     const t = i / SR;
@@ -151,11 +186,12 @@ export function buildMusic(OUT, totalSec, cutSecs, marks, voWindows = []) {
     const chord = PROG[sec % PROG.length];
     const root = noteFreq(chord[0]);
 
-    let padL = 0, padR = 0;
+    let padL = 0,
+      padR = 0;
     for (let v = 0; v < chord.length; v++) {
       const f = noteFreq(chord[v]);
       const sh = 1 + 0.0016 * Math.sin(2 * Math.PI * 4.5 * t + v * 1.7);
-      const a = (0.5 / chord.length);
+      const a = 0.5 / chord.length;
       padL += Math.sin(2 * Math.PI * f * sh * t) * a;
       padR += Math.sin(2 * Math.PI * f * 1.004 * sh * t) * a;
     }
@@ -167,14 +203,14 @@ export function buildMusic(OUT, totalSec, cutSecs, marks, voWindows = []) {
     let riser = 0;
     if (t > riseSec && t < ctaSec + 0.05) {
       const rp = clamp01((t - riseSec) / Math.max(0.001, ctaSec - riseSec));
-      riser = (Math.random() * 2 - 1) * rp * rp * rp * 0.2;
+      riser = noise() * rp * rp * rp * 0.2;
     }
     let impact = 0;
     if (t >= ctaSec && t < ctaSec + 1.4) {
       const ip = t - ctaSec;
       impact =
         Math.sin(2 * Math.PI * (72 - ip * 30) * ip) * Math.exp(-ip * 3.6) * 0.62 +
-        (Math.random() * 2 - 1) * Math.exp(-ip * 22) * 0.22;
+        noise() * Math.exp(-ip * 22) * 0.22;
     }
 
     const padLift = 1 + 0.25 * smoothstep(ctaSec - 0.1, ctaSec + 0.8, t); // chords bloom on the CTA
@@ -186,7 +222,8 @@ export function buildMusic(OUT, totalSec, cutSecs, marks, voWindows = []) {
 
     const fade = smoothstep(0, 2, t) * smoothstep(0, 2.6, totalSec - t);
     const duck = duckAt(t);
-    mL *= fade * duck; mR *= fade * duck;
+    mL *= fade * duck;
+    mR *= fade * duck;
 
     L[i] = Math.tanh(mL * 1.1) * 0.82;
     R[i] = Math.tanh(mR * 1.1) * 0.82;
@@ -197,7 +234,8 @@ export function buildMusic(OUT, totalSec, cutSecs, marks, voWindows = []) {
     lpL += a * (L[i] - lpL);
     lpR += a * (R[i] - lpR);
     const x = lpL * 0.92;
-    hp = x - hpPrev + 0.999 * hp; hpPrev = x;
+    hp = x - hpPrev + 0.999 * hp;
+    hpPrev = x;
     L[i] = hp;
     R[i] = lpR * 0.92;
   }
@@ -210,14 +248,17 @@ export function buildMusic(OUT, totalSec, cutSecs, marks, voWindows = []) {
 export function buildWhoosh(OUT) {
   const dur = 0.55;
   const n = Math.floor(dur * SR);
-  const L = new Float32Array(n), R = new Float32Array(n);
+  const L = new Float32Array(n),
+    R = new Float32Array(n);
+  const noise = noiseGenerator(0xdbee0002);
   let lp = 0;
   for (let i = 0; i < n; i++) {
-    const t = i / SR, p = t / dur;
+    const t = i / SR,
+      p = t / dur;
     const env = Math.sin(Math.PI * p) ** 1.4;
-    const noise = Math.random() * 2 - 1;
+    const noiseSample = noise();
     const cut = 0.02 + 0.16 * Math.sin(Math.PI * p);
-    lp += cut * (noise - lp);
+    lp += cut * (noiseSample - lp);
     const tone = Math.sin(2 * Math.PI * (200 + 1400 * p) * t) * 0.08 * env;
     const s = (lp * 1.4 + tone) * env * 0.55;
     L[i] = s * (1 - p * 0.4);
@@ -230,14 +271,17 @@ export function buildWhoosh(OUT) {
 export function buildClick(OUT) {
   const dur = 0.12;
   const n = Math.floor(dur * SR);
-  const L = new Float32Array(n), R = new Float32Array(n);
+  const L = new Float32Array(n),
+    R = new Float32Array(n);
+  const noise = noiseGenerator(0xdbee0003);
   for (let i = 0; i < n; i++) {
     const t = i / SR;
     const env = Math.exp(-t * 90);
     const body = Math.sin(2 * Math.PI * 1300 * t) * env * 0.3;
-    const tick = (Math.random() * 2 - 1) * Math.exp(-t * 400) * 0.18;
+    const tick = noise() * Math.exp(-t * 400) * 0.18;
     const s = body + tick;
-    L[i] = s; R[i] = s;
+    L[i] = s;
+    R[i] = s;
   }
   writeWav(OUT, "click.wav", L, R);
   console.log("click.wav");
@@ -246,12 +290,16 @@ export function buildClick(OUT) {
 export function buildTick(OUT) {
   const dur = 0.05;
   const n = Math.floor(dur * SR);
-  const L = new Float32Array(n), R = new Float32Array(n);
+  const L = new Float32Array(n),
+    R = new Float32Array(n);
+  const noise = noiseGenerator(0xdbee0004);
   for (let i = 0; i < n; i++) {
     const t = i / SR;
-    const s = (Math.random() * 2 - 1) * Math.exp(-t * 500) * 0.22 +
+    const s =
+      noise() * Math.exp(-t * 500) * 0.22 +
       Math.sin(2 * Math.PI * 2200 * t) * Math.exp(-t * 300) * 0.12;
-    L[i] = s; R[i] = s;
+    L[i] = s;
+    R[i] = s;
   }
   writeWav(OUT, "tick.wav", L, R);
   console.log("tick.wav");
@@ -260,16 +308,22 @@ export function buildTick(OUT) {
 export function buildChime(OUT) {
   const dur = 0.7;
   const n = Math.floor(dur * SR);
-  const L = new Float32Array(n), R = new Float32Array(n);
-  const f1 = noteFreq(3), f2 = noteFreq(10);
+  const L = new Float32Array(n),
+    R = new Float32Array(n);
+  const f1 = noteFreq(3),
+    f2 = noteFreq(10);
   for (let i = 0; i < n; i++) {
     const t = i / SR;
     const n1 = Math.sin(2 * Math.PI * f1 * t) * Math.exp(-t * 5) * 0.3;
     const start2 = 0.11;
-    const n2 = t > start2 ? Math.sin(2 * Math.PI * f2 * (t - start2)) * Math.exp(-(t - start2) * 4) * 0.3 : 0;
+    const n2 =
+      t > start2
+        ? Math.sin(2 * Math.PI * f2 * (t - start2)) * Math.exp(-(t - start2) * 4) * 0.3
+        : 0;
     const shimmer = Math.sin(2 * Math.PI * f2 * 2 * t) * Math.exp(-t * 8) * 0.06;
     const s = n1 + n2 + shimmer;
-    L[i] = s; R[i] = s * 0.96;
+    L[i] = s;
+    R[i] = s * 0.96;
   }
   writeWav(OUT, "chime.wav", L, R);
   console.log("chime.wav");
@@ -278,12 +332,14 @@ export function buildChime(OUT) {
 export function buildPop(OUT) {
   const dur = 0.18;
   const n = Math.floor(dur * SR);
-  const L = new Float32Array(n), R = new Float32Array(n);
+  const L = new Float32Array(n),
+    R = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const t = i / SR;
     const env = Math.exp(-t * 40);
     const s = Math.sin(2 * Math.PI * (900 - t * 1500) * t) * env * 0.4;
-    L[i] = s; R[i] = s;
+    L[i] = s;
+    R[i] = s;
   }
   writeWav(OUT, "pop.wav", L, R);
   console.log("pop.wav");
@@ -295,14 +351,17 @@ export function buildPop(OUT) {
 export function buildRiser(OUT) {
   const dur = 1.2;
   const n = Math.floor(dur * SR);
-  const L = new Float32Array(n), R = new Float32Array(n);
+  const L = new Float32Array(n),
+    R = new Float32Array(n);
+  const noise = noiseGenerator(0xdbee0005);
   let lp = 0;
   for (let i = 0; i < n; i++) {
-    const t = i / SR, p = t / dur;
+    const t = i / SR,
+      p = t / dur;
     // gently filtered noise — low cutoff keeps it a soft "air" swell, not a hiss
-    const noise = Math.random() * 2 - 1;
+    const noiseSample = noise();
     const cut = 0.006 + 0.05 * p * p;
-    lp += cut * (noise - lp);
+    lp += cut * (noiseSample - lp);
     // a soft sweeping tone rising ~200 → ~620 Hz (kept low so it's warm)
     const tone = Math.sin(2 * Math.PI * (200 + 420 * p * p) * t) * 0.08 * p;
     const env = p * p * p; // hold back, then lift late
@@ -320,18 +379,24 @@ export function buildRiser(OUT) {
 export function buildImpact(OUT) {
   const dur = 1.5;
   const n = Math.floor(dur * SR);
-  const L = new Float32Array(n), R = new Float32Array(n);
+  const L = new Float32Array(n),
+    R = new Float32Array(n);
+  const noise = noiseGenerator(0xdbee0006);
   let air = 0;
   for (let i = 0; i < n; i++) {
     const t = i / SR;
     // soft low body: pitch drops 70 → ~40 Hz, gentle attack + medium decay
     const attack = Math.min(1, t / 0.012); // ~12ms fade-in removes the click
-    const body = Math.sin(2 * Math.PI * (70 - 30 * Math.min(1, t / 0.6)) * t) * Math.exp(-t * 4.2) * 0.5 * attack;
+    const body =
+      Math.sin(2 * Math.PI * (70 - 30 * Math.min(1, t / 0.6)) * t) *
+      Math.exp(-t * 4.2) *
+      0.5 *
+      attack;
     // warm sub reinforcement
     const sub = Math.sin(2 * Math.PI * 44 * t) * Math.exp(-t * 5) * 0.3 * attack;
     // a soft airy tail that swells then fades (no transient crack)
-    const noise = Math.random() * 2 - 1;
-    air += 0.02 * (noise - air);
+    const noiseSample = noise();
+    air += 0.02 * (noiseSample - air);
     const tail = air * Math.sin(Math.PI * Math.min(1, t / dur)) * 0.25;
     const s = body + sub + tail;
     L[i] = Math.tanh(s * 1.05) * 0.7;
@@ -347,7 +412,8 @@ export function buildImpact(OUT) {
 export function buildPing(OUT) {
   const dur = 0.5;
   const n = Math.floor(dur * SR);
-  const L = new Float32Array(n), R = new Float32Array(n);
+  const L = new Float32Array(n),
+    R = new Float32Array(n);
   const f1 = noteFreq(7); // E5
   const f2 = noteFreq(12); // A5
   for (let i = 0; i < n; i++) {
