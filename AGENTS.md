@@ -295,4 +295,10 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 ## CI
 
 - `web.yml` — FE build + Vitest + GitHub Pages deploy. `server.yml` — Rust fmt/clippy/test. `plugins-ci.yml` — fmt/clippy/test matrix over all 8 crates. `deploy.yml` — backend CD.
+- **Workflows must not depend on `api.github.com` at runtime** — calls to it from Actions
+  runners fail intermittently (HTML error page). This broke `setup-bun`'s version lookup
+  (fixed by pinning `bun-version` in `web.yml`) and `docker/metadata-action` in all 9 image
+  workflows (replaced 2026-07-17 with a shell tag-derivation step + static OCI labels; keep
+  the `sha-<short>` tag scheme — `deploy.yml` rollback relies on it). Don't reintroduce
+  actions that query the GitHub API mid-job.
 - Pushing `main` triggers deployments; never push unless the maintainer explicitly asks.
