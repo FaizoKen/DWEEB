@@ -81,7 +81,7 @@ const SearchPanel: React.FC<{
   return (
     <div
       style={{
-        width: vertical ? 620 : 550,
+        width: vertical ? 620 : 660,
         opacity: p,
         transform: `translateY(${(1 - p) * 34}px) scale(${0.95 + p * 0.05})`,
         transformOrigin: "center",
@@ -90,11 +90,11 @@ const SearchPanel: React.FC<{
     >
       <div
         style={{
-          height: vertical ? 94 : 88,
+          height: vertical ? 94 : 102,
           boxSizing: "border-box",
           display: "flex",
           alignItems: "center",
-          paddingLeft: vertical ? 26 : 24,
+          paddingLeft: vertical ? 26 : 28,
           overflow: "hidden",
           borderRadius: 999,
           background: "#fff",
@@ -103,14 +103,14 @@ const SearchPanel: React.FC<{
             "0 28px 85px rgba(0,0,0,.48), 0 8px 30px rgba(66,133,244,.13), inset 0 -1px rgba(0,0,0,.08)",
         }}
       >
-        <Icon name="search" size={vertical ? 25 : 23} color="#5f6368" />
+        <Icon name="search" size={vertical ? 25 : 27} color="#5f6368" />
         <div
           style={{
             flex: 1,
             minWidth: 0,
-            marginLeft: 17,
+            marginLeft: vertical ? 17 : 20,
             color: "#202124",
-            fontSize: vertical ? 21 : 20,
+            fontSize: vertical ? 21 : 24,
             fontWeight: 560,
             letterSpacing: "-.01em",
             whiteSpace: "nowrap",
@@ -121,7 +121,7 @@ const SearchPanel: React.FC<{
             <span
               style={{
                 display: "inline-block",
-                width: 2,
+                width: vertical ? 2 : 3,
                 height: "1em",
                 marginLeft: 2,
                 verticalAlign: "-.12em",
@@ -132,7 +132,7 @@ const SearchPanel: React.FC<{
         </div>
         <div
           style={{
-            width: vertical ? 84 : 78,
+            width: vertical ? 84 : 96,
             alignSelf: "stretch",
             display: "flex",
             alignItems: "center",
@@ -142,18 +142,18 @@ const SearchPanel: React.FC<{
             flexShrink: 0,
           }}
         >
-          <GoogleG size={vertical ? 38 : 35} />
+          <GoogleG size={vertical ? 38 : 44} />
         </div>
       </div>
       <div
         style={{
-          marginTop: 17,
+          marginTop: vertical ? 17 : 22,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          gap: 10,
+          gap: vertical ? 10 : 12,
           color: COLORS.textMuted,
-          fontSize: vertical ? 17 : 16,
+          fontSize: vertical ? 17 : 19,
           fontWeight: 700,
           letterSpacing: ".01em",
         }}
@@ -314,24 +314,43 @@ export const SceneCta: React.FC = () => {
               />
             </div>
 
+            {/* Soft light pool anchoring the action column in the dark field. */}
+            {!vert && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 880,
+                  top: 60,
+                  width: 920,
+                  height: 700,
+                  zIndex: 1,
+                  background: `radial-gradient(46% 40% at 50% 36%, ${COLORS.blurple}30, transparent 72%), radial-gradient(42% 34% at 52% 80%, ${COLORS.green}16, transparent 75%)`,
+                  opacity: mascotSettled * 0.9,
+                }}
+              />
+            )}
+
+            {/* Landscape: the mascot stands BEHIND the search bar (bar z wins),
+                so icon + bar + caption read as one action unit instead of two
+                small islands floating in empty space. */}
             <div
               style={{
                 position: "absolute",
-                left: vert ? 468 : 1290,
-                top: vert ? 565 : 92,
-                zIndex: 4,
+                left: vert ? 468 : 1180,
+                top: vert ? 565 : 198,
+                zIndex: vert ? 4 : 2,
                 opacity: mascotSettled,
-                transform: `translate(${(1 - mascotSettled) * 90}px, ${(1 - mascotSettled) * 34}px) rotate(${interpolate(mascotSettled, [0, 1], [12, vert ? -5 : -7])}deg) scale(${0.72 + mascotSettled * 0.28})`,
+                transform: `translate(${(1 - mascotSettled) * 90}px, ${(1 - mascotSettled) * 34}px) rotate(${interpolate(mascotSettled, [0, 1], [12, vert ? -5 : -6])}deg) scale(${0.72 + mascotSettled * 0.28})`,
               }}
             >
-              <Mascot size={vert ? 148 : 220} />
+              <Mascot size={vert ? 148 : 330} />
             </div>
 
             <div
               style={{
                 position: "absolute",
-                left: vert ? 20 : 1065,
-                top: vert ? 730 : 430,
+                left: vert ? 20 : 1010,
+                top: vert ? 730 : 482,
                 zIndex: 3,
               }}
             >
