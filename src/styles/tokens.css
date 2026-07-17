@@ -127,7 +127,13 @@
      app frame BEHIND the chat panel; the 2026-07-17 audit briefly recorded it
      as the chat bg, which made the preview canvas read too dark. */
   --discord-bg-primary: #1a1a1e;
-  --discord-bg-secondary: #242429;
+  /* Containers/file cards. Paired to the CANVAS, not to --discord-bg-primary:
+     the canvas is classic dark's chat bg (#313338), so this is classic dark's
+     own container bg — a Discord-native pair. The refresh's #242429 belongs on
+     the refresh's #1a1a1e chat surface; on the lighter canvas it read as a dark
+     hole, and carrying the refresh's *lighter-than-chat* lift across instead
+     (#393b40) read too light. Keep both halves of the pair from one theme. */
+  --discord-bg-secondary: #2b2d31;
   --discord-bg-tertiary: #1a1a1e;
   --discord-bg-mention: rgba(88, 100, 242, 0.24);
   --discord-bg-mention-soft: rgba(88, 101, 242, 0.15);

@@ -77,8 +77,18 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   same day — both read too dark beside the editor): every preview *canvas* (the surface the
   message renders on — preview pane, mini preview, gallery/add-menu thumbnails, Activity
   skeleton) uses `--app-preview-bg` (#313338, classic Discord dark's chat bg);
-  `--discord-bg-primary` stays the measured #1a1a1e and everything *inside* the message keeps
-  the measured tokens. Don't re-point the canvases back during a fidelity audit. Workflow (2026-07-17 audit): drive the
+  `--discord-bg-primary` stays the measured #1a1a1e. Everything *inside* the message keeps the
+  measured tokens **except** `--discord-bg-secondary` (containers, file cards) = **#2b2d31**,
+  which is **paired to the canvas, not to `--discord-bg-primary`** (maintainer, 2026-07-17):
+  since the canvas is *classic* dark's chat bg, the container is *classic* dark's own container
+  bg — still a Discord-native pair, just from the theme the canvas came from. **Keep both halves
+  of the pair in one theme.** The refresh's measured #242429 is correct only on the refresh's
+  #1a1a1e chat surface; on #313338 it reads as a **dark hole** (1.222:1, and inverted — the
+  refresh container is *lighter* than its chat surface, classic's is *darker*). Rebasing the
+  refresh's lighter-than-chat lift onto the canvas instead was also tried and rejected the same
+  day as **too light** (#393b40, ratio-matched to 1.128:1). Re-measuring this back to #242429 is
+  the bug, not the fix; if the canvas deviation is ever dropped, drop this one with it. Don't
+  re-point the canvases back during a fidelity audit. Workflow (2026-07-17 audit): drive the
   editor via `import("/src/core/state/messageStore.ts")` + `attachEditorFields` on a Vite dev tab,
   post the same JSON to a test webhook with `?with_components=true`, then read Discord's rendered
   DOM/`getComputedStyle` (convert its `oklab()` colors via a canvas) rather than eyeballing
