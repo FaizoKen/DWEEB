@@ -54,7 +54,7 @@ import { PostSuccess } from "./PostSuccess";
 import { PlanBadge } from "@/features/plan/PlanBadge";
 import { fetchActivityPlan } from "@/core/activity/api";
 import { browserTimezone, formatInstant } from "@/core/schedule/recurrence";
-import { measureNeededWidth } from "@/lib/measureBarFit";
+import { MAX_INLINE_UTILITIES, measureNeededWidth } from "@/lib/measureBarFit";
 import { useBarWidth } from "@/lib/useBarWidth";
 import type { PlanInfo } from "@/core/guild/api";
 import styles from "./ActivityBar.module.css";
@@ -330,10 +330,13 @@ export function ActivityBar() {
   // where it sits inline. When compact it rides in the overflow menu instead.
   const showView = canUpdate && !botMissing && !blockedFromPosting;
 
-  // Utility actions — inline icon buttons while the bar has room. The fit
-  // check below folds them into the overflow menu one at a time from the END
-  // of this list, so the least-reached-for actions leave the row first and a
-  // near-fit never strands a wide empty gap where a whole cluster used to be.
+  // Utility actions, most-reached-for first. Only the first
+  // MAX_INLINE_UTILITIES get an inline icon; the rest ("Open on web",
+  // JSON, feedback — occasional, and hard to tell apart as bare glyphs) are
+  // overflow-menu rows at every width. The fit check below folds the inline
+  // few away too as the bar narrows, one at a time from the END of the inline
+  // run, so the least-reached-for icon leaves the row first and a near-fit
+  // never strands a wide empty gap where a whole cluster used to be.
   const utilities: UtilityAction[] = [
     {
       key: "save",
@@ -401,25 +404,31 @@ export function ActivityBar() {
   ];
 
   // The collapse ladder: step 1 tightens the row (`data-compact`), steps
-  // 2..N+1 fold the N utility icons into the overflow menu one at a time, and
-  // — in the update state — a final step folds the inline "View" button too.
-  const foldMax = utilities.length;
+  // 2..N+1 fold the N inline utility icons into the overflow menu one at a
+  // time, and — in the update state — a final step folds the inline "View"
+  // button too. N is the capped inline run, not the whole list: the tail past
+  // the cap is already in the menu and has no ladder step to fold on.
+  const inlineMax = Math.min(utilities.length, MAX_INLINE_UTILITIES);
+  const foldMax = inlineMax;
   const maxLevel = 1 + foldMax + (showView ? 1 : 0);
   const tightened = level >= 1;
   const foldedCount = Math.min(Math.max(level - 1, 0), foldMax);
-  const inlineUtilities = utilities.slice(0, foldMax - foldedCount);
-  const foldedUtilities = utilities.slice(foldMax - foldedCount);
+  const inlineCount = inlineMax - foldedCount;
+  const inlineUtilities = utilities.slice(0, inlineCount);
+  const foldedUtilities = utilities.slice(inlineCount);
   const viewFolded = showView && level >= 1 + foldMax + 1;
 
   // A signature of everything that changes the *inline* bar's width, so a state
-  // flip (Post↔Update revealing New/View, the plan pill appearing, feedback
-  // toggling, the destination renaming) re-runs the fit measurement below — not
-  // just a raw width change. The channel name matters because the left reserve
-  // tracks the cluster's natural width; the server id because a DM launch's picker
+  // flip (Post↔Update revealing New/View, the plan pill appearing, the
+  // destination renaming) re-runs the fit measurement below — not just a raw
+  // width change. The channel name matters because the left reserve tracks the
+  // cluster's natural width; the server id because a DM launch's picker
   // collapses to its icon once a server is chosen ("Pick a server" until then) and
-  // the channel picker only appears beside it from that point on.
+  // the channel picker only appears beside it from that point on. Feedback is
+  // absent: it sits past the inline cap, so toggling it only ever adds or
+  // removes a menu row.
   const planVisible = !!(plan && !botMissing && targetGuildId);
-  const layoutKey = `${canUpdate}|${botMissing}|${blockedFromPosting}|${showView}|${planVisible}|${feedbackOn}|${isDm}|${targetGuildId ?? ""}|${channelName ?? ""}`;
+  const layoutKey = `${canUpdate}|${botMissing}|${blockedFromPosting}|${showView}|${planVisible}|${isDm}|${targetGuildId ?? ""}|${channelName ?? ""}`;
 
   // Measure whether the inline layout fits, collapsing one step when it can't:
   // on any width/content change, optimistically restore the full row, then —
@@ -576,18 +585,18 @@ export function ActivityBar() {
           </>
         ) : null}
 
-        {/* Utility actions — saving/browsing the server library, restoring a
-            message DWEEB posted here, and jumping to the full web app. Library
-            actions are server-scoped (no channel needed); Restore reads through
-            the channel's webhook. All three server actions are gated on Manage
-            Webhooks. "Open on web" hands the current draft to the web app for
-            browser-local saves, account, and other full-site management.
+        {/* Utility actions — the everyday few only: saving/browsing the server
+            library and restoring a message DWEEB posted here. Library actions
+            are server-scoped (no channel needed); Restore reads through the
+            channel's webhook. All three are gated on Manage Webhooks. The rest
+            of the list ("Open on web", which hands the current draft to the web
+            app for browser-local saves and account management; JSON; feedback)
+            is menu-only at every width — see the cap above the list.
 
             When the bar is too narrow to hold every control at full size, the
-            fit check folds these into a single overflow menu one at a time —
+            fit check folds even these into the overflow menu one at a time —
             which can also absorb the update state's "View" — keeping the row
-            to the destination, undo/redo, and the primary action. Wider bars
-            show them inline. */}
+            to the destination, undo/redo, and the primary action. */}
         {inlineUtilities.map((action) => (
           <IconButton
             key={action.key}

@@ -17,6 +17,16 @@
  *  over), while a long one truncates gracefully once the actions need the room. */
 export const LEFT_MAX_RESERVE = 150;
 
+/** Ceiling on how many utility icons either bar shows inline, however much room
+ *  it has. Fit is the floor, not the rule: a wide bar *could* hold six icons in
+ *  a row, but a row of undifferentiated glyphs stops being scannable long before
+ *  it stops fitting. Only the first {@link MAX_INLINE_UTILITIES} of a bar's
+ *  `utilities` list earn a spot; the tail lives in the overflow menu at every
+ *  width, where it reads as labelled text. Order the list accordingly — the
+ *  everyday actions first. The fit ladder still folds these last few away on top
+ *  of the cap as the bar narrows. */
+export const MAX_INLINE_UTILITIES = 3;
+
 export function measureNeededWidth(
   bar: HTMLElement,
   left: HTMLElement,

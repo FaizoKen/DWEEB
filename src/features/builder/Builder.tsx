@@ -55,7 +55,7 @@ import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import { useInstallStore } from "@/features/install/installStore";
 import { useInstallState } from "@/features/install/useInstallState";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
-import { measureNeededWidth } from "@/lib/measureBarFit";
+import { MAX_INLINE_UTILITIES, measureNeededWidth } from "@/lib/measureBarFit";
 import { useBarWidth } from "@/lib/useBarWidth";
 import styles from "./Builder.module.css";
 
@@ -264,13 +264,14 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
   // the Activity to function). Empty string ⇒ the entry point is hidden.
   const collaborateUrl = isProxyConfigured() ? activityLaunchUrl() : "";
 
-  // Utility actions — inline icon buttons while the bar has room. The fit
-  // check below folds them into the "More" overflow one at a time from the END
-  // of this list, so the least-reached-for actions leave the row first and a
-  // near-fit never strands a wide empty gap where a whole cluster used to be.
-  // Deliberately short: only the three everyday actions earn an inline icon.
-  // Share and Send feedback live permanently in the "More" menu below, keeping
-  // the header quiet.
+  // Utility actions, most-reached-for first — inline icon buttons while the bar
+  // has room. The fit check below folds them into the "More" overflow one at a
+  // time from the END of this list, so the least-reached-for actions leave the
+  // row first and a near-fit never strands a wide empty gap where a whole
+  // cluster used to be. Deliberately short: only the everyday actions earn an
+  // inline icon, and MAX_INLINE_UTILITIES caps the run at three however wide the
+  // bar gets. Share, JSON, and Send feedback live permanently in the "More" menu
+  // below, keeping the header quiet.
   const utilities: UtilityAction[] = [
     {
       key: "save",
@@ -306,19 +307,23 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
   //                   and the overflow trigger drop to the small control size,
   //                   and the secondary "New" collapses to its icon (all via
   //                   the `data-compact` flag) — nothing is hidden yet
-  //   steps 2..N+1  — the N utility icons fold into the "More" overflow menu
-  //                   one at a time, from the end of `utilities`
+  //   steps 2..N+1  — the N inline utility icons fold into the "More" overflow
+  //                   menu one at a time, from the end of the inline run
   //   final step    — the primary Send/Update button drops to its icon
   // We measure the real control widths instead of guessing a breakpoint, so the
   // full row survives on any width — viewport *or* pane — that has room for it.
   // Mirrors the Activity bar's own fit check (see ActivityBar).
   const [level, setLevel] = useState(0);
-  const foldMax = utilities.length;
+  // N is the capped inline run, not the whole list: anything past the cap is
+  // already a "More" row and has no ladder step to fold on.
+  const inlineMax = Math.min(utilities.length, MAX_INLINE_UTILITIES);
+  const foldMax = inlineMax;
   const maxLevel = 1 + foldMax + 1;
   const tightened = level >= 1;
   const foldedCount = Math.min(Math.max(level - 1, 0), foldMax);
-  const inlineUtilities = utilities.slice(0, foldMax - foldedCount);
-  const foldedUtilities = utilities.slice(foldMax - foldedCount);
+  const inlineCount = inlineMax - foldedCount;
+  const inlineUtilities = utilities.slice(0, inlineCount);
+  const foldedUtilities = utilities.slice(inlineCount);
   const primaryIconOnly = level >= maxLevel;
   // Bumped whenever the bar's *width* changes; drives a fresh measurement pass.
   // (Width only — collapsing changes the bar's content, not its width, so this
