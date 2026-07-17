@@ -27,6 +27,7 @@ import { IconButton } from "@/ui/IconButton";
 import {
   BookmarkIcon,
   BracesIcon,
+  ExternalLinkIcon,
   FilmIcon,
   HistoryIcon,
   InfoIcon,
@@ -57,6 +58,7 @@ import { useInstallState } from "@/features/install/useInstallState";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
 import { MAX_INLINE_UTILITIES, measureNeededWidth } from "@/lib/measureBarFit";
 import { useBarWidth } from "@/lib/useBarWidth";
+import { openDiscordLink } from "@/lib/discordDeepLink";
 import styles from "./Builder.module.css";
 
 /** One utility action in the bar's right cluster: an inline icon button while
@@ -199,6 +201,21 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
     !parked &&
     (!destActive || !barChannelId || !restoredChannelId || restoredChannelId === barChannelId);
 
+  // The linked message's Discord jump link — for the "View the posted message"
+  // affordance carried over from the Activity bar (where it rides `openLastPost`).
+  // Built from the message's home server + its channel; a thread post links under
+  // its thread id, matching how Discord and the follow-up edit address it (see the
+  // Activity's `thread_id || channel_id` rule). Null — and the affordance hidden —
+  // whenever any piece is unknown (e.g. a Restore-tab origin with no saved guild),
+  // so the link can never point somewhere wrong. Only meaningful in the update
+  // state, so it's gated on `isUpdate` too.
+  const linkSeg = restoredFrom?.threadId || restoredChannelId;
+  const messageUrl =
+    isUpdate && restoredFrom?.guildId && linkSeg
+      ? `https://discord.com/channels/${restoredFrom.guildId}/${linkSeg}/${restoredFrom.messageId}`
+      : null;
+  const showView = messageUrl != null;
+
   // Seed the chip once per server, so it isn't a blank "Pick a channel" for
   // returning users: the linked message's channel, else the channel of the
   // most recent saved webhook in this server. Only while nothing is picked for
@@ -315,15 +332,22 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
   // Mirrors the Activity bar's own fit check (see ActivityBar).
   const [level, setLevel] = useState(0);
   // N is the capped inline run, not the whole list: anything past the cap is
-  // already a "More" row and has no ladder step to fold on.
+  // already a "More" row and has no ladder step to fold on. The ladder ends with
+  // one extra step in the update state — folding the inline "View the posted
+  // message" button into the overflow menu — before the final drop-primary step,
+  // mirroring the Activity bar's own `viewFolded` step.
   const inlineMax = Math.min(utilities.length, MAX_INLINE_UTILITIES);
   const foldMax = inlineMax;
-  const maxLevel = 1 + foldMax + 1;
+  const foldViewStep = showView ? 1 : 0;
+  const maxLevel = 1 + foldMax + foldViewStep + 1;
   const tightened = level >= 1;
   const foldedCount = Math.min(Math.max(level - 1, 0), foldMax);
   const inlineCount = inlineMax - foldedCount;
   const inlineUtilities = utilities.slice(0, inlineCount);
   const foldedUtilities = utilities.slice(inlineCount);
+  // "View" folds once every utility icon already has (it sits closest to the
+  // primary action, so it's the last icon to leave the row).
+  const viewFolded = showView && level >= 1 + foldMax + 1;
   const primaryIconOnly = level >= maxLevel;
   // Bumped whenever the bar's *width* changes; drives a fresh measurement pass.
   // (Width only — collapsing changes the bar's content, not its width, so this
@@ -336,7 +360,7 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
   // appearing or renaming) re-runs the fit measurement below — not just a raw
   // width change. The channel name matters because the left reserve tracks the
   // cluster's natural width. (Feedback is menu-only, so it never moves the bar.)
-  const layoutKey = `${isUpdate}|${planVisible}|${destActive}|${barChannel?.name ?? ""}`;
+  const layoutKey = `${isUpdate}|${showView}|${planVisible}|${destActive}|${barChannel?.name ?? ""}`;
 
   // On every width or content change, optimistically restore the full row,
   // then collapse one step at a time until both clusters fit on one row. The
@@ -434,8 +458,22 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
           >
             {(close) => (
               <>
-                {foldedUtilities.length > 0 ? (
+                {viewFolded || foldedUtilities.length > 0 ? (
                   <>
+                    {/* The update state's "View" folds in here first, above the
+                        folded utility icons — the tightest bars keep only the
+                        destination, undo/redo, and the primary action inline. */}
+                    {viewFolded ? (
+                      <MenuItem
+                        icon={<ExternalLinkIcon />}
+                        onSelect={() => {
+                          close();
+                          if (messageUrl) openDiscordLink(messageUrl);
+                        }}
+                      >
+                        View posted message
+                      </MenuItem>
+                    ) : null}
                     {foldedUtilities.map((action) => (
                       <MenuItem
                         key={action.key}
@@ -555,6 +593,21 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
 
           {isUpdate ? (
             <>
+              {/* View the message this draft is linked to, in Discord — opens the
+                  desktop app when installed, else the web (see openDiscordLink).
+                  Carried over from the Activity bar; on the tightest bars the fit
+                  check moves it into the overflow menu above (`viewFolded`), so
+                  it's only inline while there's room. */}
+              {showView && !viewFolded ? (
+                <IconButton
+                  label="View the posted message"
+                  onClick={() => {
+                    if (messageUrl) openDiscordLink(messageUrl);
+                  }}
+                >
+                  <ExternalLinkIcon />
+                </IconButton>
+              ) : null}
               <Button
                 variant="secondary"
                 size="sm"
