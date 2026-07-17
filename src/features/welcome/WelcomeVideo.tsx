@@ -3,7 +3,7 @@
  *
  * Opened explicitly from More ▸ "Watch the intro". The
  * film (rendered from `video/`, compressed web cuts in `public/media/`) tells
- * the whole product story in ~90 seconds with kinetic captions burned in — so
+ * the whole product story in under a minute with kinetic captions burned in — so
  * it starts muted (autoplay policy) and still lands, with one tap for sound.
  *
  * Layout picks the cut for the screen it's on: the landscape 16:9 master on
