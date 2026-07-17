@@ -218,6 +218,7 @@ export function htmlDocument(opts: {
       <p class="muted">
         <a href="${builderUrl}" data-analytics="${attr(opts.pageType)}" data-analytics-id="${attr(opts.pageId)}" data-analytics-location="footer">Open the builder</a> ·
         <a href="/discord-webhook-builder/">Webhook builder</a> ·
+        <a href="/discord-embed-builder/">Embed builder</a> ·
         <a href="/features/">Features</a> ·
         <a href="${TEMPLATES_INDEX_PATH}">All templates</a> ·
         <a href="/guides/">Guides</a> ·

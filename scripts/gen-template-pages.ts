@@ -26,12 +26,8 @@ import { resolveSeo, SITE, TEMPLATES_LASTMOD, type ResolvedSeo } from "./seo/con
 import { renderIndexPage, renderTemplatePage } from "./seo/layout";
 import { resolveAllFeatures, FEATURES_LASTMOD } from "./seo/features";
 import { renderFeaturePage, renderFeaturesIndexPage } from "./seo/features-layout";
-import { GUIDES, GUIDES_LASTMOD, PRODUCT_LANDING } from "./seo/guides";
-import {
-  renderGuidePage,
-  renderGuidesIndexPage,
-  renderProductLandingPage,
-} from "./seo/guides-layout";
+import { GUIDES, GUIDES_LASTMOD, LANDINGS } from "./seo/guides";
+import { renderGuidePage, renderGuidesIndexPage, renderLandingPage } from "./seo/guides-layout";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
@@ -190,7 +186,9 @@ async function main(): Promise<void> {
     await writePage(join("guides", guide.slug, "index.html"), renderGuidePage(guide, GUIDES));
   }
   await writePage(join("guides", "index.html"), renderGuidesIndexPage(GUIDES));
-  await writePage(join("discord-webhook-builder", "index.html"), renderProductLandingPage());
+  for (const landing of LANDINGS) {
+    await writePage(join(landing.slug, "index.html"), renderLandingPage(landing));
+  }
 
   // Full sitemap: home + legal + templates index + every template page.
   const sitemap = buildSitemap([
@@ -231,11 +229,11 @@ async function main(): Promise<void> {
       lastmod: guide.modified,
       images: [guide.ogImage],
     })),
-    {
-      loc: PRODUCT_LANDING.url,
+    ...LANDINGS.map((landing) => ({
+      loc: landing.url,
       lastmod: GUIDES_LASTMOD,
-      images: [PRODUCT_LANDING.ogImage],
-    },
+      images: [landing.ogImage],
+    })),
     {
       loc: `${SITE.origin}/privacy`,
       lastmod: PRIVACY_LASTMOD,
@@ -249,9 +247,10 @@ async function main(): Promise<void> {
   ]);
   await writeFile(join(DIST, "sitemap.xml"), sitemap, "utf8");
 
+  const sectionPages = 3 + LANDINGS.length; // templates/features/guides indexes + landings
   console.log(
     `[seo] generated ${all.length} templates + ${features.length} features + ${GUIDES.length} guides ` +
-      `+ 4 section/landing pages + home/legal + sitemap.xml (${all.length + features.length + GUIDES.length + 7} urls)`,
+      `+ ${sectionPages} section/landing pages + home/legal + sitemap.xml (${all.length + features.length + GUIDES.length + sectionPages + 3} urls)`,
   );
 }
 

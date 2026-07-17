@@ -25,7 +25,7 @@ const CTA_LOCATIONS = new Set(["hero", "body", "nav", "footer"]);
  * shipped CTA against this list so content additions cannot silently drift.
  */
 const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
-  landing: new Set(["discord-webhook-builder"]),
+  landing: new Set(["discord-webhook-builder", "discord-embed-builder"]),
   template: new Set([
     "index",
     "discord-components-v2-example",
@@ -84,6 +84,10 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
     "discord-embed-to-components-v2",
     "discord-webhook-security",
     "edit-discord-webhook-message",
+    "discord-text-formatting",
+    "discord-timestamp-format",
+    "discord-webhook-limits",
+    "discord-webhook-name-avatar",
   ]),
 };
 

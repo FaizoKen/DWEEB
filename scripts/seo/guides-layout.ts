@@ -2,7 +2,7 @@
 
 import { escapeHtml } from "./render-message";
 import { SITE } from "./content";
-import { GUIDES_LASTMOD, PRODUCT_LANDING, type GuidePage, type GuideSection } from "./guides";
+import { GUIDES_LASTMOD, type GuidePage, type GuideSection, type LandingPage } from "./guides";
 import { attr, breadcrumbLd, breadcrumbNav, htmlDocument, jsonLd } from "./layout";
 
 export const GUIDES_INDEX_PATH = "/guides/";
@@ -200,30 +200,32 @@ export function renderGuidesIndexPage(all: GuidePage[]): string {
   });
 }
 
-export function renderProductLandingPage(): string {
-  const page = PRODUCT_LANDING;
-  const cta = trackedAppPath("/", "landing", "discord-webhook-builder");
+export function renderLandingPage(page: LandingPage): string {
+  const cta = trackedAppPath("/", "landing", page.slug);
+  const learnCards = page.learn
+    .map(
+      (card) =>
+        `<a class="mini-card" href="${attr(card.href)}"><span class="mini-emoji">${escapeHtml(card.emoji)}</span><span class="mini-body"><span class="mini-name">${escapeHtml(card.name)}</span><span class="mini-cat">${escapeHtml(card.desc)}</span></span></a>`,
+    )
+    .join("\n        ");
   const body = `<main id="main-content" class="wrap">
-    ${breadcrumbNav([{ name: "Home", url: "/" }, { name: "Discord Webhook Builder" }])}
+    ${breadcrumbNav([{ name: "Home", url: "/" }, { name: page.breadcrumb }])}
     <article>
       <header class="hero product-hero">
-        <span class="chip">🛠️ Visual builder</span>
+        <span class="chip">${escapeHtml(page.chip)}</span>
         <h1>${escapeHtml(page.h1)}</h1>
-        <p class="lede">Design, preview and send modern Discord messages from one visual editor—including Containers, Sections, buttons, media and legacy-embed conversion.</p>
+        <p class="lede">${escapeHtml(page.lede)}</p>
         <div class="cta-row">
-          <a class="btn btn-primary btn-lg" href="${attr(cta)}" data-analytics="landing" data-analytics-id="discord-webhook-builder" data-analytics-location="hero">Build a Discord message free →</a>
+          <a class="btn btn-primary btn-lg" href="${attr(cta)}" data-analytics="landing" data-analytics-id="${attr(page.slug)}" data-analytics-location="hero">${escapeHtml(page.ctaLabel)} →</a>
           <a class="btn btn-ghost" href="/templates/">Browse templates</a>
         </div>
         <p class="cta-note">No account required for the core builder. Nothing posts until you confirm it.</p>
       </header>
       ${renderSections(page.sections)}
       <section class="block"><h2>Learn or start from a proven design</h2><div class="card-grid">
-        <a class="mini-card" href="/guides/discord-components-v2/"><span class="mini-emoji">📘</span><span class="mini-body"><span class="mini-name">Components V2 guide</span><span class="mini-cat">Types, JSON, limits and ownership</span></span></a>
-        <a class="mini-card" href="/guides/discord-embed-to-components-v2/"><span class="mini-emoji">🔄</span><span class="mini-body"><span class="mini-name">Embed to V2 converter</span><span class="mini-cat">Migrate legacy webhook JSON</span></span></a>
-        <a class="mini-card" href="/templates/"><span class="mini-emoji">📋</span><span class="mini-body"><span class="mini-name">Discord message templates</span><span class="mini-cat">Editable starting points</span></span></a>
-        <a class="mini-card" href="/features/"><span class="mini-emoji">⚙️</span><span class="mini-body"><span class="mini-name">Webhook tools and features</span><span class="mini-cat">Schedule, manage and add interactions</span></span></a>
+        ${learnCards}
       </div></section>
-      <section class="cta-band"><h2>Build the message now</h2><p>Use the visual editor free, or start from an editable Components V2 template.</p><a class="btn btn-primary btn-lg" href="${attr(cta)}" data-analytics="landing" data-analytics-id="discord-webhook-builder" data-analytics-location="body">Open DWEEB →</a></section>
+      <section class="cta-band"><h2>Build the message now</h2><p>Use the visual editor free, or start from an editable Components V2 template.</p><a class="btn btn-primary btn-lg" href="${attr(cta)}" data-analytics="landing" data-analytics-id="${attr(page.slug)}" data-analytics-location="body">Open DWEEB →</a></section>
     </article>
   </main>`;
   const webPage = {
@@ -245,16 +247,16 @@ export function renderProductLandingPage(): string {
     description: page.description,
     canonical: page.url,
     ogImage: page.ogImage,
-    imageAlt: "DWEEB visual Discord webhook and Components V2 message builder",
+    imageAlt: page.imageAlt,
     ogType: "website",
     pageType: "landing",
-    pageId: "discord-webhook-builder",
+    pageId: page.slug,
     modifiedTime: GUIDES_LASTMOD,
     jsonLd: [
       jsonLd(
         breadcrumbLd([
           { name: "Home", url: `${SITE.origin}/` },
-          { name: "Discord Webhook Builder", url: page.url },
+          { name: page.breadcrumb, url: page.url },
         ]),
       ),
       jsonLd(webPage),

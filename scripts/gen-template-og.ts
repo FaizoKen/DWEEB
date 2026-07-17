@@ -24,7 +24,7 @@ import sharp from "sharp";
 import { TEMPLATES } from "@/data/presets";
 import { resolveSeo } from "./seo/content";
 import { resolveAllFeatures } from "./seo/features";
-import { GUIDES, PRODUCT_LANDING } from "./seo/guides";
+import { GUIDES, LANDINGS } from "./seo/guides";
 import { ogCardSvg, type OgCardData } from "./seo/og-card";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -98,15 +98,17 @@ async function main(): Promise<void> {
     accent: ACCENT_BLURPLE,
     kicker: "Components V2 · Setup · Conversion · Security · Editing",
   });
-  await writeCard(OUT_LANDING, "discord-webhook-builder", {
-    title: PRODUCT_LANDING.h1,
-    category: "Visual editor · Free core builder",
-    accent: ACCENT_BLURPLE,
-    kicker: "Build · Preview · Send · Edit · Schedule",
-  });
+  for (const landing of LANDINGS) {
+    await writeCard(OUT_LANDING, landing.slug, {
+      title: landing.h1,
+      category: landing.ogCategory,
+      accent: ACCENT_BLURPLE,
+      kicker: landing.ogKicker,
+    });
+  }
 
   console.log(
-    `[seo] wrote ${GUIDES.length + 2} guide/landing OG cards${guidesOnly ? "" : " plus template/feature cards"}`,
+    `[seo] wrote ${GUIDES.length + 1 + LANDINGS.length} guide/landing OG cards${guidesOnly ? "" : " plus template/feature cards"}`,
   );
 }
 

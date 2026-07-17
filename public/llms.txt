@@ -13,7 +13,8 @@ Key facts:
 ## Docs
 
 - [Visual Discord webhook builder](https://dweeb.faizo.net/discord-webhook-builder/): product overview and direct path into the editor
-- [Discord webhook and Components V2 guides](https://dweeb.faizo.net/guides/): official-source-led setup, JSON, limits, conversion, security, and message-editing guides
+- [Discord embed builder](https://dweeb.faizo.net/discord-embed-builder/): embed-style design, legacy embed JSON import, and conversion to Components V2
+- [Discord webhook and Components V2 guides](https://dweeb.faizo.net/guides/): official-source-led setup, JSON, limits, rate limits, markdown/text formatting, timestamps, webhook name/avatar, conversion, security, and message-editing guides
 - [Features overview](https://dweeb.faizo.net/features/): every built-in feature — self roles, tickets, giveaways, forms, auto-replies, scheduled posts, webhook manager — each with a dedicated page
 - [Message template gallery](https://dweeb.faizo.net/templates/): ready-made Discord message templates (welcome, rules, announcements, reaction roles, and more), each openable in the builder
 - [Privacy policy](https://dweeb.faizo.net/privacy): what data DWEEB does and doesn't handle

@@ -217,6 +217,26 @@
         ]
       }
     </script>
+    <!-- The opt-in 90-second intro film (More ▸ Watch intro). Declaring it here
+         makes the home page eligible for video indexing/rich results; the file
+         itself stays lazy-mounted and never autoplays. Keep uploadDate in sync
+         with a re-shot film, not with app releases. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "VideoObject",
+        "@id": "https://dweeb.faizo.net/#intro-film",
+        "name": "DWEEB in 90 seconds — visual Discord message builder tour",
+        "description": "A quick tour of DWEEB: visually building a Discord Components V2 message with containers, buttons and media, watching the live preview, and sending it through a webhook.",
+        "thumbnailUrl": "https://dweeb.faizo.net/media/intro-poster.jpg",
+        "contentUrl": "https://dweeb.faizo.net/media/intro.mp4",
+        "uploadDate": "2026-07-05",
+        "duration": "PT1M19S",
+        "inLanguage": "en",
+        "about": { "@id": "https://dweeb.faizo.net/#webapp" },
+        "publisher": { "@id": "https://dweeb.faizo.net/#organization" }
+      }
+    </script>
   </head>
   <body>
     <noscript>
@@ -334,12 +354,30 @@
           reaction-role menus, giveaways, support tickets, and more. Open any one in the builder,
           edit it, and post it through a webhook.
         </p>
+        <h2>Guides and references</h2>
+        <p>
+          The <a href="/guides/" style="color: #00a8fc">guide library</a> covers the practical side:
+          <a href="/guides/discord-components-v2/" style="color: #00a8fc">Components V2</a>
+          types and limits,
+          <a href="/guides/how-to-create-a-discord-webhook/" style="color: #00a8fc"
+            >creating a webhook</a
+          >, <a href="/guides/discord-text-formatting/" style="color: #00a8fc">Discord markdown</a>,
+          <a href="/guides/discord-timestamp-format/" style="color: #00a8fc">dynamic timestamps</a>,
+          webhook
+          <a href="/guides/discord-webhook-limits/" style="color: #00a8fc">rate limits</a> and
+          <a href="/guides/discord-webhook-security/" style="color: #00a8fc">security</a>. Prefer a
+          task-focused entry point? Start from the
+          <a href="/discord-webhook-builder/" style="color: #00a8fc">webhook builder</a> or the
+          <a href="/discord-embed-builder/" style="color: #00a8fc">embed builder</a> overview.
+        </p>
         <p style="color: #b5bac1; font-size: 0.9rem">
           DWEEB by
           <a href="https://faizo.net" style="color: #00a8fc">Faizo</a>. ·
           <a href="/features/" style="color: #00a8fc">Features</a>
           ·
           <a href="/templates/" style="color: #00a8fc">Templates</a>
+          ·
+          <a href="/guides/" style="color: #00a8fc">Guides</a>
           ·
           <a href="/privacy" style="color: #00a8fc">Privacy Policy</a>
           ·

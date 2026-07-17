@@ -3,7 +3,7 @@
 import { LIMITS } from "@/core/schema/limits";
 import { SITE } from "./content";
 
-export const GUIDES_LASTMOD = "2026-07-15";
+export const GUIDES_LASTMOD = "2026-07-17";
 
 export interface GuideSection {
   heading: string;
@@ -55,7 +55,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Developer guide · Components V2",
     lede: "Components V2 turns a Discord message into a real layout tree: text, sections, thumbnails, media, separators, containers and interactive controls. This guide explains the model that Discord actually accepts and gives you an editable reference instead of a disconnected code fragment.",
     published: "2026-07-15",
-    modified: "2026-07-15",
+    modified: "2026-07-17",
     keywords: [
       "discord components v2",
       "discord components v2 example",
@@ -184,7 +184,11 @@ export const GUIDES: GuidePage[] = [
         url: "https://docs.discord.com/developers/components/using-message-components",
       },
     ],
-    related: ["discord-embed-to-components-v2", "how-to-create-a-discord-webhook"],
+    related: [
+      "discord-embed-to-components-v2",
+      "discord-text-formatting",
+      "discord-webhook-limits",
+    ],
     ctaLabel: "Open the editable Components V2 example",
     ctaPath: "/?template=showcase",
   }),
@@ -197,7 +201,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Practical guide · Discord webhooks",
     lede: "A Discord incoming webhook is the shortest path from a tool or script into one channel. It can set a display name and avatar and post rich Components V2 layouts, but its URL is also a credential. Set it up once, handle it like a password, and test with a message you can recognize.",
     published: "2026-07-15",
-    modified: "2026-07-15",
+    modified: "2026-07-17",
     keywords: [
       "how to create a discord webhook",
       "discord webhook url",
@@ -295,7 +299,12 @@ export const GUIDES: GuidePage[] = [
         url: "https://docs.discord.com/developers/resources/webhook#execute-webhook",
       },
     ],
-    related: ["discord-webhook-security", "discord-components-v2", "edit-discord-webhook-message"],
+    related: [
+      "discord-webhook-security",
+      "discord-webhook-name-avatar",
+      "discord-webhook-limits",
+      "edit-discord-webhook-message",
+    ],
     ctaLabel: "Build your first webhook message",
     ctaPath: "/",
   }),
@@ -604,14 +613,491 @@ export const GUIDES: GuidePage[] = [
     ctaLabel: "Restore a webhook message",
     ctaPath: "/?intent=restore",
   }),
+  guide({
+    slug: "discord-text-formatting",
+    title: "Discord Text Formatting: Markdown, Headers & More | DWEEB",
+    h1: "Discord Text Formatting & Markdown Guide",
+    description:
+      "Every Discord markdown rule that actually renders: bold, italics, headers, subtext, lists, spoilers, code blocks, masked links — plus the quirks that break them.",
+    eyebrow: "Reference · Markdown & formatting",
+    lede: "Discord's markdown looks familiar but behaves like no other dialect: italics care about spaces, ordered lists silently merge into bullet lists, and links trim their own punctuation. This reference covers the full syntax plus the edge cases DWEEB's preview parser is tested against real Discord clients for.",
+    published: "2026-07-17",
+    modified: "2026-07-17",
+    keywords: [
+      "discord text formatting",
+      "discord markdown",
+      "discord bold italic underline",
+      "discord headers",
+      "discord spoiler tag",
+    ],
+    sections: [
+      {
+        heading: "The complete formatting cheat sheet",
+        table: {
+          headers: ["Syntax", "Result", "Notes"],
+          rows: [
+            ["**text**", "Bold", "Also combines: ***bold italic***"],
+            ["*text* or _text_", "Italic", "See the quirks below — they are not interchangeable"],
+            ["__text__", "Underline", "Nest with italics: __*text*__"],
+            ["~~text~~", "Strikethrough", "Works inline anywhere"],
+            ["||text||", "Spoiler", "Hidden until the reader clicks it"],
+            ["`code`", "Inline code", "Use ``double backticks`` to contain a backtick"],
+            [
+              "```lang```",
+              "Code block",
+              "Multi-line; the language tag is kept but webhook messages get no highlighting",
+            ],
+            ["> text", "Quote", ">>> quotes every following line"],
+            ["# / ## / ### text", "Heading 1–3", "Must start the line"],
+            ["-# text", "Subtext", "Small, muted line — good for captions and footnotes"],
+            ["- text or 1. text", "Bullet / numbered list", "Indent two spaces for a nested level"],
+            [
+              "[label](https://…)",
+              "Masked link",
+              "Bot, webhook and embed text only — regular user chat posts it literally",
+            ],
+          ],
+        },
+      },
+      {
+        heading: "Quirks Discord actually enforces",
+        paragraphs: [
+          "These are the rules that make a message render differently in Discord than in a generic markdown previewer. DWEEB's preview parser is verified against the live Discord client for each of them, so what you see in the editor is what the channel gets.",
+        ],
+        bullets: [
+          "*italics* needs a non-space character right after the opening asterisk: `* text*` stays literal, which keeps math like 3 * 4 * 5 intact.",
+          "_underscore italics_ needs word boundaries — snake_case_names stay literal, while a space-padded _phrase_ formats.",
+          "Inline styles keep going across a line break: an unclosed **bold can format the next line.",
+          "Numbered items directly after a bullet list merge into that bullet list; separate them with a blank line to keep the numbers.",
+          "Bare URLs auto-link, but Discord drops trailing punctuation like .,:;\"')] from the link.",
+          "In Components V2 text, unicode emoji render slightly enlarged but never as jumbo emoji — an emoji-only message does not blow up the way it does in normal chat.",
+        ],
+      },
+      {
+        heading: "Mentions, emoji and other tokens",
+        table: {
+          headers: ["Token", "Renders as", "Where the ID comes from"],
+          rows: [
+            ["<@user_id>", "@user mention", "Copy ID with Developer Mode enabled"],
+            ["<@&role_id>", "@role mention", "Server settings → Roles → Copy ID"],
+            ["<#channel_id>", "#channel link", "Right-click the channel → Copy ID"],
+            [
+              "<:name:emoji_id>",
+              "Custom emoji",
+              "The bot/webhook needs no membership for unicode; custom emoji must resolve",
+            ],
+            [
+              "<a:name:emoji_id>",
+              "Animated custom emoji",
+              "Same as custom emoji, with the a: prefix",
+            ],
+            [
+              "<t:unix:style>",
+              "Dynamic timestamp",
+              "Shown in each reader's own timezone — see the timestamp guide",
+            ],
+          ],
+        },
+        paragraphs: [
+          "A custom emoji whose ID does not resolve renders as plain :name: text, so test custom emoji in the destination server before a big announcement.",
+        ],
+      },
+      {
+        heading: "Where each rule works",
+        paragraphs: [
+          "Regular user chat supports the core styles but not masked links. Webhook and bot messages support everything above, including masked links, in plain content and in Components V2 Text Displays. Legacy embed descriptions and fields support most inline styles and masked links, but headings and subtext belong to the modern surfaces.",
+          "Components V2 Text Displays are the most capable text surface: headings, subtext, lists, quotes, code, mentions and timestamps all render, and DWEEB counts every character against the message-wide budget as you type.",
+        ],
+      },
+      {
+        heading: "Escaping and plain text",
+        paragraphs: [
+          "Prefix a formatting character with a backslash to show it literally: \\*not italic\\*. For a block that must never format — a config sample, a token pattern, ASCII art — use a code block, which suppresses all markdown inside it.",
+        ],
+      },
+    ],
+    sources: [
+      {
+        label: "Discord support: Markdown Text 101",
+        url: "https://support.discord.com/hc/en-us/articles/210298617-Markdown-Text-101-Chat-Formatting-Bold-Italic-Underline",
+      },
+      {
+        label: "Discord API: Message formatting reference",
+        url: "https://docs.discord.com/developers/reference#message-formatting",
+      },
+    ],
+    related: ["discord-timestamp-format", "discord-components-v2", "discord-webhook-limits"],
+    ctaLabel: "Try the formatting live",
+    ctaPath: "/",
+  }),
+  guide({
+    slug: "discord-timestamp-format",
+    title: "Discord Timestamp Format: All Styles & How to Use | DWEEB",
+    h1: "Discord Timestamps: Every Format Code Explained",
+    description:
+      "Use Discord's <t:unix:style> timestamps to show any date in each reader's own timezone. All seven style codes with examples, plus a visual picker.",
+    eyebrow: "Reference · Dynamic timestamps",
+    lede: 'A Discord timestamp token like <t:1767225600:F> renders as a real date in every reader\'s own timezone and language — no more "8 PM EST / 1 AM UTC" tables in event posts. There are seven display styles, and the only input you need is a unix timestamp in seconds.',
+    published: "2026-07-17",
+    modified: "2026-07-17",
+    keywords: [
+      "discord timestamp format",
+      "discord timestamp",
+      "discord dynamic timestamp",
+      "discord timestamp generator",
+      "discord relative time",
+    ],
+    sections: [
+      {
+        heading: "How Discord timestamps work",
+        paragraphs: [
+          "The token is <t:UNIX> or <t:UNIX:STYLE>, where UNIX is a count of seconds since 1970-01-01 UTC and STYLE is one of seven single-letter codes. Discord replaces the token at render time using the viewer's locale and timezone, so the same message reads correctly in Tokyo and Toronto. When you omit the style, Discord uses f (short date/time).",
+          "Timestamps work in normal chat, webhook content, embed text and Components V2 Text Displays. Inside a code block the token is shown literally — that is the standard way to show someone the syntax itself.",
+        ],
+      },
+      {
+        heading: "All seven timestamp styles",
+        paragraphs: [
+          "Examples below use 1767225600 (2026-01-01 00:00 UTC) as seen by an en-US reader in UTC. Every reader sees their own language and timezone.",
+        ],
+        table: {
+          headers: ["Style", "Name", "Example output"],
+          rows: [
+            ["<t:1767225600:t>", "Short time", "12:00 AM"],
+            ["<t:1767225600:T>", "Long time", "12:00:00 AM"],
+            ["<t:1767225600:f>", "Short date/time (default)", "January 1, 2026 12:00 AM"],
+            ["<t:1767225600:F>", "Long date/time", "Thursday, January 1, 2026 12:00 AM"],
+            ["<t:1767225600:d>", "Short date", "1/1/2026"],
+            ["<t:1767225600:D>", "Long date", "January 1, 2026"],
+            ["<t:1767225600:R>", "Relative", "“in 3 days” / “2 hours ago” — updates live"],
+          ],
+        },
+      },
+      {
+        heading: "Get the unix timestamp",
+        bullets: [
+          "In DWEEB, use the clock button in the text toolbar: pick a date, time and style, preview each style live, and the token is inserted for you.",
+          "Terminal: date +%s prints the current unix time.",
+          "JavaScript: Math.floor(Date.now() / 1000).",
+          "Python: int(time.time()).",
+        ],
+        paragraphs: [
+          "DWEEB's picker previews every style with the same formatter its message preview uses, so the row you click is exactly what the channel will show.",
+        ],
+      },
+      {
+        heading: "A timestamp in a real webhook payload",
+        code: `{
+  "flags": 32768,
+  "components": [
+    {
+      "type": 10,
+      "content": "## Community game night\\nStarts <t:1767225600:F> — that's <t:1767225600:R>."
+    }
+  ]
+}`,
+      },
+      {
+        heading: "Common mistakes",
+        table: {
+          headers: ["Symptom", "Cause", "Fix"],
+          rows: [
+            [
+              "A date in the year 57,000",
+              "Milliseconds were pasted instead of seconds",
+              "Divide by 1000 and round down",
+            ],
+            [
+              "The literal <t:…> text shows in chat",
+              "The token is inside a code block or inline code",
+              "Move it out of the code span",
+            ],
+            [
+              "Time is wrong for some readers",
+              "A written timezone was added next to the token",
+              "Let the token carry the time; drop the hardcoded zone",
+            ],
+            [
+              '"2 years ago" in an evergreen post',
+              "Relative style ages with the message",
+              "Use an absolute style like F for rules and pinned posts",
+            ],
+          ],
+        },
+      },
+    ],
+    sources: [
+      {
+        label: "Discord API: Message formatting — timestamp styles",
+        url: "https://docs.discord.com/developers/reference#message-formatting-timestamp-styles",
+      },
+    ],
+    related: ["discord-text-formatting", "discord-components-v2"],
+    ctaLabel: "Insert a timestamp with the visual picker",
+    ctaPath: "/",
+  }),
+  guide({
+    slug: "discord-webhook-limits",
+    title: "Discord Webhook Rate Limits & Message Limits | DWEEB",
+    h1: "Discord Webhook Limits: Rate, Size and Components",
+    description:
+      "The limits every Discord webhook hits: rate limits and 429 handling, character caps, embed totals and Components V2 ceilings the editor enforces for you.",
+    eyebrow: "Reference · Limits & rate limits",
+    lede: "Webhook failures usually trace back to one of three separate ceilings: the size of a single message, the speed you call one webhook, and how fast one channel accepts webhook deliveries. Knowing which ceiling you hit turns a mystery 400 or 429 into a five-minute fix.",
+    published: "2026-07-17",
+    modified: "2026-07-17",
+    keywords: [
+      "discord webhook rate limit",
+      "discord character limit",
+      "discord embed limits",
+      "discord message limits",
+      "discord 429 retry after",
+    ],
+    sections: [
+      {
+        heading: "Message size and component ceilings",
+        paragraphs: [
+          "The numbers below are the ones DWEEB validates against before send; the Components V2 rows are generated from the same constants the editor uses, so this table cannot drift from the product.",
+        ],
+        table: {
+          headers: ["What", "Limit", "Applies to"],
+          rows: [
+            ["Plain message content", "2,000 characters", "content field (legacy messages)"],
+            [
+              "Combined embed text",
+              "6,000 characters across all embeds",
+              "Legacy embeds (max 10 per message, 25 fields each)",
+            ],
+            [
+              "Components V2 text budget",
+              `${LIMITS.TOTAL_CHARACTERS.toLocaleString("en-US")} characters across all text-bearing fields`,
+              "Every Text Display, label and option together",
+            ],
+            [
+              "Total components",
+              `${LIMITS.TOTAL_COMPONENTS} (max ${LIMITS.TOP_LEVEL_COMPONENTS} top-level)`,
+              "Includes every nested component",
+            ],
+            [
+              "Buttons per Action Row",
+              `${LIMITS.ACTION_ROW_BUTTONS}`,
+              "A select menu takes the whole row",
+            ],
+            ["Select menu options", `${LIMITS.SELECT_OPTIONS}`, "String select options per menu"],
+            ["Media Gallery items", `${LIMITS.GALLERY_ITEMS}`, "Images/media per gallery"],
+            [
+              "Button label",
+              `${LIMITS.BUTTON_LABEL} characters`,
+              "Longer labels are rejected, not truncated",
+            ],
+            [
+              "Webhook username override",
+              `${LIMITS.WEBHOOK_USERNAME} characters`,
+              "Per-message username field",
+            ],
+          ],
+        },
+      },
+      {
+        heading: "Rate limits and HTTP 429",
+        paragraphs: [
+          "Discord rate-limits per route: every response carries X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset-After headers describing the bucket you just spent from, and exceeding it returns HTTP 429 with a retry_after value. Those headers are the only contractual numbers — treat them, not any fixed figure, as the source of truth.",
+          "In practice, executing one webhook is bucketed at roughly five requests per two seconds, and Discord has additionally described a delivery cap of around 30 webhook messages per minute into a single channel. Both can change without notice, which is exactly why well-behaved senders react to the headers instead of hardcoding a rate.",
+        ],
+        code: `HTTP/1.1 429 Too Many Requests
+Retry-After: 1
+X-RateLimit-Remaining: 0
+
+{ "message": "You are being rate limited.", "retry_after": 0.529, "global": false }`,
+      },
+      {
+        heading: "Staying under the limits",
+        bullets: [
+          "Send one rich Components V2 message instead of a burst of small ones — layout blocks replace the multi-message pattern.",
+          "Queue sends to a single webhook serially and sleep for retry_after (seconds) on any 429 before retrying.",
+          "Never fan a loop out over one webhook URL in parallel; the bucket is shared and every request after the first few will 429.",
+          "Schedule non-urgent posts instead of firing them together at the top of the hour.",
+          "Split genuinely long announcements by design (a follow-up message) rather than letting truncation decide.",
+        ],
+      },
+      {
+        heading: "How DWEEB enforces this before send",
+        paragraphs: [
+          "The editor tracks the character budget and component ceilings live, itemizes violations in the issue list, and blocks send on error-severity problems — so a 400 invalid form body for an oversized payload is caught before the request exists. The full nesting rules live in the Components V2 guide.",
+        ],
+      },
+    ],
+    sources: [
+      {
+        label: "Discord API: Rate limits",
+        url: "https://docs.discord.com/developers/topics/rate-limits",
+      },
+      {
+        label: "Discord API: Execute Webhook",
+        url: "https://docs.discord.com/developers/resources/webhook#execute-webhook",
+      },
+      {
+        label: "Discord API: Message resource limits",
+        url: "https://docs.discord.com/developers/resources/message",
+      },
+    ],
+    related: [
+      "discord-components-v2",
+      "how-to-create-a-discord-webhook",
+      "discord-text-formatting",
+    ],
+    ctaLabel: "Validate a message against the limits",
+    ctaPath: "/",
+  }),
+  guide({
+    slug: "discord-webhook-name-avatar",
+    title: "Discord Webhook Name & Avatar: Set or Override | DWEEB",
+    h1: "Change a Discord Webhook's Name and Avatar",
+    description:
+      "Set a Discord webhook's default name and avatar, or override both per message with username and avatar_url. Rules, JSON examples and troubleshooting.",
+    eyebrow: "Practical guide · Webhook identity",
+    lede: "A webhook's name and avatar are what your members actually see, and Discord gives you two layers of control: a stored profile on the webhook itself, and per-message overrides in the payload. Use the stored profile for a stable identity and overrides when one webhook speaks as several personas.",
+    published: "2026-07-17",
+    modified: "2026-07-17",
+    keywords: [
+      "discord webhook avatar",
+      "discord webhook name",
+      "change discord webhook avatar",
+      "discord webhook username override",
+      "discord webhook identity",
+    ],
+    sections: [
+      {
+        heading: "Two layers of identity",
+        paragraphs: [
+          "The stored profile is set where the webhook was created — Server Settings → Integrations → Webhooks — or through the Modify Webhook API. It is what any plain payload posts as.",
+          "Per-message overrides are the username and avatar_url fields on the execute-webhook payload. They change how that one message appears and nothing else: the stored webhook keeps its own name and avatar, and the next plain payload uses the stored profile again.",
+        ],
+      },
+      {
+        heading: "Override the identity per message",
+        paragraphs: [
+          "DWEEB exposes both override fields in the builder, validates their lengths and shows the result in the live preview before anything posts. The raw payload shape:",
+        ],
+        code: `{
+  "username": "Release Notes",
+  "avatar_url": "https://example.com/release-bot.png",
+  "content": "Version 2.4 is live."
+}`,
+      },
+      {
+        heading: "The rules Discord applies",
+        bullets: [
+          `Usernames are 1–${LIMITS.WEBHOOK_USERNAME} characters; names containing the substrings "clyde" or "discord" (case-insensitive) are rejected.`,
+          `avatar_url accepts up to ${LIMITS.WEBHOOK_AVATAR_URL} characters and must be a direct HTTPS image URL — a page that merely contains the image will not work.`,
+          "Overrides apply at send time only. Editing an already-posted webhook message cannot change its name or avatar; the edit endpoint does not accept those fields.",
+          "The avatar is served through Discord's CDN, so a changed image behind the same URL can stay cached for a while.",
+        ],
+      },
+      {
+        heading: "Troubleshooting",
+        table: {
+          headers: ["Symptom", "Likely cause", "Fix"],
+          rows: [
+            [
+              "Avatar shows the default silhouette",
+              "avatar_url is not a direct image, or the host blocks Discord's fetch",
+              "Use a direct https://….png/jpg/webp URL you can open raw in a browser",
+            ],
+            [
+              "400 error mentioning username",
+              "The name breaks a substring or length rule",
+              "Remove clyde/discord fragments and stay within the length cap",
+            ],
+            [
+              "Old avatar keeps appearing",
+              "CDN caching of the previous image at the same URL",
+              "Publish the new image under a new URL (or add a version query)",
+            ],
+            [
+              "Identity reverts on edit",
+              "Edits cannot carry username/avatar_url",
+              "Delete and repost only if the identity itself must change",
+            ],
+          ],
+        },
+      },
+      {
+        heading: "Pick the right layer",
+        paragraphs: [
+          "Give each long-lived purpose its own webhook with a stored profile — announcements, starboard, build alerts — so the identity survives any tool that posts through it. Reach for per-message overrides when a single pipeline legitimately speaks as multiple voices, such as one CI webhook reporting per-project names and icons.",
+        ],
+      },
+    ],
+    sources: [
+      {
+        label: "Discord API: Execute Webhook (username / avatar_url)",
+        url: "https://docs.discord.com/developers/resources/webhook#execute-webhook",
+      },
+      {
+        label: "Discord API: Modify Webhook",
+        url: "https://docs.discord.com/developers/resources/webhook#modify-webhook",
+      },
+      {
+        label: "Discord support: Intro to Webhooks",
+        url: "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks",
+      },
+    ],
+    related: [
+      "how-to-create-a-discord-webhook",
+      "edit-discord-webhook-message",
+      "discord-webhook-security",
+    ],
+    ctaLabel: "Set a webhook identity visually",
+    ctaPath: "/",
+  }),
 ];
 
-export const PRODUCT_LANDING = {
-  path: "/discord-webhook-builder/",
-  url: `${SITE.origin}/discord-webhook-builder/`,
-  ogImage: `${SITE.origin}/landing-og/discord-webhook-builder.png`,
+/** A commercial-intent product landing page generated at the site root. */
+export interface LandingPage {
+  slug: string;
+  path: string;
+  url: string;
+  ogImage: string;
+  title: string;
+  h1: string;
+  /** Breadcrumb + JSON-LD name for the page. */
+  breadcrumb: string;
+  /** Hero chip label. */
+  chip: string;
+  /** Hero lede paragraph. */
+  lede: string;
+  description: string;
+  keywords: string[];
+  ctaLabel: string;
+  /** OG-card kicker/category lines (build-time image generation). */
+  ogCategory: string;
+  ogKicker: string;
+  imageAlt: string;
+  sections: GuideSection[];
+  /** "Learn more" mini-cards — internal links only. */
+  learn: { href: string; emoji: string; name: string; desc: string }[];
+}
+
+type LandingInput = Omit<LandingPage, "path" | "url" | "ogImage">;
+
+function landing(input: LandingInput): LandingPage {
+  const path = `/${input.slug}/`;
+  return {
+    ...input,
+    path,
+    url: `${SITE.origin}${path}`,
+    ogImage: `${SITE.origin}/landing-og/${input.slug}.png`,
+  };
+}
+
+const WEBHOOK_BUILDER_LANDING = landing({
+  slug: "discord-webhook-builder",
   title: "Visual Discord Webhook & Embed Builder | DWEEB",
   h1: "Visual Discord Webhook & Embed Builder",
+  breadcrumb: "Discord Webhook Builder",
+  chip: "🛠️ Visual builder",
+  lede: "Design, preview and send modern Discord messages from one visual editor—including Containers, Sections, buttons, media and legacy-embed conversion.",
   description:
     "Design Discord webhook, embed and Components V2 messages visually. Preview, import JSON, send, edit, schedule and share—free with no account required.",
   keywords: [
@@ -620,6 +1106,36 @@ export const PRODUCT_LANDING = {
     "discord message builder",
     "discord webhook generator",
     "discord components v2 builder",
+  ],
+  ctaLabel: "Build a Discord message free",
+  ogCategory: "Visual editor · Free core builder",
+  ogKicker: "Build · Preview · Send · Edit · Schedule",
+  imageAlt: "DWEEB visual Discord webhook and Components V2 message builder",
+  learn: [
+    {
+      href: "/guides/discord-components-v2/",
+      emoji: "📘",
+      name: "Components V2 guide",
+      desc: "Types, JSON, limits and ownership",
+    },
+    {
+      href: "/discord-embed-builder/",
+      emoji: "🎨",
+      name: "Discord embed builder",
+      desc: "Design embed-style cards and convert embed JSON",
+    },
+    {
+      href: "/templates/",
+      emoji: "📋",
+      name: "Discord message templates",
+      desc: "Editable starting points",
+    },
+    {
+      href: "/features/",
+      emoji: "⚙️",
+      name: "Webhook tools and features",
+      desc: "Schedule, manage and add interactions",
+    },
   ],
   sections: [
     {
@@ -660,5 +1176,130 @@ export const PRODUCT_LANDING = {
         "Nothing posts until you review and confirm it. Direct browser-to-Discord sending uses the webhook only for the chosen request. Optional scheduling, libraries, collaboration and connected-server workflows process the data they require and disclose that boundary separately. Search analytics is sanitized to exclude URL hashes, webhook credentials, Discord IDs and message content.",
       ],
     },
-  ] satisfies GuideSection[],
-} as const;
+  ],
+});
+
+const EMBED_BUILDER_LANDING = landing({
+  slug: "discord-embed-builder",
+  title: "Discord Embed Builder — Create & Convert Embeds | DWEEB",
+  h1: "Discord Embed Builder",
+  breadcrumb: "Discord Embed Builder",
+  chip: "🎨 Embed builder",
+  lede: "Design embed-style Discord messages visually, or paste existing embed JSON and convert it to Components V2 — with a pixel-accurate live preview and webhook delivery built in.",
+  description:
+    "Free visual Discord embed builder: design embed-style cards, paste legacy embed JSON, convert it to Components V2, preview live and send through your webhook.",
+  keywords: [
+    "discord embed builder",
+    "discord embed generator",
+    "discord embed creator",
+    "discord embed maker",
+    "discord embed json",
+  ],
+  ctaLabel: "Build a Discord embed free",
+  ogCategory: "Visual editor · Embeds & Components V2",
+  ogKicker: "Design · Convert · Preview · Send",
+  imageAlt: "DWEEB visual Discord embed builder with live preview and JSON conversion",
+  learn: [
+    {
+      href: "/guides/discord-embed-to-components-v2/",
+      emoji: "🔄",
+      name: "Embed to V2 converter guide",
+      desc: "How every legacy field maps, and what can't",
+    },
+    {
+      href: "/guides/discord-components-v2/",
+      emoji: "📘",
+      name: "Components V2 guide",
+      desc: "The layout system behind modern embeds",
+    },
+    {
+      href: "/templates/",
+      emoji: "📋",
+      name: "Discord message templates",
+      desc: "Embed-style cards ready to customize",
+    },
+    {
+      href: "/discord-webhook-builder/",
+      emoji: "🛠️",
+      name: "Discord webhook builder",
+      desc: "The full send, edit and schedule workflow",
+    },
+  ],
+  sections: [
+    {
+      heading: "The embed look, built on Discord's current layout system",
+      paragraphs: [
+        "A classic Discord embed is a colored card: accent stripe, title, description, thumbnail, image, fields and footer. DWEEB builds that same visual identity with Discord's Components V2 — a Container carries the accent color, Sections pair text with a thumbnail, Media Galleries hold the artwork — and shows the result in a live preview measured against the real Discord client.",
+        "The difference is what you gain: real headings and subtext, multiple media blocks, separators, and buttons or select menus in the same card. You design the message visually; DWEEB produces the JSON Discord actually accepts and sends it through your webhook when you confirm.",
+      ],
+    },
+    {
+      heading: "Everything an embed did, and where it goes now",
+      table: {
+        headers: ["Classic embed part", "Modern equivalent in the builder", "What improves"],
+        rows: [
+          ["Accent color stripe", "Container accent color", "Identical look, same hex value"],
+          ["Title + URL", "Heading text (optionally linked)", "Three heading sizes instead of one"],
+          ["Description", "Text Display", "Full markdown including subtext and lists"],
+          ["Thumbnail", "Section with a thumbnail accessory", "Text wraps beside it deliberately"],
+          ["Large image", "Media Gallery", "Up to 10 items with spoiler support"],
+          ["Fields grid", "Stacked Text Displays", "Readable on mobile instead of a cramped grid"],
+          [
+            "Footer + timestamp",
+            "Subtext line or dynamic timestamp token",
+            "Timestamps render in each reader's timezone",
+          ],
+          [
+            "— (not possible)",
+            "Buttons and select menus in the card",
+            "Link buttons work on any webhook",
+          ],
+        ],
+      },
+    },
+    {
+      heading: "Already have embed JSON? Paste it",
+      paragraphs: [
+        "The JSON panel accepts a legacy content-plus-embeds payload and converts it into editable Components V2, with a conversion report that names every field that cannot map exactly — polls, stickers, inline field grids, provider video. Nothing is silently dropped, and you can adjust the converted layout visually before sending.",
+      ],
+      bullets: [
+        "Import a full webhook payload or a bare embed object",
+        "Keep the accent color, title, description, thumbnail, image and footer text",
+        "Get warnings for anything with no modern equivalent before you apply",
+        "Export the converted JSON, or send it directly through a webhook",
+      ],
+    },
+    {
+      heading: "Embed limits vs Components V2 limits",
+      table: {
+        headers: ["Constraint", "Classic embeds", "Components V2 in DWEEB"],
+        rows: [
+          [
+            "Text budget",
+            "6,000 characters across all embeds",
+            "4,000 characters across all text fields",
+          ],
+          ["Structure cap", "10 embeds, 25 fields each", "40 components, 10 top-level blocks"],
+          [
+            "Interactive controls",
+            "None on the embed itself",
+            "Buttons and selects in the same card",
+          ],
+          ["Validation in DWEEB", "Checked on import", "Enforced live while you edit"],
+        ],
+      },
+      paragraphs: [
+        "The editor tracks both budgets for you: imports are validated as embeds, and everything you build afterwards is validated against the Components V2 ceilings before send.",
+      ],
+    },
+    {
+      heading: "Free, local by default, no account for the core builder",
+      paragraphs: [
+        "The embed builder is the same core DWEEB editor: free for noncommercial use, no account required, and your working draft stays in the browser by default. Send through any pasted incoming webhook or a connected server and channel — nothing posts until you review and confirm it. Interactive components need an app-owned destination, and the builder labels that requirement before you commit to it.",
+      ],
+    },
+  ],
+});
+
+/** Every generated product landing page, in nav order. */
+export const LANDINGS: LandingPage[] = [WEBHOOK_BUILDER_LANDING, EMBED_BUILDER_LANDING];

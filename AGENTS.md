@@ -161,13 +161,22 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `video/src/data.ts` references, and regenerate committed OG images with
   `bun add -d sharp && bun scripts/gen-template-og.ts && bun remove sharp`.
 - **Static discovery is a build contract.** `scripts/gen-template-pages.ts` generates the
-  template and feature catalogues, `/guides/*`, `/discord-webhook-builder/`, and the image
+  template and feature catalogues, `/guides/*`, the product landing pages, and the image
   sitemap. Build-critical generator code is covered by `tsconfig.seo.json`; `bun run build` then
   runs `scripts/seo/audit.ts`, which fails on broken sitemap
   targets/internal links, duplicate or missing metadata, invalid JSON-LD, missing/wrong-size
   social cards, stale/future dates, late charset declarations, thin detail pages, and orphaned
   templates. Add new discovery routes to that generator rather than hand-writing unverified
   files in `dist/`; keep source-backed guide claims and `lastmod` dates honest.
+  Landing pages are a catalog (`LANDINGS` in `scripts/seo/guides.ts`, rendered by
+  `renderLandingPage`) — currently `/discord-webhook-builder/` and `/discord-embed-builder/`.
+  **Adding a guide or landing** = entry in `GUIDES`/`LANDINGS` + its slug in `ENTRY_IDS`
+  (`src/core/seo/acquisition.ts`, else the audit fails the CTA token) + a committed OG card via
+  `bun add -d sharp && bun scripts/gen-template-og.ts --guides-only && bun remove sharp`
+  (guide/landing cards only; output is deterministic, untouched cards stay byte-identical).
+  Bump `GUIDES_LASTMOD` when guides change — the audit fails a hub whose lastmod is older
+  than its newest child, and bump a guide's `modified` when its visible content (including
+  related-link cards) changes.
 - **Search attribution is first-party and privacy-bounded.** Static CTAs use
   `entry=<landing|template|feature|guide>:<public-slug>` (never internal UTM tags), and optional
   `intent=` values may only open a non-mutating app surface. `gtag-init.js` drops hashes,

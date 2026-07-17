@@ -15,6 +15,8 @@ describe("SEO acquisition tokens", () => {
     ],
     ["?entry=feature%3Adiscord-ticket-bot", "feature", "discord-ticket-bot"],
     ["?entry=guide%3Adiscord-components-v2", "guide", "discord-components-v2"],
+    ["?entry=landing%3Adiscord-embed-builder", "landing", "discord-embed-builder"],
+    ["?entry=guide%3Adiscord-timestamp-format", "guide", "discord-timestamp-format"],
   ])("parses a trusted %s token", (search, sourceType, sourceId) => {
     expect(parseSeoEntry(search)).toEqual({ sourceType, sourceId });
   });
