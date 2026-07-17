@@ -478,7 +478,7 @@
   position: relative;
   height: 196px;
   overflow: hidden;
-  background: var(--discord-bg-primary);
+  background: var(--app-preview-bg);
   border-bottom: 1px solid var(--app-border);
 }
 

@@ -74,7 +74,7 @@
      avatars read as a tidy cluster (mirrors the tree row's presence cluster). */
   box-shadow:
     0 0 0 1.5px var(--ring, var(--app-accent, #5865f2)),
-    0 0 0 3px var(--app-bg, #171a22);
+    0 0 0 3px var(--app-bg, #0e0f13);
   margin-left: -6px;
 }
 

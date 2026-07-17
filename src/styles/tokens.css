@@ -12,27 +12,33 @@
 :root {
   /* ── App shell (builder chrome) ───────────────────────────────────── */
   /* Layered neutrals: canvas → elevated panels → inputs → hover → active.
-     Deliberately lifted out of near-black (the old #0e0f13 canvas read as a
-     void next to the preview) — a mid-dark slate ladder with clearly visible
-     borders, so hierarchy reads at a glance. The Discord preview keeps its own
-     measured `--discord-*` darks; only the shell lives on this ladder. */
-  --app-bg: #171a22;
-  --app-bg-elevated: #20242e;
-  --app-bg-subtle: #242835;
-  --app-bg-input: #292e3c;
-  --app-bg-hover: #313747;
-  --app-bg-active: #3a4153;
+     A hair warmer and more separated than before so hierarchy reads at a
+     glance without heavy borders. */
+  --app-bg: #0e0f13;
+  --app-bg-elevated: #17191f;
+  --app-bg-subtle: #1a1d23;
+  --app-bg-input: #1e2128;
+  --app-bg-hover: #242833;
+  --app-bg-active: #2c313d;
 
-  --app-border: #3a4051;
-  --app-border-strong: #4c5468;
+  --app-border: #2a2e38;
+  --app-border-strong: #3b4150;
   --app-border-focus: #5865f2;
 
-  /* Brighter body text and AA-contrast muted/subtle, re-checked against the
-     lighter surfaces above. */
-  --app-text: #f0f2f7;
-  --app-text-muted: #b0b7c6;
-  --app-text-subtle: #8b93a4;
-  --app-text-inverted: #171a22;
+  /* Brighter body text and AA-contrast muted/subtle (the old #6b7280 subtle
+     failed contrast on the dark canvas). */
+  --app-text: #eceef3;
+  --app-text-muted: #aab1bf;
+  --app-text-subtle: #828a99;
+  --app-text-inverted: #0e0f13;
+
+  /* Preview canvas — the surface the message preview (and its thumbnails)
+     renders on. Deliberately LIGHTER than Discord's measured chat background
+     (--discord-bg-primary, #121214), by maintainer choice 2026-07-17: the true
+     value read as a black void beside the editor. This is the ONE sanctioned
+     deviation from preview fidelity — everything inside the message (container
+     fills, buttons, text) keeps the measured --discord-* tokens. */
+  --app-preview-bg: #313338;
 
   --app-accent: #5865f2;
   --app-accent-hover: #4752c4;

@@ -61,7 +61,7 @@
 }
 
 .app-shell__pane--preview {
-  background: var(--discord-bg-primary);
+  background: var(--app-preview-bg);
 }
 
 .app-bootstrap {

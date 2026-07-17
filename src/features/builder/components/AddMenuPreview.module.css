@@ -6,7 +6,7 @@
   display: grid;
   place-items: center;
   padding: 14px;
-  background: var(--discord-bg-primary);
+  background: var(--app-preview-bg);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
   overflow: hidden;

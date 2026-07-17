@@ -1,6 +1,6 @@
 .surface {
   flex: 1;
-  background: var(--discord-bg-primary);
+  background: var(--app-preview-bg);
   font-family: var(--discord-font);
   color: var(--discord-text-normal);
   display: flex;
@@ -109,7 +109,7 @@
 .avatar:focus-visible {
   outline: none;
   box-shadow:
-    0 0 0 2px var(--discord-bg-primary),
+    0 0 0 2px var(--app-preview-bg),
     0 0 0 4px var(--discord-accent);
 }
 .avatar:active {

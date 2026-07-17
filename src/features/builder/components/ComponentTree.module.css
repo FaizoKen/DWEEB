@@ -522,7 +522,7 @@
      token is missing (an invalid value would drop the whole box-shadow). */
   box-shadow:
     0 0 0 1.5px var(--ring, var(--app-accent, #5865f2)),
-    0 0 0 3px var(--app-bg-elevated, #20242e);
+    0 0 0 3px var(--app-bg-elevated, #17191f);
   margin-left: -6px;
 }
 

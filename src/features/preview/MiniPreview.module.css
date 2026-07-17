@@ -9,7 +9,7 @@
   flex-shrink: 0;
   border-radius: 14px;
   overflow: hidden;
-  background: var(--discord-bg-primary);
+  background: var(--app-preview-bg);
   /* A tight, close shadow that hugs the card — the big `--app-shadow-lg` drop
    * (16px offset, 48px blur) bled down onto the FAB row right below and visibly
    * darkened it. Keep the inset hairline that defines the card's edge. */

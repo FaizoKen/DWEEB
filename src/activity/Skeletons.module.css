@@ -89,7 +89,7 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: var(--discord-bg-primary);
+  background: var(--app-preview-bg);
   padding: 24px 16px;
 }
 

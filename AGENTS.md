@@ -69,7 +69,12 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   preview renderer CSS mirror values **measured off the live Discord web client** (dark theme,
   2026 visual refresh: chat bg `#121214`, containers `#242429` + `rgba(148,148,156,.12)` border,
   translucent blurple code fills, link `#4d96ee`, buttons 32px/8px-radius with translucent
-  secondary). Don't "improve" them by eye — re-measure. Workflow (2026-07-17 audit): drive the
+  secondary). Don't "improve" them by eye — re-measure. **One sanctioned deviation** (maintainer,
+  2026-07-17): every preview *canvas* (the surface the message renders on — preview pane, mini
+  preview, gallery/add-menu thumbnails, Activity skeleton) uses `--app-preview-bg` (#313338),
+  deliberately lighter than the measured chat bg because #121214 read as a black void beside the
+  editor; `--discord-bg-primary` stays #121214 and everything *inside* the message keeps the
+  measured tokens. Don't re-point the canvases back during a fidelity audit. Workflow (2026-07-17 audit): drive the
   editor via `import("/src/core/state/messageStore.ts")` + `attachEditorFields` on a Vite dev tab,
   post the same JSON to a test webhook with `?with_components=true`, then read Discord's rendered
   DOM/`getComputedStyle` (convert its `oklab()` colors via a canvas) rather than eyeballing
