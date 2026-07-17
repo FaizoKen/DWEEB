@@ -31,9 +31,12 @@
   color: var(--app-text);
   text-align: left;
   font-size: var(--app-text-base);
-  /* Matches the weight of every other control label (buttons, field labels)
-     so menu rows don't read lighter than the chrome around them. */
-  font-weight: 500;
+  /* Regular weight, deliberately. The shell font is `gg sans`/Inter, but on the
+     common install those aren't present and the fallback is Segoe UI, which has
+     no 500 face — Chrome on Windows then rounds a request for 500 UP to its
+     Semibold (600), so menu rows rendered visibly bold and hard to read. 400
+     resolves to a real Regular face in every shell font (measured 2026-07-17). */
+  font-weight: 400;
   cursor: pointer;
   width: 100%;
 }

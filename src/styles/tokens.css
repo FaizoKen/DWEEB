@@ -33,11 +33,12 @@
   --app-text-inverted: #0e0f13;
 
   /* Preview canvas — the surface the message preview (and its thumbnails)
-     renders on. Deliberately LIGHTER than Discord's measured chat background
-     (--discord-bg-primary, #121214), by maintainer choice 2026-07-17: the true
-     value read as a black void beside the editor. This is the ONE sanctioned
-     deviation from preview fidelity — everything inside the message (container
-     fills, buttons, text) keeps the measured --discord-* tokens. */
+     renders on. Deliberately LIGHTER than the measured refresh chat surface
+     (--discord-bg-primary, #1a1a1e), by maintainer choice 2026-07-17 (after
+     trying #121214 and #1a1a1e the same day — both read too dark beside the
+     editor): classic Discord dark's chat bg. This is the ONE sanctioned
+     deviation from preview fidelity — everything inside the message keeps
+     the measured --discord-* tokens. */
   --app-preview-bg: #313338;
 
   --app-accent: #5865f2;
@@ -121,7 +122,11 @@
   /* Values measured from the live Discord web client's dark theme (2026
      visual refresh) via computed styles — see AGENTS.md "Preview fidelity".
      Keep these in sync with Discord, not with what looks nice in DWEEB. */
-  --discord-bg-primary: #121214;
+  /* chatContent — the surface messages actually render on (Discord's
+     --background-base-lower). #121214 (--background-base-lowest) is only the
+     app frame BEHIND the chat panel; the 2026-07-17 audit briefly recorded it
+     as the chat bg, which made the preview canvas read too dark. */
+  --discord-bg-primary: #1a1a1e;
   --discord-bg-secondary: #242429;
   --discord-bg-tertiary: #1a1a1e;
   --discord-bg-mention: rgba(88, 100, 242, 0.24);
