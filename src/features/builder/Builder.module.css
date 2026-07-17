@@ -21,15 +21,17 @@
 }
 
 /* Styled to match the Activity bar (ActivityBar.module.css) so the web builder
-   and the embedded Activity read as the same product chrome: a slim 44px row,
-   hairline cluster dividers, icons over labels. */
+   and the embedded Activity read as the same product chrome: hairline cluster
+   dividers, icons over labels. Deliberately a touch taller than the Activity's
+   slim 44px row — the web has vertical room to spare, so the header gets some
+   breathing space (maintainer preference, 2026-07-17). */
 .actionBar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--app-space-3);
-  padding: var(--app-space-1) var(--app-space-3);
-  min-height: 44px;
+  padding: var(--app-space-2) var(--app-space-3);
+  min-height: 52px;
   background: var(--app-bg-elevated);
   border-bottom: 1px solid var(--app-border);
   z-index: var(--app-z-toolbar);
