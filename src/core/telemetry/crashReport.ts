@@ -16,8 +16,19 @@
  *     and a hard per-session cap bounds the total regardless.
  */
 
-/** Where the error surfaced. */
-export type CrashKind = "error" | "unhandledrejection" | "boundary";
+/** Where the error surfaced. Beyond the three raw traps, two stale-chunk
+ *  refinements (see [`resolveCrashKind`]) tell the proxy how bad it was:
+ *  `stale-chunk` = a lazy surface failed post-boot but was handled in place
+ *  (the user got a refresh prompt, the app kept running — the proxy logs it
+ *  below paging level); `stale-chunk-fatal` = the same failure took the app
+ *  down (boot recovery exhausted, or a path no boundary covers) — that one
+ *  still pages, because it means broken deploy or SW precache gap. */
+export type CrashKind =
+  | "error"
+  | "unhandledrejection"
+  | "boundary"
+  | "stale-chunk"
+  | "stale-chunk-fatal";
 
 /** The content-free beacon sent to `POST /api/telemetry/crash`. */
 export interface CrashPayload {
@@ -168,14 +179,37 @@ const STALE_CHUNK_MESSAGES = [
 
 /**
  * Whether `message` is a failed lazy-chunk load. Not unconditionally dropped
- * like `isNonCrashMessage` — the reporter suppresses it only while the
- * stale-chunk recovery (`core/pwa/staleChunkRecovery.ts`) is reloading past it;
- * the same failure with recovery exhausted still reports, because then it's
- * signal (SW precache gap, broken deploy) rather than routine deploy skew.
+ * like `isNonCrashMessage` — see [`resolveCrashKind`] for the policy.
  */
 export function isStaleChunkMessage(message: string): boolean {
   const lower = message.toLowerCase();
   return STALE_CHUNK_MESSAGES.some((known) => lower.includes(known));
+}
+
+/**
+ * Final wire kind for a report, folding in the whole stale-chunk policy.
+ * Returns `null` when the report should be dropped entirely.
+ *
+ *  - Not a stale-chunk message: the kind passes through untouched.
+ *  - Stale chunk while the boot recovery's reload is in flight: dropped — a
+ *    self-healing deploy-skew event is not a crash.
+ *  - Stale chunk reported as handled (`stale-chunk`, from `ChunkErrorBoundary`
+ *    catching a post-boot lazy-surface failure): kept as-is. The proxy logs it
+ *    below paging level — the user got a refresh prompt and the app kept
+ *    running, but a spike still flags an SW precache gap.
+ *  - Any other stale chunk (the top-level `ErrorBoundary`, a raw
+ *    window trap): rewritten to `stale-chunk-fatal`. Nothing recovered and
+ *    nothing handled it, so this is the page-worthy shape — recovery exhausted
+ *    on a broken deploy, or a lazy path no boundary covers.
+ */
+export function resolveCrashKind(
+  kind: CrashKind,
+  message: string,
+  reloadInProgress: boolean,
+): CrashKind | null {
+  if (!isStaleChunkMessage(message)) return kind;
+  if (reloadInProgress) return null;
+  return kind === "stale-chunk" ? kind : "stale-chunk-fatal";
 }
 
 /** Build the content-free wire payload from an untrusted thrown value. */

@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { reportBoundaryError } from "@/core/telemetry/reporter";
+import { isStaleChunkMessage } from "@/core/telemetry/crashReport";
 
 interface State {
   error: Error | null;
@@ -30,6 +31,48 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
 
   render() {
     if (!this.state.error) return this.props.children;
+    // Deploy skew that nothing recovered: the tab predates the latest deploy
+    // and a chunk it needs is gone (boot recovery exhausted, or a lazy path no
+    // ChunkErrorBoundary covers). Not a bug in the app — say so, and reload
+    // preserving the full URL: the `#hash` share payload and the autosaved
+    // draft both survive, unlike the generic branch's hash-stripping escape.
+    if (isStaleChunkMessage(this.state.error.message)) {
+      return (
+        <div
+          role="alert"
+          style={{
+            maxWidth: 520,
+            margin: "10vh auto",
+            padding: 24,
+            background: "var(--app-bg-elevated)",
+            border: "1px solid var(--app-border)",
+            borderRadius: 12,
+            color: "var(--app-text)",
+            fontFamily: "var(--app-font-sans)",
+          }}
+        >
+          <h1 style={{ marginTop: 0, fontSize: 18 }}>A new version of DWEEB is available.</h1>
+          <p style={{ color: "var(--app-text-muted)" }}>
+            This tab was loaded before the latest update, and a part it needs is no longer
+            available. Refresh to load the current version — your draft is saved on this device.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{
+              background: "var(--app-accent)",
+              color: "#fff",
+              padding: "8px 14px",
+              border: 0,
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            Refresh
+          </button>
+        </div>
+      );
+    }
     return (
       <div
         role="alert"

@@ -96,6 +96,40 @@ fn is_non_crash(message: &str) -> bool {
         .any(|known| message.contains(known))
 }
 
+/// How each engine words a dynamic `import()` whose chunk failed to fetch —
+/// the signature of deploy skew (a tab from an older build requesting a hashed
+/// chunk the next deploy purged). Mirrors the frontend's list in
+/// `core/telemetry/crashReport.ts`; matched case-insensitively on containment.
+const STALE_CHUNK_MESSAGES: [&str; 4] = [
+    "failed to fetch dynamically imported module", // Chromium
+    "error loading dynamically imported module",   // Firefox
+    "importing a module script failed",            // Safari
+    "unable to preload css",                       // Vite preload helper
+];
+
+/// Whether this beacon is *routine* deploy skew — logged at `info` (greppable,
+/// aggregatable) instead of `warn` so it never pages through the log alerter.
+///
+/// Routine covers the frontend's handled shapes (`stale-chunk` from a
+/// `ChunkErrorBoundary` that showed a refresh prompt while the app kept
+/// running) *and* every legacy kind (`boundary`/`error`/`unhandledrejection`):
+/// pre-fix clients ship from service-worker caches for weeks and keep sending
+/// the old crash shape for what is the same self-healing skew event.
+///
+/// The one shape that stays `warn` (and pages) is `stale-chunk-fatal`: a
+/// current client whose app actually went down on a missing chunk — boot
+/// recovery exhausted or an unguarded lazy path — which means a broken deploy
+/// or an SW precache gap, not routine skew.
+fn is_routine_stale_chunk(kind: &str, message: &str) -> bool {
+    if kind == "stale-chunk-fatal" {
+        return false;
+    }
+    let lower = message.to_lowercase();
+    STALE_CHUNK_MESSAGES
+        .iter()
+        .any(|known| lower.contains(known))
+}
+
 /// `POST /api/telemetry/crash` — record one frontend crash.
 ///
 /// See the module docs for why this is unauthenticated and content-free. The
@@ -118,16 +152,32 @@ pub async fn crash_report(
     let surface = clamp_field(&body.surface, SURFACE_MAX);
     let path = clamp_field(&body.path, PATH_MAX);
 
-    tracing::warn!(
-        target: "web_crash",
-        %kind,
-        %surface,
-        %version,
-        %path,
-        %message,
-        %stack,
-        "web app crash",
-    );
+    // Routine deploy skew stays greppable under the same target but at `info`,
+    // below the log alerter's paging threshold (which fires on `web_crash`
+    // WARNs). See [`is_routine_stale_chunk`] for what still pages.
+    if is_routine_stale_chunk(&kind, &message) {
+        tracing::info!(
+            target: "web_crash",
+            %kind,
+            %surface,
+            %version,
+            %path,
+            %message,
+            %stack,
+            "web app stale chunk (deploy skew)",
+        );
+    } else {
+        tracing::warn!(
+            target: "web_crash",
+            %kind,
+            %surface,
+            %version,
+            %path,
+            %message,
+            %stack,
+            "web app crash",
+        );
+    }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -185,5 +235,51 @@ mod tests {
         // Mentioning the API isn't the same as being the loop notice.
         assert!(!is_non_crash("ResizeObserver is not defined"));
         assert!(!is_non_crash(""));
+    }
+
+    #[test]
+    fn stale_chunk_beacons_are_routine_for_every_non_fatal_kind() {
+        // The exact shape the 2026-07-17 page carried: an old client's boundary
+        // crash on a purged chunk. Info, not a page.
+        let msg = "Failed to fetch dynamically imported module: \
+                   https://dweeb.faizo.net/assets/TemplateGallery-eyaR9UxE.js";
+        assert!(is_routine_stale_chunk("boundary", msg));
+        // Legacy window traps and the new handled kind are routine too.
+        assert!(is_routine_stale_chunk("unhandledrejection", msg));
+        assert!(is_routine_stale_chunk("error", msg));
+        assert!(is_routine_stale_chunk("stale-chunk", msg));
+        // Other engines' wording.
+        assert!(is_routine_stale_chunk(
+            "boundary",
+            "error loading dynamically imported module: https://x/a.js"
+        ));
+        assert!(is_routine_stale_chunk(
+            "boundary",
+            "Importing a module script failed."
+        ));
+        assert!(is_routine_stale_chunk(
+            "boundary",
+            "Unable to preload CSS for /assets/App-abc.css"
+        ));
+    }
+
+    #[test]
+    fn fatal_stale_chunk_still_pages() {
+        // A current client whose app actually went down on the missing chunk —
+        // broken deploy or SW precache gap. Stays warn.
+        assert!(!is_routine_stale_chunk(
+            "stale-chunk-fatal",
+            "Failed to fetch dynamically imported module: https://x/a.js"
+        ));
+    }
+
+    #[test]
+    fn non_chunk_crashes_are_never_routine() {
+        assert!(!is_routine_stale_chunk("boundary", "Failed to fetch")); // plain network error
+        assert!(!is_routine_stale_chunk(
+            "boundary",
+            "Cannot read properties of undefined (reading 'id')"
+        ));
+        assert!(!is_routine_stale_chunk("boundary", ""));
     }
 }

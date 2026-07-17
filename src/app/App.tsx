@@ -21,6 +21,7 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { ChunkErrorBoundary } from "@/ui/ChunkErrorBoundary";
 import { Builder } from "@/features/builder/Builder";
 import { SendCoachMark } from "@/features/builder/SendCoachMark";
 import { useWelcomeAutoOpen } from "@/features/welcome/useWelcomeAutoOpen";
@@ -213,6 +214,7 @@ export function App() {
   // and is reopenable any time from the Builder action bar or the Saved menu.
   const galleryOpen = useTemplateGalleryStore((s) => s.open);
   const openGallery = useTemplateGalleryStore((s) => s.openGallery);
+  const closeGallery = useTemplateGalleryStore((s) => s.closeGallery);
   const backgroundSuppressed = bootstrapPending || deferEditorForInitialGallery;
   useEffect(() => {
     if (deferEditorForInitialGallery && !initialGalleryOpening && !galleryOpen) {
@@ -232,17 +234,20 @@ export function App() {
   // About panel. Mounted lazily only while open (its in-progress text resets on
   // close, which is fine for a one-off report).
   const feedbackOpen = useFeedbackStore((s) => s.open);
+  const closeFeedback = useFeedbackStore((s) => s.closeFeedback);
 
   // The pricing modal — summoned from the account menu or a maxed-out quota's
   // "Upgrade" link. Shows the Free/Plus/Pro tiers and points "Upgrade" at
   // RoleLogic's checkout. Mounted lazily only while open.
   const pricingOpen = usePlanStore((s) => s.open);
+  const closePricing = usePlanStore((s) => s.closePricing);
 
   // The "Collaborate in Discord" dialog — summoned from the Builder's "More"
   // menu and the floating shortcut. Mints a voice-channel Activity invite so a group
   // co-edits in one shared instance. Mounted lazily only while open.
   const collaborateOpen = useCollaborateStore((s) => s.open);
   const openCollaborate = useCollaborateStore((s) => s.openCollaborate);
+  const closeCollaborate = useCollaborateStore((s) => s.closeCollaborate);
   // Only offer the collaborate FAB where the invite can actually be minted (a
   // configured proxy) — matches the Builder "More" menu's gate.
   const collaborateUrl = isProxyConfigured() ? activityLaunchUrl() : "";
@@ -251,15 +256,18 @@ export function App() {
   // the captured native PWA prompt on Chromium, or shows per-platform manual
   // steps elsewhere. Mounted lazily only while open.
   const installOpen = useInstallStore((s) => s.open);
+  const closeInstall = useInstallStore((s) => s.closeInstall);
 
   // The intro film — auto-played once for brand-new users (layered over the
   // landing gallery) and replayable from the "More" menu. Mounted lazily only
   // while open so the video modal never weighs on the initial bundle.
   const welcomeOpen = useWelcomeStore((s) => s.open);
+  const closeWelcome = useWelcomeStore((s) => s.closeWelcome);
 
   // Guided setup for an interactive template the gallery just applied: wires its
   // paired plugin(s), then closes, leaving the editor in front.
   const setupTemplateId = useTemplateSetupStore((s) => s.templateId);
+  const closeTemplateSetup = useTemplateSetupStore((s) => s.close);
   // A "go post" nudge (raised when setup finishes): raise the mobile preview so
   // the message is visible. The Send button's own pulse is wired in the Builder.
   const sendNudge = useSendNudgeStore((s) => s.token);
@@ -461,10 +469,23 @@ export function App() {
           ) : null}
         </section>
 
+        {/* Every lazy surface below sits inside a ChunkErrorBoundary: when this
+          tab has outlived a deploy and its chunk was purged (deploy skew), the
+          user gets a "refresh to update" dialog instead of the whole editor
+          falling to the top-level ErrorBoundary. Each onDismiss must fully
+          unmount the surface — the open flag AND any keep-mounted latch —
+          because a still-mounted lazy child rethrows its cached rejection. */}
         {aiMounted ? (
-          <Suspense fallback={null}>
-            <AiChatPanel />
-          </Suspense>
+          <ChunkErrorBoundary
+            onDismiss={() => {
+              closeAi();
+              setAiMounted(false);
+            }}
+          >
+            <Suspense fallback={null}>
+              <AiChatPanel />
+            </Suspense>
+          </ChunkErrorBoundary>
         ) : null}
 
         <div className="fab-stack">
@@ -510,69 +531,97 @@ export function App() {
         </div>
 
         {shareMounted ? (
-          <Suspense fallback={null}>
-            <ShareDialog
-              open={shareOpen}
-              onClose={() => setShareOpen(false)}
-              initialTab={shareInitialTab}
-              initialSendWhen={shareInitialWhen}
-              onRequestRemoveInteractive={requestRemoveInteractive}
-              initialWebhook={incomingWebhook}
-            />
-          </Suspense>
+          <ChunkErrorBoundary
+            onDismiss={() => {
+              setShareOpen(false);
+              setShareMounted(false);
+            }}
+          >
+            <Suspense fallback={null}>
+              <ShareDialog
+                open={shareOpen}
+                onClose={() => setShareOpen(false)}
+                initialTab={shareInitialTab}
+                initialSendWhen={shareInitialWhen}
+                onRequestRemoveInteractive={requestRemoveInteractive}
+                initialWebhook={incomingWebhook}
+              />
+            </Suspense>
+          </ChunkErrorBoundary>
         ) : null}
         {confirmMounted ? (
-          <Suspense fallback={null}>
-            <RemoveInteractiveConfirm
-              open={confirmStripOpen}
-              onClose={() => setConfirmStripOpen(false)}
-            />
-          </Suspense>
+          <ChunkErrorBoundary
+            onDismiss={() => {
+              setConfirmStripOpen(false);
+              setConfirmMounted(false);
+            }}
+          >
+            <Suspense fallback={null}>
+              <RemoveInteractiveConfirm
+                open={confirmStripOpen}
+                onClose={() => setConfirmStripOpen(false)}
+              />
+            </Suspense>
+          </ChunkErrorBoundary>
         ) : null}
         {setupTemplateId ? (
-          <Suspense fallback={null}>
-            <TemplateSetup templateId={setupTemplateId} />
-          </Suspense>
+          <ChunkErrorBoundary onDismiss={closeTemplateSetup}>
+            <Suspense fallback={null}>
+              <TemplateSetup templateId={setupTemplateId} />
+            </Suspense>
+          </ChunkErrorBoundary>
         ) : null}
         {feedbackOpen ? (
-          <Suspense fallback={null}>
-            <FeedbackDialog />
-          </Suspense>
+          <ChunkErrorBoundary onDismiss={closeFeedback}>
+            <Suspense fallback={null}>
+              <FeedbackDialog />
+            </Suspense>
+          </ChunkErrorBoundary>
         ) : null}
         {pricingOpen ? (
-          <Suspense fallback={null}>
-            <PricingModal />
-          </Suspense>
+          <ChunkErrorBoundary onDismiss={closePricing}>
+            <Suspense fallback={null}>
+              <PricingModal />
+            </Suspense>
+          </ChunkErrorBoundary>
         ) : null}
         {collaborateOpen ? (
-          <Suspense fallback={null}>
-            <CollaborateDialog />
-          </Suspense>
+          <ChunkErrorBoundary onDismiss={closeCollaborate}>
+            <Suspense fallback={null}>
+              <CollaborateDialog />
+            </Suspense>
+          </ChunkErrorBoundary>
         ) : null}
         {installOpen ? (
-          <Suspense fallback={null}>
-            <InstallDialog />
-          </Suspense>
+          <ChunkErrorBoundary onDismiss={closeInstall}>
+            <Suspense fallback={null}>
+              <InstallDialog />
+            </Suspense>
+          </ChunkErrorBoundary>
         ) : null}
         {welcomeOpen ? (
-          <Suspense fallback={null}>
-            <WelcomeVideo />
-          </Suspense>
+          <ChunkErrorBoundary onDismiss={closeWelcome}>
+            <Suspense fallback={null}>
+              <WelcomeVideo />
+            </Suspense>
+          </ChunkErrorBoundary>
         ) : null}
         <SendCoachMark />
         <UpdatePrompt />
         <ToastViewport />
       </main>
       {galleryOpen || initialGalleryOpening ? (
-        <Suspense
-          fallback={
-            <div className="gallery-bootstrap" role="status">
-              <span className="gallery-bootstrap__hint">Opening your message directory…</span>
-            </div>
-          }
-        >
-          <TemplateGallery />
-        </Suspense>
+        <ChunkErrorBoundary onDismiss={closeGallery}>
+          <Suspense
+            fallback={
+              <div className="gallery-bootstrap" role="status">
+                <span className="gallery-bootstrap__hint">Opening your message directory…</span>
+              </div>
+            }
+          >
+            <TemplateGallery />
+          </Suspense>
+        </ChunkErrorBoundary>
       ) : null}
     </>
   );

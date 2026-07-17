@@ -21,7 +21,10 @@
  *    normally — a reload loop is strictly worse than a crash report.
  *  - **Boot only.** Once the app surface has committed (`dweeb:surface-ready`)
  *    an automatic reload could throw away the user's in-progress message, so
- *    recovery disarms. Post-boot chunks are the SW precache's job anyway.
+ *    recovery disarms. Post-boot chunks are covered by the SW precache and,
+ *    where a tab is uncontrolled anyway, by `ui/ChunkErrorBoundary`, which
+ *    turns a failed lazy surface into a "refresh to update" prompt instead of
+ *    a top-boundary crash.
  *  - **Never `preventDefault()`.** The import is left to reject so callers
  *    don't continue with an `undefined` module namespace; the reporter instead
  *    recognizes the in-flight recovery (`isStaleChunkReloadInProgress`) and

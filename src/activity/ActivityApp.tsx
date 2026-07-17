@@ -19,6 +19,7 @@
  */
 
 import { lazy, Suspense, useEffect, useState } from "react";
+import { ChunkErrorBoundary } from "@/ui/ChunkErrorBoundary";
 import { ComponentTree } from "@/features/builder/components/ComponentTree";
 import { Preview } from "@/features/preview/Preview";
 import { MiniPreview } from "@/features/preview/MiniPreview";
@@ -109,6 +110,7 @@ export function ActivityApp() {
   // Feedback form open state — mounted lazily below only while open (like the web
   // app), summoned from the bar's "Send feedback" action.
   const feedbackOpen = useFeedbackStore((s) => s.open);
+  const closeFeedback = useFeedbackStore((s) => s.closeFeedback);
 
   // The preview is a side column on desktop and a bottom sheet on mobile; this
   // only matters in the sheet layout, where the CSS keeps it slid away until
@@ -230,10 +232,15 @@ export function ActivityApp() {
         </div>
       ) : null}
 
+      {/* Deploy-skew guard: the Activity has no service worker (Discord's
+        webview), so a deploy mid-session purges this chunk — turn that into a
+        refresh prompt instead of dropping the whole surface to the boundary. */}
       {feedbackOpen ? (
-        <Suspense fallback={null}>
-          <FeedbackDialog />
-        </Suspense>
+        <ChunkErrorBoundary onDismiss={closeFeedback}>
+          <Suspense fallback={null}>
+            <FeedbackDialog />
+          </Suspense>
+        </ChunkErrorBoundary>
       ) : null}
 
       <ToastViewport />

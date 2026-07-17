@@ -29,7 +29,7 @@ import {
   crashSignature,
   CrashThrottle,
   isNonCrashMessage,
-  isStaleChunkMessage,
+  resolveCrashKind,
   type CrashKind,
   type CrashPayload,
 } from "./crashReport";
@@ -91,6 +91,19 @@ export function reportBoundaryError(error: unknown): void {
   report("boundary", error);
 }
 
+/**
+ * Report a post-boot lazy-chunk failure that `ChunkErrorBoundary` handled in
+ * place (the surface showed a refresh prompt; the app kept running). Sent as
+ * `stale-chunk`, which the proxy logs below paging level — routine deploy skew
+ * is worth counting (a spike means an SW precache gap) but not a page. The
+ * shared `report` path still drops it while a boot recovery reload is in
+ * flight, and dedups repeats via the throttle.
+ */
+export function reportHandledStaleChunk(error: unknown): void {
+  if (!enabled()) return;
+  report("stale-chunk", error);
+}
+
 /** Shared path: build → throttle → beacon. Never throws. */
 function report(kind: CrashKind, error: unknown): void {
   try {
@@ -106,12 +119,14 @@ function report(kind: CrashKind, error: unknown): void {
     // ResizeObserver loop notice). Drop them before the throttle so they can't
     // spend a slot the next real crash needs.
     if (isNonCrashMessage(payload.message)) return;
-    // A stale-chunk rejection the recovery is already reloading past is a
-    // self-healing deploy-skew non-event — beaconing it would page for nothing.
-    // With no reload in flight (recovery exhausted or disarmed) it reports
-    // normally, because then something genuinely needs looking at.
-    if (isStaleChunkMessage(payload.message) && isStaleChunkReloadInProgress()) return;
-    const sig = crashSignature(kind, payload.message, payload.stack);
+    // Stale-chunk policy (see resolveCrashKind): dropped while the boot
+    // recovery is already reloading past it; kept as `stale-chunk` when a
+    // ChunkErrorBoundary handled it in place; escalated to `stale-chunk-fatal`
+    // when nothing did — that last shape is the one that still pages.
+    const resolvedKind = resolveCrashKind(kind, payload.message, isStaleChunkReloadInProgress());
+    if (resolvedKind === null) return;
+    payload.kind = resolvedKind;
+    const sig = crashSignature(resolvedKind, payload.message, payload.stack);
     if (!throttle.shouldSend(sig)) return;
     send(payload);
   } catch {

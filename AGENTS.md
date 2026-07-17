@@ -128,18 +128,38 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   non-errors (the RO loop notice) are dropped by the crash reporter (`core/telemetry/crashReport.ts`)
   _and_ by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
   cache, so stale clients keep beaconing long after a fix.
-- **Deploy skew self-heals with one boot reload — don't page for it.** GitHub Pages caches
-  `index.html` ~10 min and every deploy purges the old hashed chunks, so a visitor who isn't
-  SW-controlled yet can boot a stale shell whose lazy `import()`s 404 ("Failed to fetch
-  dynamically imported module" — this paged the maintainer repeatedly on 0.12.0).
-  `core/pwa/staleChunkRecovery.ts` (armed first thing in `main.tsx`) listens for Vite's
-  `vite:preloadError` and reloads once — guarded per version via sessionStorage so it can
-  never loop, and only **before** `dweeb:surface-ready` so an automatic reload can't destroy
-  a user's in-progress message. The crash reporter drops stale-chunk beacons _only while that
-  reload is in flight_ (`isStaleChunkMessage` + `isStaleChunkReloadInProgress`); the same
-  failure with recovery exhausted still reports, because then it's real signal (SW precache
-  gap, broken deploy). Keep new boot-path dynamic imports behind this ordering, and don't
-  "simplify" the suppression into an unconditional drop.
+- **Deploy skew self-heals — don't page for it.** GitHub Pages caches `index.html` ~10 min
+  and every deploy purges the old hashed chunks, so a tab that isn't SW-controlled can hit a
+  404 on a lazy `import()` ("Failed to fetch dynamically imported module" — this paged the
+  maintainer repeatedly on 0.12.0, first at boot, then post-boot when an open tab's Template
+  gallery chunk vanished). Four layers, each with a reason to exist — keep all of them:
+  1. **SW precache + `clientsClaim`** (vite.config.ts): the precache protects controlled
+     tabs across deploys, and `clientsClaim: true` closes the first-visit hole where the very
+     session that installed the worker stayed uncontrolled to its end. Safe with
+     `registerType: "prompt"`: an *updated* worker never skips waiting, so it can't activate
+     (or claim) under an old tab.
+  2. **Boot**: `core/pwa/staleChunkRecovery.ts` (armed first thing in `main.tsx`) listens for
+     Vite's `vite:preloadError` and reloads once — guarded per version via sessionStorage so
+     it can never loop, and only **before** `dweeb:surface-ready` so an automatic reload can't
+     destroy a user's in-progress message. Keep new boot-path dynamic imports behind this
+     ordering.
+  3. **Post-boot**: every lazy surface (all 10 in `App.tsx` + the Activity's FeedbackDialog)
+     is wrapped in `ui/ChunkErrorBoundary`, which turns exactly the stale-chunk failure into a
+     "refresh to update" Modal while the app keeps running (draft autosave + preserved URL
+     make the refresh lossless) and rethrows anything else to the top boundary. Wrap any NEW
+     lazy surface the same way; its `onDismiss` must fully unmount the surface (open flag
+     *and* any `*Mounted` latch) or the cached rejection rethrows forever. Never auto-reload
+     post-boot. The top `ErrorBoundary` also has a stale-chunk branch (accurate copy,
+     hash-preserving reload) for anything that still gets through.
+  4. **Reporting** (`resolveCrashKind` in crashReport.ts + `telemetry.rs`): dropped while the
+     boot reload is in flight; a boundary-handled failure reports as kind `stale-chunk`; an
+     unhandled one is escalated to `stale-chunk-fatal`. The proxy logs any stale-chunk message
+     that isn't `stale-chunk-fatal` at **info** (same `web_crash` target, still greppable) so
+     routine skew — including the long tail of pre-fix SW-cached clients — never pages;
+     `stale-chunk-fatal` stays a warn and pages, because a current client actually going down
+     means a broken deploy or SW precache gap. Don't "simplify" any of this into an
+     unconditional drop, and deploy the server change before (or with) the web one — the old
+     proxy logs every stale-chunk beacon at warn.
 - **`Field` rewrites the caller's element tree — it must never descend into a render prop.**
   `ui/Field`'s `wireControl` walks the tree its render-prop child returns and clones
   `aria-describedby`/`aria-errormessage`/`aria-invalid` onto the element carrying the control id.

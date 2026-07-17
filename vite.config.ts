@@ -235,6 +235,16 @@ export default defineConfig(({ mode }) => ({
       injectRegister: false,
       manifest: false,
       workbox: {
+        // Without this, the very session that installs the worker (a first
+        // visit) stays uncontrolled to its end — the SW only controls pages
+        // loaded after it activates — so a deploy mid-session could still 404
+        // that tab's lazy chunks (a real prod boundary crash: the gallery
+        // chunk, 0.12.0). Claiming on activation puts the freshly installed
+        // precache in front of the installing session too. Updates are
+        // unaffected: `registerType: "prompt"` never skips waiting, so an
+        // updated worker still can't activate (and thus can't claim) under an
+        // old tab.
+        clientsClaim: true,
         globPatterns: [
           // Keep every versioned lazy chunk available to an already-open tab
           // across a deployment. Registration is delayed until after paint in

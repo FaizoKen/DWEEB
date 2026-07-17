@@ -125,6 +125,11 @@ echo "$(J | grep -a 'outcome=done' | grep -oE 'launch=\S+' | sort -u | wc -l)" \
 
 # Frontend crash reports (web + Activity surfaces)
 journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat | grep web_crash
+
+# Routine deploy skew only (stale-chunk beacons logged at INFO — greppable but
+# never paged; a spike here means an SW precache gap even though nothing broke)
+journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
+  | grep web_crash | grep 'stale chunk'
 ```
 
 ## Off-host dead-man's switch (recommended)

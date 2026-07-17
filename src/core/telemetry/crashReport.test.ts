@@ -7,6 +7,7 @@ import {
   describeError,
   isNonCrashMessage,
   isStaleChunkMessage,
+  resolveCrashKind,
   topFrames,
   type CrashInput,
 } from "./crashReport";
@@ -174,6 +175,35 @@ describe("isStaleChunkMessage", () => {
     expect(isStaleChunkMessage("Failed to fetch")).toBe(false); // a plain network error
     expect(isStaleChunkMessage("Cannot read properties of undefined (reading 'id')")).toBe(false);
     expect(isStaleChunkMessage("")).toBe(false);
+  });
+});
+
+describe("resolveCrashKind", () => {
+  const STALE = "Failed to fetch dynamically imported module: https://x/assets/Gallery-abc.js";
+
+  it("passes non-stale reports through untouched", () => {
+    expect(resolveCrashKind("error", "boom", false)).toBe("error");
+    expect(resolveCrashKind("boundary", "boom", false)).toBe("boundary");
+    // Reload state is irrelevant when the message isn't a chunk failure.
+    expect(resolveCrashKind("error", "boom", true)).toBe("error");
+  });
+
+  it("drops a stale chunk the boot recovery is already reloading past", () => {
+    expect(resolveCrashKind("unhandledrejection", STALE, true)).toBe(null);
+    expect(resolveCrashKind("boundary", STALE, true)).toBe(null);
+    expect(resolveCrashKind("stale-chunk", STALE, true)).toBe(null);
+  });
+
+  it("keeps a handled post-boot failure as stale-chunk (logged below paging level)", () => {
+    expect(resolveCrashKind("stale-chunk", STALE, false)).toBe("stale-chunk");
+  });
+
+  it("escalates an unhandled stale chunk to stale-chunk-fatal (the page-worthy shape)", () => {
+    // The top boundary catching it means the app actually went down — recovery
+    // exhausted on a broken deploy, or a lazy path no ChunkErrorBoundary covers.
+    expect(resolveCrashKind("boundary", STALE, false)).toBe("stale-chunk-fatal");
+    expect(resolveCrashKind("error", STALE, false)).toBe("stale-chunk-fatal");
+    expect(resolveCrashKind("unhandledrejection", STALE, false)).toBe("stale-chunk-fatal");
   });
 });
 
