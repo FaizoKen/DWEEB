@@ -75,7 +75,7 @@
   border-color: transparent;
 }
 .variant-danger:hover:not(:disabled) {
-  background: rgba(237, 66, 69, 0.12);
+  background: var(--app-danger-soft);
 }
 
 .icon {

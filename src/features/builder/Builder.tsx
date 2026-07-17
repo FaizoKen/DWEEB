@@ -268,6 +268,9 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
   // check below folds them into the "More" overflow one at a time from the END
   // of this list, so the least-reached-for actions leave the row first and a
   // near-fit never strands a wide empty gap where a whole cluster used to be.
+  // Deliberately short: only the three everyday actions earn an inline icon.
+  // Share and Send feedback live permanently in the "More" menu below, keeping
+  // the header quiet.
   const utilities: UtilityAction[] = [
     {
       key: "save",
@@ -290,24 +293,6 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
       menuLabel: "Restore a message",
       run: onRestore,
     },
-    {
-      key: "share",
-      icon: ShareIcon,
-      label: "Share this message as a link",
-      menuLabel: "Share link",
-      run: onShare,
-    },
-    ...(feedbackOn
-      ? [
-          {
-            key: "feedback",
-            icon: SupportIcon,
-            label: "Send feedback",
-            menuLabel: "Send feedback",
-            run: openFeedback,
-          } satisfies UtilityAction,
-        ]
-      : []),
   ];
 
   const barRef = useRef<HTMLDivElement>(null);
@@ -343,10 +328,10 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
 
   // A signature of everything that changes the *inline* bar's width, so a state
   // flip (Send↔Update revealing New, the plan pill or destination chip
-  // appearing or renaming, feedback toggling) re-runs the fit measurement below
-  // — not just a raw width change. The channel name matters because the left
-  // reserve tracks the cluster's natural width.
-  const layoutKey = `${isUpdate}|${planVisible}|${feedbackOn}|${destActive}|${barChannel?.name ?? ""}`;
+  // appearing or renaming) re-runs the fit measurement below — not just a raw
+  // width change. The channel name matters because the left reserve tracks the
+  // cluster's natural width. (Feedback is menu-only, so it never moves the bar.)
+  const layoutKey = `${isUpdate}|${planVisible}|${destActive}|${barChannel?.name ?? ""}`;
 
   // On every width or content change, optimistically restore the full row,
   // then collapse one step at a time until both clusters fit on one row. The
@@ -421,17 +406,19 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
           ) : null}
 
           {/* Utility actions — saving a draft, the message directory (gallery),
-              restoring a posted message, sharing a link, and feedback. Inline
-              icons while the bar has room; the fit check folds them into the
-              "More" overflow below one at a time as the row tightens. */}
+              and restoring a posted message. Inline icons while the bar has
+              room; the fit check folds them into the "More" overflow below one
+              at a time as the row tightens. Share and feedback are menu-only
+              (see below) so the header stays minimal. */}
           {inlineUtilities.map((action) => (
             <IconButton key={action.key} label={action.label} onClick={action.run}>
               <action.icon />
             </IconButton>
           ))}
 
-          {/* The overflow menu: the long tail of occasional actions, plus any
-              utility icons the fit check folded in above them. */}
+          {/* The overflow menu: the long tail of occasional actions — Share
+              and Send feedback live here permanently — plus any utility icons
+              the fit check folded in above them. */}
           <Menu
             align="end"
             trigger={
@@ -459,6 +446,15 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
                     <MenuDivider />
                   </>
                 ) : null}
+                <MenuItem
+                  icon={<ShareIcon />}
+                  onSelect={() => {
+                    close();
+                    onShare();
+                  }}
+                >
+                  Share link
+                </MenuItem>
                 {collaborateUrl ? (
                   <MenuItem
                     icon={<UsersIcon />}
@@ -492,6 +488,17 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
                 >
                   Clear current message
                 </MenuItem>
+                {feedbackOn ? (
+                  <MenuItem
+                    icon={<SupportIcon />}
+                    onSelect={() => {
+                      close();
+                      openFeedback();
+                    }}
+                  >
+                    Send feedback
+                  </MenuItem>
+                ) : null}
                 <MenuItem
                   icon={<InfoIcon />}
                   onSelect={() => {

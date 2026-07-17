@@ -289,7 +289,7 @@
   text-transform: uppercase;
   line-height: 1.7;
   background: rgba(240, 178, 50, 0.16);
-  color: rgb(240, 178, 50);
+  color: var(--app-warning);
 }
 
 /* Create */
@@ -401,7 +401,7 @@
   border: none;
   font: inherit;
   font-size: 12px;
-  color: rgb(240, 178, 50);
+  color: var(--app-warning);
   cursor: pointer;
 }
 .purgeToggle:hover .purgeToggleAccent {
@@ -429,7 +429,7 @@
 .purgeIcon {
   flex: none;
   margin-top: 1px;
-  color: rgb(240, 178, 50);
+  color: var(--app-warning);
 }
 .purgeList {
   list-style: none;
@@ -713,7 +713,7 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   background: rgba(240, 178, 50, 0.16);
-  color: rgb(240, 178, 50);
+  color: var(--app-warning);
 }
 .manageBody {
   display: flex;

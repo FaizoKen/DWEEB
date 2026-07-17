@@ -41,5 +41,5 @@
 
 .warning {
   font-size: var(--app-text-xs);
-  color: rgb(240, 178, 50);
+  color: var(--app-warning);
 }

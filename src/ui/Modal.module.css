@@ -49,8 +49,8 @@
 }
 
 .title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--app-text-lg);
+  font-weight: 700;
   margin: 0;
 }
 

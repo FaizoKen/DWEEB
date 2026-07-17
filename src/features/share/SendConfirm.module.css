@@ -77,7 +77,7 @@
 }
 .ownerFollower {
   background: rgba(240, 178, 50, 0.16);
-  color: rgb(240, 178, 50);
+  color: var(--app-warning);
 }
 
 .muted {
@@ -249,7 +249,7 @@
 
 .pingEveryone {
   font-weight: 600;
-  color: rgb(240, 178, 50);
+  color: var(--app-warning);
 }
 
 .pingDetail {

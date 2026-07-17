@@ -67,7 +67,7 @@
   gap: 5px;
   padding: 3px 9px;
   font-size: var(--app-text-xs);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--app-text-muted);
   background: var(--app-bg-subtle);
   border: 1px solid var(--app-border);
@@ -522,7 +522,7 @@
      token is missing (an invalid value would drop the whole box-shadow). */
   box-shadow:
     0 0 0 1.5px var(--ring, var(--app-accent, #5865f2)),
-    0 0 0 3px var(--app-bg-elevated, #17191f);
+    0 0 0 3px var(--app-bg-elevated, #20242e);
   margin-left: -6px;
 }
 
@@ -561,7 +561,7 @@
   min-height: 30px;
   padding: 4px 13px 4px 5px;
   font-size: var(--app-text-sm);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--app-text-muted);
   background: transparent;
   border: 1px dashed rgba(88, 101, 242, 0.45);
@@ -799,7 +799,7 @@
 /* Warning variant: the lane's worst issue is a soft one (Discord accepts but
    degrades the value) — matches the amber the issue banner/chip use. */
 .optionsTabDotWarn {
-  background: rgb(240, 178, 50);
+  background: var(--app-warning);
 }
 .optionsTabError .optionsTabIcon {
   border-color: var(--app-danger, #f23f43);

@@ -31,6 +31,9 @@
   color: var(--app-text);
   text-align: left;
   font-size: var(--app-text-base);
+  /* Matches the weight of every other control label (buttons, field labels)
+     so menu rows don't read lighter than the chrome around them. */
+  font-weight: 500;
   cursor: pointer;
   width: 100%;
 }
