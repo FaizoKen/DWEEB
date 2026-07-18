@@ -36,7 +36,7 @@ import { useActivityStore } from "@/core/activity/activityStore";
 import { useRoleInfo } from "@/core/guild/guildStore";
 import { summarizePings, type PingSummary } from "@/core/schema/mentions";
 import { inspectCapabilities } from "@/core/schema/capability";
-import type { PickerGuild, PermanentSlots } from "@/core/guild/api";
+import { slotUsageLabel, type PickerGuild, type PermanentSlots } from "@/core/guild/api";
 import {
   fetchActivityIdentities,
   fetchActivityPermanentSlots,
@@ -46,7 +46,6 @@ import {
 import { openExternalLink } from "@/core/activity/sdk";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
-import { Switch } from "@/ui/Switch";
 import { pushToast } from "@/ui/Toast";
 import { ClockIcon, PlusIcon, SendIcon, RefreshIcon } from "@/ui/Icon";
 import { ServerGlyph } from "./GuildPicker";
@@ -75,7 +74,7 @@ export interface PostConfirmProps {
   /** True while the confirmed post is in flight — drives the button spinner. */
   busy?: boolean;
   /** Confirm the post. `makePermanent` carries the "Never expire" choice (always
-   *  false unless the toggle was shown and switched on); `postAs` carries the
+   *  false unless the expiry options were shown with it selected); `postAs` carries the
    *  "Post as" choice — a connected custom bot's application id, or null for
    *  DWEEB (always null unless the picker was shown). */
   onConfirm: (makePermanent: boolean, postAs: string | null) => void;
@@ -201,13 +200,15 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
 }
 
 /**
- * The "Never expire" control for a message with interactive components. By
- * default the post's buttons & selects stop working once unused for the
- * deployment TTL (any interaction restarts that window); claiming one of the
- * server's never-expire slots keeps them alive regardless. Mirrors the
- * web app's PermanentOptIn, minus the update-target/already-permanent cases (the
- * Activity only offers it on a brand-new post). When every slot is taken the
- * switch gives way to a "Manage on web" hand-off — freeing slots lives there.
+ * The expiry decision for a message with interactive components: two stacked
+ * radio cards, "Never expire" first (and the default — the fetch effect
+ * pre-selects it whenever a slot is free). By default a post's buttons &
+ * selects stop working once unused for the deployment TTL (any interaction
+ * restarts that window); a never-expire slot keeps them alive regardless.
+ * Mirrors the web app's PermanentOptIn, minus the update-target/already-
+ * permanent cases (the Activity only offers it on a brand-new post). When
+ * every slot is taken the "Never expire" card renders disabled with a
+ * "Manage on web" hand-off underneath — freeing slots lives there.
  */
 function PermanentOptIn({
   slots,
@@ -223,25 +224,51 @@ function PermanentOptIn({
   onManageOnWeb?: () => void;
 }) {
   const slotsFull = slots.used >= slots.cap;
-  const sub = slotsFull
-    ? `All ${slots.cap} never-expire slots are in use — free one or upgrade for more on the web`
-    : `Buttons & selects keep working · ${slots.used}/${slots.cap} slots used`;
+  const days =
+    slots.ttl_days != null
+      ? `${slots.ttl_days} day${slots.ttl_days === 1 ? "" : "s"}`
+      : "a few days";
+  const neverSub = slotsFull
+    ? `All ${slots.cap} slots are in use — free one or upgrade for more on the web`
+    : `Buttons & selects keep working forever · ${slotUsageLabel(slots.used, slots.cap)}`;
 
   return (
     <div className={styles.permanentBox}>
-      <div className={styles.permanentRow}>
-        <span className={styles.permanentCopy} id="post-confirm-permanent">
-          <span className={styles.permanentTitle}>Never expire</span>
-          <span className={styles.permanentSub}>{sub}</span>
-        </span>
-        {!slotsFull ? (
-          <Switch
-            aria-labelledby="post-confirm-permanent"
+      <div className={styles.permanentOptions} role="radiogroup" aria-label="Component expiry">
+        <label
+          className={styles.permanentOption}
+          data-checked={checked ? "" : undefined}
+          data-disabled={slotsFull ? "" : undefined}
+        >
+          <input
+            type="radio"
+            name="post-confirm-expiry"
+            className={styles.permanentRadio}
             checked={checked}
-            disabled={busy}
-            onChange={(e) => onChange(e.currentTarget.checked)}
+            disabled={busy || slotsFull}
+            onChange={() => onChange(true)}
           />
-        ) : null}
+          <span className={styles.permanentCopy}>
+            <span className={styles.permanentTitle}>Never expire</span>
+            <span className={styles.permanentSub}>{neverSub}</span>
+          </span>
+        </label>
+        <label className={styles.permanentOption} data-checked={!checked ? "" : undefined}>
+          <input
+            type="radio"
+            name="post-confirm-expiry"
+            className={styles.permanentRadio}
+            checked={!checked}
+            disabled={busy}
+            onChange={() => onChange(false)}
+          />
+          <span className={styles.permanentCopy}>
+            <span className={styles.permanentTitle}>Expire when unused</span>
+            <span className={styles.permanentSub}>
+              Buttons &amp; selects stop working after {days} without use
+            </span>
+          </span>
+        </label>
       </div>
       {slotsFull && onManageOnWeb ? (
         <div className={styles.permanentAction}>
@@ -320,10 +347,10 @@ export function PostConfirm({
   );
 
   // Never-expire slot state, fetched when the confirm opens for a brand-new post
-  // of an interactive message. Null until it resolves; the toggle only renders on
-  // a successful fetch with expiry actually configured. `makePermanent` is the
-  // switch — defaulted ON when a slot is free so interactive posts keep working
-  // unless the user opts out (matching the web app).
+  // of an interactive message. Null until it resolves; the expiry options only
+  // render on a successful fetch with expiry actually configured. `makePermanent`
+  // is the choice — "Never expire" is pre-selected when a slot is free so
+  // interactive posts keep working unless the user opts out (matching the web app).
   const offersPermanent = open && mode === "new" && hasInteractive && !!guildId;
   const [slots, setSlots] = useState<PermanentSlots | null>(null);
   const [makePermanent, setMakePermanent] = useState(false);
@@ -335,19 +362,20 @@ export function PostConfirm({
     fetchActivityPermanentSlots(guildId, ac.signal)
       .then((s) => {
         setSlots(s);
-        // On when expiry is configured here and a slot is free to claim; a full
-        // server (or expiry off) leaves it off — the user can't claim from here.
+        // "Never expire" pre-selected when expiry is configured here and a slot
+        // is free to claim; a full server (or expiry off) lands on "Expire when
+        // unused" — the user can't claim a slot from here.
         setMakePermanent(s.ttl_days !== null && s.used < s.cap);
       })
       .catch(() => {
-        // 501 (feature off), 403, network, abort — just leave the toggle hidden;
+        // 501 (feature off), 403, network, abort — just leave the options hidden;
         // the post proceeds as an ordinary (expiring) message.
       });
     return () => ac.abort();
   }, [offersPermanent, guildId]);
 
-  // Show the toggle only once slots resolved and this deployment actually expires
-  // components (ttl_days set) — otherwise there's nothing to keep alive.
+  // Show the expiry options only once slots resolved and this deployment actually
+  // expires components (ttl_days set) — otherwise there's nothing to keep alive.
   const showPermanent = offersPermanent && slots != null && slots.ttl_days !== null;
 
   // "Post as" — DWEEB or one of the server's registered custom bots. Only a

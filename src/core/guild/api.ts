@@ -287,6 +287,14 @@ export function isUnlimitedCap(cap: number): boolean {
   return cap >= UNLIMITED_CAP;
 }
 
+/** Slot-usage tail for never-expire copy. Hides the raw unlimited-cap sentinel,
+ *  which otherwise renders as the absurd "1/1000000 slots used". */
+export function slotUsageLabel(used: number, cap: number): string {
+  return isUnlimitedCap(cap)
+    ? `${used} used · unlimited slots`
+    : `${used}/${cap} slot${cap === 1 ? "" : "s"} used`;
+}
+
 /** A server's permanent-slot state, as every slot endpoint returns it. */
 export interface PermanentSlots {
   /** Slots the server may hold. */

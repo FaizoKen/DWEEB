@@ -207,7 +207,7 @@
   color: var(--app-text-muted);
 }
 
-/* "Never expire" control for messages with interactive components — mirrors the
+/* Expiry decision for messages with interactive components — mirrors the
    web app's PermanentOptIn box. */
 .permanentBox {
   margin: 0 0 14px;
@@ -217,10 +217,46 @@
   border: 1px solid var(--app-border);
 }
 
-.permanentRow {
+/* The two expiry choices as stacked radio cards — "Never expire" first (the
+   default). Native radios carry the semantics; the accent border marks the
+   selected card. */
+.permanentOptions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.permanentOption {
+  display: flex;
+  align-items: flex-start;
   gap: 10px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid var(--app-border);
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+
+.permanentOption:hover:not([data-disabled]) {
+  border-color: var(--app-accent);
+}
+
+.permanentOption[data-checked] {
+  border-color: var(--app-accent);
+}
+
+.permanentOption[data-disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.permanentRadio {
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  accent-color: var(--app-accent);
 }
 
 .permanentCopy {

@@ -694,11 +694,12 @@ export function SendPanel({
     fetchPermanentSlots(knownGuildId, ac.signal)
       .then((slots) => {
         setConfirmSlots(slots);
-        // Default the switch ON so interactive messages never expire unless the
-        // user opts out. An update target that already holds a slot stays on
-        // (leaving it on keeps the slot, turning it off releases it after the
-        // PATCH); everything else defaults on only when a slot is free to claim —
-        // a full server leaves it off, and the switch gives way to "Free a slot".
+        // Default to "Never expire" so interactive messages keep working unless
+        // the user opts out. An update target that already holds a slot stays on
+        // (keeping it selected keeps the slot, picking "Expire when unused"
+        // releases it after the PATCH); everything else defaults on only when a
+        // slot is free to claim — a full server lands on "Expire when unused"
+        // with the never-expire option disabled behind "Free a slot"/upgrade.
         const alreadyPermanent =
           updateTargetId != null && slots.items.some((i) => i.message_id === updateTargetId);
         setMakePermanent(alreadyPermanent || slots.used < slots.cap);
@@ -713,8 +714,8 @@ export function SendPanel({
 
   // What the confirm dialog renders. Hidden when expiry is off on this
   // deployment (nothing to decide) or the slot state never loaded; when every
-  // slot is taken by other messages the switch gives way to a "Free a slot"
-  // button that hands off to the gallery's Posted tab (below).
+  // slot is taken by other messages the "Never expire" option is disabled and
+  // a "Free a slot" button hands off to the gallery's Posted tab (below).
   const targetAlreadyPermanent =
     updateTargetId != null &&
     confirmSlots != null &&
@@ -722,7 +723,7 @@ export function SendPanel({
   const slotsFull =
     confirmSlots != null && !targetAlreadyPermanent && confirmSlots.used >= confirmSlots.cap;
 
-  // "Free a slot" on the confirm's locked switch: abandon the pending send,
+  // "Free a slot" under the confirm's disabled never-expire option: abandon the pending send,
   // drop the whole dialog stack (confirm + Share dialog), and open the
   // gallery's Posted tab for the webhook's server — slots are freed right on
   // the posted messages' cards there. Nothing is lost: the editor keeps the
@@ -752,6 +753,7 @@ export function SendPanel({
       ? {
           used: confirmSlots.used,
           cap: confirmSlots.cap,
+          ttlDays: confirmSlots.ttl_days,
           alreadyPermanent: targetAlreadyPermanent,
           checked: makePermanent,
           onChange: setMakePermanent,

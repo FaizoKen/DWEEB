@@ -11,17 +11,21 @@
  *     ring the whole channel is impossible to miss.
  *
  * For messages with interactive components it is also the one place permanence
- * is decided (state owned by the Send panel): components expire after a
- * deployment-set TTL unless the message holds one of the server's permanent
- * slots. The switch claims a slot — or, when the update target already holds
- * one, starts on and releases it when turned off. The claim/release itself
- * runs right after the send succeeds — permanence is keyed to the message id,
- * which only exists once Discord accepts the message, so it can never happen
- * here. When every slot is taken by other messages the switch gives way to
- * a "Free a slot" button that hands off to the gallery's Posted tab, where
- * slots are freed on the messages' cards — closing this dialog and the Share
- * dialog around it (the pending send is abandoned, but the panel keeps its
- * inputs). The post-send dialog only *reports* the final state.
+ * is decided (state owned by the Send panel): components expire once unused
+ * for a deployment-set TTL unless the message holds one of the server's
+ * permanent slots. The choice renders as two radio options — "Never expire"
+ * FIRST and default-selected (maintainer, 2026-07-18; it replaced an on/off
+ * switch whose off state never said what actually happens) — with "Expire
+ * when unused" as the opt-out. Picking "Never expire" claims a slot; on an
+ * update target that already holds one, picking "Expire when unused" releases
+ * it. The claim/release itself runs right after the send succeeds — permanence
+ * is keyed to the message id, which only exists once Discord accepts the
+ * message, so it can never happen here. When every slot is taken by other
+ * messages the "Never expire" option is disabled and a "Free a slot" button
+ * hands off to the gallery's Posted tab, where slots are freed on the
+ * messages' cards — closing this dialog and the Share dialog around it (the
+ * pending send is abandoned, but the panel keeps its inputs). The post-send
+ * dialog only *reports* the final state.
  *
  * The dialog is presentational: it owns no send logic. Confirming closes it and
  * hands back to the Send panel, which runs the existing verify + send flow
@@ -40,9 +44,9 @@ import {
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import { useRoleInfo } from "@/core/guild/guildStore";
 import type { PingSummary } from "@/core/schema/mentions";
+import { slotUsageLabel } from "@/core/guild/api";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
-import { Switch } from "@/ui/Switch";
 import { cn } from "@/lib/cn";
 import styles from "./SendConfirm.module.css";
 
@@ -133,7 +137,7 @@ export interface SendConfirmProps {
    * slot from here. Surfaces the heads-up *before* the post (the advice is
    * "sign in before sending"); `onSignIn` starts the Discord login. Undefined
    * when there's nothing to expire, the feature is off, or the user is signed
-   * in (they get the "Never expire" toggle instead).
+   * in (they get the expiry options instead).
    */
   expiryNudge?: {
     /** Days the components stay clickable — the deployment's `COMPONENT_TTL_DAYS`. */
@@ -141,23 +145,28 @@ export interface SendConfirmProps {
     onSignIn: () => void;
   };
   /**
-   * The "Make permanent" control for messages with interactive components.
-   * Present only when the Send panel could read the slot state (signed in,
-   * slots fetched, expiry on). Undefined hides the row entirely — the
-   * post-send dialog then just shows a generic expiry note.
+   * The expiry decision for messages with interactive components — two radio
+   * options, "Never expire" first and default-selected. Present only when the
+   * Send panel could read the slot state (signed in, slots fetched, expiry
+   * on). Undefined hides the row entirely — the post-send dialog then just
+   * shows a generic expiry note.
    */
   permanentOption?: {
     used: number;
     cap: number;
-    /** The update target already holds a slot — the switch starts on, and
-     *  turning it off releases the slot once the update succeeds. */
+    /** Days components stay clickable without use — the deployment's TTL, for
+     *  the "Expire when unused" option's copy. */
+    ttlDays: number;
+    /** The update target already holds a slot — "Never expire" starts
+     *  selected, and picking "Expire when unused" releases the slot once the
+     *  update succeeds. */
     alreadyPermanent: boolean;
     checked: boolean;
     onChange: (checked: boolean) => void;
     /**
-     * Every slot is taken by *other* messages: the switch gives way to a
-     * "Free a slot" button that hands off to the gallery's Posted tab, where
-     * a slot can be freed on a message's card.
+     * Every slot is taken by *other* messages: the "Never expire" option is
+     * disabled and a "Free a slot" button hands off to the gallery's Posted
+     * tab, where a slot can be freed on a message's card.
      */
     slotsFull: boolean;
     /**
@@ -280,7 +289,13 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
   );
 }
 
-/** The "Make permanent" row: title + state sub-line + the switch. */
+/**
+ * The expiry decision: two stacked radio cards, "Never expire" first (and the
+ * default — the Send panel pre-selects it whenever a slot is free). Each option
+ * explains its own outcome, which the old on/off switch never did for its off
+ * state. When every slot is taken the "Never expire" card renders disabled
+ * with the escape actions (Upgrade / Free a slot) underneath.
+ */
 function PermanentOptIn({
   option,
   busy,
@@ -288,32 +303,65 @@ function PermanentOptIn({
   option: NonNullable<SendConfirmProps["permanentOption"]>;
   busy: boolean;
 }) {
-  const { used, cap, alreadyPermanent, checked, onChange, slotsFull, onManageSlots, onUpgrade } =
-    option;
+  const {
+    used,
+    cap,
+    ttlDays,
+    alreadyPermanent,
+    checked,
+    onChange,
+    slotsFull,
+    onManageSlots,
+    onUpgrade,
+  } = option;
 
-  const sub = slotsFull
+  const days = `${ttlDays} day${ttlDays === 1 ? "" : "s"}`;
+  const neverSub = slotsFull
     ? onUpgrade
-      ? `All ${cap} never-expire slots are in use — upgrade for more, or free one to use it here`
-      : `All ${cap} never-expire slots are used by other messages — free one to use it here`
-    : alreadyPermanent && !checked
-      ? "Frees its slot — buttons & selects can expire again"
-      : `Buttons & selects keep working · ${used}/${cap} slots used`;
+      ? `All ${cap} slots are used by other messages — upgrade for more, or free one`
+      : `All ${cap} slots are used by other messages — free one to use it here`
+    : alreadyPermanent
+      ? `Keeps its current slot · ${slotUsageLabel(used, cap)}`
+      : `Buttons & selects keep working forever · ${slotUsageLabel(used, cap)}`;
+  const expireSub = alreadyPermanent
+    ? `Frees its slot — buttons & selects stop working after ${days} without use`
+    : `Buttons & selects stop working after ${days} without use`;
 
   return (
     <div className={styles.permanentBox}>
-      <div className={styles.permanentRow}>
-        <span className={styles.permanentCopy} id="send-confirm-permanent">
-          <span className={styles.permanentTitle}>Never expire</span>
-          <span className={styles.permanentSub}>{sub}</span>
-        </span>
-        {!slotsFull ? (
-          <Switch
-            aria-labelledby="send-confirm-permanent"
+      <div className={styles.permanentOptions} role="radiogroup" aria-label="Component expiry">
+        <label
+          className={styles.permanentOption}
+          data-checked={checked ? "" : undefined}
+          data-disabled={slotsFull ? "" : undefined}
+        >
+          <input
+            type="radio"
+            name="send-confirm-expiry"
+            className={styles.permanentRadio}
             checked={checked}
-            disabled={busy}
-            onChange={(e) => onChange(e.currentTarget.checked)}
+            disabled={busy || slotsFull}
+            onChange={() => onChange(true)}
           />
-        ) : null}
+          <span className={styles.permanentCopy}>
+            <span className={styles.permanentTitle}>Never expire</span>
+            <span className={styles.permanentSub}>{neverSub}</span>
+          </span>
+        </label>
+        <label className={styles.permanentOption} data-checked={!checked ? "" : undefined}>
+          <input
+            type="radio"
+            name="send-confirm-expiry"
+            className={styles.permanentRadio}
+            checked={!checked}
+            disabled={busy}
+            onChange={() => onChange(false)}
+          />
+          <span className={styles.permanentCopy}>
+            <span className={styles.permanentTitle}>Expire when unused</span>
+            <span className={styles.permanentSub}>{expireSub}</span>
+          </span>
+        </label>
       </div>
       {slotsFull && (onUpgrade || onManageSlots) ? (
         <div className={styles.permanentAction}>
@@ -431,7 +479,7 @@ function PreviewMismatchNotice({
  * once they go unused for a few days, unless it claims a never-expire slot —
  * which needs a signed-in session. Shown *before* the post so the "sign in
  * before sending" advice is still actionable — the signed-in path gets the
- * {@link PermanentOptIn} toggle instead.
+ * {@link PermanentOptIn} expiry options instead.
  */
 function ExpiryNudge({ ttlDays, onSignIn }: NonNullable<SendConfirmProps["expiryNudge"]>) {
   return (
