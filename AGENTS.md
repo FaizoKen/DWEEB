@@ -213,10 +213,13 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   use", never "N days after sending", and treat client-side expiry estimates (gallery
   "Buttons may be expired" tag, scheduled-history badge, PermanentStatus date) as a no-use
   lower bound — the FE can't see server-side activity. The send/post confirm dialogs (web
-  `SendConfirm` + Activity `PostConfirm`) present the choice as **two radio cards with
-  "Never expire" first and default-selected** whenever a slot is free (maintainer,
-  2026-07-18 — replaced an on/off switch whose off state never said what happens; don't
-  revert or flip the default), and all slot-usage copy goes through `slotUsageLabel`
+  `SendConfirm` + Activity `PostConfirm`) present the choice as an **"Expiry" fact row —
+  two choice pills with "Never expire" first and default-selected** whenever a slot is
+  free, matching the dialog's When / Post as rows (maintainer: two explicit options
+  2026-07-18 — replaced an on/off switch whose off state never said what happens —
+  restyled from stacked radio cards into the fact row 2026-07-19; don't revert or flip
+  the default, and the hint under the pills must always state the selected option's
+  outcome), and all slot-usage copy goes through `slotUsageLabel`
   (core/guild/api.ts) so the unlimited-cap sentinel never renders as "1/1000000 slots".
 - **Plugin request and storage work is resource-bounded.** Every plugin router caps request
   bodies at 256 KiB. Interaction services parse their primary Ed25519 key once at boot (custom

@@ -142,79 +142,56 @@
   }
 }
 
-/* Expiry decision for messages with interactive components. */
-.permanentBox {
-  margin: 0 0 14px;
-  padding: 10px 12px;
-  border-radius: var(--app-radius-sm);
-  background: var(--app-bg-subtle);
-  border: 1px solid var(--app-border);
-}
-
-/* The two expiry choices as stacked radio cards — "Never expire" first (the
-   default). Native radios carry the semantics; the accent border marks the
-   selected card. */
-.permanentOptions {
+/* Expiry decision for messages with interactive components — an "Expiry" fact
+   row of choice pills, matching the Activity dialog's When / Post as rows. */
+.idPills {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
-.permanentOption {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: var(--app-radius-sm);
+.idPill {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 999px;
   border: 1px solid var(--app-border);
+  background: var(--app-bg-subtle);
+  color: var(--app-text);
   cursor: pointer;
   transition:
     border-color 0.12s ease,
-    background 0.12s ease;
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
-.permanentOption:hover:not([data-disabled]) {
+.idPill:hover:not(:disabled) {
   border-color: var(--app-accent);
 }
 
-.permanentOption[data-checked] {
+.idPill[data-active] {
+  background: var(--app-accent);
   border-color: var(--app-accent);
+  color: #fff;
 }
 
-.permanentOption[data-disabled] {
+.idPill:disabled {
   opacity: 0.55;
   cursor: default;
 }
 
-.permanentRadio {
-  flex: 0 0 auto;
-  margin: 2px 0 0;
-  accent-color: var(--app-accent);
-}
-
-.permanentCopy {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.permanentTitle {
-  font-size: var(--app-text-sm);
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--app-text);
-}
-
-.permanentSub {
-  font-size: var(--app-text-xs);
-  line-height: 1.4;
+/* The selected expiry choice's outcome, spelled out under the pills. */
+.idHint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
   color: var(--app-text-muted);
 }
 
-/* Slots-full actions under the locked switch — Upgrade (primary) + Free a slot
+/* Slots-full actions under the pills — Upgrade (primary) + Free a slot
    (secondary), side by side, wrapping on a narrow modal. */
 .permanentAction {
   margin-top: 8px;

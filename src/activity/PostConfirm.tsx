@@ -200,14 +200,17 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
 }
 
 /**
- * The expiry decision for a message with interactive components: two stacked
- * radio cards, "Never expire" first (and the default — the fetch effect
- * pre-selects it whenever a slot is free). By default a post's buttons &
- * selects stop working once unused for the deployment TTL (any interaction
- * restarts that window); a never-expire slot keeps them alive regardless.
- * Mirrors the web app's PermanentOptIn, minus the update-target/already-
- * permanent cases (the Activity only offers it on a brand-new post). When
- * every slot is taken the "Never expire" card renders disabled with a
+ * The expiry decision for a message with interactive components, rendered as
+ * an "Expiry" fact row so it keeps the dialog's When / Post as rhythm: two
+ * pills, "Never expire" first (and the default — the fetch effect pre-selects
+ * it whenever a slot is free), with the selected choice's outcome spelled out
+ * in the hint underneath (the on/off switch this UI replaced never said what
+ * its off state did — every state must keep naming its outcome). By default a
+ * post's buttons & selects stop working once unused for the deployment TTL
+ * (any interaction restarts that window); a never-expire slot keeps them alive
+ * regardless. Mirrors the web app's PermanentOptIn, minus the update-target/
+ * already-permanent cases (the Activity only offers it on a brand-new post).
+ * When every slot is taken the "Never expire" pill renders disabled with a
  * "Manage on web" hand-off underneath — freeing slots lives there.
  */
 function PermanentOptIn({
@@ -228,55 +231,47 @@ function PermanentOptIn({
     slots.ttl_days != null
       ? `${slots.ttl_days} day${slots.ttl_days === 1 ? "" : "s"}`
       : "a few days";
-  const neverSub = slotsFull
-    ? `All ${slots.cap} slots are in use — free one or upgrade for more on the web`
-    : `Buttons & selects keep working forever · ${slotUsageLabel(slots.used, slots.cap)}`;
+  const hint = slotsFull
+    ? `All ${slots.cap} never-expire slots are in use — free one or upgrade for more on the web. Buttons & selects stop working after ${days} without use.`
+    : checked
+      ? `Buttons & selects keep working forever · ${slotUsageLabel(slots.used, slots.cap)}`
+      : `Buttons & selects stop working after ${days} without use`;
 
   return (
-    <div className={styles.permanentBox}>
-      <div className={styles.permanentOptions} role="radiogroup" aria-label="Component expiry">
-        <label
-          className={styles.permanentOption}
-          data-checked={checked ? "" : undefined}
-          data-disabled={slotsFull ? "" : undefined}
-        >
-          <input
-            type="radio"
-            name="post-confirm-expiry"
-            className={styles.permanentRadio}
-            checked={checked}
+    <div className={styles.fact}>
+      <dt>Expiry</dt>
+      <dd>
+        <div className={styles.idPills} role="group" aria-label="Component expiry">
+          <button
+            type="button"
+            className={styles.idPill}
+            data-active={checked ? "" : undefined}
+            aria-pressed={checked}
             disabled={busy || slotsFull}
-            onChange={() => onChange(true)}
-          />
-          <span className={styles.permanentCopy}>
-            <span className={styles.permanentTitle}>Never expire</span>
-            <span className={styles.permanentSub}>{neverSub}</span>
-          </span>
-        </label>
-        <label className={styles.permanentOption} data-checked={!checked ? "" : undefined}>
-          <input
-            type="radio"
-            name="post-confirm-expiry"
-            className={styles.permanentRadio}
-            checked={!checked}
+            onClick={() => onChange(true)}
+          >
+            Never expire
+          </button>
+          <button
+            type="button"
+            className={styles.idPill}
+            data-active={!checked ? "" : undefined}
+            aria-pressed={!checked}
             disabled={busy}
-            onChange={() => onChange(false)}
-          />
-          <span className={styles.permanentCopy}>
-            <span className={styles.permanentTitle}>Expire when unused</span>
-            <span className={styles.permanentSub}>
-              Buttons &amp; selects stop working after {days} without use
-            </span>
-          </span>
-        </label>
-      </div>
-      {slotsFull && onManageOnWeb ? (
-        <div className={styles.permanentAction}>
-          <Button size="sm" variant="secondary" disabled={busy} onClick={onManageOnWeb}>
-            Manage on web ↗
-          </Button>
+            onClick={() => onChange(false)}
+          >
+            Expire when unused
+          </button>
         </div>
-      ) : null}
+        <p className={styles.idHint}>{hint}</p>
+        {slotsFull && onManageOnWeb ? (
+          <div className={styles.permanentAction}>
+            <Button size="sm" variant="secondary" disabled={busy} onClick={onManageOnWeb}>
+              Manage on web ↗
+            </Button>
+          </div>
+        ) : null}
+      </dd>
     </div>
   );
 }
@@ -836,6 +831,15 @@ export function PostConfirm({
             </dd>
           </div>
         ) : null}
+        {showPermanent && slots ? (
+          <PermanentOptIn
+            slots={slots}
+            checked={makePermanent}
+            onChange={setMakePermanent}
+            busy={busy}
+            onManageOnWeb={onManageOnWeb}
+          />
+        ) : null}
       </dl>
 
       {mode === "update" ? (
@@ -843,16 +847,6 @@ export function PostConfirm({
           This replaces the whole message with the current draft — anything not rebuilt in the
           editor is overwritten.
         </p>
-      ) : null}
-
-      {showPermanent && slots ? (
-        <PermanentOptIn
-          slots={slots}
-          checked={makePermanent}
-          onChange={setMakePermanent}
-          busy={busy}
-          onManageOnWeb={onManageOnWeb}
-        />
       ) : null}
 
       <PingSummaryView pings={pings} />
