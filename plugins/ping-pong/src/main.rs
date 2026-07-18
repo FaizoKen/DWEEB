@@ -60,6 +60,8 @@ const FLAG_IS_COMPONENTS_V2: u64 = 1 << 15; // 32768
 
 struct App {
     public_key_hex: String,
+    /// Parsed once: point decompression is meaningful work at interaction QPS.
+    public_key: VerifyingKey,
     public_base_url: String,
     /// Shared secret with the dispatcher. When a forwarded request carries it
     /// (x-dweeb-forward-auth), the dispatcher's x-dweeb-public-key header
@@ -98,6 +100,8 @@ async fn run() {
     if hex::decode(&public_key_hex).map(|b| b.len()) != Ok(32) {
         panic!("DISCORD_PUBLIC_KEY must be 64 hex chars");
     }
+    let public_key = parse_verifying_key(&public_key_hex)
+        .expect("DISCORD_PUBLIC_KEY must encode a valid Ed25519 point");
     let public_base_url = std::env::var("PUBLIC_BASE_URL")
         .unwrap_or_else(|_| "http://localhost:8091".into())
         .trim_end_matches('/')
@@ -113,6 +117,7 @@ async fn run() {
 
     let state = Arc::new(App {
         public_key_hex,
+        public_key,
         public_base_url,
         forward_secret,
     });
@@ -126,6 +131,7 @@ async fn run() {
         // The registry is fetched cross-origin by DWEEB. Everything here is
         // public, so a permissive (credential-less) CORS policy is fine.
         .layer(CorsLayer::permissive())
+        .layer(axum::extract::DefaultBodyLimit::max(256 * 1024))
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -211,9 +217,13 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
         .get("x-signature-timestamp")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    let key_hex = attested_key(&headers, app.forward_secret.as_deref())
-        .unwrap_or(app.public_key_hex.as_str());
-    if !verify_signature(key_hex, signature, timestamp, &body) {
+    let attested = attested_key(&headers, app.forward_secret.as_deref());
+    let verified = match attested {
+        Some(key) if !key.eq_ignore_ascii_case(&app.public_key_hex) => parse_verifying_key(key)
+            .is_some_and(|key| verify_signature(&key, signature, timestamp, &body)),
+        _ => verify_signature(&app.public_key, signature, timestamp, &body),
+    };
+    if !verified {
         return (StatusCode::UNAUTHORIZED, "bad signature").into_response();
     }
 
@@ -325,23 +335,17 @@ fn decode_custom_id(custom_id: &str) -> (String, bool) {
 /// Verify Discord's `X-Signature-Ed25519` over `timestamp || body`. Any
 /// malformed input fails closed (returns false). This MUST run on the raw body
 /// bytes, before JSON parsing. (Same logic as the modal-form plugin.)
+fn parse_verifying_key(public_key_hex: &str) -> Option<VerifyingKey> {
+    let pk: [u8; 32] = hex::decode(public_key_hex).ok()?.try_into().ok()?;
+    VerifyingKey::from_bytes(&pk).ok()
+}
+
 fn verify_signature(
-    public_key_hex: &str,
+    verifying_key: &VerifyingKey,
     signature_hex: &str,
     timestamp: &str,
     body: &[u8],
 ) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex)
-        .ok()
-        .and_then(|b| b.try_into().ok())
-    {
-        Some(arr) => arr,
-        None => return false,
-    };
-    let verifying_key = match VerifyingKey::from_bytes(&pk) {
-        Ok(k) => k,
-        Err(_) => return false,
-    };
     let sig: [u8; 64] = match hex::decode(signature_hex)
         .ok()
         .and_then(|b| b.try_into().ok())

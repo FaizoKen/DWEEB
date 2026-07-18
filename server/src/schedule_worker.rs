@@ -18,6 +18,7 @@
 //! missed slot — so a long downtime yields at most one catch-up post, not a
 //! burst of every occurrence that elapsed.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,6 +43,11 @@ const BACKOFF_BASE_SECS: i64 = 30;
 const BACKOFF_CAP_SECS: i64 = 3600;
 /// How often to sweep terminal rows (done/failed past retention).
 const SWEEP_INTERVAL_SECS: i64 = 3600;
+/// Process independent due schedules concurrently, but keep the fan-out small:
+/// default SQLite pool width (three) overlaps Discord latency without turning a
+/// restart backlog into an outbound/DB burst. Even an unusually large configured
+/// pool is capped here.
+const MAX_DELIVERY_CONCURRENCY: usize = 8;
 
 /// Spawn the worker loop. `http` should carry a modest timeout (the worker is
 /// off the 3s interaction budget, but a hung POST shouldn't hold a lease). The
@@ -67,6 +73,11 @@ pub fn spawn(
     let retention_secs = retention_days.max(0) * 86_400;
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(period);
+        // If a delivery batch runs longer than the period, don't replay every
+        // missed tick back-to-back. The rows remain durable and the next normal
+        // tick will claim them; bursting catch-up ticks would defeat the batch's
+        // outbound/DB load bound during an upstream slowdown.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // First sweep fires on the first tick (last_sweep far in the past), so
         // leftovers from before a restart are reclaimed promptly.
         let mut last_sweep: i64 = 0;
@@ -104,10 +115,76 @@ async fn drain_once(
     let jobs = tokio::task::spawn_blocking(move || s.claim_due(now, lease_secs, batch))
         .await
         .map_err(|e| e.to_string())??;
-    for job in jobs {
-        process(state, store, key, http, job, now).await;
+    if jobs.is_empty() {
+        return Ok(());
+    }
+
+    // A batch used to run strictly serially: one slow 15-second webhook could
+    // hold every unrelated due post behind it and let later rows' leases age out.
+    // Group by webhook first, then run groups concurrently: this preserves due
+    // order and avoids self-inflicted Discord rate-limit races at one endpoint
+    // while independent destinations overlap their network waits.
+    let groups = group_deliveries(jobs);
+
+    // Keep a bounded JoinSet full. Panics are isolated to one destination and
+    // logged rather than silently killing the scheduler's only worker loop.
+    let concurrency = crate::sqlite_pool::configured_size()
+        .clamp(1, MAX_DELIVERY_CONCURRENCY)
+        .min(groups.len());
+    let mut pending = groups.into_iter();
+    let mut running = tokio::task::JoinSet::new();
+    for _ in 0..concurrency {
+        if let Some(group) = pending.next() {
+            spawn_delivery_group(&mut running, state, store, key, http, group, now);
+        }
+    }
+    while let Some(result) = running.join_next().await {
+        if let Err(e) = result {
+            tracing::warn!(error = %e, "scheduled delivery task panicked");
+        }
+        if let Some(group) = pending.next() {
+            spawn_delivery_group(&mut running, state, store, key, http, group, now);
+        }
     }
     Ok(())
+}
+
+fn group_deliveries(jobs: Vec<ClaimedJob>) -> Vec<Vec<ClaimedJob>> {
+    let mut group_indexes: HashMap<String, usize> = HashMap::new();
+    let mut groups: Vec<Vec<ClaimedJob>> = Vec::new();
+    for job in jobs {
+        let index = match group_indexes.get(&job.webhook_id) {
+            Some(index) => *index,
+            None => {
+                let index = groups.len();
+                group_indexes.insert(job.webhook_id.clone(), index);
+                groups.push(Vec::new());
+                index
+            }
+        };
+        groups[index].push(job);
+    }
+    groups
+}
+
+fn spawn_delivery_group(
+    running: &mut tokio::task::JoinSet<()>,
+    state: &AppState,
+    store: &Arc<ScheduleStore>,
+    key: &Key,
+    http: &reqwest::Client,
+    jobs: Vec<ClaimedJob>,
+    now: i64,
+) {
+    let state = state.clone();
+    let store = Arc::clone(store);
+    let key = key.clone();
+    let http = http.clone();
+    running.spawn(async move {
+        for job in jobs {
+            process(&state, &store, &key, &http, job, now).await;
+        }
+    });
 }
 
 /// Fire one claimed occurrence and record the outcome.
@@ -510,6 +587,29 @@ fn summarize(code: u16, body: &str) -> String {
 mod tests {
     use super::*;
 
+    fn claimed(id: &str, webhook_id: &str) -> ClaimedJob {
+        ClaimedJob {
+            id: id.into(),
+            webhook_id: webhook_id.into(),
+            webhook_sealed: String::new(),
+            thread_id: None,
+            payload_sealed: String::new(),
+            tz: "UTC".into(),
+            recurrence_json: r#"{"kind":"once"}"#.into(),
+            end_at: None,
+            max_runs: None,
+            runs_count: 0,
+            attempts: 0,
+            guild_id: None,
+            make_permanent: false,
+            owner_user_id: None,
+            title: None,
+            dest_label: None,
+            application_id: None,
+            channel_id: None,
+        }
+    }
+
     #[test]
     fn backoff_doubles_then_caps() {
         assert_eq!(backoff_secs(0), 30);
@@ -550,26 +650,7 @@ mod tests {
 
     #[test]
     fn compute_next_respects_max_runs_and_once() {
-        let once = ClaimedJob {
-            id: "x".into(),
-            webhook_id: "1".into(),
-            webhook_sealed: String::new(),
-            thread_id: None,
-            payload_sealed: String::new(),
-            tz: "UTC".into(),
-            recurrence_json: r#"{"kind":"once"}"#.into(),
-            end_at: None,
-            max_runs: None,
-            runs_count: 0,
-            attempts: 0,
-            guild_id: None,
-            make_permanent: false,
-            owner_user_id: None,
-            title: None,
-            dest_label: None,
-            application_id: None,
-            channel_id: None,
-        };
+        let once = claimed("x", "1");
         assert_eq!(compute_next(&once, 1000), None);
 
         let mut daily = once;
@@ -580,5 +661,21 @@ mod tests {
 
         daily.max_runs = Some(5);
         assert!(compute_next(&daily, 1000).is_some());
+    }
+
+    #[test]
+    fn delivery_groups_preserve_order_per_webhook() {
+        let groups = group_deliveries(vec![
+            claimed("a1", "a"),
+            claimed("b1", "b"),
+            claimed("a2", "a"),
+            claimed("c1", "c"),
+            claimed("b2", "b"),
+        ]);
+        let ids: Vec<Vec<&str>> = groups
+            .iter()
+            .map(|group| group.iter().map(|job| job.id.as_str()).collect())
+            .collect();
+        assert_eq!(ids, vec![vec!["a1", "a2"], vec!["b1", "b2"], vec!["c1"]]);
     }
 }

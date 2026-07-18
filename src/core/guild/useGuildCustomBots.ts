@@ -18,6 +18,7 @@
 
 import { useEffect } from "react";
 import { create } from "zustand";
+import { registerAccountStateReset } from "@/core/auth/accountScopedState";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { fetchCustomBots, isAuthError, type CustomBotItem } from "@/core/guild/api";
@@ -34,6 +35,8 @@ interface GuildCustomBotsState {
   /** Fetch the guild's custom bots (deduped; cached for {@link TTL_MS} unless
    *  `force`). Safe to call from multiple mounts. */
   load: (guildId: string, opts?: { force?: boolean }) => Promise<void>;
+  /** Release the current account's registry rows and cancel its request. */
+  reset: () => void;
 }
 
 // Module-scoped in-flight guard so concurrent mounts share one request.
@@ -74,14 +77,25 @@ export const useGuildCustomBotsStore = create<GuildCustomBotsState>((set, get) =
       set({ guildId, items: bots.items, loading: false, fetchedAt: Date.now() });
     } catch (e) {
       if (controller.signal.aborted) return;
-      if (isAuthError(e)) useAuthStore.getState().markSignedOut();
+      if (isAuthError(e)) {
+        useAuthStore.getState().markSignedOut();
+        return;
+      }
       // 501 (feature off), 403 (not a manager), network — all mean "none here".
       set({ guildId, items: [], loading: false, fetchedAt: Date.now() });
     } finally {
       if (inflight?.controller === controller) inflight = null;
     }
   },
+
+  reset() {
+    inflight?.controller.abort();
+    inflight = null;
+    set({ guildId: null, items: [], loading: false, fetchedAt: 0 });
+  },
 }));
+
+registerAccountStateReset(() => useGuildCustomBotsStore.getState().reset());
 
 /**
  * The connected guild's registered custom bots — triggers a (deduped) load when

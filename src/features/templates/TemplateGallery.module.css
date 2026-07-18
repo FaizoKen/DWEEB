@@ -404,6 +404,20 @@
   color: var(--app-text-subtle);
 }
 
+.detailError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--app-danger) 35%, var(--app-border));
+  border-radius: var(--app-radius-sm);
+  background: color-mix(in srgb, var(--app-danger) 8%, transparent);
+  color: var(--app-text-muted);
+  font-size: var(--app-text-sm);
+}
+
 /* Separates the Scheduled tab's posted/failed history rows from the upcoming
  * preview grid above them. */
 .scheduleHistoryWrap {

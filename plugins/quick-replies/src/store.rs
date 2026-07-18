@@ -200,6 +200,7 @@ impl Store {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?;
+        drop(conn);
         Ok(match row {
             None => EditLookup::Unknown,
             Some(None) => EditLookup::Forbidden,
@@ -236,6 +237,7 @@ impl Store {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?;
+        drop(conn);
         Ok(match row {
             Some(json) => serde_json::from_str(&json).ok(),
             None => None,
@@ -246,6 +248,8 @@ impl Store {
 fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA busy_timeout = 5000;
          CREATE TABLE IF NOT EXISTS instances (
              id              TEXT PRIMARY KEY,
              created_at      INTEGER NOT NULL,

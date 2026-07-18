@@ -63,6 +63,9 @@ pub struct AppState {
     /// Persisted Activity collaboration drafts (see `activity_draft.rs`), so a
     /// room resumes where it was left off. None when Activities are disabled.
     pub activity_drafts: Option<Arc<crate::activity_draft::ActivityDraftStore>>,
+    /// Bounds the only request path that can retain tens of MiB: multipart
+    /// Activity post/edit uploads. Small JSON sends never consume a permit.
+    pub activity_uploads: Arc<tokio::sync::Semaphore>,
     /// Per-server message library (see `library.rs`); None when the feature is
     /// off.
     pub library: Option<Arc<crate::library::LibraryStore>>,

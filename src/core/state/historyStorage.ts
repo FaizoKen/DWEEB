@@ -98,9 +98,9 @@ export function saveHistory(past: readonly HistoryFrame[], future: readonly Hist
 /** Read the persisted undo/redo stacks, if any. Never throws. */
 export function loadHistory(): { past: HistoryFrame[]; future: HistoryFrame[] } | null {
   if (typeof localStorage === "undefined") return null;
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
   try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as { past?: unknown; future?: unknown };
     const past = reviveFrames(parsed.past);
     const future = reviveFrames(parsed.future);

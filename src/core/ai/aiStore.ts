@@ -62,6 +62,19 @@ interface AiState {
 }
 
 let inflight: AbortController | null = null;
+let sendSequence = 0;
+let activeSendId = 0;
+let latestSendId = 0;
+
+/** Abort and permanently supersede the current send. Settings/chat resets use
+ * this stronger form; ordinary Cancel keeps the send latest so its partial
+ * assistant bubble may still settle, but must relinquish controller ownership. */
+function supersedeActiveSend(): void {
+  inflight?.abort();
+  inflight = null;
+  activeSendId = 0;
+  latestSendId = ++sendSequence;
+}
 
 function appendMessage(messages: ChatMessage[], msg: ChatMessage): ChatMessage[] {
   return [...messages, msg];
@@ -88,8 +101,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     saveAiSettings(next);
     // Clear the transcript: prior turns were produced under the old provider/
     // model/key and shouldn't carry into a freshly configured assistant.
-    inflight?.abort();
-    inflight = null;
+    supersedeActiveSend();
     set({
       settings: next,
       messages: [],
@@ -109,6 +121,15 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({ error: "Add your AI provider API key first." });
       return;
     }
+
+    const sendId = ++sendSequence;
+    activeSendId = sendId;
+    latestSendId = sendId;
+    const isActiveSend = () => activeSendId === sendId;
+    const isLatestSend = () => latestSendId === sendId;
+    const releaseSend = () => {
+      if (activeSendId === sendId) activeSendId = 0;
+    };
 
     // Append the user turn plus an empty assistant placeholder we stream into.
     // `thinking` stays true for the whole request so the composer keeps showing
@@ -136,9 +157,20 @@ export const useAiStore = create<AiState>((set, get) => ({
     } catch {
       set((s) => ({
         messages: s.messages.filter((m) => m.id !== assistantId),
-        thinking: false,
-        error: "Couldn't load the AI assistant. Check your connection and try again.",
+        ...(isLatestSend()
+          ? {
+              thinking: false,
+              error: "Couldn't load the AI assistant. Check your connection and try again.",
+            }
+          : {}),
       }));
+      releaseSend();
+      return;
+    }
+    // Cancel/settings reset can happen while the lazy engine chunk loads. Do
+    // not start a provider request after the user already stopped this turn.
+    if (!isActiveSend()) {
+      set((s) => ({ messages: s.messages.filter((m) => m.id !== assistantId) }));
       return;
     }
     const [
@@ -252,19 +284,59 @@ export const useAiStore = create<AiState>((set, get) => ({
     // the accumulated raw text (kept even on a mid-stream abort).
     const streamTurn = async (turnSystem: string, turns: AiTurn[]) => {
       let raw = "";
-      inflight = new AbortController();
-      const result = await callAI(settings, turnSystem, turns, inflight.signal, (delta) => {
-        raw += delta;
+      let frameId: number | null = null;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const flushStream = () => {
+        frameId = null;
+        timeoutId = null;
         const display = streamingProse(raw);
         set((s) => ({
           messages: s.messages.map((m) => (m.id === assistantId ? { ...m, content: display } : m)),
         }));
+      };
+      const scheduleFlush = () => {
+        if (frameId !== null || timeoutId !== null) return;
+        // Providers may deliver many token events in one display frame. Fold
+        // them into one array copy/store notification/render; the final raw
+        // transcript still retains every byte for follow-up turns.
+        if (typeof requestAnimationFrame === "function") {
+          frameId = requestAnimationFrame(flushStream);
+        } else {
+          timeoutId = setTimeout(flushStream, 16);
+        }
+      };
+      const controller = new AbortController();
+      inflight = controller;
+      const result = await callAI(settings, turnSystem, turns, controller.signal, (delta) => {
+        raw += delta;
+        scheduleFlush();
       });
-      inflight = null;
+      if (frameId !== null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(frameId);
+      }
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      flushStream();
+      // A cancelled turn may have already yielded to a new send. Never clear
+      // that newer turn's controller when this older promise finally settles.
+      if (inflight === controller) inflight = null;
       return { result, raw };
     };
 
     const { result, raw } = await streamTurn(system, toTurns(history));
+
+    // Some adapters/upstreams may resolve successfully despite an AbortSignal.
+    // Settle this turn's own bubble, but never apply it after Cancel or after a
+    // newer send has taken ownership.
+    if (!isActiveSend() && result.ok) {
+      const stoppedRaw = result.text ?? raw;
+      showBubble(analyze(stoppedRaw), {
+        raw: stoppedRaw,
+        partial: true,
+        streaming: false,
+        settledRaw: stoppedRaw,
+      });
+      return;
+    }
 
     if (!result.ok) {
       // A cancelled request with partial text is kept (the user stopped it on
@@ -272,16 +344,21 @@ export const useAiStore = create<AiState>((set, get) => ({
       const cancelled = result.error === "Request cancelled.";
       if (cancelled && raw.trim()) {
         const partial = analyze(raw);
-        commitMessage(partial);
+        if (isLatestSend()) commitMessage(partial);
         showBubble(partial, { raw, partial: true, streaming: false, settledRaw: raw });
-        set({ thinking: false });
+        if (isLatestSend()) set({ thinking: false });
       } else {
         set((s) => ({
           messages: s.messages.filter((m) => m.id !== assistantId),
-          thinking: false,
-          error: cancelled ? null : (result.error ?? "Request failed."),
+          ...(isLatestSend()
+            ? {
+                thinking: false,
+                error: cancelled ? null : (result.error ?? "Request failed."),
+              }
+            : {}),
         }));
       }
+      releaseSend();
       return;
     }
 
@@ -308,9 +385,10 @@ export const useAiStore = create<AiState>((set, get) => ({
         { role: "assistant", content: finalRaw },
         { role: "user", content: buildMissingPayloadPrompt() },
       ];
-      inflight = new AbortController();
-      const nudge = await callAI(settings, system, nudgeTurns, inflight.signal);
-      inflight = null;
+      const controller = new AbortController();
+      inflight = controller;
+      const nudge = await callAI(settings, system, nudgeTurns, controller.signal);
+      if (inflight === controller) inflight = null;
       if (nudge.ok) {
         const next = analyze(nudge.text ?? "");
         if (next.hasPayload) {
@@ -344,14 +422,15 @@ export const useAiStore = create<AiState>((set, get) => ({
           { role: "assistant", content: priorRaw },
           { role: "user", content: buildRepairPrompt(analysis.errors) },
         ];
-        inflight = new AbortController();
+        const controller = new AbortController();
+        inflight = controller;
         const repair = await callAI(
           settings,
           buildSystemPrompt(broken),
           repairTurns,
-          inflight.signal,
+          controller.signal,
         );
-        inflight = null;
+        if (inflight === controller) inflight = null;
         if (!repair.ok) break; // cancelled or failed — keep the best-effort message
         const next = analyze(repair.text ?? "");
         priorRaw = repair.text ?? "";
@@ -368,7 +447,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       }
     }
 
-    commitMessage(analysis);
+    if (isLatestSend()) commitMessage(analysis);
     showBubble(analysis, {
       raw,
       partial: false,
@@ -376,18 +455,19 @@ export const useAiStore = create<AiState>((set, get) => ({
       settledRaw: finalRaw,
       failedEdit: editIntended && analysis.message === null,
     });
-    set({ thinking: false });
+    if (isLatestSend()) set({ thinking: false });
+    releaseSend();
   },
 
   cancel() {
     inflight?.abort();
     inflight = null;
+    activeSendId = 0;
     set({ thinking: false });
   },
 
   clearChat() {
-    inflight?.abort();
-    inflight = null;
+    supersedeActiveSend();
     set({ messages: [], thinking: false, error: null });
   },
 }));

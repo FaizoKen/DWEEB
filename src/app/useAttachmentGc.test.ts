@@ -7,6 +7,8 @@ import {
   getAttachmentFile,
   parseSessionUrl,
   registerAttachment,
+  registerAttachments,
+  subscribeAttachments,
 } from "@/core/state/attachmentStore";
 import { useMessageStore } from "@/core/state/messageStore";
 import { collectReferencedMediaUrls } from "./useAttachmentGc";
@@ -42,6 +44,20 @@ afterEach(() => {
 });
 
 describe("attachment history garbage collection", () => {
+  it("registers a file batch with one registry notification", () => {
+    let notifications = 0;
+    const unsubscribe = subscribeAttachments(() => notifications++);
+    const urls = registerAttachments([
+      new File(["a"], "a.png", { type: "image/png" }),
+      new File(["b"], "b.png", { type: "image/png" }),
+    ]);
+    unsubscribe();
+    for (const url of urls) registeredIds.push(parseSessionUrl(url)!.blobId);
+
+    expect(urls).toHaveLength(2);
+    expect(notifications).toBe(1);
+  });
+
   it("keeps a deleted upload alive so Undo restores usable bytes", () => {
     const { id, url } = registerTestFile();
     const beforeDelete = messageWithFile(url);

@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
-import { useMessageStore, selectMessage } from "@/core/state/messageStore";
+import { useMessageStore } from "@/core/state/messageStore";
 import { usePluginRegistry } from "@/core/state/pluginRegistryStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
@@ -56,8 +56,9 @@ export function Preview({
   message: messageOverride,
   prioritizeMedia = false,
 }: PreviewProps = {}) {
-  const storeMessage = useMessageStore(selectMessage);
-  const message = messageOverride ?? storeMessage;
+  // Read-only gallery cards select their override as a constant store slice, so
+  // live editor/collaboration updates do not wake every mounted thumbnail.
+  const message = useMessageStore((state) => messageOverride ?? state.message);
   const select = useMessageStore((s) => s.select);
 
   // Show placeholders as their values/samples rather than raw `{token}` text —

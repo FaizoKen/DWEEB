@@ -13,6 +13,7 @@
  */
 
 import { create } from "zustand";
+import { registerAccountStateReset } from "@/core/auth/accountScopedState";
 import type { WebhookMessage } from "@/core/schema/types";
 import { collectSearchText } from "@/core/schema/traversal";
 import type { RestoredOrigin } from "@/core/state/messageStore";
@@ -24,7 +25,9 @@ import {
 import {
   createLibraryEntry,
   deleteLibraryEntry,
+  fetchLibraryEntries,
   isLibraryConfigured,
+  LIBRARY_DETAIL_BATCH_SIZE,
   listLibrary,
   updateLibraryEntry,
   type LibraryBucketUsage,
@@ -59,8 +62,19 @@ interface LibraryState {
   error: string | null;
   /** True after the first load attempt for `guildId` settled (ok or not). */
   loaded: boolean;
+  /** Last detail-batch failure. List metadata remains usable; body search falls
+   * back to metadata until an explicit card load retries successfully. */
+  detailError: string | null;
   /** Load (or reload) a server's library. No-op when unconfigured. */
   refresh(guildId: string): Promise<void>;
+  /** Drop every account-scoped row and invalidate outstanding async work. */
+  reset(): void;
+  /** Hydrate metadata rows in bounded, sequential batches. Concurrent callers
+   * for the same ids share one task instead of duplicating decrypt requests. */
+  hydrate(guildId: string, ids: string[]): Promise<void>;
+  /** Ensure one row has details (used when a user clicks before its preview
+   * batch settles), returning null if it can no longer be read. */
+  hydrateOne(guildId: string, id: string): Promise<LibraryEntryView | null>;
   /** Record a just-posted message (label `posted`, upserted by message id).
    *  Fire-and-forget: any failure is swallowed — the send already succeeded. */
   recordPosted(guildId: string, input: RecordLibraryPostInput): Promise<void>;
@@ -108,6 +122,26 @@ function mergeEntry(
 
 const EMPTY_BUCKET: LibraryBucketUsage = { used: 0, quota: null };
 
+/** A summary has no own `payload` property. Full rows always do, including an
+ * explicit `null` when a rotated key made the seal unreadable. */
+export function libraryEntryHasDetails(entry: LibraryEntryView): boolean {
+  return Object.prototype.hasOwnProperty.call(entry, "payload");
+}
+
+/** Detail ids for the active shelf. `limit` bounds normal card paging; `null`
+ * is reserved for body search, whose exact semantics require every row. */
+export function pendingLibraryDetailIds(
+  entries: LibraryEntryView[],
+  limit: number | null,
+): string[] {
+  const candidates = limit == null ? entries : entries.slice(0, Math.max(0, limit));
+  return candidates.filter((entry) => !libraryEntryHasDetails(entry)).map((entry) => entry.id);
+}
+
+const detailTasks = new Map<string, Promise<void>>();
+const detailTaskKey = (guildId: string, id: string) => `${guildId}:${id}`;
+let accountGeneration = 0;
+
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   guildId: null,
   entries: [],
@@ -116,9 +150,26 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   loading: false,
   error: null,
   loaded: false,
+  detailError: null,
+
+  reset() {
+    accountGeneration += 1;
+    detailTasks.clear();
+    set({
+      guildId: null,
+      entries: [],
+      posted: EMPTY_BUCKET,
+      drafts: EMPTY_BUCKET,
+      loading: false,
+      error: null,
+      loaded: false,
+      detailError: null,
+    });
+  },
 
   async refresh(guildId) {
     if (!isLibraryConfigured() || !guildId) return;
+    const generation = accountGeneration;
     // Reset when switching servers so stale entries never flash under the new
     // server's header; a same-server refresh keeps the list up while loading.
     if (get().guildId !== guildId) {
@@ -129,13 +180,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         drafts: EMPTY_BUCKET,
         loaded: false,
         error: null,
+        detailError: null,
       });
     }
     set({ loading: true });
-    const res = await listLibrary(guildId);
+    const res = await listLibrary(guildId, { metadataOnly: true });
     // A slow response for a server the user has already navigated away from
     // must not clobber the current one.
-    if (get().guildId !== guildId) return;
+    if (accountGeneration !== generation || get().guildId !== guildId) return;
     if (res.ok) {
       set({
         entries: res.items,
@@ -144,21 +196,131 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         loading: false,
         loaded: true,
         error: null,
+        detailError: null,
+      });
+    } else if (res.status === 401 || res.status === 403) {
+      // A same-guild refresh can race sign-out/account replacement. Never keep
+      // another account's decrypted shelf resident merely because the guild id
+      // happens to match; also invalidate detail/mutation responses in flight.
+      accountGeneration += 1;
+      detailTasks.clear();
+      set({
+        guildId,
+        entries: [],
+        posted: EMPTY_BUCKET,
+        drafts: EMPTY_BUCKET,
+        loading: false,
+        loaded: true,
+        error: null,
+        detailError: null,
       });
     } else {
       set({
         loading: false,
         loaded: true,
-        // 401 (signed out) and 403 (member without Manage Webhooks) are normal
-        // states, not failures worth a banner — the library simply isn't theirs
-        // to see.
-        error: res.status === 401 || res.status === 403 ? null : res.error,
+        error: res.error,
       });
     }
   },
 
+  async hydrate(guildId, ids) {
+    if (get().guildId !== guildId || ids.length === 0) return;
+    const generation = accountGeneration;
+    const entriesById = new Map(get().entries.map((entry) => [entry.id, entry]));
+    const wanted = [...new Set(ids)].filter((id) => {
+      const entry = entriesById.get(id);
+      return entry != null && !libraryEntryHasDetails(entry);
+    });
+    if (wanted.length === 0) return;
+
+    const existing = new Set<Promise<void>>();
+    const fresh: string[] = [];
+    for (const id of wanted) {
+      const task = detailTasks.get(detailTaskKey(guildId, id));
+      if (task) existing.add(task);
+      else fresh.push(id);
+    }
+
+    let freshTask: Promise<void> | undefined;
+    if (fresh.length > 0) {
+      freshTask = (async () => {
+        // Sequential batches bound both browser response memory and proxy
+        // decrypt/SQLite work even when a body search needs the whole shelf.
+        for (let offset = 0; offset < fresh.length; offset += LIBRARY_DETAIL_BATCH_SIZE) {
+          const batch = fresh.slice(offset, offset + LIBRARY_DETAIL_BATCH_SIZE);
+          const res = await fetchLibraryEntries(guildId, batch);
+          if (!res.ok) {
+            if (accountGeneration === generation && get().guildId === guildId) {
+              if (res.status === 401 || res.status === 403) {
+                // Detail hydration carries the same decrypted payload/webhook
+                // data as a full list. Losing authorization must end this
+                // account lifetime just as decisively as the metadata refresh:
+                // clear resident secrets and reject every sibling response.
+                accountGeneration += 1;
+                detailTasks.clear();
+                set({
+                  guildId,
+                  entries: [],
+                  posted: EMPTY_BUCKET,
+                  drafts: EMPTY_BUCKET,
+                  loading: false,
+                  loaded: true,
+                  error: null,
+                  detailError: null,
+                });
+              } else {
+                set({ detailError: res.error });
+              }
+            }
+            return;
+          }
+          if (accountGeneration !== generation || get().guildId !== guildId) return;
+          const details = new Map(res.items.map((entry) => [entry.id, entry]));
+          const requested = new Set(batch);
+          set((state) => ({
+            detailError: null,
+            entries: state.entries.map((entry) => {
+              const full = details.get(entry.id);
+              if (full) return full;
+              // The row may have been removed after the metadata list. Mark it
+              // settled/unreadable rather than retrying it forever.
+              return requested.has(entry.id) ? { ...entry, payload: null } : entry;
+            }),
+          }));
+        }
+      })().catch(() => {
+        if (accountGeneration === generation && get().guildId === guildId) {
+          set({ detailError: "Couldn't load message details." });
+        }
+      });
+      for (const id of fresh) detailTasks.set(detailTaskKey(guildId, id), freshTask);
+      const cleanup = () => {
+        for (const id of fresh) {
+          const key = detailTaskKey(guildId, id);
+          if (detailTasks.get(key) === freshTask) detailTasks.delete(key);
+        }
+      };
+      // A rejection handler on the detached cleanup chain prevents an
+      // unexpected exception from becoming a global unhandled-rejection crash.
+      void freshTask.then(cleanup, cleanup);
+    }
+
+    await Promise.all([...existing, ...(freshTask ? [freshTask] : [])]);
+  },
+
+  async hydrateOne(guildId, id) {
+    const generation = accountGeneration;
+    const current = get().entries.find((entry) => entry.id === id);
+    if (current && libraryEntryHasDetails(current)) return current;
+    await get().hydrate(guildId, [id]);
+    if (accountGeneration !== generation) return null;
+    const hydrated = get().entries.find((entry) => entry.id === id);
+    return hydrated && libraryEntryHasDetails(hydrated) ? hydrated : null;
+  },
+
   async recordPosted(guildId, input) {
     if (!isLibraryConfigured() || !guildId) return;
+    const generation = accountGeneration;
     const res = await createLibraryEntry(guildId, {
       label: "posted",
       payload: stripEditorFields(input.message),
@@ -168,7 +330,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       thread_id: input.threadId,
       dest_label: input.destLabel,
     });
-    if (res.ok) {
+    if (res.ok && accountGeneration === generation) {
       const merged = mergeEntry(get(), res.entry);
       if (merged) set(merged);
     }
@@ -189,12 +351,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         status: 400,
       };
     }
+    const generation = accountGeneration;
     const res = await createLibraryEntry(guildId, {
       label: "draft",
       title,
       payload: stripEditorFields(message),
     });
-    if (res.ok) {
+    if (res.ok && accountGeneration === generation) {
       const merged = mergeEntry(get(), res.entry);
       if (merged) set(merged);
     }
@@ -202,16 +365,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   async rename(guildId, id, title) {
+    const generation = accountGeneration;
     const res = await updateLibraryEntry(guildId, id, { title });
-    if (res.ok && get().guildId === guildId) {
+    if (res.ok && accountGeneration === generation && get().guildId === guildId) {
       set({ entries: get().entries.map((e) => (e.id === id ? res.entry : e)) });
     }
     return res;
   },
 
   async remove(guildId, id) {
+    const generation = accountGeneration;
     const res = await deleteLibraryEntry(guildId, id);
-    if (res.ok && get().guildId === guildId) {
+    if (res.ok && accountGeneration === generation && get().guildId === guildId) {
       const removed = get().entries.find((e) => e.id === id);
       const patch: Partial<LibraryState> = {
         entries: get().entries.filter((e) => e.id !== id),
@@ -226,6 +391,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return res.ok;
   },
 }));
+
+registerAccountStateReset(() => useLibraryStore.getState().reset());
 
 /** Hydration is cached per entry object: entries are immutable API snapshots
  *  (every store mutation swaps in fresh objects), so a WeakMap key can never go

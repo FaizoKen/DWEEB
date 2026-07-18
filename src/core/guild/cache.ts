@@ -30,9 +30,9 @@ export const CLIENT_TTL_MS = 10 * 60 * 1000;
 
 export function loadCachedGuild(): GuildData | null {
   if (typeof localStorage === "undefined") return null;
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
   try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<GuildData>;
     // Guard the shape: a partial/corrupt entry is discarded rather than trusted.
     if (

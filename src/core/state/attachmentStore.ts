@@ -35,8 +35,8 @@
 import {
   deleteAttachmentBlob,
   deleteAttachmentBlobs,
-  loadAllAttachmentBlobs,
-  putAttachmentBlob,
+  loadAttachmentBlobs,
+  putAttachmentBlobs,
 } from "./attachmentDb";
 
 const SESSION_PREFIX = "session://";
@@ -82,9 +82,24 @@ export function registerAttachment(file: File): string {
   blobs.set(id, { file });
   // Write through to IndexedDB so the upload survives a reload. Fire-and-forget
   // — the session URL is usable immediately; the persisted copy lands shortly.
-  void putAttachmentBlob(id, file);
+  void putAttachmentBlobs([{ id, file }]);
   notify();
   return buildSessionUrl(id, file.name);
+}
+
+/** Register a file batch with one IndexedDB transaction and one notification. */
+export function registerAttachments(files: readonly File[]): string[] {
+  if (files.length === 0) return [];
+  const records: Array<{ id: string; file: File }> = [];
+  const urls = files.map((file) => {
+    const id = makeBlobId();
+    blobs.set(id, { file });
+    records.push({ id, file });
+    return buildSessionUrl(id, file.name);
+  });
+  void putAttachmentBlobs(records);
+  notify();
+  return urls;
 }
 
 /** Drop a blob and revoke its object URL, if any. */
@@ -131,9 +146,14 @@ export function garbageCollect(referencedUrls: Iterable<string>): void {
  * blobs against the live tree (drop anything no longer referenced).
  */
 let hydration: Promise<void> | null = null;
-export function hydrateAttachments(): Promise<void> {
+export function hydrateAttachments(referencedUrls: Iterable<string>): Promise<void> {
   if (hydration) return hydration;
-  hydration = loadAllAttachmentBlobs().then((records) => {
+  const ids = new Set<string>();
+  for (const url of referencedUrls) {
+    const parsed = parseSessionUrl(url);
+    if (parsed) ids.add(parsed.blobId);
+  }
+  hydration = loadAttachmentBlobs(ids).then((records) => {
     let changed = false;
     for (const { id, file } of records) {
       if (blobs.has(id)) continue;

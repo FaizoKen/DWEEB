@@ -608,11 +608,11 @@ fn clamp(s: &str, max: usize) -> String {
 }
 
 impl RawAuthor {
-    /// The author's display name for the transcript (global → username → "user").
-    pub fn name(&self) -> String {
+    /// Consume the author so transcript construction can move, not clone, its
+    /// strings while holding a few hundred fetched messages in memory.
+    pub fn into_name(self) -> String {
         self.global_name
-            .clone()
-            .or_else(|| self.username.clone())
+            .or(self.username)
             .unwrap_or_else(|| "user".to_string())
     }
 }

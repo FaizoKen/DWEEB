@@ -21,6 +21,7 @@
 
 import { useEffect } from "react";
 import { create } from "zustand";
+import { registerAccountStateReset } from "@/core/auth/accountScopedState";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { isProxyConfigured } from "@/core/guild/config";
@@ -52,6 +53,8 @@ interface GuildWebhooksState {
   upsertLocal: (webhook: GuildWebhook) => void;
   /** Drop a deleted webhook from the list without a refetch. */
   removeLocal: (webhookId: string) => void;
+  /** Release credential-bearing rows and cancel the active request. */
+  reset: () => void;
 }
 
 // Module-scoped in-flight guard so concurrent mounts share one request.
@@ -111,7 +114,6 @@ export const useGuildWebhooksStore = create<GuildWebhooksState>((set, get) => ({
       if (controller.signal.aborted) return;
       if (isAuthError(e)) {
         useAuthStore.getState().markSignedOut();
-        set({ guildId, status: "idle", webhooks: [], error: null });
         return;
       }
       const status =
@@ -139,6 +141,10 @@ export const useGuildWebhooksStore = create<GuildWebhooksState>((set, get) => ({
   },
 
   upsertLocal(webhook) {
+    // An action that began before sign-out may settle after `reset`. Never let
+    // that delayed credential recreate an account-scoped cache.
+    const guildId = get().guildId;
+    if (!guildId || webhook.guild_id !== guildId) return;
     set((prev) => {
       const idx = prev.webhooks.findIndex((w) => w.id === webhook.id);
       if (idx === -1) return { webhooks: [webhook, ...prev.webhooks] };
@@ -152,7 +158,23 @@ export const useGuildWebhooksStore = create<GuildWebhooksState>((set, get) => ({
   removeLocal(webhookId) {
     set((prev) => ({ webhooks: prev.webhooks.filter((w) => w.id !== webhookId) }));
   },
+
+  reset() {
+    inflight?.controller.abort();
+    inflight = null;
+    set({
+      guildId: null,
+      status: "idle",
+      webhooks: [],
+      dweebAppId: "",
+      error: null,
+      canReinvite: false,
+      fetchedAt: 0,
+    });
+  },
 }));
+
+registerAccountStateReset(() => useGuildWebhooksStore.getState().reset());
 
 /**
  * Whether the signed-in user can manage the connected guild's webhooks — the

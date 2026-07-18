@@ -8,9 +8,9 @@
  * layer existed, every upload was lost on reload and surfaced as "missing".
  *
  * This module persists the bytes alongside the draft so a returning user keeps
- * their uploads: on startup `attachmentStore.hydrateAttachments()` reads every
- * stored blob back into the in-memory map, re-connecting the `session://` URLs
- * the draft restored. The store writes through here on register / forget / GC.
+ * their uploads: startup reads only blobs referenced by live editor roots and
+ * prunes orphan keys with a key-only cursor, so stale file bytes never enter
+ * memory. The store writes through here on register / forget / GC.
  *
  * Everything is best-effort: IndexedDB can be unavailable (private windows,
  * disabled storage, quota). Every call resolves rather than rejects, so a
@@ -33,6 +33,17 @@ interface StoredBlob {
   type: string;
   lastModified: number;
   savedAt: number;
+}
+
+function storedBlob(id: string, file: File): StoredBlob {
+  return {
+    id,
+    blob: file,
+    name: file.name,
+    type: file.type,
+    lastModified: file.lastModified,
+    savedAt: Date.now(),
+  };
 }
 
 function dbUnavailable(): boolean {
@@ -110,15 +121,29 @@ function toFile(record: StoredBlob): File {
 
 /** Persist a single upload. Resolves once the write commits (or is dropped). */
 export function putAttachmentBlob(id: string, file: File): Promise<void> {
-  const record: StoredBlob = {
-    id,
-    blob: file,
-    name: file.name,
-    type: file.type,
-    lastModified: file.lastModified,
-    savedAt: Date.now(),
-  };
-  return withStore<unknown>("readwrite", (store) => store.put(record), null).then(() => undefined);
+  return putAttachmentBlobs([{ id, file }]);
+}
+
+/** Persist several uploads in one transaction. */
+export function putAttachmentBlobs(records: Iterable<{ id: string; file: File }>): Promise<void> {
+  const list = Array.from(records);
+  if (list.length === 0) return Promise.resolve();
+  return openDb().then((db) => {
+    if (!db) return;
+    return new Promise<void>((resolve) => {
+      let tx: IDBTransaction;
+      try {
+        tx = db.transaction(STORE, "readwrite");
+      } catch {
+        resolve();
+        return;
+      }
+      const store = tx.objectStore(STORE);
+      for (const { id, file } of list) store.put(storedBlob(id, file));
+      tx.oncomplete = () => resolve();
+      tx.onabort = tx.onerror = () => resolve();
+    });
+  });
 }
 
 /** Drop a single persisted upload. */
@@ -148,15 +173,50 @@ export function deleteAttachmentBlobs(ids: Iterable<string>): Promise<void> {
   });
 }
 
-/** Read every persisted upload back as `{ id, file }`. Returns [] on failure. */
-export function loadAllAttachmentBlobs(): Promise<Array<{ id: string; file: File }>> {
-  return withStore<StoredBlob[]>(
-    "readonly",
-    (store) => store.getAll() as IDBRequest<StoredBlob[]>,
-    [],
-  ).then((records) =>
-    records
-      .filter((r): r is StoredBlob => !!r && typeof r.id === "string" && r.blob instanceof Blob)
-      .map((r) => ({ id: r.id, file: toFile(r) })),
-  );
+/**
+ * Restore only reachable uploads and remove every other persisted key. The
+ * key cursor never reads values, so stale large blobs are deleted without
+ * first cloning their bytes into the renderer process.
+ */
+export function loadAttachmentBlobs(
+  ids: Iterable<string>,
+): Promise<Array<{ id: string; file: File }>> {
+  const live = new Set(Array.from(ids).filter(Boolean));
+  return openDb().then((db) => {
+    if (!db) return [];
+    return new Promise<Array<{ id: string; file: File }>>((resolve) => {
+      let tx: IDBTransaction;
+      try {
+        tx = db.transaction(STORE, "readwrite");
+      } catch {
+        resolve([]);
+        return;
+      }
+      const store = tx.objectStore(STORE);
+      const found: StoredBlob[] = [];
+      for (const id of live) {
+        const req = store.get(id) as IDBRequest<StoredBlob | undefined>;
+        req.onsuccess = () => {
+          if (req.result) found.push(req.result);
+        };
+      }
+      const cursorReq = store.openKeyCursor();
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (!cursor) return;
+        if (typeof cursor.key === "string" && !live.has(cursor.key)) cursor.delete();
+        cursor.continue();
+      };
+      tx.oncomplete = () =>
+        resolve(
+          found
+            .filter(
+              (record): record is StoredBlob =>
+                !!record && typeof record.id === "string" && record.blob instanceof Blob,
+            )
+            .map((record) => ({ id: record.id, file: toFile(record) })),
+        );
+      tx.onabort = tx.onerror = () => resolve([]);
+    });
+  });
 }

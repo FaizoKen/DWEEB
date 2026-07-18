@@ -29,6 +29,9 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # CSPRNG for opaque instance ids, separate edit credentials, AND the unbiased
 # winner draw.
 getrandom = "0.2"
+# One OS-seeded userspace CSPRNG per draw. Reservoir sampling may request a
+# random index per entrant; entering the kernel for every row wastes CPU.
+rand = "0.9"
 # Store only a one-way digest of each edit credential.
 sha2 = "0.10"
 tracing = "0.1"

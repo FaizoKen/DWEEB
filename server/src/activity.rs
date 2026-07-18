@@ -31,7 +31,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use axum::body::{Body, Bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{FromRequest, Multipart, Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
@@ -40,8 +40,9 @@ use axum::Json;
 use axum_extra::extract::cookie::PrivateCookieJar;
 use reqwest::Url;
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use serde_json::{json, Value};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, OwnedSemaphorePermit};
 
 use crate::discord::{DiscordUser, UploadFile, Webhook};
 use crate::error::AppError;
@@ -360,6 +361,42 @@ fn clamp_field(s: &str, max: usize) -> String {
 /// buffering, so an abusive client can't make the proxy hold more than the
 /// route's body limit ever allows anyway.
 const MAX_UPLOAD_FILES: usize = 10;
+/// Non-multipart posts contain only Discord JSON, whose real valid payload is
+/// far below this. The upload routes need a 32 MiB outer limit for file parts;
+/// reading plain JSON through that same allowance would let a tiny request path
+/// retain attachment-sized memory for no functional reason.
+const MAX_ACTIVITY_JSON_BYTES: usize = 128 * 1024;
+
+fn is_multipart_request(req: &Request) -> bool {
+    req.headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| {
+            ct.trim_start()
+                .to_ascii_lowercase()
+                .starts_with("multipart/form-data")
+        })
+}
+
+/// Reserve one large-upload slot before the multipart parser starts buffering.
+/// Fail fast when saturated instead of queueing unbounded 32 MiB bodies in the
+/// process; the caller still has its local files and can retry after the hint.
+fn activity_upload_slot(
+    st: &AppState,
+    req: &Request,
+) -> Result<Option<OwnedSemaphorePermit>, AppError> {
+    if !is_multipart_request(req) {
+        return Ok(None);
+    }
+    Arc::clone(&st.activity_uploads)
+        .try_acquire_owned()
+        .map(Some)
+        .map_err(|_| AppError::Status {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: "The upload queue is busy - wait a moment and try again.".into(),
+            retry_after: Some(2.0),
+        })
+}
 
 /// Is `name` a well-formed multipart file part (`files[0]`, `files[1]`, …)?
 /// The index inside the brackets is what the payload's `attachments` array
@@ -380,19 +417,17 @@ fn is_files_part(name: &str) -> bool {
 async fn body_with_uploads<T: serde::de::DeserializeOwned>(
     req: Request,
 ) -> Result<(T, Vec<UploadFile>), AppError> {
-    let is_multipart = req
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|ct| {
-            ct.trim_start()
-                .to_ascii_lowercase()
-                .starts_with("multipart/form-data")
-        });
+    let is_multipart = is_multipart_request(&req);
 
     if !is_multipart {
-        let Json(body) = Json::<T>::from_request(req, &())
+        let bytes = to_bytes(req.into_body(), MAX_ACTIVITY_JSON_BYTES)
             .await
+            .map_err(|_| AppError::Status {
+                status: StatusCode::PAYLOAD_TOO_LARGE,
+                message: "JSON post body is too large.".into(),
+                retry_after: None,
+            })?;
+        let body = serde_json::from_slice(&bytes)
             .map_err(|e| bad_request(&format!("invalid JSON body: {e}")))?;
         return Ok((body, Vec::new()));
     }
@@ -489,6 +524,7 @@ pub async fn activity_post(
     // Authenticate before buffering the body, so an unauthenticated caller
     // can't make the proxy hold megabytes of upload first.
     let session = resolve_identity(&st, &jar, &headers).await?;
+    let _upload_slot = activity_upload_slot(&st, &req)?;
     let (body, files) = body_with_uploads::<PostBody>(req).await?;
     let guild = body.guild_id.trim().to_string();
     let channel_id = body.channel_id.trim().to_string();
@@ -1420,6 +1456,7 @@ pub async fn activity_edit(
     }
     // Authenticate before buffering the body — same order as `activity_post`.
     let session = resolve_identity(&st, &jar, &headers).await?;
+    let _upload_slot = activity_upload_slot(&st, &req)?;
     let (body, files) = body_with_uploads::<EditBody>(req).await?;
     let guild = body.guild_id.trim().to_string();
     let channel_id = body.channel_id.trim().to_string();
@@ -2721,9 +2758,15 @@ pub async fn activity_room(
             .await
             .unwrap_or(crate::entitlement::UNLIMITED_SLOTS)
     };
-    Ok(ws.on_upgrade(move |socket| async move {
-        room_socket(st, instance, draft_key, me, host_cap, socket).await;
-    }))
+    // Reject oversized frames in the WebSocket codec itself. Checking after
+    // `recv()` still lets Tungstenite assemble its much larger default message
+    // in memory, which defeats the relay cap under concurrent connections.
+    Ok(ws
+        .max_frame_size(MAX_RELAY_BYTES)
+        .max_message_size(MAX_RELAY_BYTES)
+        .on_upgrade(move |socket| async move {
+            room_socket(st, instance, draft_key, me, host_cap, socket).await;
+        }))
 }
 
 /// Pump one participant's socket: relay anything they send to the whole room
@@ -2856,10 +2899,19 @@ async fn room_socket(
 /// purely to refresh the stored draft). Both update the persisted draft; only
 /// `snapshot` is withheld from the broadcast, since peers already hold that state
 /// via the granular patch that prompted it, and re-applying a full draft would
-/// revert their concurrent edits. Everything else relays unchanged. The DB write
-/// runs on a blocking task off the socket loop, keyed by the room's stable
-/// `draft_key`; a no-op (always relay) when persistence is off or disabled for
-/// this socket (`draft_key` is `None`).
+/// revert their concurrent edits. Everything else relays unchanged. Persistence
+/// is queued by the room's stable `draft_key`; one store worker coalesces all
+/// rooms, seals only their newest values, and commits them as a batch off the
+/// async runtime. This is a no-op (always relay) when persistence is off or
+/// disabled for this socket (`draft_key` is `None`).
+#[derive(Deserialize)]
+struct PersistFrame<'a> {
+    #[serde(rename = "type")]
+    kind: &'a str,
+    #[serde(borrow)]
+    message: Option<&'a RawValue>,
+}
+
 fn persist_and_should_relay(st: &AppState, draft_key: Option<&str>, frame: &str) -> bool {
     let (Some(store), Some(key)) = (&st.activity_drafts, draft_key) else {
         return true;
@@ -2871,28 +2923,23 @@ fn persist_and_should_relay(st: &AppState, draft_key: Option<&str>, frame: &str)
     if !frame.contains("\"snapshot\"") && !frame.contains("\"draft\"") {
         return true;
     }
-    let Ok(v) = serde_json::from_str::<Value>(frame) else {
+    // `RawValue` validates the frame but borrows the message's original JSON
+    // slice. The old Value -> String round-trip allocated a full JSON tree and
+    // then serialized it again for every editor heartbeat.
+    let Ok(v) = serde_json::from_str::<PersistFrame<'_>>(frame) else {
         return true;
     };
-    let ty = v.get("type").and_then(Value::as_str);
-    if matches!(ty, Some("draft") | Some("snapshot")) {
-        if let Some(message) = v.get("message") {
-            if let Ok(msg_str) = serde_json::to_string(message) {
-                if let Some(sealed) = crate::seal::seal(&st.key, &msg_str) {
-                    let store = Arc::clone(store);
-                    let key = key.to_string();
-                    let now = crate::schedule::unix_now();
-                    tokio::task::spawn_blocking(move || {
-                        if let Err(e) = store.put(&key, &sealed, now) {
-                            tracing::warn!("activity draft persist failed: {e}");
-                        }
-                    });
-                }
-            }
+    if matches!(v.kind, "draft" | "snapshot") {
+        if let Some(message) = v.message {
+            store.queue_put(
+                key.to_string(),
+                message.get().to_string(),
+                crate::schedule::unix_now(),
+            );
         }
     }
     // `snapshot` is server-only; `draft` and everything else still fan out.
-    ty != Some("snapshot")
+    v.kind != "snapshot"
 }
 
 /// Load and unseal the persisted draft stored under `key` as a JSON message, or

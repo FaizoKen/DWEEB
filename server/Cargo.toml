@@ -53,16 +53,17 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Minimal feature set: an async (tokio) connection manager with auto-reconnect.
 redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Optimise the release binary for size — this is a low-throughput proxy, so a
-# small footprint matters more than squeezing out every microsecond. `panic`
+# Optimise the release binary for sustained throughput: hot JSON,
+# encryption, and routing code use full optimization. LTO, one codegen unit,
+# and stripping still keep the deployed image compact. `panic`
 # is left at the default (unwind) so a panicking handler tears down only its
 # own request task, not the whole process.
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 codegen-units = 1
 strip = true

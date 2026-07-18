@@ -4,8 +4,8 @@
  * The auto-saved draft persists a *non-credential* origin pointer (the Discord
  * message id + its home guild) when it's editing an already-posted message, but
  * not the webhook token — that lives in the server library's posted entry. On
- * boot this recovers the full restore origin by fetching the home server's
- * library and matching the message id, so the editor reopens with "Update
+ * boot this recovers the full restore origin through a narrow indexed lookup
+ * of that message id, so the editor reopens with "Update
  * existing" armed and the origin-guild banner showing, exactly as it was before
  * the tab closed. When the library can't answer (signed out, no Manage
  * Webhooks, or the entry rolled off the posted history), the editor reopens as
@@ -18,10 +18,9 @@
  */
 
 import { useEffect, useRef } from "react";
-import { useMessageStore } from "@/core/state/messageStore";
-import { loadDraftMessage } from "@/core/state/draftStorage";
-import { isLibraryConfigured, listLibrary } from "@/core/library/api";
-import { libraryEntryOrigin } from "@/core/library/libraryStore";
+import { getMessageDocumentGeneration, useMessageStore } from "@/core/state/messageStore";
+import { loadDraft } from "@/core/state/draftStorage";
+import { fetchLibraryOrigin, isLibraryConfigured } from "@/core/library/api";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
 import { readTemplateParam } from "./useTemplateDeepLink";
@@ -51,20 +50,31 @@ export function useDraftOriginBootstrap(): void {
     // Nothing to do unless the draft pointed at a posted message and no origin
     // has been set since (e.g. by a webhook redirect). The guild id is required
     // — it names which server's library holds the webhook URL.
-    const origin = loadDraftMessage()?.origin;
+    // messageStore already re-hydrated the draft during module bootstrap. Read
+    // only its small raw origin record here instead of attaching editor ids to
+    // the full component tree a second time.
+    const origin = loadDraft()?.origin;
     if (!origin?.guildId || useMessageStore.getState().restoredFrom) return;
     if (!isLibraryConfigured()) return;
 
-    // Recover the webhook URL from the home server's library, reading the API
-    // directly (not the shared store) so this boot-time lookup can't fight the
-    // gallery's own refresh over which guild the store shows.
+    // Recover only this row's update credential. The indexed endpoint returns
+    // no message payload, so boot doesn't decrypt/download the whole library.
     const { guildId, guildName, messageId } = origin;
-    void listLibrary(guildId).then((res) => {
+    const documentGeneration = getMessageDocumentGeneration();
+    void fetchLibraryOrigin(guildId, messageId).then((res) => {
       if (!res.ok) return;
       // Another source may have armed an origin while the fetch was in flight.
       if (useMessageStore.getState().restoredFrom) return;
-      const entry = res.items.find((e) => e.label === "posted" && e.message_id === messageId);
-      const recovered = entry ? libraryEntryOrigin(entry) : null;
+      // Import, Clear, a template, or any other whole-message replacement may
+      // have taken ownership while the indexed lookup was in flight. Never arm
+      // that new document to PATCH the old draft's live Discord message.
+      if (getMessageDocumentGeneration() !== documentGeneration) return;
+      const recovered = {
+        webhookUrl: res.origin.webhook_url,
+        messageId: res.origin.message_id,
+        threadId: res.origin.thread_id ?? undefined,
+        guildId: res.origin.guild_id,
+      };
       if (recovered) {
         // The library entry doesn't carry the guild's display name — keep the
         // draft's, so the origin-guild banner reads the same as before.

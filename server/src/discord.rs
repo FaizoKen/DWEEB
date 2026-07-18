@@ -52,7 +52,10 @@ pub const MANAGE_WEBHOOKS: u64 = 0x2000_0000;
 
 pub struct Discord {
     http: Client,
-    token: String,
+    /// Prebuilt authorization value for every bot-token request. Constructing
+    /// `"Bot {token}"` on each guild read copied the (long) secret into a fresh
+    /// heap allocation on one of the hottest upstream paths.
+    bot_auth: String,
     /// Caps concurrent bot-token calls to Discord (global rate-budget guard).
     bot_sem: Arc<Semaphore>,
 }
@@ -262,7 +265,7 @@ impl Discord {
             .expect("failed to build HTTP client");
         Discord {
             http,
-            token,
+            bot_auth: format!("Bot {token}"),
             bot_sem: Arc::new(Semaphore::new(max_concurrency.max(1))),
         }
     }
@@ -885,8 +888,7 @@ impl Discord {
             .acquire()
             .await
             .map_err(|_| AppError::Internal("rate-limit semaphore closed".into()))?;
-        let auth = format!("Bot {}", self.token);
-        self.get_json(path, &auth, false).await
+        self.get_json(path, &self.bot_auth, false).await
     }
 
     /// Authenticated bot request carrying a JSON body, decoded as `T`. Holds the
@@ -942,7 +944,7 @@ impl Discord {
         let mut req = self
             .http
             .request(method, format!("{API_BASE}{path}"))
-            .header(AUTHORIZATION, format!("Bot {}", self.token));
+            .header(AUTHORIZATION, self.bot_auth.as_str());
         if let Some(r) = reason.map(audit_reason).filter(|r| !r.is_empty()) {
             req = req.header("X-Audit-Log-Reason", r);
         }

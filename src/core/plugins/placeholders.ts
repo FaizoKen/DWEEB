@@ -249,27 +249,47 @@ export function substituteMessage(
   map: Record<string, string>,
 ): WebhookMessage {
   if (isEmptyMap(map)) return message;
-  const clone = structuredClone(message);
-  const meta = clone as unknown as Record<string, unknown>;
+  // Preview calls this on every edit and the core placeholder map is always
+  // non-empty. Copy on write so a message with no matching tokens keeps all of
+  // its identities, letting memoized component renderers skip untouched nodes.
+  const source = message as unknown as Record<string, unknown>;
+  let out = source;
   // Webhook execution overrides — e.g. `avatar_url: {server_icon}` or a per-send
   // `username: {server}`. These post alongside the components, so substitute them
   // too, mirroring the wire fields the executor consumes.
-  subField(meta, "username", map);
-  subField(meta, "avatar_url", map);
-  subField(meta, "thread_name", map);
-  for (const top of clone.components) substituteNode(top, map);
-  return clone;
+  out = substituteFields(source, out, ["username", "avatar_url", "thread_name"], map);
+  const components = mapWithSharing(message.components, (node) => substituteNode(node, map));
+  if (components !== message.components) out = setField(source, out, "components", components);
+  return out as unknown as WebhookMessage;
 }
 
-/** Substitute a single string property in place when present. */
-function subField(o: Record<string, unknown>, key: string, map: Record<string, string>): void {
-  const v = o[key];
-  if (typeof v === "string") o[key] = substituteText(v, map);
+/** Clone `source` at most once and set a changed field on the working copy. */
+function setField(
+  source: Record<string, unknown>,
+  current: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): Record<string, unknown> {
+  const out = current === source ? { ...source } : current;
+  out[key] = value;
+  return out;
 }
 
-/** Substitute the `url` of an UnfurledMediaItem-shaped object in place. */
-function subMediaUrl(media: unknown, map: Record<string, string>): void {
-  if (media && typeof media === "object") subField(media as Record<string, unknown>, "url", map);
+/** Substitute selected string fields, preserving the object when none change. */
+function substituteFields(
+  source: Record<string, unknown>,
+  current: Record<string, unknown>,
+  keys: readonly string[],
+  map: Record<string, string>,
+): Record<string, unknown> {
+  let out = current;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value !== "string") continue;
+    const substituted = substituteText(value, map);
+    if (substituted !== value) out = setField(source, out, key, substituted);
+  }
+  return out;
 }
 
 /**
@@ -280,56 +300,64 @@ function subMediaUrl(media: unknown, map: Record<string, string>): void {
  * media items, select options, emoji — carry no `type`, so the switch is the only
  * thing that touches their fields and the descent never double-substitutes them.
  */
-function substituteNode(node: unknown, map: Record<string, string>): void {
-  if (Array.isArray(node)) {
-    for (const child of node) substituteNode(child, map);
-    return;
-  }
-  if (!node || typeof node !== "object") return;
-  const o = node as Record<string, unknown>;
+function substituteNode(
+  node: WebhookMessage["components"][number],
+  map: Record<string, string>,
+): WebhookMessage["components"][number] {
+  const source = node as unknown as Record<string, unknown>;
+  let out = source;
 
-  switch (o.type) {
+  switch (source.type) {
     case ComponentType.TextDisplay:
-      subField(o, "content", map);
+      out = substituteFields(source, out, ["content"], map);
       break;
     case ComponentType.Button:
-      subField(o, "label", map);
+      out = substituteFields(source, out, ["label"], map);
       // Only a Link button carries a user-facing URL; an interactive button's
       // custom_id is bot-facing and never substituted.
-      if (o.style === ButtonStyle.Link) subField(o, "url", map);
+      if (source.style === ButtonStyle.Link) {
+        out = substituteFields(source, out, ["url"], map);
+      }
       break;
     case ComponentType.StringSelect:
-      subField(o, "placeholder", map);
-      if (Array.isArray(o.options)) {
-        for (const opt of o.options) {
-          if (opt && typeof opt === "object") {
-            const op = opt as Record<string, unknown>;
-            subField(op, "label", map);
-            subField(op, "value", map);
-            subField(op, "description", map);
-          }
-        }
+      out = substituteFields(source, out, ["placeholder"], map);
+      if (Array.isArray(source.options)) {
+        const options = mapWithSharing(source.options, (option) => {
+          if (!option || typeof option !== "object") return option;
+          const record = option as Record<string, unknown>;
+          return substituteFields(record, record, ["label", "value", "description"], map);
+        });
+        if (options !== source.options) out = setField(source, out, "options", options);
       }
       break;
     case ComponentType.UserSelect:
     case ComponentType.RoleSelect:
     case ComponentType.MentionableSelect:
     case ComponentType.ChannelSelect:
-      subField(o, "placeholder", map);
+      out = substituteFields(source, out, ["placeholder"], map);
       break;
     case ComponentType.Thumbnail:
-      subField(o, "description", map);
-      subMediaUrl(o.media, map);
+      out = substituteFields(source, out, ["description"], map);
+      if (source.media && typeof source.media === "object") {
+        const media = source.media as Record<string, unknown>;
+        const nextMedia = substituteFields(media, media, ["url"], map);
+        if (nextMedia !== media) out = setField(source, out, "media", nextMedia);
+      }
       break;
     case ComponentType.MediaGallery:
-      if (Array.isArray(o.items)) {
-        for (const item of o.items) {
-          if (item && typeof item === "object") {
-            const it = item as Record<string, unknown>;
-            subField(it, "description", map);
-            subMediaUrl(it.media, map);
+      if (Array.isArray(source.items)) {
+        const items = mapWithSharing(source.items, (item) => {
+          if (!item || typeof item !== "object") return item;
+          const record = item as Record<string, unknown>;
+          let next = substituteFields(record, record, ["description"], map);
+          if (record.media && typeof record.media === "object") {
+            const media = record.media as Record<string, unknown>;
+            const nextMedia = substituteFields(media, media, ["url"], map);
+            if (nextMedia !== media) next = setField(record, next, "media", nextMedia);
           }
-        }
+          return next;
+        });
+        if (items !== source.items) out = setField(source, out, "items", items);
       }
       break;
     // File media must stay an attachment reference, so its URL is never
@@ -337,9 +365,34 @@ function substituteNode(node: unknown, map: Record<string, string>): void {
     // here — their children are reached by the generic descent below.
   }
 
-  for (const value of Object.values(o)) {
-    if (value && typeof value === "object") substituteNode(value, map);
+  if (Array.isArray(source.components)) {
+    const components = mapWithSharing(source.components, (child) =>
+      substituteNode(child as WebhookMessage["components"][number], map),
+    );
+    if (components !== source.components) out = setField(source, out, "components", components);
   }
+  if (source.accessory && typeof source.accessory === "object") {
+    const accessory = substituteNode(source.accessory as WebhookMessage["components"][number], map);
+    if (accessory !== source.accessory) out = setField(source, out, "accessory", accessory);
+  }
+
+  return out as unknown as WebhookMessage["components"][number];
+}
+
+/** Array map that allocates only if at least one item actually changes. */
+function mapWithSharing<T>(items: T[], transform: (item: T) => T): T[] {
+  let out: T[] | null = null;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    const next = transform(item);
+    if (out) {
+      out.push(next);
+    } else if (next !== item) {
+      out = items.slice(0, i);
+      out.push(next);
+    }
+  }
+  return out ?? items;
 }
 
 function isEmptyMap(map: Record<string, string>): boolean {
@@ -378,6 +431,10 @@ export function collectMessagePlaceholders(
   for (const p of CORE_PLACEHOLDERS) {
     claim(p.token, Object.prototype.hasOwnProperty.call(cv, p.token) ? cv[p.token] : p.sample);
   }
+
+  // An empty bundled registry is valid. Skip a full component-tree walk when
+  // no plugin could possibly contribute another placeholder.
+  if (plugins.length === 0) return map;
 
   // Then plugins, in binding order.
   for (const { customId, plugin } of pluginBoundComponents(plugins, message)) {

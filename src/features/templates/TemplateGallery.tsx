@@ -55,9 +55,11 @@ import { usePlanStore } from "@/core/plan/planStore";
 import { handleDiscordLinkClick } from "@/lib/discordDeepLink";
 import { isLibraryConfigured } from "@/core/library/api";
 import {
+  libraryEntryHasDetails,
   libraryEntryMessage,
   libraryEntryOrigin,
   libraryEntrySearchText,
+  pendingLibraryDetailIds,
   useLibraryStore,
 } from "@/core/library/libraryStore";
 import { interactiveComponents } from "@/core/plugins/targets";
@@ -88,6 +90,7 @@ import {
   EAGER_THUMBNAILS,
   GalleryCard,
   GalleryChipsSkeleton,
+  GalleryDetailError,
   GalleryGridSkeleton,
   LoadMoreSentinel,
   messageSearchText,
@@ -163,6 +166,10 @@ export function TemplateGallery() {
   const [filter, setFilter] = useState<Filter>(
     () => useTemplateGalleryStore.getState().initialFilter,
   );
+  // Card pages also bound server-library detail hydration: only the rows the
+  // current deck can reveal need payloads until body search explicitly asks
+  // for the rest.
+  const [visibleCount, setVisibleCount] = useState(CARD_PAGE_SIZE);
   const [pendingDelete, setPendingDelete] = useState<{
     kind: "saved" | "library" | "scheduled";
     id: string;
@@ -205,6 +212,8 @@ export function TemplateGallery() {
   const libPosted = useLibraryStore((s) => s.posted);
   const libDrafts = useLibraryStore((s) => s.drafts);
   const libLoaded = useLibraryStore((s) => s.loaded);
+  const libDetailError = useLibraryStore((s) => s.detailError);
+  const hydrateLibrary = useLibraryStore((s) => s.hydrate);
   const removeLibrary = useLibraryStore((s) => s.remove);
   useEffect(() => {
     if (libraryOn && connectedGuildId) {
@@ -442,10 +451,13 @@ export function TemplateGallery() {
     const posted: CardData[] = [];
     const drafts: CardData[] = [];
     for (const entry of serverEntries) {
-      const message = libraryEntryMessage(entry);
-      if (!message) continue;
+      const hasDetails = libraryEntryHasDetails(entry);
+      const message = hasDetails ? libraryEntryMessage(entry) : null;
+      // Preserve the old fail-safe for an unreadable full row. A summary stays
+      // as a lightweight placeholder card until its visible page is hydrated.
+      if (hasDetails && !message) continue;
       const isPosted = entry.label === "posted";
-      const interactive = interactiveComponents(message).length > 0;
+      const interactive = message ? interactiveComponents(message).length > 0 : false;
       const holdsSlot = isPosted && !!entry.message_id && grantIds.has(entry.message_id);
       // "Buttons expired" — an interactive message older than the component
       // TTL without a slot. Display-only and best-effort. (Never-expire state
@@ -492,7 +504,6 @@ export function TemplateGallery() {
           };
         }
       }
-      const origin = libraryEntryOrigin(entry);
       const description = isPosted
         ? holdsSlot
           ? `${entry.dest_label ? `Posted to ${entry.dest_label}` : "Posted"} · never-expire keeps it out of the rolling history window, so it stays here until you free the slot.`
@@ -506,7 +517,8 @@ export function TemplateGallery() {
         emoji: isPosted ? "📤" : "🔖",
         name: displayName,
         description,
-        message,
+        message: message ?? undefined,
+        previewPending: !hasDetails,
         accent: isPosted ? ACCENT_GREEN : ACCENT_TEAL,
         savedAt: entry.updated_at * 1000,
         badge: isPosted ? "Posted" : "Server draft",
@@ -517,7 +529,7 @@ export function TemplateGallery() {
           displayName,
           description,
           isPosted ? "Posted" : "Server draft",
-          libraryEntrySearchText(entry),
+          message ? libraryEntrySearchText(entry) : undefined,
         ),
         // Never-expire posted messages sit above the rolling window and never
         // auto-evict; deleting one would strand its claimed slot. So a pinned
@@ -535,25 +547,39 @@ export function TemplateGallery() {
                 posted: isPosted,
               }),
         onPick: () => {
-          if (origin) {
-            // Posted with its webhook intact: restore content *and* origin so
-            // the Send panel flips to "Update existing".
-            replaceMessageFromRestore(message, origin);
-            alignConnectedGuild(entry.guild_id);
-            pushToast(
-              "Loaded from the server library — edits will update the original.",
-              "success",
-            );
-          } else {
-            replaceMessage(message);
-            pushToast(
-              isPosted
-                ? "Loaded from the server library (content only — sending posts a new copy)."
-                : "Loaded from the server library.",
-              "success",
-            );
-          }
-          closeGallery();
+          void (async () => {
+            const full = hasDetails
+              ? entry
+              : await useLibraryStore.getState().hydrateOne(entry.guild_id, entry.id);
+            const loaded = full ? libraryEntryMessage(full) : null;
+            if (!full || !loaded) {
+              pushToast(
+                "This entry couldn't be read — it may predate a server key change.",
+                "error",
+              );
+              return;
+            }
+            const origin = libraryEntryOrigin(full);
+            if (origin) {
+              // Posted with its webhook intact: restore content *and* origin so
+              // the Send panel flips to "Update existing".
+              replaceMessageFromRestore(loaded, origin);
+              alignConnectedGuild(full.guild_id);
+              pushToast(
+                "Loaded from the server library — edits will update the original.",
+                "success",
+              );
+            } else {
+              replaceMessage(loaded);
+              pushToast(
+                isPosted
+                  ? "Loaded from the server library (content only — sending posts a new copy)."
+                  : "Loaded from the server library.",
+                "success",
+              );
+            }
+            closeGallery();
+          })();
         },
       };
       (isPosted ? posted : drafts).push(card);
@@ -738,6 +764,69 @@ export function TemplateGallery() {
   );
   const firstFilter = filters[0] ?? TEMPLATE_FILTER;
   const activeFilter = filters.includes(filter) ? filter : firstFilter;
+  // The first render after a tab/search switch still carries the previous
+  // page count. Clamp it synchronously so a deeply scrolled shelf cannot
+  // over-hydrate the new shelf before the reset effect runs.
+  const visibleScopeRef = useRef({ filter: activeFilter, query: deferredQuery });
+  const visibleScopeChanged =
+    visibleScopeRef.current.filter !== activeFilter ||
+    visibleScopeRef.current.query !== deferredQuery;
+  const effectiveVisibleCount = visibleScopeChanged ? CARD_PAGE_SIZE : visibleCount;
+
+  const activeLibraryLabel =
+    activeFilter === POSTED_FILTER
+      ? "posted"
+      : activeFilter === SERVER_DRAFTS_FILTER
+        ? "draft"
+        : null;
+  const activeLibraryEntries = useMemo(
+    () =>
+      activeLibraryLabel ? serverEntries.filter((entry) => entry.label === activeLibraryLabel) : [],
+    [serverEntries, activeLibraryLabel],
+  );
+  // Normal browsing decrypts only the currently revealable card pages. A body
+  // search is the one operation that genuinely needs every message in the
+  // active shelf, so it explicitly hydrates the remaining rows in sequential,
+  // bounded batches before reporting final results.
+  useEffect(() => {
+    if (!connectedGuildId || !activeLibraryLabel || libDetailError) return;
+    const needsBodySearch = deferredQuery.trim().length > 0;
+    const ids = pendingLibraryDetailIds(
+      activeLibraryEntries,
+      needsBodySearch ? null : effectiveVisibleCount,
+    );
+    if (ids.length > 0) void hydrateLibrary(connectedGuildId, ids);
+  }, [
+    connectedGuildId,
+    activeLibraryLabel,
+    activeLibraryEntries,
+    deferredQuery,
+    effectiveVisibleCount,
+    hydrateLibrary,
+    libDetailError,
+  ]);
+  const librarySearchPending =
+    deferredQuery.trim().length > 0 &&
+    activeLibraryLabel !== null &&
+    !libDetailError &&
+    activeLibraryEntries.some((entry) => !libraryEntryHasDetails(entry));
+  const retryLibraryDetails = useCallback(() => {
+    if (!connectedGuildId || !activeLibraryLabel) return;
+    const bodySearch = deferredQuery.trim().length > 0;
+    const ids = pendingLibraryDetailIds(
+      activeLibraryEntries,
+      bodySearch ? null : effectiveVisibleCount,
+    );
+    useLibraryStore.setState({ detailError: null });
+    if (ids.length > 0) void hydrateLibrary(connectedGuildId, ids);
+  }, [
+    connectedGuildId,
+    activeLibraryLabel,
+    activeLibraryEntries,
+    deferredQuery,
+    effectiveVisibleCount,
+    hydrateLibrary,
+  ]);
 
   // Keep the arrow affordances honest as categories load or the dialog resizes.
   // When opened directly to a category near the end, reveal that active chip
@@ -834,11 +923,12 @@ export function TemplateGallery() {
 
   // The grid mounts in pages — a new tab or search starts back at one page,
   // and the sentinel at the grid's tail reveals the next as the user nears it.
-  const [visibleCount, setVisibleCount] = useState(CARD_PAGE_SIZE);
   useEffect(() => {
+    visibleScopeRef.current = { filter: activeFilter, query: deferredQuery };
     setVisibleCount(CARD_PAGE_SIZE);
   }, [activeFilter, deferredQuery]);
-  const visibleCards = shown.length > visibleCount ? shown.slice(0, visibleCount) : shown;
+  const visibleCards =
+    shown.length > effectiveVisibleCount ? shown.slice(0, effectiveVisibleCount) : shown;
   const revealMore = useCallback(() => setVisibleCount((n) => n + CARD_PAGE_SIZE), []);
 
   const startBlank = () => {
@@ -1194,7 +1284,18 @@ export function TemplateGallery() {
                   </div>
                 ) : null}
 
-                {shown.length > 0 ? (
+                {libDetailError && activeLibraryLabel ? (
+                  <GalleryDetailError
+                    bodySearch={deferredQuery.trim().length > 0}
+                    onRetry={retryLibraryDetails}
+                  />
+                ) : null}
+
+                {librarySearchPending ? (
+                  <GalleryGridSkeleton
+                    cards={Math.min(8, Math.max(3, activeLibraryEntries.length))}
+                  />
+                ) : shown.length > 0 ? (
                   <div className={styles.grid}>
                     {visibleCards.map((c, i) => (
                       <GalleryCard

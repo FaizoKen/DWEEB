@@ -36,6 +36,7 @@ pub struct AppState {
     pub store: Arc<Store>,
     pub http: reqwest::Client,
     pub config: Arc<Config>,
+    pub primary_key: ed25519_dalek::VerifyingKey,
     /// The shared bot's own user id, fetched once and cached — needed in a
     /// ticket channel's overwrites so the bot can see the channel it created,
     /// even when a *custom* app (whose application id differs) posted the panel.
@@ -199,10 +200,15 @@ pub async fn interactions(
     let (Some(signature), Some(timestamp)) = (signature, timestamp) else {
         return (StatusCode::UNAUTHORIZED, "missing signature").into_response();
     };
-    let key_hex =
-        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
-            .unwrap_or(&state.config.discord_public_key);
-    if !discord::verify_signature(key_hex, signature, timestamp, &body) {
+    let attested =
+        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref());
+    let verified = match attested {
+        Some(key) if !key.eq_ignore_ascii_case(&state.config.discord_public_key) => {
+            discord::verify_signature(key, signature, timestamp, &body)
+        }
+        _ => discord::verify_signature_with_key(&state.primary_key, signature, timestamp, &body),
+    };
+    if !verified {
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
 
@@ -363,8 +369,18 @@ fn handle_intake_submit(
 
 /// The anti-spam gate as a ready-to-send reply, or None when the open may proceed.
 fn gate_reply(state: &AppState, id: &str, uid: &str, cfg: &InstanceConfig) -> Option<Response> {
-    let open_count = state.store.count_open(id, uid).unwrap_or(0);
-    let last = state.store.last_open_at(id, uid).unwrap_or(None);
+    let (open_count, last) = match state.store.open_stats(id, uid) {
+        Ok(stats) => stats,
+        Err(e) => {
+            tracing::error!(error = %e, "ticket anti-spam lookup");
+            return Some(
+                Json(discord::ephemeral_text(
+                    "Something went wrong checking your existing tickets — try again.",
+                ))
+                .into_response(),
+            );
+        }
+    };
     match discord::open_gate(open_count, cfg.max_open_per_user, last, unix_millis(), cfg.cooldown_secs) {
         OpenGate::Allowed => None,
         OpenGate::AtLimit { max } => Some(
@@ -800,11 +816,11 @@ impl CloseTask {
         let raw =
             rest::fetch_recent_messages(&self.state.http, token, &self.ticket.channel_id, 3).await;
         let lines: Vec<discord::TranscriptLine> = raw
-            .iter()
+            .into_iter()
             .map(|m| discord::TranscriptLine {
-                author: m.author.name(),
-                timestamp: m.timestamp.clone(),
-                content: m.content.clone(),
+                author: m.author.into_name(),
+                timestamp: m.timestamp,
+                content: m.content,
             })
             .collect();
         let title = format!("ticket-{:04}", self.ticket.number);

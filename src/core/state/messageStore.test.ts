@@ -19,7 +19,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { useMessageStore } from "./messageStore";
+import { getMessageDocumentGeneration, useMessageStore } from "./messageStore";
 import { ComponentType, type TopLevelComponent, type WebhookMessage } from "@/core/schema";
 
 function textDisplay(id: string, content: string): TopLevelComponent {
@@ -72,5 +72,25 @@ describe("undo vs. remote collab patches", () => {
     const after = useMessageStore.getState();
     expect(after.message.username).toBeUndefined();
     expect(content(after.message)).toBe("hello");
+  });
+});
+
+describe("whole-document generation", () => {
+  beforeEach(() => {
+    seed({ components: [textDisplay("t1", "hello")] });
+  });
+
+  it("advances for replacements but not ordinary edits", () => {
+    const initial = getMessageDocumentGeneration();
+    useMessageStore.getState().setUsername("same document");
+    expect(getMessageDocumentGeneration()).toBe(initial);
+
+    useMessageStore.getState().replaceMessage({
+      components: [textDisplay("replacement", "new document")],
+    });
+    expect(getMessageDocumentGeneration()).toBe(initial + 1);
+
+    useMessageStore.getState().clearAll();
+    expect(getMessageDocumentGeneration()).toBe(initial + 2);
   });
 });

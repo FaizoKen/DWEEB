@@ -9,7 +9,7 @@
  */
 
 import { LIMITS } from "@/core/schema/limits";
-import { registerAttachment } from "@/core/state/attachmentStore";
+import { registerAttachments } from "@/core/state/attachmentStore";
 import { useMessageStore } from "@/core/state/messageStore";
 import type { EditorId } from "@/core/schema/types";
 import { pushToast } from "@/ui/Toast";
@@ -23,7 +23,7 @@ export function addFilesToGallery(galleryId: EditorId, currentCount: number, fil
     return;
   }
   const accepted = files.slice(0, room);
-  const urls = accepted.map((file) => registerAttachment(file));
+  const urls = registerAttachments(accepted);
   useMessageStore.getState().addGalleryItemsWithUrls(galleryId, urls);
   if (files.length > room) {
     pushToast(
@@ -50,7 +50,7 @@ export function replaceGalleryItemFiles(
   // room under the cap.
   const roomForExtras = Math.max(0, LIMITS.GALLERY_ITEMS - currentCount);
   const kept = files.slice(0, 1 + roomForExtras);
-  const urls = kept.map((file) => registerAttachment(file));
+  const urls = registerAttachments(kept);
   useMessageStore.getState().replaceGalleryItemWithUrls(galleryId, itemId, urls);
   if (files.length > kept.length) {
     pushToast(`Replaced 1 — galleries hold up to ${LIMITS.GALLERY_ITEMS} images.`, "info");

@@ -24,6 +24,12 @@ const DEBOUNCE_MS = 300;
 export function useAutoSaveDraft(): void {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // A field-edit burst can change `message` several times while history keeps
+    // the same coalesced frame. Avoid rewriting up to 1 MB of identical history
+    // into synchronous localStorage on each pause in that burst. Null forces
+    // the first pending flush to retain the old cleanup/write behavior.
+    let savedPast: ReturnType<typeof useMessageStore.getState>["past"] | null = null;
+    let savedFuture: ReturnType<typeof useMessageStore.getState>["future"] | null = null;
 
     const flush = () => {
       timer = null;
@@ -43,7 +49,11 @@ export function useAutoSaveDraft(): void {
             }
           : undefined,
       );
-      saveHistory(state.past, state.future);
+      if (state.past !== savedPast || state.future !== savedFuture) {
+        saveHistory(state.past, state.future);
+        savedPast = state.past;
+        savedFuture = state.future;
+      }
     };
 
     const unsubscribe = useMessageStore.subscribe((state, prev) => {

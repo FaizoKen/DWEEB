@@ -24,6 +24,14 @@ const PLAN: PlanInfo = {
 const G1 = "111111111111111111";
 const G2 = "222222222222222222";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describe("planStore", () => {
   beforeEach(() => {
     usePlanStore.setState({ guildId: null, plan: null, status: "idle", open: false });
@@ -93,5 +101,23 @@ describe("planStore", () => {
       status: "idle",
       open: false,
     });
+  });
+
+  it("does not accept a previous account's delayed result for the same server", async () => {
+    const previous = deferred<PlanInfo>();
+    const current: PlanInfo = {
+      ...PLAN,
+      tier: "pro",
+      limits: { ...PLAN.limits, schedules: 100 },
+    };
+    fetchGuildPlanMock.mockReturnValueOnce(previous.promise).mockResolvedValueOnce(current);
+
+    const staleLoad = usePlanStore.getState().load(G1);
+    usePlanStore.getState().reset();
+    await usePlanStore.getState().load(G1);
+    previous.resolve(PLAN);
+    await staleLoad;
+
+    expect(usePlanStore.getState().plan).toEqual(current);
   });
 });

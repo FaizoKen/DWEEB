@@ -17,12 +17,40 @@
 //! content. Rows are swept after a retention window — a collaborative session that
 //! nobody has touched for a week isn't getting resumed.
 
+use std::collections::HashMap;
 use std::path::Path as FsPath;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::sqlite_pool::SqlitePool;
 
+use axum_extra::extract::cookie::Key;
 use rusqlite::{params, Connection};
+use tokio::sync::Notify;
+
+/// Fold bursts from every editor/room into at most four SQLite transactions per
+/// second. The browser already durability-throttles snapshots to four seconds;
+/// this small extra delay is invisible to users while preventing N co-editors
+/// from producing N encryption jobs, blocking tasks, and WAL commits.
+const WRITE_COALESCE: Duration = Duration::from_millis(250);
+/// Pending plaintext is strictly best-effort and each accepted relay frame may
+/// be as large as 256 KiB. Bound distinct rooms in one writer generation so a
+/// synchronized reconnect/snapshot burst cannot retain an unbounded second
+/// copy of collaboration state while SQLite is busy. Existing pending rooms
+/// still replace their older value at the bound.
+const MAX_PENDING_DRAFTS: usize = 64;
+
+struct PendingDraft {
+    json: String,
+    updated_at: i64,
+}
+
+struct SealedDraft {
+    instance: String,
+    sealed: String,
+    updated_at: i64,
+}
 
 /// SQLite-backed map of `instance_id → sealed latest draft`.
 pub struct ActivityDraftStore {
@@ -31,6 +59,11 @@ pub struct ActivityDraftStore {
     /// Approximate row count, kept in step with inserts/deletes so the cap check
     /// is a load rather than a `COUNT(*)` on the persist hot path.
     count: AtomicI64,
+    /// Latest not-yet-flushed message per collaboration context. Replacing an
+    /// entry drops superseded snapshots before they consume encryption/DB work.
+    pending: Mutex<HashMap<String, PendingDraft>>,
+    pending_cap: usize,
+    pending_notify: Notify,
 }
 
 impl ActivityDraftStore {
@@ -73,6 +106,9 @@ impl ActivityDraftStore {
             pool,
             max_entries: max_entries as i64,
             count: AtomicI64::new(count),
+            pending: Mutex::new(HashMap::new()),
+            pending_cap: max_entries.min(MAX_PENDING_DRAFTS as u64) as usize,
+            pending_notify: Notify::new(),
         })
     }
 
@@ -86,33 +122,116 @@ impl ActivityDraftStore {
         self.pool.ping()
     }
 
+    /// Queue the newest plaintext message for a collaboration context. One
+    /// background writer (started from `main`) drains all contexts in a single
+    /// blocking task/transaction, and seals only the newest value for each key.
+    pub fn queue_put(&self, instance: String, json: String, updated_at: i64) {
+        let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        if !pending.contains_key(&instance) && pending.len() >= self.pending_cap {
+            return;
+        }
+        pending.insert(instance, PendingDraft { json, updated_at });
+        drop(pending);
+        self.pending_notify.notify_one();
+    }
+
+    /// Run the process-local coalescing writer. There is deliberately one task
+    /// per store: SQLite still has one writer at a time, so spawning a task for
+    /// every snapshot only grows the blocking queue and can let old writes land
+    /// after newer ones. Batching also amortizes WAL commits across rooms.
+    pub async fn run_writer(self: Arc<Self>, key: Key) {
+        loop {
+            self.pending_notify.notified().await;
+            tokio::time::sleep(WRITE_COALESCE).await;
+
+            let batch: Vec<(String, PendingDraft)> = {
+                let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+                pending.drain().collect()
+            };
+            if batch.is_empty() {
+                continue;
+            }
+
+            let store = Arc::clone(&self);
+            let key = key.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let mut sealed = Vec::with_capacity(batch.len());
+                for (instance, draft) in batch {
+                    let Some(ciphertext) = crate::seal::seal(&key, &draft.json) else {
+                        continue;
+                    };
+                    sealed.push(SealedDraft {
+                        instance,
+                        sealed: ciphertext,
+                        updated_at: draft.updated_at,
+                    });
+                }
+                store.put_batch(&sealed)
+            })
+            .await;
+
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!("activity draft batch persist failed: {e}"),
+                Err(e) => tracing::warn!("activity draft batch task failed: {e}"),
+            }
+        }
+    }
+
     /// Upsert the sealed draft for `instance`. Updating an existing instance is
     /// always allowed (it doesn't grow the table); a brand-new instance is
     /// dropped silently once the global cap is hit — persistence is best-effort,
     /// so a full table just degrades to the old ephemeral behaviour rather than
     /// failing the edit.
     pub fn put(&self, instance: &str, draft_sealed: &str, now: i64) -> Result<(), String> {
-        let conn = self.lock();
-        let updated = conn
-            .execute(
-                "UPDATE activity_drafts SET draft_sealed = ?2, updated_at = ?3 \
-                 WHERE instance_id = ?1",
-                params![instance, draft_sealed, now],
-            )
-            .map_err(e2s)?;
-        if updated > 0 {
+        self.put_batch(&[SealedDraft {
+            instance: instance.to_string(),
+            sealed: draft_sealed.to_string(),
+            updated_at: now,
+        }])
+    }
+
+    /// Persist a drained set in one transaction. The UPDATE-first shape keeps
+    /// updates working at the global cap and lets the atomic count stay a cheap
+    /// insert guard without a point read for every existing room.
+    fn put_batch(&self, drafts: &[SealedDraft]) -> Result<(), String> {
+        if drafts.is_empty() {
             return Ok(());
         }
-        if self.count.load(Ordering::Relaxed) >= self.max_entries {
-            return Ok(());
+        let mut conn = self.lock();
+        let tx = conn.transaction().map_err(e2s)?;
+        let mut inserted = 0_i64;
+        {
+            let mut update = tx
+                .prepare_cached(
+                    "UPDATE activity_drafts SET draft_sealed = ?2, updated_at = ?3 \
+                     WHERE instance_id = ?1",
+                )
+                .map_err(e2s)?;
+            let mut insert = tx
+                .prepare_cached(
+                    "INSERT INTO activity_drafts (instance_id, draft_sealed, updated_at) \
+                     VALUES (?1, ?2, ?3)",
+                )
+                .map_err(e2s)?;
+            for draft in drafts {
+                let updated = update
+                    .execute(params![draft.instance, draft.sealed, draft.updated_at])
+                    .map_err(e2s)?;
+                if updated > 0 || self.count.load(Ordering::Relaxed) + inserted >= self.max_entries
+                {
+                    continue;
+                }
+                insert
+                    .execute(params![draft.instance, draft.sealed, draft.updated_at])
+                    .map_err(e2s)?;
+                inserted += 1;
+            }
         }
-        conn.execute(
-            "INSERT INTO activity_drafts (instance_id, draft_sealed, updated_at) \
-             VALUES (?1, ?2, ?3)",
-            params![instance, draft_sealed, now],
-        )
-        .map_err(e2s)?;
-        self.count.fetch_add(1, Ordering::Relaxed);
+        tx.commit().map_err(e2s)?;
+        if inserted > 0 {
+            self.count.fetch_add(inserted, Ordering::Relaxed);
+        }
         Ok(())
     }
 
@@ -202,6 +321,49 @@ mod tests {
         assert_eq!(store.get("old").unwrap(), None);
         assert!(store.get("fresh").unwrap().is_some());
         assert_eq!(store.count.load(Ordering::Relaxed), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn queued_snapshots_persist_only_the_latest_value() {
+        let (store, path) = temp_store("queued", 100);
+        let store = Arc::new(store);
+        let key = Key::from(&[7_u8; 64]);
+        let worker = tokio::spawn(Arc::clone(&store).run_writer(key.clone()));
+
+        store.queue_put("room".into(), r#"{"content":"old"}"#.into(), 1_000);
+        store.queue_put("room".into(), r#"{"content":"latest"}"#.into(), 1_001);
+
+        let plain = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(sealed) = store.get("room").unwrap() {
+                    break crate::seal::open(&key, &sealed).unwrap();
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("coalesced writer should flush promptly");
+        assert_eq!(plain, r#"{"content":"latest"}"#);
+        assert_eq!(store.count.load(Ordering::Relaxed), 1);
+
+        worker.abort();
+        let _ = worker.await;
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn pending_plaintext_is_bounded() {
+        let (store, path) = temp_store("pending-cap", (MAX_PENDING_DRAFTS + 100) as u64);
+        for i in 0..(MAX_PENDING_DRAFTS + 25) {
+            store.queue_put(format!("room-{i}"), "{}".into(), 1_000);
+        }
+        assert_eq!(store.pending.lock().unwrap().len(), MAX_PENDING_DRAFTS);
+        // A hot room still replaces its queued value at the ceiling.
+        store.queue_put("room-0".into(), r#"{"content":"new"}"#.into(), 1_001);
+        assert_eq!(store.pending.lock().unwrap()["room-0"].updated_at, 1_001);
+        drop(store);
         let _ = std::fs::remove_file(path);
     }
 }

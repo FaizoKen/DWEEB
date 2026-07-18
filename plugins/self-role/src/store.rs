@@ -273,6 +273,7 @@ impl Store {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?;
+        drop(conn);
         let Some((json, stored_hash)) = row else {
             return Ok(EditLookup::Unknown);
         };
@@ -321,6 +322,7 @@ impl Store {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?;
+        drop(conn);
         Ok(match row {
             Some(json) => serde_json::from_str::<InstanceConfig>(&json)
                 .ok()
@@ -395,6 +397,8 @@ impl Store {
 fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA busy_timeout = 5000;
          CREATE TABLE IF NOT EXISTS instances (
              id              TEXT PRIMARY KEY,
              created_at      INTEGER NOT NULL,

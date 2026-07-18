@@ -14,6 +14,7 @@
  */
 
 import { create } from "zustand";
+import { resetAccountScopedState } from "@/core/auth/accountScopedState";
 import {
   fetchMe,
   fetchUserGuilds,
@@ -60,25 +61,37 @@ interface AuthState {
 }
 
 let initialised = false;
+let sessionGeneration = 0;
 
 export const useAuthStore = create<AuthState>((set, get) => {
+  /** End one account lifetime before publishing the anonymous state. Feature
+   * resets abort or invalidate in-flight work so a late response cannot put
+   * decrypted data back after sign-out. */
+  const clearSession = (): void => {
+    sessionGeneration += 1;
+    useGuildStore.getState().disconnect();
+    usePlanStore.getState().reset();
+    resetAccountScopedState();
+    set({ status: "anon", user: null, guilds: [], guildsStatus: "idle", guildsError: null });
+  };
+
   // Core session hydration, shared by first-load `init` and post-login refresh.
   // Greets only when asked (right after an actual sign-in), and only once a user
   // actually comes back.
   const hydrate = async (greet: boolean): Promise<void> => {
+    const generation = sessionGeneration;
     set({ status: "loading" });
     try {
       const user = await fetchMe();
+      if (generation !== sessionGeneration) return;
       if (user) {
         set({ status: "authed", user });
         if (greet) pushToast(`Signed in as ${user.name}`, "success");
         void get().loadGuilds();
-      } else {
-        set({ status: "anon", user: null });
-      }
+      } else clearSession();
     } catch {
       // Network/again-later: treat as signed-out rather than wedging the UI.
-      set({ status: "anon", user: null });
+      if (generation === sessionGeneration) clearSession();
     }
   };
 
@@ -107,11 +120,15 @@ export const useAuthStore = create<AuthState>((set, get) => {
     },
 
     async loadGuilds(force = false) {
+      if (get().status !== "authed") return;
+      const generation = sessionGeneration;
       set({ guildsStatus: "loading", guildsError: null });
       try {
         const guilds = await fetchUserGuilds(force);
+        if (generation !== sessionGeneration || get().status !== "authed") return;
         set({ guilds, guildsStatus: "ready" });
       } catch (e) {
+        if (generation !== sessionGeneration) return;
         if (isAuthError(e)) {
           get().markSignedOut();
           return;
@@ -152,23 +169,16 @@ export const useAuthStore = create<AuthState>((set, get) => {
     },
 
     async logout() {
+      clearSession();
       await postLogout();
-      useGuildStore.getState().disconnect();
-      usePlanStore.getState().reset();
-      set({ status: "anon", user: null, guilds: [], guildsStatus: "idle", guildsError: null });
       pushToast("Signed out", "info");
     },
 
     markSignedOut() {
-      useGuildStore.getState().disconnect();
-      usePlanStore.getState().reset();
-      set({
-        status: "anon",
-        user: null,
-        guilds: [],
-        guildsStatus: "idle",
-        guildsError: null,
-      });
+      // Concurrent requests can all observe the same expired cookie. Only the
+      // first one needs to clear state and notify the user.
+      if (get().status === "anon") return;
+      clearSession();
       pushToast("Your session expired — sign in again.", "info");
     },
   };

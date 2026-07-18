@@ -68,6 +68,22 @@ import {
 
 const HISTORY_LIMIT = 50;
 
+/**
+ * Monotonic identity for the editor document. Field/structural edits keep the
+ * same identity, while actions that deliberately replace or wipe the whole
+ * message advance it. Async boot helpers use this to avoid attaching state
+ * recovered for document A (such as a webhook origin) to replacement B.
+ */
+let documentGeneration = 0;
+
+export function getMessageDocumentGeneration(): number {
+  return documentGeneration;
+}
+
+function beginNewDocument(): void {
+  documentGeneration += 1;
+}
+
 /** True for the five select component types `createSelect` knows how to build. */
 function isSelectComponentType(t: ComponentTypeValue): t is SelectComponent["type"] {
   return (
@@ -438,6 +454,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   replaceMessage(next) {
+    beginNewDocument();
     set((s) => ({
       ...pushHistory(s),
       message: reassignIds(next),
@@ -448,6 +465,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   replaceMessageFromRestore(next, origin) {
+    beginNewDocument();
     set((s) => ({
       ...pushHistory(s),
       message: reassignIds(next),
@@ -467,6 +485,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   loadDefaultPreset() {
+    beginNewDocument();
     set((s) => ({
       ...pushHistory(s),
       message: reassignIds(DEFAULT_PRESET.message),
@@ -477,6 +496,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   clearAll() {
+    beginNewDocument();
     set((s) => ({
       ...pushHistory(s),
       // A fresh, empty message — drops every message-level option (username,

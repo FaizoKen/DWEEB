@@ -62,6 +62,66 @@ struct Cached {
     fetched_at: i64,
 }
 
+/// Entitlement entries are tiny, but the guild id key-space is unbounded over a
+/// long-lived process. Keep enough for a large active fleet while refusing to
+/// retain one entry for every guild ever observed.
+const MAX_CACHE_ENTRIES: usize = 10_000;
+const MAX_SWEEP_INTERVAL_SECS: i64 = 60;
+
+struct EntitlementCache {
+    entries: HashMap<String, Cached>,
+    max_entries: usize,
+    sweep_interval: i64,
+    next_sweep: i64,
+}
+
+impl EntitlementCache {
+    fn new(max_entries: usize, cache_secs: i64, now: i64) -> Self {
+        let sweep_interval = cache_secs.clamp(1, MAX_SWEEP_INTERVAL_SECS);
+        Self {
+            entries: HashMap::new(),
+            max_entries: max_entries.max(1),
+            sweep_interval,
+            next_sweep: now.saturating_add(sweep_interval),
+        }
+    }
+
+    fn get(&mut self, guild: &str, now: i64, cache_secs: i64) -> Option<i64> {
+        let fresh = self
+            .entries
+            .get(guild)
+            .filter(|cached| now.saturating_sub(cached.fetched_at) < cache_secs)
+            .map(|cached| cached.slots);
+        if fresh.is_none() {
+            self.entries.remove(guild);
+        }
+        fresh
+    }
+
+    fn insert(&mut self, guild: &str, slots: i64, now: i64, cache_secs: i64) {
+        if now >= self.next_sweep {
+            self.entries
+                .retain(|_, cached| now.saturating_sub(cached.fetched_at) < cache_secs);
+            self.next_sweep = now.saturating_add(self.sweep_interval);
+        }
+        // Existing hot entries may always refresh. At capacity, new guilds run
+        // uncached until the next lazy sweep instead of growing memory forever.
+        if self.entries.len() < self.max_entries || self.entries.contains_key(guild) {
+            self.entries.insert(
+                guild.to_string(),
+                Cached {
+                    slots,
+                    fetched_at: now,
+                },
+            );
+        }
+    }
+
+    fn invalidate(&mut self, guild: &str) {
+        self.entries.remove(guild);
+    }
+}
+
 /// Resolves + caches per-user entitlement and answers tier/limit questions.
 pub struct Entitlement {
     /// The Stripe integration (mirror + client). None ⇒ plan system inert.
@@ -70,7 +130,12 @@ pub struct Entitlement {
     free: TierLimits,
     plus: TierLimits,
     pro: TierLimits,
-    cache: Mutex<HashMap<String, Cached>>,
+    cache: Mutex<EntitlementCache>,
+    /// Collapse concurrent cold reads for one guild, then cap distinct misses at
+    /// the Stripe mirror's SQLite pool width. This avoids both duplicate lazy
+    /// backfills and a cold-start burst blocking Tokio workers on store locks.
+    flight: crate::singleflight::SingleFlight,
+    miss_sem: tokio::sync::Semaphore,
 }
 
 impl Entitlement {
@@ -81,7 +146,13 @@ impl Entitlement {
             free: config.plan_limits.free,
             plus: config.plan_limits.plus,
             pro: config.plan_limits.pro,
-            cache: Mutex::new(HashMap::new()),
+            cache: Mutex::new(EntitlementCache::new(
+                MAX_CACHE_ENTRIES,
+                config.entitlement_cache_secs.max(1),
+                unix_now(),
+            )),
+            flight: crate::singleflight::SingleFlight::new(),
+            miss_sem: tokio::sync::Semaphore::new(crate::sqlite_pool::configured_size()),
         }
     }
 
@@ -191,7 +262,7 @@ impl Entitlement {
     /// instead of waiting out the cache window.
     pub fn invalidate(&self, guild: &str) {
         if let Ok(mut cache) = self.cache.lock() {
-            cache.remove(guild);
+            cache.invalidate(guild);
         }
     }
 
@@ -199,25 +270,32 @@ impl Entitlement {
         let Some(stripe) = &self.stripe else {
             return 0;
         };
-        let now = unix_now();
-        if let Ok(cache) = self.cache.lock() {
-            if let Some(c) = cache.get(guild) {
-                if now - c.fetched_at < self.cache_secs {
-                    return c.slots;
-                }
+        if let Ok(mut cache) = self.cache.lock() {
+            if let Some(slots) = cache.get(guild, unix_now(), self.cache_secs) {
+                return slots;
             }
         }
+
+        // Only one caller per guild performs the miss work. Re-check once the
+        // gate is held because the previous leader normally filled the cache.
+        let _flight = self.flight.acquire(guild).await;
+        if let Ok(mut cache) = self.cache.lock() {
+            if let Some(slots) = cache.get(guild, unix_now(), self.cache_secs) {
+                return slots;
+            }
+        }
+
+        // Bound simultaneous mirror/backfill work to the store's connection
+        // width. The semaphore is never closed, but fail open to Free if that
+        // invariant is ever broken rather than panicking a request task.
+        let Ok(_permit) = self.miss_sem.acquire().await else {
+            return 0;
+        };
         // Reads the local mirror (network-free); a stale/missing entry may trigger
         // one throttled Stripe backfill inside `active_slots_for`.
         let slots = stripe.active_slots_for(guild).await;
         if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(
-                guild.to_string(),
-                Cached {
-                    slots,
-                    fetched_at: now,
-                },
-            );
+            cache.insert(guild, slots, unix_now(), self.cache_secs);
         }
         slots
     }
@@ -330,5 +408,39 @@ mod tests {
         assert_eq!(Tier::Free.as_str(), "free");
         assert_eq!(Tier::Plus.as_str(), "plus");
         assert_eq!(Tier::Pro.as_str(), "pro");
+    }
+
+    #[test]
+    fn entitlement_cache_expires_and_reclaims_entries() {
+        let mut cache = EntitlementCache::new(2, 10, 100);
+        cache.insert("old", 36, 100, 10);
+
+        assert_eq!(cache.get("old", 109, 10), Some(36));
+        assert_eq!(cache.get("old", 110, 10), None);
+        assert!(cache.entries.is_empty());
+    }
+
+    #[test]
+    fn entitlement_cache_is_bounded_and_refreshes_hot_keys() {
+        let mut cache = EntitlementCache::new(2, 300, 100);
+        cache.insert("a", 10, 100, 300);
+        cache.insert("b", 36, 100, 300);
+        cache.insert("uncached", 130, 100, 300);
+
+        assert_eq!(cache.entries.len(), 2);
+        assert_eq!(cache.get("uncached", 100, 300), None);
+        cache.insert("a", 130, 101, 300);
+        assert_eq!(cache.get("a", 101, 300), Some(130));
+        assert_eq!(cache.entries.len(), 2);
+    }
+
+    #[test]
+    fn entitlement_cache_sweeps_expired_entries_on_write() {
+        let mut cache = EntitlementCache::new(2, 10, 100);
+        cache.insert("old", 36, 100, 10);
+        cache.insert("new", 130, 110, 10);
+
+        assert!(!cache.entries.contains_key("old"));
+        assert_eq!(cache.get("new", 110, 10), Some(130));
     }
 }

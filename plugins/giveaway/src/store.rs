@@ -10,7 +10,7 @@
 //! person** structurally (a PRIMARY KEY), and is what the draw reads and the
 //! live count counts.
 
-use std::sync::Mutex;
+use std::{collections::HashSet, sync::Mutex};
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -230,6 +230,7 @@ impl Store {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?;
+        drop(conn);
         Ok(match row {
             None => EditLookup::Unknown,
             Some(None) => EditLookup::Forbidden,
@@ -270,6 +271,7 @@ impl Store {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?;
+        drop(conn);
         Ok(row.and_then(|(config, status, winners)| {
             let config: InstanceConfig = serde_json::from_str(&config).ok()?;
             let winners: Vec<String> = serde_json::from_str(&winners).unwrap_or_default();
@@ -329,15 +331,73 @@ impl Store {
         )
     }
 
-    /// Every entrant's user id (the draw pool).
-    pub fn list_entrants(&self, instance_id: &str) -> rusqlite::Result<Vec<String>> {
+    /// Uniformly sample up to `limit` entrants without materialising the whole
+    /// giveaway. Reservoir sampling keeps memory O(winner count), while the
+    /// primary-key index lets SQLite stream the pool in one pass.
+    pub fn sample_entrants(
+        &self,
+        instance_id: &str,
+        excluded: &[String],
+        limit: usize,
+        mut pick: impl FnMut(usize) -> usize,
+    ) -> rusqlite::Result<(Vec<String>, usize)> {
         let conn = self.lock();
-        let mut stmt = conn.prepare("SELECT user_id FROM entries WHERE instance_id = ?1")?;
+        let mut stmt = conn.prepare_cached("SELECT user_id FROM entries WHERE instance_id = ?1")?;
         let rows = stmt.query_map([instance_id], |r| r.get::<_, String>(0))?;
-        rows.collect()
+        let excluded: HashSet<&str> = excluded.iter().map(String::as_str).collect();
+        let mut sample = Vec::with_capacity(limit);
+        let mut eligible = 0usize;
+        for row in rows {
+            let entrant = row?;
+            if excluded.contains(entrant.as_str()) {
+                continue;
+            }
+            eligible += 1;
+            if sample.len() < limit {
+                sample.push(entrant);
+            } else if limit > 0 {
+                let slot = pick(eligible) % eligible;
+                if slot < limit {
+                    sample[slot] = entrant;
+                }
+            }
+        }
+        Ok((sample, eligible))
+    }
+
+    /// Finish the first draw only while the giveaway is still open. The status
+    /// predicate prevents concurrent host clicks announcing different winners.
+    pub fn commit_draw(&self, instance_id: &str, winners: &[String]) -> rusqlite::Result<bool> {
+        let json = serde_json::to_string(winners).expect("serialize winners");
+        let conn = self.lock();
+        let n = conn.execute(
+            "UPDATE instances SET status = 'ended', winners = ?2
+             WHERE id = ?1 AND status = 'open'",
+            (instance_id, json),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Replace winners only if nobody has rerolled the set this request loaded.
+    pub fn commit_reroll(
+        &self,
+        instance_id: &str,
+        previous: &[String],
+        winners: &[String],
+    ) -> rusqlite::Result<bool> {
+        let previous_json = serde_json::to_string(previous).expect("serialize prior winners");
+        let json = serde_json::to_string(winners).expect("serialize winners");
+        let conn = self.lock();
+        let n = conn.execute(
+            "UPDATE instances SET winners = ?2
+             WHERE id = ?1 AND status = 'ended' AND winners = ?3",
+            (instance_id, json, previous_json),
+        )?;
+        Ok(n > 0)
     }
 
     /// Mark a giveaway ended (or rerolled) with this winner set.
+    #[cfg(test)]
     pub fn set_winners(&self, instance_id: &str, winners: &[String]) -> rusqlite::Result<bool> {
         let json = serde_json::to_string(winners).expect("serialize winners");
         let conn = self.lock();
@@ -362,6 +422,8 @@ impl Store {
 fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA busy_timeout = 5000;
          CREATE TABLE IF NOT EXISTS instances (
              id              TEXT PRIMARY KEY,
              created_at      INTEGER NOT NULL,
@@ -504,5 +566,43 @@ mod tests {
             store.get("one").unwrap().unwrap().status,
             Status::Open
         ));
+    }
+
+    #[test]
+    fn entrant_sampling_is_bounded_and_honours_exclusions() {
+        let store = Store::open(":memory:").unwrap();
+        store.create("one", TOKEN, &config("Prize")).unwrap();
+        for user in ["a", "b", "c", "d", "e"] {
+            assert!(store.enter("one", user).unwrap());
+        }
+
+        // A deterministic picker is enough to assert the reservoir's resource
+        // contract: it visits all eligible rows but retains only the limit.
+        let (sample, eligible) = store
+            .sample_entrants("one", &["b".into(), "d".into()], 2, |_| 0)
+            .unwrap();
+        assert_eq!(eligible, 3);
+        assert_eq!(sample.len(), 2);
+        assert!(sample.iter().all(|u| u != "b" && u != "d"));
+
+        let (empty, eligible) = store.sample_entrants("one", &[], 0, |_| 0).unwrap();
+        assert_eq!(eligible, 5);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn winner_updates_are_compare_and_swap() {
+        let store = Store::open(":memory:").unwrap();
+        store.create("one", TOKEN, &config("Prize")).unwrap();
+
+        assert!(store.commit_draw("one", &["a".into()]).unwrap());
+        assert!(!store.commit_draw("one", &["b".into()]).unwrap());
+        assert!(store
+            .commit_reroll("one", &["a".into()], &["c".into()])
+            .unwrap());
+        assert!(!store
+            .commit_reroll("one", &["a".into()], &["d".into()])
+            .unwrap());
+        assert_eq!(store.get("one").unwrap().unwrap().winners, vec!["c"]);
     }
 }

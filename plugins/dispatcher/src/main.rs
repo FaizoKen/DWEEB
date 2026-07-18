@@ -350,7 +350,8 @@ async fn run() {
             // the fallback reply if an upstream stalls.
             .timeout(Duration::from_millis(2500))
             // Keep upstream connections warm — the forward hop stays sub-ms.
-            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_idle_timeout(Duration::from_secs(30))
+            .pool_max_idle_per_host(16)
             .build()
             .expect("reqwest client"),
     });
@@ -411,6 +412,9 @@ async fn run() {
                 .delete(custom_app_hook_delete),
         )
         .layer(tower_http::trace::TraceLayer::new_for_http())
+        // Keep unauthenticated oversized payloads away from signature parsing
+        // and JSON allocation. Real interaction/config bodies are far smaller.
+        .layer(axum::extract::DefaultBodyLimit::max(256 * 1024))
         .with_state(app);
 
     tracing::info!(%addr, "interactions dispatcher listening");

@@ -28,6 +28,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Json, Response},
 };
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -43,6 +44,7 @@ pub struct AppState {
     pub store: Arc<Store>,
     pub http: reqwest::Client,
     pub config: Arc<Config>,
+    pub primary_key: ed25519_dalek::VerifyingKey,
     /// How to refresh each giveaway's public message *out of band*, keyed by
     /// instance id. Captured whenever we answer an Enter click with an
     /// `UPDATE_MESSAGE` (so `@original` of that interaction's token is the public
@@ -52,7 +54,7 @@ pub struct AppState {
     /// click on it. RAM-only — the tokens are ~15-minute bearer credentials, so
     /// they are never persisted; a restart or an expired/absent entry just falls
     /// back to that next-click refresh.
-    pub refreshers: Arc<Mutex<HashMap<String, Refresher>>>,
+    pub refreshers: Arc<Mutex<RefresherCache>>,
 }
 
 /// A captured way to edit one giveaway's public message after the fact: the
@@ -65,10 +67,45 @@ pub struct Refresher {
     stored_at_ms: i64,
 }
 
+/// Small, short-lived cache of public-message edit handles. Sweeping the whole
+/// map on every entry made each click O(number of active giveaways); keep the
+/// same TTL while amortising that scan to at most once per minute.
+#[derive(Default)]
+pub struct RefresherCache {
+    entries: HashMap<String, Refresher>,
+    next_sweep_at_ms: i64,
+}
+
 /// How long a captured [`Refresher`] is usable — comfortably inside Discord's
 /// ~15-minute interaction-token window, with margin so we never PATCH with a
 /// token about to expire.
 const REFRESHER_TTL_MS: i64 = 14 * 60 * 1000;
+const REFRESHER_SWEEP_INTERVAL_MS: i64 = 60 * 1000;
+
+impl RefresherCache {
+    fn insert(&mut self, id: String, entry: Refresher, now_ms: i64) {
+        if now_ms >= self.next_sweep_at_ms {
+            self.entries
+                .retain(|_, r| now_ms.saturating_sub(r.stored_at_ms) < REFRESHER_TTL_MS);
+            self.next_sweep_at_ms = now_ms.saturating_add(REFRESHER_SWEEP_INTERVAL_MS);
+        }
+        self.entries.insert(id, entry);
+    }
+
+    fn fresh(&mut self, id: &str, now_ms: i64) -> Option<(String, String, discord::MessageRef)> {
+        let expired = self
+            .entries
+            .get(id)
+            .is_some_and(|r| now_ms.saturating_sub(r.stored_at_ms) >= REFRESHER_TTL_MS);
+        if expired {
+            self.entries.remove(id);
+            return None;
+        }
+        self.entries
+            .get(id)
+            .map(|r| (r.application_id.clone(), r.token.clone(), r.message.clone()))
+    }
+}
 
 pub async fn health() -> &'static str {
     "ok"
@@ -248,10 +285,15 @@ pub async fn interactions(
     let (Some(signature), Some(timestamp)) = (signature, timestamp) else {
         return (StatusCode::UNAUTHORIZED, "missing signature").into_response();
     };
-    let key_hex =
-        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
-            .unwrap_or(&state.config.discord_public_key);
-    if !discord::verify_signature(key_hex, signature, timestamp, &body) {
+    let attested =
+        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref());
+    let verified = match attested {
+        Some(key) if !key.eq_ignore_ascii_case(&state.config.discord_public_key) => {
+            discord::verify_signature(key, signature, timestamp, &body)
+        }
+        _ => discord::verify_signature_with_key(&state.primary_key, signature, timestamp, &body),
+    };
+    if !verified {
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
 
@@ -594,21 +636,44 @@ fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -
         .into_response();
     }
 
-    let entrants = state.store.list_entrants(id).unwrap_or_default();
-    if entrants.is_empty() {
+    let mut rng = draw_rng();
+    let (winners, entrant_count) =
+        match state
+            .store
+            .sample_entrants(id, &[], g.config.winner_count as usize, |bound| {
+                rand_below(&mut rng, bound)
+            }) {
+            Ok(sample) => sample,
+            Err(e) => {
+                tracing::error!(error = %e, "load draw pool");
+                return Json(discord::ephemeral_text(
+                    "Something went wrong drawing winners — try again.",
+                ))
+                .into_response();
+            }
+        };
+    if entrant_count == 0 {
         return Json(discord::ephemeral_text(
             "Nobody has entered yet, so there's no one to draw. Give it time, or cancel the giveaway.",
         ))
         .into_response();
     }
 
-    let winners = discord::choose_winners(&entrants, g.config.winner_count as usize, rand_below);
-    if let Err(e) = state.store.set_winners(id, &winners) {
-        tracing::error!(error = %e, "set winners");
-        return Json(discord::ephemeral_text(
-            "Something went wrong drawing winners — try again.",
-        ))
-        .into_response();
+    match state.store.commit_draw(id, &winners) {
+        Ok(true) => {}
+        Ok(false) => {
+            return Json(discord::ephemeral_text(
+                "This giveaway was already drawn by another host.",
+            ))
+            .into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "set winners");
+            return Json(discord::ephemeral_text(
+                "Something went wrong drawing winners — try again.",
+            ))
+            .into_response();
+        }
     }
     maybe_dm_winners(state, &g.config, &winners);
 
@@ -616,7 +681,7 @@ fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -
     // announcement) can't touch the giveaway message. Bring it current out of
     // band — winners + "ended" + disabled button — from an earlier Enter click's
     // captured token, instead of waiting for the next click on it.
-    let count = entrants.len() as i64;
+    let count = entrant_count as i64;
     let ended = ended_giveaway(&g, winners.clone());
     spawn_public_refresh(state, &ended, id, count);
 
@@ -642,32 +707,52 @@ fn handle_reroll(state: &AppState, interaction: &discord::Interaction, id: &str)
     }
 
     // Reroll excludes everyone already drawn, so a reroll is genuinely fresh.
-    let already: std::collections::BTreeSet<&str> = g.winners.iter().map(String::as_str).collect();
-    let pool: Vec<String> = state
-        .store
-        .list_entrants(id)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|u| !already.contains(u.as_str()))
-        .collect();
-    if pool.is_empty() {
+    // Reservoir sampling retains only the requested winners in memory.
+    let mut rng = draw_rng();
+    let (winners, eligible_count) =
+        match state
+            .store
+            .sample_entrants(id, &g.winners, g.config.winner_count as usize, |bound| {
+                rand_below(&mut rng, bound)
+            }) {
+            Ok(sample) => sample,
+            Err(e) => {
+                tracing::error!(error = %e, "load reroll pool");
+                return Json(discord::ephemeral_text(
+                    "Something went wrong rerolling — try again.",
+                ))
+                .into_response();
+            }
+        };
+    if eligible_count == 0 {
         return Json(discord::ephemeral_text(
             "Everyone who entered has already been drawn — there's no one left to reroll.",
         ))
         .into_response();
     }
 
-    let winners = discord::choose_winners(&pool, g.config.winner_count as usize, rand_below);
-    if let Err(e) = state.store.set_winners(id, &winners) {
-        tracing::error!(error = %e, "reroll set winners");
-        return Json(discord::ephemeral_text(
-            "Something went wrong rerolling — try again.",
-        ))
-        .into_response();
+    match state.store.commit_reroll(id, &g.winners, &winners) {
+        Ok(true) => {}
+        Ok(false) => {
+            return Json(discord::ephemeral_text(
+                "Another host rerolled first — reopen the controls to see the latest winners.",
+            ))
+            .into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "reroll set winners");
+            return Json(discord::ephemeral_text(
+                "Something went wrong rerolling — try again.",
+            ))
+            .into_response();
+        }
     }
     maybe_dm_winners(state, &g.config, &winners);
 
-    let entries = state.store.count_entries(id).unwrap_or(pool.len() as i64);
+    let entries = state
+        .store
+        .count_entries(id)
+        .unwrap_or(eligible_count as i64 + g.winners.len() as i64);
     // Refresh the public message to the rerolled winners out of band (see the
     // note in `handle_draw`).
     let ended = ended_giveaway(&g, winners.clone());
@@ -830,11 +915,8 @@ fn remember_refresher(state: &AppState, interaction: &discord::Interaction, id: 
         message: message.clone(),
         stored_at_ms: now,
     };
-    if let Ok(mut map) = state.refreshers.lock() {
-        // Drop stale entries so a long-lived process doesn't accumulate spent
-        // (expired) tokens for giveaways that have gone quiet.
-        map.retain(|_, r| now - r.stored_at_ms < REFRESHER_TTL_MS);
-        map.insert(id.to_string(), entry);
+    if let Ok(mut cache) = state.refreshers.lock() {
+        cache.insert(id.to_string(), entry, now);
     }
 }
 
@@ -846,11 +928,11 @@ fn remember_refresher(state: &AppState, interaction: &discord::Interaction, id: 
 /// captured handle, or nothing editable, or no async runtime (tests).
 fn spawn_public_refresh(state: &AppState, g: &Giveaway, id: &str, count: i64) {
     let now = unix_millis();
-    let captured = state.refreshers.lock().ok().and_then(|map| {
-        map.get(id)
-            .filter(|r| now - r.stored_at_ms < REFRESHER_TTL_MS)
-            .map(|r| (r.application_id.clone(), r.token.clone(), r.message.clone()))
-    });
+    let captured = state
+        .refreshers
+        .lock()
+        .ok()
+        .and_then(|mut cache| cache.fresh(id, now));
     let Some((app_id, token, message)) = captured else {
         return;
     };
@@ -964,23 +1046,21 @@ fn maybe_dm_winners(state: &AppState, cfg: &InstanceConfig, winners: &[String]) 
     });
 }
 
-/// An unbiased random index in `0..bound`, from the OS CSPRNG. Rejection
-/// sampling drops the small high tail that would otherwise skew a plain modulo,
-/// so every entrant has exactly equal odds.
-fn rand_below(bound: usize) -> usize {
+/// Seed one userspace CSPRNG per draw. Reservoir sampling may request an index
+/// for every entrant, so entering the OS RNG for every row would dominate a
+/// large draw with syscalls.
+fn draw_rng() -> StdRng {
+    let mut seed = [0u8; 32];
+    getrandom::getrandom(&mut seed).expect("CSPRNG unavailable");
+    StdRng::from_seed(seed)
+}
+
+/// An unbiased random index in `0..bound` from the draw-local CSPRNG.
+fn rand_below(rng: &mut StdRng, bound: usize) -> usize {
     if bound <= 1 {
         return 0;
     }
-    let bound = bound as u64;
-    let zone = u64::MAX - (u64::MAX % bound); // largest multiple of `bound`
-    loop {
-        let mut b = [0u8; 8];
-        getrandom::getrandom(&mut b).expect("CSPRNG unavailable");
-        let x = u64::from_le_bytes(b);
-        if x < zone {
-            return (x % bound) as usize;
-        }
-    }
+    rng.random_range(0..bound)
 }
 
 fn new_instance_id() -> String {
@@ -1054,10 +1134,14 @@ mod tests {
 
     fn test_state() -> AppState {
         let store = Store::open(":memory:").expect("open store");
+        // RFC 8032 test-vector public key: a valid point without needing a
+        // signing key in these handler-only tests.
+        let public_key =
+            "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a".to_string();
         let config = Config {
             port: 0,
             public_base_url: "http://localhost".into(),
-            discord_public_key: "0".repeat(64),
+            discord_public_key: public_key.clone(),
             dispatcher_forward_secret: None,
             database_path: ":memory:".into(),
             default_bot_token: None,
@@ -1067,6 +1151,7 @@ mod tests {
             store: Arc::new(store),
             http: reqwest::Client::new(),
             config: Arc::new(config),
+            primary_key: discord::parse_verifying_key(&public_key).unwrap(),
             refreshers: Default::default(),
         }
     }
@@ -1297,8 +1382,8 @@ mod tests {
         // public message later — the token whose `@original` is that message.
         let _ = handle_component(&state, &host_enter_click(id, template(id)));
         let captured = {
-            let map = state.refreshers.lock().unwrap();
-            let r = map.get(id).expect("refresher captured");
+            let cache = state.refreshers.lock().unwrap();
+            let r = cache.entries.get(id).expect("refresher captured");
             assert_eq!(r.application_id, "999000");
             assert_eq!(r.token, "tok_abc");
             r.message.clone()
@@ -1313,6 +1398,38 @@ mod tests {
         assert!(s.contains("<@100>"), "{s}");
         assert!(s.contains("[ended]"), "{s}");
         assert!(s.contains("\"disabled\":true"), "{s}");
+    }
+
+    #[test]
+    fn refresher_cache_sweeps_globally_only_on_the_interval() {
+        let now = 1_000_000;
+        let message = host_enter_click("abc", template("abc"))
+            .message
+            .expect("message");
+        let refresher = |stored_at_ms| Refresher {
+            application_id: "app".into(),
+            token: "token".into(),
+            message: message.clone(),
+            stored_at_ms,
+        };
+
+        let mut cache = RefresherCache::default();
+        cache
+            .entries
+            .insert("stale".into(), refresher(now - REFRESHER_TTL_MS));
+        cache.insert("fresh".into(), refresher(now), now);
+        assert!(!cache.entries.contains_key("stale"));
+
+        // A second insert inside the sweep interval does not walk the map.
+        cache
+            .entries
+            .insert("stale-for-now".into(), refresher(now - REFRESHER_TTL_MS));
+        cache.insert("fresh-2".into(), refresher(now + 1), now + 1);
+        assert!(cache.entries.contains_key("stale-for-now"));
+
+        // Direct lookup still rejects and removes an expired credential.
+        assert!(cache.fresh("stale-for-now", now + 1).is_none());
+        assert!(!cache.entries.contains_key("stale-for-now"));
     }
 
     #[test]

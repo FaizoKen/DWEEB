@@ -53,12 +53,12 @@ use std::sync::Arc;
 
 use crate::sqlite_pool::SqlitePool;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use axum_extra::extract::cookie::PrivateCookieJar;
-use rusqlite::{params, Connection, OptionalExtension};
+use axum_extra::extract::cookie::{Key, PrivateCookieJar};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -75,6 +75,10 @@ use crate::seal;
 const ID_LEN: usize = 10;
 /// Hard ceiling on one list response, safely above any per-guild quota.
 const LIST_LIMIT: usize = 500;
+/// A detail request is deliberately smaller than the full shelf. The gallery
+/// asks in visible pages (and sequential chunks for a body-text search), so a
+/// single request can never make the proxy open hundreds of seals at once.
+const DETAIL_BATCH_LIMIT: usize = 64;
 
 /// The two stored labels. Scheduled/permanent are derived client-side from
 /// their own APIs, so they never appear here.
@@ -118,6 +122,38 @@ pub struct Row {
     pub updated_at: i64,
 }
 
+/// Minimal row needed to re-arm "Update existing" for an auto-saved draft.
+/// Keeping this separate from [`Row`] is intentional: boot only needs the
+/// webhook origin, not a potentially large encrypted message payload.
+pub struct OriginRow {
+    pub guild_id: String,
+    pub webhook_sealed: Option<String>,
+    pub message_id: String,
+    pub thread_id: Option<String>,
+    pub channel_id: Option<String>,
+    pub application_id: Option<String>,
+}
+
+/// List-card metadata. Deliberately excludes both sealed columns, so opening
+/// the directory does not pull large ciphertext blobs through SQLite merely to
+/// learn which chips/cards exist. Details are fetched in bounded batches when
+/// a card page actually needs its preview or a body-text search needs content.
+pub struct SummaryRow {
+    pub id: String,
+    pub guild_id: String,
+    pub label: String,
+    pub title: Option<String>,
+    pub webhook_id: Option<String>,
+    pub application_id: Option<String>,
+    pub channel_id: Option<String>,
+    pub message_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub dest_label: Option<String>,
+    pub created_by: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
     Ok(Row {
         id: r.get(0)?,
@@ -135,6 +171,24 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         created_by: r.get(12)?,
         created_at: r.get(13)?,
         updated_at: r.get(14)?,
+    })
+}
+
+fn summary_row_from(r: &rusqlite::Row) -> rusqlite::Result<SummaryRow> {
+    Ok(SummaryRow {
+        id: r.get(0)?,
+        guild_id: r.get(1)?,
+        label: r.get(2)?,
+        title: r.get(3)?,
+        webhook_id: r.get(4)?,
+        application_id: r.get(5)?,
+        channel_id: r.get(6)?,
+        message_id: r.get(7)?,
+        thread_id: r.get(8)?,
+        dest_label: r.get(9)?,
+        created_by: r.get(10)?,
+        created_at: r.get(11)?,
+        updated_at: r.get(12)?,
     })
 }
 
@@ -460,6 +514,52 @@ impl LibraryStore {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(e2s)
     }
 
+    /// A server's entry metadata without either encrypted payload column. This
+    /// is the normal gallery-open path; full rows are loaded only for visible
+    /// pages through [`Self::list_details_for_guild`].
+    pub fn list_summaries_for_guild(
+        &self,
+        guild: &str,
+        limit: usize,
+    ) -> Result<Vec<SummaryRow>, String> {
+        let conn = self.lock();
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT id, guild_id, label, title, webhook_id, application_id, channel_id, \
+                        message_id, thread_id, dest_label, created_by, created_at, updated_at \
+                 FROM library_messages WHERE guild_id=?1 \
+                 ORDER BY updated_at DESC LIMIT ?2",
+            )
+            .map_err(e2s)?;
+        let rows = stmt
+            .query_map((guild, limit as i64), summary_row_from)
+            .map_err(e2s)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(e2s)
+    }
+
+    /// Full rows for one bounded, guild-scoped card page. One `IN` query keeps
+    /// detail hydration from becoming a request/statement-per-card N+1 path.
+    pub fn list_details_for_guild(&self, guild: &str, ids: &[String]) -> Result<Vec<Row>, String> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.lock();
+        let placeholders = (2..=ids.len() + 1)
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT {COLS} FROM library_messages \
+             WHERE guild_id=?1 AND id IN ({placeholders})"
+        );
+        let mut stmt = conn.prepare_cached(&sql).map_err(e2s)?;
+        let values = std::iter::once(guild).chain(ids.iter().map(String::as_str));
+        let rows = stmt
+            .query_map(params_from_iter(values), row_from)
+            .map_err(e2s)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(e2s)
+    }
+
     /// One entry, scoped to its guild so a guessed id from another server 404s.
     pub fn get(&self, guild: &str, id: &str) -> Result<Option<Row>, String> {
         let conn = self.lock();
@@ -468,6 +568,38 @@ impl LibraryStore {
             params![guild, id],
             row_from,
         )
+        .optional()
+        .map_err(e2s)
+    }
+
+    /// Look up one posted message's update origin using
+    /// `idx_library_msg(guild_id, message_id)`. This is the boot-time hot path:
+    /// it avoids loading/decrypting/serializing the server's entire library just
+    /// to recover one webhook URL.
+    pub fn origin_for_message(
+        &self,
+        guild: &str,
+        message_id: &str,
+    ) -> Result<Option<OriginRow>, String> {
+        let conn = self.lock();
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT guild_id, webhook_sealed, message_id, thread_id, channel_id, \
+                        application_id \
+                 FROM library_messages \
+                 WHERE guild_id=?1 AND message_id=?2 AND label='posted' LIMIT 1",
+            )
+            .map_err(e2s)?;
+        stmt.query_row(params![guild, message_id], |r| {
+            Ok(OriginRow {
+                guild_id: r.get(0)?,
+                webhook_sealed: r.get(1)?,
+                message_id: r.get(2)?,
+                thread_id: r.get(3)?,
+                channel_id: r.get(4)?,
+                application_id: r.get(5)?,
+            })
+        })
         .optional()
         .map_err(e2s)
     }
@@ -763,16 +895,32 @@ pub struct PatchBody {
     pub payload: Option<Value>,
 }
 
-/// `GET /api/guilds/:guild_id/library` — the server's whole library, decrypted:
-/// each entry carries its payload (the content is the product — thumbnails need
-/// it) and, on posted entries, the webhook execute URL so a load can update the
-/// live message in place. Revealing that URL matches `webhooks_list`, which
-/// already hands the same callers every webhook token in the server.
+#[derive(Default, Deserialize)]
+pub struct ListQuery {
+    /// Backwards-compatible opt-in: old clients omit this and still receive the
+    /// historical full rows. Current galleries ask for metadata first, then use
+    /// the bounded detail endpoint for cards they actually reveal.
+    #[serde(default)]
+    pub metadata_only: bool,
+}
+
+#[derive(Deserialize)]
+pub struct DetailBody {
+    pub ids: Vec<String>,
+}
+
+/// `GET /api/guilds/:guild_id/library` — the server's library. Existing callers
+/// receive full decrypted entries; `?metadata_only=true` omits payload/webhook
+/// seals entirely for the gallery's cheap first pass. Full details then come
+/// from [`library_entries`]. Revealing a posted row's webhook URL matches
+/// `webhooks_list`, which already hands the same callers every webhook token in
+/// the server.
 pub async fn library_list(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
     headers: HeaderMap,
     Path(guild): Path<String>,
+    Query(query): Query<ListQuery>,
 ) -> Result<Response, AppError> {
     let store = store(&st)?;
     let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
@@ -786,24 +934,133 @@ pub async fn library_list(
         .map_err(|e| AppError::Internal(e.to_string()))?
         .map_err(AppError::Internal)?;
     let g = guild.clone();
-    let rows = tokio::task::spawn_blocking(move || store.list_for_guild(&g, LIST_LIMIT))
+    let (items, listed) = if query.metadata_only {
+        tokio::task::spawn_blocking(move || {
+            let rows = store.list_summaries_for_guild(&g, LIST_LIMIT)?;
+            let listed = rows.len();
+            Ok::<_, String>((rows.iter().map(summary_view).collect::<Vec<_>>(), listed))
+        })
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
-        .map_err(AppError::Internal)?;
-    let items: Vec<Value> = rows.iter().map(|r| view(&st, r)).collect();
+        .map_err(AppError::Internal)?
+    } else {
+        // Legacy full-list clients remain supported. Keep their potentially
+        // expensive AES/JSON work off Tokio's request workers as well.
+        let key = st.key.clone();
+        tokio::task::spawn_blocking(move || {
+            let rows = store.list_for_guild(&g, LIST_LIMIT)?;
+            let listed = rows.len();
+            Ok::<_, String>((
+                rows.iter().map(|r| view(&key, r)).collect::<Vec<_>>(),
+                listed,
+            ))
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .map_err(AppError::Internal)?
+    };
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         // `used`/`quota` are the pre-split totals kept for cached frontends;
         // the buckets are the real contract (quota `null` = unlimited).
         Json(json!({
             "items": items,
-            "used": rows.len(),
+            "used": listed,
             "quota": match (posted_cap, draft_cap) {
                 (Some(p), Some(d)) => json!(p + d),
                 _ => Value::Null,
             },
             "posted": { "used": posted_used, "quota": cap_json(posted_cap) },
             "drafts": { "used": draft_used, "quota": cap_json(draft_cap) },
+        })),
+    )
+        .into_response())
+}
+
+/// `POST /api/guilds/:guild_id/library/entries` - return full details for a
+/// bounded set of list-card ids. The same Manage-Webhooks gate as the list
+/// applies; ids are also scoped in SQL, so one server can never retrieve a row
+/// from another. Payload/webhook decryption stays on the blocking pool.
+pub async fn library_entries(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Path(guild): Path<String>,
+    Json(body): Json<DetailBody>,
+) -> Result<Response, AppError> {
+    let store = store(&st)?;
+    let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
+    authorize_activity_webhooks(&st, session, &guild).await?;
+
+    if body.ids.len() > DETAIL_BATCH_LIMIT {
+        return Err(bad_request("Too many library entry ids."));
+    }
+    let mut seen = HashSet::with_capacity(body.ids.len());
+    let mut ids = Vec::with_capacity(body.ids.len());
+    for id in body.ids {
+        if id.len() != ID_LEN || !id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+            return Err(bad_request("Invalid library entry id."));
+        }
+        if seen.insert(id.clone()) {
+            ids.push(id);
+        }
+    }
+
+    let key = st.key.clone();
+    let items = tokio::task::spawn_blocking(move || {
+        let rows = store.list_details_for_guild(&guild, &ids)?;
+        Ok::<_, String>(rows.iter().map(|r| view(&key, r)).collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?
+    .map_err(AppError::Internal)?;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({ "items": items })),
+    )
+        .into_response())
+}
+
+/// `GET /api/guilds/:guild_id/library/origin/:message_id` - recover only the
+/// update-in-place pointer for an auto-saved draft. Even bounded gallery detail
+/// hydration is unnecessary here: app boot needs one indexed row and only its
+/// much smaller webhook secret.
+pub async fn library_origin(
+    State(st): State<AppState>,
+    jar: PrivateCookieJar,
+    headers: HeaderMap,
+    Path((guild, message_id)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    let store = store(&st)?;
+    if !is_snowflake(&message_id) {
+        return Err(bad_request("message_id must be a Discord id"));
+    }
+    let session = crate::activity::resolve_identity(&st, &jar, &headers).await?;
+    authorize_activity_webhooks(&st, session, &guild).await?;
+
+    let g = guild.clone();
+    let mid = message_id.clone();
+    let row = tokio::task::spawn_blocking(move || store.origin_for_message(&g, &mid))
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .map_err(AppError::Internal)?
+        .ok_or_else(not_found)?;
+    let webhook_url = row
+        .webhook_sealed
+        .as_deref()
+        .and_then(|sealed| seal::open(&st.key, sealed))
+        .ok_or_else(not_found)?;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({
+            "guild_id": row.guild_id,
+            "webhook_url": webhook_url,
+            "message_id": row.message_id,
+            "thread_id": row.thread_id,
+            "channel_id": row.channel_id,
+            "application_id": row.application_id,
         })),
     )
         .into_response())
@@ -914,7 +1171,7 @@ pub async fn library_create(
             Ok((
                 StatusCode::CREATED,
                 [(header::CACHE_CONTROL, "no-store")],
-                Json(view(&st, &row)),
+                Json(view(&st.key, &row)),
             )
                 .into_response())
         }
@@ -1002,7 +1259,11 @@ pub async fn library_patch(
         .map_err(|e| AppError::Internal(e.to_string()))?
         .map_err(AppError::Internal)?;
     row.updated_at = now;
-    Ok(([(header::CACHE_CONTROL, "no-store")], Json(view(&st, &row))).into_response())
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(view(&st.key, &row)),
+    )
+        .into_response())
 }
 
 /// `DELETE /api/guilds/:guild_id/library/:id`.
@@ -1030,14 +1291,14 @@ pub async fn library_delete(
 /// One entry as the API returns it: metadata plus the decrypted payload and (on
 /// posted entries) the decrypted webhook execute URL. An unopenable seal (a
 /// rotated SESSION_SECRET) degrades to `null` rather than failing the list.
-fn view(st: &AppState, r: &Row) -> Value {
-    let payload = seal::open(&st.key, &r.payload_sealed)
+fn view(key: &Key, r: &Row) -> Value {
+    let payload = seal::open(key, &r.payload_sealed)
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .unwrap_or(Value::Null);
     let webhook_url = r
         .webhook_sealed
         .as_deref()
-        .and_then(|s| seal::open(&st.key, s))
+        .and_then(|s| seal::open(key, s))
         .map(Value::String)
         .unwrap_or(Value::Null);
     json!({
@@ -1047,6 +1308,27 @@ fn view(st: &AppState, r: &Row) -> Value {
         "title": r.title,
         "payload": payload,
         "webhook_url": webhook_url,
+        "webhook_id": r.webhook_id,
+        "application_id": r.application_id,
+        "channel_id": r.channel_id,
+        "message_id": r.message_id,
+        "thread_id": r.thread_id,
+        "dest_label": r.dest_label,
+        "created_by": r.created_by,
+        "created_at": r.created_at,
+        "updated_at": r.updated_at,
+    })
+}
+
+/// Metadata-only list view. Absence of the `payload` property is the client-side
+/// detail marker; a full row whose seal is unopenable explicitly carries
+/// `payload: null`, so it is never fetched in a loop.
+fn summary_view(r: &SummaryRow) -> Value {
+    json!({
+        "id": r.id,
+        "guild_id": r.guild_id,
+        "label": r.label,
+        "title": r.title,
         "webhook_id": r.webhook_id,
         "application_id": r.application_id,
         "channel_id": r.channel_id,
@@ -1266,6 +1548,86 @@ mod tests {
         )
         .unwrap();
         assert_eq!(store.counts_for_guild("g2").unwrap(), (1, 0));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn origin_lookup_is_indexed_scoped_and_payload_free() {
+        let (store, path) = temp_store("origin", 100, 10, 10);
+        let mut posted = entry("g1", "posted", Some("m1"));
+        posted.application_id = Some("app1".into());
+        posted.thread_id = Some("thread1".into());
+        upsert(&store, &posted, "id-origin-x", 1_000, None).unwrap();
+        upsert(
+            &store,
+            &entry("g2", "posted", Some("m1")),
+            "id-other-xx",
+            1_000,
+            None,
+        )
+        .unwrap();
+
+        let origin = store.origin_for_message("g1", "m1").unwrap().unwrap();
+        assert_eq!(origin.guild_id, "g1");
+        assert_eq!(origin.webhook_sealed.as_deref(), Some("sealed-hook"));
+        assert_eq!(origin.message_id, "m1");
+        assert_eq!(origin.thread_id.as_deref(), Some("thread1"));
+        assert_eq!(origin.channel_id.as_deref(), Some("7"));
+        assert_eq!(origin.application_id.as_deref(), Some("app1"));
+        assert!(store.origin_for_message("g3", "m1").unwrap().is_none());
+        assert!(store.origin_for_message("g1", "missing").unwrap().is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn summary_list_skips_secrets_and_batch_details_stay_guild_scoped() {
+        let (store, path) = temp_store("summary-detail", 100, 10, 10);
+        upsert(
+            &store,
+            &entry("g1", "posted", Some("m1")),
+            "detail0001",
+            2_000,
+            None,
+        )
+        .unwrap();
+        upsert(
+            &store,
+            &entry("g1", "draft", None),
+            "detail0002",
+            1_000,
+            None,
+        )
+        .unwrap();
+        upsert(
+            &store,
+            &entry("g2", "draft", None),
+            "detail0003",
+            3_000,
+            None,
+        )
+        .unwrap();
+
+        let summaries = store.list_summaries_for_guild("g1", 100).unwrap();
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].id, "detail0001");
+        let wire = summary_view(&summaries[0]);
+        assert!(wire.get("payload").is_none());
+        assert!(wire.get("webhook_url").is_none());
+
+        let details = store
+            .list_details_for_guild(
+                "g1",
+                &[
+                    "detail0001".into(),
+                    "detail0003".into(),
+                    "missing000".into(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0].id, "detail0001");
+        assert_eq!(details[0].payload_sealed, "sealed-payload");
+        assert_eq!(details[0].webhook_sealed.as_deref(), Some("sealed-hook"));
         let _ = std::fs::remove_file(path);
     }
 

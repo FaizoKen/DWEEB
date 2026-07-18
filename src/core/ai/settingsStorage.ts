@@ -17,9 +17,9 @@ const PROVIDERS: AiProvider[] = ["openai", "anthropic", "gemini", "groq", "openr
 export function loadAiSettings(): AiSettings {
   const fallback = defaultSettingsFor(DEFAULT_PROVIDER);
   if (typeof localStorage === "undefined") return fallback;
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return fallback;
   try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<AiSettings>;
     const known =
       typeof parsed.provider === "string" && PROVIDERS.includes(parsed.provider as AiProvider);

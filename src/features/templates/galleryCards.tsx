@@ -35,7 +35,8 @@ export interface CardData {
   /** Absent on a scheduled card whose payload hasn't loaded (or has no
    *  message) — the card then shows a placeholder in place of the thumbnail. */
   message?: WebhookMessage;
-  /** Scheduled only — the preview payload is still being fetched. */
+  /** The preview payload is still being fetched (scheduled or metadata-first
+   *  server-library card). */
   previewPending?: boolean;
   accent?: number;
   /** Template only — drives the category chip + the search haystack. */
@@ -179,11 +180,11 @@ export const GalleryCard = memo(function GalleryCard({
             prioritizeMedia={priorityThumb}
           />
         ) : (
-          // A scheduled card whose payload is still loading (or has none to
-          // preview) — a calm placeholder in place of the live thumbnail.
+          // A card whose payload is still loading (or has none to preview) — a
+          // calm placeholder in place of the live thumbnail.
           <div className={styles.thumbPlaceholder}>
             <span className={styles.thumbPlaceholderIcon} aria-hidden>
-              🕒
+              {card.emoji}
             </span>
             <span>{card.previewPending ? "Loading preview…" : "Preview unavailable"}</span>
           </div>
@@ -351,6 +352,30 @@ export function GalleryGridSkeleton({ cards = 8 }: { cards?: number }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Visible, retryable failure for metadata-first library details. Without this,
+ * a failed body-search batch could quietly look like "no matches" even though
+ * some message bodies were never loaded. */
+export function GalleryDetailError({
+  bodySearch,
+  onRetry,
+}: {
+  bodySearch: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div className={styles.detailError} role="alert">
+      <span>
+        {bodySearch
+          ? "Some messages couldn't load, so body search may be incomplete."
+          : "Some message previews couldn't load."}
+      </span>
+      <button type="button" className={styles.loadMoreBtn} onClick={onRetry}>
+        Retry
+      </button>
     </div>
   );
 }

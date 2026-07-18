@@ -58,9 +58,9 @@ export interface DraftRecord {
 /** Read the saved draft, if any. Never throws. */
 export function loadDraft(): DraftRecord | null {
   if (typeof localStorage === "undefined") return null;
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
   try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     if (
       !parsed ||

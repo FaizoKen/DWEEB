@@ -25,6 +25,7 @@ pub struct AppState {
     pub store: Arc<Store>,
     pub http: reqwest::Client,
     pub config: Arc<Config>,
+    pub primary_key: ed25519_dalek::VerifyingKey,
 }
 
 pub async fn health() -> &'static str {
@@ -201,10 +202,15 @@ pub async fn interactions(
     let (Some(signature), Some(timestamp)) = (signature, timestamp) else {
         return (StatusCode::UNAUTHORIZED, "missing signature").into_response();
     };
-    let key_hex =
-        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
-            .unwrap_or(&state.config.discord_public_key);
-    if !discord::verify_signature(key_hex, signature, timestamp, &body) {
+    let attested =
+        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref());
+    let verified = match attested {
+        Some(key) if !key.eq_ignore_ascii_case(&state.config.discord_public_key) => {
+            discord::verify_signature(key, signature, timestamp, &body)
+        }
+        _ => discord::verify_signature_with_key(&state.primary_key, signature, timestamp, &body),
+    };
+    if !verified {
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
 
@@ -329,42 +335,33 @@ async fn handle_component(state: &AppState, interaction: &discord::Interaction) 
     let reason = format!("Self-role via DWEEB ({})", interaction.actor_name());
     let mut futs = Vec::new();
     for rid in &changes.add {
-        let (http, token, guild_id, user_id, rid, reason) = (
-            state.http.clone(),
-            token.clone(),
-            guild_id.to_string(),
-            user_id.to_string(),
-            rid.clone(),
-            reason.clone(),
-        );
-        futs.push(tokio::spawn(async move {
-            let res = rest::add_role(&http, &token, &guild_id, &user_id, &rid, &reason).await;
-            (rid, true, res) // (role id, is_add, outcome)
-        }));
+        futs.push(apply_role_change(
+            &state.http,
+            &token,
+            guild_id,
+            user_id,
+            rid,
+            &reason,
+            true,
+        ));
     }
     for rid in &changes.remove {
-        let (http, token, guild_id, user_id, rid, reason) = (
-            state.http.clone(),
-            token.clone(),
-            guild_id.to_string(),
-            user_id.to_string(),
-            rid.clone(),
-            reason.clone(),
-        );
-        futs.push(tokio::spawn(async move {
-            let res = rest::remove_role(&http, &token, &guild_id, &user_id, &rid, &reason).await;
-            (rid, false, res)
-        }));
+        futs.push(apply_role_change(
+            &state.http,
+            &token,
+            guild_id,
+            user_id,
+            rid,
+            &reason,
+            false,
+        ));
     }
 
     let mut added = Vec::new();
     let mut removed = Vec::new();
     let mut denied = Vec::new();
     let mut busy = Vec::new();
-    for joined in join_all(futs).await {
-        let Ok((rid, is_add, res)) = joined else {
-            continue;
-        };
+    for (rid, is_add, res) in join_all(futs).await {
         match (res, is_add) {
             (Ok(()), true) => added.push(rid),
             (Ok(()), false) => removed.push(rid),
@@ -412,6 +409,26 @@ async fn handle_component(state: &AppState, interaction: &discord::Interaction) 
         expires_at_unix,
     ))
     .into_response()
+}
+
+/// One role REST future. Joining these directly avoids a scheduler task
+/// allocation and repeated client/token/id clones for every selected role,
+/// while preserving the existing concurrent request behavior.
+async fn apply_role_change(
+    http: &reqwest::Client,
+    token: &str,
+    guild_id: &str,
+    user_id: &str,
+    role_id: &str,
+    reason: &str,
+    add: bool,
+) -> (String, bool, Result<(), rest::RoleError>) {
+    let result = if add {
+        rest::add_role(http, token, guild_id, user_id, role_id, reason).await
+    } else {
+        rest::remove_role(http, token, guild_id, user_id, role_id, reason).await
+    };
+    (role_id.to_string(), add, result)
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

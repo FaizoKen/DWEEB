@@ -24,6 +24,10 @@ pub fn spawn(store: Arc<Store>, http: reqwest::Client, token: String, interval_s
     let period = Duration::from_secs(interval_secs.max(MIN_INTERVAL_SECS));
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(period);
+        // A slow Discord batch can outlive several periods. The default Burst
+        // policy would then run every missed tick back-to-back and defeat the
+        // batch rate bound precisely while the dependency is struggling.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
             if let Err(e) = drain_once(&store, &http, &token).await {

@@ -36,7 +36,10 @@ export interface LibraryEntryView {
   /** Wire-format message payload (raw `{placeholder}` tokens preserved when
    *  the entry came from the web builder). Null if the seal couldn't be
    *  opened (rotated SESSION_SECRET). */
-  payload: unknown;
+  /** Omitted by the metadata-first list. A fetched full row always owns this
+   * property, using `null` for an unopenable seal, so callers can distinguish
+   * "not loaded yet" from "loaded but unreadable" without retry loops. */
+  payload?: unknown;
   /** Canonical webhook execute URL — posted entries only. */
   webhook_url?: string | null;
   webhook_id?: string | null;
@@ -94,7 +97,30 @@ export type LibraryEntryResult =
   | { ok: true; entry: LibraryEntryView }
   | { ok: false; error: string; status: number };
 
+/** Minimal posted-message credential lookup used to re-arm a reopened draft.
+ * Unlike a full library row it deliberately carries no message payload. */
+export interface LibraryOriginView {
+  guild_id: string;
+  webhook_url: string;
+  message_id: string;
+  thread_id?: string | null;
+  channel_id?: string | null;
+  application_id?: string | null;
+}
+
+export type LibraryOriginResult =
+  | { ok: true; origin: LibraryOriginView }
+  | { ok: false; error: string; status: number };
+
 export type LibraryDeleteResult = { ok: true } | { ok: false; error: string; status: number };
+
+export type LibraryEntriesResult =
+  | { ok: true; items: LibraryEntryView[] }
+  | { ok: false; error: string; status: number };
+
+/** Mirrors the proxy's per-request decryption bound. Larger shelves are split
+ * into sequential chunks by the store. */
+export const LIBRARY_DETAIL_BATCH_SIZE = 64;
 
 async function readError(res: Response): Promise<string> {
   const data = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -104,7 +130,10 @@ async function readError(res: Response): Promise<string> {
 /** The server's library: entries (newest touched first) and the per-bucket
  *  usage (posted history window / saved-draft quota). Needs Manage Webhooks in
  *  the guild. */
-export async function listLibrary(guildId: string): Promise<LibraryListResult> {
+export async function listLibrary(
+  guildId: string,
+  options: { metadataOnly?: boolean } = {},
+): Promise<LibraryListResult> {
   if (!isLibraryConfigured()) {
     return {
       ok: false,
@@ -114,7 +143,8 @@ export async function listLibrary(guildId: string): Promise<LibraryListResult> {
   }
   let res: Response;
   try {
-    res = await proxyFetch(`/api/guilds/${encodeURIComponent(guildId)}/library`);
+    const query = options.metadataOnly ? "?metadata_only=true" : "";
+    res = await proxyFetch(`/api/guilds/${encodeURIComponent(guildId)}/library${query}`);
   } catch {
     return { ok: false, error: "Couldn't reach the library service.", status: 0 };
   }
@@ -140,6 +170,71 @@ export async function listLibrary(guildId: string): Promise<LibraryListResult> {
     posted: bucket(data?.posted, "posted"),
     drafts: bucket(data?.drafts, "draft"),
   };
+}
+
+/** Fetch full payload/webhook details for one bounded list-card batch. The list
+ * remains metadata-only until a visible page or body search actually needs
+ * message content. */
+export async function fetchLibraryEntries(
+  guildId: string,
+  ids: string[],
+): Promise<LibraryEntriesResult> {
+  if (!isLibraryConfigured()) {
+    return {
+      ok: false,
+      error: "The message library isn't configured on this deployment.",
+      status: 0,
+    };
+  }
+  if (ids.length > LIBRARY_DETAIL_BATCH_SIZE) {
+    return { ok: false, error: "Too many library entries requested.", status: 400 };
+  }
+  let res: Response;
+  try {
+    res = await proxyFetch(`/api/guilds/${encodeURIComponent(guildId)}/library/entries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+  } catch {
+    return { ok: false, error: "Couldn't reach the library service.", status: 0 };
+  }
+  if (!res.ok) return { ok: false, error: await readError(res), status: res.status };
+  const data = (await res.json().catch(() => null)) as { items?: LibraryEntryView[] } | null;
+  return { ok: true, items: data?.items ?? [] };
+}
+
+/**
+ * Recover one posted message's update credential by its Discord message id.
+ * This boot path must stay narrow: listing the library would transfer and ask
+ * the proxy to decrypt hundreds of unrelated message payloads just to find one
+ * indexed row.
+ */
+export async function fetchLibraryOrigin(
+  guildId: string,
+  messageId: string,
+): Promise<LibraryOriginResult> {
+  if (!isLibraryConfigured()) {
+    return {
+      ok: false,
+      error: "The message library isn't configured on this deployment.",
+      status: 0,
+    };
+  }
+  let res: Response;
+  try {
+    res = await proxyFetch(
+      `/api/guilds/${encodeURIComponent(guildId)}/library/origin/${encodeURIComponent(messageId)}`,
+    );
+  } catch {
+    return { ok: false, error: "Couldn't reach the library service.", status: 0 };
+  }
+  if (!res.ok) return { ok: false, error: await readError(res), status: res.status };
+  const origin = (await res.json().catch(() => null)) as LibraryOriginView | null;
+  if (!origin?.guild_id || !origin.webhook_url || !origin.message_id) {
+    return { ok: false, error: "Malformed response.", status: res.status };
+  }
+  return { ok: true, origin };
 }
 
 /** Store a message. A `posted` entry with a `message_id` upserts — re-posting

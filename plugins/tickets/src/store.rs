@@ -277,6 +277,7 @@ impl Store {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?;
+        drop(conn);
         Ok(match row {
             None => EditLookup::Unknown,
             Some(None) => EditLookup::Forbidden,
@@ -313,6 +314,7 @@ impl Store {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?;
+        drop(conn);
         Ok(match row {
             Some(json) => serde_json::from_str(&json).ok(),
             None => None,
@@ -321,27 +323,19 @@ impl Store {
 
     // ── ticket numbering ───────────────────────────────────────────────────────
 
-    /// Allocate the next ticket number for an instance, monotonically. Runs under
-    /// the single connection lock, so two concurrent opens can't collide on a
-    /// number (the lock serializes the read-then-write).
+    /// Allocate the next ticket number for an instance monotonically. One
+    /// UPSERT+RETURNING replaces the old read-then-write pair, halving DB work
+    /// and making the increment indivisible even if the store is pooled later.
     pub fn next_number(&self, instance_id: &str) -> rusqlite::Result<i64> {
         let conn = self.lock();
-        let current: i64 = conn
-            .query_row(
-                "SELECT next_number FROM counters WHERE instance_id = ?1",
-                [instance_id],
-                |r| r.get(0),
-            )
-            .or_else(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => Ok(1),
-                other => Err(other),
-            })?;
-        conn.execute(
-            "INSERT INTO counters (instance_id, next_number) VALUES (?1, ?2)
-             ON CONFLICT(instance_id) DO UPDATE SET next_number = ?2",
-            (instance_id, current + 1),
-        )?;
-        Ok(current)
+        conn.query_row(
+            "INSERT INTO counters (instance_id, next_number) VALUES (?1, 2)
+             ON CONFLICT(instance_id) DO UPDATE
+             SET next_number = counters.next_number + 1
+             RETURNING next_number - 1",
+            [instance_id],
+            |r| r.get(0),
+        )
     }
 
     // ── tickets / anti-spam ledger ─────────────────────────────────────────────
@@ -425,26 +419,29 @@ impl Store {
         )
     }
 
-    /// When this member last opened a ticket from this panel (millis), across all
-    /// statuses — so opening then closing can't bypass the cooldown.
-    pub fn last_open_at(
+    /// Read both anti-spam inputs in one indexed pass for the request gate.
+    pub fn open_stats(
         &self,
         instance_id: &str,
         opener_id: &str,
-    ) -> rusqlite::Result<Option<i64>> {
+    ) -> rusqlite::Result<(i64, Option<i64>)> {
         let conn = self.lock();
-        let v: Option<i64> = conn.query_row(
-            "SELECT MAX(created_at) FROM tickets WHERE instance_id = ?1 AND opener_id = ?2",
+        conn.query_row(
+            "SELECT
+                 COALESCE(SUM(CASE WHEN status IN ('open','locked') THEN 1 ELSE 0 END), 0),
+                 MAX(created_at)
+             FROM tickets WHERE instance_id = ?1 AND opener_id = ?2",
             (instance_id, opener_id),
-            |r| r.get(0),
-        )?;
-        Ok(v)
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
     }
 }
 
 fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA busy_timeout = 5000;
          CREATE TABLE IF NOT EXISTS instances (
              id              TEXT PRIMARY KEY,
              created_at      INTEGER NOT NULL,
@@ -559,6 +556,19 @@ mod tests {
     }
 
     #[test]
+    fn open_stats_combines_count_and_latest_open() {
+        let s = store();
+        s.create_ticket("c1", "i", "g", 1, "u", "").unwrap();
+        s.create_ticket("c2", "i", "g", 2, "u", "").unwrap();
+        s.set_status("c1", "closed").unwrap();
+
+        let (open, latest) = s.open_stats("i", "u").unwrap();
+        assert_eq!(open, 1);
+        assert!(latest.is_some());
+        assert_eq!(s.open_stats("i", "nobody").unwrap(), (0, None));
+    }
+
+    #[test]
     fn claim_and_lookup_round_trip() {
         let s = store();
         s.create_ticket("c1", "i", "g", 7, "opener", "Billing")
@@ -641,7 +651,7 @@ mod tests {
         s.create_ticket("c1", "i", "g", 1, "u", "").unwrap();
         s.set_status("c1", "closed").unwrap();
         // Cooldown must still see the most recent open even after it closed.
-        assert!(s.last_open_at("i", "u").unwrap().is_some());
-        assert!(s.last_open_at("i", "nobody").unwrap().is_none());
+        assert!(s.open_stats("i", "u").unwrap().1.is_some());
+        assert!(s.open_stats("i", "nobody").unwrap().1.is_none());
     }
 }

@@ -38,6 +38,8 @@ interface PlanState {
   reset(): void;
 }
 
+let accountGeneration = 0;
+
 export const usePlanStore = create<PlanState>((set, get) => ({
   guildId: null,
   plan: null,
@@ -49,6 +51,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
     const id = guildId?.trim();
     if (!id) return;
     const st = get();
+    const generation = accountGeneration;
     // Same server + already loaded/loading → skip unless forced.
     if (!force && id === st.guildId && (st.status === "ready" || st.status === "loading")) return;
     // Switching servers clears the previous server's tier so we never briefly
@@ -57,10 +60,10 @@ export const usePlanStore = create<PlanState>((set, get) => ({
     try {
       const plan = await fetchGuildPlan(id);
       // A newer load for a different server may have superseded this one.
-      if (get().guildId !== id) return;
+      if (generation !== accountGeneration || get().guildId !== id) return;
       set({ plan, status: "ready" });
     } catch (e) {
-      if (get().guildId !== id) return;
+      if (generation !== accountGeneration || get().guildId !== id) return;
       // A 401 is "signed out"; anything else is a soft miss.
       if (isAuthError(e)) set({ plan: null, status: "ready" });
       else set({ status: "error" });
@@ -77,6 +80,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
   },
 
   reset() {
+    accountGeneration += 1;
     set({ guildId: null, plan: null, status: "idle", open: false });
   },
 }));

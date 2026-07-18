@@ -43,6 +43,41 @@ describe("substituteMessage", () => {
     expect(substituteMessage(m, {})).toBe(m);
   });
 
+  it("returns the same tree when a non-empty map has no matching tokens", () => {
+    const m = simpleTextMessage();
+    expect(substituteMessage(m, { server: "Cats" })).toBe(m);
+  });
+
+  it("preserves untouched component references when one sibling changes", () => {
+    const original: WebhookMessage = {
+      components: [
+        { _id: "changed", type: ComponentType.TextDisplay, content: "Hi {server}" },
+        { _id: "stable", type: ComponentType.TextDisplay, content: "Still here" },
+      ],
+    };
+
+    const out = substituteMessage(original, { server: "Cats" });
+
+    expect(out).not.toBe(original);
+    expect(out.components).not.toBe(original.components);
+    expect(out.components[0]).not.toBe(original.components[0]);
+    expect(out.components[1]).toBe(original.components[1]);
+    expect((out.components[0] as { content: string }).content).toBe("Hi Cats");
+  });
+
+  it("keeps the component array when only message metadata changes", () => {
+    const original: WebhookMessage = {
+      username: "{server} bot",
+      components: [{ _id: "stable", type: ComponentType.TextDisplay, content: "Plain text" }],
+    };
+
+    const out = substituteMessage(original, { server: "Cats" });
+
+    expect(out).not.toBe(original);
+    expect(out.username).toBe("Cats bot");
+    expect(out.components).toBe(original.components);
+  });
+
   it("substitutes user-facing fields without mutating the input", () => {
     const original: WebhookMessage = {
       username: "{server} bot",

@@ -21,7 +21,7 @@ vi.mock("./providers", async (importOriginal) => {
   return { ...actual, callAI: vi.fn() };
 });
 
-import { callAI, type AiTurn } from "./providers";
+import { callAI, type AiCallResult, type AiTurn } from "./providers";
 import { useAiStore } from "./aiStore";
 import { useMessageStore } from "@/core/state/messageStore";
 
@@ -56,6 +56,14 @@ function turnsOfCall(n: number): AiTurn[] {
   return call[2];
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   mockedCallAI.mockReset();
   // Configures a key (send() refuses without one) and clears the transcript.
@@ -68,6 +76,49 @@ beforeEach(() => {
 });
 
 describe("aiStore.send — applying edits", () => {
+  it("coalesces token bursts into display-frame store updates", async () => {
+    mockedCallAI.mockImplementationOnce(async (_settings, _system, _turns, _signal, onToken) => {
+      for (let i = 0; i < 100; i++) onToken?.("x");
+      return { ok: true, text: "x".repeat(100) };
+    });
+    let updates = 0;
+    const unsubscribe = useAiStore.subscribe(() => updates++);
+    await useAiStore.getState().send("answer briefly");
+    unsubscribe();
+
+    expect(lastAssistantBubble().content).toBe("x".repeat(100));
+    expect(updates).toBeLessThan(10);
+  });
+
+  it("does not let a cancelled send clear the next send's controller or thinking state", async () => {
+    const first = deferred<AiCallResult>();
+    const second = deferred<AiCallResult>();
+    let secondSignal: AbortSignal | undefined;
+    mockedCallAI
+      .mockImplementationOnce(async () => first.promise)
+      .mockImplementationOnce(async (_settings, _system, _turns, signal) => {
+        secondSignal = signal;
+        return second.promise;
+      });
+
+    const firstSend = useAiStore.getState().send("first");
+    await vi.waitFor(() => expect(mockedCallAI).toHaveBeenCalledTimes(1));
+    useAiStore.getState().cancel();
+
+    const secondSend = useAiStore.getState().send("second");
+    await vi.waitFor(() => expect(mockedCallAI).toHaveBeenCalledTimes(2));
+    first.resolve({ ok: false, error: "Request cancelled." });
+    await firstSend;
+
+    expect(useAiStore.getState().thinking).toBe(true);
+    expect(secondSignal?.aborted).toBe(false);
+
+    useAiStore.getState().cancel();
+    expect(secondSignal?.aborted).toBe(true);
+    second.resolve({ ok: false, error: "Request cancelled." });
+    await secondSend;
+  });
+
   it("applies a fenced payload and keeps the raw reply as provider history", async () => {
     queueReply(`Sure!\n${FENCE(PAYLOAD("AI EDIT ONE"))}`);
     await useAiStore.getState().send("make it simpler");

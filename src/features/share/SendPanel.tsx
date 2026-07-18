@@ -148,6 +148,7 @@ import { navigatePopup, openPopup, redirectFullPage, watchPopup } from "@/core/o
 import { webhookFlow } from "@/core/oauth/flows";
 import { copyText } from "@/core/serialization/clipboard";
 import { encodeJson } from "@/core/serialization";
+import { hasSessionAttachments } from "@/core/serialization/normalize";
 import { cancelSchedule, createSchedule, isScheduleConfigured } from "@/core/schedule/api";
 import { trackAnalytics } from "@/core/telemetry/analytics";
 import { preserveCreatedScheduleAccess } from "@/core/schedule/accessPersistence";
@@ -421,7 +422,7 @@ export function SendPanel({
   const blockingIssues = validation.issues.filter((i) => i.severity === "error");
   // Local uploads (session:// blobs) live only in this browser, so they can't be
   // carried to the server for a scheduled (later) post — that path is blocked.
-  const hasUploads = useMemo(() => JSON.stringify(message).includes("session://"), [message]);
+  const hasUploads = useMemo(() => hasSessionAttachments(message), [message]);
 
   // Who the message will actually ping, after applying allowed_mentions. Shown
   // in the confirmation dialog so the blast radius is visible before sending.

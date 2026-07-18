@@ -5,11 +5,12 @@
  * "delete this node" path can't safely free the blob without checking the rest
  * of the tree.
  *
- * Cheap alternative: after every message/history/browser-save mutation, walk
- * the live tree, every undo/redo snapshot, and every named browser draft, then
- * tell the registry which blob ids are still reachable. Anything else gets
- * freed (from both the in-memory map and IndexedDB). History is part of the
- * root set because deleting a component pushes its old tree onto `past`;
+ * Cheap alternative: after a short mutation debounce, walk the live tree,
+ * every undo/redo snapshot, and every named browser draft, then tell the
+ * registry which blob ids are still reachable. Snapshot URL lists are cached
+ * by immutable object identity, so only newly edited trees need a real walk.
+ * Anything unreachable is freed from memory and IndexedDB. History is part of
+ * the root set because deleting a component pushes its old tree onto `past`;
  * browser saves are roots because loading one later must restore its files.
  *
  * On mount we first `hydrateAttachments()` — pulling persisted uploads back
@@ -26,9 +27,13 @@ import { useSavedMessagesStore, type SavedMessageRecord } from "@/core/state/sav
 import { garbageCollect, hydrateAttachments } from "@/core/state/attachmentStore";
 import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 
+/** Collapse typing bursts before walking the editor's full reachability graph. */
+const GC_DEBOUNCE_MS = 300;
+
 export function useAttachmentGc(): void {
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const reconcile = () =>
       garbageCollect(
         collectReferencedMediaUrls(
@@ -36,9 +41,26 @@ export function useAttachmentGc(): void {
           useSavedMessagesStore.getState().entries,
         ),
       );
-    void hydrateAttachments().then(() => {
-      if (cancelled) return;
+    const runReconcile = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
       reconcile();
+    };
+    const scheduleReconcile = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(runReconcile, GC_DEBOUNCE_MS);
+    };
+    // Only materialize persisted blobs that one of the initial roots can use.
+    // The database prunes every other key without reading its bytes.
+    const initialReferences = Array.from(
+      collectReferencedMediaUrls(
+        useMessageStore.getState(),
+        useSavedMessagesStore.getState().entries,
+      ),
+    );
+    void hydrateAttachments(initialReferences).then(() => {
+      if (cancelled) return;
+      runReconcile();
     });
     const unsubscribeMessage = useMessageStore.subscribe((state, prev) => {
       if (
@@ -48,13 +70,14 @@ export function useAttachmentGc(): void {
       ) {
         return;
       }
-      reconcile();
+      scheduleReconcile();
     });
     const unsubscribeSaved = useSavedMessagesStore.subscribe((state, prev) => {
-      if (state.entries !== prev.entries) reconcile();
+      if (state.entries !== prev.entries) scheduleReconcile();
     });
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
       unsubscribeMessage();
       unsubscribeSaved();
     };
@@ -79,33 +102,51 @@ export function* collectReferencedMediaUrls(
   for (const saved of savedMessages) yield* collectMediaUrls(saved.payload);
 }
 
+/**
+ * Message snapshots are immutable in both stores. Cache the small URL list per
+ * snapshot so each debounced pass only walks the newest edited tree; the 50
+ * unchanged undo frames and browser saves become cheap array iteration.
+ */
+const mediaUrlCache = new WeakMap<object, readonly string[]>();
+
 function* collectMediaUrls(message: WebhookMessage | unknown): Generator<string> {
-  const visit = function* (node: unknown): Generator<string> {
+  if (!message || typeof message !== "object") return;
+  let cached = mediaUrlCache.get(message);
+  if (cached === undefined) {
+    cached = scanMediaUrls(message);
+    mediaUrlCache.set(message, cached);
+  }
+  yield* cached;
+}
+
+function scanMediaUrls(message: WebhookMessage | unknown): string[] {
+  const urls: string[] = [];
+  const visit = (node: unknown): void => {
     if (!node || typeof node !== "object") return;
     const obj = node as Record<string, unknown>;
     const type = typeof obj.type === "number" ? obj.type : null;
     if (type === ComponentType.File) {
       const file = obj.file as { url?: unknown } | undefined;
-      if (file && typeof file.url === "string") yield file.url;
+      if (file && typeof file.url === "string") urls.push(file.url);
     } else if (type === ComponentType.Thumbnail) {
       const media = obj.media as { url?: unknown } | undefined;
-      if (media && typeof media.url === "string") yield media.url;
+      if (media && typeof media.url === "string") urls.push(media.url);
     } else if (type === ComponentType.MediaGallery) {
       const items = obj.items;
       if (Array.isArray(items)) {
         for (const item of items) {
           const media = (item as { media?: { url?: unknown } })?.media;
-          if (media && typeof media.url === "string") yield media.url;
+          if (media && typeof media.url === "string") urls.push(media.url);
         }
       }
     }
     if (Array.isArray(obj.components)) {
-      for (const child of obj.components) yield* visit(child);
+      for (const child of obj.components) visit(child);
     }
-    if (obj.accessory) yield* visit(obj.accessory);
+    if (obj.accessory) visit(obj.accessory);
   };
-  if (!message || typeof message !== "object") return;
   const components = (message as { components?: unknown }).components;
-  if (!Array.isArray(components)) return;
-  for (const top of components) yield* visit(top);
+  if (!Array.isArray(components)) return urls;
+  for (const top of components) visit(top);
+  return urls;
 }

@@ -88,12 +88,16 @@ async fn run() {
         }
     };
 
+    let primary_key = discord::parse_verifying_key(&config.discord_public_key)
+        .expect("DISCORD_PUBLIC_KEY must encode a valid Ed25519 point");
     let store = Store::open(&config.database_path).expect("failed to open database");
     // One client for the config-time role listing and the draw-time winner DMs.
     // 2.5s keeps the whole interaction inside Discord's ~3s window even after the
     // dispatcher hop.
     let http = reqwest::Client::builder()
         .timeout(Duration::from_millis(2500))
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(16)
         .user_agent(concat!(
             "dweeb-giveaway/",
             env!("CARGO_PKG_VERSION"),
@@ -107,6 +111,7 @@ async fn run() {
         store: Arc::new(store),
         http,
         config: Arc::new(config),
+        primary_key,
         refreshers: Default::default(),
     };
 
@@ -127,6 +132,7 @@ async fn run() {
         // by the iframe. Both are public/capability-gated, so a permissive
         // (credential-less) CORS policy is fine.
         .layer(CorsLayer::permissive())
+        .layer(axum::extract::DefaultBodyLimit::max(256 * 1024))
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

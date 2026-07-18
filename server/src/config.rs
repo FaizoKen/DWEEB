@@ -104,6 +104,9 @@ pub struct Config {
     /// Days a collaboration draft is kept after its last edit before the sweeper
     /// deletes it — a session nobody has touched this long won't be resumed.
     pub activity_draft_retention_days: i64,
+    /// Max multipart Activity post/edit requests buffered at once. Each route
+    /// accepts up to 32 MiB, so this is a hard process-memory circuit breaker.
+    pub activity_upload_concurrency: usize,
     /// Server-held feedback forum webhook used by both browser surfaces. This is
     /// a credential and is never included in a frontend build. None (unset) ⇒
     /// the feedback endpoints answer 501.
@@ -305,6 +308,10 @@ impl Config {
             opt_env("ACTIVITY_DRAFT_DB_PATH").unwrap_or_else(|| "activity-drafts.db".to_string());
         let activity_draft_max_entries = parse_or("ACTIVITY_DRAFT_MAX_ENTRIES", 20_000)?;
         let activity_draft_retention_days = parse_or("ACTIVITY_DRAFT_RETENTION_DAYS", 7)?;
+        let activity_upload_concurrency = parse_or("ACTIVITY_UPLOAD_CONCURRENCY", 2)?;
+        if activity_upload_concurrency == 0 {
+            return Err("ACTIVITY_UPLOAD_CONCURRENCY must be at least 1".into());
+        }
         let feedback_webhook_url = match opt_env("FEEDBACK_WEBHOOK_URL") {
             Some(url) if valid_feedback_webhook_url(&url) => Some(url.trim().to_string()),
             Some(_) => {
@@ -430,6 +437,7 @@ impl Config {
             activity_draft_db_path,
             activity_draft_max_entries,
             activity_draft_retention_days,
+            activity_upload_concurrency,
             feedback_webhook_url,
             session_secret,
             session_ttl,

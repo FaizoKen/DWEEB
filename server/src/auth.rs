@@ -417,7 +417,15 @@ pub async fn callback(
             &cfg.oauth_redirect_url,
         )
         .await?;
-    let user = st.discord.current_user(&token.access_token).await?;
+    // Identity and guild membership are independent Discord routes. Resolve
+    // them together so login cache warming costs one network round-trip instead
+    // of two sequential ones; an OAuth-exchanged token is expected to be valid
+    // for both, and the guild list remains best-effort as before.
+    let (user, guilds) = tokio::join!(
+        st.discord.current_user(&token.access_token),
+        st.discord.current_user_guilds(&token.access_token),
+    );
+    let user = user?;
 
     let display = user
         .global_name
@@ -433,7 +441,7 @@ pub async fn callback(
     };
 
     // Warm the per-user guild cache so the FE picker is populated immediately.
-    if let Ok(raw) = st.discord.current_user_guilds(&token.access_token).await {
+    if let Ok(raw) = guilds {
         let require = cfg.require_manage_guild;
         let list: Vec<UsableGuild> = raw
             .into_iter()

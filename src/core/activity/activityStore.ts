@@ -26,6 +26,7 @@ import {
   createShortLink,
   isShortLinkConfigured,
   attachEditorFields,
+  hasSessionAttachments,
 } from "@/core/serialization";
 import {
   buildWirePayload,
@@ -622,7 +623,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     // Uploaded files exist only in this browser — the worker can't attach them
     // when the schedule fires later, so the post would land broken. (The proxy
     // re-guards this; mirrors the web app's schedule gate.)
-    if (JSON.stringify(message).includes("session://")) {
+    if (hasSessionAttachments(message)) {
       pushToast("Uploaded files can't be scheduled — use image/media URLs instead.", "error");
       return null;
     }

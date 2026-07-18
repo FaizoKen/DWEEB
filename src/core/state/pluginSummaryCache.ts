@@ -45,25 +45,47 @@ const STORAGE_KEY = "dweeb.plugins.summaries.v1";
 /** Bound the map so it can't grow without limit across many edits. */
 const MAX_ENTRIES = 200;
 
+// Reads sit on the preview/validation hot path: one message edit may look up
+// several bindings more than once. Keep the parsed map in memory instead of
+// synchronously reading and JSON-parsing up to 200 entries per lookup.
+let cachedMap: CacheMap | null = null;
+
 function readAll(): CacheMap {
-  if (typeof localStorage === "undefined") return {};
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as CacheMap) : {};
-  } catch {
-    return {};
+  if (cachedMap) return cachedMap;
+  if (typeof localStorage === "undefined") {
+    cachedMap = {};
+    return cachedMap;
   }
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      cachedMap = {};
+      return cachedMap;
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    cachedMap = parsed && typeof parsed === "object" ? (parsed as CacheMap) : {};
+  } catch {
+    cachedMap = {};
+  }
+  return cachedMap;
 }
 
 function writeAll(map: CacheMap): void {
+  // Same-tab readers see writes immediately even when persistent storage is
+  // unavailable; other tabs invalidate below via the browser storage event.
+  cachedMap = map;
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
   } catch {
     // Quota / disabled storage — a missing cosmetic summary is harmless.
   }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key === STORAGE_KEY || event.key === null) cachedMap = null;
+  });
 }
 
 /** Look up a cached summary for a `custom_id`, if one was stored. */

@@ -75,12 +75,15 @@ async fn run() {
         }
     };
 
+    let primary_key = discord::parse_verifying_key(&config.discord_public_key)
+        .expect("DISCORD_PUBLIC_KEY must encode a valid Ed25519 point");
     let store = Store::open(&config.database_path).expect("failed to open database");
 
     let port = config.port;
     let state = AppState {
         store: Arc::new(store),
         config: Arc::new(config),
+        primary_key,
     };
 
     let app = Router::new()
@@ -98,6 +101,7 @@ async fn run() {
         // by the iframe. Both are public/capability-gated, so a permissive
         // (credential-less) CORS policy is fine.
         .layer(CorsLayer::permissive())
+        .layer(axum::extract::DefaultBodyLimit::max(256 * 1024))
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

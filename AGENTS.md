@@ -45,6 +45,14 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - **Activity API calls**: the Activity iframe uses bearer auth; cookie-only `/api/guilds/*`
   routes silently 401 inside it. Every Activity-reachable feature needs an `/api/activity/*`
   twin or a dual-credential route, and its FE call must go through `proxyFetch`.
+- **Activity memory is deliberately load-shed, not queued without limit.** The post/edit routes
+  allow 32 MiB only for multipart uploads; plain JSON is capped at 128 KiB. Multipart buffering
+  consumes one permit from `ACTIVITY_UPLOAD_CONCURRENCY` (default 2) and returns a retryable 503
+  when full. The room WebSocket sets both its frame and assembled-message decoder limits to the
+  256 KiB relay limit, and persisted snapshots go through one 250 ms coalescing writer: only the latest plaintext per room is kept,
+  at most 64 rooms may be pending, sealing runs off Tokio, and ready rooms commit in one SQLite
+  transaction. Do not move sealing/WAL writes back into each socket task or replace these bounds
+  with an unbounded wait queue.
 - **The Activity's destination server is the launching guild — fixed. Only the channel moves.**
   The collab room is keyed to the server the Activity launched in, and its `target` frame carries a
   channel id and nothing else, so the whole room posts into that one server. A guild launch shows a
@@ -178,6 +186,12 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   registry-only (no backend service). Plugin config iframes are forced dark theme.
 - Every interaction plugin must verify custom-app signatures through the dispatcher-forwarded
   key attestation; `DISPATCHER_FORWARD_SECRET` must match the dispatcher and every plugin.
+- **Plugin request and storage work is resource-bounded.** Every plugin router caps request
+  bodies at 256 KiB. Interaction services parse their primary Ed25519 key once at boot (custom
+  attested keys remain dynamic), bound idle HTTP pools, and configure SQLite with WAL,
+  `synchronous=NORMAL`, and a 5-second busy timeout. Stateful stores must release the connection
+  mutex before token hashing or JSON decoding. Giveaway draws use constant-memory reservoir
+  sampling and compare-and-swap commits; ticket numbering and anti-spam checks stay single-query.
 - Stateful plugin instance ids in Discord `custom_id` are public bindings, never edit authority.
   Protocol-v2 services return a separate 256-bit management token once, store only its SHA-256
   digest, and require it for updates; a legacy/cache-miss edit must create and rebind a new
@@ -260,8 +274,16 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   at build by `stampBuildMeta` (vite.config.ts) — don't hand-maintain them; the build
   throws if the patterns vanish. Marketing claims there must match the plans model
   (quota-raising only — never claim "no usage limit" or "no paywall").
-- Message library: "posted" is a server-only rolling history window (no local fallback);
-  drafts have hard per-plan caps.
+- **Message library is metadata-first.** "Posted" is a server-only rolling history window (no
+  local fallback); drafts have hard per-plan caps. Gallery open uses
+  `/library?metadata_only=true`, whose SQL excludes both sealed payload columns; visible cards
+  hydrate through the guild-scoped `/library/entries` endpoint in batches of at most 64 (24 cards
+  at a time in the UI), while exact body search loads remaining batches sequentially. The legacy
+  full-list response remains for deploy skew. Reopening an editing draft uses the indexed
+  `/library/origin/:message_id` lookup, never a full list. Keep decryption/JSON parsing on the
+  blocking pool, and reset/invalidate all decrypted rows on sign-out or a 401/403. Async draft
+  origin recovery must also retain the editor's whole-document generation; a template/import/clear
+  while the lookup is pending must never arm the replacement message with the old webhook secret.
 - Keep the default `webhook.incoming` OAuth path. Custom bots must not collect bot tokens;
   their OAuth create flow uses the popup/localStorage handshake because Discord can sever
   `window.opener`.
@@ -307,7 +329,11 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   must NOT send `temperature`/`top_p`/`top_k` (Claude Opus 4.7+ / Sonnet 5 / Fable 5 reject
   them with a 400), and provider default-model ids must be currently-served models (the old
   `claude-3-5-sonnet-latest` default 404'd — it retired 2025-10). Guarded by
-  `src/core/ai/aiStore.test.ts` + `extractReply.test.ts`.
+  `src/core/ai/aiStore.test.ts` + `extractReply.test.ts`. Streaming token bursts are committed to
+  Zustand at most once per display frame; do not restore one full transcript-array copy/render per
+  token. The accumulated raw reply still records every token for provider history. Provider
+  controllers are owned by a monotonically identified send: a cancelled send settling late must
+  never clear a newer send's controller, thinking state, or editor commit.
 - **Env config fails loudly, never silently.** `config.rs` trims every value (`normalize`), and a
   _present but unparseable_ value is a boot error rather than a fall back to the default —
   `parse_bool` accepts only `1/true/yes/on` + `0/false/no/off` and rejects anything else. This is
@@ -346,6 +372,25 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   repeated queries (per-connection statement cache). Size = `SQLITE_POOL_SIZE` env (default 3,
   floor 1); **set it to `1` to reproduce the old single-connection behaviour** on a
   memory-constrained host (each connection carries its own page + statement cache).
+- **Hot process caches are bounded by both cardinality and lifetime.** The fallback Discord JSON
+  cache lazily reclaims expiry, admits at most 10,000 keys / an estimated 32 MiB of retained JSON,
+  and gives Redis GET/SET two seconds before failing open. Entitlement and lazy-reconcile maps also
+  expire and cap guild keys; their cold/background work is single-flight or semaphore-bounded.
+  For horizontal proxy scaling, use Redis rather than raising process-local bounds.
+- **Scheduled delivery concurrency is per destination.** Due rows for different webhook ids run
+  concurrently up to the small SQLite-pool-derived cap, but rows for one webhook remain serial and
+  in due order. This avoids head-of-line blocking without racing Discord's per-webhook rate limit.
+  Missed interval ticks use `Skip`, so an upstream slowdown never triggers a catch-up burst.
+- **Browser upload hydration follows reachability.** Startup collects `session://` ids from the
+  live message, undo/redo, and named browser saves, reads only those IndexedDB blobs, and deletes
+  orphan keys with a key-only cursor (never materializing stale file bytes). Multi-file gallery
+  registration is one IDB transaction + one attachment-store notification; GC is debounced and
+  snapshot URL scans are WeakMap-cached under the stores' immutable-tree contract.
+- **Authentication defines an account-state lifetime.** Credential/decrypted stores register with
+  `core/auth/accountScopedState`; logout/session expiry clears and aborts library, webhook,
+  custom-bot, and emoji work before publishing anonymous state, and generation guards reject late
+  responses from the prior account. Cross-guild emoji fetches share a process-global four-request
+  permit pool and merge one batch at a time. Add any new account-scoped cache to this reset path.
 
 ## CI
 

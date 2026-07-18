@@ -47,17 +47,23 @@ pub fn verify_signature(
     timestamp: &str,
     body: &[u8],
 ) -> bool {
-    let pk: [u8; 32] = match hex::decode(public_key_hex)
-        .ok()
-        .and_then(|b| b.try_into().ok())
-    {
-        Some(arr) => arr,
-        None => return false,
+    let Some(verifying_key) = parse_verifying_key(public_key_hex) else {
+        return false;
     };
-    let verifying_key = match VerifyingKey::from_bytes(&pk) {
-        Ok(k) => k,
-        Err(_) => return false,
-    };
+    verify_signature_with_key(&verifying_key, signature_hex, timestamp, body)
+}
+
+pub fn parse_verifying_key(public_key_hex: &str) -> Option<VerifyingKey> {
+    let pk: [u8; 32] = hex::decode(public_key_hex).ok()?.try_into().ok()?;
+    VerifyingKey::from_bytes(&pk).ok()
+}
+
+pub fn verify_signature_with_key(
+    verifying_key: &VerifyingKey,
+    signature_hex: &str,
+    timestamp: &str,
+    body: &[u8],
+) -> bool {
     let sig: [u8; 64] = match hex::decode(signature_hex)
         .ok()
         .and_then(|b| b.try_into().ok())

@@ -21,6 +21,7 @@ pub struct AppState {
     pub store: Arc<Store>,
     pub http: reqwest::Client,
     pub config: Arc<Config>,
+    pub primary_key: ed25519_dalek::VerifyingKey,
 }
 
 pub async fn health() -> &'static str {
@@ -152,10 +153,15 @@ pub async fn interactions(
     let (Some(signature), Some(timestamp)) = (signature, timestamp) else {
         return (StatusCode::UNAUTHORIZED, "missing signature").into_response();
     };
-    let key_hex =
-        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref())
-            .unwrap_or(&state.config.discord_public_key);
-    if !discord::verify_signature(key_hex, signature, timestamp, &body) {
+    let attested =
+        discord::attested_key(&headers, state.config.dispatcher_forward_secret.as_deref());
+    let verified = match attested {
+        Some(key) if !key.eq_ignore_ascii_case(&state.config.discord_public_key) => {
+            discord::verify_signature(key, signature, timestamp, &body)
+        }
+        _ => discord::verify_signature_with_key(&state.primary_key, signature, timestamp, &body),
+    };
+    if !verified {
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
 

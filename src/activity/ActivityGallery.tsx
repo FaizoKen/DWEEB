@@ -33,8 +33,10 @@ import { createPortal } from "react-dom";
 import { useActivityStore } from "@/core/activity/activityStore";
 import { useMessageStore } from "@/core/state/messageStore";
 import {
+  libraryEntryHasDetails,
   libraryEntryMessage,
   libraryEntrySearchText,
+  pendingLibraryDetailIds,
   useLibraryStore,
 } from "@/core/library/libraryStore";
 import type { PermanentSlots } from "@/core/guild/api";
@@ -60,6 +62,7 @@ import {
   EAGER_THUMBNAILS,
   GalleryCard,
   GalleryChipsSkeleton,
+  GalleryDetailError,
   GalleryGridSkeleton,
   LoadMoreSentinel,
   messageSearchText,
@@ -95,6 +98,8 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
   const libPosted = useLibraryStore((s) => s.posted);
   const libDrafts = useLibraryStore((s) => s.drafts);
   const libLoaded = useLibraryStore((s) => s.loaded);
+  const libDetailError = useLibraryStore((s) => s.detailError);
+  const hydrateLibrary = useLibraryStore((s) => s.hydrate);
   const removeLibrary = useLibraryStore((s) => s.remove);
 
   // (Re)load the target server's shelf on open — posts from teammates or the
@@ -181,6 +186,7 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
   // when a keystroke re-filters (and re-renders) a large deck.
   const deferredQuery = useDeferredValue(query);
   const [filter, setFilter] = useState<Filter>(POSTED_FILTER);
+  const [visibleCount, setVisibleCount] = useState(CARD_PAGE_SIZE);
   const [pendingDelete, setPendingDelete] = useState<{
     id: string;
     guildId: string;
@@ -251,10 +257,11 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     const posted: CardData[] = [];
     const drafts: CardData[] = [];
     for (const entry of serverEntries) {
-      const message = libraryEntryMessage(entry);
-      if (!message) continue;
+      const hasDetails = libraryEntryHasDetails(entry);
+      const message = hasDetails ? libraryEntryMessage(entry) : null;
+      if (hasDetails && !message) continue;
       const isPosted = entry.label === "posted";
-      const interactive = interactiveComponents(message).length > 0;
+      const interactive = message ? interactiveComponents(message).length > 0 : false;
       const displayName =
         entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft");
       const holdsSlot = isPosted && !!entry.message_id && grantIds.has(entry.message_id);
@@ -300,7 +307,8 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
         emoji: isPosted ? "📤" : "🔖",
         name: displayName,
         description,
-        message,
+        message: message ?? undefined,
+        previewPending: !hasDetails,
         accent: isPosted ? ACCENT_GREEN : ACCENT_TEAL,
         savedAt: entry.updated_at * 1000,
         badge: isPosted ? "Posted" : "Server draft",
@@ -310,16 +318,25 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
           displayName,
           description,
           isPosted ? "Posted" : "Server draft",
-          libraryEntrySearchText(entry),
+          message ? libraryEntrySearchText(entry) : undefined,
         ),
         onPick: () => {
-          // loadLibraryEntry loads into the shared editor (collab broadcasts to
-          // the room), re-wires Update-in-place for a posted entry, and toasts.
-          if (loadEntry(entry)) {
-            onClose();
-          } else {
-            pushToast("This entry couldn't be read — it may predate a server key change.", "error");
-          }
+          void (async () => {
+            const full = hasDetails
+              ? entry
+              : await useLibraryStore.getState().hydrateOne(entry.guild_id, entry.id);
+            // loadLibraryEntry loads into the shared editor (collab broadcasts
+            // to the room), re-wires Update-in-place for a posted entry, and
+            // toasts.
+            if (full && loadEntry(full)) {
+              onClose();
+            } else {
+              pushToast(
+                "This entry couldn't be read — it may predate a server key change.",
+                "error",
+              );
+            }
+          })();
         },
         onDelete: holdsSlot
           ? undefined
@@ -458,6 +475,62 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     [postedCards.length, hasScheduled, draftCards.length],
   );
   const activeFilter = filters.includes(filter) ? filter : (filters[0] ?? TEMPLATE_FILTER);
+  const visibleScopeRef = useRef({ filter: activeFilter, query: deferredQuery });
+  const visibleScopeChanged =
+    visibleScopeRef.current.filter !== activeFilter ||
+    visibleScopeRef.current.query !== deferredQuery;
+  const effectiveVisibleCount = visibleScopeChanged ? CARD_PAGE_SIZE : visibleCount;
+
+  const activeLibraryLabel =
+    activeFilter === POSTED_FILTER
+      ? "posted"
+      : activeFilter === SERVER_DRAFTS_FILTER
+        ? "draft"
+        : null;
+  const activeLibraryEntries = useMemo(
+    () =>
+      activeLibraryLabel ? serverEntries.filter((entry) => entry.label === activeLibraryLabel) : [],
+    [serverEntries, activeLibraryLabel],
+  );
+  useEffect(() => {
+    if (!targetGuildId || !activeLibraryLabel || libDetailError) return;
+    const needsBodySearch = deferredQuery.trim().length > 0;
+    const ids = pendingLibraryDetailIds(
+      activeLibraryEntries,
+      needsBodySearch ? null : effectiveVisibleCount,
+    );
+    if (ids.length > 0) void hydrateLibrary(targetGuildId, ids);
+  }, [
+    targetGuildId,
+    activeLibraryLabel,
+    activeLibraryEntries,
+    deferredQuery,
+    effectiveVisibleCount,
+    hydrateLibrary,
+    libDetailError,
+  ]);
+  const librarySearchPending =
+    deferredQuery.trim().length > 0 &&
+    activeLibraryLabel !== null &&
+    !libDetailError &&
+    activeLibraryEntries.some((entry) => !libraryEntryHasDetails(entry));
+  const retryLibraryDetails = useCallback(() => {
+    if (!targetGuildId || !activeLibraryLabel) return;
+    const bodySearch = deferredQuery.trim().length > 0;
+    const ids = pendingLibraryDetailIds(
+      activeLibraryEntries,
+      bodySearch ? null : effectiveVisibleCount,
+    );
+    useLibraryStore.setState({ detailError: null });
+    if (ids.length > 0) void hydrateLibrary(targetGuildId, ids);
+  }, [
+    targetGuildId,
+    activeLibraryLabel,
+    activeLibraryEntries,
+    deferredQuery,
+    effectiveVisibleCount,
+    hydrateLibrary,
+  ]);
 
   // On a cold open the library hasn't answered yet, so the Posted/Server-drafts
   // chips don't exist *yet* — hold the requested filter until the load settles
@@ -505,11 +578,12 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
 
   // The grid mounts in pages — a new tab or search starts back at one page,
   // and the sentinel at the grid's tail reveals the next as the user nears it.
-  const [visibleCount, setVisibleCount] = useState(CARD_PAGE_SIZE);
   useEffect(() => {
+    visibleScopeRef.current = { filter: activeFilter, query: deferredQuery };
     setVisibleCount(CARD_PAGE_SIZE);
   }, [activeFilter, deferredQuery]);
-  const visibleCards = shown.length > visibleCount ? shown.slice(0, visibleCount) : shown;
+  const visibleCards =
+    shown.length > effectiveVisibleCount ? shown.slice(0, effectiveVisibleCount) : shown;
   const revealMore = useCallback(() => setVisibleCount((n) => n + CARD_PAGE_SIZE), []);
 
   const startBlank = () => {
@@ -703,7 +777,18 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
                   </p>
                 ) : null}
 
-                {shown.length > 0 ? (
+                {libDetailError && activeLibraryLabel ? (
+                  <GalleryDetailError
+                    bodySearch={deferredQuery.trim().length > 0}
+                    onRetry={retryLibraryDetails}
+                  />
+                ) : null}
+
+                {librarySearchPending ? (
+                  <GalleryGridSkeleton
+                    cards={Math.min(8, Math.max(3, activeLibraryEntries.length))}
+                  />
+                ) : shown.length > 0 ? (
                   <div className={styles.grid}>
                     {visibleCards.map((c, i) => (
                       <GalleryCard

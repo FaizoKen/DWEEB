@@ -1,22 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createLibraryEntryMock, deleteLibraryEntryMock, listLibraryMock, updateLibraryEntryMock } =
-  vi.hoisted(() => ({
-    createLibraryEntryMock: vi.fn(),
-    deleteLibraryEntryMock: vi.fn(),
-    listLibraryMock: vi.fn(),
-    updateLibraryEntryMock: vi.fn(),
-  }));
+const {
+  createLibraryEntryMock,
+  deleteLibraryEntryMock,
+  fetchLibraryEntriesMock,
+  listLibraryMock,
+  updateLibraryEntryMock,
+} = vi.hoisted(() => ({
+  createLibraryEntryMock: vi.fn(),
+  deleteLibraryEntryMock: vi.fn(),
+  fetchLibraryEntriesMock: vi.fn(),
+  listLibraryMock: vi.fn(),
+  updateLibraryEntryMock: vi.fn(),
+}));
 
 vi.mock("./api", () => ({
   createLibraryEntry: createLibraryEntryMock,
   deleteLibraryEntry: deleteLibraryEntryMock,
+  fetchLibraryEntries: fetchLibraryEntriesMock,
   isLibraryConfigured: () => true,
+  LIBRARY_DETAIL_BATCH_SIZE: 64,
   listLibrary: listLibraryMock,
   updateLibraryEntry: updateLibraryEntryMock,
 }));
 
-import { useLibraryStore } from "./libraryStore";
+import { libraryEntryHasDetails, pendingLibraryDetailIds, useLibraryStore } from "./libraryStore";
 import type { LibraryEntryResult, LibraryEntryView } from "./api";
 import { ComponentType, type WebhookMessage } from "@/core/schema/types";
 import { stripEditorFields } from "@/core/serialization/normalize";
@@ -51,6 +59,7 @@ function resetStore(guildId: string | null = GUILD_A) {
     loading: false,
     error: null,
     loaded: true,
+    detailError: null,
   });
 }
 
@@ -67,8 +76,151 @@ describe("libraryStore.saveDraft", () => {
     resetStore();
     createLibraryEntryMock.mockReset();
     deleteLibraryEntryMock.mockReset();
+    fetchLibraryEntriesMock.mockReset();
     listLibraryMock.mockReset();
     updateLibraryEntryMock.mockReset();
+  });
+
+  it("hydrates summary rows in one detail batch and keeps their shelf order", async () => {
+    const message = simpleTextMessage();
+    const full = draftEntry(GUILD_A, message);
+    const summary = { ...full };
+    delete summary.payload;
+    const second = { ...summary, id: "draft-2", title: "Second" };
+    resetStore();
+    useLibraryStore.setState({ entries: [summary, second] });
+    fetchLibraryEntriesMock.mockResolvedValue({ ok: true, items: [full] });
+
+    await useLibraryStore.getState().hydrate(GUILD_A, [full.id, full.id]);
+
+    expect(fetchLibraryEntriesMock).toHaveBeenCalledOnce();
+    expect(fetchLibraryEntriesMock).toHaveBeenCalledWith(GUILD_A, [full.id]);
+    const entries = useLibraryStore.getState().entries;
+    expect(entries.map((entry) => entry.id)).toEqual([full.id, second.id]);
+    expect(entries[0]).toEqual(full);
+    expect(libraryEntryHasDetails(entries[1]!)).toBe(false);
+  });
+
+  it("limits normal detail work to the visible page but hydrates all rows for body search", () => {
+    const full = draftEntry(GUILD_A, simpleTextMessage());
+    const summaries = Array.from({ length: 70 }, (_, index) => {
+      const entry = { ...full, id: `draft-${index}` };
+      delete entry.payload;
+      return entry;
+    });
+    // One already-hydrated card is omitted from both request plans.
+    summaries[3] = { ...summaries[3]!, payload: full.payload };
+
+    expect(pendingLibraryDetailIds(summaries, 24)).toHaveLength(23);
+    expect(pendingLibraryDetailIds(summaries, null)).toHaveLength(69);
+    expect(pendingLibraryDetailIds(summaries, 24)).not.toContain("draft-3");
+  });
+
+  it("shares an in-flight detail request between concurrent card loads", async () => {
+    const full = draftEntry(GUILD_A, simpleTextMessage());
+    const summary = { ...full };
+    delete summary.payload;
+    resetStore();
+    useLibraryStore.setState({ entries: [summary] });
+    const request = deferred<{ ok: true; items: LibraryEntryView[] }>();
+    fetchLibraryEntriesMock.mockReturnValue(request.promise);
+
+    const first = useLibraryStore.getState().hydrateOne(GUILD_A, full.id);
+    const second = useLibraryStore.getState().hydrateOne(GUILD_A, full.id);
+    request.resolve({ ok: true, items: [full] });
+
+    await expect(Promise.all([first, second])).resolves.toEqual([full, full]);
+    expect(fetchLibraryEntriesMock).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces a detail failure and clears it after a retry succeeds", async () => {
+    const full = draftEntry(GUILD_A, simpleTextMessage());
+    const summary = { ...full };
+    delete summary.payload;
+    resetStore();
+    useLibraryStore.setState({ entries: [summary] });
+    fetchLibraryEntriesMock.mockResolvedValueOnce({
+      ok: false,
+      error: "Detail service unavailable.",
+      status: 503,
+    });
+
+    await useLibraryStore.getState().hydrate(GUILD_A, [full.id]);
+    expect(useLibraryStore.getState().detailError).toBe("Detail service unavailable.");
+
+    fetchLibraryEntriesMock.mockResolvedValueOnce({ ok: true, items: [full] });
+    await useLibraryStore.getState().hydrate(GUILD_A, [full.id]);
+    expect(useLibraryStore.getState().detailError).toBeNull();
+    expect(useLibraryStore.getState().entries[0]).toEqual(full);
+  });
+
+  it("clears decrypted rows when detail hydration loses authorization", async () => {
+    const full = draftEntry(GUILD_A, simpleTextMessage());
+    const summary = { ...full, id: "draft-2" };
+    delete summary.payload;
+    resetStore();
+    useLibraryStore.setState({ entries: [full, summary] });
+    fetchLibraryEntriesMock.mockResolvedValueOnce({
+      ok: false,
+      error: "Sign in to continue.",
+      status: 401,
+    });
+
+    await useLibraryStore.getState().hydrate(GUILD_A, [summary.id]);
+
+    expect(useLibraryStore.getState()).toMatchObject({
+      guildId: GUILD_A,
+      entries: [],
+      posted: { used: 0, quota: null },
+      drafts: { used: 0, quota: null },
+      loading: false,
+      loaded: true,
+      error: null,
+      detailError: null,
+    });
+  });
+
+  it("does not let an old detail response repopulate state after account reset", async () => {
+    const full = draftEntry(GUILD_A, simpleTextMessage());
+    const summary = { ...full };
+    delete summary.payload;
+    resetStore();
+    useLibraryStore.setState({ entries: [summary] });
+    const request = deferred<{ ok: true; items: LibraryEntryView[] }>();
+    fetchLibraryEntriesMock.mockReturnValue(request.promise);
+
+    const oldLoad = useLibraryStore.getState().hydrate(GUILD_A, [full.id]);
+    useLibraryStore.getState().reset();
+    resetStore(GUILD_A);
+    request.resolve({ ok: true, items: [full] });
+    await oldLoad;
+
+    expect(useLibraryStore.getState().entries).toEqual([]);
+  });
+
+  it("clears decrypted same-guild rows when a refresh loses authorization", async () => {
+    const full = draftEntry(GUILD_A, simpleTextMessage());
+    resetStore();
+    useLibraryStore.setState({ entries: [full], detailError: "old detail error" });
+    listLibraryMock.mockResolvedValue({
+      ok: false,
+      error: "Sign in to continue.",
+      status: 401,
+    });
+
+    await useLibraryStore.getState().refresh(GUILD_A);
+
+    expect(listLibraryMock).toHaveBeenCalledWith(GUILD_A, { metadataOnly: true });
+    expect(useLibraryStore.getState()).toMatchObject({
+      guildId: GUILD_A,
+      entries: [],
+      posted: { used: 0, quota: null },
+      drafts: { used: 0, quota: null },
+      loading: false,
+      loaded: true,
+      error: null,
+      detailError: null,
+    });
   });
 
   it("sends a wire-format draft and merges it into the loaded server shelf", async () => {

@@ -347,6 +347,14 @@ async fn run() {
         None
     };
     if let Some(store) = &activity_drafts {
+        // One coalescing writer seals only the newest snapshot per room and
+        // commits every room ready in the window as a single transaction. This
+        // keeps collaboration fan-in from becoming unbounded blocking tasks or
+        // one WAL commit per connected editor.
+        let writer = Arc::clone(store);
+        let writer_key = key.clone();
+        tokio::spawn(writer.run_writer(writer_key));
+
         let store = Arc::clone(store);
         let retention_secs = config.activity_draft_retention_days.max(1) * 86_400;
         tokio::spawn(async move {
@@ -379,6 +387,9 @@ async fn run() {
         activity_rooms: Arc::new(crate::activity::ActivityRooms::new()),
         activity_tickets: Arc::new(crate::activity::ActivityTickets::new()),
         activity_drafts,
+        activity_uploads: Arc::new(tokio::sync::Semaphore::new(
+            config.activity_upload_concurrency,
+        )),
         library,
         entitlements,
         stripe,
@@ -488,6 +499,16 @@ async fn run() {
             get(library::library_list)
                 .post(library::library_create)
                 .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
+        // Metadata-first galleries hydrate only the visible card page. Keep the
+        // id envelope tight; response payloads retain the normal message limit.
+        .route(
+            "/api/guilds/:guild_id/library/entries",
+            post(library::library_entries).layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
+        .route(
+            "/api/guilds/:guild_id/library/origin/:message_id",
+            get(library::library_origin),
         )
         .route(
             "/api/guilds/:guild_id/library/:id",
