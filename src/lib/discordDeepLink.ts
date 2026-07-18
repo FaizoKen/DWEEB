@@ -41,6 +41,43 @@ function isMobileOs(): boolean {
   return /Android|iPhone|iPad|iPod/i.test(ua) || iPadOs;
 }
 
+/** Desktop WebKit (Safari — mobile is filtered out before this matters). It is
+ *  the one engine where the fallback deadline must stay under a second: WebKit
+ *  forwards a click's user activation through a `setTimeout` only when the
+ *  delay is ≤ 1s, so a later `window.open` gets popup-blocked and `openWeb`
+ *  would navigate this tab away instead. Chromium and Firefox implement the
+ *  spec's 5-second transient activation, which allows a realistic deadline. */
+function isDesktopWebKit(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /AppleWebKit/i.test(ua) && !/Chrom(?:e|ium)|Edg|OPR/i.test(ua);
+}
+
+/**
+ * How long the app launch gets to take focus before we assume no app is
+ * installed and open the web link instead.
+ *
+ * This must comfortably exceed a *real* handoff, or the fallback opens the web
+ * link even though the app is coming — the "opens both" bug: with the browser
+ * set to always allow discord:// links, launching the (possibly cold-starting)
+ * desktop app on Windows regularly takes over a second before its window
+ * steals focus, so an 800 ms deadline fired while the page was still focused,
+ * opened the web tab, and then the app arrived anyway. 2.5 s covers slow
+ * handoffs while staying well inside the 5 s transient-activation budget that
+ * keeps the fallback `window.open` popup-legal on Chromium/Firefox. WebKit
+ * keeps the sub-second deadline its popup gate demands (see isDesktopWebKit);
+ * its no-app case shows a modal error dialog that blurs the page and cancels
+ * the fallback anyway, so the short deadline rarely bites there.
+ */
+const APP_HANDOFF_GRACE_MS = 2500;
+const WEBKIT_APP_HANDOFF_GRACE_MS = 800;
+
+/** Cancels the pending desktop fallback race, if any. Module-level so a repeat
+ *  click supersedes the pending race instead of stacking a second deadline —
+ *  stacked deadlines meant an impatient double-click could open two web tabs
+ *  on top of the app. */
+let cancelPendingFallback: (() => void) | null = null;
+
 /**
  * Open a URL in a new tab, severing the opener for safety. If the popup is
  * blocked (can happen on the async desktop-fallback path in stricter browsers),
@@ -113,7 +150,10 @@ export function openDiscordLink(webUrl: string): void {
     return;
   }
 
-  // Desktop: race the app launch against a web fallback.
+  // Desktop: race the app launch against a web fallback. Only one race may be
+  // pending — a repeat click supersedes the old one rather than stacking it.
+  cancelPendingFallback?.();
+
   let handedOff = false;
   const onBlur = () => {
     handedOff = true;
@@ -124,10 +164,25 @@ export function openDiscordLink(webUrl: string): void {
   window.addEventListener("blur", onBlur, { once: true });
   document.addEventListener("visibilitychange", onVisibility);
 
-  const cleanup = () => {
+  // If the app grabs focus at any point the page blurs/hides — leave it be.
+  // Only a page that stayed focused through the whole grace period means no
+  // handler took the launch; see APP_HANDOFF_GRACE_MS for why the period must
+  // be generous everywhere the popup gate allows it.
+  const deadline = window.setTimeout(
+    () => {
+      cleanup();
+      if (!handedOff && document.hasFocus()) openWeb(webUrl);
+    },
+    isDesktopWebKit() ? WEBKIT_APP_HANDOFF_GRACE_MS : APP_HANDOFF_GRACE_MS,
+  );
+
+  // Hoisted: referenced by the deadline callback above and the catch below.
+  function cleanup() {
+    window.clearTimeout(deadline);
     window.removeEventListener("blur", onBlur);
     document.removeEventListener("visibilitychange", onVisibility);
-  };
+    cancelPendingFallback = null;
+  }
 
   // Launch the custom scheme. A registered handler opens the app *without*
   // unloading the page; an unregistered one is ignored (Chromium) or prompts
@@ -142,12 +197,5 @@ export function openDiscordLink(webUrl: string): void {
     return;
   }
 
-  // If the app grabbed focus the page is now blurred/hidden — leave it be.
-  // Otherwise no handler took it, so open the web link. The delay sits well
-  // inside the browser's transient-activation window, so the fallback isn't
-  // treated as an unsolicited popup.
-  window.setTimeout(() => {
-    cleanup();
-    if (!handedOff && document.hasFocus()) openWeb(webUrl);
-  }, 800);
+  cancelPendingFallback = cleanup;
 }

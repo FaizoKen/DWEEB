@@ -45,6 +45,19 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - **Activity API calls**: the Activity iframe uses bearer auth; cookie-only `/api/guilds/*`
   routes silently 401 inside it. Every Activity-reachable feature needs an `/api/activity/*`
   twin or a dual-credential route, and its FE call must go through `proxyFetch`.
+- **"Open in Discord" deep links race the app against a web fallback — the grace period is
+  load-bearing** (`lib/discordDeepLink.ts`, fixed 2026-07-19). Desktop launches `discord://`
+  and opens the web link only if the page stays focused through the whole grace window; a blur
+  or hidden at any point means the app took over. The original 800 ms deadline shipped the
+  "opens both" bug: on Windows with the browser set to always-allow, a (cold-starting) app
+  regularly needs >800 ms to steal focus, so the web tab opened *and* the app arrived. The
+  window is now 2500 ms on Chromium/Firefox (their transient activation lasts 5 s, so the
+  delayed `window.open` stays popup-legal) but must stay ≤1000 ms on WebKit — Safari forwards
+  a click's user activation through `setTimeout` only for delays ≤1 s, and a blocked popup
+  degrades to navigating the builder tab away. Repeat clicks supersede the pending race
+  (module-level cancel) rather than stacking fallback tabs. Don't shorten the Chromium window
+  back for snappiness and don't lengthen the WebKit one; guarded by
+  `src/lib/discordDeepLink.test.ts`.
 - **Activity memory is deliberately load-shed, not queued without limit.** The post/edit routes
   allow 32 MiB only for multipart uploads; plain JSON is capped at 128 KiB. Multipart buffering
   consumes one permit from `ACTIVITY_UPLOAD_CONCURRENCY` (default 2) and returns a retryable 503
