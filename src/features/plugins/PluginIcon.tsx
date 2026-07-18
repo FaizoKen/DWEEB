@@ -114,6 +114,18 @@ const BUILTIN_ICONS: Record<string, { color: string; bg: string; paths: ReactNod
       </>
     ),
   },
+  // Rising result bars — the live tally.
+  poll: {
+    color: "#818cf8",
+    bg: "rgba(129, 140, 248, 0.14)",
+    paths: (
+      <>
+        <path d="M6 20v-4" />
+        <path d="M12 20V10" />
+        <path d="M18 20V4" />
+      </>
+    ),
+  },
 };
 
 /** Deterministic hue from a plugin id, for the monogram fallback tint. */
