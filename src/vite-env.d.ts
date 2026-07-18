@@ -36,6 +36,8 @@ interface ImportMetaEnv {
   readonly VITE_DEV_QUICK_REPLIES_ORIGIN?: string;
   /** Dev only: local origin for the picker plugin's config UI (default `http://localhost:8097`). */
   readonly VITE_DEV_PICKER_ORIGIN?: string;
+  /** Dev only: local origin for the poll plugin's config UI (default `http://localhost:8098`). */
+  readonly VITE_DEV_POLL_ORIGIN?: string;
 }
 
 interface ImportMeta {
