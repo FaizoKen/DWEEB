@@ -884,11 +884,13 @@ pub async fn activity_permanent_remove(
 ///
 /// The bearer twin of the web app's cookie-only `/api/guilds/:id/plan`; gated on
 /// plain MEMBERSHIP like the other Activity reads (any member may see which plan
-/// their server is on — it's display-only). Returns the exact same
-/// `{ tier, limits, billing }` shape the web FE already parses. Unlike the web
-/// handler it deliberately skips the Stripe legacy-claim/reconcile pass: that
-/// binds the caller's floating subscription to the server, which is an owner
-/// action, and this endpoint admits any member.
+/// their server is on — it's display-only). Returns the shared `plan_json` body
+/// — the exact `{ tier, limits, billing }` the web handler serves — so the two
+/// surfaces can never drift (a hand-built copy here once omitted the library
+/// limits and the Activity showed "Unlimited" where the web showed the cap).
+/// Unlike the web handler it deliberately skips the Stripe legacy-claim/
+/// reconcile pass: that binds the caller's floating subscription to the server,
+/// which is an owner action, and this endpoint admits any member.
 pub async fn activity_plan(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
@@ -905,18 +907,7 @@ pub async fn activity_plan(
     }
     authorize_activity_member(&st, session, &guild).await?;
     let tier = st.entitlements.tier_for(&guild).await;
-    let limits = st.entitlements.limits_for(tier);
-    Ok(Json(json!({
-        "tier": tier.as_str(),
-        "limits": {
-            "schedules": crate::entitlement::lim(limits.schedules),
-            "permanent": crate::entitlement::lim(limits.permanent),
-            "custom_bots": crate::entitlement::lim(limits.custom_bots),
-            "coeditors": crate::entitlement::lim(limits.coeditors),
-        },
-        "billing": st.entitlements.enabled(),
-    }))
-    .into_response())
+    Ok(Json(st.entitlements.plan_json(tier)).into_response())
 }
 
 // ── Custom-bot identities (post as the server's own bot) ────────────────────

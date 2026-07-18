@@ -357,7 +357,7 @@ pub async fn guild_plan(
 }
 
 /// Present a limit for the FE: a positive number, or `null` for unlimited (`0`).
-pub(crate) fn lim(n: i64) -> Value {
+fn lim(n: i64) -> Value {
     if n <= 0 {
         Value::Null
     } else {
@@ -408,6 +408,70 @@ mod tests {
         assert_eq!(Tier::Free.as_str(), "free");
         assert_eq!(Tier::Plus.as_str(), "plus");
         assert_eq!(Tier::Pro.as_str(), "pro");
+    }
+
+    #[test]
+    fn plan_json_carries_every_limit_the_fe_renders() {
+        // Both plan endpoints (web `/api/guilds/:id/plan` and the Activity's
+        // `/api/activity/plan`) serve this one body. The Activity handler once
+        // hand-built its own copy without the library keys, so its plan card
+        // showed "Unlimited" saved messages / posted history on Free while the
+        // web showed the caps. Every key PlanBadge renders must be present.
+        let limits = TierLimits {
+            schedules: 3,
+            permanent: 5,
+            custom_bots: 1,
+            coeditors: 2,
+            library: 10,
+            library_posted: 10,
+        };
+        let unlimited = TierLimits {
+            schedules: 0,
+            permanent: 0,
+            custom_bots: 0,
+            coeditors: 0,
+            library: 0,
+            library_posted: 0,
+        };
+        let ent = Entitlement {
+            stripe: None,
+            cache_secs: 60,
+            free: limits,
+            plus: limits,
+            pro: unlimited,
+            cache: Mutex::new(EntitlementCache::new(1, 60, 0)),
+            flight: crate::singleflight::SingleFlight::new(),
+            miss_sem: tokio::sync::Semaphore::new(1),
+        };
+
+        let body = ent.plan_json(Tier::Free);
+        assert_eq!(body["tier"], "free");
+        for (key, cap) in [
+            ("schedules", 3),
+            ("permanent", 5),
+            ("custom_bots", 1),
+            ("coeditors", 2),
+            ("library", 10),
+            ("library_posted", 10),
+        ] {
+            assert_eq!(body["limits"][key], json!(cap), "limits.{key}");
+        }
+
+        // Unlimited (0) renders as JSON null — the FE's "Unlimited" case. The
+        // key must still be present, not absent.
+        let body = ent.plan_json(Tier::Pro);
+        let pro_limits = body["limits"].as_object().expect("limits object");
+        for key in [
+            "schedules",
+            "permanent",
+            "custom_bots",
+            "coeditors",
+            "library",
+            "library_posted",
+        ] {
+            assert!(pro_limits.contains_key(key), "limits.{key} missing");
+            assert_eq!(pro_limits[key], Value::Null, "limits.{key}");
+        }
     }
 
     #[test]
