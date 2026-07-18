@@ -33,8 +33,8 @@ import {
   InfoIcon,
   InstallIcon,
   MoreHorizontalIcon,
-  PencilIcon,
   RedoIcon,
+  RefreshIcon,
   SaveIcon,
   SendIcon,
   ShareIcon,
@@ -623,7 +623,7 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
                 id="builder-send-action"
                 variant="primary"
                 size="sm"
-                leadingIcon={<PencilIcon />}
+                leadingIcon={<RefreshIcon />}
                 onClick={onUpdate}
                 aria-label="Update"
                 title="Update the message you last posted or restored"
