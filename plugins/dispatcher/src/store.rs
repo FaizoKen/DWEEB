@@ -1,7 +1,9 @@
 //! SQLite-backed registry of "permanent" messages — messages whose components
-//! are exempt from the COMPONENT_TTL_DAYS expiry — and of "custom apps":
-//! guild-registered Discord applications whose interactions this dispatcher
-//! also serves (verified with each app's own public key).
+//! are exempt from the COMPONENT_TTL_DAYS expiry — of per-message component
+//! activity (the last time each message's components were used, which slides
+//! that expiry window forward), and of "custom apps": guild-registered Discord
+//! applications whose interactions this dispatcher also serves (verified with
+//! each app's own public key).
 //!
 //! Both are managed from the DWEEB dashboard: the proxy (which holds the
 //! Discord login and checks the user manages the guild) calls this service's
@@ -144,6 +146,10 @@ impl Store {
                  cap        INTEGER NOT NULL,
                  updated_at INTEGER NOT NULL,
                  PRIMARY KEY (guild_id, feature)
+             );
+             CREATE TABLE IF NOT EXISTS component_activity (
+                 message_id TEXT PRIMARY KEY,
+                 last_seen  INTEGER NOT NULL
              );",
         )?;
         // Migration for databases created before the client-secret column.
@@ -289,6 +295,63 @@ impl Store {
             (message_id, guild_id),
         )?;
         Ok(n > 0)
+    }
+
+    // ── Component activity (sliding TTL window) ─────────────────────────────
+    //
+    // The TTL gate in main.rs expires a component only when BOTH the message's
+    // send time and its last recorded use are past the window — so a message
+    // people keep using stays clickable. These rows are that "last use" record:
+    // written write-throttled from the interaction path (see ActivityMarks),
+    // read only for clicks already expired-by-snowflake, and pruned once older
+    // than the TTL (a row that stale can no longer keep anything alive — the
+    // send time behind it is necessarily just as stale).
+
+    /// Record that a message's components were just used. Monotonic (a late
+    /// or racing older write never moves the clock backward) and best-effort:
+    /// a failed write only means the window slides a little less far, which
+    /// is the same fail-toward-expiry bias as [`Self::is_permanent`].
+    pub fn touch_activity(&self, message_id: &str, now_ms: i64) {
+        let conn = self.conn.lock().unwrap();
+        if let Err(err) = conn.execute(
+            "INSERT INTO component_activity (message_id, last_seen) VALUES (?1, ?2)
+             ON CONFLICT(message_id) DO UPDATE SET last_seen = excluded.last_seen
+                 WHERE excluded.last_seen > component_activity.last_seen",
+            (message_id, now_ms),
+        ) {
+            tracing::warn!(%err, "couldn't record component activity");
+        }
+    }
+
+    /// When a message's components were last used, in unix millis. `None` when
+    /// no use is on record — or on a read error, so the TTL gate falls back to
+    /// the fixed send-date behaviour (fail toward expiry, never toward
+    /// unlimited validity).
+    pub fn last_activity_ms(&self, message_id: &str) -> Option<u64> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT last_seen FROM component_activity WHERE message_id = ?1",
+            [message_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+        .unwrap_or_else(|err| {
+            tracing::error!(%err, "activity lookup failed");
+            None
+        })
+        .map(|ms| ms.max(0) as u64)
+    }
+
+    /// Drop activity rows last touched before `cutoff_ms`. The table's scan is
+    /// unindexed on purpose: pruning keeps it at "messages used within one
+    /// TTL", small enough that an index would cost more per write than the
+    /// periodic scan does. Returns how many rows went.
+    pub fn prune_activity(&self, cutoff_ms: i64) -> rusqlite::Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM component_activity WHERE last_seen < ?1",
+            [cutoff_ms],
+        )
     }
 
     // ── Per-guild plan caps ──────────────────────────────────────────────────
@@ -761,6 +824,24 @@ mod tests {
             s.add("g1", "c", "200", "u", 1).unwrap(),
             Add::Added
         ));
+    }
+
+    #[test]
+    fn component_activity_tracks_last_use_and_prunes() {
+        let s = store();
+        assert_eq!(s.last_activity_ms("m1"), None);
+        s.touch_activity("m1", 1_000);
+        assert_eq!(s.last_activity_ms("m1"), Some(1_000));
+        // Monotonic: a late/racing older write never moves the clock backward.
+        s.touch_activity("m1", 500);
+        assert_eq!(s.last_activity_ms("m1"), Some(1_000));
+        s.touch_activity("m1", 2_000);
+        assert_eq!(s.last_activity_ms("m1"), Some(2_000));
+        // Prune drops only rows last touched before the cutoff.
+        s.touch_activity("m2", 9_000);
+        assert_eq!(s.prune_activity(5_000).unwrap(), 1);
+        assert_eq!(s.last_activity_ms("m1"), None);
+        assert_eq!(s.last_activity_ms("m2"), Some(9_000));
     }
 
     #[test]

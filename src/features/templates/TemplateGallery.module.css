@@ -730,7 +730,7 @@
 }
 
 /* Derived status pills on server-library cards ("Never expires", "Buttons
- * expired") — same chip geometry as the badge, tinted by tone. */
+ * may be expired") — same chip geometry as the badge, tinted by tone. */
 .cardTag {
   padding: 2px 8px;
   border-radius: 999px;

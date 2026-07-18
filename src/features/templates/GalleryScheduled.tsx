@@ -19,8 +19,10 @@ import styles from "@/features/guild/ScheduledList.module.css";
 
 /**
  * A posted message's interactive components are dead once the deployment's TTL
- * has elapsed since it fired — unless it claimed a never-expire slot. We can
- * only say so when the TTL is known.
+ * has elapsed since it fired *without any use* — unless it claimed a
+ * never-expire slot. The dispatcher's expiry window slides with use, which
+ * this client can't see, so this is the no-use lower bound (hence the badge's
+ * hedged tooltip). We can only say so when the TTL is known.
  */
 function isExpired(s: ScheduleView, ttlDays: number | null): boolean {
   if (ttlDays == null || s.status !== "done" || s.make_permanent) return false;
@@ -159,7 +161,7 @@ function HistoryRow({
         {expired ? (
           <span
             className={cn(styles.badge, styles.badgeExpired)}
-            title="This post's buttons & selects have stopped working"
+            title="Posted longer than the expiry window ago — its buttons & selects have stopped working unless the message stayed in use"
           >
             expired
           </span>

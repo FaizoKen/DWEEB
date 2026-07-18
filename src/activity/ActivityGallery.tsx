@@ -154,8 +154,8 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
     [targetGuildId],
   );
 
-  // Give a slot back. The message returns to the expiry clock, counted from
-  // its send date — an old message's buttons may expire right away.
+  // Give a slot back. The message returns to the sliding expiry clock, counted
+  // from its last use — a long-idle message's buttons may expire right away.
   const freeNeverExpire = useCallback(
     async (messageId: string) => {
       if (!targetGuildId) return;
@@ -280,7 +280,7 @@ export function ActivityGallery({ onClose }: { onClose: () => void }) {
             busy: slotBusy,
             title: paused
               ? "Never expire is paused — the server holds more never-expire messages than its plan allows. Tap to free the slot."
-              : "This message never expires and stays in this history. Tap to free the slot — it goes back on the expiry clock, counted from its send date.",
+              : "This message never expires and stays in this history. Tap to free the slot — it goes back on the expiry clock, counted from its last use.",
             run: () => setPendingFreeSlot({ messageId, name: displayName, paused }),
           };
         } else if (interactive && entry.channel_id) {

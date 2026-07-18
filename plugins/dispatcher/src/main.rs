@@ -21,14 +21,18 @@
 //!
 //! Adding a plugin is one entry in the ROUTES env var; nothing here changes.
 //!
-//! Components also expire by default: a click on a message older than
-//! COMPONENT_TTL_DAYS (the message id snowflake carries its send time) is
-//! answered here with an UPDATE_MESSAGE that disables the clicked component,
-//! and is never forwarded. A disabled component fires no further interactions,
-//! so one expired click is the last traffic that message ever generates.
-//! A click whose custom_id matches no route is answered the same way: the
-//! component is disabled, so a message left behind by an uninstalled plugin
-//! stops generating traffic after its first click.
+//! Components also expire by default — on a *sliding* window: a click is dead
+//! only when the message's send time (the id snowflake carries it) AND its
+//! last recorded use are both more than COMPONENT_TTL_DAYS ago. Every served
+//! interaction restarts the window (persisted per message, write-throttled —
+//! see ActivityMarks), so a message people keep using stays clickable
+//! indefinitely, while an untouched one still dies COMPONENT_TTL_DAYS after
+//! sending, exactly the old fixed-date behaviour. An expired click is answered
+//! here with an UPDATE_MESSAGE that disables the clicked component, and is
+//! never forwarded; a disabled component fires no further interactions, so one
+//! expired click is the last traffic that message ever generates. (A click
+//! whose custom_id matches no route instead gets an ephemeral what's-wrong
+//! note — disabling it would hide the broken wiring from whoever can fix it.)
 //!
 //! Each guild gets a cap of exemptions, managed two ways: from the DWEEB
 //! dashboard — the proxy authenticates the user (Discord login plus Manage
@@ -61,7 +65,8 @@
 //!   ROUTES              JSON map of custom_id prefix -> upstream base URL,
 //!                       e.g. {"modalform:":"http://modal-form:8090"}, required
 //!   COMPONENT_TTL_DAYS  days a component stays clickable after its message
-//!                       was sent, default 7; 0 = never expires
+//!                       was sent or last used (any served interaction
+//!                       restarts the window), default 7; 0 = never expires
 //!   PERMANENT_SLOTS_PER_GUILD
 //!                       messages per guild exempt from the TTL, default 2;
 //!                       0 stops new grants (existing ones stay honored)
@@ -127,6 +132,55 @@ fn is_snowflake(s: &str) -> bool {
     (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// Most messages the in-memory bump throttle tracks at once. Enough for every
+/// message plausibly clicked inside one throttle window; overflowing it only
+/// costs redundant (idempotent) activity upserts, never correctness.
+const ACTIVITY_MARKS_CAP: usize = 8192;
+
+/// How often one message's activity bump is actually persisted: an eighth of
+/// the TTL, capped at six hours. Tight enough that the sliding window is
+/// accurate to a few hours on any sane TTL, loose enough that a busy panel
+/// costs a handful of writes per day instead of one per click.
+fn activity_throttle_ms(ttl_ms: u64) -> u64 {
+    (ttl_ms / 8).clamp(1, 6 * 3_600_000)
+}
+
+/// In-memory write throttle for the activity bumps that slide the TTL window:
+/// remembers when each message's use was last persisted so the interaction
+/// hot path stays (mostly) database-free — the invariant the fixed-date gate
+/// always had. Purely an optimization: losing an entry (eviction, restart)
+/// just means one extra idempotent upsert. Bounded by cardinality
+/// ([`ACTIVITY_MARKS_CAP`]) and lifetime (stale entries are reclaimed first).
+struct ActivityMarks(std::sync::Mutex<HashMap<String, u64>>);
+
+impl ActivityMarks {
+    fn new() -> Self {
+        Self(std::sync::Mutex::new(HashMap::new()))
+    }
+
+    /// True when the caller should persist this use — the first sighting of
+    /// the message within the current throttle window. Records the sighting
+    /// whenever it returns true.
+    fn should_persist(&self, message_id: &str, now_ms: u64, throttle_ms: u64) -> bool {
+        let mut marks = self.0.lock().unwrap();
+        if let Some(last) = marks.get(message_id) {
+            if now_ms.saturating_sub(*last) < throttle_ms {
+                return false;
+            }
+        } else if marks.len() >= ACTIVITY_MARKS_CAP {
+            // Lifetime bound first: entries past the throttle window have done
+            // their job. If everything is somehow still fresh, start over —
+            // the cost is a redundant upsert per message, not correctness.
+            marks.retain(|_, last| now_ms.saturating_sub(*last) < throttle_ms);
+            if marks.len() >= ACTIVITY_MARKS_CAP {
+                marks.clear();
+            }
+        }
+        marks.insert(message_id.to_string(), now_ms);
+        true
+    }
+}
+
 struct App {
     /// The main app's verifying key, decoded once at boot — the hot path
     /// never re-parses hex.
@@ -155,9 +209,14 @@ struct App {
     forward_secret: Option<String>,
     /// (custom_id prefix, upstream base URL) — longest prefix wins.
     routes: Vec<(String, String)>,
-    /// How long a component stays clickable after its message was sent.
-    /// `None` = never expires (COMPONENT_TTL_DAYS=0).
+    /// How long a component stays clickable after its message was sent or
+    /// last used — the sliding TTL window. `None` = never expires
+    /// (COMPONENT_TTL_DAYS=0).
     component_ttl_ms: Option<u64>,
+    /// Write throttle for the per-message activity bumps that slide the TTL
+    /// window ([`ActivityMarks`]) — keeps the interaction hot path at one
+    /// SQLite write per message per throttle window, not one per click.
+    activity_marks: ActivityMarks,
     /// Default TTL-exempt messages a guild may hold at once — the
     /// `PERMANENT_SLOTS_PER_GUILD` env. The proxy overrides it per request with
     /// the guild's plan cap (`?cap=N`); the Discord-direct Message Info toggle,
@@ -339,6 +398,7 @@ async fn run() {
         forward_secret,
         routes,
         component_ttl_ms,
+        activity_marks: ActivityMarks::new(),
         permanent_slots,
         store,
         internal_token,
@@ -355,6 +415,34 @@ async fn run() {
             .build()
             .expect("reqwest client"),
     });
+
+    // Reclaim activity rows the sliding TTL can no longer use: one pass at
+    // boot, then periodically. A row older than the TTL keeps nothing alive
+    // (the send time behind it is at least as old), so pruning is invisible to
+    // the gate — it only keeps the table at "messages used within one TTL".
+    if let Some(ttl_ms) = component_ttl_ms {
+        let app = app.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(6 * 3600));
+            loop {
+                tick.tick().await;
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                match app
+                    .store
+                    .prune_activity(now_ms.saturating_sub(ttl_ms) as i64)
+                {
+                    Ok(pruned) if pruned > 0 => {
+                        tracing::info!(pruned, "pruned stale component-activity rows")
+                    }
+                    Ok(_) => {}
+                    Err(err) => tracing::warn!(%err, "component-activity prune failed"),
+                }
+            }
+        });
+    }
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -622,26 +710,43 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
 
     // Components expire COMPONENT_TTL_DAYS after their message was sent (the
     // message id snowflake carries the send time — no registry of instances
-    // needed), unless an admin spent one of the guild's permanent slots on
-    // the message. An expired click is answered by disabling the component on
-    // the message itself, so it never reaches a plugin and never fires again.
-    // Modal submits are exempt: opening the modal already passed this gate.
-    // Only already-expired clicks pay the store lookup; fresh traffic never
-    // touches the database.
+    // needed) — a *sliding* window: any recorded use inside it keeps the
+    // message alive ([`expired_by_ttl`]), and an admin can exempt it outright
+    // with one of the guild's permanent slots. An expired click is answered by
+    // disabling the component on the message itself, so it never reaches a
+    // plugin and never fires again. Modal submits are exempt: opening the
+    // modal already passed this gate. Only already-expired-by-snowflake clicks
+    // pay the store lookups; fresh traffic never reads the database.
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
     if interaction.get("type").and_then(Value::as_u64) == Some(TYPE_MESSAGE_COMPONENT) {
         if let (Some(ttl_ms), Some(sent_ms)) = (app.component_ttl_ms, message_sent_ms(&interaction))
         {
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
             let message_id = interaction
                 .pointer("/message/id")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            if now_ms.saturating_sub(sent_ms) > ttl_ms && !app.store.is_permanent(message_id) {
+            if expired_by_ttl(&app.store, message_id, sent_ms, now_ms, ttl_ms) {
                 tracing::info!(custom_id, "component past TTL, disabling");
                 return disable_clicked(&interaction, custom_id, "This component has expired.");
+            }
+        }
+    }
+
+    // Everything served past the gate counts as "use" and restarts the
+    // message's sliding TTL window — components and modal submits alike (a
+    // submit carries the message it was opened from). Throttled in memory so
+    // repeat clicks stay database-free, and best-effort: a lost bump only
+    // means slightly earlier expiry.
+    if let (Some(ttl_ms), Some(_)) = (app.component_ttl_ms, message_sent_ms(&interaction)) {
+        if let Some(message_id) = interaction.pointer("/message/id").and_then(Value::as_str) {
+            if app
+                .activity_marks
+                .should_persist(message_id, now_ms, activity_throttle_ms(ttl_ms))
+            {
+                app.store.touch_activity(message_id, now_ms as i64);
             }
         }
     }
@@ -717,6 +822,31 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
 fn message_sent_ms(interaction: &Value) -> Option<u64> {
     let id: u64 = interaction.pointer("/message/id")?.as_str()?.parse().ok()?;
     Some((id >> 22) + DISCORD_EPOCH_MS)
+}
+
+/// Is a component past its expiry? The window is *sliding*: expired only when
+/// the send time AND the last recorded use are both more than `ttl_ms` ago,
+/// and no permanent slot exempts the message. The database is consulted only
+/// once the snowflake alone says "expired" — fresh traffic stays read-free —
+/// and a missing or unreadable activity row falls back to the fixed send-date
+/// behaviour (fail toward expiry, never toward unlimited validity).
+fn expired_by_ttl(
+    store: &store::Store,
+    message_id: &str,
+    sent_ms: u64,
+    now_ms: u64,
+    ttl_ms: u64,
+) -> bool {
+    if now_ms.saturating_sub(sent_ms) <= ttl_ms {
+        return false;
+    }
+    if store
+        .last_activity_ms(message_id)
+        .is_some_and(|seen| now_ms.saturating_sub(seen) <= ttl_ms)
+    {
+        return false;
+    }
+    !store.is_permanent(message_id)
 }
 
 /// Answer a dead click (expired or unrouted) by editing the message to disable
@@ -1442,4 +1572,55 @@ fn verify_signature(key: &VerifyingKey, signature_hex: &str, timestamp: &str, bo
     message.extend_from_slice(timestamp.as_bytes());
     message.extend_from_slice(body);
     key.verify(&message, &signature).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ttl_gate_slides_with_recorded_use() {
+        let store = store::Store::open(":memory:").unwrap();
+        let ttl = 7 * 86_400_000u64;
+        let sent = 1_000_000_000_000u64;
+        // Fresh by snowflake — alive (this path never reads the database).
+        assert!(!expired_by_ttl(&store, "1", sent, sent + ttl, ttl));
+        // Past the snowflake TTL with no recorded use — expired, exactly the
+        // old fixed-date behaviour (so pre-feature messages don't change).
+        assert!(expired_by_ttl(&store, "1", sent, sent + ttl + 1, ttl));
+        // A recorded use slides the window: alive until a full TTL passes
+        // since that use, then expired again.
+        let used = sent + ttl;
+        store.touch_activity("1", used as i64);
+        assert!(!expired_by_ttl(&store, "1", sent, used + ttl, ttl));
+        assert!(expired_by_ttl(&store, "1", sent, used + ttl + 1, ttl));
+        // A permanent slot trumps the clock entirely.
+        store.add("g", "c", "2", "u", 10).unwrap();
+        assert!(!expired_by_ttl(&store, "2", sent, sent + 10 * ttl, ttl));
+    }
+
+    #[test]
+    fn activity_marks_throttle_writes_and_stay_bounded() {
+        let marks = ActivityMarks::new();
+        assert!(marks.should_persist("m", 1_000, 100));
+        assert!(!marks.should_persist("m", 1_050, 100)); // inside the window
+        assert!(marks.should_persist("m", 1_100, 100)); // window elapsed
+                                                        // Overflowing the cap reclaims stale entries first ("m" above), then
+                                                        // clears outright if everything is fresh — but always keeps recording.
+        for i in 0..ACTIVITY_MARKS_CAP {
+            assert!(marks.should_persist(&format!("x{i}"), 2_000, 100));
+        }
+        assert!(marks.should_persist("overflow", 2_050, 100));
+        assert!(marks.0.lock().unwrap().len() <= ACTIVITY_MARKS_CAP);
+    }
+
+    #[test]
+    fn activity_throttle_scales_with_ttl() {
+        // Default 7-day TTL → capped at six hours.
+        assert_eq!(activity_throttle_ms(7 * 86_400_000), 6 * 3_600_000);
+        // A short TTL throttles proportionally (an eighth of the window).
+        assert_eq!(activity_throttle_ms(86_400_000), 10_800_000);
+        // Degenerate inputs stay sane.
+        assert_eq!(activity_throttle_ms(0), 1);
+    }
 }

@@ -202,8 +202,9 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
 
 /**
  * The "Never expire" control for a message with interactive components. By
- * default the post's buttons & selects stop working after the deployment TTL;
- * claiming one of the server's never-expire slots keeps them alive. Mirrors the
+ * default the post's buttons & selects stop working once unused for the
+ * deployment TTL (any interaction restarts that window); claiming one of the
+ * server's never-expire slots keeps them alive regardless. Mirrors the
  * web app's PermanentOptIn, minus the update-target/already-permanent cases (the
  * Activity only offers it on a brand-new post). When every slot is taken the
  * switch gives way to a "Manage on web" hand-off — freeing slots lives there.

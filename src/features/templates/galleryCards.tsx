@@ -56,7 +56,7 @@ export interface CardData {
   /** Remove this entry from its list (local store or server library). */
   onDelete?: () => void;
   /** Extra status pills after the badge — the library's derived labels
-   *  ("Buttons expired"). */
+   *  ("Buttons may be expired"). */
   tags?: { text: string; tone: "ok" | "warn" | "info" }[];
   /** Posted only — the never-expire toggle chip at the preview's top-left.
    *  One control carries both the status and the action: "off" is a

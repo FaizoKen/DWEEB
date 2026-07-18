@@ -763,8 +763,8 @@ export function SendPanel({
       : undefined;
 
   // The signed-out counterpart to the "Never expire" toggle: a message with
-  // interactive components expires after the deployment TTL unless it holds a
-  // slot, but claiming one needs a signed-in session. Surface the heads-up +
+  // interactive components expires after the deployment TTL without use unless
+  // it holds a slot, but claiming one needs a signed-in session. Surface the heads-up +
   // sign-in nudge in the confirm dialog — the success dialog already says this,
   // but only *after* the post, where "sign in before sending" is too late. The
   // exact day count comes from the build-time COMPONENT_TTL_DAYS (the live

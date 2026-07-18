@@ -6,8 +6,8 @@
 //! dispatcher's own HTTP response, the same way `/dashboard` always was.
 //! That is also what makes them fast: every handler below is a pure function
 //! of the interaction payload Discord already sent — no Discord API call, no
-//! forward hop, and (except the permanent-slot data behind "Message Info",
-//! which this service owns anyway) no database. The expensive-looking part,
+//! forward hop, and (except the permanent-slot and component-activity data
+//! behind "Message Info", which this service owns anyway) no database. The expensive-looking part,
 //! compressing a message into a share link, is LZ-String over a few KB of
 //! JSON — microseconds.
 //!
@@ -641,8 +641,15 @@ fn expiry_line(
         }
         (None, Some(ttl_ms)) => match snowflake_ms(message_id) {
             Some(sent_ms) => {
-                let expires = (sent_ms + ttl_ms) / 1000;
-                if now_ms() > sent_ms + ttl_ms {
+                // The window is sliding, so expiry anchors to the LATER of the
+                // send time and the last recorded use — the same arithmetic
+                // the TTL gate applies (`expired_by_ttl` in main.rs).
+                let anchor = app
+                    .store
+                    .last_activity_ms(message_id)
+                    .map_or(sent_ms, |seen| seen.max(sent_ms));
+                let expires = (anchor + ttl_ms) / 1000;
+                if now_ms() > anchor + ttl_ms {
                     format!(
                         "**Expiry:** \u{231B} interactive components **expired** <t:{expires}:R> \
                          — each click now just disables its component. \
@@ -651,7 +658,9 @@ fn expiry_line(
                 } else {
                     format!(
                         "**Expiry:** \u{23F3} interactive components expire \
-                         <t:{expires}:f> (<t:{expires}:R>)."
+                         <t:{expires}:f> (<t:{expires}:R>) — every use restarts \
+                         the {}-day timer.",
+                        ttl_ms / 86_400_000
                     )
                 }
             }

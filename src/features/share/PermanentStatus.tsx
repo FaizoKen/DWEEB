@@ -3,18 +3,21 @@
  * rendered as the value of the "Interaction" row in the destination facts
  * list — same section as Webhook / Server / Channel.
  *
- * Plugin buttons/selects stop working a set number of days after the message
- * is sent unless the message holds one of the server's permanent slots. The
- * *decision* happens before the send — the confirm dialog owns the "Make
+ * Plugin buttons/selects stop working once the message goes a set number of
+ * days without use (the dispatcher's sliding TTL window — every interaction
+ * restarts it) unless the message holds one of the server's permanent slots.
+ * The *decision* happens before the send — the confirm dialog owns the "Make
  * permanent" toggle and the inline slot freeing — so this row is purely a
  * receipt: it states the outcome the Send panel already knows, without
  * re-fetching or offering to change anything. Changing your mind = update the
  * message, which re-opens the confirm with the toggle.
  *
  *  - permanent → green "never expires";
- *  - expiring  → amber concrete expiry date: send time decoded from the
- *    message snowflake plus the deployment TTL — the same arithmetic the
- *    interactions dispatcher applies server-side;
+ *  - expiring  → amber *earliest possible* expiry date: send time decoded
+ *    from the message snowflake plus the deployment TTL. The dispatcher's
+ *    window slides with use, which this client can't see — so the date is
+ *    exact for a message nobody touches and a lower bound otherwise, and the
+ *    copy says "if unused";
  *  - unknown   → generic expiry warning, used when the slot state never
  *    loaded; `signInHint` adds the nudge when the cause was being signed out.
  *
@@ -88,16 +91,17 @@ export function PermanentStatusValue({
         {expiryLabel ? (
           alreadyExpired ? (
             <>
-              Expired on <strong>{expiryLabel}</strong>
+              May have expired — components stop working after <strong>{ttlDays} days</strong>{" "}
+              without use
             </>
           ) : (
             <>
-              Expires on <strong>{expiryLabel}</strong>
+              Expires on <strong>{expiryLabel}</strong> if unused — every use extends it
             </>
           )
         ) : (
           <>
-            Expires <strong>{ttlDays} days</strong> after sending
+            Expires after <strong>{ttlDays} days</strong> without use
           </>
         )}
       </Line>
@@ -106,7 +110,7 @@ export function PermanentStatusValue({
   } else {
     line = (
       <Line tone="warning" icon={<ClockIcon size={14} />}>
-        Expires a few days after sending
+        Expires after a few days without use
       </Line>
     );
     if (signInHint) {

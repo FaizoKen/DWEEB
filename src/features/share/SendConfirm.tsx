@@ -128,7 +128,7 @@ export interface SendConfirmProps {
   };
   /**
    * The signed-out counterpart to {@link permanentOption}: the message carries
-   * interactive components that expire a few days after sending, the feature is
+   * interactive components that expire after a few days without use, the feature is
    * available, but the user is signed out so they can't claim a never-expire
    * slot from here. Surfaces the heads-up *before* the post (the advice is
    * "sign in before sending"); `onSignIn` starts the Discord login. Undefined
@@ -296,7 +296,7 @@ function PermanentOptIn({
       ? `All ${cap} never-expire slots are in use — upgrade for more, or free one to use it here`
       : `All ${cap} never-expire slots are used by other messages — free one to use it here`
     : alreadyPermanent && !checked
-      ? "Frees its slot — buttons & selects will expire"
+      ? "Frees its slot — buttons & selects can expire again"
       : `Buttons & selects keep working · ${used}/${cap} slots used`;
 
   return (
@@ -428,16 +428,17 @@ function PreviewMismatchNotice({
 
 /**
  * Signed-out expiry heads-up: this message's interactive components stop working
- * a few days after sending unless it claims a never-expire slot, which needs a
- * signed-in session. Shown *before* the post so the "sign in before sending"
- * advice is still actionable — the signed-in path gets the {@link PermanentOptIn}
- * toggle instead.
+ * once they go unused for a few days, unless it claims a never-expire slot —
+ * which needs a signed-in session. Shown *before* the post so the "sign in
+ * before sending" advice is still actionable — the signed-in path gets the
+ * {@link PermanentOptIn} toggle instead.
  */
 function ExpiryNudge({ ttlDays, onSignIn }: NonNullable<SendConfirmProps["expiryNudge"]>) {
   return (
     <div className={styles.routingNote} role="note">
       <strong>
-        Buttons &amp; selects stop working {ttlDays} day{ttlDays === 1 ? "" : "s"} after sending.
+        Buttons &amp; selects stop working after {ttlDays} day{ttlDays === 1 ? "" : "s"} without
+        use.
       </strong>
       <p className={styles.pingDetail}>
         Sign in before sending to make this message never expire and keep them clickable.

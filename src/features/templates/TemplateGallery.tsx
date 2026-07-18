@@ -267,8 +267,8 @@ export function TemplateGallery() {
     [connectedGuildId],
   );
 
-  // Give a slot back. The message returns to the expiry clock, counted from
-  // its send date — an old message's buttons may expire right away.
+  // Give a slot back. The message returns to the sliding expiry clock, counted
+  // from its last use — a long-idle message's buttons may expire right away.
   const freeNeverExpire = useCallback(
     async (messageId: string) => {
       if (!connectedGuildId) return;
@@ -459,9 +459,12 @@ export function TemplateGallery() {
       const isPosted = entry.label === "posted";
       const interactive = message ? interactiveComponents(message).length > 0 : false;
       const holdsSlot = isPosted && !!entry.message_id && grantIds.has(entry.message_id);
-      // "Buttons expired" — an interactive message older than the component
-      // TTL without a slot. Display-only and best-effort. (Never-expire state
-      // lives entirely in the pin chip below — no duplicate meta-row pill.)
+      // "Buttons may be expired" — an interactive message posted longer than
+      // the component TTL ago without a slot. Display-only and best-effort:
+      // the dispatcher's expiry window slides with use, which this client
+      // can't see, so this is the no-use lower bound — hence "may". (Never-
+      // expire state lives entirely in the pin chip below — no duplicate
+      // meta-row pill.)
       const tags: CardData["tags"] = [];
       if (
         isPosted &&
@@ -471,7 +474,7 @@ export function TemplateGallery() {
         interactive &&
         Date.now() - entry.updated_at * 1000 > permanent.ttl_days * 86_400_000
       ) {
-        tags.push({ text: "Buttons expired", tone: "warn" });
+        tags.push({ text: "Buttons may be expired", tone: "warn" });
       }
       const displayName =
         entry.title?.trim() || entry.dest_label || (isPosted ? "Posted message" : "Server draft");
@@ -490,7 +493,7 @@ export function TemplateGallery() {
             busy: slotBusy,
             title: paused
               ? "Never expire is paused — the server holds more never-expire messages than its plan allows. Tap to free the slot."
-              : "This message never expires and stays in this history. Tap to free the slot — it goes back on the expiry clock, counted from its send date.",
+              : "This message never expires and stays in this history. Tap to free the slot — it goes back on the expiry clock, counted from its last use.",
             run: () => setPendingFreeSlot({ messageId, name: displayName, paused }),
           };
         } else if (interactive && entry.channel_id) {
@@ -1176,9 +1179,9 @@ export function TemplateGallery() {
                         {isUnlimitedCap(permanent.cap)
                           ? `${permanent.used} used`
                           : `${permanent.used}/${permanent.cap} slots used`}
-                        {" · "}buttons &amp; selects stop working {permanent.ttl_days} days after
-                        sending unless the message holds a slot — assign or free one right on its
-                        card.
+                        {" · "}buttons &amp; selects stop working after {permanent.ttl_days} days
+                        without use unless the message holds a slot — assign or free one right on
+                        its card.
                       </span>
                       {!isUnlimitedCap(permanent.cap) && permanent.used >= permanent.cap ? (
                         <button
@@ -1239,7 +1242,7 @@ export function TemplateGallery() {
                                   size="sm"
                                   variant="ghost"
                                   disabled={slotBusy}
-                                  title="Puts the message back on the expiry clock, counted from its send date"
+                                  title="Puts the message back on the expiry clock, counted from its last use"
                                   onClick={() => void freeNeverExpire(item.message_id)}
                                 >
                                   Free slot
@@ -1468,7 +1471,7 @@ export function TemplateGallery() {
           <p className={styles.confirmText}>
             Free <strong>{pendingFreeSlot?.name}</strong>'s never-expire slot? Its buttons &amp;
             selects go back on the {permanent?.ttl_days ? `${permanent.ttl_days}-day ` : ""}expiry
-            clock — counted from when it was sent, so an older message's may lapse right away — and
+            clock — counted from its last use, so a long-idle message's may lapse right away — and
             it rejoins the rolling history, where newer posts can push it off. You can re-pin it
             later if a slot is free.
           </p>

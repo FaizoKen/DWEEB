@@ -186,6 +186,20 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   registry-only (no backend service). Plugin config iframes are forced dark theme.
 - Every interaction plugin must verify custom-app signatures through the dispatcher-forwarded
   key attestation; `DISPATCHER_FORWARD_SECRET` must match the dispatcher and every plugin.
+- **Component expiry is a sliding window, enforced in the dispatcher** (2026-07-18; was a
+  fixed date from the send snowflake). A component click dies only when the message's send
+  time AND its last served interaction are both older than `COMPONENT_TTL_DAYS` (default 7):
+  every routed component/modal interaction restarts the window via a write-throttled
+  `component_activity` upsert in dispatcher.db (`ActivityMarks` in-memory throttle ≈ TTL/8
+  capped at 6h; rows pruned once older than the TTL — safe, their send time is at least as
+  stale). The gate reads the store only for clicks already expired-by-snowflake, and a
+  missing/unreadable activity row falls back to the fixed send-date rule — fail toward
+  expiry, never toward unlimited validity. Never-expire slots exempt a message outright and
+  remain the only protection for *idle* messages (that's the paid-slot pitch — active
+  messages keep themselves alive for free). Keep user-facing copy phrased "N days without
+  use", never "N days after sending", and treat client-side expiry estimates (gallery
+  "Buttons may be expired" tag, scheduled-history badge, PermanentStatus date) as a no-use
+  lower bound — the FE can't see server-side activity.
 - **Plugin request and storage work is resource-bounded.** Every plugin router caps request
   bodies at 256 KiB. Interaction services parse their primary Ed25519 key once at boot (custom
   attested keys remain dynamic), bound idle HTTP pools, and configure SQLite with WAL,

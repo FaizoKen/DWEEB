@@ -260,7 +260,8 @@ export async function createActivityInvite(
 
 // ── Permanent component slots ───────────────────────────────────────────────
 // Messages exempted from the component expiry (the interactions dispatcher
-// disables plugin buttons/selects COMPONENT_TTL_DAYS after a message is sent).
+// disables plugin buttons/selects once a message has gone COMPONENT_TTL_DAYS
+// without use — any served interaction restarts that window).
 // Each server gets a fixed number of exemption slots, managed here through the
 // proxy, which checks the signed-in user manages the server.
 

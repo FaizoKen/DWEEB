@@ -64,25 +64,36 @@ uninstalled plugin stop generating traffic after their first click.
 |---|---|
 | `DISCORD_PUBLIC_KEY` | App public key (64 hex chars), verifies signatures. Required. |
 | `ROUTES` | JSON map of `custom_id` prefix → upstream base URL. Required. |
-| `COMPONENT_TTL_DAYS` | Days a component stays clickable after its message was sent. Default `7`; `0` = never expires. |
+| `COMPONENT_TTL_DAYS` | Days a component stays clickable after its message was sent **or last used** — any served interaction restarts the window. Default `7`; `0` = never expires. |
 | `PERMANENT_SLOTS_PER_GUILD` | TTL-exempt messages each guild may hold. Default `2`; `0` stops new grants (existing ones stay honored). |
 | `CUSTOM_APPS_PER_GUILD` | Custom Discord apps each guild may register. Default `1`; `0` stops new registrations (existing ones keep working). |
 | `DISPATCHER_FORWARD_SECRET` | Shared secret with every plugin, vouching for the forwarded verifying-key header. Unset = custom-app clicks fail the plugins' own verification. |
 | `INTERNAL_API_TOKEN` | Bearer token gating the `/permanent` + `/custom-apps` management APIs the proxy calls — and, in reverse, the token this service presents to the proxy's `/internal/permanent/reenable`. Unset = those APIs are disabled and no component revival is attempted. |
-| `DATABASE_PATH` | SQLite file for the permanent slots + custom-app registry. Default `./dispatcher.db` (`/data/dispatcher.db` in the image). |
+| `DATABASE_PATH` | SQLite file for the permanent slots, custom-app registry + component-activity record. Default `./dispatcher.db` (`/data/dispatcher.db` in the image). |
 | `DASHBOARD_URL` | URL `/dashboard` replies with. Default `https://dweeb.faizo.net`. |
 | `SERVER_URL` | Proxy base URL the dispatcher calls to revive a message's TTL-disabled components after a never-expire grant (`POST /internal/permanent/reenable`). Default `http://proxy:8080`; unreachable = the grant still succeeds, just no revival. |
 | `PORT` | Bind port, default `8095`. |
 
 ## Component TTL
 
-Components expire by default: a click on a message older than
-`COMPONENT_TTL_DAYS` (the message id snowflake carries its send time, so no
-per-instance registry is needed) is answered here with an `UPDATE_MESSAGE`
-that **disables the clicked component**, and is never forwarded to a plugin.
-Discord sends no interactions for a disabled component, so that first expired
-click is the last traffic the component ever generates — old messages can't
-accumulate into unbounded long-tail load.
+Components expire by default — on a **sliding window**. A click is dead only
+when the message's send time (the id snowflake carries it, so no per-instance
+registry is needed) *and* its last recorded use are both more than
+`COMPONENT_TTL_DAYS` ago; every interaction the dispatcher serves restarts
+the window. A panel people keep clicking therefore stays alive indefinitely,
+while an untouched message still expires `COMPONENT_TTL_DAYS` after sending —
+exactly the old fixed-date behaviour, which is also what pre-existing
+messages (no recorded use yet) fall back to. An expired click is answered
+here with an `UPDATE_MESSAGE` that **disables the clicked component**, and is
+never forwarded to a plugin. Discord sends no interactions for a disabled
+component, so that first expired click is the last traffic the component ever
+generates — old messages can't accumulate into unbounded long-tail load.
+
+The "last use" record lives in the same SQLite file as the slots, one row per
+message, write-throttled in memory (at most one upsert per message per few
+hours) and pruned once older than the TTL — so the table stays at "messages
+used within one window" and the interaction hot path stays effectively
+database-free.
 
 Modal submits are exempt: opening the modal already passed this gate, so a
 form a user is mid-way through filling in still lands.
@@ -113,8 +124,9 @@ The authorization chain: browser → **proxy** (Discord login; the user must
 manage the guild) → **this service's `/permanent` API** (bearer
 `INTERNAL_API_TOKEN`), which owns the slots in one SQLite file
 (`DATABASE_PATH`; mount `/data` so they survive restarts). The TTL gate above
-consults the same store, and only for already-expired clicks — fresh traffic
-never touches the database.
+consults the same store, and only for clicks already expired by their
+snowflake — fresh traffic never reads the database (the sliding window's
+throttled activity upsert is its only, occasional, write).
 
 ```
 GET    /permanent/:guild_id              → { cap, used, ttl_days, items }

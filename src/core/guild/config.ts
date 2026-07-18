@@ -37,9 +37,11 @@ export const WEB_APP_BASE_URL: string = (
 ).replace(/\/+$/, "");
 
 /**
- * Days a message's interactive components stay clickable after sending before
- * the dispatcher stops answering them — unless the message holds a never-expire
- * slot. Mirrors the dispatcher's `COMPONENT_TTL_DAYS` (default 7; `0` = never
+ * Days a message's interactive components stay clickable without use before
+ * the dispatcher stops answering them — a sliding window: every served
+ * interaction restarts it, so only an unused message actually lapses — unless
+ * the message holds a never-expire slot, which exempts it outright. Mirrors
+ * the dispatcher's `COMPONENT_TTL_DAYS` (default 7; `0` = never
  * expires). Build-time so a signed-out user — who can't fetch the live slot
  * state, where the authoritative number comes from — can still be told the
  * concrete figure before posting. `null` when the deployment disables expiry
