@@ -30,6 +30,7 @@ on:
       - Plugin Giveaway
       - Plugin Quick Replies
       - Plugin Picker
+      - Plugin Poll
     types: [completed]
     branches: [main]
   workflow_dispatch:

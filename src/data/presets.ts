@@ -1675,6 +1675,10 @@ const EVENT_MESSAGE: WebhookMessage = {
   ],
 };
 
+// A live poll powered by the Poll plugin: the `{results}` bars, ballot count
+// and status restamp on the message itself as members vote. The select's
+// sample options mirror the plugin's "poll-community" preset; configuring the
+// slot rewires (and locks) them to the real poll options.
 const POLL_MESSAGE: WebhookMessage = {
   username: "Polls",
   components: [
@@ -1686,7 +1690,7 @@ const POLL_MESSAGE: WebhookMessage = {
         {
           _id: id(),
           type: ComponentType.TextDisplay,
-          content: "# 📊 Community Poll\n**What should we host next month?**",
+          content: "# 📊 Community Poll\n**{question}**",
         },
         {
           _id: id(),
@@ -1697,19 +1701,66 @@ const POLL_MESSAGE: WebhookMessage = {
         {
           _id: id(),
           type: ComponentType.TextDisplay,
-          content: "🇦 — Movie night\n🇧 — Game tournament\n🇨 — Art jam\n🇩 — Q&A with the team",
+          content: "{results}",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Small,
         },
         {
           _id: id(),
           type: ComponentType.TextDisplay,
-          content: "> React with the option you want. Voting closes in 48 hours!",
+          content:
+            "> 🗳️ **{votes}** ballots cast · status: **{status}**\n> One ballot each — pick below, change it anytime.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.StringSelect,
+              custom_id: "poll_select",
+              placeholder: "Cast your vote…",
+              min_values: 1,
+              max_values: 1,
+              options: [
+                {
+                  label: "Movie night",
+                  value: "o1",
+                  description: "Popcorn and a big screen",
+                  emoji: { name: "🍿" },
+                },
+                {
+                  label: "Game tournament",
+                  value: "o2",
+                  description: "Bracket, prizes, glory",
+                  emoji: { name: "🎮" },
+                },
+                {
+                  label: "Art jam",
+                  value: "o3",
+                  description: "Draw together on a theme",
+                  emoji: { name: "🎨" },
+                },
+                {
+                  label: "Q&A with the team",
+                  value: "o4",
+                  description: "Ask the mods anything",
+                  emoji: { name: "🎤" },
+                },
+              ],
+            },
+          ],
         },
       ],
     },
     {
       _id: id(),
       type: ComponentType.TextDisplay,
-      content: "-# One vote per person, please — let's keep it fair. 🙏",
+      content: "-# 🔒 Ballots are anonymous — the results update live on this message.",
     },
   ],
 };
@@ -2580,11 +2631,14 @@ export const TEMPLATES: MessageTemplate[] = [
   {
     id: "poll",
     name: "Poll",
-    description: "Lettered options ready for reaction voting.",
+    description: "A live poll with real ballots — bars, counts and status update on the message.",
     emoji: "📊",
     category: "Events",
-    tags: ["vote", "survey", "question", "reactions"],
+    tags: ["vote", "survey", "question", "ballot", "results", "select"],
     accent: ACCENT.blue,
+    requiresBot: true,
+    pairsWith: "Poll",
+    pluginSlots: [{ customId: "poll_select", pluginId: "poll", preset: "poll-community" }],
     message: POLL_MESSAGE,
   },
   {

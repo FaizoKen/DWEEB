@@ -266,6 +266,59 @@
     },
     {
       "schemaVersion": 1,
+      "id": "poll",
+      "name": "Poll",
+      "description": "Run a live poll from a button or select menu — one ballot per member, change or retract, role gates, live or hidden-until-close results, an optional deadline, and host close/reopen with a public results announcement.",
+      "version": "0.1.0",
+      "publisher": "DWEEB",
+      "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/poll",
+      "targets": ["button", "string_select"],
+      "resources": ["guild", "message"],
+      "configUrl": "https://poll.dweeb.faizo.net/config.html",
+      "customIdPrefix": "poll:",
+      "apiVersion": 2,
+      "defaultEmoji": "📊",
+      "managesSelectOptions": true,
+      "managesFields": ["min_values", "max_values"],
+      "placeholders": [
+        { "token": "question", "label": "Question", "sample": "the question" },
+        { "token": "votes", "label": "Ballot count", "sample": "0" },
+        { "token": "results", "label": "Live results", "sample": "▱▱▱▱▱▱▱▱▱▱ 0% (0)" },
+        { "token": "leader", "label": "Current leader", "sample": "TBD" },
+        { "token": "status", "label": "Status", "sample": "open" },
+        { "token": "closes", "label": "Closes", "sample": "soon" }
+      ],
+      "presets": [
+        {
+          "id": "poll-community",
+          "name": "Community poll",
+          "description": "What should we host next month? Four options, live results.",
+          "emoji": "📊"
+        },
+        {
+          "id": "poll-yesno",
+          "name": "Yes / No vote",
+          "description": "A quick thumbs-up-or-down decision.",
+          "emoji": "👍",
+          "targets": ["button"]
+        },
+        {
+          "id": "poll-rsvp",
+          "name": "Event RSVP",
+          "description": "Going / Maybe / Can't make it — with a live count.",
+          "emoji": "📅",
+          "targets": ["button"]
+        },
+        {
+          "id": "poll-feedback",
+          "name": "Feedback (hidden results)",
+          "description": "Rate the event 1–5; results reveal when the poll closes.",
+          "emoji": "⭐"
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
       "kind": "link",
       "id": "rolelogic-member-origin-role",
       "name": "Member Origin Role",

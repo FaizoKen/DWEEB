@@ -1,0 +1,45 @@
+[package]
+name = "dweeb-poll"
+version = "0.1.0"
+edition = "2021"
+description = "DWEEB plugin: run a live poll from a button or select menu — one ballot per member, change/retract, role gates, live or hidden-until-close results, a lazy deadline, and host close/reopen with a public results announcement."
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+# Loads a local `.env` for `cargo run`; a no-op under Docker (which injects env).
+dotenvy = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Talks to the Discord REST API for exactly two OPTIONAL/off-path things: the
+# config UI's role picker (bot token, optional) and the interaction-webhook
+# followup/edit calls that keep the public message fresh (no bot token). rustls
+# avoids an OpenSSL system dependency, keeping the deploy image tiny. The core
+# poll (vote / tallies / close) runs entirely off interaction responses.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Verify Discord's Ed25519 interaction signatures.
+ed25519-dalek = "2"
+hex = "0.4"
+# Single-file embedded store — no separate DB server to pay for. `bundled`
+# compiles SQLite from source, so the image needs no system libsqlite.
+rusqlite = { version = "0.31", features = ["bundled"] }
+# CSPRNG for opaque instance ids and the separate edit credentials.
+getrandom = "0.2"
+# Store only a one-way digest of each edit credential.
+sha2 = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# The lifecycle tests drive the (sync) handlers on a bare executor and read
+# axum response bodies with `futures::executor::block_on`.
+futures = "0.3"
+
+# Small, low-throughput service — optimise the release binary for size so it
+# fits the cheapest hosting tiers.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

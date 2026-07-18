@@ -49,6 +49,7 @@ jobs:
           - modal-form
           - picker
           - ping-pong
+          - poll
           - quick-replies
           - self-role
           - tickets

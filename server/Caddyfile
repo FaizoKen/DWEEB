@@ -111,6 +111,12 @@ picker.{$PLUGINS_DOMAIN} {
 	reverse_proxy picker:8097
 }
 
+# Poll.
+poll.{$PLUGINS_DOMAIN} {
+	import site_defaults
+	reverse_proxy poll:8098
+}
+
 # ── Monitoring ───────────────────────────────────────────────────────────────
 # Self-hosted monitoring UIs on the plugins wildcard (no DNS work). Dozzle (raw
 # container logs) is intentionally absent — it stays localhost-only and is

@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Poll — configure</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1f22;
+        --panel: #2b2d31;
+        --panel-2: #232428;
+        --border: #3a3c41;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #5865f2;
+        --green: #3ba55d;
+        --yellow: #f0b232;
+        --danger: #da373c;
+        --radius: 8px;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #f2f3f5;
+        --panel-2: #e3e5e8;
+        --border: #d7d9dc;
+        --text: #1e1f22;
+        --muted: #4e5058;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 20px 0 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h2:first-of-type { margin-top: 0; }
+      .step-num {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="text"], input[type="number"], select, textarea {
+        width: 100%;
+        padding: 8px 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+      }
+      input:focus-visible, select:focus-visible, textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+      .hint code, .callout code { color: var(--accent); }
+      .row2 { display: flex; gap: 8px; }
+      .row2 > * { flex: 1; }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
+      .bar .grow { flex: 1; }
+      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+      .callout {
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+      .callout.good { border-left-color: var(--green); }
+      .callout.warn { border-left-color: var(--yellow); }
+      .callout.bad { border-left-color: var(--danger); }
+      .callout b { color: var(--text); }
+
+      details { margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+      summary { cursor: pointer; padding: 10px 12px; font-weight: 600; color: var(--text); list-style: none; }
+      summary::-webkit-details-marker { display: none; }
+      summary::before { content: "▸ "; color: var(--muted); }
+      details[open] summary::before { content: "▾ "; }
+      .details-body { padding: 0 12px 12px; }
+
+      .checkrow { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+      .checkrow input { flex: none; width: auto; accent-color: var(--accent); }
+
+      /* Options editor. */
+      .options { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+      .option-row { display: flex; gap: 6px; align-items: flex-start; }
+      .option-row .emoji { flex: none; width: 52px; text-align: center; }
+      .option-row .grow2 { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+      .option-row .remove {
+        flex: none;
+        width: 32px;
+        padding: 8px 0;
+        color: var(--muted);
+      }
+      .option-row .remove:hover { color: var(--danger); border-color: var(--danger); }
+      .add-option { margin-top: 8px; }
+
+      /* Role list. */
+      .roles { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 220px; overflow: auto; }
+      .role {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 9px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-2);
+        cursor: pointer;
+      }
+      .role:hover { border-color: var(--accent); }
+      .role input { flex: none; margin: 0; width: auto; accent-color: var(--accent); }
+      .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
+      .role .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .role-search { margin-top: 8px; }
+      .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+      .locked { opacity: 0.5; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <!-- Step 1 — server status ----------------------------------------------->
+    <h2><span class="step-num">1</span> Server</h2>
+    <div id="serverIntro"></div>
+    <!-- Hidden value-holder for the connected server id (no raw-id field). -->
+    <input id="guildId" type="hidden" />
+    <div class="err" id="connErr"></div>
+
+    <!-- Step 2 — the question + options --------------------------------------->
+    <h2><span class="step-num">2</span> The question</h2>
+    <label class="lbl" for="question">What are people voting on? <span style="color:var(--danger)">*</span></label>
+    <input id="question" type="text" maxlength="300" placeholder="e.g. What should we host next month?" />
+
+    <label class="lbl" style="margin-top: 12px">Options <span class="count" id="optCount"></span></label>
+    <div id="selectNote" class="callout good" style="display:none">
+      ✓ DWEEB wires these options onto your select menu and locks them — you never map anything by hand. Just <b>Save</b>.
+    </div>
+    <div id="options" class="options"></div>
+    <button id="addOption" class="add-option" type="button">＋ Add option</button>
+    <div class="hint">
+      2–25 options. The little box is an optional emoji shown next to the option.
+    </div>
+    <div class="hint">
+      Tip: write the poll text in your DWEEB message, then attach this to it. Drop these
+      <b>placeholders</b> into the message text and they fill in — and stay live:
+      <code>{question}</code>, <code>{results}</code> (bars + counts), <code>{votes}</code>,
+      <code>{leader}</code>, <code>{status}</code>, <code>{closes}</code>. Every vote restamps
+      them on the message itself.
+    </div>
+
+    <!-- Step 3 — ballot rules -------------------------------------------------->
+    <h2><span class="step-num">3</span> Ballot rules</h2>
+    <div class="row2">
+      <div>
+        <label class="lbl" for="choiceMode">How many picks per ballot?</label>
+        <select id="choiceMode">
+          <option value="1">Pick one (single choice)</option>
+          <option value="multi">Pick several…</option>
+        </select>
+      </div>
+      <div id="maxChoicesWrap" style="display:none">
+        <label class="lbl" for="maxChoices">Up to how many?</label>
+        <input id="maxChoices" type="number" min="2" max="25" value="2" />
+      </div>
+    </div>
+    <div class="checkrow" style="margin-top: 10px">
+      <input id="allowChange" type="checkbox" checked />
+      <label for="allowChange" style="margin:0;cursor:pointer">Members can <b>change or retract</b> their ballot while the poll is open</label>
+    </div>
+    <div class="checkrow">
+      <input id="hideResults" type="checkbox" />
+      <label for="hideResults" style="margin:0;cursor:pointer"><b>Hide results</b> until the poll closes (only the ballot count shows live)</label>
+    </div>
+    <div class="hint">Ballots are always anonymous — the poll never shows who voted for what.</div>
+
+    <!-- Advanced — vote gate, deadline, close announcement, host roles --------->
+    <details id="advanced">
+      <summary>Advanced options</summary>
+      <div class="details-body">
+        <!-- Vote gate -->
+        <h2 style="margin-top: 12px"><span class="step-num">4</span> Who can vote
+          <span class="count" id="reqCount"></span></h2>
+        <div id="reqIntro" class="hint">
+          By default <b>anyone</b> can vote, one ballot each.
+        </div>
+
+        <label class="lbl">Required roles</label>
+        <div id="rolesUnavailable" class="callout" style="display:none"></div>
+        <div id="rolesWrap">
+          <input id="roleSearch" class="role-search" type="text" placeholder="Search roles…" />
+          <div id="roles" class="roles"></div>
+          <div class="checkrow" id="requireAllWrap" style="display:none">
+            <input id="requireAll" type="checkbox" />
+            <label for="requireAll" style="margin:0;cursor:pointer">Must have <b>all</b> selected roles (otherwise any one)</label>
+          </div>
+        </div>
+
+        <label class="lbl" for="minAge" style="margin-top: 12px">Minimum account age</label>
+        <select id="minAge">
+          <option value="0">No minimum</option>
+          <option value="1">1 day old</option>
+          <option value="3">3 days old</option>
+          <option value="7">7 days old</option>
+          <option value="14">14 days old</option>
+          <option value="30">30 days old</option>
+          <option value="90">90 days old</option>
+        </select>
+        <div class="hint">Blocks brand-new alt accounts. Derived from the account's age — no extra setup.</div>
+
+        <!-- Deadline -->
+        <h2><span class="step-num">5</span> Deadline (optional)</h2>
+        <div class="hint" id="deadlineHint">
+          Closes voting when it passes — the first click after the deadline settles the message
+          (results reveal, the component disables). A host can also close early, or reopen.
+        </div>
+        <div class="row2" style="margin-top: 8px">
+          <div>
+            <label class="lbl" for="durValue">Closes in</label>
+            <input id="durValue" type="number" min="0" placeholder="e.g. 24" />
+          </div>
+          <div>
+            <label class="lbl" for="durUnit">&nbsp;</label>
+            <select id="durUnit">
+              <option value="minutes">minutes</option>
+              <option value="hours" selected>hours</option>
+              <option value="days">days</option>
+            </select>
+          </div>
+        </div>
+        <div class="hint" id="endsAtPreview"></div>
+
+        <!-- Close announcement -->
+        <h2><span class="step-num">6</span> When it closes</h2>
+        <label class="lbl" for="closeAnnouncement">Custom close announcement (optional)</label>
+        <textarea id="closeAnnouncement" rows="2" maxlength="1500"
+          placeholder="Default: 📊 Poll closed: {question} — with the full results."></textarea>
+        <div class="hint">Use <code>{question}</code>, <code>{results}</code>, <code>{leader}</code>, <code>{votes}</code> — they're filled in for you.</div>
+
+        <!-- Host roles -->
+        <label class="lbl" style="margin-top: 12px">Extra host roles
+          <span class="count" id="hostCount"></span></label>
+        <div class="hint">Server managers can always close, reopen and post results. Add roles here to let others run it too.</div>
+        <div id="hostRolesWrap">
+          <input id="hostRoleSearch" class="role-search" type="text" placeholder="Search roles…" />
+          <div id="hostRoles" class="roles"></div>
+        </div>
+      </div>
+    </details>
+
+    <div class="err" id="error"></div>
+
+    <div class="bar">
+      <button id="cancel" type="button">Cancel</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script>
+      "use strict";
+      const PREFIX = "poll:";
+      const MAX_OPTIONS = 25;
+
+      // ── Session / protocol state ────────────────────────────────────────
+      let nonce = null;
+      let hostOrigin = "*";
+      let instanceId = null; // set when reconfiguring
+      let protocolVersion = 1;
+      // Browser-local edit credential for `instanceId` (protocol v2). Absent ⇒
+      // saving creates a replacement instance instead of updating in place.
+      let managementToken = null;
+      let target = "button"; // component kind, from init
+
+      // ── Capabilities (from /api/meta) ───────────────────────────────────
+      let defaultBot = false; // deployment runs a shared bot (for the role pickers)
+      let inviteUrl = null;
+
+      // ── Host context (the server DWEEB is connected to) ─────────────────
+      let autoGuild = false;
+      let hostGuildName = "";
+      let guildName = "";
+
+      // ── Editor model ────────────────────────────────────────────────────
+      let roles = []; // [{ id, name, color }] live list, once connected
+      let selectedReq = new Set(); // vote-gate role ids
+      let selectedHost = new Set(); // host role ids
+      let savedStatus = null; // when reconfiguring: open/closed
+      let savedVotes = 0;
+      // Poll options. Each row keeps a STABLE key once created — the key is
+      // what ballots and tallies are stored under, so editing a label must
+      // never re-key the option (that would orphan its votes).
+      let options = []; // [{ key, label, description, emoji }]
+      let nextKey = 1;
+
+      const $ = (id) => document.getElementById(id);
+      const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
+      const hexColor = (n) => (n && n > 0 ? "#" + n.toString(16).padStart(6, "0") : "#99aab5");
+      const escapeHtml = (s) =>
+        String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+      function mintKey() {
+        // o1, o2, … skipping any key already in use (a reloaded config keeps
+        // its stored keys, which may collide with the counter otherwise).
+        for (;;) {
+          const k = "o" + nextKey++;
+          if (!options.some((o) => o.key === k)) return k;
+        }
+      }
+
+      // ── Step-1 status ────────────────────────────────────────────────────
+      function renderServerIntro() {
+        const intro = $("serverIntro");
+        if (autoGuild) {
+          const where = guildName || hostGuildName ? `<b>${escapeHtml(guildName || hostGuildName)}</b>` : "this server";
+          let extra = "";
+          if (savedStatus === "closed") {
+            extra = ` <span style="color:var(--yellow)">This poll is <b>closed</b> (${savedVotes} ballots).</span>`;
+          } else if (instanceId) {
+            extra = ` <span class="hint" style="display:inline">${savedVotes} ballots so far.</span>`;
+          }
+          intro.innerHTML = `<div class="callout good">✓ Building for ${where}.${extra}</div>`;
+        } else {
+          intro.innerHTML = `<div class="callout warn">Connect your server in DWEEB first — sign in and pick the server you're building this message for, then reopen this poll. It'll target that exact server automatically.</div>`;
+        }
+        sendResize();
+      }
+
+      // ── Options editor ───────────────────────────────────────────────────
+      function addOption(seed) {
+        if (options.length >= MAX_OPTIONS) return;
+        options.push({
+          key: seed && seed.key ? seed.key : mintKey(),
+          label: (seed && seed.label) || "",
+          description: (seed && seed.description) || "",
+          emoji: (seed && seed.emoji) || "",
+        });
+      }
+
+      function renderOptions() {
+        const wrap = $("options");
+        wrap.innerHTML = "";
+        options.forEach((opt, i) => {
+          const row = document.createElement("div");
+          row.className = "option-row";
+
+          const emoji = document.createElement("input");
+          emoji.type = "text";
+          emoji.className = "emoji";
+          emoji.maxLength = 8;
+          emoji.placeholder = "🙂";
+          emoji.title = "Optional emoji";
+          emoji.value = opt.emoji;
+          emoji.addEventListener("input", () => { opt.emoji = emoji.value; });
+
+          const grow = document.createElement("div");
+          grow.className = "grow2";
+          const label = document.createElement("input");
+          label.type = "text";
+          label.maxLength = 100;
+          label.placeholder = `Option ${i + 1}`;
+          label.value = opt.label;
+          label.addEventListener("input", () => { opt.label = label.value; });
+          const desc = document.createElement("input");
+          desc.type = "text";
+          desc.maxLength = 100;
+          desc.placeholder = "Description (optional)";
+          desc.value = opt.description;
+          desc.addEventListener("input", () => { opt.description = desc.value; });
+          grow.append(label, desc);
+
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "remove";
+          remove.textContent = "✕";
+          remove.title = "Remove this option";
+          remove.disabled = options.length <= 2;
+          remove.addEventListener("click", () => {
+            options.splice(i, 1);
+            renderOptions();
+          });
+
+          row.append(emoji, grow, remove);
+          wrap.appendChild(row);
+        });
+        $("optCount").textContent = `(${options.length}/${MAX_OPTIONS})`;
+        $("addOption").disabled = options.length >= MAX_OPTIONS;
+        syncMaxChoicesBounds();
+        sendResize();
+      }
+
+      $("addOption").addEventListener("click", () => {
+        addOption();
+        renderOptions();
+      });
+
+      // ── Ballot rules ─────────────────────────────────────────────────────
+      $("choiceMode").addEventListener("change", syncMaxChoicesBounds);
+      function syncMaxChoicesBounds() {
+        const multi = $("choiceMode").value === "multi";
+        $("maxChoicesWrap").style.display = multi ? "" : "none";
+        const cap = Math.max(2, options.length);
+        $("maxChoices").max = String(cap);
+        if (+$("maxChoices").value > cap) $("maxChoices").value = String(cap);
+        sendResize();
+      }
+
+      function currentMaxChoices() {
+        if ($("choiceMode").value !== "multi") return 1;
+        const cap = Math.max(2, options.length);
+        return Math.max(2, Math.min(cap, parseInt($("maxChoices").value, 10) || 2));
+      }
+
+      // ── Role pickers (vote gate + host) ─────────────────────────────────
+      // The poll itself needs no bot. We only reach out to populate the role
+      // pickers; everything else works without it.
+      async function maybeConnect() {
+        if (!defaultBot) {
+          showRolesUnavailable(
+            "Role gates need the shared bot, which isn't configured on this deployment. Everything else still works — question, options, ballot rules, and deadline.",
+          );
+          return;
+        }
+        const gid = $("guildId").value.trim();
+        if (!isSnowflake(gid)) return;
+        try {
+          const res = await fetch("/api/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ guild_id: gid }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            showRolesUnavailable(
+              (data.error || "Couldn't load this server's roles.") +
+                (inviteUrl ? ` <a href="${inviteUrl}" target="_blank" rel="noopener">Add the bot</a> and reopen.` : ""),
+            );
+            return;
+          }
+          guildName = data.guild_name || guildName;
+          roles = Array.isArray(data.roles) ? data.roles : [];
+          // Drop selections that no longer exist.
+          const ids = new Set(roles.map((r) => r.id));
+          selectedReq = new Set([...selectedReq].filter((id) => ids.has(id)));
+          selectedHost = new Set([...selectedHost].filter((id) => ids.has(id)));
+          $("rolesUnavailable").style.display = "none";
+          $("rolesWrap").classList.remove("locked");
+          $("hostRolesWrap").classList.remove("locked");
+          renderRoles(false);
+          renderRoles(true);
+          renderServerIntro();
+        } catch {
+          showRolesUnavailable("Couldn't reach the poll service to load roles.");
+        }
+      }
+
+      function showRolesUnavailable(msg) {
+        const box = $("rolesUnavailable");
+        box.className = "callout warn";
+        box.innerHTML = msg;
+        box.style.display = "";
+        $("rolesWrap").classList.add("locked");
+        $("hostRolesWrap").classList.add("locked");
+        sendResize();
+      }
+
+      $("roleSearch").addEventListener("input", () => renderRoles(false));
+      $("hostRoleSearch").addEventListener("input", () => renderRoles(true));
+
+      function renderRoles(host) {
+        const wrap = host ? $("hostRoles") : $("roles");
+        const search = host ? $("hostRoleSearch") : $("roleSearch");
+        const selected = host ? selectedHost : selectedReq;
+        const q = (search.value || "").trim().toLowerCase();
+        wrap.innerHTML = "";
+        const shown = roles.filter((r) => !q || r.name.toLowerCase().includes(q));
+        if (!roles.length) {
+          wrap.innerHTML = `<div class="hint">No roles loaded.</div>`;
+        } else if (!shown.length) {
+          wrap.innerHTML = `<div class="hint">No roles match.</div>`;
+        }
+        for (const r of shown) {
+          const row = document.createElement("label");
+          row.className = "role";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = selected.has(r.id);
+          input.addEventListener("change", () => {
+            if (input.checked) selected.add(r.id);
+            else selected.delete(r.id);
+            updateCounts();
+          });
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = r.name;
+          row.append(input, dot, name);
+          wrap.appendChild(row);
+        }
+        updateCounts();
+        sendResize();
+      }
+
+      function updateCounts() {
+        $("reqCount").textContent = selectedReq.size ? `(${selectedReq.size} selected)` : "";
+        $("hostCount").textContent = selectedHost.size ? `(${selectedHost.size} selected)` : "";
+        $("requireAllWrap").style.display = selectedReq.size > 1 ? "" : "none";
+        $("reqIntro").style.display = selectedReq.size || +$("minAge").value ? "none" : "";
+      }
+      $("minAge").addEventListener("change", updateCounts);
+
+      // ── Deadline preview ─────────────────────────────────────────────────
+      for (const el of [$("durValue"), $("durUnit")]) el.addEventListener("input", renderDeadlinePreview);
+      function computeEndsAt() {
+        const v = parseFloat($("durValue").value);
+        if (!v || v <= 0) return null;
+        const mult = { minutes: 60, hours: 3600, days: 86400 }[$("durUnit").value] || 3600;
+        return Math.floor(Date.now() / 1000 + v * mult);
+      }
+      function renderDeadlinePreview() {
+        const ends = computeEndsAt();
+        $("endsAtPreview").textContent = ends
+          ? `Voting closes ${new Date(ends * 1000).toLocaleString()}.`
+          : "No deadline — voting stays open until a host closes it.";
+        sendResize();
+      }
+
+      // ── Starter templates ───────────────────────────────────────────────
+      // Ready-made polls for the most common shapes, so a beginner can launch
+      // one in a click. Each fills the question, options and rules — all still
+      // editable, and the server/roles stay your own. Applied only via the
+      // host's `init.preset` (the plugin library / a template named it).
+      const PRESETS = [
+        {
+          id: "poll-community", name: "Community poll",
+          question: "What should we host next month?",
+          options: [
+            { label: "Movie night", emoji: "🍿" },
+            { label: "Game tournament", emoji: "🎮" },
+            { label: "Art jam", emoji: "🎨" },
+            { label: "Q&A with the team", emoji: "🎤" },
+          ],
+          durValue: 48, durUnit: "hours",
+        },
+        {
+          id: "poll-yesno", name: "Yes / No vote",
+          question: "Should we do it?",
+          options: [
+            { label: "Yes", emoji: "👍" },
+            { label: "No", emoji: "👎" },
+          ],
+        },
+        {
+          id: "poll-rsvp", name: "Event RSVP",
+          question: "Are you coming to the event?",
+          options: [
+            { label: "I'll be there!", emoji: "✅" },
+            { label: "Maybe", emoji: "🤔" },
+            { label: "Can't make it", emoji: "❌" },
+          ],
+        },
+        {
+          id: "poll-feedback", name: "Feedback (hidden results)",
+          question: "How was the event?",
+          options: [
+            { label: "Amazing", emoji: "🤩" },
+            { label: "Good", emoji: "🙂" },
+            { label: "Okay", emoji: "😐" },
+            { label: "Not great", emoji: "🙁" },
+          ],
+          hideResults: true, durValue: 24, durUnit: "hours",
+        },
+      ];
+
+      function applyPreset(p) {
+        $("question").value = p.question;
+        options = [];
+        nextKey = 1;
+        for (const o of p.options) addOption(o);
+        $("choiceMode").value = "1";
+        $("allowChange").checked = true;
+        $("hideResults").checked = !!p.hideResults;
+        $("durValue").value = p.durValue ? String(p.durValue) : "";
+        if (p.durUnit) $("durUnit").value = p.durUnit;
+        // The deadline lives behind "Advanced options" — open it so the seeded
+        // countdown is visible rather than silently tucked away.
+        if (p.durValue) $("advanced").open = true;
+        renderOptions();
+        renderDeadlinePreview();
+        $("error").textContent = "";
+      }
+
+      // ── DWEEB protocol ──────────────────────────────────────────────────
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
+
+      window.addEventListener("message", async (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          const resolve = pendingReqs.get(msg.requestId);
+          pendingReqs.delete(msg.requestId);
+          resolve(msg.ok ? msg.data : null);
+          return;
+        }
+
+        if (msg.type !== "dweeb:plugin:init") return;
+        nonce = msg.nonce;
+        hostOrigin = event.origin;
+        protocolVersion = msg.apiVersion === 2 ? 2 : 1;
+        managementToken =
+          protocolVersion >= 2 && /^[0-9a-f]{64}$/.test(msg.managementToken || "")
+            ? msg.managementToken
+            : null;
+        if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+        target = msg.target === "string_select" ? "string_select" : "button";
+        $("selectNote").style.display = target === "string_select" ? "" : "none";
+
+        await loadMeta();
+        const guild = await requestResource("guild");
+        if (guild && typeof guild.id === "string" && isSnowflake(guild.id)) {
+          autoGuild = true;
+          $("guildId").value = guild.id;
+          hostGuildName = typeof guild.name === "string" ? guild.name : "";
+          guildName = hostGuildName;
+        }
+
+        if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
+          instanceId = msg.customId.slice(PREFIX.length);
+          await loadInstance(instanceId);
+        }
+
+        if (!instanceId) {
+          // The host (plugin library / a template) may name a preset to open
+          // pre-filled. Apply it once; an unknown id leaves the starter form.
+          const seed = typeof msg.preset === "string"
+            ? PRESETS.find((p) => p.id === msg.preset)
+            : null;
+          if (seed) applyPreset(seed);
+          else {
+            addOption();
+            addOption();
+            renderOptions();
+          }
+        }
+        renderServerIntro();
+        renderDeadlinePreview();
+        updateCounts();
+        renderRoles(false);
+        renderRoles(true);
+        sendResize();
+        maybeConnect();
+      });
+
+      const pendingReqs = new Map();
+      function requestResource(resource) {
+        return new Promise((resolve) => {
+          if (nonce == null) return resolve(null);
+          const requestId = "req_" + Math.random().toString(36).slice(2);
+          pendingReqs.set(requestId, resolve);
+          parent.postMessage({ type: "dweeb:plugin:request", nonce, requestId, resource }, hostOrigin);
+          setTimeout(() => {
+            if (pendingReqs.has(requestId)) {
+              pendingReqs.delete(requestId);
+              resolve(null);
+            }
+          }, 4000);
+        });
+      }
+
+      function sendResize() {
+        if (nonce == null) return;
+        parent.postMessage(
+          { type: "dweeb:plugin:resize", nonce, height: document.body.scrollHeight + 24 },
+          hostOrigin,
+        );
+      }
+
+      async function loadMeta() {
+        try {
+          const res = await fetch("/api/meta");
+          if (res.ok) {
+            const m = await res.json();
+            defaultBot = !!m.defaultBot;
+            inviteUrl = m.inviteUrl || null;
+          }
+        } catch {
+          /* leave defaults */
+        }
+      }
+
+      // ── Reconfigure ─────────────────────────────────────────────────────
+      async function loadInstance(id) {
+        try {
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          guildName = d.guild_name || guildName;
+          if (d.guild_id && isSnowflake(d.guild_id)) $("guildId").value = d.guild_id;
+          savedStatus = d.status || "open";
+          savedVotes = d.votes || 0;
+          $("question").value = d.question || "";
+          // Keep the STORED keys — ballots and tallies live under them.
+          options = (Array.isArray(d.options) ? d.options : []).map((o) => ({
+            key: o.key,
+            label: o.label || "",
+            description: o.description || "",
+            emoji: (o.emoji && o.emoji.name) || "",
+          }));
+          while (options.length < 2) addOption();
+          const max = Math.max(1, d.max_choices || 1);
+          $("choiceMode").value = max > 1 ? "multi" : "1";
+          if (max > 1) $("maxChoices").value = String(max);
+          $("allowChange").checked = d.allow_change !== false;
+          $("hideResults").checked = !!d.hide_results;
+          $("closeAnnouncement").value = d.close_announcement || "";
+          const reqs = d.requirements || {};
+          selectedReq = new Set((reqs.roles || []).map((r) => r.id));
+          selectedHost = new Set((d.host_roles || []).map((r) => r.id));
+          $("requireAll").checked = !!reqs.require_all;
+          $("minAge").value = String(reqs.min_account_age_days || 0);
+          // Seed the role lists with the saved ones so they show even before a
+          // live connect; maybeConnect() refreshes with the full guild list.
+          const seed = [...(reqs.roles || []), ...(d.host_roles || [])];
+          const byId = new Map(roles.map((r) => [r.id, r]));
+          for (const r of seed) if (!byId.has(r.id)) { roles.push({ id: r.id, name: r.name || r.id, color: r.color || 0 }); byId.set(r.id, r); }
+          if (d.ends_at) {
+            const secs = d.ends_at - Math.floor(Date.now() / 1000);
+            if (secs > 0) {
+              if (secs % 86400 === 0) { $("durValue").value = secs / 86400; $("durUnit").value = "days"; }
+              else if (secs % 3600 === 0) { $("durValue").value = secs / 3600; $("durUnit").value = "hours"; }
+              else { $("durValue").value = Math.round(secs / 60); $("durUnit").value = "minutes"; }
+            }
+          }
+          if (selectedReq.size || selectedHost.size || reqs.min_account_age_days || d.close_announcement || d.ends_at) {
+            $("advanced").open = true;
+          }
+          renderOptions();
+        } catch {
+          /* fresh form */
+        }
+      }
+
+      // ── Save ────────────────────────────────────────────────────────────
+      $("cancel").addEventListener("click", () => {
+        parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
+      });
+      $("save").addEventListener("click", save);
+
+      function roleRefs(selected) {
+        return roles.filter((r) => selected.has(r.id)).map((r) => ({ id: r.id, name: r.name, color: r.color || 0 }));
+      }
+
+      // The placeholders this poll fills into the host's message text.
+      const POLL_TOKENS = ["question", "votes", "results", "leader", "status", "closes"];
+
+      // True when the user actually dropped one of our placeholders into their
+      // message. We only keep a render template when they did — otherwise the
+      // live tallies keep restamping the bound component alone, with no
+      // template to drift if they later edit the message.
+      function hasPlaceholders(components) {
+        const re = new RegExp("\\{(" + POLL_TOKENS.join("|") + ")\\}");
+        let found = false;
+        const visit = (n) => {
+          if (found || !n || typeof n !== "object") return;
+          if (Array.isArray(n)) return n.forEach(visit);
+          if (typeof n.content === "string" && re.test(n.content)) return void (found = true);
+          if (typeof n.label === "string" && re.test(n.label)) return void (found = true);
+          if (typeof n.placeholder === "string" && re.test(n.placeholder)) return void (found = true);
+          for (const k in n) visit(n[k]);
+        };
+        visit(components);
+        return found;
+      }
+
+      async function save() {
+        $("error").textContent = "";
+        const guildId = $("guildId").value.trim();
+        if (!autoGuild || !isSnowflake(guildId))
+          return fail("Connect your server in DWEEB first — sign in and pick it, then reopen this poll.");
+
+        const question = $("question").value.trim();
+        if (!question) return fail("Enter a question — what are people voting on?");
+
+        const cleanOptions = [];
+        for (const o of options) {
+          const label = o.label.trim();
+          if (!label) continue;
+          const entry = { key: o.key, label };
+          const desc = o.description.trim();
+          if (desc) entry.description = desc;
+          const emoji = o.emoji.trim();
+          if (emoji) entry.emoji = { name: emoji };
+          cleanOptions.push(entry);
+        }
+        if (cleanOptions.length < 2) return fail("Give the poll at least two options (with labels).");
+        const maxChoices = Math.min(currentMaxChoices(), cleanOptions.length);
+
+        // Capture the message the user is building so we can re-render its
+        // placeholders live once it's posted (best-effort; null if the editor
+        // didn't answer, or the user used no placeholders → no template to keep).
+        const builtMessage = await requestResource("message");
+        const messageTemplate =
+          builtMessage && Array.isArray(builtMessage.components) && hasPlaceholders(builtMessage.components)
+            ? builtMessage.components
+            : null;
+
+        const endsAt = computeEndsAt();
+        const body = {
+          target,
+          guild_id: guildId,
+          guild_name: guildName || "",
+          question,
+          options: cleanOptions,
+          max_choices: maxChoices,
+          allow_change: $("allowChange").checked,
+          hide_results: $("hideResults").checked,
+          ends_at: endsAt,
+          requirements: {
+            roles: roleRefs(selectedReq),
+            require_all: selectedReq.size > 1 && $("requireAll").checked,
+            min_account_age_days: parseInt($("minAge").value, 10) || 0,
+          },
+          host_roles: roleRefs(selectedHost),
+          close_announcement: $("closeAnnouncement").value.trim() || null,
+          message_template: messageTemplate,
+        };
+
+        setBusy(true);
+        try {
+          // In-place update needs the browser-local edit credential; without it
+          // (another browser, cleared storage) save a fresh replacement poll
+          // and let DWEEB rebind the component. NOTE: a replacement starts with
+          // an empty ballot box — the 403 notice below says so before anything
+          // is overwritten.
+          const canUpdate = !!(instanceId && managementToken);
+          const url = canUpdate
+            ? `/api/instances/${encodeURIComponent(instanceId)}`
+            : "/api/instances";
+          const res = await fetch(url, {
+            method: canUpdate ? "PUT" : "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(canUpdate ? { "X-DWEEB-Plugin-Edit-Token": managementToken } : {}),
+            },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setBusy(false);
+            if (res.status === 403) {
+              managementToken = null;
+              return fail(
+                "Edit access is no longer available in this browser. Save again to create a replacement poll — note it starts with a fresh (empty) ballot box.",
+              );
+            }
+            return fail(data.error || `Server returned ${res.status}.`);
+          }
+          const id = data.id || instanceId;
+          const nextManagementToken = /^[0-9a-f]{64}$/.test(data.managementToken || "")
+            ? data.managementToken
+            : managementToken;
+          if (protocolVersion >= 2 && !nextManagementToken) {
+            setBusy(false);
+            return fail("The plugin service did not return edit access. Reload and try again.");
+          }
+          // Static values for the host's first paint of any `{token}` text —
+          // the real question and (when set) a live Discord countdown; without
+          // a deadline `closes` is explicitly EMPTY so the token never paints
+          // its manifest sample or renders literally. The dynamic ones
+          // (results, leader) fall back to their manifest samples until a
+          // click renders them.
+          const values = {
+            question,
+            status: "open",
+            votes: "0",
+            closes: endsAt ? `<t:${endsAt}:R>` : "",
+          };
+          parent.postMessage(
+            {
+              type: "dweeb:plugin:save",
+              nonce,
+              customId: PREFIX + id,
+              guildId,
+              summary: {
+                label: "Poll",
+                description: `${question.slice(0, 60)} · ${cleanOptions.length} options`,
+              },
+              values,
+              // For a select, hand DWEEB the option list to wire + lock onto
+              // the menu (value = the stable option key). Ignored for buttons.
+              // Also pin the pick bounds so the user can't widen them past the
+              // poll's ballot rules.
+              ...(target === "string_select"
+                ? {
+                    options: cleanOptions.map((o) => {
+                      const out = { label: o.label.slice(0, 100), value: o.key };
+                      if (o.description) out.description = o.description.slice(0, 100);
+                      if (o.emoji) out.emoji = { name: o.emoji.name };
+                      return out;
+                    }),
+                    fields: { min_values: 1, max_values: maxChoices },
+                  }
+                : {}),
+              ...(protocolVersion >= 2 && nextManagementToken
+                ? { managementToken: nextManagementToken }
+                : {}),
+            },
+            hostOrigin,
+          );
+        } catch {
+          setBusy(false);
+          fail("Couldn't reach the poll service.");
+        }
+      }
+
+      function fail(m) {
+        $("error").textContent = m;
+        sendResize();
+      }
+      function setBusy(b) {
+        $("save").disabled = b;
+        $("save").textContent = b ? "Saving…" : "Save";
+      }
+    </script>
+  </body>
+</html>

@@ -471,17 +471,18 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   poll: {
     slug: "discord-poll-template",
-    title: "Discord Poll Template — reaction voting options | DWEEB",
+    title: "Discord Poll Template — live voting with results bars | DWEEB",
     h1: "Discord Poll Template",
     description:
-      "A ready-to-vote Discord poll template with lettered options for reaction voting. Free, no bot needed — customize the question and post through any webhook.",
+      "A live Discord poll template with a real voting menu, one ballot per member, and results bars that update on the message itself. Pairs with the Poll plugin.",
     intro:
-      "Ask your community and let them vote. This poll lays out lettered options ready for reaction voting, with a clear question and a closing time — great for picking the next event, gathering feedback, or settling a friendly debate.",
+      "Ask your community and let them actually vote. Members pick from a menu — one anonymous ballot each, changeable while the poll is open — and the results bars, counts and status restamp on the message live. Gate voting by role, hide results until close, set a deadline, and close with a public results announcement.",
     whenToUse: [
-      "Collecting quick community votes with reactions",
       "Letting members choose the next event or topic",
-      "Gathering lightweight feedback",
+      "Running votes with live result bars on the message",
+      "Collecting feedback with results hidden until close",
     ],
+    keywords: ["discord poll bot", "voting menu", "live results", "ballot"],
   },
   "giveaway-button": {
     slug: "discord-giveaway-template",

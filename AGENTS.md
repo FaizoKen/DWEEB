@@ -13,7 +13,7 @@ in a tool-private memory store.
 
 Visual Discord webhook & embed builder for Components V2 messages (Preact SPA), plus a
 Rust backend (`server/` = API proxy, `plugins/dispatcher` = interaction dispatcher,
-plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborative builder).
+plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborative builder).
 
 ## Commands
 
@@ -37,8 +37,8 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   telemetry). `src/features` — UI features. `src/activity` — Discord Activity entry.
 - `server/src` — Rust API proxy: Discord/OAuth auth, plain-SQLite shortlinks, and
   SQLite-backed schedules/message library/Activity drafts whose sensitive payloads are sealed.
-- `plugins/*` — 8 Rust crates total: the dispatcher plus ping-pong, tickets, giveaway,
-  quick-replies, self-role, modal-form, and picker.
+- `plugins/*` — 9 Rust crates total: the dispatcher plus ping-pong, tickets, giveaway,
+  quick-replies, self-role, modal-form, picker, and poll.
 
 ## Conventions & gotchas (hard-won — do not rediscover)
 
@@ -195,9 +195,10 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - Stateful plugin instance ids in Discord `custom_id` are public bindings, never edit authority.
   Protocol-v2 services return a separate 256-bit management token once, store only its SHA-256
   digest, and require it for updates; a legacy/cache-miss edit must create and rebind a new
-  instance. **All six stateful plugins are v2 as of 2026-07-16** (modal-form and self-role
+  instance. **All stateful plugins are v2 as of 2026-07-16** (modal-form and self-role
   first; picker, quick-replies, giveaway, and tickets migrated in one pass — services deployed
-  before the web-manifest bump, per the deploy-ordering rule above). Pre-migration instances
+  before the web-manifest bump, per the deploy-ordering rule above; poll shipped v2-native
+  2026-07-18). Pre-migration instances
   keep a null token digest, so an edit of one always 403s into the create-a-replacement flow;
   a replacement giveaway starts with an empty entry list and a replacement ticket panel restarts
   its numbering/ledger (both config UIs say so on the 403). Never add a v1 stateful plugin. Saved-webhook approval responses travel over an iframe-created `MessagePort`, not
@@ -402,7 +403,7 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 
 ## CI
 
-- `web.yml` — FE build + Vitest + GitHub Pages deploy. `server.yml` — Rust fmt/clippy/test. `plugins-ci.yml` — fmt/clippy/test matrix over all 8 crates. `deploy.yml` — backend CD.
+- `web.yml` — FE build + Vitest + GitHub Pages deploy. `server.yml` — Rust fmt/clippy/test. `plugins-ci.yml` — fmt/clippy/test matrix over all 9 crates. `deploy.yml` — backend CD.
 - **Workflows must not depend on `api.github.com` at runtime** — calls to it from Actions
   runners fail intermittently (HTML error page). This broke `setup-bun`'s version lookup
   (fixed by pinning `bun-version` in `web.yml`) and `docker/metadata-action` in all 9 image

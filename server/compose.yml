@@ -156,7 +156,7 @@ services:
     environment:
       <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
-      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094", "quickreplies:": "http://quick-replies:8096", "picker:": "http://picker:8097"}'
+      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094", "quickreplies:": "http://quick-replies:8096", "picker:": "http://picker:8097", "poll:": "http://poll:8098"}'
       # The /dashboard slash command (answered inline, no plugin) replies with
       # this URL. Register the command once: node scripts/register-commands.mjs
       # NOT derived from DOMAIN — that is the API host, not the dashboard.
@@ -438,6 +438,46 @@ services:
       retries: 3
       start_period: 5s
 
+  # Poll (../plugins/poll): members vote from a button or select menu — live
+  # tallies restamp on the message itself, ballots are one-per-member
+  # (changeable or locked), results can hide until close, and a host closes
+  # with a public results announcement. Like giveaway it needs NO bot to run —
+  # voting, tallies, close and the announcement all happen over interaction
+  # responses. BOT_TOKEN is OPTIONAL here, powering only the config UI's role
+  # picker (vote gates + host roles); point it at the main DWEEB bot if you
+  # want that. Its own registry, config UI and config API, backed by one SQLite
+  # file (poll configs + the per-member ballot ledger + tallies). Served at
+  # poll.$PLUGINS_DOMAIN.
+  poll:
+    image: ghcr.io/faizoken/dweeb-poll:${POLL_TAG:-latest}
+    mem_limit: 64m
+    mem_reservation: 16m
+    build: ../plugins/poll
+    <<: *svc-base
+    environment:
+      <<: *rust-env
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://poll.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      # Lets the dispatcher vouch for a custom app's verifying key (see the
+      # dispatcher service above). Must match the dispatcher's value.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
+      # OPTIONAL — only for the config UI's role picker. Unset and the core
+      # poll still works; role gates just can't be set up. We point it at the
+      # main DWEEB bot when present.
+      BOT_TOKEN: ${POLL_BOT_TOKEN:-}
+      BOT_INVITE_URL: ${POLL_BOT_INVITE_URL:-}
+      RUST_LOG: info
+    volumes:
+      # The plugin's only state: the SQLite file with poll configs + ballots.
+      - poll_data:/data
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8098 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 60s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   # Only started when you opt in with `--profile redis`. Shared cache +
   # rate-limit store for running several `proxy` replicas behind a balancer.
   redis:
@@ -532,6 +572,7 @@ volumes:
   giveaway_data:
   quickreplies_data:
   picker_data:
+  poll_data:
   beszel_data:
   beszel_agent_data:
   gatus_data:
