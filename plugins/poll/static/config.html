@@ -209,7 +209,7 @@
 
     <!-- Advanced — vote gate, deadline, close announcement, host roles --------->
     <details id="advanced">
-      <summary>Advanced options</summary>
+      <summary>Advanced options <span class="count" id="advSummary"></span></summary>
       <div class="details-body">
         <!-- Vote gate -->
         <h2 style="margin-top: 12px"><span class="step-num">4</span> Who can vote
@@ -540,6 +540,7 @@
         $("hostCount").textContent = selectedHost.size ? `(${selectedHost.size} selected)` : "";
         $("requireAllWrap").style.display = selectedReq.size > 1 ? "" : "none";
         $("reqIntro").style.display = selectedReq.size || +$("minAge").value ? "none" : "";
+        renderAdvSummary();
       }
       $("minAge").addEventListener("change", updateCounts);
 
@@ -556,8 +557,24 @@
         $("endsAtPreview").textContent = ends
           ? `Voting closes ${new Date(ends * 1000).toLocaleString()}.`
           : "No deadline — voting stays open until a host closes it.";
+        renderAdvSummary();
         sendResize();
       }
+
+      // Advanced options stay COLLAPSED by default — never auto-opened by a
+      // preset or a reloaded config. This hint on the closed disclosure line is
+      // what keeps a seeded deadline or a saved gate from being silently
+      // invisible behind it.
+      function renderAdvSummary() {
+        const bits = [];
+        if (computeEndsAt()) bits.push("deadline");
+        if (selectedReq.size) bits.push(`gate: ${selectedReq.size} role${selectedReq.size === 1 ? "" : "s"}`);
+        if (+$("minAge").value) bits.push("account age");
+        if ($("closeAnnouncement").value.trim()) bits.push("custom close");
+        if (selectedHost.size) bits.push(`+${selectedHost.size} host role${selectedHost.size === 1 ? "" : "s"}`);
+        $("advSummary").textContent = bits.length ? `(${bits.join(" · ")})` : "";
+      }
+      $("closeAnnouncement").addEventListener("input", renderAdvSummary);
 
       // ── Starter templates ───────────────────────────────────────────────
       // Ready-made polls for the most common shapes, so a beginner can launch
@@ -616,9 +633,6 @@
         $("hideResults").checked = !!p.hideResults;
         $("durValue").value = p.durValue ? String(p.durValue) : "";
         if (p.durUnit) $("durUnit").value = p.durUnit;
-        // The deadline lives behind "Advanced options" — open it so the seeded
-        // countdown is visible rather than silently tucked away.
-        if (p.durValue) $("advanced").open = true;
         renderOptions();
         renderDeadlinePreview();
         $("error").textContent = "";
@@ -765,9 +779,6 @@
               else if (secs % 3600 === 0) { $("durValue").value = secs / 3600; $("durUnit").value = "hours"; }
               else { $("durValue").value = Math.round(secs / 60); $("durUnit").value = "minutes"; }
             }
-          }
-          if (selectedReq.size || selectedHost.size || reqs.min_account_age_days || d.close_announcement || d.ends_at) {
-            $("advanced").open = true;
           }
           renderOptions();
         } catch {
