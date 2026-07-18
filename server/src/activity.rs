@@ -113,7 +113,9 @@ pub(crate) async fn resolve_identity(
 pub(crate) async fn resolve_bearer(st: &AppState, token: &str) -> Result<Session, AppError> {
     let key = format!("actid:{:016x}", fingerprint(token));
     if let Some(v) = st.cache.get(&key).await {
-        if let Ok(user) = serde_json::from_value::<DiscordUser>((*v).clone()) {
+        // Deserialize by reference — this runs on every bearer-authenticated
+        // Activity request, so don't deep-clone the cached JSON first.
+        if let Ok(user) = DiscordUser::deserialize(v.as_ref()) {
             return Ok(session_from_user(user, token));
         }
     }

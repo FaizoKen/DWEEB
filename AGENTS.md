@@ -377,6 +377,14 @@ plus 7 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   and gives Redis GET/SET two seconds before failing open. Entitlement and lazy-reconcile maps also
   expire and cap guild keys; their cold/background work is single-flight or semaphore-bounded.
   For horizontal proxy scaling, use Redis rather than raising process-local bounds.
+- **Cached JSON is read by reference on request paths.** The per-request authorization gates
+  (`find_guild` in routes.rs) scan the user's cached guild list in place and decode only the one
+  matching entry; the full-list deserializations (`guild_list`, `bot_guild_set`, the Activity's
+  `resolve_bearer`) go through `T::deserialize(v.as_ref())`. Never reintroduce
+  `from_value((*v).clone())` — deep-cloning the cached tree on every authorized request was the
+  proxy's largest per-request allocation cost. A cache hit whose *matching* entry doesn't decode
+  falls through to a refetch (same recovery a failed whole-list parse had); a well-formed list
+  without the guild is a definitive deny for the TTL. Guarded by the `scan_*` tests in routes.rs.
 - **Scheduled delivery concurrency is per destination.** Due rows for different webhook ids run
   concurrently up to the small SQLite-pool-derived cap, but rows for one webhook remain serial and
   in due order. This avoids head-of-line blocking without racing Discord's per-webhook rate limit.

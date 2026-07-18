@@ -1353,8 +1353,10 @@ pub(crate) async fn authorize_member_session(
     session: Session,
     guild: &str,
 ) -> Result<Session, AppError> {
-    let guilds = usable_guilds(st, &session, false).await?;
-    if guilds.iter().any(|g| g.id == guild) {
+    if find_guild(st, &session, GuildLens::Usable, guild)
+        .await?
+        .is_some()
+    {
         Ok(session)
     } else {
         Err(AppError::Forbidden(
@@ -1395,8 +1397,10 @@ pub(crate) async fn authorize_activity_member(
     session: Session,
     guild: &str,
 ) -> Result<Session, AppError> {
-    let guilds = member_guilds(st, &session, false).await?;
-    if guilds.iter().any(|g| g.id == guild) {
+    if find_guild(st, &session, GuildLens::Member, guild)
+        .await?
+        .is_some()
+    {
         Ok(session)
     } else {
         Err(AppError::Forbidden(
@@ -1416,8 +1420,7 @@ pub(crate) async fn authorize_activity_webhooks(
     session: Session,
     guild: &str,
 ) -> Result<Session, AppError> {
-    let guilds = member_guilds(st, &session, false).await?;
-    match guilds.iter().find(|g| g.id == guild) {
+    match find_guild(st, &session, GuildLens::Member, guild).await? {
         Some(g) if g.can_manage_webhooks => Ok(session),
         Some(_) => Err(AppError::Forbidden(
             "Posting here needs the Manage Webhooks permission in this server (or Administrator). \
@@ -1455,8 +1458,7 @@ pub(crate) async fn authorize_webhooks_session(
     session: Session,
     guild: &str,
 ) -> Result<Session, AppError> {
-    let guilds = usable_guilds(st, &session, false).await?;
-    match guilds.iter().find(|g| g.id == guild) {
+    match find_guild(st, &session, GuildLens::Usable, guild).await? {
         Some(g) if g.can_manage_webhooks => Ok(session),
         Some(_) => Err(AppError::Forbidden(
             "Managing webhooks needs the Manage Webhooks permission in this server (or Administrator). Ask an admin, or have your role granted it.".into(),
@@ -1467,17 +1469,50 @@ pub(crate) async fn authorize_webhooks_session(
     }
 }
 
-/// The user's usable guilds (owner or `MANAGE_GUILD`, unless that gate is off),
-/// cached per-user so repeat reads don't re-hit Discord.
-async fn usable_guilds(
+/// Which per-user guild list a read wants. The two lenses share one Discord
+/// route and one code path but stay under separate cache keys, so the web app's
+/// filtered picker list never mixes with the Activity's full-membership list.
+#[derive(Clone, Copy)]
+enum GuildLens {
+    /// Guilds the user may *use* in the web app: owner or `MANAGE_GUILD`,
+    /// unless that gate is off (`REQUIRE_MANAGE_GUILD`).
+    Usable,
+    /// The user's FULL membership — every server they belong to — mapped with
+    /// the Manage-Webhooks bit. Unlike [`GuildLens::Usable`] this does NOT
+    /// apply `REQUIRE_MANAGE_GUILD`: it backs the embedded Activity's
+    /// authorization, where the launching guild is trusted SDK context and
+    /// *any* member may load it and collaborate (posting stays separately
+    /// gated on Manage Webhooks).
+    Member,
+}
+
+impl GuildLens {
+    /// Per-user cache key. The literal prefixes predate this enum — keep them
+    /// stable so a deploy doesn't cold-start every session's authorization.
+    fn key(self, uid: &str) -> String {
+        match self {
+            GuildLens::Usable => format!("uguilds:{uid}"),
+            GuildLens::Member => format!("mguilds:{uid}"),
+        }
+    }
+}
+
+/// The user's guilds through `lens`, cached per-user so repeat reads don't
+/// re-hit Discord. This materializes the whole list — it backs the listing
+/// endpoints; the per-request authorization gates use [`find_guild`], which
+/// reads the same cache entry without building a `Vec`.
+async fn guild_list(
     st: &AppState,
     session: &Session,
+    lens: GuildLens,
     fresh: bool,
 ) -> Result<Vec<UsableGuild>, AppError> {
-    let key = format!("uguilds:{}", session.uid);
+    let key = lens.key(&session.uid);
     if !fresh {
         if let Some(v) = st.cache.get(&key).await {
-            if let Ok(list) = serde_json::from_value::<Vec<UsableGuild>>((*v).clone()) {
+            // Deserialize by reference — cloning the whole cached JSON tree
+            // first would double the allocation cost of every hit.
+            if let Ok(list) = Vec::<UsableGuild>::deserialize(v.as_ref()) {
                 return Ok(list);
             }
         }
@@ -1489,13 +1524,25 @@ async fn usable_guilds(
     let _gate = st.flight.acquire(&key).await;
     if !fresh {
         if let Some(v) = st.cache.get(&key).await {
-            if let Ok(list) = serde_json::from_value::<Vec<UsableGuild>>((*v).clone()) {
+            if let Ok(list) = Vec::<UsableGuild>::deserialize(v.as_ref()) {
                 return Ok(list);
             }
         }
     }
+    fetch_guilds(st, session, lens).await
+}
+
+/// One `/users/@me/guilds` round-trip mapped through `lens`, cached
+/// best-effort under the lens's key. Both callers ([`guild_list`] and
+/// [`find_guild`]) reach this holding the key's single-flight gate, so a
+/// cold-cache burst still costs one Discord call.
+async fn fetch_guilds(
+    st: &AppState,
+    session: &Session,
+    lens: GuildLens,
+) -> Result<Vec<UsableGuild>, AppError> {
     let raw = st.discord.current_user_guilds(&session.token).await?;
-    let require = st.config.require_manage_guild;
+    let require = matches!(lens, GuildLens::Usable) && st.config.require_manage_guild;
     let list: Vec<UsableGuild> = raw
         .into_iter()
         .filter(|g| !require || g.can_manage())
@@ -1507,54 +1554,81 @@ async fn usable_guilds(
         })
         .collect();
     if let Ok(val) = serde_json::to_value(&list) {
-        st.cache.put(key, Arc::new(val)).await;
+        st.cache.put(lens.key(&session.uid), Arc::new(val)).await;
     }
     Ok(list)
 }
 
-/// The user's FULL guild membership — every server they belong to — mapped with
-/// the Manage-Webhooks bit and cached per-user. Unlike [`usable_guilds`] this does
-/// NOT apply `REQUIRE_MANAGE_GUILD`: it backs the embedded Activity's authorization,
-/// where the launching guild is trusted SDK context and *any* member may load and
-/// collaborate (posting stays separately gated on Manage Webhooks). Kept under its
-/// own cache key so it never mixes with the web app's filtered list.
+/// The user's usable guilds (see [`GuildLens::Usable`]) as a full list — for
+/// the server-picker listing endpoint.
+async fn usable_guilds(
+    st: &AppState,
+    session: &Session,
+    fresh: bool,
+) -> Result<Vec<UsableGuild>, AppError> {
+    guild_list(st, session, GuildLens::Usable, fresh).await
+}
+
+/// The user's full membership (see [`GuildLens::Member`]) as a full list — for
+/// the Activity's DM-launch destination picker.
 async fn member_guilds(
     st: &AppState,
     session: &Session,
     fresh: bool,
 ) -> Result<Vec<UsableGuild>, AppError> {
-    let key = format!("mguilds:{}", session.uid);
-    if !fresh {
-        if let Some(v) = st.cache.get(&key).await {
-            if let Ok(list) = serde_json::from_value::<Vec<UsableGuild>>((*v).clone()) {
-                return Ok(list);
-            }
+    guild_list(st, session, GuildLens::Member, fresh).await
+}
+
+/// Look up ONE guild in the user's cached list through `lens` — the shape every
+/// authorization gate needs (`Some`/`None` decides membership; the entry's
+/// `can_manage_webhooks` decides the stricter gates). The gates run on every
+/// guild-scoped request, so a cache hit must stay cheap: scan the cached JSON
+/// in place and materialize only the matching entry, instead of deep-cloning
+/// and deserializing the user's entire guild list per request.
+async fn find_guild(
+    st: &AppState,
+    session: &Session,
+    lens: GuildLens,
+    guild: &str,
+) -> Result<Option<UsableGuild>, AppError> {
+    let key = lens.key(&session.uid);
+    if let Some(v) = st.cache.get(&key).await {
+        if let Some(found) = scan_cached_guilds(&v, guild) {
+            return Ok(found);
         }
     }
-    // Same coalescing as `usable_guilds`: one `/users/@me/guilds` call serves a
-    // burst of concurrent misses (bootstrap + room + the picker on a launch).
+    // Cache miss (or an unusable entry): same single-flight coalescing as
+    // `guild_list`, then one Discord fetch fills the cache for both paths.
     let _gate = st.flight.acquire(&key).await;
-    if !fresh {
-        if let Some(v) = st.cache.get(&key).await {
-            if let Ok(list) = serde_json::from_value::<Vec<UsableGuild>>((*v).clone()) {
-                return Ok(list);
-            }
+    if let Some(v) = st.cache.get(&key).await {
+        if let Some(found) = scan_cached_guilds(&v, guild) {
+            return Ok(found);
         }
     }
-    let raw = st.discord.current_user_guilds(&session.token).await?;
-    let list: Vec<UsableGuild> = raw
-        .into_iter()
-        .map(|g| UsableGuild {
-            can_manage_webhooks: g.can_manage_webhooks(),
-            id: g.id,
-            name: g.name,
-            icon: g.icon,
-        })
-        .collect();
-    if let Ok(val) = serde_json::to_value(&list) {
-        st.cache.put(key, Arc::new(val)).await;
+    let list = fetch_guilds(st, session, lens).await?;
+    Ok(list.into_iter().find(|g| g.id == guild))
+}
+
+/// Search a cached guild-list value for `guild` without materializing the list.
+///
+///  - `None` — the entry is unusable (not an array, or the matching element
+///    doesn't decode): fall through to a refetch, exactly like a failed
+///    whole-list parse used to.
+///  - `Some(None)` — a valid list that doesn't contain the guild. The cache is
+///    authoritative for its TTL, so this is a definitive "not a member".
+///  - `Some(Some(g))` — the guild's entry.
+///
+/// A malformed element that *isn't* the one searched for is skipped rather than
+/// invalidating the lookup: it can't change whether the matching entry exists.
+fn scan_cached_guilds(value: &Value, guild: &str) -> Option<Option<UsableGuild>> {
+    let list = value.as_array()?;
+    let entry = list
+        .iter()
+        .find(|e| e.get("id").and_then(Value::as_str) == Some(guild));
+    match entry {
+        Some(e) => UsableGuild::deserialize(e).ok().map(Some),
+        None => Some(None),
     }
-    Ok(list)
 }
 
 /// The set of guild ids the bot is in (cached). Best-effort: an error here only
@@ -1563,7 +1637,7 @@ async fn bot_guild_set(st: &AppState, fresh: bool) -> HashSet<String> {
     const KEY: &str = "botguilds";
     if !fresh {
         if let Some(v) = st.cache.get(KEY).await {
-            if let Ok(ids) = serde_json::from_value::<Vec<String>>((*v).clone()) {
+            if let Ok(ids) = Vec::<String>::deserialize(v.as_ref()) {
                 return ids.into_iter().collect();
             }
         }
@@ -1575,7 +1649,7 @@ async fn bot_guild_set(st: &AppState, fresh: bool) -> HashSet<String> {
     let _gate = st.flight.acquire(KEY).await;
     if !fresh {
         if let Some(v) = st.cache.get(KEY).await {
-            if let Ok(ids) = serde_json::from_value::<Vec<String>>((*v).clone()) {
+            if let Ok(ids) = Vec::<String>::deserialize(v.as_ref()) {
                 return ids.into_iter().collect();
             }
         }
@@ -1720,5 +1794,67 @@ mod tests {
         assert!(!constant_time_eq(b"s3cret", b"s3creT"));
         assert!(!constant_time_eq(b"s3cret", b"s3cre")); // length differs
         assert!(constant_time_eq(b"", b""));
+    }
+
+    // ── scan_cached_guilds (per-request authorization lookup) ────────────────
+
+    #[test]
+    fn scan_finds_a_guild_and_decodes_only_that_entry() {
+        let cached = json!([
+            { "id": "1", "name": "Alpha", "icon": null, "can_manage_webhooks": false },
+            { "id": "2", "name": "Beta", "icon": "h", "can_manage_webhooks": true },
+        ]);
+        let found = scan_cached_guilds(&cached, "2")
+            .expect("valid list")
+            .expect("guild present");
+        assert_eq!(found.id, "2");
+        assert_eq!(found.name, "Beta");
+        assert_eq!(found.icon.as_deref(), Some("h"));
+        assert!(found.can_manage_webhooks);
+    }
+
+    #[test]
+    fn scan_treats_a_valid_list_without_the_guild_as_definitive() {
+        // The cache is authoritative for its TTL: a present, well-formed list
+        // that lacks the guild must deny without a Discord refetch.
+        let cached = json!([{ "id": "1", "name": "Alpha", "icon": null }]);
+        assert_eq!(
+            scan_cached_guilds(&cached, "999").map(|g| g.is_none()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn scan_falls_through_on_unusable_cache_shapes() {
+        // Not a list at all → refetch (mirrors the old whole-list parse failure).
+        assert!(scan_cached_guilds(&json!({ "id": "1" }), "1").is_none());
+        // The *matching* entry doesn't decode → refetch rather than mis-authorize.
+        let broken = json!([{ "id": "1", "name": 42 }]);
+        assert!(scan_cached_guilds(&broken, "1").is_none());
+    }
+
+    #[test]
+    fn scan_skips_malformed_entries_it_is_not_looking_for() {
+        // A foreign malformed element can't change whether the match exists.
+        let cached = json!([
+            "garbage",
+            { "name": "no id" },
+            { "id": "2", "name": "Beta", "icon": null },
+        ]);
+        let found = scan_cached_guilds(&cached, "2")
+            .expect("valid enough")
+            .expect("guild present");
+        assert_eq!(found.name, "Beta");
+    }
+
+    #[test]
+    fn scan_decodes_entries_cached_before_the_webhooks_bit_existed() {
+        // `can_manage_webhooks` is `#[serde(default)]` so pre-field cache
+        // entries still authorize plain membership (the bit defaults to false).
+        let cached = json!([{ "id": "1", "name": "Alpha", "icon": null }]);
+        let found = scan_cached_guilds(&cached, "1")
+            .expect("valid list")
+            .expect("guild present");
+        assert!(!found.can_manage_webhooks);
     }
 }
