@@ -175,11 +175,7 @@ pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectReque
     };
     match crate::rest::connect(&state.http, token, req.guild_id.trim()).await {
         Ok(result) => Json(json!(result)).into_response(),
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": e.message() })),
-        )
-            .into_response(),
+        Err(e) => (e.status(), Json(json!({ "error": e.message() }))).into_response(),
     }
 }
 

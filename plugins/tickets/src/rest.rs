@@ -13,6 +13,7 @@
 //! client's sub-3s timeout so a click still answers within Discord's window; the
 //! heavier open/close flows run off the interaction's 3s path (see `routes.rs`).
 
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -34,6 +35,8 @@ pub enum ConnectError {
     BadToken,
     /// 403/404 on the guild — the bot isn't in that server (or can't see it).
     BotNotInGuild,
+    /// 429 — Discord is rate-limiting us. Transient.
+    RateLimited,
     /// Couldn't reach Discord, or it returned something unexpected.
     Network,
 }
@@ -47,7 +50,28 @@ impl ConnectError {
             ConnectError::BotNotInGuild => {
                 "I can't see that server. Make sure the bot has been invited to it, then try again.".into()
             }
+            ConnectError::RateLimited => {
+                "Discord is rate-limiting us right now — try again in a moment.".into()
+            }
             ConnectError::Network => "Couldn't reach Discord just now — try again in a moment.".into(),
+        }
+    }
+
+    /// The HTTP status `/api/connect` answers with. Only a fault **on our side**
+    /// may be 5xx: `TraceLayer`'s classifier turns any 5xx into an ERROR log,
+    /// which the ops alerter forwards to Discord. The config iframe auto-connects
+    /// on open, so an admin opening it for a server this plugin's bot was never
+    /// invited to is a routine, user-caused outcome — it must not page anyone.
+    pub fn status(&self) -> StatusCode {
+        match self {
+            // Our own credential is broken; every connect will fail until the
+            // operator rotates it. This one *should* page.
+            ConnectError::BadToken => StatusCode::INTERNAL_SERVER_ERROR,
+            ConnectError::BotNotInGuild => StatusCode::NOT_FOUND,
+            ConnectError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+            // Discord unreachable or 5xx — a real upstream failure, rare enough
+            // to be worth an alert.
+            ConnectError::Network => StatusCode::BAD_GATEWAY,
         }
     }
 }
@@ -301,6 +325,7 @@ async fn get_json<T: for<'de> Deserialize<'de>>(
     Err(match status.as_u16() {
         401 => ConnectError::BadToken,
         403 | 404 => ConnectError::BotNotInGuild,
+        429 => ConnectError::RateLimited,
         _ => ConnectError::Network,
     })
 }
@@ -614,5 +639,59 @@ impl RawAuthor {
         self.global_name
             .or(self.username)
             .unwrap_or_else(|| "user".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A routine, user-caused connect outcome must never answer 5xx.
+    ///
+    /// `TraceLayer`'s default classifier reports every 5xx through `on_failure`
+    /// at ERROR level, and the ops alerter forwards backend ERRORs to Discord.
+    /// The config iframe auto-connects whenever it opens, so an admin opening it
+    /// for a server this plugin's bot was never invited to used to answer 502 and
+    /// page the maintainer for a non-event. Keep these four honest.
+    #[test]
+    fn only_our_own_faults_are_server_errors() {
+        // Not a fault of ours — the caller named a guild we can't see, or Discord
+        // asked us to slow down. Neither may reach the alerter.
+        assert_eq!(ConnectError::BotNotInGuild.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            ConnectError::RateLimited.status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        for e in [ConnectError::BotNotInGuild, ConnectError::RateLimited] {
+            assert!(
+                !e.status().is_server_error(),
+                "{e:?} must not be reported as a server error"
+            );
+        }
+
+        // Genuinely broken: our credential is rejected, or Discord is unreachable.
+        // These *should* page.
+        assert_eq!(
+            ConnectError::BadToken.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(ConnectError::Network.status(), StatusCode::BAD_GATEWAY);
+        for e in [ConnectError::BadToken, ConnectError::Network] {
+            assert!(e.status().is_server_error(), "{e:?} should alert");
+        }
+    }
+
+    /// Every variant carries a human-readable message for the config UI, which
+    /// renders `data.error` verbatim on any non-ok response.
+    #[test]
+    fn every_variant_explains_itself() {
+        for e in [
+            ConnectError::BadToken,
+            ConnectError::BotNotInGuild,
+            ConnectError::RateLimited,
+            ConnectError::Network,
+        ] {
+            assert!(!e.message().trim().is_empty(), "{e:?} has no message");
+        }
     }
 }

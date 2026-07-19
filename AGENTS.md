@@ -221,6 +221,21 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   the default, and the hint under the pills must always state the selected option's
   outcome), and all slot-usage copy goes through `slotUsageLabel`
   (core/guild/api.ts) so the unlimited-cap sentinel never renders as "1/1000000 slots".
+- **A plugin may only answer 5xx for its own faults — 5xx is the paging channel.**
+  `TraceLayer::new_for_http()`'s default classifier reports every 5xx through `on_failure` at
+  ERROR level, and `dweeb-alerts` forwards backend ERRORs to Discord. So a status code is an
+  alerting decision, not just an HTTP detail. All five bot-token plugins' `POST /api/connect`
+  (quick-replies, giveaway, poll, self-role, tickets) used to answer a blanket **502 for every**
+  `ConnectError`, including `BotNotInGuild` — and the config iframe **auto-connects on open**
+  (`maybeConnect()`), so simply opening a plugin's config for a server whose shared bot was never
+  invited paged the maintainer. That's what the 2026-07-20 quick-replies 502 alerts were; the
+  ~230ms latency was the tell (a real `Network` failure takes the client's full 2.5s timeout).
+  Mapping now lives in `ConnectError::status()`: `BotNotInGuild` → **404**, `RateLimited` (new,
+  Discord 429) → **429**, `BadToken` → **500** (our credential is broken — this one *should*
+  page), `Network` → **502** (genuine upstream failure). The config UIs branch on `!res.ok` and
+  render `data.error`, so the copy is unchanged. Guarded by `only_our_own_faults_are_server_errors`
+  in each crate's `rest.rs`. When adding a plugin route, ask "would an ordinary user action reach
+  this branch?" — if yes it is 4xx, never 5xx.
 - **Plugin request and storage work is resource-bounded.** Every plugin router caps request
   bodies at 256 KiB. Interaction services parse their primary Ed25519 key once at boot (custom
   attested keys remain dynamic), bound idle HTTP pools, and configure SQLite with WAL,
