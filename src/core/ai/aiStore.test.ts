@@ -21,6 +21,15 @@ vi.mock("./providers", async (importOriginal) => {
   return { ...actual, callAI: vi.fn() };
 });
 
+// The built-in (dweeb) provider's `isConfigured` is "a proxy is configured",
+// which reads VITE_PROXY_BASE_URL at import time — set in a local dev env but
+// NOT in CI's test step, so pin it true here to test the built-in gating
+// deterministically regardless of the ambient build env.
+vi.mock("@/core/guild/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/core/guild/config")>();
+  return { ...actual, isProxyConfigured: () => true };
+});
+
 import { callAI, type AiCallResult, type AiTurn } from "./providers";
 import { useAiStore } from "./aiStore";
 import { useAuthStore } from "@/core/auth/authStore";
