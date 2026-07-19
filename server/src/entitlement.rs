@@ -186,6 +186,10 @@ impl Entitlement {
                 "coeditors": lim(limits.coeditors),
                 "library": lim(limits.library),
                 "library_posted": lim(limits.library_posted),
+                // Built-in AI: requests/tokens per UTC day. Per-user on Free,
+                // pooled per server on paid tiers (see `ai.rs`).
+                "ai_requests": lim(limits.ai_requests),
+                "ai_tokens": lim(limits.ai_tokens),
             },
             "billing": self.enabled(),
         })
@@ -424,6 +428,9 @@ mod tests {
             coeditors: 2,
             library: 10,
             library_posted: 10,
+            ai_requests: 30,
+            ai_tokens: 150_000,
+            ai_member_requests: 0,
         };
         let unlimited = TierLimits {
             schedules: 0,
@@ -432,6 +439,9 @@ mod tests {
             coeditors: 0,
             library: 0,
             library_posted: 0,
+            ai_requests: 0,
+            ai_tokens: 0,
+            ai_member_requests: 0,
         };
         let ent = Entitlement {
             stripe: None,
@@ -453,6 +463,8 @@ mod tests {
             ("coeditors", 2),
             ("library", 10),
             ("library_posted", 10),
+            ("ai_requests", 30),
+            ("ai_tokens", 150_000),
         ] {
             assert_eq!(body["limits"][key], json!(cap), "limits.{key}");
         }
@@ -468,6 +480,8 @@ mod tests {
             "coeditors",
             "library",
             "library_posted",
+            "ai_requests",
+            "ai_tokens",
         ] {
             assert!(pro_limits.contains_key(key), "limits.{key} missing");
             assert_eq!(pro_limits[key], Value::Null, "limits.{key}");

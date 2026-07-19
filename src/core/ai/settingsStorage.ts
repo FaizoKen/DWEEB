@@ -12,7 +12,15 @@ import { DEFAULT_PROVIDER, defaultSettingsFor } from "./providerMeta";
 
 const STORAGE_KEY = "dweeb.ai.v1";
 
-const PROVIDERS: AiProvider[] = ["openai", "anthropic", "gemini", "groq", "openrouter", "ollama"];
+const PROVIDERS: AiProvider[] = [
+  "dweeb",
+  "openai",
+  "anthropic",
+  "gemini",
+  "groq",
+  "openrouter",
+  "ollama",
+];
 
 export function loadAiSettings(): AiSettings {
   const fallback = defaultSettingsFor(DEFAULT_PROVIDER);

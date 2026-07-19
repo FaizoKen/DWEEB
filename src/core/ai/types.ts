@@ -8,10 +8,20 @@
  */
 
 /**
- * Supported provider families. Groq, OpenRouter, and Ollama all speak the
- * OpenAI API; Ollama is a self-hosted local server (no key required).
+ * Supported provider families. `dweeb` is the built-in, no-key mode: the DWEEB
+ * proxy holds a server-side Groq key and relays the completion (sign-in +
+ * daily quotas apply — see `server/src/ai.rs`). Groq, OpenRouter, and Ollama
+ * all speak the OpenAI API; Ollama is a self-hosted local server (no key
+ * required).
  */
-export type AiProvider = "openai" | "anthropic" | "gemini" | "groq" | "openrouter" | "ollama";
+export type AiProvider =
+  | "dweeb"
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "groq"
+  | "openrouter"
+  | "ollama";
 
 /**
  * Persisted assistant configuration. The API key is a credential — it lives in

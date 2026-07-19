@@ -130,6 +130,14 @@ services:
       # LIBRARY_ENABLED=false to disable (the endpoints answer 501); per-server
       # caps come from the plan tiers (or LIBRARY_MAX_PER_GUILD standalone).
       LIBRARY_DB_PATH: ${LIBRARY_DB_PATH:-/data/library.db}
+      # Built-in AI (Groq relay) usage ledger — daily/monthly quota rollups.
+      # Its own SQLite file on the SAME proxy_data volume: quotas that reset on
+      # every redeploy aren't quotas. The whole feature is gated on GROQ_API_KEY
+      # (set it in .env to turn built-in AI on; unset ⇒ the /api/ai endpoints
+      # answer 501 and the FE hides the built-in provider). AI_MODEL /
+      # AI_MAX_TOKENS / AI_MONTHLY_TOKEN_BUDGET and the PLAN_*_AI_* tiers are
+      # tuned in .env — see .env.example.
+      AI_DB_PATH: ${AI_DB_PATH:-/data/ai-usage.db}
     volumes:
       # The proxy's only state: the SQLite file with the opt-in share short
       # links (auto-expiring, default 7 days).

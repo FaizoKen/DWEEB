@@ -22,6 +22,12 @@ export interface ProviderMeta {
   /** Whether the provider needs an API key (local servers like Ollama don't). */
   requiresKey: boolean;
   /**
+   * True for the DWEEB-hosted relay: no key/model/base-url fields at all —
+   * the proxy owns the credential and pins the model. Requires Discord
+   * sign-in; usage is quota'd per user (Free) or per server (Plus/Pro).
+   */
+  builtIn?: boolean;
+  /**
    * True when there's a no-cost path: a free cloud tier (Groq, Gemini,
    * OpenRouter `:free` models) or a self-hosted server (Ollama). Drives the
    * "Free" marker in the picker so users can avoid the pay-per-token providers.
@@ -38,9 +44,25 @@ export interface ProviderMeta {
   keyPlaceholder: string;
 }
 
-// Ordered so the free providers come first — that's what the dropdown shows,
-// and the default lands on a free tier so a new user can get going at no cost.
+// Ordered so the built-in no-key mode comes first, then the free BYOK
+// providers — that's what the dropdown shows, and the default lands on the
+// built-in relay so a new user can get going with zero setup.
 export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
+  // The DWEEB-hosted relay (Groq-backed, server-held key). The model is pinned
+  // server-side, so defaultModel/baseUrl stay empty and the settings form
+  // hides those fields entirely.
+  dweeb: {
+    label: "DWEEB AI (built-in)",
+    defaultModel: "",
+    defaultBaseUrl: "",
+    requiresBaseUrl: false,
+    requiresKey: false,
+    builtIn: true,
+    freeTier: true,
+    freeTierNote: "Free — no key needed, just sign in",
+    keysUrl: "",
+    keyPlaceholder: "(no key needed)",
+  },
   groq: {
     label: "Groq (LPU Cloud)",
     defaultModel: "openai/gpt-oss-120b",
@@ -112,8 +134,8 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
   },
 };
 
-/** Provider key the settings form starts on — a free tier by default. */
-export const DEFAULT_PROVIDER: AiProvider = "groq";
+/** Provider key the settings form starts on — the built-in no-key relay. */
+export const DEFAULT_PROVIDER: AiProvider = "dweeb";
 
 /** Build a fresh settings object for a provider, seeding sensible defaults. */
 export function defaultSettingsFor(provider: AiProvider): AiSettings {

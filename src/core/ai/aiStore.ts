@@ -15,9 +15,13 @@
 import { create } from "zustand";
 import { newId } from "@/lib/id";
 import { useMessageStore } from "@/core/state/messageStore";
+import { useGuildStore } from "@/core/guild/guildStore";
+import { useAuthStore } from "@/core/auth/authStore";
+import { isProxyConfigured } from "@/core/guild/config";
 import type { WebhookMessage } from "@/core/schema/types";
 import type { AiSettings, ChatMessage } from "./types";
-import type { AiTurn } from "./providers";
+import type { AiPrompt, AiTurn } from "./providers";
+import { useAiUsageStore } from "./usageStore";
 import { loadAiSettings, saveAiSettings } from "./settingsStorage";
 // `attachEditorFields` (normalize) and `validateMessage` (validation) are on the
 // app's critical path already — the editor store, draft persistence, and live
@@ -111,14 +115,30 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   isConfigured() {
-    return get().settings.apiKey.trim().length > 0;
+    const settings = get().settings;
+    // The built-in relay needs no key — only a configured proxy. Sign-in is
+    // checked at send time (the auth state may still be resolving here).
+    if (settings.provider === "dweeb") return isProxyConfigured();
+    return settings.apiKey.trim().length > 0;
   },
 
   async send(prompt) {
     const text = prompt.trim();
     if (!text || get().thinking) return;
     if (!get().isConfigured()) {
-      set({ error: "Add your AI provider API key first." });
+      set({
+        error:
+          get().settings.provider === "dweeb"
+            ? "Built-in AI isn't available in this build — add your own API key in AI settings."
+            : "Add your AI provider API key first.",
+      });
+      return;
+    }
+    // The built-in relay requires a Discord session. Only a *known* signed-out
+    // state blocks here — while auth is still resolving, the request proceeds
+    // and a real 401 comes back with the same guidance.
+    if (get().settings.provider === "dweeb" && useAuthStore.getState().status === "anon") {
+      set({ error: "Sign in with Discord to use the built-in AI — it's free, no key needed." });
       return;
     }
 
@@ -175,12 +195,25 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
     const [
       { callAI, toTurns },
-      { buildSystemPrompt, buildRepairPrompt, buildMissingPayloadPrompt },
+      { buildSystemPrompt, buildPromptContext, buildRepairPrompt, buildMissingPayloadPrompt },
       { extractReply, streamingProse, announcesEdit },
     ] = engine;
 
     const { settings } = get();
-    const system = buildSystemPrompt(useMessageStore.getState().message);
+    // The connected server (if any) rides along so the built-in relay draws on
+    // a paid server's pooled allowance; BYOK providers ignore it.
+    const guildId = useGuildStore.getState().guildId.trim() || undefined;
+    const makePrompt = (msg: WebhookMessage): AiPrompt => ({
+      system: buildSystemPrompt(msg),
+      context: buildPromptContext(msg),
+      guildId,
+    });
+    const basePrompt = makePrompt(useMessageStore.getState().message);
+    // Refresh the built-in usage meter once this send fully settles (success
+    // or quota refusal both move it).
+    const refreshUsage = () => {
+      if (settings.provider === "dweeb") void useAiUsageStore.getState().load(guildId);
+    };
 
     // Split a raw reply into prose + a validated, importable message (or null),
     // and collect the error-severity issues that would make Discord reject it.
@@ -282,7 +315,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     // Stream one provider turn into the assistant bubble; returns the result and
     // the accumulated raw text (kept even on a mid-stream abort).
-    const streamTurn = async (turnSystem: string, turns: AiTurn[]) => {
+    const streamTurn = async (turnPrompt: AiPrompt, turns: AiTurn[]) => {
       let raw = "";
       let frameId: number | null = null;
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -307,7 +340,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       };
       const controller = new AbortController();
       inflight = controller;
-      const result = await callAI(settings, turnSystem, turns, controller.signal, (delta) => {
+      const result = await callAI(settings, turnPrompt, turns, controller.signal, (delta) => {
         raw += delta;
         scheduleFlush();
       });
@@ -322,7 +355,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       return { result, raw };
     };
 
-    const { result, raw } = await streamTurn(system, toTurns(history));
+    const { result, raw } = await streamTurn(basePrompt, toTurns(history));
 
     // Some adapters/upstreams may resolve successfully despite an AbortSignal.
     // Settle this turn's own bubble, but never apply it after Cancel or after a
@@ -358,6 +391,7 @@ export const useAiStore = create<AiState>((set, get) => ({
             : {}),
         }));
       }
+      if (!cancelled) refreshUsage();
       releaseSend();
       return;
     }
@@ -387,7 +421,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       ];
       const controller = new AbortController();
       inflight = controller;
-      const nudge = await callAI(settings, system, nudgeTurns, controller.signal);
+      const nudge = await callAI(settings, basePrompt, nudgeTurns, controller.signal);
       if (inflight === controller) inflight = null;
       if (nudge.ok) {
         const next = analyze(nudge.text ?? "");
@@ -424,12 +458,7 @@ export const useAiStore = create<AiState>((set, get) => ({
         ];
         const controller = new AbortController();
         inflight = controller;
-        const repair = await callAI(
-          settings,
-          buildSystemPrompt(broken),
-          repairTurns,
-          controller.signal,
-        );
+        const repair = await callAI(settings, makePrompt(broken), repairTurns, controller.signal);
         if (inflight === controller) inflight = null;
         if (!repair.ok) break; // cancelled or failed — keep the best-effort message
         const next = analyze(repair.text ?? "");
@@ -456,6 +485,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       failedEdit: editIntended && analysis.message === null,
     });
     if (isLatestSend()) set({ thinking: false });
+    refreshUsage();
     releaseSend();
   },
 

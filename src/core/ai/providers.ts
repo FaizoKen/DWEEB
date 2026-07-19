@@ -17,6 +17,7 @@
 
 import type { AiProvider, AiSettings, ChatMessage } from "./types";
 import { PROVIDERS } from "./providerMeta";
+import { proxyFetch } from "@/core/net/proxyFetch";
 
 /**
  * Sampling temperature for the OpenAI-compatible and Gemini paths. The
@@ -33,6 +34,20 @@ const GENERATION_TEMPERATURE = 0.2;
 export interface AiTurn {
   role: "user" | "assistant";
   content: string;
+}
+
+/**
+ * What a send needs beyond the transcript. BYOK providers consume the fully
+ * assembled `system` prompt; the built-in provider sends only `context` (the
+ * live message JSON) + `guildId` — the proxy owns the instruction template and
+ * assembles the identical prompt server-side, so the relay can never be used
+ * as a general-purpose LLM API.
+ */
+export interface AiPrompt {
+  system: string;
+  context: string;
+  /** The connected server, so paid servers draw on their pooled allowance. */
+  guildId?: string;
 }
 
 export interface AiCallResult {
@@ -70,28 +85,31 @@ export function toTurns(messages: ChatMessage[]): AiTurn[] {
 }
 
 /**
- * Make one completion request. `system` is the schema/instruction prompt,
- * `turns` is the running conversation (oldest first, ending with the latest
- * user turn). When `onToken` is supplied the reply is streamed and each text
- * delta is delivered through it as it arrives; the resolved `text` is still the
- * full reply so callers don't have to reassemble it themselves.
+ * Make one completion request. `prompt` carries the assembled system prompt
+ * (BYOK) plus the raw message context (built-in relay); `turns` is the running
+ * conversation (oldest first, ending with the latest user turn). When `onToken`
+ * is supplied the reply is streamed and each text delta is delivered through it
+ * as it arrives; the resolved `text` is still the full reply so callers don't
+ * have to reassemble it themselves.
  */
 export async function callAI(
   settings: AiSettings,
-  system: string,
+  prompt: AiPrompt,
   turns: AiTurn[],
   signal?: AbortSignal,
   onToken?: (delta: string) => void,
 ): Promise<AiCallResult> {
   try {
     switch (settings.provider) {
+      case "dweeb":
+        return await callDweeb(prompt, turns, signal, onToken);
       case "anthropic":
-        return await callAnthropic(settings, system, turns, signal, onToken);
+        return await callAnthropic(settings, prompt.system, turns, signal, onToken);
       case "gemini":
-        return await callGemini(settings, system, turns, signal, onToken);
+        return await callGemini(settings, prompt.system, turns, signal, onToken);
       case "openai":
       default:
-        return await callOpenAiCompatible(settings, system, turns, signal, onToken);
+        return await callOpenAiCompatible(settings, prompt.system, turns, signal, onToken);
     }
   } catch (e) {
     if ((e as DOMException)?.name === "AbortError") {
@@ -111,6 +129,8 @@ function networkErrorMessage(provider: AiProvider): string {
     "Couldn't reach the provider — the request was blocked before any response came back. " +
     "This is usually a CORS restriction, a network/DNS problem, or a browser ad-block/privacy extension.";
   switch (provider) {
+    case "dweeb":
+      return "Couldn't reach DWEEB's AI service. Check your connection and try again — or switch to your own API key in AI settings.";
     case "openai":
       return `${base}\n\nTips: make sure the key is an OpenAI key (sk-…) and that no extension is blocking api.openai.com. If your provider doesn't allow browser calls, set the Base URL to a proxy you control.`;
     case "anthropic":
@@ -309,6 +329,101 @@ async function callOpenAiCompatible(
   }
   if (onToken) onToken(content);
   return { ok: true, text: content };
+}
+
+/**
+ * The built-in relay: `POST /api/ai/chat` on the DWEEB proxy (session cookie —
+ * sign-in required). The body is data-only (`guild_id` + message `context` +
+ * transcript); the proxy assembles the prompt, pins the model, enforces
+ * quotas, and streams Groq's OpenAI-shaped SSE back verbatim, so the decoding
+ * below matches `callOpenAiCompatible`'s.
+ */
+async function callDweeb(
+  prompt: AiPrompt,
+  turns: AiTurn[],
+  signal?: AbortSignal,
+  onToken?: (delta: string) => void,
+): Promise<AiCallResult> {
+  const res = await proxyFetch("/api/ai/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      guild_id: prompt.guildId,
+      context: prompt.context,
+      turns,
+    }),
+    signal,
+  });
+  if (!res.ok) {
+    return { ok: false, error: describeDweebError(res.status, await readJson(res)) };
+  }
+
+  // The relay ALWAYS streams SSE, so decode by the response's content type —
+  // not by whether the caller wants tokens. The store's recovery/repair turns
+  // pass no `onToken`, and branching on it here would try to JSON-parse an
+  // event stream and fail every one of those turns.
+  if (isEventStream(res)) {
+    let full = "";
+    await readSse(res, (data) => {
+      if (data === "[DONE]") return;
+      let json: unknown;
+      try {
+        json = JSON.parse(data);
+      } catch {
+        return;
+      }
+      const delta = (json as { choices?: Array<{ delta?: { content?: unknown } }> })?.choices?.[0]
+        ?.delta?.content;
+      if (typeof delta === "string" && delta) {
+        full += delta;
+        onToken?.(delta);
+      }
+    });
+    return full
+      ? { ok: true, text: full }
+      : { ok: false, error: "The assistant returned an empty response — try again." };
+  }
+
+  const body = await readJson(res);
+  const content = (body as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]
+    ?.message?.content;
+  if (typeof content !== "string") {
+    return { ok: false, error: "The assistant returned an unexpected response shape." };
+  }
+  if (onToken) onToken(content);
+  return { ok: true, text: content };
+}
+
+/**
+ * Map the relay's structured refusals onto actionable copy. The proxy sends
+ * `{ error, status, kind }` where `kind` distinguishes a spent daily allowance
+ * (`quota`, with `resets_at`), the deployment's monthly budget (`budget`), and
+ * retryable backpressure (`busy`) — plus the plain 401/429/501 cases.
+ */
+function describeDweebError(status: number, body: unknown): string {
+  const obj = (body ?? {}) as { error?: unknown; kind?: unknown; resets_at?: unknown };
+  const message = typeof obj.error === "string" ? obj.error : "";
+  const kind = typeof obj.kind === "string" ? obj.kind : "";
+
+  if (status === 401) {
+    return "Sign in with Discord to use the built-in AI — it's free, no key needed.";
+  }
+  if (status === 501) {
+    return "Built-in AI isn't enabled on this deployment. Add your own API key in AI settings instead.";
+  }
+  if (kind === "quota") {
+    const resetsAt = typeof obj.resets_at === "number" ? obj.resets_at : null;
+    const when = resetsAt
+      ? ` (resets ${new Date(resetsAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`
+      : "";
+    return `${message || "Today's AI allowance is used up."}${when}`;
+  }
+  if (kind === "budget" || kind === "busy") {
+    return message || "The assistant is unavailable right now — try again shortly.";
+  }
+  if (message) return message;
+  if (status === 429) return "Rate limited — wait a few seconds and try again.";
+  return `The AI service returned an unexpected ${status} response.`;
 }
 
 async function callAnthropic(

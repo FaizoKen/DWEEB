@@ -32,6 +32,16 @@ pub struct TierLimits {
     /// Posted-message history window (per server): the library keeps the last
     /// N posted messages, auto-recorded and auto-evicted oldest-first.
     pub library_posted: i64,
+    /// Built-in AI requests per UTC day. On Free this is a **per-user**
+    /// allowance; on Plus/Pro it's the server's **pooled** allowance.
+    pub ai_requests: i64,
+    /// Built-in AI tokens (input + output) per UTC day, same scoping as
+    /// `ai_requests` — the cost-side bound the request count alone can't give.
+    pub ai_tokens: i64,
+    /// Per-member daily request ceiling inside a paid server's pool, so one
+    /// member can't drain a community's allowance. Unused on Free (the whole
+    /// allowance is already per-user there).
+    pub ai_member_requests: i64,
 }
 
 /// The Free / Plus / Pro quota table read by `entitlement.rs`.
@@ -236,6 +246,33 @@ pub struct Config {
     pub entitlement_cache_secs: i64,
     /// The Free/Plus/Pro quota table (env-tunable; defaults shipped).
     pub plan_limits: PlanLimits,
+
+    // ── Built-in AI (Groq-backed relay, see `ai.rs`) ───────────────────────
+    /// Server-held Groq API key. None ⇒ the whole feature is off: the `/api/ai`
+    /// endpoints answer 501 and the FE hides the built-in provider. This is a
+    /// credential and must never appear in a frontend build (`VITE_*`).
+    pub groq_api_key: Option<String>,
+    /// OpenAI-compatible API origin the relay calls (default Groq's).
+    pub ai_base_url: String,
+    /// The pinned chat model. Clients can never choose a model.
+    pub ai_model: String,
+    /// Optional cheaper model tried once when the primary is unavailable
+    /// (429/5xx after a retry). None ⇒ fail with a retryable error instead.
+    pub ai_fallback_model: Option<String>,
+    /// `max_tokens` pinned on every completion (bounds the cost of one reply).
+    pub ai_max_tokens: u32,
+    /// SQLite file the AI usage ledger lives in. Must sit on persistent
+    /// storage — quotas that reset on every redeploy aren't quotas.
+    pub ai_db_path: String,
+    /// Simultaneous relayed provider streams (the shared lane).
+    pub ai_concurrency: usize,
+    /// Extra permits only paid servers may spill into when the shared lane is
+    /// full — the "premium keeps working under load" lever. 0 disables it.
+    pub ai_reserved_concurrency: usize,
+    /// Monthly deployment-wide token ceiling (input + output). Once spent, the
+    /// relay answers a distinct 503 until the next UTC month — the hard cap on
+    /// what the feature can cost. 0 = uncapped.
+    pub ai_monthly_token_budget: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -390,6 +427,10 @@ impl Config {
                 coeditors: parse_or("PLAN_FREE_COEDITORS", 2)?,
                 library: parse_or("PLAN_FREE_LIBRARY", 10)?,
                 library_posted: parse_or("PLAN_FREE_LIBRARY_POSTED", 10)?,
+                // Free AI is per USER per day (paid tiers pool per server).
+                ai_requests: parse_or("PLAN_FREE_AI_REQUESTS", 30)?,
+                ai_tokens: parse_or("PLAN_FREE_AI_TOKENS", 150_000)?,
+                ai_member_requests: parse_or("PLAN_FREE_AI_MEMBER_REQUESTS", 0)?,
             },
             plus: TierLimits {
                 schedules: parse_or("PLAN_PLUS_SCHEDULES", 30)?,
@@ -398,6 +439,9 @@ impl Config {
                 coeditors: parse_or("PLAN_PLUS_COEDITORS", 6)?,
                 library: parse_or("PLAN_PLUS_LIBRARY", 100)?,
                 library_posted: parse_or("PLAN_PLUS_LIBRARY_POSTED", 100)?,
+                ai_requests: parse_or("PLAN_PLUS_AI_REQUESTS", 400)?,
+                ai_tokens: parse_or("PLAN_PLUS_AI_TOKENS", 2_000_000)?,
+                ai_member_requests: parse_or("PLAN_PLUS_AI_MEMBER_REQUESTS", 150)?,
             },
             pro: TierLimits {
                 // 0 = unlimited (mapped to i64::MAX at each gate).
@@ -407,8 +451,33 @@ impl Config {
                 coeditors: parse_or("PLAN_PRO_COEDITORS", 25)?,
                 library: parse_or("PLAN_PRO_LIBRARY", 0)?,
                 library_posted: parse_or("PLAN_PRO_LIBRARY_POSTED", 0)?,
+                // Deliberately NOT unlimited: AI spends real provider money per
+                // request, so even Pro keeps a (large) daily bound.
+                ai_requests: parse_or("PLAN_PRO_AI_REQUESTS", 2_000)?,
+                ai_tokens: parse_or("PLAN_PRO_AI_TOKENS", 10_000_000)?,
+                ai_member_requests: parse_or("PLAN_PRO_AI_MEMBER_REQUESTS", 500)?,
             },
         };
+
+        let groq_api_key = opt_env("GROQ_API_KEY");
+        let ai_base_url =
+            opt_env("AI_BASE_URL").unwrap_or_else(|| "https://api.groq.com/openai/v1".to_string());
+        let ai_model = opt_env("AI_MODEL").unwrap_or_else(|| "openai/gpt-oss-120b".to_string());
+        let ai_fallback_model = opt_env("AI_FALLBACK_MODEL");
+        // NB: Groq counts the RESERVED `max_tokens` toward its per-minute token
+        // budget (TPM), not just the tokens actually generated. Keep this
+        // comfortably under the smallest tier's TPM you target, or every
+        // request 413s before it starts — the free tier's 8k TPM is breached by
+        // an 8k reservation alone. 4k covers a full Components V2 message JSON
+        // plus a short reasoning budget with room for the prompt underneath.
+        let ai_max_tokens = parse_or("AI_MAX_TOKENS", 4_096)?;
+        let ai_db_path = opt_env("AI_DB_PATH").unwrap_or_else(|| "ai-usage.db".to_string());
+        let ai_concurrency = parse_or("AI_CONCURRENCY", 4)?;
+        if ai_concurrency == 0 {
+            return Err("AI_CONCURRENCY must be at least 1".into());
+        }
+        let ai_reserved_concurrency = parse_or("AI_RESERVED_CONCURRENCY", 2)?;
+        let ai_monthly_token_budget = parse_or("AI_MONTHLY_TOKEN_BUDGET", 20_000_000)?;
 
         check_durable_store_paths(
             &DurableStores {
@@ -419,6 +488,7 @@ impl Config {
                 stripe: stripe_secret_key
                     .is_some()
                     .then_some(stripe_db_path.as_str()),
+                ai_usage: groq_api_key.is_some().then_some(ai_db_path.as_str()),
             },
             parse_bool("STRICT_DB_PATHS", false)?,
         )?;
@@ -478,6 +548,15 @@ impl Config {
             stripe_backfill_ttl_secs,
             entitlement_cache_secs,
             plan_limits,
+            groq_api_key,
+            ai_base_url,
+            ai_model,
+            ai_fallback_model,
+            ai_max_tokens,
+            ai_db_path,
+            ai_concurrency,
+            ai_reserved_concurrency,
+            ai_monthly_token_budget,
         })
     }
 }
@@ -492,6 +571,7 @@ struct DurableStores<'a> {
     library: Option<&'a str>,
     activity_draft: Option<&'a str>,
     stripe: Option<&'a str>,
+    ai_usage: Option<&'a str>,
 }
 
 impl<'a> DurableStores<'a> {
@@ -503,6 +583,7 @@ impl<'a> DurableStores<'a> {
             ("LIBRARY_DB_PATH", self.library),
             ("ACTIVITY_DRAFT_DB_PATH", self.activity_draft),
             ("STRIPE_DB_PATH", self.stripe),
+            ("AI_DB_PATH", self.ai_usage),
         ]
         .into_iter()
         .filter_map(|(key, path)| path.map(|p| (key, p)))
@@ -701,6 +782,7 @@ mod tests {
             library,
             activity_draft: None,
             stripe: None,
+            ai_usage: None,
         }
     }
 

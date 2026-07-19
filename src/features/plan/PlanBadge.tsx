@@ -34,6 +34,8 @@ const LIMIT_ROWS: { key: keyof PlanInfo["limits"]; label: string }[] = [
   { key: "library_posted", label: "Posted history" },
   { key: "custom_bots", label: "Custom bots" },
   { key: "coeditors", label: "Live co-editors" },
+  // Per user on Free, a pooled per-server allowance on paid tiers.
+  { key: "ai_requests", label: "AI requests / day" },
 ];
 
 /** A limit value for display: a number, or "Unlimited" for the null (0/∞) case. */
@@ -80,7 +82,9 @@ export function PlanBadge({
               : "Everything works on Free. Paid plans just raise a few limits."}
           </p>
           <ul className={styles.limits}>
-            {LIMIT_ROWS.map((r) => (
+            {/* An absent key (proxy predating the field) hides the row —
+                `undefined` must not render as "Unlimited". */}
+            {LIMIT_ROWS.filter((r) => plan.limits[r.key] !== undefined).map((r) => (
               <li key={r.key} className={styles.limitRow}>
                 <span className={styles.limitLabel}>{r.label}</span>
                 <span className={styles.limitVal}>{limitText(plan.limits[r.key])}</span>

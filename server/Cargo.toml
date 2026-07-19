@@ -52,6 +52,10 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Optional shared cache + rate-limit backend for multi-instance deployments.
 # Minimal feature set: an async (tokio) connection manager with auto-reconnect.
 redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
+# `ReceiverStream` bridges the AI relay's mpsc channel into an axum streaming
+# body, so the Groq SSE stream is forwarded chunk-by-chunk while a background
+# task keeps reading it for the final usage accounting.
+tokio-stream = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 tracing = "0.1"

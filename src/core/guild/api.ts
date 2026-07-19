@@ -155,6 +155,11 @@ export interface PlanLimits {
    *  library keeps before the oldest rolls off. Absent from a proxy that
    *  predates the posted/saved split. */
   library_posted?: number | null;
+  /** Built-in AI requests per UTC day — per user on Free, pooled per server on
+   *  paid tiers. Absent from a proxy that predates built-in AI. */
+  ai_requests?: number | null;
+  /** Built-in AI tokens per UTC day, same scoping as `ai_requests`. */
+  ai_tokens?: number | null;
 }
 
 /** A server's plan, from `GET /api/guilds/:id/plan`. */

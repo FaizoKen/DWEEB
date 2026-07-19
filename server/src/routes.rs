@@ -77,6 +77,10 @@ pub struct AppState {
     /// DWEEB's own Stripe billing (mirror + client; see `stripe.rs`). None when
     /// Stripe isn't configured — the plan system is then inert.
     pub stripe: Option<Arc<crate::stripe::StripeState>>,
+    /// Built-in AI relay runtime (see `ai.rs`): Groq client, usage ledger, and
+    /// concurrency lanes. None when `GROQ_API_KEY` isn't configured — the
+    /// `/api/ai` endpoints then answer 501 and the FE hides the provider.
+    pub ai: Option<Arc<crate::ai::AiRuntime>>,
     /// Master key for encrypting/decrypting cookies.
     pub key: Key,
 }
@@ -123,6 +127,9 @@ pub async fn health() -> impl IntoResponse {
 pub async fn capabilities(State(st): State<AppState>) -> impl IntoResponse {
     axum::Json(json!({
         "feedback": st.config.feedback_webhook_url.is_some(),
+        // Built-in AI relay (server-held Groq key). The FE surfaces the
+        // no-key "DWEEB AI" provider only when this is on.
+        "ai": st.ai.is_some(),
     }))
 }
 
@@ -166,6 +173,8 @@ pub async fn ready(State(st): State<AppState>) -> Response {
     probe!(st.schedules, "schedules");
     probe!(st.activity_drafts, "activity_drafts");
     probe!(st.library, "library");
+    // The AI usage ledger lives inside `AiRuntime`, so pluck the store out.
+    probe!(st.ai.as_ref().map(|ai| Arc::clone(&ai.store)), "ai_usage");
 
     // Stripe's mirror store lives inside `StripeState`, so it's probed directly.
     if let Some(stripe) = st.stripe.clone() {

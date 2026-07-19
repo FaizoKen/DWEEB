@@ -23,6 +23,7 @@ vi.mock("./providers", async (importOriginal) => {
 
 import { callAI, type AiCallResult, type AiTurn } from "./providers";
 import { useAiStore } from "./aiStore";
+import { useAuthStore } from "@/core/auth/authStore";
 import { useMessageStore } from "@/core/state/messageStore";
 
 const mockedCallAI = vi.mocked(callAI);
@@ -72,6 +73,30 @@ beforeEach(() => {
     apiKey: "sk-test",
     model: "test-model",
     baseUrl: "",
+  });
+});
+
+describe("aiStore — built-in (dweeb) provider gating", () => {
+  it("needs no API key, but a known signed-out state refuses with a sign-in prompt", async () => {
+    // The built-in relay is configured by the proxy alone — no key required.
+    useAiStore.getState().setSettings({
+      provider: "dweeb",
+      apiKey: "",
+      model: "",
+      baseUrl: "",
+    });
+    expect(useAiStore.getState().isConfigured()).toBe(true);
+
+    // A *known* signed-out session must be refused before any provider call —
+    // with the sign-in guidance, never the BYOK "add your API key" copy.
+    useAuthStore.setState({ status: "anon" });
+    try {
+      await useAiStore.getState().send("build me a card");
+      expect(mockedCallAI).not.toHaveBeenCalled();
+      expect(useAiStore.getState().error).toContain("Sign in with Discord");
+    } finally {
+      useAuthStore.setState({ status: "unknown" });
+    }
   });
 });
 

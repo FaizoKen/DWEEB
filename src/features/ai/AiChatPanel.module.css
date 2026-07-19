@@ -440,6 +440,56 @@
   margin-top: 4px;
 }
 
+/* Built-in provider: the settings form replaces the key/model fields with this
+ * explainer card (the proxy owns the credential and pins the model). */
+.builtInCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  padding: 10px 12px;
+}
+.builtInCard strong {
+  color: var(--app-accent-text);
+}
+
+/* Slim status strip between the transcript and the composer: the built-in
+ * provider's daily-allowance meter, or its sign-in call to action. */
+.usageBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--app-border);
+  font-size: 11px;
+  color: var(--app-text-muted);
+  flex-shrink: 0;
+}
+.usageBar + .composer {
+  border-top: none;
+  padding-top: 8px;
+}
+.usageAction {
+  font: inherit;
+  font-weight: 600;
+  color: var(--app-accent-text);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.usageLow {
+  color: var(--app-danger);
+}
+
 .settings a {
   color: var(--app-accent-text);
 }

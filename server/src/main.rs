@@ -14,6 +14,8 @@
 
 mod activity;
 mod activity_draft;
+mod ai;
+mod ai_usage;
 mod auth;
 mod cache;
 mod config;
@@ -73,6 +75,12 @@ use crate::shortlink::{shortlink_create, shortlink_resolve, ShortLinkStore};
 const FEEDBACK_RATE_CAP: u32 = 3;
 const FEEDBACK_RATE_WINDOW: Duration = Duration::from_secs(15 * 60);
 
+/// The built-in AI chat spends real provider money per request, so it gets its
+/// own strict per-IP budget on top of the global limiter and the per-user
+/// pacing inside `ai.rs`. Sustained ~10/min with a small burst.
+const AI_RATE_PER_MIN: u32 = 10;
+const AI_RATE_BURST: u32 = 5;
+
 fn main() {
     // `dweeb-proxy healthcheck` is invoked by the Docker HEALTHCHECK on every
     // interval. Answer it before building any async runtime — the probe just
@@ -128,7 +136,7 @@ async fn run() {
     // through Redis so multiple instances coordinate; otherwise both are
     // process-local. The connection manager is cloned into each (cheap; it's an
     // Arc internally with its own reconnection loop).
-    let (cache, limiter, feedback_limiter) = match &config.redis_url {
+    let (cache, limiter, feedback_limiter, ai_limiter) = match &config.redis_url {
         Some(url) => {
             let conn = match connect_redis(url).await {
                 Ok(c) => c,
@@ -153,10 +161,16 @@ async fn run() {
                     window_secs: 60,
                 },
                 Limiter::Redis {
-                    conn,
+                    conn: conn.clone(),
                     key_prefix: "feedback",
                     limit: FEEDBACK_RATE_CAP,
                     window_secs: FEEDBACK_RATE_WINDOW.as_secs(),
+                },
+                Limiter::Redis {
+                    conn,
+                    key_prefix: "ai",
+                    limit: AI_RATE_PER_MIN.saturating_add(AI_RATE_BURST),
+                    window_secs: 60,
                 },
             )
         }
@@ -170,10 +184,12 @@ async fn run() {
                 FEEDBACK_RATE_CAP,
                 FEEDBACK_RATE_WINDOW,
             )),
+            Limiter::Memory(RateLimiter::new(AI_RATE_PER_MIN, AI_RATE_BURST)),
         ),
     };
     let limiter = Arc::new(limiter);
     let feedback_limiter = Arc::new(feedback_limiter);
+    let ai_limiter = Arc::new(ai_limiter);
 
     // Cookie signing + encryption key, built from the configured secret
     // (validated to be ≥64 bytes in `Config::from_env`).
@@ -374,6 +390,46 @@ async fn run() {
         });
     }
 
+    // Built-in AI relay: present only when GROQ_API_KEY is configured. The
+    // usage ledger is a durable quota promise, so an unopenable store fails the
+    // boot loudly (same stance as the schedule/library stores). A slow sweeper
+    // reclaims rollup rows too old to bind any quota check.
+    let ai = match ai::AiRuntime::from_config(&config) {
+        Ok(runtime) => {
+            if runtime.is_some() {
+                tracing::info!(
+                    db = %config.ai_db_path,
+                    model = %config.ai_model,
+                    "built-in AI relay enabled"
+                );
+            }
+            runtime
+        }
+        Err(e) => {
+            eprintln!("ai usage store error: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Some(runtime) = &ai {
+        let store = Arc::clone(&runtime.store);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(6 * 3600));
+            loop {
+                tick.tick().await;
+                let s = Arc::clone(&store);
+                let (day_cutoff, month_cutoff) =
+                    crate::ai_usage::sweep_cutoffs(crate::schedule::unix_now());
+                match tokio::task::spawn_blocking(move || s.sweep(&day_cutoff, &month_cutoff)).await
+                {
+                    Ok(Ok(0)) => {}
+                    Ok(Ok(n)) => tracing::info!(deleted = n, "swept old AI usage rollups"),
+                    Ok(Err(e)) => tracing::warn!("ai usage sweep failed: {e}"),
+                    Err(e) => tracing::warn!("ai usage sweep panicked: {e}"),
+                }
+            }
+        });
+    }
+
     let state = AppState {
         discord: Arc::new(Discord::new(
             config.bot_token.clone(),
@@ -393,6 +449,7 @@ async fn run() {
         library,
         entitlements,
         stripe,
+        ai,
         key,
         config: Arc::new(config),
     };
@@ -632,6 +689,21 @@ async fn run() {
             "/api/stripe/webhook",
             post(stripe::webhook).layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
         )
+        // Built-in AI (server-held Groq key; see `ai.rs`). The chat relay is
+        // cookie-gated and layered: a strict route-local per-IP limiter here,
+        // then per-user pacing / single-flight / daily quotas / the monthly
+        // budget inside the handler. The body is data-only (message JSON +
+        // transcript) and bounded like the other message-carrying routes. The
+        // TimeoutLayer above only bounds time-to-headers, so the streamed SSE
+        // body is unaffected (it has its own deadline in the relay task).
+        .route(
+            "/api/ai/chat",
+            post(ai::ai_chat)
+                .layer(axum::extract::DefaultBodyLimit::max(128 * 1024))
+                .layer(from_fn_with_state(ai_limiter, rate_limit)),
+        )
+        // The signed-in user's remaining daily allowance, for the panel meter.
+        .route("/api/ai/usage", get(ai::ai_usage_summary))
         // Guild data (login + membership gated)
         .route("/api/guilds", get(list_guilds))
         .route("/api/guilds/:guild_id/roles", get(roles))

@@ -16,7 +16,11 @@ import { IconButton } from "@/ui/IconButton";
 import { CloseIcon, SendIcon, SettingsIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
 import { useAiStore } from "@/core/ai/aiStore";
 import { PROVIDERS } from "@/core/ai/providerMeta";
+import { useAiUsageStore } from "@/core/ai/usageStore";
 import type { ChatMessage } from "@/core/ai/types";
+import { useAuthStore } from "@/core/auth/authStore";
+import { useGuildStore } from "@/core/guild/guildStore";
+import { usePlanStore } from "@/core/plan/planStore";
 import { AiSettingsForm } from "./AiSettingsForm";
 import styles from "./AiChatPanel.module.css";
 
@@ -39,10 +43,23 @@ export function AiChatPanel() {
   const clearChat = useAiStore((s) => s.clearChat);
   const settings = useAiStore((s) => s.settings);
   const isConfigured = useAiStore((s) => s.isConfigured());
+  const builtIn = settings.provider === "dweeb";
+  const authStatus = useAuthStore((s) => s.status);
+  const login = useAuthStore((s) => s.login);
+  const guildId = useGuildStore((s) => s.guildId);
+  const usage = useAiUsageStore((s) => s.usage);
 
   // "settings" view is forced until a key exists; afterwards the gear toggles it.
   const [showSettings, setShowSettings] = useState(false);
   const view = !isConfigured || showSettings ? "settings" : "chat";
+
+  // Keep the built-in allowance meter current while the panel is open (each
+  // completed send also refreshes it via the store).
+  useEffect(() => {
+    if (open && builtIn && authStatus === "authed") {
+      void useAiUsageStore.getState().load(guildId.trim() || undefined);
+    }
+  }, [open, builtIn, authStatus, guildId]);
 
   const [draft, setDraft] = useState("");
   const panelRef = useRef<HTMLElement>(null);
@@ -207,6 +224,38 @@ export function AiChatPanel() {
             </div>
           </div>
 
+          {builtIn ? (
+            authStatus === "anon" ? (
+              <div className={styles.usageBar}>
+                <span>Built-in AI is free with a Discord sign-in — no key needed.</span>
+                <button type="button" className={styles.usageAction} onClick={login}>
+                  Sign in
+                </button>
+              </div>
+            ) : usage && usage.requests_limit !== null ? (
+              <div className={styles.usageBar}>
+                <span
+                  className={
+                    usage.requests_used >= usage.requests_limit ? styles.usageLow : undefined
+                  }
+                >
+                  {usage.scope === "guild" ? "Server AI pool" : "Free AI"} ·{" "}
+                  {Math.min(usage.requests_used, usage.requests_limit)}/{usage.requests_limit} today
+                </span>
+                {usage.tier !== "pro" &&
+                usage.requests_used >= Math.ceil(usage.requests_limit * 0.8) &&
+                guildId.trim() ? (
+                  <button
+                    type="button"
+                    className={styles.usageAction}
+                    onClick={() => usePlanStore.getState().openPricing(guildId.trim())}
+                  >
+                    Upgrade for more
+                  </button>
+                ) : null}
+              </div>
+            ) : null
+          ) : null}
           <form
             className={styles.composer}
             onSubmit={(e) => {

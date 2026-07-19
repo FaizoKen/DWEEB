@@ -354,6 +354,33 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   in-dialog re-pick). The full list appears only when no bar pick exists yet (it's then the
   first pick), and that decision is frozen per dialog open so an in-dialog pick doesn't yank
   the list away mid-flow.
+- **Built-in AI is a server-relayed Groq key with layered spend guards** (2026-07-19). The
+  default AI provider is `dweeb`: `POST /api/ai/chat` on the proxy (`server/src/ai.rs`)
+  relays a streamed completion under a server-held `GROQ_API_KEY` (unset ⇒ 501 and the FE
+  hides the provider; `/api/capabilities` reports `ai`). **The client sends data only**
+  (`guild_id` + current-message `context` + transcript `turns`, closed contract) — the
+  instruction template, model (`AI_MODEL`), `max_tokens`, and temperature are pinned
+  server-side, so the route can't be borrowed as a general-purpose LLM API. The template's
+  single source of truth is `server/src/ai_prompt.txt` (Rust `include_str!`, FE `?raw`
+  import in `systemPrompt.ts` — it must stay under `server/src/` because the server's
+  Docker build context only copies that directory; `systemPrompt.test.ts` guards its baked
+  limit numbers against `LIMITS` drift, and `build_system`/`buildSystemPrompt` must stay
+  byte-identical). Guards, outermost in: route-local per-IP limiter → sign-in (cookie;
+  needs an `/api/activity/*` bearer twin before the assistant ever ships in the Activity) →
+  per-user pacing bucket + one-in-flight → daily quotas (Free = per-user
+  `PLAN_FREE_AI_REQUESTS/_TOKENS`; Plus/Pro = per-server pool + per-member ceiling,
+  resolved via `authorize_member_session` + entitlement) → concurrency semaphore
+  (`AI_CONCURRENCY`, plus `AI_RESERVED_CONCURRENCY` permits only paid servers may spill
+  into) → `AI_MONTHLY_TOKEN_BUDGET`, the monthly global token ceiling that makes the
+  feature's worst-case cost the number in the env file (distinct 503, FE steers to BYOK).
+  Usage is a SQLite rollup ledger (`ai_usage.rs`, `AI_DB_PATH` — a durable store: absolute
+  path in prod, probed by `/ready`), recorded from Groq's final-chunk usage (estimated
+  from chars when absent) and logged content-free under the `ai_usage` tracing target;
+  `GET /api/ai/usage` feeds the panel meter. Quota copy says "resets at midnight UTC".
+  Pro's AI quota is deliberately large-but-bounded, never unlimited (each request spends
+  real provider money) — that stays consistent with "plans are quota-raising only"
+  because Free keeps the feature too. BYOK providers remain unlimited and untouched; the
+  relay streams Groq's OpenAI-shaped SSE verbatim so the FE reuses the same decoder.
 - **AI assistant (src/core/ai) reliability contract.** The chat panel strips the model's
   JSON payload from the displayed bubble, but provider history must carry the RAW reply —
   `ChatMessage.raw` + `toTurns` — or follow-ups like "do it" leave the model blind to its
