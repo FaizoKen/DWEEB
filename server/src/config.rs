@@ -428,8 +428,14 @@ impl Config {
                 library: parse_or("PLAN_FREE_LIBRARY", 10)?,
                 library_posted: parse_or("PLAN_FREE_LIBRARY_POSTED", 10)?,
                 // Free AI is per USER per day (paid tiers pool per server).
-                ai_requests: parse_or("PLAN_FREE_AI_REQUESTS", 30)?,
-                ai_tokens: parse_or("PLAN_FREE_AI_TOKENS", 150_000)?,
+                // Sized for PROFITABILITY, not generosity: on gpt-oss-120b a
+                // request costs ~$0.002 worst case, i.e. ~$0.06/month for every
+                // request-per-day granted. Free earns no revenue at all, so its
+                // allowance is a taste of the feature (~$0.48/mo per ACTIVE user)
+                // rather than a working budget. The request cap binds first; the
+                // token cap is the backstop against huge-context abuse.
+                ai_requests: parse_or("PLAN_FREE_AI_REQUESTS", 8)?,
+                ai_tokens: parse_or("PLAN_FREE_AI_TOKENS", 60_000)?,
                 ai_member_requests: parse_or("PLAN_FREE_AI_MEMBER_REQUESTS", 0)?,
             },
             plus: TierLimits {
@@ -439,9 +445,10 @@ impl Config {
                 coeditors: parse_or("PLAN_PLUS_COEDITORS", 6)?,
                 library: parse_or("PLAN_PLUS_LIBRARY", 100)?,
                 library_posted: parse_or("PLAN_PLUS_LIBRARY_POSTED", 100)?,
-                ai_requests: parse_or("PLAN_PLUS_AI_REQUESTS", 400)?,
-                ai_tokens: parse_or("PLAN_PLUS_AI_TOKENS", 2_000_000)?,
-                ai_member_requests: parse_or("PLAN_PLUS_AI_MEMBER_REQUESTS", 150)?,
+                // ~$1.20/month worst case against ~$4.55 net revenue (~26%).
+                ai_requests: parse_or("PLAN_PLUS_AI_REQUESTS", 20)?,
+                ai_tokens: parse_or("PLAN_PLUS_AI_TOKENS", 150_000)?,
+                ai_member_requests: parse_or("PLAN_PLUS_AI_MEMBER_REQUESTS", 10)?,
             },
             pro: TierLimits {
                 // 0 = unlimited (mapped to i64::MAX at each gate).
@@ -452,10 +459,14 @@ impl Config {
                 library: parse_or("PLAN_PRO_LIBRARY", 0)?,
                 library_posted: parse_or("PLAN_PRO_LIBRARY_POSTED", 0)?,
                 // Deliberately NOT unlimited: AI spends real provider money per
-                // request, so even Pro keeps a (large) daily bound.
-                ai_requests: parse_or("PLAN_PRO_AI_REQUESTS", 2_000)?,
-                ai_tokens: parse_or("PLAN_PRO_AI_TOKENS", 10_000_000)?,
-                ai_member_requests: parse_or("PLAN_PRO_AI_MEMBER_REQUESTS", 500)?,
+                // request, so even Pro keeps a bounded daily allowance — sized
+                // so a server that maxes it EVERY day still costs a fraction of
+                // its subscription (~$2.40/month against ~$9.41 net, ~25%).
+                // Raising these is a direct, linear increase in provider spend:
+                // budget roughly $0.06/month per request-per-day granted.
+                ai_requests: parse_or("PLAN_PRO_AI_REQUESTS", 40)?,
+                ai_tokens: parse_or("PLAN_PRO_AI_TOKENS", 300_000)?,
+                ai_member_requests: parse_or("PLAN_PRO_AI_MEMBER_REQUESTS", 20)?,
             },
         };
 
