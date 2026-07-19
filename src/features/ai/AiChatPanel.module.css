@@ -458,6 +458,27 @@
   color: var(--app-accent-text);
 }
 
+/* Switch between the built-in relay and the bring-your-own-key section. Kept
+ * deliberately quiet: BYOK stays fully available (it's the escape valve every
+ * quota/budget refusal points at) but shouldn't compete with the zero-setup
+ * default for a new user's attention. */
+.advancedToggle {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  align-self: flex-start;
+  color: var(--app-text-muted);
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.advancedToggle:hover {
+  color: var(--app-text);
+}
+
 /* Slim status strip between the transcript and the composer: the built-in
  * provider's daily-allowance meter, or its sign-in call to action. */
 .usageBar {
