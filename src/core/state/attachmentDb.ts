@@ -204,7 +204,15 @@ export function loadAttachmentBlobs(
       cursorReq.onsuccess = () => {
         const cursor = cursorReq.result;
         if (!cursor) return;
-        if (typeof cursor.key === "string" && !live.has(cursor.key)) cursor.delete();
+        const key = cursor.key;
+        if (typeof key === "string" && !live.has(key)) {
+          // Not `cursor.delete()`: that throws InvalidStateError on a key
+          // cursor, and an exception here aborts the transaction — discarding
+          // the live blobs gathered above. A store-level delete stays
+          // value-free; preventDefault keeps a failed one equally non-fatal.
+          const del = store.delete(key);
+          del.onerror = (event) => event.preventDefault();
+        }
         cursor.continue();
       };
       tx.oncomplete = () =>

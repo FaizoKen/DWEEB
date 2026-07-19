@@ -427,7 +427,14 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   Missed interval ticks use `Skip`, so an upstream slowdown never triggers a catch-up burst.
 - **Browser upload hydration follows reachability.** Startup collects `session://` ids from the
   live message, undo/redo, and named browser saves, reads only those IndexedDB blobs, and deletes
-  orphan keys with a key-only cursor (never materializing stale file bytes). Multi-file gallery
+  orphan keys with a key-only cursor (never materializing stale file bytes). Those orphan deletes
+  are issued as `store.delete(key)` requests, **never `IDBCursor.delete()`** — a key cursor's
+  `delete()` throws `InvalidStateError`, and an exception (or unhandled request error, hence the
+  `preventDefault` on each delete) inside the transaction's handlers aborts the whole transaction:
+  v1.0.0 shipped that, so one orphan key both fired a `web_crash` beacon and silently dropped
+  hydration of the user's *live* uploads (fixed 2026-07-19, guarded by
+  `src/core/state/attachmentDb.test.ts` against fake-indexeddb, which enforces the spec
+  restriction). Multi-file gallery
   registration is one IDB transaction + one attachment-store notification; GC is debounced and
   snapshot URL scans are WeakMap-cached under the stores' immutable-tree contract.
 - **Authentication defines an account-state lifetime.** Credential/decrypted stores register with
