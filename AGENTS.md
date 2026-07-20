@@ -412,6 +412,31 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   token. The accumulated raw reply still records every token for provider history. Provider
   controllers are owned by a monotonically identified send: a cancelled send settling late must
   never clear a newer send's controller, thinking state, or editor commit.
+- **An uploaded avatar must be hosted forever — Discord hot-links `avatar_url`.**
+  Discord does *not* re-host the avatar image: it stores the URL string on the message
+  and re-fetches it every time that message renders. So every "cheap" hosting idea is
+  wrong, and two were tried and rejected on the evidence (2026-07-20): a short-TTL /
+  in-memory store puts a **broken image in a permanent message**, and reusing Discord's
+  own attachment CDN (post the image as a throwaway webhook message, keep its
+  `cdn.discordapp.com/attachments/…` link, delete the message) **does not work at all** —
+  Discord rejects its own attachment URLs in `avatar_url` with *and* without the
+  `?ex=&is=&hm=` signature params (discord-api-docs#6657). Don't reintroduce either.
+  Hosting therefore lives in the proxy (`server/src/avatar.rs`, `AVATAR_*` env,
+  `/data/avatars.db`): `POST /api/avatar` takes raw bytes and returns a permanent
+  `…/api/avatar/<sha256>.png`, `GET` serves them anonymously (Discord's fetcher carries
+  no credential) as `immutable` for a year. Rows are **never swept** — deleting one
+  silently breaks a live post — so size is bounded only by content-addressed dedupe, a
+  byte cap, and a row cap that answers 503 rather than evicting. The browser does all
+  the pixel work (`core/avatar/image.ts`: center-crop, downscale to 256², re-encode),
+  because Discord *silently* falls back to the default avatar for images past ~1024px
+  and never renders animated GIFs (#830) — so the server only parses PNG/JPEG **header**
+  bytes to verify dimensions, and needs no image-decoding crate. Format is chosen per
+  image: PNG whenever there is any transparency (JPEG would flatten it to black inside
+  Discord's circular crop), else PNG until `PNG_SIZE_BUDGET`, then JPEG. Upload is
+  identity-gated through `resolve_identity` (**not** cookie-only — the Activity renders
+  the same `ComponentTree`) so the endpoint can't become a free image host. The field
+  stays a URL input: uploading just fills it, because it must keep accepting
+  `{server_icon}` and existing CDN links.
 - **Env config fails loudly, never silently.** `config.rs` trims every value (`normalize`), and a
   _present but unparseable_ value is a boot error rather than a fall back to the default —
   `parse_bool` accepts only `1/true/yes/on` + `0/false/no/off` and rejects anything else. This is

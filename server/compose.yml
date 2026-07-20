@@ -106,6 +106,15 @@ services:
       # The short-link SQLite file must live on the proxy_data volume — a
       # short link promises 7 days, so it has to survive a redeploy.
       SHORTLINK_DB_PATH: ${SHORTLINK_DB_PATH:-/data/shortlinks.db}
+      # Uploaded webhook avatars, on the SAME proxy_data volume — and this one
+      # is the least forgiving of the set. Discord HOT-LINKS avatar_url rather
+      # than re-hosting it, so it re-fetches this URL for the life of every
+      # message sent with an uploaded avatar. Losing this file doesn't expire a
+      # link, it breaks the avatar in posts that may be years old. Rows are
+      # therefore never swept (see server/src/avatar.rs); size is bounded by
+      # content-addressed dedupe plus AVATAR_MAX_BYTES / AVATAR_MAX_ENTRIES.
+      # Set AVATAR_UPLOADS_ENABLED=false in .env to turn the feature off.
+      AVATAR_DB_PATH: ${AVATAR_DB_PATH:-/data/avatars.db}
       # Scheduled posts live in their OWN SQLite file on the SAME proxy_data
       # volume — a schedule is a promise to post later, so it must outlive a
       # redeploy. The webhook URL + payload are sealed at rest under

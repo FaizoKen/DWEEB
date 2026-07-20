@@ -51,6 +51,8 @@ pub struct AppState {
     pub dispatcher: Option<Arc<DispatcherApi>>,
     /// Short-link store (see `shortlink.rs`); None when the feature is off.
     pub shortlinks: Option<Arc<ShortLinkStore>>,
+    /// Uploaded webhook avatars (see `avatar.rs`); None when the feature is off.
+    pub avatars: Option<Arc<crate::avatar::AvatarStore>>,
     /// Scheduled-post store (see `schedule.rs`); None when the feature is off.
     pub schedules: Option<Arc<crate::schedule::ScheduleStore>>,
     /// Live collaboration rooms for the embedded Activity (see `activity.rs`).
@@ -130,6 +132,9 @@ pub async fn capabilities(State(st): State<AppState>) -> impl IntoResponse {
         // Built-in AI relay (server-held Groq key). The FE surfaces the
         // no-key "DWEEB AI" provider only when this is on.
         "ai": st.ai.is_some(),
+        // Uploaded webhook avatars. Off ⇒ the builder shows only the
+        // paste-a-URL field rather than an upload control that would 501.
+        "avatarUploads": st.avatars.is_some(),
     }))
 }
 
@@ -170,6 +175,7 @@ pub async fn ready(State(st): State<AppState>) -> Response {
     }
 
     probe!(st.shortlinks, "shortlinks");
+    probe!(st.avatars, "avatars");
     probe!(st.schedules, "schedules");
     probe!(st.activity_drafts, "activity_drafts");
     probe!(st.library, "library");

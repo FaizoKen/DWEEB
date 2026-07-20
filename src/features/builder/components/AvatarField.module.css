@@ -1,0 +1,115 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* One row: round preview, the URL input, then the upload button. Keeps the
+   avatar field the same height as the Username field beside it in `.row2`. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Round like Discord renders it, so what the user sees here is what the
+   message will look like. */
+.preview {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  display: grid;
+  place-items: center;
+}
+
+.previewImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.previewEmpty {
+  color: var(--app-text-subtle);
+  display: grid;
+  place-items: center;
+}
+
+/* Covers the thumbnail while bytes are in flight. */
+.spinner {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--app-bg-elevated) 78%, transparent);
+}
+
+.spinnerDot {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--app-border);
+  border-top-color: var(--app-accent);
+  border-radius: 50%;
+  animation: spin 640ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinnerDot {
+    animation-duration: 2s;
+  }
+}
+
+.uploadBtn {
+  flex: 0 0 auto;
+}
+
+.fileInput {
+  display: none;
+}
+
+/* Drop affordance across the whole row, so a dragged image can be released
+   anywhere over the field rather than onto the 32px thumbnail. */
+.dropOverlay {
+  position: absolute;
+  inset: -2px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--app-accent);
+  border-radius: var(--app-radius);
+  background:
+    linear-gradient(var(--app-accent-soft), var(--app-accent-soft)), var(--app-bg-elevated);
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.status {
+  margin: 0;
+  font-size: 11px;
+  color: var(--app-text-subtle);
+}
+
+.errorText {
+  margin: 0;
+  font-size: 11px;
+  color: var(--app-danger, #ed4245);
+}

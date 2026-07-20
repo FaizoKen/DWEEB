@@ -17,6 +17,7 @@ mod activity_draft;
 mod ai;
 mod ai_usage;
 mod auth;
+mod avatar;
 mod cache;
 mod config;
 mod discord;
@@ -52,6 +53,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
+use crate::avatar::{avatar_get, avatar_upload, AvatarStore};
 use crate::cache::{DataCache, TtlCache};
 use crate::config::Config;
 use crate::discord::Discord;
@@ -263,6 +265,37 @@ async fn run() {
     } else {
         None
     };
+    // Uploaded webhook avatars. Note the asymmetry with short links above:
+    // there is deliberately **no sweep task** here. Discord hot-links
+    // `avatar_url` for the life of the message, so an expired row is not a dead
+    // link, it is a broken image in someone's old post. Size is bounded by
+    // content-addressed dedupe + a byte cap + a row cap instead (see
+    // `avatar.rs`), never by deletion.
+    let avatars = if config.avatar_uploads_enabled {
+        match AvatarStore::open(
+            &config.avatar_db_path,
+            config.avatar_max_entries,
+            config.avatar_max_bytes,
+            config.avatar_public_base_url.clone(),
+        ) {
+            Ok(store) => {
+                tracing::info!(
+                    db = %config.avatar_db_path,
+                    base = %config.avatar_public_base_url,
+                    max_entries = config.avatar_max_entries,
+                    "avatar uploads enabled"
+                );
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                eprintln!("avatar store error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     if let Some(store) = &shortlinks {
         let store = Arc::clone(store);
         tokio::spawn(async move {
@@ -439,6 +472,7 @@ async fn run() {
         flight: Arc::new(crate::singleflight::SingleFlight::new()),
         dispatcher,
         shortlinks,
+        avatars,
         schedules,
         activity_rooms: Arc::new(crate::activity::ActivityRooms::new()),
         activity_tickets: Arc::new(crate::activity::ActivityTickets::new()),
@@ -453,6 +487,10 @@ async fn run() {
         key,
         config: Arc::new(config),
     };
+
+    // Read off the state's `Arc<Config>` — `config` itself has moved into it,
+    // and the router below is built after that move.
+    let avatar_body_limit = state.config.avatar_max_bytes + 4 * 1024;
 
     // Now that `AppState` exists, start the scheduled-post delivery worker. It
     // holds a clone of the state so a fired custom-bot schedule can re-resolve and
@@ -502,6 +540,20 @@ async fn run() {
             post(shortlink_create).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route("/api/shortlink/:id", get(shortlink_resolve))
+        // Uploaded webhook avatars (see `avatar.rs`). Discord hot-links
+        // `avatar_url`, so these bytes must be publicly fetchable and must stay
+        // reachable for as long as the message exists.
+        //
+        // The upload is session-gated in the handler (an open endpoint would be
+        // a free image host) and takes raw image bytes, so the body limit is the
+        // configured per-image cap plus a little slack for headers. The GET is
+        // deliberately anonymous: Discord's image fetcher sends no credential,
+        // and neither does an `<img>` tag in the preview.
+        .route(
+            "/api/avatar",
+            post(avatar_upload).layer(axum::extract::DefaultBodyLimit::max(avatar_body_limit)),
+        )
+        .route("/api/avatar/:file", get(avatar_get))
         // Frontend crash telemetry: the browser's global error handlers beacon a
         // content-free crash report (message, a few stack frames, version, URL
         // path — never the `#hash` payload) so runtime errors in the wild are

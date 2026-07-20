@@ -64,6 +64,7 @@ import { Field } from "@/ui/Field";
 import { IconButton } from "@/ui/IconButton";
 import { PlaceholderInput } from "@/ui/PlaceholderInput";
 import { useMessagePlaceholders } from "@/features/builder/useMessagePlaceholders";
+import { AvatarField } from "./AvatarField";
 import { AddComponentMenu, type AddMenuNode } from "./AddComponentMenu";
 import { fieldForIssueCode, routeMessageIssues } from "@/features/builder/optionsReveal";
 import { MessageOptions } from "./MessageOptions";
@@ -525,14 +526,11 @@ function MetaHeader() {
           warning={fieldIssues.get("avatar")?.warning}
         >
           {(id) => (
-            <PlaceholderInput
+            <AvatarField
               id={id}
-              data-meta-field="avatar"
-              type="url"
               value={avatar}
               placeholders={placeholders}
               onChange={(value) => setAvatar(value)}
-              placeholder="https://… or {server_icon}"
             />
           )}
         </Field>

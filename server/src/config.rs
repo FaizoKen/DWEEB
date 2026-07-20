@@ -155,6 +155,29 @@ pub struct Config {
     /// keep resolving); bounds worst-case disk usage under abuse.
     pub shortlink_max_entries: u64,
 
+    // ── Uploaded webhook avatars ───────────────────────────────────────────
+    /// Master switch for avatar uploads. False ⇒ `/api/avatar` answers 501 and
+    /// the builder offers only the paste-a-URL field. Default on — the feature
+    /// needs no secret.
+    pub avatar_uploads_enabled: bool,
+    /// SQLite file the uploaded avatar images live in. Must sit on persistent
+    /// storage, and unusually strictly so: Discord *hot-links* `avatar_url`
+    /// forever, so losing this file breaks the avatar on every message that was
+    /// ever sent with an uploaded one. See `avatar.rs` for why the rows are
+    /// never swept.
+    pub avatar_db_path: String,
+    /// Uploads answer 503 once this many *distinct* images are stored. Images
+    /// are content-addressed, so re-using one costs nothing and only genuinely
+    /// new artwork counts against this.
+    pub avatar_max_entries: u64,
+    /// Hard cap on one stored image. The client downscales to 256×256 (~10–60
+    /// KiB) before uploading; this bounds a hand-crafted request.
+    pub avatar_max_bytes: usize,
+    /// Public origin + path the avatar URL is built from. Defaults to this
+    /// service's own origin (taken from `OAUTH_REDIRECT_URL`) — override only
+    /// when the images are fronted by a different hostname or a CDN.
+    pub avatar_public_base_url: String,
+
     // ── Scheduled posts ────────────────────────────────────────────────────
     /// Master switch for scheduled posts. False ⇒ the `/api/schedules`
     /// endpoints answer 501 and the worker never starts (the builder hides the
@@ -373,6 +396,21 @@ impl Config {
             opt_env("SHORTLINK_DB_PATH").unwrap_or_else(|| "shortlinks.db".to_string());
         let shortlink_max_entries = parse_or("SHORTLINK_MAX_ENTRIES", 50_000)?;
 
+        let avatar_uploads_enabled = parse_bool("AVATAR_UPLOADS_ENABLED", true)?;
+        let avatar_db_path = opt_env("AVATAR_DB_PATH").unwrap_or_else(|| "avatars.db".to_string());
+        let avatar_max_entries = parse_or("AVATAR_MAX_ENTRIES", 20_000)?;
+        let avatar_max_bytes = parse_or("AVATAR_MAX_BYTES", 128 * 1024)?;
+        // The URL we hand out has to be one Discord's fetcher can reach from the
+        // public internet, so it can't be derived from the request (a proxied
+        // Host header would send Discord somewhere internal). `OAUTH_REDIRECT_URL`
+        // is already required, already public, and already points at this very
+        // service — reuse its origin rather than adding a variable every
+        // deployment would have to remember to set.
+        let avatar_public_base_url = match opt_env("AVATAR_PUBLIC_BASE_URL") {
+            Some(base) => base.trim_end_matches('/').to_string(),
+            None => format!("{}/api/avatar", origin_of(&oauth_redirect_url)?),
+        };
+
         let schedules_enabled = parse_bool("SCHEDULES_ENABLED", true)?;
         let schedule_db_path =
             opt_env("SCHEDULE_DB_PATH").unwrap_or_else(|| "schedules.db".to_string());
@@ -493,6 +531,7 @@ impl Config {
         check_durable_store_paths(
             &DurableStores {
                 shortlink: (shortlink_ttl_days > 0).then_some(shortlink_db_path.as_str()),
+                avatar: avatar_uploads_enabled.then_some(avatar_db_path.as_str()),
                 schedule: schedules_enabled.then_some(schedule_db_path.as_str()),
                 library: library_enabled.then_some(library_db_path.as_str()),
                 activity_draft: activities_enabled.then_some(activity_draft_db_path.as_str()),
@@ -533,6 +572,11 @@ impl Config {
             shortlink_ttl_days,
             shortlink_db_path,
             shortlink_max_entries,
+            avatar_uploads_enabled,
+            avatar_db_path,
+            avatar_max_entries,
+            avatar_max_bytes,
+            avatar_public_base_url,
             schedules_enabled,
             schedule_db_path,
             schedule_max_entries,
@@ -578,6 +622,7 @@ impl Config {
 /// so it has nothing to lose. `None` ⇒ that store is off.
 struct DurableStores<'a> {
     shortlink: Option<&'a str>,
+    avatar: Option<&'a str>,
     schedule: Option<&'a str>,
     library: Option<&'a str>,
     activity_draft: Option<&'a str>,
@@ -590,6 +635,7 @@ impl<'a> DurableStores<'a> {
     fn enabled(&self) -> Vec<(&'static str, &'a str)> {
         [
             ("SHORTLINK_DB_PATH", self.shortlink),
+            ("AVATAR_DB_PATH", self.avatar),
             ("SCHEDULE_DB_PATH", self.schedule),
             ("LIBRARY_DB_PATH", self.library),
             ("ACTIVITY_DRAFT_DB_PATH", self.activity_draft),
@@ -648,6 +694,26 @@ fn check_durable_store_paths(stores: &DurableStores<'_>, strict: bool) -> Result
          to make this a hard boot failure."
     );
     Ok(())
+}
+
+/// The `scheme://host[:port]` of an absolute URL, with no trailing slash.
+///
+/// Used to derive the public origin uploaded avatars are served from out of
+/// `OAUTH_REDIRECT_URL`. Deliberately string-based rather than pulling in a URL
+/// parser: the input is an operator-supplied absolute `https://…` URL that
+/// Discord itself already validated as a redirect target, so the only failure
+/// worth reporting is "that isn't an absolute URL at all".
+fn origin_of(url: &str) -> Result<String, String> {
+    let (scheme, rest) = url
+        .split_once("://")
+        .ok_or_else(|| format!("OAUTH_REDIRECT_URL must be an absolute URL, got {url:?}"))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if scheme.is_empty() || authority.is_empty() {
+        return Err(format!(
+            "OAUTH_REDIRECT_URL must be an absolute URL, got {url:?}"
+        ));
+    }
+    Ok(format!("{scheme}://{authority}"))
 }
 
 /// Does this path survive a redeploy — i.e. is it anchored somewhere other than
@@ -781,7 +847,7 @@ fn valid_feedback_webhook_url(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        bool_value, check_durable_store_paths, is_durable_path, normalize, parse_value,
+        bool_value, check_durable_store_paths, is_durable_path, normalize, origin_of, parse_value,
         valid_feedback_webhook_url, DurableStores,
     };
 
@@ -789,12 +855,36 @@ mod tests {
     fn stores<'a>(schedule: Option<&'a str>, library: Option<&'a str>) -> DurableStores<'a> {
         DurableStores {
             shortlink: None,
+            avatar: None,
             schedule,
             library,
             activity_draft: None,
             stripe: None,
             ai_usage: None,
         }
+    }
+
+    #[test]
+    fn avatar_base_url_derives_from_the_oauth_redirect_origin() {
+        // The avatar URL is baked permanently into Discord messages, so getting
+        // this origin wrong is unrecoverable — pin the derivation.
+        assert_eq!(
+            origin_of("https://api.dweeb.example.com/auth/callback").unwrap(),
+            "https://api.dweeb.example.com"
+        );
+        assert_eq!(
+            origin_of("http://localhost:8080/auth/callback").unwrap(),
+            "http://localhost:8080"
+        );
+        // Query/fragment must not leak into the origin.
+        assert_eq!(
+            origin_of("https://api.example.com/auth/callback?x=1#y").unwrap(),
+            "https://api.example.com"
+        );
+        // A bare host is not an absolute URL; failing loudly beats serving
+        // avatar URLs Discord can never resolve.
+        assert!(origin_of("api.example.com/auth/callback").is_err());
+        assert!(origin_of("https://").is_err());
     }
 
     #[test]
