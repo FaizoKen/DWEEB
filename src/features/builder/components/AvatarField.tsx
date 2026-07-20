@@ -28,6 +28,7 @@
 
 import { useRef, useState } from "react";
 import { PlaceholderInput } from "@/ui/PlaceholderInput";
+import { UploadIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { useAvatarUploadConfigured } from "@/core/avatar/availability";
 import { uploadAvatarImage } from "@/core/avatar/upload";
@@ -128,10 +129,17 @@ export function AvatarField({ id, value, onChange, placeholders }: AvatarFieldPr
             className={styles.uploadBtn}
             disabled={busy}
             aria-busy={busy}
+            // Icon-only, so the label has to live in `aria-label` — `title`
+            // alone is not an accessible name for a screen reader.
+            aria-label={busy ? "Uploading image" : "Upload an image"}
+            title={busy ? "Uploading…" : "Upload an image"}
             onClick={() => inputRef.current?.click()}
           >
-            {busy ? <span className={styles.spinnerDot} aria-hidden="true" /> : "Upload"}
-            {busy ? <span className={styles.srOnly}>Uploading</span> : null}
+            {busy ? (
+              <span className={styles.spinnerDot} aria-hidden="true" />
+            ) : (
+              <UploadIcon size={15} />
+            )}
           </button>
           <input
             ref={inputRef}

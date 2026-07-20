@@ -62,7 +62,7 @@ export function MediaGalleryInspector({ node }: Props) {
     <>
       <div className={styles.listHeader}>
         <span>
-          Images ({node.items.length} / {LIMITS.GALLERY_ITEMS})
+          Media ({node.items.length} / {LIMITS.GALLERY_ITEMS})
         </span>
         <button
           type="button"
@@ -70,7 +70,7 @@ export function MediaGalleryInspector({ node }: Props) {
           disabled={isFull}
           onClick={() => addThenScroll(() => addItem(node._id))}
         >
-          + Add image
+          + Add media
         </button>
       </div>
 
@@ -106,17 +106,17 @@ export function MediaGalleryInspector({ node }: Props) {
           }}
         />
         {isFull ? (
-          <span>Gallery full — {LIMITS.GALLERY_ITEMS} images max.</span>
+          <span>Gallery full — {LIMITS.GALLERY_ITEMS} items max.</span>
         ) : (
           <>
-            <strong>Drag &amp; drop, paste, or click to add images</strong>
+            <strong>Drag &amp; drop, paste, or click to add images or videos</strong>
             <span>Kept in this browser while editing; uploaded to Discord when you send.</span>
           </>
         )}
       </label>
 
       <p className={styles.note}>
-        Each image is its own row in the tree below — select a row to edit it, or use its up/down
+        Each item is its own row in the tree below — select a row to edit it, or use its up/down
         arrows to reorder.
       </p>
 

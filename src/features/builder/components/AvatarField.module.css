@@ -14,9 +14,9 @@
 }
 
 /* Clear the inset button so a long URL scrolls behind it rather than under it.
-   Width of the button (60) + its right offset (5) + a little breathing room. */
+   Button (26) + its right offset (5) + a little breathing room. */
 .inputWithButton {
-  padding-right: 74px;
+  padding-right: 39px;
 }
 
 .uploadBtn {
@@ -27,15 +27,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* Square: the spinner swaps in for the icon at the same footprint, so the
+     button never changes size mid-upload and the input's padding stays right. */
+  width: 26px;
   height: 26px;
-  min-width: 60px;
-  padding: 0 10px;
+  padding: 0;
   border: 0;
-  border-radius: 4px;
-  background: var(--app-bg-active);
-  color: var(--app-text-muted);
-  font-size: var(--app-text-sm);
-  font-weight: 600;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--app-text-subtle);
   line-height: 1;
   cursor: pointer;
   transition:
@@ -43,8 +43,10 @@
     color 120ms ease;
 }
 
+/* Transparent at rest so it reads as an affordance inside the field rather than
+   a second control competing with the input; the surface appears on hover. */
 .uploadBtn:hover:not(:disabled) {
-  background: var(--app-accent-soft);
+  background: var(--app-bg-active);
   color: var(--app-text);
 }
 
@@ -97,16 +99,4 @@
   font-weight: 600;
   pointer-events: none;
   z-index: 1;
-}
-
-.srOnly {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }

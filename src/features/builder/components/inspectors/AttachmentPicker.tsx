@@ -33,15 +33,24 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A gallery item takes images *and* videos, a thumbnail only images — the
+  // copy has to say which, or "image" reads as a restriction that isn't there.
+  const acceptsImage = accept?.includes("image/") ?? false;
+  const acceptsVideo = accept?.includes("video/") ?? false;
+  const acceptsMedia = acceptsImage && acceptsVideo;
+  const acceptsImageOnly = acceptsImage && !acceptsVideo;
+
   const handlePick = (file: File | null) => {
     if (!file) return;
     // The native `accept` only filters the OS dialog; drag-and-drop and the
     // dialog's "All files" override both slip past it, so re-check here.
     if (!matchesAccept(file, accept)) {
       setError(
-        accept?.startsWith("image")
-          ? `“${file.name}” isn't an image file.`
-          : `“${file.name}” isn't a supported file type.`,
+        acceptsMedia
+          ? `“${file.name}” isn't an image or video file.`
+          : acceptsImageOnly
+            ? `“${file.name}” isn't an image file.`
+            : `“${file.name}” isn't a supported file type.`,
       );
       return;
     }
@@ -111,7 +120,11 @@ export function AttachmentPicker({ url, onChange, accept }: AttachmentPickerProp
     handlePick(e.dataTransfer.files?.[0] ?? null);
   };
 
-  const dropText = accept?.startsWith("image") ? "Drop image here" : "Drop file here";
+  const dropText = acceptsMedia
+    ? "Drop image or video here"
+    : acceptsImageOnly
+      ? "Drop image here"
+      : "Drop file here";
 
   return (
     <div className={styles.wrap}>

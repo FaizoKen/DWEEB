@@ -457,11 +457,11 @@ function DragGhost() {
   }, [drag, ghostStart, ghostRef]);
 
   if (!drag) return null;
-  // Gallery images aren't components, so they carry no COMPONENT_META entry —
+  // Gallery items aren't components, so they carry no COMPONENT_META entry —
   // give them a dedicated ghost. Everything else reads from its type meta.
-  const isImage = drag.parentKind === "gallery";
-  const glyph = isImage ? "▦" : COMPONENT_META[drag.type].glyph;
-  const label = isImage ? "Image" : COMPONENT_META[drag.type].label;
+  const isGalleryItem = drag.parentKind === "gallery";
+  const glyph = isGalleryItem ? "▦" : COMPONENT_META[drag.type].glyph;
+  const label = isGalleryItem ? "Media" : COMPONENT_META[drag.type].label;
   return createPortal(
     <div ref={ghostRef} className={styles.ghost} aria-hidden="true">
       <span className={styles.ghostGlyph}>{glyph}</span>
@@ -1390,7 +1390,7 @@ function GalleryItemNode({
           data-row-select="true"
           aria-expanded={isSelected}
           aria-controls={isSelected ? editorPanelId : undefined}
-          aria-label={`${isSelected ? "Close" : "Open"} image editor${rowSummary ? `: ${rowSummary}` : ""}`}
+          aria-label={`${isSelected ? "Close" : "Open"} media editor${rowSummary ? `: ${rowSummary}` : ""}`}
         >
           <span className={styles.chevron} aria-hidden="true">
             {isSelected ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
@@ -1404,7 +1404,7 @@ function GalleryItemNode({
             </span>
             <IssueDot issues={issues} />
           </span>
-          <span className={styles.label}>Image</span>
+          <span className={styles.label}>Media</span>
           <span className={styles.summary}>{rowSummary}</span>
         </button>
 
@@ -1441,7 +1441,7 @@ function GalleryItemNode({
             <IconButton
               size="sm"
               variant="danger"
-              label="Delete image"
+              label="Delete media"
               onClick={() => removeGalleryItem(galleryId, item._id)}
             >
               <TrashIcon size={12} />
@@ -1459,7 +1459,7 @@ function GalleryItemNode({
   );
 }
 
-/** Short right-aligned summary for a gallery image row: its filename or state. */
+/** Short right-aligned summary for a gallery media row: its filename or state. */
 function summarizeGalleryItem(item: MediaGalleryItem): string {
   const url = item.media.url?.trim();
   if (url) {
@@ -1468,7 +1468,7 @@ function summarizeGalleryItem(item: MediaGalleryItem): string {
     return segment || url;
   }
   if (item.media.attachment_id) return `attachment ${item.media.attachment_id}`;
-  return "No image set";
+  return "No media set";
 }
 
 interface AdderHandlers {
@@ -1576,7 +1576,7 @@ function collectAdders(node: AnyComponent, h: AdderHandlers): ReactNode[] {
     out.push(
       <li key="__add_gallery_item" className={styles.adderItem}>
         <AddChildButton
-          label="Add image"
+          label="Add media"
           onClick={() => addThenScroll(() => h.addGalleryItem(node._id))}
         />
       </li>,
@@ -1632,7 +1632,7 @@ function summarize(node: AnyComponent): string {
   }
   if (node.type === ComponentType.MediaGallery) {
     const n = (node as MediaGalleryComponent).items.length;
-    return `${n} ${n === 1 ? "image" : "images"}`;
+    return `${n} ${n === 1 ? "item" : "items"}`;
   }
   if (node.type === ComponentType.ActionRow) {
     const row = node as ActionRowComponent;

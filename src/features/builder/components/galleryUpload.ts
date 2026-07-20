@@ -1,6 +1,6 @@
 /**
  * Shared "drop / paste files into a gallery" actions, used by the gallery tree
- * row, its image rows, and the gallery inspector so they all clamp to the cap
+ * row, its media rows, and the gallery inspector so they all clamp to the cap
  * and surface the same messaging.
  *
  * Files are registered in the attachment store (persisted to IndexedDB) and
@@ -14,12 +14,12 @@ import { useMessageStore } from "@/core/state/messageStore";
 import type { EditorId } from "@/core/schema/types";
 import { pushToast } from "@/ui/Toast";
 
-/** Append dropped/pasted files as new gallery images (gallery row / inspector). */
+/** Append dropped/pasted files as new gallery items (gallery row / inspector). */
 export function addFilesToGallery(galleryId: EditorId, currentCount: number, files: File[]): void {
   if (files.length === 0) return;
   const room = LIMITS.GALLERY_ITEMS - currentCount;
   if (room <= 0) {
-    pushToast(`Gallery is full — ${LIMITS.GALLERY_ITEMS} images max.`, "error");
+    pushToast(`Gallery is full — ${LIMITS.GALLERY_ITEMS} items max.`, "error");
     return;
   }
   const accepted = files.slice(0, room);
@@ -27,14 +27,14 @@ export function addFilesToGallery(galleryId: EditorId, currentCount: number, fil
   useMessageStore.getState().addGalleryItemsWithUrls(galleryId, urls);
   if (files.length > room) {
     pushToast(
-      `Added ${accepted.length} — galleries hold up to ${LIMITS.GALLERY_ITEMS} images.`,
+      `Added ${accepted.length} — galleries hold up to ${LIMITS.GALLERY_ITEMS} items.`,
       "info",
     );
   }
 }
 
 /**
- * Replace one gallery image with a dropped/pasted file (dropping onto its
+ * Replace one gallery item with a dropped/pasted file (dropping onto its
  * row / inspector picker). The first file takes over the targeted slot in
  * place — keeping its alt text and spoiler flag — and any extra files are
  * inserted right after it, clamped to the cap.
@@ -53,6 +53,6 @@ export function replaceGalleryItemFiles(
   const urls = registerAttachments(kept);
   useMessageStore.getState().replaceGalleryItemWithUrls(galleryId, itemId, urls);
   if (files.length > kept.length) {
-    pushToast(`Replaced 1 — galleries hold up to ${LIMITS.GALLERY_ITEMS} images.`, "info");
+    pushToast(`Replaced 1 — galleries hold up to ${LIMITS.GALLERY_ITEMS} items.`, "info");
   }
 }

@@ -425,15 +425,15 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
       });
     }
     // Attach each item's issues to the *item's* editor id (not the gallery's)
-    // so the editor can flag the exact broken image row and its inspector.
+    // so the editor can flag the exact broken media row and its inspector.
     node.items.forEach((item, i) => {
-      validateMediaItem(item.media, item._id, issues, `Gallery image ${i + 1}`);
+      validateMediaItem(item.media, item._id, issues, `Gallery item ${i + 1}`);
       if (item.description && item.description.length > LIMITS.MEDIA_DESCRIPTION) {
         issues.push({
           nodeId: item._id,
           severity: "error",
           code: "GALLERY_DESC_LONG",
-          message: `Gallery image ${i + 1} description must be ≤${LIMITS.MEDIA_DESCRIPTION} characters.`,
+          message: `Gallery item ${i + 1} description must be ≤${LIMITS.MEDIA_DESCRIPTION} characters.`,
         });
       }
     });

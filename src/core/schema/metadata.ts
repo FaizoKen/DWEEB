@@ -32,7 +32,7 @@ export const COMPONENT_META: Record<ComponentTypeValue, ComponentMeta> = {
   },
   [ComponentType.MediaGallery]: {
     label: "Media Gallery",
-    description: "Up to 10 images in a grid.",
+    description: "Up to 10 images or videos in a grid.",
     glyph: "▦",
   },
   [ComponentType.File]: {
