@@ -220,7 +220,11 @@
     <!-- The opt-in ~55-second intro film (More ▸ Watch intro). Declaring it here
          makes the home page eligible for video indexing/rich results; the file
          itself stays lazy-mounted and never autoplays. Keep uploadDate and
-         duration in sync with a re-shot film, not with app releases. -->
+         duration in sync with a re-shot film, not with app releases.
+         uploadDate must be a full ISO 8601 datetime WITH a timezone offset — a
+         bare "YYYY-MM-DD" is what Search Console reported as both "Invalid
+         datetime value" and "missing a timezone" (2026-07-20). Guarded by
+         scripts/seo/audit.ts. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -230,7 +234,7 @@
         "description": "A quick tour of DWEEB: visually building a Discord Components V2 message with containers, buttons and media, watching the live preview, and sending it through a webhook.",
         "thumbnailUrl": "https://dweeb.faizo.net/media/intro-poster.jpg",
         "contentUrl": "https://dweeb.faizo.net/media/intro.mp4",
-        "uploadDate": "2026-07-17",
+        "uploadDate": "2026-07-17T23:41:44+08:00",
         "duration": "PT54S",
         "inLanguage": "en",
         "about": { "@id": "https://dweeb.faizo.net/#webapp" },

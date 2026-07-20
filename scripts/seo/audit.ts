@@ -85,6 +85,42 @@ function validDate(value: string): boolean {
   );
 }
 
+/**
+ * Schema properties Google validates as a *datetime* rather than a plain date:
+ * a bare "YYYY-MM-DD" is rejected twice over, as an invalid datetime value AND
+ * as a missing timezone (Search Console, 2026-07-20). Deliberately narrow —
+ * `datePublished`/`dateModified` are Date-typed, are legitimately date-only
+ * here, and are cross-checked against sitemap lastmod above.
+ */
+const DATETIME_PROPERTIES = new Set(["uploadDate"]);
+
+function validDateTime(value: string): boolean {
+  return (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(value) &&
+    !Number.isNaN(Date.parse(value))
+  );
+}
+
+/** Report any datetime-typed property in a JSON-LD tree that is not a zoned ISO 8601 datetime. */
+function auditJsonLdDates(node: unknown, label: string): void {
+  if (Array.isArray(node)) {
+    for (const item of node) auditJsonLdDates(item, label);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  for (const [key, value] of Object.entries(node)) {
+    if (DATETIME_PROPERTIES.has(key)) {
+      if (typeof value !== "string" || !validDateTime(value)) {
+        errors.push(
+          `${label}: JSON-LD "${key}" must be an ISO 8601 datetime with a timezone offset (got ${JSON.stringify(value)})`,
+        );
+      }
+      continue;
+    }
+    auditJsonLdDates(value, label);
+  }
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isFile();
@@ -275,7 +311,7 @@ async function main(): Promise<void> {
     ];
     for (const [index, match] of jsonLdMatches.entries()) {
       try {
-        JSON.parse(match[1]!);
+        auditJsonLdDates(JSON.parse(match[1]!), entry.url);
       } catch (error) {
         errors.push(`${entry.url}: JSON-LD block ${index + 1} does not parse (${String(error)})`);
       }

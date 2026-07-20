@@ -267,6 +267,13 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   social cards, stale/future dates, late charset declarations, thin detail pages, and orphaned
   templates. Add new discovery routes to that generator rather than hand-writing unverified
   files in `dist/`; keep source-backed guide claims and `lastmod` dates honest.
+  **Datetime-typed JSON-LD properties need a timezone.** `uploadDate` on the home page's
+  intro-film `VideoObject` shipped as a bare `"2026-07-17"`, which Search Console reported as
+  *two* issues at once — "Invalid datetime value" and "missing a timezone" (2026-07-20). It is
+  now a full zoned ISO 8601 datetime, and `DATETIME_PROPERTIES` in `audit.ts` fails the build on
+  any regression. That set is deliberately narrow: `datePublished`/`dateModified` are Date-typed,
+  are legitimately date-only, and are separately cross-checked against sitemap `lastmod` — don't
+  widen it to them.
   Landing pages are a catalog (`LANDINGS` in `scripts/seo/guides.ts`, rendered by
   `renderLandingPage`) — currently `/discord-webhook-builder/` and `/discord-embed-builder/`.
   **Adding a guide or landing** = entry in `GUIDES`/`LANDINGS` + its slug in `ENTRY_IDS`
