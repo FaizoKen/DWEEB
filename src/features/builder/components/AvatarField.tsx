@@ -138,7 +138,7 @@ export function AvatarField({ id, value, onChange, placeholders }: AvatarFieldPr
             {busy ? (
               <span className={styles.spinnerDot} aria-hidden="true" />
             ) : (
-              <UploadIcon size={15} />
+              <UploadIcon size={16} />
             )}
           </button>
           <input

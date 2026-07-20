@@ -34,8 +34,11 @@
   padding: 0;
   border: 0;
   border-radius: 5px;
-  background: transparent;
-  color: var(--app-text-subtle);
+  /* A resting surface, not a bare glyph. Transparent + `--app-text-subtle`
+     measured only ~4.6:1 against the input fill and read as decoration; the
+     chip plus `--app-text-muted` makes it legible as the control it is. */
+  background: var(--app-bg-active);
+  color: var(--app-text-muted);
   line-height: 1;
   cursor: pointer;
   transition:
@@ -43,10 +46,9 @@
     color 120ms ease;
 }
 
-/* Transparent at rest so it reads as an affordance inside the field rather than
-   a second control competing with the input; the surface appears on hover. */
+/* Accent tint on hover, matching the app's other icon buttons. */
 .uploadBtn:hover:not(:disabled) {
-  background: var(--app-bg-active);
+  background: var(--app-accent-soft);
   color: var(--app-text);
 }
 
