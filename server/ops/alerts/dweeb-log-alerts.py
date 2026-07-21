@@ -38,7 +38,8 @@ WEBHOOK = (
 # (dozzle, beszel, gatus itself) are excluded: their errors are not actionable.
 SERVICES = os.environ.get(
     "ALERTS_SERVICES",
-    "proxy,dispatcher,ping-pong,tickets,giveaway,quick-replies,self-role,modal-form,picker,caddy",
+    "proxy,dispatcher,ping-pong,tickets,giveaway,quick-replies,self-role,modal-form,picker,"
+    "poll,caddy",
 ).split(",")
 
 FLUSH_SECS = int(os.environ.get("ALERTS_FLUSH_SECS", "45"))
@@ -55,6 +56,26 @@ TRACING_RE = re.compile(
     r"^\S+Z\s+(?P<level>ERROR|WARN)\s+(?P<target>[\w:_.-]+)(?:\{[^}]*\})?:\s?(?P<msg>.*)$"
 )
 PANIC_RE = re.compile(r"panicked at|thread '.*' panicked", re.IGNORECASE)
+
+# Caddy logs a connection that ended early at ERROR — and ERROR is the paging
+# channel. These are network reality, not a backend fault, so they are dropped:
+# a client hangs up mid-upload, or an upstream answers 4xx and closes without
+# draining the request body, at which point Caddy — still copying that body —
+# reports `write: broken pipe`, discards the real status and synthesises a 502.
+# That is what a passing vulnerability scanner's `POST /lib/vendor/phpunit/…`
+# did on 2026-07-21. Every service now drains the body on an unroutable path
+# (see each router's `not_found`), but the residue is legitimate and stays:
+# a 413 on an oversized upload, a 429 under abuse, a browser closing a tab.
+#
+# An upstream genuinely going down does NOT hide behind this. It announces
+# itself three other ways that all still page: a Rust panic / tracing ERROR in
+# the service's own logs, Caddy's `dial tcp … connection refused` and DNS
+# failures (no connection-abort wording, so they pass the filter below), and
+# Gatus's /ready check.
+CONN_ABORT_RE = re.compile(
+    r"broken pipe|connection reset by peer|context canceled|client disconnected",
+    re.IGNORECASE,
+)
 
 # Normalization for dedup signatures: volatile tokens -> placeholders.
 NORM_PATTERNS = [
@@ -98,13 +119,19 @@ def classify(rest: str) -> tuple[str, str] | None:
         if level == "WARN" and target.startswith("web_crash"):
             return ("WEB CRASH", msg)
         return None
-    # Caddy logs JSON (zap): alert on error-level entries only.
+    # Caddy logs JSON (zap): alert on error-level entries only, minus the
+    # connection aborts that are not ours to fix (see CONN_ABORT_RE).
     if rest.startswith("{") and '"level":"error"' in rest:
         try:
-            j = json.loads(rest)
-            return ("ERROR " + str(j.get("logger", "caddy")), str(j.get("msg", ""))[:200])
+            entry = json.loads(rest)
+            msg, logger = str(entry.get("msg", "")), str(entry.get("logger", "caddy"))
         except ValueError:
-            return ("ERROR caddy", rest.strip()[:200])
+            # Unparseable: fall back to matching the raw line, so a mangled
+            # entry carrying abort wording is still filtered rather than paged.
+            msg, logger = rest.strip(), "caddy"
+        if CONN_ABORT_RE.search(msg):
+            return None
+        return ("ERROR " + logger, msg[:200])
     return None
 
 

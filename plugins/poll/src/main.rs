@@ -127,6 +127,8 @@ async fn run() {
             get(routes::get_instance).put(routes::update_instance),
         )
         .route("/interactions", post(routes::interactions))
+        // Unroutable paths answer 404 after draining the body (see `not_found`).
+        .fallback(not_found)
         .with_state(state)
         // The registry is fetched cross-origin by DWEEB; the config API is hit
         // by the iframe. Both are public/capability-gated, so a permissive
@@ -145,6 +147,28 @@ async fn run() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("server error");
+}
+
+/// Fallback for a path this service doesn't route: 404 — but only *after* the
+/// request body has been read and dropped.
+///
+/// The drain is the entire point. Axum's default fallback answers without
+/// touching the body, so hyper can't reuse the connection and closes it; Caddy,
+/// still streaming that body upstream, sees the close as `write: broken pipe`,
+/// throws our 404 away, and synthesises a **502** for the client. Caddy logs
+/// that at ERROR, and ERROR is the paging channel (`dweeb-alerts`) — so an
+/// internet vulnerability scanner POSTing a body at a path we don't serve
+/// (`POST /`) paged the maintainer over a request we had already answered
+/// correctly. The house rule holds here too: a status code is an alerting
+/// decision, and 5xx must mean *our* fault.
+///
+/// Reading the body first keeps the connection reusable, so the honest 404
+/// reaches the client and nothing is logged anywhere. Buffering via `Bytes`
+/// rather than streaming the drain is deliberate: it's bounded by the router's
+/// `DefaultBodyLimit`, and a body past that limit is one we *want* to hang up on
+/// instead of read to the end.
+async fn not_found(_drained: axum::body::Bytes) -> impl axum::response::IntoResponse {
+    (axum::http::StatusCode::NOT_FOUND, "Not found")
 }
 
 /// Resolve on Ctrl-C or (on Unix) SIGTERM. Docker sends SIGTERM on

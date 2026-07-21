@@ -817,6 +817,12 @@ async fn run() {
             "/api/guilds/:guild_id/custom-apps/:application_id/webhook",
             post(auth::custom_bot_webhook_start),
         )
+        // Unroutable paths answer 404 *after* draining the request body (see
+        // `not_found`). Registered here, before the layers below, because
+        // `Router::layer` only wraps the routes and fallback added above it —
+        // the fallback needs the timeout backstop, CORS, and rate limiting like
+        // any other route.
+        .fallback(not_found)
         // Global request timeout: a backstop that bounds any single request so a
         // handler wedged on a stuck store lock or a hung upstream returns 408
         // instead of pinning a connection forever (outbound Discord calls and DB
@@ -899,6 +905,28 @@ async fn connect_redis(url: &str) -> Result<redis::aio::ConnectionManager, Strin
 /// making several sequential Discord calls, each already capped by the reqwest
 /// client) with headroom.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Fallback for a path this service doesn't route: 404 — but only *after* the
+/// request body has been read and dropped.
+///
+/// The drain is the entire point. Axum's default fallback answers without
+/// touching the body, so hyper can't reuse the connection and closes it; Caddy,
+/// still streaming that body upstream, sees the close as `write: broken pipe`,
+/// throws our 404 away, and synthesises a **502** for the client. Caddy logs
+/// that at ERROR, and ERROR is the paging channel (`dweeb-alerts`) — so every
+/// internet vulnerability scanner that POSTs a body at a path we don't serve
+/// (`POST /lib/vendor/phpunit/…`, `POST /`) paged the maintainer over a request
+/// we had already answered correctly. Same rule as a plugin's `ConnectError`
+/// mapping: a status code is an alerting decision, and this was never our fault.
+///
+/// Reading the body first keeps the connection reusable, so the honest 404
+/// reaches the client and nothing is logged anywhere. Buffering via `Bytes`
+/// rather than streaming the drain is deliberate: it's bounded by the ambient
+/// `DefaultBodyLimit`, and a body past that limit is one we *want* to hang up on
+/// instead of read to the end.
+async fn not_found(_drained: axum::body::Bytes) -> impl axum::response::IntoResponse {
+    (axum::http::StatusCode::NOT_FOUND, "Not found")
+}
 
 /// Routes deliberately exempt from the global request timeout, merged into the
 /// app *after* the `TimeoutLayer`: the collaboration room WebSocket (a
@@ -996,4 +1024,51 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
     tracing::info!("shutdown signal received");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use axum::body::{Body, Bytes};
+    use axum::handler::Handler;
+    use axum::http::{Request, StatusCode};
+
+    /// The 404 fallback must READ the request body, not just answer.
+    ///
+    /// Answering without reading forces hyper to close the connection, which
+    /// Caddy reports as `write: broken pipe`, converts into a 502, and logs at
+    /// ERROR — i.e. it pages, for a scanner request we answered correctly. If
+    /// someone "simplifies" `not_found` to take no extractor, this fails.
+    #[tokio::test]
+    async fn fallback_drains_the_request_body() {
+        let read = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&read);
+        let chunks = tokio_stream::iter(vec![
+            Ok::<Bytes, std::io::Error>(Bytes::from_static(b"<?php ")),
+            Ok(Bytes::from_static(b"eval($_POST[0]);")),
+        ]);
+        let counted = tokio_stream::StreamExt::map(chunks, move |chunk| {
+            if let Ok(bytes) = &chunk {
+                counter.fetch_add(bytes.len(), Ordering::SeqCst);
+            }
+            chunk
+        });
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/lib/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php")
+            .body(Body::from_stream(counted))
+            .expect("build request");
+
+        let response = not_found.call(request, ()).await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            read.load(Ordering::SeqCst),
+            22,
+            "the fallback must consume the whole body before responding"
+        );
+    }
 }

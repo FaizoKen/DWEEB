@@ -236,6 +236,27 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   render `data.error`, so the copy is unchanged. Guarded by `only_our_own_faults_are_server_errors`
   in each crate's `rest.rs`. When adding a plugin route, ask "would an ordinary user action reach
   this branch?" — if yes it is 4xx, never 5xx.
+- **Every router answers an unroutable path *after* draining the request body** (`not_found`,
+  wired with `.fallback()` in all 10 Rust `main.rs` files — proxy + dispatcher + 8 plugins).
+  Axum's default fallback answers 404 without touching the body, so hyper can't reuse the
+  connection and closes it; Caddy, still copying that body upstream, reports
+  `write: broken pipe`, throws the 404 away and synthesises a **502** — which it logs at ERROR,
+  which pages (`dweeb-alerts`). Internet vulnerability scanners POST bodies at paths we don't
+  serve constantly, so this paged the maintainer over requests already answered correctly
+  (2026-07-21: `POST /lib/vendor/phpunit/…` at the proxy; the same class had already hit the
+  picker host as `POST /`). Reading the body first keeps the connection reusable, so the honest
+  404 is delivered and nothing is logged anywhere. `.fallback()` must be registered **before**
+  the `.layer()` calls that should wrap it — `Router::layer` only applies to what was added
+  above it. Buffering the drain through `Bytes` is deliberate: it is bounded by the ambient
+  `DefaultBodyLimit`, and a body past that limit is one to hang up on rather than read.
+  Guarded by `fallback_drains_the_request_body` in `server/src/main.rs`.
+- **The paging channel carries our faults, so `dweeb-alerts` drops Caddy connection aborts**
+  (`broken pipe`, `connection reset by peer`, `context canceled`, `client disconnected` —
+  `CONN_ABORT_RE`). Draining above removes the scanner case, but the honest residue stays: a
+  413 on an oversized upload, a 429 under abuse, a browser closing a tab. None is actionable,
+  and an upstream genuinely going down still pages three other ways — its own panic/tracing
+  ERROR, Caddy's `dial tcp … connection refused`/DNS errors (which carry no abort wording and
+  pass the filter), and Gatus on `/ready`. Don't widen that regex into a blanket Caddy mute.
 - **Plugin request and storage work is resource-bounded.** Every plugin router caps request
   bodies at 256 KiB. Interaction services parse their primary Ed25519 key once at boot (custom
   attested keys remain dynamic), bound idle HTTP pools, and configure SQLite with WAL,
