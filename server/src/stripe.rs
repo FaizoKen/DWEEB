@@ -63,6 +63,14 @@ const STRIPE_API: &str = "https://api.stripe.com";
 /// Reject a webhook whose timestamp is this far from now (replay protection).
 const WEBHOOK_TOLERANCE_SECS: i64 = 300;
 
+/// Stamped into every DWEEB-originated subscription's `source` metadata at
+/// checkout. The Stripe account and price IDs are **shared** with the sibling
+/// RoleLogic app (one payment grants both), so a purchase can't otherwise be told
+/// apart in the dashboard/exports — this marks which app's checkout created it.
+/// Purely informational: nothing in this file reads it back, so it never affects
+/// entitlement, the webhook, or the shared grant.
+const APP_SOURCE: &str = "dweeb";
+
 /// How long after moving a subscription before it can be moved again. Premium is
 /// per-server and movable, so without this one paid sub could be cycled across
 /// many servers to seed each with creation-gated benefits (scheduled posts,
@@ -492,6 +500,13 @@ impl StripeClient {
             (
                 "subscription_data[metadata][discord_user_id]".into(),
                 uid.to_string(),
+            ),
+            // Which app's checkout created this payment (see [`APP_SOURCE`]) — the
+            // Stripe account/prices are shared with RoleLogic, so this is the tell
+            // that it's a DWEEB purchase. Additive: the webhook/backfill ignore it.
+            (
+                "subscription_data[metadata][source]".into(),
+                APP_SOURCE.to_string(),
             ),
             // The server this subscription grants premium to — read back off the
             // subscription by the webhook/backfill to bind it to the guild.
