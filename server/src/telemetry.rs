@@ -130,6 +130,51 @@ fn is_routine_stale_chunk(kind: &str, message: &str) -> bool {
         .any(|known| lower.contains(known))
 }
 
+/// Whether a `window.onerror` beacon reports someone else's code, not ours.
+///
+/// The global `error` trap hears every uncaught exception in the page context —
+/// including code we never shipped: browser-extension scripts injected into the
+/// page, userscripts, bookmarklets, and anything eval'd in a devtools console.
+/// One of those paged the maintainer on 2026-07-24: a Safari user's foreign
+/// script blew its own stack (`Maximum call stack size exceeded.`, frames
+/// `@`/`Pk@`/`Nk@` with **no source URL** — JSC's rendering of code that has no
+/// script URL), and rebuilding every deployed 1.0.0 bundle proved no DWEEB build
+/// ever contained those symbols. Unactionable, but it logged at `warn` and the
+/// log alerter pages on `web_crash` warns.
+///
+/// Two shapes are demoted to `info` (still greppable under `web_crash`, never
+/// a page), both only for `kind == "error"` — the one trap foreign page-context
+/// code lands in without involving the app:
+///
+///  - **Unattributed stack**: frames exist but none carries a script URL (no
+///    `://` anywhere). Every engine prints absolute URLs for frames from real
+///    scripts — ours are `https://…/assets/…` (any deploy origin, and the
+///    Activity's discordsays.com proxy) — so a stack with no URL at all cannot
+///    be code we served. (V8 words eval frames `<anonymous>`; JSC leaves them
+///    bare; Firefox keeps the host URL even for eval, so on Firefox this stays
+///    conservative and keeps paging.)
+///  - **Muted cross-origin error**: the literal `Script error.` shape with an
+///    empty stack — the browser deliberately withheld everything about a
+///    non-CORS cross-origin script's failure, so the beacon carries nothing to
+///    act on.
+///
+/// Deliberately narrow, mirroring [`is_routine_stale_chunk`]'s posture:
+/// `boundary`/`unhandledrejection` beacons keep paging even with a foreign-
+/// looking stack (the app actually went down / a real rejection was dropped,
+/// and the client's 6-frame cut can hide our deeper frames), an empty stack
+/// with an ordinary message keeps paging (our own code can `throw "string"`),
+/// and extension frames that *do* carry a URL (`safari-web-extension://…`)
+/// keep paging until real noise proves otherwise.
+fn is_foreign_code_error(kind: &str, message: &str, stack: &str) -> bool {
+    if kind != "error" {
+        return false;
+    }
+    if !stack.is_empty() && !stack.contains("://") {
+        return true;
+    }
+    stack.is_empty() && message.trim_start().starts_with("Script error")
+}
+
 /// `POST /api/telemetry/crash` — record one frontend crash.
 ///
 /// See the module docs for why this is unauthenticated and content-free. The
@@ -166,6 +211,21 @@ pub async fn crash_report(
             %stack,
             "web app stale chunk (deploy skew)",
         );
+    } else if is_foreign_code_error(&kind, &message, &stack) {
+        // Someone else's code crashing in our visitors' pages — extensions,
+        // userscripts, console experiments. Counted, never paged. The client
+        // also declines to send these, but old clients ship from SW caches for
+        // weeks; this branch is the authority (see [`is_foreign_code_error`]).
+        tracing::info!(
+            target: "web_crash",
+            %kind,
+            %surface,
+            %version,
+            %path,
+            %message,
+            %stack,
+            "web app foreign-code error",
+        );
     } else {
         tracing::warn!(
             target: "web_crash",
@@ -181,12 +241,20 @@ pub async fn crash_report(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-/// Trim an untrusted telemetry string to a bounded, single-line snippet: drop
-/// control characters (incl. newlines, so it can't forge extra log lines) and
-/// cap the length. Same guarantee as the Activity beacon's clamp — a hostile
-/// beacon can neither spam nor corrupt the log.
+/// Trim an untrusted telemetry string to a bounded, single-line snippet:
+/// replace control characters with spaces (newlines included, so it can't
+/// forge extra log lines) and cap the length. Same guarantee as the Activity
+/// beacon's clamp — a hostile beacon can neither spam nor corrupt the log.
+///
+/// Replaced, not dropped: the 2026-07-24 page glued a six-line Safari stack
+/// into the unreadable `@@@Pk@Nk@Pk@` — keeping a space where each newline was
+/// (`@ @ @ Pk@ Nk@ Pk@`) keeps the frame boundaries legible in the one-line
+/// log without weakening the injection guarantee.
 fn clamp_field(s: &str, max: usize) -> String {
-    s.chars().filter(|c| !c.is_control()).take(max).collect()
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(max)
+        .collect()
 }
 
 #[cfg(test)]
@@ -194,13 +262,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clamp_strips_control_chars_including_newlines() {
-        // A forged log line (embedded newline + fake fields) collapses to one line.
+    fn clamp_replaces_control_chars_including_newlines() {
+        // A forged log line (embedded newline + fake fields) collapses to one
+        // line; the space keeps adjacent tokens (stack frames) readable.
         let hostile = "boom\n2026-01-01 INFO forged=line\ttab";
         let out = clamp_field(hostile, 100);
         assert!(!out.contains('\n'));
         assert!(!out.contains('\t'));
-        assert_eq!(out, "boom2026-01-01 INFO forged=linetab");
+        assert_eq!(out, "boom 2026-01-01 INFO forged=line tab");
+    }
+
+    #[test]
+    fn clamp_keeps_stack_frames_legible() {
+        // The 2026-07-24 shape: a multi-line Safari stack must not fuse into
+        // `@@@Pk@Nk@Pk@` — one space per frame boundary.
+        assert_eq!(
+            clamp_field("@\n@\n@\nPk@\nNk@\nPk@", 100),
+            "@ @ @ Pk@ Nk@ Pk@"
+        );
     }
 
     #[test]
@@ -281,5 +360,70 @@ mod tests {
             "Cannot read properties of undefined (reading 'id')"
         ));
         assert!(!is_routine_stale_chunk("boundary", ""));
+    }
+
+    #[test]
+    fn unattributed_stacks_are_foreign_not_a_page() {
+        // The 2026-07-24 page verbatim: a Safari user's eval'd/injected script
+        // overflowed its own stack. No frame carries a script URL, so it cannot
+        // be code we served (checked post-clamp, newlines already spaces).
+        assert!(is_foreign_code_error(
+            "error",
+            "Maximum call stack size exceeded.",
+            "@ @ @ Pk@ Nk@ Pk@"
+        ));
+        // V8's eval wording is equally unattributed.
+        assert!(is_foreign_code_error(
+            "error",
+            "Maximum call stack size exceeded",
+            "at Pk (<anonymous>) at Nk (<anonymous>)"
+        ));
+    }
+
+    #[test]
+    fn muted_cross_origin_script_error_is_foreign() {
+        assert!(is_foreign_code_error("error", "Script error.", ""));
+        // But only with the empty stack the mute implies — and only verbatim-ish.
+        assert!(!is_foreign_code_error(
+            "error",
+            "Script error.",
+            "Pk@https://dweeb.faizo.net/assets/index-abc.js:1:2"
+        ));
+    }
+
+    #[test]
+    fn attributed_stacks_still_page() {
+        // Any frame with a real script URL means it can be ours — warn.
+        assert!(!is_foreign_code_error(
+            "error",
+            "Maximum call stack size exceeded.",
+            "Pk@https://dweeb.faizo.net/assets/useBarWidth-Dcpvcuzg.js:41:9528 Nk@https://dweeb.faizo.net/assets/useBarWidth-Dcpvcuzg.js:41:9600"
+        ));
+        // Extension frames carry a URL too; deliberately still a page.
+        assert!(!is_foreign_code_error(
+            "error",
+            "boom",
+            "hook@safari-web-extension://abc/inject.js:1:2"
+        ));
+    }
+
+    #[test]
+    fn empty_stack_with_ordinary_message_still_pages() {
+        // Our own code can `throw "string"` (no stack attached) — that must
+        // keep paging.
+        assert!(!is_foreign_code_error("error", "invalid share token", ""));
+    }
+
+    #[test]
+    fn only_the_window_error_trap_is_ever_foreign() {
+        // A boundary crash took the app down and a rejection dropped real work;
+        // both keep paging even when the (6-frame-cut) stack looks foreign.
+        assert!(!is_foreign_code_error("boundary", "boom", "@ @ Pk@"));
+        assert!(!is_foreign_code_error(
+            "unhandledrejection",
+            "boom",
+            "@ @ Pk@"
+        ));
+        assert!(!is_foreign_code_error("boundary", "Script error.", ""));
     }
 }

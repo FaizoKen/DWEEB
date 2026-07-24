@@ -149,6 +149,24 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   non-errors (the RO loop notice) are dropped by the crash reporter (`core/telemetry/crashReport.ts`)
   _and_ by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
   cache, so stale clients keep beaconing long after a fix.
+- **A crash beacon must be *our* crash before it may page** (2026-07-24). `window.onerror` hears
+  every uncaught error in the page context, including code we never shipped — extension scripts
+  injected into the page, userscripts, bookmarklets, console experiments. One paged the maintainer:
+  a Safari user's foreign script overflowed its own stack ("Maximum call stack size exceeded.",
+  frames `@`/`Pk@`/`Nk@` with **no source URL** — JSC's rendering of code that has no script URL);
+  rebuilding every deployed 1.0.0 bundle proved no DWEEB build contained those symbols (prod-vs-local
+  identifier histograms match, so local rebuilds are name-faithful — a reusable diagnosis trick).
+  Policy (`isForeignCodeError` in crashReport.ts, mirrored as `is_foreign_code_error` in
+  telemetry.rs, which is the authority since SW-stale clients keep the old reporter for weeks):
+  a `kind=error` beacon whose stack has frames but no `://` anywhere (nothing we serve produces
+  URL-less frames), or the muted cross-origin `Script error.` + empty stack, is foreign — the client
+  doesn't send it and the proxy logs it at **info** (`web app foreign-code error`, still greppable
+  under `web_crash`). Deliberately narrow: `boundary`/`unhandledrejection` keep paging even with
+  foreign-looking stacks (the 6-frame cut can hide our deeper frames), an empty stack with an
+  ordinary message keeps paging (our code can `throw "string"`), and extension frames that carry a
+  URL keep paging. `clamp_field` now replaces control chars with spaces so a multi-line stack stays
+  legible in the one-line log (`@ @ @ Pk@` instead of the fused `@@@Pk@` that made this incident
+  cryptic) without weakening the log-injection guarantee.
 - **Deploy skew self-heals — don't page for it.** GitHub Pages caches `index.html` ~10 min
   and every deploy purges the old hashed chunks, so a tab that isn't SW-controlled can hit a
   404 on a lazy `import()` ("Failed to fetch dynamically imported module" — this paged the

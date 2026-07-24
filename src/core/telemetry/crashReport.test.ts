@@ -5,6 +5,7 @@ import {
   crashSignature,
   CrashThrottle,
   describeError,
+  isForeignCodeError,
   isNonCrashMessage,
   isStaleChunkMessage,
   resolveCrashKind,
@@ -204,6 +205,59 @@ describe("resolveCrashKind", () => {
     expect(resolveCrashKind("boundary", STALE, false)).toBe("stale-chunk-fatal");
     expect(resolveCrashKind("error", STALE, false)).toBe("stale-chunk-fatal");
     expect(resolveCrashKind("unhandledrejection", STALE, false)).toBe("stale-chunk-fatal");
+  });
+});
+
+describe("isForeignCodeError", () => {
+  it("classifies an unattributed stack from the window trap as foreign", () => {
+    // The 2026-07-24 page verbatim: a Safari user's eval'd/injected script
+    // overflowed its own stack. JSC prints bare `fn@` frames (no source URL)
+    // for code that has no script URL — nothing we served looks like that.
+    expect(
+      isForeignCodeError("error", "Maximum call stack size exceeded.", "@\n@\n@\nPk@\nNk@\nPk@"),
+    ).toBe(true);
+    // V8's wording for eval'd code is equally unattributed.
+    expect(
+      isForeignCodeError(
+        "error",
+        "Maximum call stack size exceeded",
+        "at Pk (<anonymous>)\nat Nk (<anonymous>)",
+      ),
+    ).toBe(true);
+  });
+
+  it("classifies the muted cross-origin 'Script error.' shape as foreign", () => {
+    expect(isForeignCodeError("error", "Script error.", "")).toBe(true);
+    // Only with the empty stack the mute implies.
+    expect(
+      isForeignCodeError("error", "Script error.", "x@https://dweeb.faizo.net/assets/a.js:1:2"),
+    ).toBe(false);
+  });
+
+  it("keeps any stack that carries a script URL", () => {
+    expect(
+      isForeignCodeError(
+        "error",
+        "Maximum call stack size exceeded.",
+        "Pk@https://dweeb.faizo.net/assets/useBarWidth-abc.js:41:9528",
+      ),
+    ).toBe(false);
+    // Extension frames with a URL are identifiable — deliberately still kept.
+    expect(isForeignCodeError("error", "boom", "hook@safari-web-extension://x/inject.js:1:2")).toBe(
+      false,
+    );
+  });
+
+  it("keeps an empty stack with an ordinary message (our code can throw strings)", () => {
+    expect(isForeignCodeError("error", "invalid share token", "")).toBe(false);
+  });
+
+  it("never classifies boundary or rejection reports as foreign", () => {
+    // A boundary crash took the app down; a rejection dropped real work. Both
+    // keep flowing even when the 6-frame cut leaves a foreign-looking stack.
+    expect(isForeignCodeError("boundary", "boom", "@\n@\nPk@")).toBe(false);
+    expect(isForeignCodeError("unhandledrejection", "boom", "@\n@\nPk@")).toBe(false);
+    expect(isForeignCodeError("boundary", "Script error.", "")).toBe(false);
   });
 });
 

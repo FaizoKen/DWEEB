@@ -28,6 +28,7 @@ import {
   buildCrashPayload,
   crashSignature,
   CrashThrottle,
+  isForeignCodeError,
   isNonCrashMessage,
   resolveCrashKind,
   type CrashKind,
@@ -125,6 +126,13 @@ function report(kind: CrashKind, error: unknown): void {
     // when nothing did — that last shape is the one that still pages.
     const resolvedKind = resolveCrashKind(kind, payload.message, isStaleChunkReloadInProgress());
     if (resolvedKind === null) return;
+    // Someone else's code (an extension/userscript/console script with an
+    // unattributed stack, or a muted cross-origin script) crashing in our page
+    // is not our crash — don't spend a beacon or a throttle slot on it. Checked
+    // after the stale-chunk resolve so a Safari stale-chunk-fatal (whose stack
+    // can be sparse) is never mistaken for foreign code. The proxy applies the
+    // same rule to beacons from clients older than this filter.
+    if (isForeignCodeError(resolvedKind, payload.message, payload.stack)) return;
     payload.kind = resolvedKind;
     const sig = crashSignature(resolvedKind, payload.message, payload.stack);
     if (!throttle.shouldSend(sig)) return;

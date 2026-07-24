@@ -212,6 +212,42 @@ export function resolveCrashKind(
   return kind === "stale-chunk" ? kind : "stale-chunk-fatal";
 }
 
+/**
+ * Whether a `window.onerror` report describes someone else's code, not ours.
+ *
+ * The global `error` trap hears every uncaught exception in the page context —
+ * including code we never shipped: extension scripts injected into the page,
+ * userscripts, bookmarklets, devtools-console experiments. One of those paged
+ * the maintainer on 2026-07-24: a Safari user's foreign script blew its own
+ * stack ("Maximum call stack size exceeded.", frames `@`/`Pk@`/`Nk@` with no
+ * source URL — JSC's rendering of code that has no script URL), and no deployed
+ * DWEEB bundle ever contained those symbols.
+ *
+ * Two shapes qualify, both only for the `error` kind (the one trap foreign
+ * page-context code lands in without involving the app):
+ *
+ *  - **Unattributed stack**: frames exist but none carries a script URL (no
+ *    `://` anywhere). Every engine prints absolute URLs for frames from real
+ *    scripts, so a stack with none cannot be code we served.
+ *  - **Muted cross-origin error**: the literal "Script error." shape with an
+ *    empty stack — the browser withheld everything about a non-CORS
+ *    cross-origin script's failure, leaving nothing to act on.
+ *
+ * Deliberately narrow, like [`isNonCrashMessage`]: `boundary` and
+ * `unhandledrejection` reports keep flowing even with a foreign-looking stack
+ * (the app actually went down / real work was dropped, and the 6-frame cut can
+ * hide our deeper frames), an empty stack with an ordinary message keeps
+ * flowing (our own code can `throw "string"`), and extension frames that do
+ * carry a URL (`safari-web-extension://…`) keep flowing too. The proxy applies
+ * the same rule server-side (`telemetry.rs`) — it is the authority, because
+ * SW-cached clients without this filter keep beaconing for weeks.
+ */
+export function isForeignCodeError(kind: CrashKind, message: string, stack: string): boolean {
+  if (kind !== "error") return false;
+  if (stack.length > 0 && !stack.includes("://")) return true;
+  return stack.length === 0 && message.trimStart().startsWith("Script error");
+}
+
 /** Build the content-free wire payload from an untrusted thrown value. */
 export function buildCrashPayload(input: CrashInput): CrashPayload {
   const { message, stack } = describeError(input.error);
