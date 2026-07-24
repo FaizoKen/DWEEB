@@ -221,6 +221,32 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   the default, and the hint under the pills must always state the selected option's
   outcome), and all slot-usage copy goes through `slotUsageLabel`
   (core/guild/api.ts) so the unlimited-cap sentinel never renders as "1/1000000 slots".
+- **In-Discord plugin management is discovered through "Message Info", executed by the
+  plugin** (2026-07-24). Ops panels always existed but were hidden behind the plugin's own
+  member-facing button (a giveaway host clicking Enter gets the Draw/Reroll/Cancel panel; a
+  poll host's vote reply carries Close/Reopen/Results), which admins couldn't find. Now the
+  Message Info reply lists every routed plugin it detects on the message (`plugins_on_message`
+  in dispatcher commands.rs — custom_ids matched against the same ROUTES table clicks are
+  forwarded by) and, for Manage Server holders in a guild, adds one "Manage <plugin>" button
+  per instance of each prefix in `MANAGEABLE_PLUGINS` (currently `giveaway:` + `poll:`). The
+  button's custom_id is `<prefix>manage:<instance>` — the PLUGIN's namespace, so the click
+  travels the ordinary prefix forwarding (zero new routing, no command re-registration, custom
+  apps included) and the plugin answers with its existing host panel as a **fresh type-4
+  ephemeral** (never UPDATE_MESSAGE — the button sits on the info reply, and there is no
+  public message in the interaction; the panel's own actions already refresh the public
+  message out of band via the refresher cache / next-click). Authority is the plugin's
+  `require_host` at click time — the dispatcher's Manage-Server gate is presentation only
+  (host-role-only hosts don't see the buttons but keep the in-situ path). Contract details:
+  instance ids are extracted only from *bare* bound custom_ids (`<prefix><id>`, the only
+  shape the editor posts); verb-carrying ids name the plugin in the `**Plugins:**` line but
+  mint no button; custom_ids past 100 chars and buttons past the 5-per-row cap are skipped.
+  **Adding a plugin to the set**: implement the `manage:` verb arm (a plugin without it
+  answers "Unknown action."), deploy that service FIRST, then add its prefix to
+  `MANAGEABLE_PLUGINS`. Config edits stay web-only (the v2 management token is browser-local)
+  — a manage panel is operational controls, never a config editor. The perm-toggle's
+  UPDATE_MESSAGE refresh must keep foreign action rows (`other_action_rows`) or the manage
+  row vanishes on toggle. Guarded by `manage_control_*` tests in giveaway/poll routes.rs and
+  the `plugins_*`/`manage_buttons`/`other_action_rows` tests in dispatcher commands.rs.
 - **A plugin may only answer 5xx for its own faults — 5xx is the paging channel.**
   `TraceLayer::new_for_http()`'s default classifier reports every 5xx through `on_failure` at
   ERROR level, and `dweeb-alerts` forwards backend ERRORs to Discord. So a status code is an

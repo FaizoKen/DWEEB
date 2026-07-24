@@ -17,6 +17,18 @@
 //! [`component`] — the only custom_id namespace the dispatcher keeps for
 //! itself.
 //!
+//! "Message Info" is also where plugins on a message become manageable
+//! without hunting for hidden affordances: the reply names every routed
+//! plugin it finds on the message, and for the plugins that serve a `manage:`
+//! verb ([`MANAGEABLE_PLUGINS`]) it gives Manage Server holders a button per
+//! instance. Those buttons carry the PLUGIN's own custom_id namespace
+//! (`<prefix>manage:<instance>`), so a click travels the ordinary prefix
+//! forwarding in main.rs and the plugin answers with its ephemeral host
+//! panel — re-checking authority itself, since any custom_id is
+//! client-forgeable. The dispatcher never learns plugin grammars beyond one
+//! shared convention: a *bound* component's custom_id is `<prefix><id>`
+//! (bare, no verb), which is the only shape the editor ever posts.
+//!
 //! The share-link contract: a MESSAGE command's payload includes the full
 //! target message under `data.resolved.messages`, and the web editor already
 //! opens `#s=<version>.<lz-string>` share tokens (src/core/serialization).
@@ -53,10 +65,11 @@ const TYPE_TEXT_DISPLAY: u64 = 10;
 const TYPE_THUMBNAIL: u64 = 11;
 const TYPE_MEDIA_GALLERY: u64 = 12;
 const TYPE_CONTAINER: u64 = 17;
-// Classic component types, for the toggle button on the Message Info reply.
+// Classic component types, for the buttons on the Message Info reply.
 const TYPE_ACTION_ROW: u64 = 1;
 const TYPE_BUTTON: u64 = 2;
 const BUTTON_PRIMARY: u64 = 1;
+const BUTTON_SECONDARY: u64 = 2;
 const BUTTON_DANGER: u64 = 4;
 /// A media gallery holds at most this many items.
 const MAX_GALLERY_ITEMS: usize = 10;
@@ -87,6 +100,15 @@ pub const CUSTOM_ID_PREFIX: &str = "dweeb:";
 /// The permanent-slot toggle button on a "Message Info" reply:
 /// `dweeb:perm:<channel_id>:<message_id>`.
 const PERM_TOGGLE_PREFIX: &str = "dweeb:perm:";
+
+/// Plugins whose services answer a `<prefix>manage:<instance>` component with
+/// an ephemeral management panel (authority re-checked at click time): the
+/// routing prefix and the label the Manage button carries. Only these
+/// prefixes get a button on a "Message Info" reply — a plugin without the
+/// verb would answer the click with "Unknown action.", so a prefix belongs
+/// here only once its deployed service parses `manage:` (ship the service
+/// first, this list second).
+const MANAGEABLE_PLUGINS: [(&str, &str); 2] = [("giveaway:", "giveaway"), ("poll:", "poll")];
 
 /// Answer any application-command interaction. Unknown names get a polite
 /// ephemeral shrug (a stale registration, or a custom app that registered
@@ -294,6 +316,14 @@ fn message_info(app: &App, interaction: &Value) -> Response {
         lines.push(format!("**Flags:** {}", marks.join(" · ")));
     }
 
+    // Which plugins run this message — its custom_ids matched against the
+    // same routing table clicks are forwarded by, so "listed here" and
+    // "served by a plugin" are the same statement.
+    let plugins = plugins_on_message(&app.routes, msg.get("components").unwrap_or(&Value::Null));
+    if !plugins.is_empty() {
+        lines.push(plugins_line(&plugins));
+    }
+
     let permanent = app.store.permanent_details(message_id);
     lines.push(expiry_line(
         app,
@@ -302,12 +332,18 @@ fn message_info(app: &App, interaction: &Value) -> Response {
         permanent.as_ref(),
     ));
 
+    let permissions: u128 = interaction
+        .pointer("/member/permissions")
+        .and_then(Value::as_str)
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(0);
+    let mut action_rows: Vec<Value> = Vec::new();
+
     // Slot usage + the toggle button, for guilds on a TTL'd deployment. The
     // button renders only for Manage Server holders ([`toggle_permanent`]
     // re-checks — a custom_id is client-forgeable), and only when there is
     // something to toggle: interactive components to keep alive, or this
     // guild's own slot to release.
-    let mut button = None;
     if let (Some(guild_id), Some(_)) = (guild_id, app.component_ttl_ms) {
         if let Ok(rows) = app.store.list(guild_id) {
             lines.push(slots_line(
@@ -315,36 +351,45 @@ fn message_info(app: &App, interaction: &Value) -> Response {
                 app.permanent_cap_for(guild_id),
             ));
         }
-        let permissions: u128 = interaction
-            .pointer("/member/permissions")
-            .and_then(Value::as_str)
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(0);
         if permissions & MANAGE_GUILD != 0 && !message_id.is_empty() && !channel_id.is_empty() {
             let custom_id = format!("{PERM_TOGGLE_PREFIX}{channel_id}:{message_id}");
-            button = toggle_button(guild_id, permanent.as_ref(), interactive, &custom_id);
+            if let Some(b) = toggle_button(guild_id, permanent.as_ref(), interactive, &custom_id) {
+                action_rows.push(json!({ "type": TYPE_ACTION_ROW, "components": [b] }));
+            }
+        }
+    }
+
+    // Manage buttons for the plugins that serve a panel: guild messages only
+    // (every plugin refuses DMs) and Manage Server holders only — a plugin
+    // may also honor its own configured host roles, but the dispatcher can't
+    // know them, and those hosts keep their existing way in (clicking the
+    // plugin's own button). The plugin re-checks authority on click either
+    // way; this gate is presentation, not security.
+    if guild_id.is_some() && permissions & MANAGE_GUILD != 0 {
+        let buttons = manage_buttons(&plugins);
+        if !buttons.is_empty() {
+            action_rows.push(json!({ "type": TYPE_ACTION_ROW, "components": buttons }));
         }
     }
 
     let text = lines.join("\n");
-    match button {
-        // Components V2: the info text is a Text Display, the toggle an action
-        // row beside it. The text is a handful of bounded lines, always inside
-        // the budget — the buttoned shape never needs the oversize fallbacks.
-        Some(b) => Json(json!({
-            "type": RESPONSE_CHANNEL_MESSAGE,
-            "data": {
-                "flags": FLAG_EPHEMERAL | FLAG_IS_COMPONENTS_V2,
-                "components": [
-                    { "type": TYPE_TEXT_DISPLAY, "content": text },
-                    { "type": TYPE_ACTION_ROW, "components": [b] },
-                ],
-            }
-        }))
-        .into_response(),
-        None => reply_sized(text)
-            .unwrap_or_else(|| ephemeral("This message's details are too long to display.")),
+    if action_rows.is_empty() {
+        return reply_sized(text)
+            .unwrap_or_else(|| ephemeral("This message's details are too long to display."));
     }
+    // Components V2: the info text is a Text Display, the buttons in action
+    // rows beside it. The text is a handful of bounded lines, always inside
+    // the budget — the buttoned shape never needs the oversize fallbacks.
+    let mut components = vec![json!({ "type": TYPE_TEXT_DISPLAY, "content": text })];
+    components.extend(action_rows);
+    Json(json!({
+        "type": RESPONSE_CHANNEL_MESSAGE,
+        "data": {
+            "flags": FLAG_EPHEMERAL | FLAG_IS_COMPONENTS_V2,
+            "components": components,
+        }
+    }))
+    .into_response()
 }
 
 // ── Dispatcher-owned components ──────────────────────────────────────────────
@@ -503,17 +548,41 @@ fn refresh_info_reply(
         .and_then(Value::as_str)
         .unwrap_or_default();
     // Rebuild the V2 tree: the patched Text Display, plus the toggle's action
-    // row when there's still something to toggle. The message keeps its V2
-    // flag across an UPDATE_MESSAGE, so the components alone carry the edit.
+    // row when there's still something to toggle. Every OTHER action row on
+    // the reply (the plugin manage buttons) survives verbatim — only the
+    // toggle's own row is rebuilt. The message keeps its V2 flag across an
+    // UPDATE_MESSAGE, so the components alone carry the edit.
     let mut components = vec![json!({ "type": TYPE_TEXT_DISPLAY, "content": patched.join("\n") })];
     if let Some(b) = toggle_button(guild_id, permanent.as_ref(), interactive, custom_id) {
         components.push(json!({ "type": TYPE_ACTION_ROW, "components": [b] }));
     }
+    components.extend(other_action_rows(interaction, custom_id));
     Json(json!({
         "type": RESPONSE_UPDATE_MESSAGE,
         "data": { "components": components }
     }))
     .into_response()
+}
+
+/// Every action row on the reply the click sits on EXCEPT the one holding
+/// `clicked_id` — what [`refresh_info_reply`] must carry over verbatim while
+/// it rebuilds the clicked toggle's row from a fresh store read.
+fn other_action_rows(interaction: &Value, clicked_id: &str) -> Vec<Value> {
+    interaction
+        .pointer("/message/components")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|c| c.get("type").and_then(Value::as_u64) == Some(TYPE_ACTION_ROW))
+        .filter(|row| {
+            !row.get("components")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|b| b.get("custom_id").and_then(Value::as_str) == Some(clicked_id))
+        })
+        .cloned()
+        .collect()
 }
 
 /// The "Message Info" text, read back from the V2 reply the toggle sits on:
@@ -746,6 +815,111 @@ fn count_interactive(node: &Value) -> usize {
         }
         _ => 0,
     }
+}
+
+// ── Plugins on the message ───────────────────────────────────────────────────
+
+/// The routed plugins present on a message, in component order: the matched
+/// routing prefix, plus the instance id when the custom_id is a *bound*
+/// binding — `<prefix><id>`, bare, no verb, the only shape the editor ever
+/// attaches to a posted message (panel controls carry a `<verb>:` and live on
+/// ephemeral replies). A verb-carrying or empty tail still names the plugin
+/// in the info line, it just can't be managed (`None`). Deduplicated; expects
+/// `routes` longest-prefix-first, as main.rs sorts it.
+fn plugins_on_message<'a>(
+    routes: &'a [(String, String)],
+    components: &'a Value,
+) -> Vec<(&'a str, Option<&'a str>)> {
+    // The same walk `count_interactive` does: children under `components`, a
+    // section's button under `accessory`.
+    fn collect<'a>(node: &'a Value, out: &mut Vec<&'a str>) {
+        match node {
+            Value::Array(items) => items.iter().for_each(|item| collect(item, out)),
+            Value::Object(map) => {
+                if let Some(id) = map.get("custom_id").and_then(Value::as_str) {
+                    out.push(id);
+                }
+                if let Some(children) = map.get("components") {
+                    collect(children, out);
+                }
+                if let Some(accessory) = map.get("accessory") {
+                    collect(accessory, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut ids = Vec::new();
+    collect(components, &mut ids);
+    let mut found: Vec<(&str, Option<&str>)> = Vec::new();
+    for id in ids {
+        let Some((prefix, _)) = routes.iter().find(|(p, _)| id.starts_with(p.as_str())) else {
+            continue;
+        };
+        let tail = &id[prefix.len()..];
+        let instance = (!tail.is_empty() && !tail.contains(':')).then_some(tail);
+        let entry = (prefix.as_str(), instance);
+        if !found.contains(&entry) {
+            found.push(entry);
+        }
+    }
+    found
+}
+
+/// The `**Plugins:**` line: every routed plugin on the message, named once by
+/// its routing prefix. Purely informative — visible to everyone, since the
+/// custom_ids it reads are already in every viewer's client.
+fn plugins_line(plugins: &[(&str, Option<&str>)]) -> String {
+    let mut names: Vec<&str> = Vec::new();
+    for (prefix, _) in plugins {
+        let name = prefix.trim_end_matches(':');
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    let list: Vec<String> = names.iter().map(|n| format!("`{n}`")).collect();
+    format!("**Plugins:** {}", list.join(" · "))
+}
+
+/// One "Manage <plugin>" button per detected instance of a manage-capable
+/// plugin ([`MANAGEABLE_PLUGINS`]), capped at one action row. The custom_id
+/// hands the click to the plugin's own `manage:` verb through the ordinary
+/// prefix forwarding — the plugin re-checks authority, so these buttons are
+/// discovery, not the gate. Labels number up only when one plugin appears
+/// more than once on the message.
+fn manage_buttons(plugins: &[(&str, Option<&str>)]) -> Vec<Value> {
+    /// Discord caps an action row at five buttons and a custom_id at 100
+    /// chars; an instance past either simply doesn't get a button (it stays
+    /// manageable the in-situ way).
+    const MAX_BUTTONS: usize = 5;
+    const MAX_CUSTOM_ID: usize = 100;
+    let mut buttons = Vec::new();
+    for (prefix, label) in MANAGEABLE_PLUGINS {
+        let instances: Vec<&str> = plugins
+            .iter()
+            .filter(|(p, _)| *p == prefix)
+            .filter_map(|(_, instance)| *instance)
+            .collect();
+        for (n, instance) in instances.iter().enumerate() {
+            let custom_id = format!("{prefix}manage:{instance}");
+            if custom_id.len() > MAX_CUSTOM_ID {
+                continue;
+            }
+            let text = if instances.len() == 1 {
+                format!("Manage {label}")
+            } else {
+                format!("Manage {label} #{}", n + 1)
+            };
+            buttons.push(json!({
+                "type": TYPE_BUTTON,
+                "style": BUTTON_SECONDARY,
+                "label": text,
+                "custom_id": custom_id,
+            }));
+        }
+    }
+    buttons.truncate(MAX_BUTTONS);
+    buttons
 }
 
 /// Unix seconds of an ISO 8601 timestamp the way Discord writes them
@@ -1369,6 +1543,137 @@ mod tests {
         // The two custom_id holders count; the link button and text don't.
         assert_eq!(count_interactive(&components), 2);
         assert_eq!(count_interactive(&Value::Null), 0);
+    }
+
+    // ── plugins on the message ───────────────────────────────────────────────
+
+    /// A routing table like main.rs builds: longest prefix first.
+    fn routes() -> Vec<(String, String)> {
+        [
+            ("quickreplies:", "http://quick-replies:8096"),
+            ("giveaway:", "http://giveaway:8094"),
+            ("poll:", "http://poll:8098"),
+        ]
+        .map(|(p, b)| (p.to_string(), b.to_string()))
+        .to_vec()
+    }
+
+    #[test]
+    fn plugins_are_detected_through_nesting_and_deduplicated() {
+        let components = json!([
+            { "type": 17, "components": [
+                { "type": 9,
+                  "components": [{ "type": 10, "content": "hi" }],
+                  "accessory": { "type": 2, "style": 1, "custom_id": "giveaway:g1" } },
+                { "type": 1, "components": [
+                    { "type": 2, "style": 5, "url": "https://example.com", "label": "Link" },
+                    { "type": 3, "custom_id": "poll:p1", "options": [] },
+                    // A repeat of the same binding collapses to one entry.
+                    { "type": 2, "style": 1, "custom_id": "poll:p1" },
+                ]},
+            ]},
+            // Unrouted namespaces — the dispatcher's own and a stranger's —
+            // never make the list.
+            { "type": 1, "components": [
+                { "type": 2, "style": 1, "custom_id": "dweeb:perm:1:2" },
+                { "type": 2, "style": 1, "custom_id": "mystery:x" },
+            ]},
+        ]);
+        assert_eq!(
+            plugins_on_message(&routes(), &components),
+            vec![("giveaway:", Some("g1")), ("poll:", Some("p1"))]
+        );
+    }
+
+    #[test]
+    fn verb_carrying_ids_name_the_plugin_but_yield_no_instance() {
+        // A panel-control shape on a message (never posted by the editor, but
+        // custom apps can build anything): the plugin is named, not managed.
+        let components = json!([
+            { "type": 1, "components": [
+                { "type": 2, "style": 1, "custom_id": "giveaway:draw:g1" },
+                { "type": 2, "style": 1, "custom_id": "quickreplies:" },
+            ]},
+        ]);
+        assert_eq!(
+            plugins_on_message(&routes(), &components),
+            vec![("giveaway:", None), ("quickreplies:", None)]
+        );
+        assert!(manage_buttons(&plugins_on_message(&routes(), &components)).is_empty());
+    }
+
+    #[test]
+    fn plugins_line_names_each_plugin_once() {
+        assert_eq!(
+            plugins_line(&[
+                ("giveaway:", Some("g1")),
+                ("giveaway:", Some("g2")),
+                ("poll:", None),
+            ]),
+            "**Plugins:** `giveaway` · `poll`"
+        );
+    }
+
+    #[test]
+    fn manage_buttons_route_into_the_plugins_own_namespace() {
+        let buttons = manage_buttons(&[
+            ("giveaway:", Some("g1")),
+            ("poll:", Some("p1")),
+            // Routed but not manage-capable — no button, no dead click.
+            ("quickreplies:", Some("q1")),
+        ]);
+        assert_eq!(buttons.len(), 2);
+        assert_eq!(buttons[0]["custom_id"], "giveaway:manage:g1");
+        assert_eq!(buttons[0]["label"], "Manage giveaway");
+        assert_eq!(buttons[1]["custom_id"], "poll:manage:p1");
+        assert_eq!(buttons[1]["label"], "Manage poll");
+    }
+
+    #[test]
+    fn duplicate_instances_get_numbered_labels_and_the_row_stays_capped() {
+        let plugins: Vec<(&str, Option<&str>)> = vec![
+            ("giveaway:", Some("g1")),
+            ("giveaway:", Some("g2")),
+            ("poll:", Some("p1")),
+            ("poll:", Some("p2")),
+            ("poll:", Some("p3")),
+            ("poll:", Some("p4")),
+        ];
+        let buttons = manage_buttons(&plugins);
+        // Discord's per-row cap: five buttons, in detection order.
+        assert_eq!(buttons.len(), 5);
+        assert_eq!(buttons[0]["label"], "Manage giveaway #1");
+        assert_eq!(buttons[1]["label"], "Manage giveaway #2");
+        assert_eq!(buttons[2]["label"], "Manage poll #1");
+    }
+
+    #[test]
+    fn an_instance_too_long_for_a_custom_id_is_skipped() {
+        let long = "x".repeat(95);
+        let buttons = manage_buttons(&[("giveaway:", Some(long.as_str()))]);
+        // "giveaway:manage:" + 95 chars would exceed Discord's 100-char cap.
+        assert!(buttons.is_empty());
+    }
+
+    #[test]
+    fn other_action_rows_keeps_everything_but_the_clicked_row() {
+        let interaction = json!({
+            "data": { "custom_id": "dweeb:perm:1:2" },
+            "message": { "components": [
+                { "type": 10, "content": "### Message Info" },
+                { "type": 1, "components": [
+                    { "type": 2, "style": 1, "custom_id": "dweeb:perm:1:2", "label": "Never expire" },
+                ]},
+                { "type": 1, "components": [
+                    { "type": 2, "style": 2, "custom_id": "giveaway:manage:g1", "label": "Manage giveaway" },
+                ]},
+            ]}
+        });
+        let kept = other_action_rows(&interaction, "dweeb:perm:1:2");
+        // The manage row survives; the toggle's own row (rebuilt fresh by the
+        // caller) and the Text Display do not.
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0]["components"][0]["custom_id"], "giveaway:manage:g1");
     }
 
     #[test]
