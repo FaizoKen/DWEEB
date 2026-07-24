@@ -24,6 +24,7 @@ import {
   type PickerGuild,
 } from "@/core/guild/api";
 import { isProxyConfigured } from "@/core/guild/config";
+import { syncGuildIdentity } from "@/core/guild/identityCache";
 import { startLoginPopup } from "@/core/oauth/flows";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { usePlanStore } from "@/core/plan/planStore";
@@ -126,6 +127,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
       try {
         const guilds = await fetchUserGuilds(force);
         if (generation !== sessionGeneration || get().status !== "authed") return;
+        // The list is authoritative for the connected server's name/icon: refresh
+        // (or drop) the cache that carries them across the next reload's boot gap,
+        // before publishing the list that consumers re-render on.
+        syncGuildIdentity(useGuildStore.getState().guildId, guilds);
         set({ guilds, guildsStatus: "ready" });
       } catch (e) {
         if (generation !== sessionGeneration) return;

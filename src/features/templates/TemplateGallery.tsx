@@ -42,7 +42,6 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useSavedMessagesStore, type SavedMessageRecord } from "@/core/state/savedMessagesStore";
-import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import {
   addPermanentMessage,
@@ -73,7 +72,7 @@ import { TEMPLATES, type MessageTemplate } from "@/data/presets";
 import type { WebhookMessage } from "@/core/schema/types";
 import { isRegisteredPluginId } from "@/core/plugins/registry";
 import { useSendNudgeStore } from "@/core/state/sendNudgeStore";
-import { GuildIdentity } from "@/features/share/GuildIdentity";
+import { GuildIdentity, useGuildIdentity } from "@/features/share/GuildIdentity";
 import { Button } from "@/ui/Button";
 import { Modal } from "@/ui/Modal";
 import {
@@ -147,14 +146,14 @@ export function TemplateGallery() {
   const closeGallery = useTemplateGalleryStore((s) => s.closeGallery);
   const savedEntries = useSavedMessagesStore((s) => s.entries);
   const removeEntry = useSavedMessagesStore((s) => s.remove);
-  // The signed-in user's servers, for the connected server's display name.
-  const authGuilds = useAuthStore((s) => s.guilds);
   // The connected server — whose library the Posted tab shows.
   const connectedGuildId = useGuildStore((s) => s.guildId);
-  const connectedGuildName = useMemo(
-    () => authGuilds.find((g) => g.id === connectedGuildId)?.name,
-    [authGuilds, connectedGuildId],
-  );
+  // Its display identity, for the title glyph and the library copy. Resolves
+  // from the cached identity while the user's guild list loads, so the gallery —
+  // which auto-opens on the landing screen, before that list is even requested —
+  // shows the real server icon straight away instead of the generic glyph.
+  const connectedGuild = useGuildIdentity(connectedGuildId);
+  const connectedGuildName = connectedGuild?.name;
 
   const [query, setQuery] = useState("");
   // Filtering runs against the deferred value so typing stays responsive even

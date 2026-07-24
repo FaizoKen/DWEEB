@@ -4,16 +4,32 @@
  * primary button.
  *
  * Resolves the icon (and a nicer name) from the signed-in user's guild list by
- * id; falls back to a provided name (e.g. the one saved on a pasted webhook,
- * whose server may not be in that list) and an initial-letter glyph when there's
- * no icon. Renders nothing when neither a guild nor a fallback name is known, so
- * the bar collapses to just the button on the signed-out / paste-only path.
+ * id — or, while that list is still loading (two round-trips into every visit),
+ * from the connected server's cached identity, so the real icon is there on the
+ * first frame instead of popping in. Falls back to a provided name (e.g. the one
+ * saved on a pasted webhook, whose server may not be in that list) and an
+ * initial-letter glyph when there's no icon. Renders nothing when neither a
+ * guild nor a fallback name is known, so the bar collapses to just the button on
+ * the signed-out / paste-only path.
  */
 
+import { useMemo } from "react";
 import { useAuthStore } from "@/core/auth/authStore";
 import { guildIconUrl } from "@/core/guild/api";
+import { resolveGuildIdentity, type GuildIdentityInfo } from "@/core/guild/identityCache";
 import { cn } from "@/lib/cn";
 import styles from "./GuildIdentity.module.css";
+
+/**
+ * A server's display identity (name + icon), live list first and last-known
+ * identity second. Shared with the surfaces that decide whether they know the
+ * server at all — the Message directory swaps its generic glyph for the real
+ * server icon on this.
+ */
+export function useGuildIdentity(guildId?: string | null): GuildIdentityInfo | null {
+  const guilds = useAuthStore((s) => s.guilds);
+  return useMemo(() => resolveGuildIdentity(guildId, guilds), [guildId, guilds]);
+}
 
 export function GuildIdentity({
   guildId,
@@ -32,8 +48,7 @@ export function GuildIdentity({
    * destination and space is deliberately tight. */
   compact?: boolean;
 }) {
-  const guilds = useAuthStore((s) => s.guilds);
-  const guild = guildId ? guilds.find((g) => g.id === guildId) : undefined;
+  const guild = useGuildIdentity(guildId);
   const name = guild?.name ?? fallbackName;
   if (!name) return null;
 

@@ -23,6 +23,7 @@ import { create } from "zustand";
 import { useAuthStore } from "@/core/auth/authStore";
 import { fetchBootstrap, GuildApiError, type BootstrapResponse } from "./api";
 import { isProxyConfigured } from "./config";
+import { clearCachedGuildIdentity, rememberGuildIdentity } from "./identityCache";
 import {
   CLIENT_TTL_MS,
   clearCachedGuild,
@@ -121,7 +122,12 @@ async function load(
     // Remember this as the last server so a future sign-in reselects it.
     saveLastGuildId(guildId);
     set({ guildId, status: "ready", data, error: null });
-    const name = useAuthStore.getState().guilds.find((g) => g.id === guildId)?.name;
+    // Remember the server's name/icon too: the mapping data above hydrates from
+    // localStorage on the next load's first frame, but those two only arrive with
+    // the user's guild list, two round-trips later (see `identityCache`).
+    const entry = useAuthStore.getState().guilds.find((g) => g.id === guildId);
+    rememberGuildIdentity(entry);
+    const name = entry?.name;
     // `force` is only set by the explicit "Refresh" action, so word the toast
     // for it differently from a first connect/switch.
     pushToast(
@@ -190,6 +196,7 @@ export const useGuildStore = create<GuildState>((set, get) => ({
     inflight?.controller.abort();
     inflight = null;
     clearCachedGuild();
+    clearCachedGuildIdentity();
     set({ guildId: "", status: "idle", data: null, error: null });
   },
 }));

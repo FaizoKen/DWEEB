@@ -532,6 +532,19 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   restriction). Multi-file gallery
   registration is one IDB transaction + one attachment-store notification; GC is debounced and
   snapshot URL scans are WeakMap-cached under the stores' immutable-tree contract.
+- **The connected server's name/icon are cached separately from its data.** `guildStore`
+  hydrates the connected guild's id *and* its whole roles/channels/emojis map synchronously from
+  localStorage, but a guild's display name and icon hash exist only in `authStore.guilds`, which
+  costs two sequential round-trips (`/auth/me` → `/api/guilds`) and is never persisted. The
+  landing gallery auto-opens on the first frame, so anything gated on that list showed its
+  "no server" fallback — the Message directory's title rendered the generic sparkle glyph beside
+  a fully-loaded server library, and stayed there for good if `/api/guilds` was slow or errored.
+  `core/guild/identityCache.ts` persists just `{id, name, icon}` for the connected guild;
+  resolution order is **live list → cached identity** (`resolveGuildIdentity`, or the
+  `useGuildIdentity` hook exported from `features/share/GuildIdentity.tsx`). The list stays
+  authoritative: `syncGuildIdentity` refreshes the cache on every load and *drops* it when the
+  connected guild is absent from a loaded list, so a left server can't pin a stale chip. Don't
+  reintroduce a bare `guilds.find(...)` on a surface that must render before sign-in resolves.
 - **Authentication defines an account-state lifetime.** Credential/decrypted stores register with
   `core/auth/accountScopedState`; logout/session expiry clears and aborts library, webhook,
   custom-bot, and emoji work before publishing anonymous state, and generation guards reject late
