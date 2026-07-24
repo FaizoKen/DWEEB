@@ -313,6 +313,7 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
         Action::Draw { id } => handle_draw(state, interaction, &id),
         Action::Reroll { id } => handle_reroll(state, interaction, &id),
         Action::Cancel { id } => handle_cancel(state, interaction, &id),
+        Action::Manage { id } => handle_manage(state, interaction, &id),
         Action::Unknown => Json(discord::ephemeral_text("Unknown action.")).into_response(),
     }
 }
@@ -617,6 +618,31 @@ fn require_host(
         .into_response());
     }
     Ok(g)
+}
+
+/// The dispatcher's "Message Info" manage button: the host panel as a fresh
+/// ephemeral reply. Unlike a host's Enter click, this button sits on the
+/// (ephemeral) info reply — there is no public message in the interaction to
+/// refresh, so the panel is the whole answer; its Draw/Cancel/Reroll then
+/// reach the public message out of band exactly as they do today.
+fn handle_manage(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
+    let g = match require_host(state, interaction, id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
+    };
+    let entered = interaction
+        .actor_id()
+        .map(|uid| state.store.is_entered(id, uid).unwrap_or(false))
+        .unwrap_or(false);
+    let count = state.store.count_entries(id).unwrap_or(0);
+    Json(discord::host_panel(
+        id,
+        g.status,
+        entered,
+        count,
+        g.config.winner_count as usize,
+    ))
+    .into_response()
 }
 
 fn handle_draw(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
@@ -1540,6 +1566,45 @@ mod tests {
             .unwrap();
         let _ = handle_component(&state, &control_click(id, "join", "0"));
         assert_eq!(state.store.count_entries(id).unwrap(), 1);
+    }
+
+    #[test]
+    fn manage_control_opens_the_host_panel_off_the_message() {
+        let state = test_state();
+        let id = "abc";
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(None))
+            .unwrap();
+        state.store.enter(id, "100").unwrap();
+
+        // The dispatcher's Message Info button carries no giveaway message at
+        // all (it sits on the ephemeral info reply) — the panel must arrive as
+        // a fresh ephemeral reply (type 4), never an UPDATE of the info reply.
+        let resp = body_json(handle_component(
+            &state,
+            &control_click(id, "manage", MANAGE_GUILD),
+        ));
+        assert_eq!(resp["type"], 4);
+        let s = resp.to_string();
+        assert!(s.contains("Host controls"), "{s}");
+        assert!(s.contains(&format!("giveaway:draw:{id}")), "{s}");
+    }
+
+    #[test]
+    fn manage_control_is_denied_for_a_plain_member() {
+        let state = test_state();
+        let id = "abc";
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with(None))
+            .unwrap();
+
+        let denied = body_json(handle_component(&state, &control_click(id, "manage", "0")));
+        assert!(
+            denied.to_string().contains("Only a server manager"),
+            "{denied}"
+        );
     }
 
     #[test]

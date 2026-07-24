@@ -291,6 +291,12 @@ pub enum Action {
     Results {
         id: String,
     },
+    /// Open the host panel from a surface that isn't the poll message — the
+    /// dispatcher mints `poll:manage:<id>` buttons on its "Message Info"
+    /// reply. Same authority gate as every other host verb.
+    Manage {
+        id: String,
+    },
     Unknown,
 }
 
@@ -322,6 +328,7 @@ pub fn parse_action(custom_id: &str) -> Action {
                 "close" => Action::Close { id },
                 "reopen" => Action::Reopen { id },
                 "results" => Action::Results { id },
+                "manage" => Action::Manage { id },
                 _ => Action::Unknown,
             }
         }
@@ -1373,6 +1380,11 @@ mod tests {
         assert_eq!(
             parse_action("poll:results:abc"),
             Action::Results { id: "abc".into() }
+        );
+        // The dispatcher's Message Info manage button.
+        assert_eq!(
+            parse_action("poll:manage:abc"),
+            Action::Manage { id: "abc".into() }
         );
     }
 

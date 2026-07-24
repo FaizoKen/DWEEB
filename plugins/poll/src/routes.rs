@@ -324,6 +324,7 @@ fn handle_component(state: &AppState, interaction: &discord::Interaction) -> Res
         Action::Close { id } => handle_close(state, interaction, &id),
         Action::Reopen { id } => handle_reopen(state, interaction, &id),
         Action::Results { id } => handle_results(state, interaction, &id),
+        Action::Manage { id } => handle_manage(state, interaction, &id),
         Action::Unknown => Json(discord::ephemeral_text("Unknown action.")).into_response(),
     }
 }
@@ -691,6 +692,20 @@ fn require_host(
         .into_response());
     }
     Ok(p)
+}
+
+/// The dispatcher's "Message Info" manage button: the host panel as a fresh
+/// ephemeral reply. Unlike a host's click on the poll itself, this button sits
+/// on the (ephemeral) info reply — there is no poll message in the interaction
+/// to refresh, so the panel is the whole answer; its Close/Reopen/Post-results
+/// then reach the public message out of band exactly as they do today.
+fn handle_manage(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
+    let p = match require_host(state, interaction, id) {
+        Ok(p) => p,
+        Err(resp) => return resp,
+    };
+    let votes = state.store.tallies(id).map(|t| t.total).unwrap_or(0);
+    Json(discord::host_panel(id, p.status, votes)).into_response()
 }
 
 fn handle_close(state: &AppState, interaction: &discord::Interaction, id: &str) -> Response {
@@ -1846,5 +1861,50 @@ mod tests {
         assert_eq!(v["type"], 4);
         assert!(v.to_string().contains("This poll has closed"), "{v}");
         assert!(state.refreshers.lock().unwrap().entries.is_empty());
+    }
+
+    #[test]
+    fn manage_control_opens_the_host_panel_off_the_message() {
+        let state = test_state();
+        let id = "abc";
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with("button", None))
+            .unwrap();
+        state
+            .store
+            .cast_ballot(id, "100", &["a".to_string()], true)
+            .unwrap();
+
+        // The dispatcher's Message Info button carries no poll message at all
+        // (it sits on the ephemeral info reply) — the panel must arrive as a
+        // fresh ephemeral reply (type 4), never an UPDATE of the info reply.
+        let resp = body_json(handle_component(
+            &state,
+            &panel_click(id, "manage", "1", MANAGE_GUILD, &[]),
+        ));
+        assert_eq!(resp["type"], 4);
+        let s = resp.to_string();
+        assert!(s.contains("Host controls"), "{s}");
+        assert!(s.contains(&format!("poll:close:{id}")), "{s}");
+    }
+
+    #[test]
+    fn manage_control_is_denied_for_a_plain_member() {
+        let state = test_state();
+        let id = "abc";
+        state
+            .store
+            .create(id, TEST_EDIT_TOKEN, &config_with("button", None))
+            .unwrap();
+
+        let denied = body_json(handle_component(
+            &state,
+            &panel_click(id, "manage", "9", "0", &[]),
+        ));
+        assert!(
+            denied.to_string().contains("Only a server manager"),
+            "{denied}"
+        );
     }
 }

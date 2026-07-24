@@ -260,6 +260,12 @@ pub enum Action {
     Cancel {
         id: String,
     },
+    /// Open the host panel from a surface that isn't the giveaway message —
+    /// the dispatcher mints `giveaway:manage:<id>` buttons on its "Message
+    /// Info" reply. Same authority gate as every other host verb.
+    Manage {
+        id: String,
+    },
     Unknown,
 }
 
@@ -290,6 +296,7 @@ pub fn parse_action(custom_id: &str) -> Action {
                 "draw" => Action::Draw { id },
                 "reroll" => Action::Reroll { id },
                 "cancel" => Action::Cancel { id },
+                "manage" => Action::Manage { id },
                 _ => Action::Unknown,
             }
         }
@@ -1096,6 +1103,11 @@ mod tests {
         assert_eq!(
             parse_action("giveaway:leave:abc"),
             Action::Leave { id: "abc".into() }
+        );
+        // The dispatcher's Message Info manage button.
+        assert_eq!(
+            parse_action("giveaway:manage:abc"),
+            Action::Manage { id: "abc".into() }
         );
     }
 
