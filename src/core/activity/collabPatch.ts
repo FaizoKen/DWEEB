@@ -162,7 +162,14 @@ function mergeOwnProps(node: AnyComponent, data: Record<string, unknown>): AnyCo
  *  an atomic node — leaf components and media galleries. */
 function childCollections(node: AnyComponent): AnyComponent[][] {
   if (isContainer(node)) return [node.components as AnyComponent[]];
-  if (isSection(node)) return [[node.accessory as AnyComponent], node.components as AnyComponent[]];
+  // An absent accessory collapses to an empty collection rather than `[undefined]`
+  // (which would throw in `idsEqual`/`diffNode`); a peer that has one then reads as
+  // a structural difference and replaces the subtree, which is the right answer.
+  if (isSection(node))
+    return [
+      node.accessory ? [node.accessory as AnyComponent] : [],
+      node.components as AnyComponent[],
+    ];
   if (isActionRow(node)) return [node.components as AnyComponent[]];
   return [];
 }

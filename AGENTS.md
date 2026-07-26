@@ -211,6 +211,30 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   surfaces in the _child_, far from the line at fault. Guarded by `src/ui/Field.test.ts`, which runs
   against `preact/compat` (aliased in `vitest.config.ts`) because React's `Children.map` does not
   wrap and would hide the bug.
+- **`attachEditorFields` must return the shape it declares — the schema layer trusts it
+  absolutely** (2026-07-26). It is the single funnel for every external payload (JSON
+  import/paste, share token, draft/history/saved/library hydration, template, AI reply, Discord
+  Restore), and downstream code dereferences the non-optional fields with no guard: `walk`
+  iterates `node.components` and yields `node.accessory`, `countCharacters` iterates
+  `select.options`, the validator reads `media.url` / `item.media.url`. A payload omitting one
+  reached those consumers as `undefined` and threw a bare TypeError. That shipped in 1.0.0: a
+  pasted section with no `accessory` made `countCharacters` throw
+  `Cannot use 'in' operator to search for 'content' in undefined` (note `in` throws on undefined
+  rather than answering false) inside `JsonPanel.finish`'s click handler — so **Import looked
+  dead** (the throw preempts both `setError` and `replace`) and the uncaught error paged the
+  maintainer. `repairStructure` (normalize.ts) now fills a missing `components`/`items`/`options`
+  array with `[]` and missing `media`/`file` with `{url:""}`: that invents nothing and the
+  validator already has a precise complaint for each empty case. A missing Section `accessory`
+  has no neutral value — a synthesized `createThumbnail()` would inject the DWEEB placeholder
+  JPEG into a message that then really posts — so it is **refused** with a descriptive throw,
+  which is safe because all 11 callers already treat a throw as "malformed payload" and report
+  it. Two more layers, since this is the paging channel: the three `accessory`-yielding walkers
+  (schema/traversal.ts, schema/capability.ts, plugins/targets.ts), `collabPatch`'s
+  `childCollections`, and the structural helpers never dereference an absent accessory, and
+  `validateNode` reports `SECTION_ACCESSORY_MISSING` so such a tree arriving by a non-boundary
+  route (a peer's collab op) is blocked from send instead of silently 400ing at Discord. When
+  adding a field the schema layer will walk unguarded, guarantee it here. Guarded by the
+  malformed-payload tests in `serialization/encode.test.ts` + `schema/validation.test.ts`.
 - **Adding an interaction plugin** touches the crate, compose service/volume + dispatcher
   `ROUTES`, Caddyfile, registry, `server/gatus/config.yaml`, `plugins-ci.yml` matrix,
   `.github/workflows/plugin-<id>.yml`, and `deploy.yml`'s workflow list. A link plugin is

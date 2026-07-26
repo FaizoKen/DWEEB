@@ -155,6 +155,64 @@ function parseMessageReference(raw: unknown): MessageReference | undefined {
   return out;
 }
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Component types whose `components` array is non-optional in the editor's
+ * types — every traversal iterates it without a guard.
+ */
+const CHILD_BEARING_TYPES: ReadonlySet<number> = new Set([
+  ComponentType.Section,
+  ComponentType.Container,
+  ComponentType.ActionRow,
+]);
+
+/**
+ * Fill in the structural fields the editor's types promise but an external
+ * payload can simply omit.
+ *
+ * This is load-bearing, not tidiness. `attachEditorFields` claims to return a
+ * `WebhookMessage`, and the entire schema layer takes that at its word: `walk`
+ * iterates `node.components` and yields `node.accessory`, `countCharacters`
+ * iterates `select.options`, the validator reads `media.url`. A pasted payload
+ * missing one of those reached those consumers as `undefined` and threw a bare
+ * TypeError — via the JSON Import button that meant a dead button with no error
+ * shown, plus an uncaught-error alert to the maintainer (prod, 2026-07-26:
+ * `Cannot use 'in' operator to search for 'content' in undefined`, thrown by
+ * `countCharacters` on a section with no accessory).
+ *
+ * A missing array repairs to `[]`, and missing media to an empty URL: that
+ * invents nothing, and the validator already has a precise complaint for each
+ * empty case ("Container must contain at least one component", "select needs
+ * options", "Thumbnail needs a URL"). A missing Section accessory has no such
+ * neutral value — anything synthesized is content the user never wrote, and a
+ * placeholder image would silently post to Discord — so it is refused outright.
+ * Every `attachEditorFields` caller already treats a throw as "malformed
+ * payload" and surfaces it, so the user reads the reason instead of hitting a
+ * crash.
+ */
+function repairStructure(stamped: Record<string, unknown>, type: number): void {
+  if (CHILD_BEARING_TYPES.has(type) && !Array.isArray(stamped.components)) {
+    stamped.components = [];
+  }
+  if (type === ComponentType.MediaGallery && !Array.isArray(stamped.items)) {
+    stamped.items = [];
+  }
+  if (type === ComponentType.StringSelect && !Array.isArray(stamped.options)) {
+    stamped.options = [];
+  }
+  if (type === ComponentType.Thumbnail && !isPlainObject(stamped.media)) {
+    stamped.media = { url: "" };
+  }
+  if (type === ComponentType.File && !isPlainObject(stamped.file)) {
+    stamped.file = { url: "" };
+  }
+  if (type === ComponentType.Section && !isPlainObject(stamped.accessory)) {
+    throw new Error("Section is missing its `accessory` — it needs one thumbnail or button.");
+  }
+}
+
 function attachNode(raw: unknown): AnyComponent {
   if (!raw || typeof raw !== "object") {
     throw new Error("Component must be an object.");
@@ -164,6 +222,7 @@ function attachNode(raw: unknown): AnyComponent {
     throw new Error("Component is missing a numeric `type` field.");
   }
   const stamped: Record<string, unknown> = { ...node, _id: newId() };
+  repairStructure(stamped, node.type);
 
   if (Array.isArray(stamped.components)) {
     stamped.components = (stamped.components as unknown[]).map(attachNode);
@@ -172,13 +231,18 @@ function attachNode(raw: unknown): AnyComponent {
     stamped.accessory = attachNode(stamped.accessory);
   }
   // Stamp a fresh editor id onto each gallery item so they're selectable and
-  // reorderable as tree rows. Mirrors the per-component stamping above.
+  // reorderable as tree rows. Mirrors the per-component stamping above. Each
+  // item's `media` is guaranteed for the same reason as `repairStructure`'s —
+  // the validator reads `item.media.url` with no guard.
   if (Array.isArray(stamped.items)) {
-    stamped.items = (stamped.items as unknown[]).map((item) =>
-      item && typeof item === "object"
-        ? { ...(item as Record<string, unknown>), _id: newId() }
-        : item,
-    );
+    stamped.items = (stamped.items as unknown[]).map((item) => {
+      const base = isPlainObject(item) ? item : {};
+      return {
+        ...base,
+        _id: newId(),
+        media: isPlainObject(base.media) ? base.media : { url: "" },
+      };
+    });
   }
   // Container children get constrained; the validator catches type mismatches.
   if (stamped.type === ComponentType.Container && Array.isArray(stamped.components)) {

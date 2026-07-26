@@ -117,6 +117,27 @@ describe("validateMessage — containers & sections", () => {
     } as unknown as AnyComponent;
     expect(errorCodes(msg([section]))).toContain("SECTION_TEXT_COUNT");
   });
+
+  /**
+   * The import boundary refuses an accessory-less section outright, so this
+   * only guards trees that reach the editor another way (a collab op from a
+   * peer, a hand-mutated store). It must be *reported*, never crashed on:
+   * validation walks the tree through `countCharacters`, which probes fields
+   * with the `in` operator — and `in` throws on `undefined` instead of
+   * answering false. That TypeError escaped a click handler in prod
+   * (2026-07-26: "Cannot use 'in' operator to search for 'content' in
+   * undefined") and paged the maintainer.
+   */
+  it("reports a section with no accessory rather than throwing", () => {
+    const section = {
+      _id: "s",
+      type: ComponentType.Section,
+      components: [td("hi")],
+    } as unknown as AnyComponent;
+    const message = msg([section]);
+    expect(() => validateMessage(message)).not.toThrow();
+    expect(errorCodes(message)).toContain("SECTION_ACCESSORY_MISSING");
+  });
 });
 
 describe("validateMessage — buttons", () => {

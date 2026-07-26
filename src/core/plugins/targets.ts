@@ -283,7 +283,7 @@ export function componentIdentity(message: WebhookMessage, nodeId: EditorId): Co
     if (isContainer(node)) for (const child of node.components) visit(child);
     else if (isSection(node)) {
       for (const t of node.components) visit(t);
-      visit(node.accessory);
+      if (node.accessory) visit(node.accessory);
     } else if (isActionRow(node)) for (const child of node.components) visit(child);
   };
   for (const top of message.components) {
@@ -318,7 +318,8 @@ function* deep(node: AnyComponent): Generator<AnyComponent> {
     for (const child of node.components) yield* deep(child);
   } else if (isSection(node)) {
     for (const t of node.components) yield t;
-    yield node.accessory;
+    // Never yield an absent accessory — see the note in schema/traversal.ts.
+    if (node.accessory) yield node.accessory;
   } else if (isActionRow(node)) {
     for (const child of node.components) yield child;
   }

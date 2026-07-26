@@ -133,6 +133,96 @@ describe("normalize round-trip invariants", () => {
   });
 });
 
+/**
+ * The import boundary is the only thing standing between a hand-written payload
+ * and a schema layer that dereferences `node.components`, `node.accessory`,
+ * `select.options` and `media.url` with no guard. A payload omitting one of
+ * those used to reach those consumers as `undefined` and throw a bare TypeError
+ * — in prod (2026-07-26) `countCharacters` threw "Cannot use 'in' operator to
+ * search for 'content' in undefined" out of the JSON-import click handler, so
+ * Import silently did nothing and the uncaught error paged the maintainer.
+ */
+describe("attachEditorFields — structurally incomplete payloads", () => {
+  it("refuses a section with no accessory, with a reason the panel can show", () => {
+    const result = decodeJson(
+      JSON.stringify({
+        components: [
+          {
+            type: ComponentType.Section,
+            components: [{ type: ComponentType.TextDisplay, content: "hi" }],
+          },
+        ],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/accessory/i);
+  });
+
+  it.each([
+    ["container", ComponentType.Container],
+    ["action row", ComponentType.ActionRow],
+  ])("fills a missing `components` array on a %s", (_name, type) => {
+    const attached = attachEditorFields({ components: [{ type }] });
+    expect((attached.components[0] as unknown as { components: unknown[] }).components).toEqual([]);
+  });
+
+  it("fills a missing `components` array on a section that does have an accessory", () => {
+    const attached = attachEditorFields({
+      components: [
+        {
+          type: ComponentType.Section,
+          accessory: { type: ComponentType.Thumbnail, media: { url: "https://x.test/a.png" } },
+        },
+      ],
+    });
+    expect((attached.components[0] as unknown as { components: unknown[] }).components).toEqual([]);
+  });
+
+  it("fills a missing `options` array on a string select", () => {
+    const attached = attachEditorFields({
+      components: [
+        {
+          type: ComponentType.ActionRow,
+          components: [{ type: ComponentType.StringSelect, custom_id: "s" }],
+        },
+      ],
+    });
+    const row = attached.components[0] as unknown as { components: Array<{ options: unknown[] }> };
+    expect(row.components[0]!.options).toEqual([]);
+  });
+
+  it("fills missing media on a thumbnail, a file, and a gallery item", () => {
+    const attached = attachEditorFields({
+      components: [
+        { type: ComponentType.Thumbnail },
+        { type: ComponentType.File },
+        { type: ComponentType.MediaGallery, items: [{}, "not-an-object"] },
+      ],
+    });
+    const [thumb, file, gallery] = attached.components as unknown as [
+      { media: { url: string } },
+      { file: { url: string } },
+      { items: Array<{ media: { url: string } }> },
+    ];
+    expect(thumb.media).toEqual({ url: "" });
+    expect(file.file).toEqual({ url: "" });
+    // Every item ends up media-bearing, including one that wasn't even an object.
+    expect(gallery.items.map((i) => i.media)).toEqual([{ url: "" }, { url: "" }]);
+  });
+
+  it("fills a missing `items` array on a media gallery", () => {
+    const attached = attachEditorFields({ components: [{ type: ComponentType.MediaGallery }] });
+    expect((attached.components[0] as unknown as { items: unknown[] }).items).toEqual([]);
+  });
+
+  it("leaves a well-formed payload untouched", () => {
+    const original = richMessage();
+    const attached = attachEditorFields(stripEditorFields(original));
+    expect(stripEditorFields(attached)).toEqual(stripEditorFields(original));
+  });
+});
+
 describe("migrate", () => {
   it("returns the payload unchanged at the current version", () => {
     const payload = { components: [] };

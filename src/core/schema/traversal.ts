@@ -32,7 +32,13 @@ function* walkNode(node: AnyComponent): Generator<AnyComponent> {
     for (const child of node.components) yield* walkNode(child);
   } else if (isSection(node)) {
     for (const text of node.components) yield text;
-    yield node.accessory;
+    // A section always has an accessory — the import boundary refuses a payload
+    // without one (`repairStructure` in serialization/normalize.ts). This guard
+    // is the second layer: consumers of `walk` probe fields with the `in`
+    // operator, which throws on `undefined` rather than returning false, so a
+    // malformed tree arriving by some other route must not be yielded. That
+    // TypeError escaped a click handler in prod (2026-07-26) and paged.
+    if (node.accessory) yield node.accessory;
   } else if (isActionRow(node)) {
     for (const child of node.components) yield child;
   } else if (isMediaGallery(node)) {
@@ -51,7 +57,8 @@ export function subtreeContainsId(node: AnyComponent, id: EditorId): boolean {
   if (isContainer(node)) return node.components.some((c) => subtreeContainsId(c, id));
   if (isSection(node))
     return (
-      node.components.some((c) => subtreeContainsId(c, id)) || subtreeContainsId(node.accessory, id)
+      node.components.some((c) => subtreeContainsId(c, id)) ||
+      (node.accessory ? subtreeContainsId(node.accessory, id) : false)
     );
   if (isActionRow(node)) return node.components.some((c) => subtreeContainsId(c, id));
   if (isMediaGallery(node)) return node.items.some((item) => item._id === id);
@@ -159,7 +166,7 @@ function findInside(node: AnyComponent, id: EditorId): NodeLocation | null {
       const text = node.components[i]!;
       if (text._id === id) return { node: text, parent: node, index: i };
     }
-    if (node.accessory._id === id) return { node: node.accessory, parent: node, index: 0 };
+    if (node.accessory?._id === id) return { node: node.accessory, parent: node, index: 0 };
   } else if (isActionRow(node)) {
     for (let i = 0; i < node.components.length; i++) {
       const child = node.components[i]!;
@@ -213,7 +220,9 @@ function mapNode<T extends AnyComponent>(
       if (next !== c) changed = true;
       return next as typeof c;
     });
-    const accessory = mapNode(node.accessory, id, update) as typeof node.accessory;
+    const accessory = node.accessory
+      ? (mapNode(node.accessory, id, update) as typeof node.accessory)
+      : node.accessory;
     if (accessory !== node.accessory) changed = true;
     return changed ? { ...node, components, accessory } : node;
   }

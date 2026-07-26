@@ -403,7 +403,21 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
       });
     }
     for (const t of node.components) validateNode(t, issues);
-    validateNode(node.accessory, issues);
+    // Guarded because a malformed tree must be *reported*, not crashed on (the
+    // deref used to throw an uncaught TypeError). The import boundary refuses a
+    // payload whose section has no accessory, so this only fires if such a tree
+    // reaches the editor another way — and then it blocks send, which is right:
+    // Discord rejects an accessory-less section.
+    if (node.accessory) {
+      validateNode(node.accessory, issues);
+    } else {
+      issues.push({
+        nodeId: node._id,
+        severity: "error",
+        code: "SECTION_ACCESSORY_MISSING",
+        message: "Section needs an accessory — either a thumbnail or a button.",
+      });
+    }
     return;
   }
 
