@@ -47,13 +47,24 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/directory",
             "targets": ["button", "string_select"],
             "requiresBot": true,
-            "resources": ["guild"],
+            // `message` is requested only to capture the author's own layout as
+            // the live-render template for "in the message" output.
+            "resources": ["guild", "message"],
             "configUrl": format!("{base}/config.html"),
             "customIdPrefix": PREFIX,
             "apiVersion": 2,
             "defaultEmoji": "\u{1F5C2}\u{FE0F}",
             "managesSelectOptions": true,
             "managesFields": ["min_values", "max_values"],
+            // Tokens are namespaced (`directory*`) rather than a bare `{roles}`:
+            // Self Role already declares `{roles}`, and the host resolves a
+            // collision first-wins in binding order, so two plugins on one
+            // message would silently fight over it.
+            "placeholders": [
+                { "token": crate::store::TOKEN_LIST, "label": "The list", "sample": "the list appears here" },
+                { "token": crate::store::TOKEN_COUNT, "label": "How many are listed", "sample": "0" },
+                { "token": crate::store::TOKEN_UPDATED, "label": "Last updated", "sample": "just now" }
+            ],
             "presets": [
                 { "id": "directory-staff", "name": "Staff list", "description": "Owners, admins and moderators in named groups, with who holds each role.", "emoji": "\u{1F6E1}\u{FE0F}" },
                 { "id": "directory-roles", "name": "Role guide", "description": "Every role the server displays separately, with what each one is for.", "emoji": "\u{1F3AD}" },
@@ -310,22 +321,36 @@ async fn handle_component(state: &AppState, interaction: discord::Interaction) -
         .into_response();
     };
 
-    // A roster with member expansion has to page the member list, which can
-    // outlast Discord's ~3s window — so answer "thinking…" now and edit the real
-    // reply in. Everything else is one concurrent structure read and answers
-    // inline; see `discord::needs_defer`.
-    if discord::needs_defer(&cfg) {
-        let (Some(application_id), Some(interaction_token)) = (
-            interaction.application_id.clone(),
-            interaction.token.clone(),
-        ) else {
+    // Two output shapes, and the choice changes which *kind* of deferral is legal
+    // when a member scan has to run (see `discord::needs_defer`):
+    //
+    //  • "reply"   — answer the clicker. A slow scan defers a REPLY (type 5) and
+    //                later edits that reply.
+    //  • "message" — re-stamp the author's own message, so everyone sees the fresh
+    //                list without clicking anything. A slow scan must defer an
+    //                UPDATE (type 6): after a deferred *reply*, `@original` means
+    //                the reply, so the list could never reach the message it
+    //                belongs to.
+    let section = interaction.picked_section().map(|s| s.to_string());
+    let deferring = discord::needs_defer(&cfg);
+    let followup = interaction
+        .application_id
+        .clone()
+        .zip(interaction.token.clone());
+
+    if cfg.writes_to_message() {
+        return message_output(state, cfg, token, interaction, section, deferring, followup).await;
+    }
+
+    if deferring {
+        let Some((application_id, interaction_token)) = followup else {
             // Without these we can't follow up at all. Fall through to an inline
-            // reply with no member expansion rather than leaving the click dead.
+            // reply rather than leaving the click dead — it just can't expand
+            // members inside Discord's window.
             tracing::warn!("component interaction carried no application_id/token");
-            return inline_reply(state, &cfg, &token, interaction.picked_section()).await;
+            return inline_reply(state, &cfg, &token, section.as_deref()).await;
         };
         let public = cfg.public;
-        let section = interaction.picked_section().map(|s| s.to_string());
         let state = state.clone();
         tokio::spawn(async move {
             let components = build_components(&state, &cfg, &token, section.as_deref()).await;
@@ -340,7 +365,98 @@ async fn handle_component(state: &AppState, interaction: discord::Interaction) -
         return Json(discord::deferred(public)).into_response();
     }
 
-    inline_reply(state, &cfg, &token, interaction.picked_section()).await
+    inline_reply(state, &cfg, &token, section.as_deref()).await
+}
+
+/// `"message"` output: re-render the author's message from its stored template, so
+/// the list everyone can already see becomes current.
+async fn message_output(
+    state: &AppState,
+    cfg: InstanceConfig,
+    token: String,
+    interaction: discord::Interaction,
+    section: Option<String>,
+    deferring: bool,
+    followup: Option<(String, String)>,
+) -> Response {
+    // A normalized config can't reach here without a template (see
+    // `validate::validate_output`), but a row written by an older build could.
+    // Falling back to a reply keeps such a click useful instead of dead.
+    let Some(template) = cfg.message_template.clone() else {
+        tracing::info!("message-output directory has no template; replying instead");
+        return inline_reply(state, &cfg, &token, section.as_deref()).await;
+    };
+    let message = interaction.message.unwrap_or_default();
+
+    if deferring {
+        let Some((application_id, interaction_token)) = followup else {
+            tracing::warn!("component interaction carried no application_id/token");
+            return Json(discord::ephemeral_text(
+                "Couldn't refresh the list just now — try again in a moment.",
+            ))
+            .into_response();
+        };
+        let state = state.clone();
+        tokio::spawn(async move {
+            let vars = build_vars(&state, &cfg, &token, section.as_deref()).await;
+            let components = discord::render_template(&template, &vars);
+            rest::edit_original(
+                &state.http,
+                &application_id,
+                &interaction_token,
+                &discord::update_followup_body(&message, components),
+            )
+            .await;
+        });
+        return Json(discord::deferred_update()).into_response();
+    }
+
+    let vars = build_vars(state, &cfg, &token, section.as_deref()).await;
+    let components = discord::render_template(&template, &vars);
+    Json(discord::update_message(&message, components)).into_response()
+}
+
+/// Read the server and render the list as text for `{directory}` & co.
+async fn build_vars(
+    state: &AppState,
+    cfg: &InstanceConfig,
+    token: &str,
+    section: Option<&str>,
+) -> discord::RenderVars {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let structure = match state
+        .cache
+        .structure(&state.http, token, &cfg.guild_id)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::info!(guild_id = %cfg.guild_id, error = ?e, "structure read failed");
+            // Keep the author's message readable: the token resolves to a short
+            // note rather than vanishing or decaying to a literal `{directory}`.
+            return discord::RenderVars {
+                list: e.member_message().to_string(),
+                count: 0,
+                updated_unix: now,
+            };
+        }
+    };
+    let (members, member_state) = resolve_members(state, cfg, token, &structure).await;
+    let text = render::render_text(&RenderInput {
+        cfg,
+        structure: &structure,
+        members: members.as_ref(),
+        member_state,
+        section,
+    });
+    discord::RenderVars {
+        list: text.list,
+        count: text.count,
+        updated_unix: now,
+    }
 }
 
 async fn inline_reply(
@@ -381,23 +497,7 @@ async fn build_components(
         }
     };
 
-    let (members, member_state) = if discord::needs_defer(cfg) {
-        // Only the roles actually on show are scanned — the bound that keeps a
-        // cached scan small (see the note in `rest`). `roster_role_ids` is the
-        // renderer's own selection logic, so the two can't drift.
-        let wanted: Vec<String> = render::roster_role_ids(cfg, &structure);
-        match state
-            .cache
-            .members(&state.http, token, &cfg.guild_id, &wanted)
-            .await
-        {
-            MemberScanOutcome::Ok(index) => (Some(index), MemberState::Ready),
-            MemberScanOutcome::Unavailable => (None, MemberState::Unavailable),
-            MemberScanOutcome::Busy => (None, MemberState::Busy),
-        }
-    } else {
-        (None, MemberState::NotRequested)
-    };
+    let (members, member_state) = resolve_members(state, cfg, token, &structure).await;
 
     render::render(&RenderInput {
         cfg,
@@ -406,6 +506,33 @@ async fn build_components(
         member_state,
         section,
     })
+}
+
+/// Scan members when this directory expands them, mapping the outcome to the
+/// renderer's state. Shared by both output shapes so a reply and an in-place
+/// render can never disagree about what was available.
+async fn resolve_members(
+    state: &AppState,
+    cfg: &InstanceConfig,
+    token: &str,
+    structure: &rest::GuildStructure,
+) -> (Option<rest::MemberIndex>, MemberState) {
+    if !discord::needs_defer(cfg) {
+        return (None, MemberState::NotRequested);
+    }
+    // Only the roles actually on show are scanned — the bound that keeps a cached
+    // scan small (see the note in `rest`). `roster_role_ids` is the renderer's own
+    // selection logic, so the two can't drift.
+    let wanted: Vec<String> = render::roster_role_ids(cfg, structure);
+    match state
+        .cache
+        .members(&state.http, token, &cfg.guild_id, &wanted)
+        .await
+    {
+        MemberScanOutcome::Ok(index) => (Some(index), MemberState::Ready),
+        MemberScanOutcome::Unavailable => (None, MemberState::Unavailable),
+        MemberScanOutcome::Busy => (None, MemberState::Busy),
+    }
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -514,16 +641,58 @@ mod tests {
     }
 
     /// Editor-data access is default-deny: the iframe can only read a resource
-    /// the manifest declared. It requests `guild`, so the manifest must say so.
+    /// the manifest declared, and an undeclared request is refused by the host
+    /// with no visible cause. The iframe reads `guild` (which server to list) and
+    /// `message` (the author's layout, captured as the live-render template for
+    /// in-message output), so the manifest must declare exactly those.
     #[test]
     fn the_iframe_only_requests_declared_resources() {
-        assert!(CONFIG_HTML.contains(r#"requestResource("guild")"#));
-        // `message` and the webhook resources are deliberately NOT declared — a
-        // read-only directory has no business reading the draft or a credential.
-        for undeclared in ["\"message\"", "\"savedWebhook\"", "\"savedMessages\""] {
+        // Declared in `registry()` above.
+        let declared = ["guild", "message"];
+        for name in declared {
             assert!(
-                !CONFIG_HTML.contains(&format!("requestResource({undeclared})")),
-                "config.html requests {undeclared}, which the manifest does not declare"
+                CONFIG_HTML.contains(&format!("requestResource(\"{name}\")")),
+                "manifest declares {name:?} but the iframe never reads it — drop the declaration"
+            );
+        }
+        // Credentials and browser-saved message bodies are deliberately NOT
+        // declared: a read-only directory has no business with either.
+        for undeclared in [
+            "savedWebhook",
+            "savedWebhooks",
+            "savedMessages",
+            "component",
+        ] {
+            assert!(
+                !CONFIG_HTML.contains(&format!("requestResource(\"{undeclared}\")")),
+                "config.html requests {undeclared:?}, which the manifest does not declare"
+            );
+        }
+    }
+
+    /// The iframe's token list, the store's constants and the manifest's declared
+    /// placeholders must all name the same three tokens.
+    ///
+    /// A drift here is silent in the worst way: the author writes `{directory}`,
+    /// the editor's palette offers it, and the service substitutes something else
+    /// — so the message keeps a literal token forever with no error anywhere.
+    #[test]
+    fn the_placeholder_tokens_agree_across_every_layer() {
+        use crate::store::{TOKEN_COUNT, TOKEN_LIST, TOKEN_UPDATED};
+        for token in [TOKEN_LIST, TOKEN_COUNT, TOKEN_UPDATED] {
+            assert!(
+                CONFIG_HTML.contains(&format!("\"{token}\"")),
+                "config.html's OUR_TOKENS is missing {token:?}"
+            );
+        }
+        // The bare `roles` token belongs to Self Role; ours must stay namespaced,
+        // or two plugins on one message would fight over it (the host resolves a
+        // collision first-wins in binding order).
+        assert_eq!(TOKEN_LIST, "directory");
+        for token in [TOKEN_LIST, TOKEN_COUNT, TOKEN_UPDATED] {
+            assert!(
+                token.starts_with("directory"),
+                "{token:?} is not namespaced to this plugin"
             );
         }
     }

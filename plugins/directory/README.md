@@ -15,8 +15,26 @@ Two modes:
   topic.
 
 Everything is read **at click time**, so a renamed role or a rewritten channel
-topic is current without anyone re-editing the message. The reply is private by
-default; a directory can be made public instead.
+topic is current without anyone re-editing the message.
+
+## Where the list appears
+
+Two output shapes, chosen in the config panel:
+
+- **In a reply** (default) — a click answers the clicker, privately unless you
+  make it public. Best for a long roster: the reply gets its own 4000-character
+  budget and the channel stays clean.
+- **In the message itself** — you put `{directory}` in your own message text and
+  the list is written there, so **everyone reads it without clicking**. Any click
+  re-stamps it in place for everyone. Also available: `{directory_count}` and
+  `{directory_updated}` (a live "5 minutes ago").
+
+One honest limit on the second option: **Discord only lets the list refresh when
+someone clicks.** A webhook-authored message is editable solely through an
+interaction on it, or with the webhook token — which lives sealed in the proxy and
+never reaches a plugin. There is no way for the plugin to push an update on its
+own, so label the button something like *Refresh*. In exchange, the list is
+readable by anyone at any time without interacting at all.
 
 ## What it needs
 
@@ -66,6 +84,21 @@ enabled. Member expansion is an enhancement here, never a requirement.
   giveaway's entries, there is nothing to lose — which is why a replacement
   instance (the protocol-v2 cache-miss path) costs the host nothing but a
   re-save.
+- **In-message output defers an UPDATE (type 6), never a reply (type 5).** After a
+  deferred *reply*, `@original` names the reply — so a member-expanding roster
+  would edit its list into an invisible ephemeral instead of the message it
+  belongs to. That's why the two output shapes have separate defer paths.
+- **Re-rendering always starts from the stored raw template**, never from the live
+  message. Reading back an already-substituted message would leave nothing to
+  substitute, freezing the list at its first value on the second click. The host
+  bakes every *foreign* token before handing the template over, so re-rendering
+  can't decay someone else's `{server}` into literal text.
+- **A `{directory}`-less in-message setup is refused at save.** It would otherwise
+  post a button that re-renders correctly and therefore appears to do nothing at
+  all, with no error anywhere — the worst possible failure mode.
+- Tokens are namespaced (`directory*`) rather than a bare `{roles}`, which Self
+  Role already declares. The host resolves a collision first-wins in binding
+  order, so two plugins on one message would silently fight over it.
 - `5xx` is the paging channel. An admin opening the config panel for a server the
   bot was never invited to gets **404**, not 502 — see
   `ConnectError::status()` and the `only_our_own_faults_are_server_errors` test.

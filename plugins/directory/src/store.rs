@@ -13,6 +13,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 // ── Limits (also enforced in `validate.rs`, which explains each to the user) ──
@@ -118,6 +119,35 @@ pub const CHANNEL_SOURCE_ALL: &str = "all";
 pub const MODE_ROLES: &str = "roles";
 pub const MODE_CHANNELS: &str = "channels";
 
+/// Where the answer appears.
+///
+/// `"reply"` — a separate reply to the clicker (ephemeral unless `public`). The
+/// default, and the right choice for a long roster: it has its own 4000-character
+/// budget and leaves the channel clean.
+///
+/// `"message"` — the list is written **into the host's own message**, wherever
+/// they put a `{directory}` placeholder, and a click re-stamps it in place. So it
+/// is visible to everyone *without* clicking, and any click refreshes it for
+/// everyone. The trade-off is that the list now shares the message's single
+/// 4000-character Components V2 budget with the author's own text, which is why
+/// the text renderer has its own tighter cap.
+pub const OUTPUT_REPLY: &str = "reply";
+pub const OUTPUT_MESSAGE: &str = "message";
+
+/// The placeholder tokens this plugin offers for the host's message text.
+///
+/// Deliberately namespaced. A bare `{roles}` would collide with the Self Role
+/// plugin's own declared token, and the host resolves a collision first-wins in
+/// binding order — so two plugins on one message would silently fight over it.
+pub const TOKEN_LIST: &str = "directory";
+pub const TOKEN_COUNT: &str = "directory_count";
+pub const TOKEN_UPDATED: &str = "directory_updated";
+
+/// Upper bound on a stored `message_template`, mirroring the poll plugin. The
+/// template is the author's whole component tree, so this bounds both the row and
+/// the work a click does re-rendering it.
+pub const MAX_TEMPLATE_BYTES: usize = 16 * 1024;
+
 pub const TARGET_BUTTON: &str = "button";
 pub const TARGET_STRING_SELECT: &str = "string_select";
 
@@ -150,9 +180,24 @@ pub struct InstanceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intro: Option<String>,
     /// When true the reply is posted for the whole channel to see; otherwise —
-    /// the default — it is ephemeral, visible only to whoever clicked.
+    /// the default — it is ephemeral, visible only to whoever clicked. Ignored in
+    /// `"message"` output, where the list lives in the host's own public message.
     #[serde(default)]
     pub public: bool,
+    /// [`OUTPUT_REPLY`] (default) or [`OUTPUT_MESSAGE`] — see those constants.
+    #[serde(default = "default_output")]
+    pub output: String,
+    /// `"message"` output only: the author's component tree with this plugin's
+    /// own `{token}`s left raw, captured at save time.
+    ///
+    /// The host bakes every *foreign* token (core `{server}`, another plugin's)
+    /// to its first-paint value before handing this over, so re-rendering can't
+    /// decay someone else's placeholder into literal text. Re-rendering always
+    /// starts from this raw template rather than from the live message, which is
+    /// what makes a refresh idempotent — otherwise the second click would try to
+    /// substitute into text where the token has already been replaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_template: Option<Value>,
     /// Container accent colour (24-bit). None = no accent stripe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accent_color: Option<u32>,
@@ -240,6 +285,9 @@ fn default_role_source() -> String {
 fn default_channel_source() -> String {
     CHANNEL_SOURCE_ALL.to_string()
 }
+fn default_output() -> String {
+    OUTPUT_REPLY.to_string()
+}
 fn default_max_members() -> u32 {
     20
 }
@@ -251,6 +299,11 @@ impl InstanceConfig {
     /// True when this is a role roster (rather than a channel index).
     pub fn is_roles(&self) -> bool {
         self.mode == MODE_ROLES
+    }
+
+    /// True when a click re-stamps the host's own message instead of replying.
+    pub fn writes_to_message(&self) -> bool {
+        self.output == OUTPUT_MESSAGE
     }
 
     /// The host's note for one role/channel id, if any.
@@ -274,6 +327,25 @@ impl InstanceConfig {
         }
         if self.mode != MODE_CHANNELS {
             self.mode = MODE_ROLES.to_string();
+        }
+        if self.output != OUTPUT_MESSAGE {
+            self.output = OUTPUT_REPLY.to_string();
+        }
+        // A template only means anything in "message" output. Dropping it when the
+        // author switches back to a reply keeps the row from carrying a stale copy
+        // of a message they've since rewritten.
+        if self.output != OUTPUT_MESSAGE {
+            self.message_template = None;
+        }
+        // A template that isn't an array isn't a component tree. Refusing it here
+        // rather than at render time means the click path never has to branch on a
+        // shape that can't work.
+        if self
+            .message_template
+            .as_ref()
+            .is_some_and(|t| !t.is_array())
+        {
+            self.message_template = None;
         }
         if ![ROLE_SOURCE_PICKED, ROLE_SOURCE_HOISTED, ROLE_SOURCE_STAFF]
             .contains(&self.role_source.as_str())
@@ -538,6 +610,8 @@ pub(crate) mod tests {
             title: None,
             intro: None,
             public: false,
+            output: OUTPUT_REPLY.into(),
+            message_template: None,
             accent_color: None,
             notes: vec![],
             requirements: Requirement::default(),
@@ -573,6 +647,44 @@ pub(crate) mod tests {
         assert_eq!(cfg.mode, MODE_ROLES);
         assert_eq!(cfg.role_source, ROLE_SOURCE_PICKED);
         assert_eq!(cfg.channel_source, CHANNEL_SOURCE_ALL);
+    }
+
+    /// Switching back to a reply must drop the template, or the row keeps a stale
+    /// copy of a message the author has since rewritten — which would come back if
+    /// they ever switched to in-message output again.
+    #[test]
+    fn normalize_drops_a_template_that_no_longer_applies() {
+        let template = serde_json::json!([{ "type": 10, "content": "{directory}" }]);
+
+        let mut cfg = base_config();
+        cfg.output = OUTPUT_MESSAGE.into();
+        cfg.message_template = Some(template.clone());
+        cfg.normalize();
+        assert!(cfg.writes_to_message());
+        assert!(cfg.message_template.is_some(), "kept in message output");
+
+        cfg.output = OUTPUT_REPLY.into();
+        cfg.normalize();
+        assert!(cfg.message_template.is_none(), "dropped in reply output");
+
+        // An unrecognised output value folds onto the safe default…
+        let mut cfg = base_config();
+        cfg.output = "wat".into();
+        cfg.message_template = Some(template);
+        cfg.normalize();
+        assert_eq!(cfg.output, OUTPUT_REPLY);
+        assert!(cfg.message_template.is_none());
+    }
+
+    /// A template that isn't a component tree is refused here, so the click path
+    /// never has to branch on a shape that can't render.
+    #[test]
+    fn normalize_drops_a_template_that_is_not_an_array() {
+        let mut cfg = base_config();
+        cfg.output = OUTPUT_MESSAGE.into();
+        cfg.message_template = Some(serde_json::json!({ "not": "an array" }));
+        cfg.normalize();
+        assert!(cfg.message_template.is_none());
     }
 
     #[test]

@@ -304,15 +304,23 @@
     <input id="title" type="text" maxlength="100" placeholder="" />
     <label class="lbl" for="intro">Line underneath (optional)</label>
     <input id="intro" type="text" maxlength="400" placeholder="e.g. Ping a moderator only if it's urgent." />
+    <label class="lbl" for="output">Where the list appears</label>
+    <select id="output">
+      <option value="reply">In a reply when someone clicks</option>
+      <option value="message">In this message itself — no click needed to read it</option>
+    </select>
+    <div class="hint" id="outputHint"></div>
+    <div id="tokenHelp" class="callout" style="display:none"></div>
+
     <div class="row2" style="margin-top: 10px">
-      <div>
+      <div id="visibilityWrap">
         <label class="lbl" for="visibility">Who sees the answer</label>
         <select id="visibility">
           <option value="private">Only the person who clicked</option>
           <option value="public">Everyone in the channel</option>
         </select>
       </div>
-      <div>
+      <div id="accentWrap">
         <label class="lbl" for="accent">Accent colour</label>
         <div class="row2">
           <input id="accent" type="color" value="#5865f2" />
@@ -929,9 +937,39 @@
         updateCounts();
       });
 
-      // ── Visibility hint ──────────────────────────────────────────────────
+      // ── Output mode + visibility hints ───────────────────────────────────
       $("visibility").addEventListener("change", updateCounts);
+      $("output").addEventListener("change", updateCounts);
+
+      function outputMode() {
+        return $("output").value === "message" ? "message" : "reply";
+      }
+
       function renderPublicHint() {
+        const inMessage = outputMode() === "message";
+        // In-message output has no separate reply to make public or to style, so
+        // those two controls would be lying if they stayed enabled.
+        $("visibilityWrap").style.display = inMessage ? "none" : "";
+        $("accentWrap").style.display = inMessage ? "none" : "";
+
+        if (inMessage) {
+          $("outputHint").innerHTML =
+            "The list is written into <b>this message</b>, so everyone reads it without clicking. Clicking <b>refreshes it in place</b> for everyone.";
+          const box = $("tokenHelp");
+          box.className = "callout warn";
+          box.innerHTML =
+            "Put <code>{directory}</code> in your message text where the list should go — that's the spot it fills in. " +
+            "Optional extras: <code>{directory_count}</code> (how many are listed) and <code>{directory_updated}</code> (a live \"5 minutes ago\").<br><br>" +
+            "Two things to know: the list shares this message's 4000-character limit with your own text, so it's capped around 2000 characters; " +
+            "and Discord only lets the list refresh when someone clicks — it can't update entirely on its own. Give the button a label like <b>Refresh</b>.";
+          box.style.display = "";
+          $("publicHint").textContent = "";
+          return;
+        }
+
+        $("tokenHelp").style.display = "none";
+        $("outputHint").innerHTML =
+          "A click answers with the list. Best for a long roster: the reply gets its own space and your message stays short.";
         const pub = $("visibility").value === "public";
         $("publicHint").innerHTML = pub
           ? "Everyone in the channel sees each answer — good for a one-off staff announcement, noisy on a busy button. Mentions never ping."
@@ -1169,6 +1207,7 @@
           $("title").value = d.title || "";
           $("intro").value = d.intro || "";
           $("visibility").value = d.public ? "public" : "private";
+          $("output").value = d.output === "message" ? "message" : "reply";
           accent = typeof d.accent_color === "number" ? d.accent_color : null;
 
           $("roleSource").value = d.role_source || "picked";
@@ -1286,6 +1325,32 @@
           .map((c) => ({ id: c.id, name: c.name, kind: c.kind || 0 }));
       }
 
+      // The tokens this plugin fills into the host's message text. Must match
+      // TOKEN_* in src/store.rs and the manifest's declared placeholders.
+      const OUR_TOKENS = ["directory", "directory_count", "directory_updated"];
+
+      /// True when the author actually put one of our tokens somewhere the
+      /// service will substitute. Mirrors the fields `substitute_tree` rewrites
+      /// (content / label / placeholder), so this can't approve a token sitting
+      /// somewhere substitution would never reach.
+      function hasOurToken(components) {
+        const re = new RegExp("\\{(" + OUR_TOKENS.join("|") + ")\\}");
+        let found = false;
+        const visit = (n) => {
+          if (found || !n || typeof n !== "object") return;
+          if (Array.isArray(n)) return n.forEach(visit);
+          for (const field of ["content", "label", "placeholder"]) {
+            if (typeof n[field] === "string" && re.test(n[field])) {
+              found = true;
+              return;
+            }
+          }
+          for (const k in n) visit(n[k]);
+        };
+        visit(components);
+        return found;
+      }
+
       function summaryLine() {
         if (mode === "roles") {
           const src = roleSource();
@@ -1338,6 +1403,24 @@
 
         const onList = new Set(noteTargets().map(([id]) => id));
 
+        // In-message output needs the author's own layout as its live-render
+        // template. The host hands it over with every FOREIGN token already baked
+        // to its first-paint value, leaving only our `{directory*}` tokens raw —
+        // so re-rendering can't decay someone else's `{server}` into literal text.
+        let messageTemplate = null;
+        if (outputMode() === "message") {
+          const built = await requestResource("message");
+          if (!built || !Array.isArray(built.components))
+            return fail(
+              "I couldn't read the message you're building. Reload the editor, or switch this back to a reply.",
+            );
+          if (!hasOurToken(built.components))
+            return fail(
+              "Add {directory} to your message text where the list should appear — otherwise clicking would change nothing.",
+            );
+          messageTemplate = built.components;
+        }
+
         // Only keep groups that have roles in them — an empty section would
         // render as a bare heading (and, on a menu, an option that shows nothing).
         const cleanGroups = groups
@@ -1357,6 +1440,8 @@
           title: $("title").value.trim() || null,
           intro: $("intro").value.trim() || null,
           public: $("visibility").value === "public",
+          output: outputMode(),
+          message_template: messageTemplate,
           accent_color: accent,
           // Only keep descriptions for things actually on the list. Switching
           // mode or narrowing a source leaves the old text in `notes`, and a

@@ -8,7 +8,8 @@
 
 use crate::store::{
     InstanceConfig, CHANNEL_SOURCE_CATEGORIES, CHANNEL_SOURCE_PICKED, MAX_CATEGORIES, MAX_CHANNELS,
-    MAX_GROUPS, MAX_NOTES, MAX_ROLES, ROLE_SOURCE_PICKED, TARGET_STRING_SELECT,
+    MAX_GROUPS, MAX_NOTES, MAX_ROLES, MAX_TEMPLATE_BYTES, ROLE_SOURCE_PICKED, TARGET_STRING_SELECT,
+    TOKEN_COUNT, TOKEN_LIST, TOKEN_UPDATED,
 };
 
 /// Discord snowflakes are 64-bit ints rendered in decimal; every id we accept
@@ -50,6 +51,8 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
         validate_channels_mode(cfg)?;
     }
 
+    validate_output(cfg)?;
+
     // A select needs something to put in its menu, and Discord caps that at 25.
     // Checked *after* the per-mode rules so the more specific complaint wins.
     if cfg.target == TARGET_STRING_SELECT {
@@ -68,6 +71,66 @@ pub fn validate_config(cfg: &InstanceConfig) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Rules specific to writing the list into the author's own message.
+///
+/// The important one is the last: a `"message"` setup whose message contains no
+/// `{directory}` token would post a button that, when clicked, correctly
+/// re-renders a message with nothing to substitute — i.e. appears to do nothing at
+/// all, with no error anywhere. That's the worst possible outcome, so it's refused
+/// at save with the fix in the message.
+fn validate_output(cfg: &InstanceConfig) -> Result<(), String> {
+    if !cfg.writes_to_message() {
+        return Ok(());
+    }
+    let Some(template) = cfg.message_template.as_ref() else {
+        return Err(
+            "I couldn't read the message you're building, so the list can't be written into it. Reload the editor, or switch this back to \"a private reply\"."
+                .into(),
+        );
+    };
+    if !template.is_array() {
+        return Err(
+            "The captured message looks malformed — reload the editor and try again.".into(),
+        );
+    }
+    let len = serde_json::to_string(template)
+        .map(|s| s.len())
+        .unwrap_or(usize::MAX);
+    if len > MAX_TEMPLATE_BYTES {
+        return Err(
+            "This message is too large to keep a live copy of. Shorten it, or switch this back to \"a private reply\"."
+                .into(),
+        );
+    }
+    if !tree_has_own_token(template) {
+        return Err(format!(
+            "Put {{{TOKEN_LIST}}} in your message text where the list should appear — otherwise clicking would change nothing. You can also use {{{TOKEN_COUNT}}} and {{{TOKEN_UPDATED}}}."
+        ));
+    }
+    Ok(())
+}
+
+/// True when any user-text field in the tree carries one of our tokens. Mirrors
+/// the fields `discord::substitute_tree` actually rewrites, so this can't approve
+/// a token sitting somewhere substitution would never reach.
+fn tree_has_own_token(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Array(a) => a.iter().any(tree_has_own_token),
+        serde_json::Value::Object(o) => {
+            for field in ["content", "label", "placeholder"] {
+                if o.get(field)
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(crate::discord::has_own_token)
+                {
+                    return true;
+                }
+            }
+            o.values().any(tree_has_own_token)
+        }
+        _ => false,
+    }
 }
 
 fn validate_roles_mode(cfg: &InstanceConfig) -> Result<(), String> {
@@ -364,11 +427,107 @@ mod tests {
         assert!(validate_config(&cfg).is_ok());
     }
 
+    // ── In-message output ───────────────────────────────────────────────────
+
+    // A valid in-message config with `template` as the captured message.
+    fn with_message_output(template: serde_json::Value) -> InstanceConfig {
+        let mut cfg = base_config();
+        cfg.roles = vec![role_ref(&good_role_id())];
+        cfg.output = crate::store::OUTPUT_MESSAGE.into();
+        cfg.message_template = Some(template);
+        cfg
+    }
+
+    #[test]
+    fn a_valid_in_message_setup_passes() {
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": "# Staff\n{directory}" }
+        ]));
+        assert!(validate_config(&cfg).is_ok(), "{:?}", validate_config(&cfg));
+    }
+
+    /// The failure this exists to prevent: an in-message setup whose message has
+    /// no token posts a button that re-renders correctly and therefore appears to
+    /// do *nothing at all*, with no error anywhere for the author to find.
+    #[test]
+    fn in_message_output_without_a_token_is_refused_with_the_fix() {
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": "# Staff\nno placeholder here" }
+        ]));
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(
+            err.contains("{directory}"),
+            "the error must name the token: {err}"
+        );
+    }
+
+    /// A token in a field substitution never visits is the same failure wearing a
+    /// disguise, so the check must mirror `substitute_tree`'s field list exactly.
+    #[test]
+    fn a_token_in_an_unsubstituted_field_does_not_count() {
+        // `custom_id` is bot-facing and never rewritten.
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 2, "custom_id": "directory:{directory}", "label": "Refresh" }
+        ]));
+        assert!(validate_config(&cfg).is_err());
+
+        // …but a button label or a select placeholder is rewritten, so it counts.
+        for field in ["label", "placeholder"] {
+            let cfg = with_message_output(serde_json::json!([
+                { "type": 2, field: "{directory_count} listed" }
+            ]));
+            assert!(
+                validate_config(&cfg).is_ok(),
+                "{field} should count as substitutable"
+            );
+        }
+    }
+
+    /// A nested token must be found — the author's list is usually inside a
+    /// container or a section, not at the top level.
+    #[test]
+    fn a_nested_token_is_found() {
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 17, "components": [
+                { "type": 9, "components": [{ "type": 10, "content": "{directory}" }] }
+            ]}
+        ]));
+        assert!(validate_config(&cfg).is_ok(), "{:?}", validate_config(&cfg));
+    }
+
+    #[test]
+    fn in_message_output_needs_a_template_at_all() {
+        let mut cfg = base_config();
+        cfg.roles = vec![role_ref(&good_role_id())];
+        cfg.output = crate::store::OUTPUT_MESSAGE.into();
+        cfg.message_template = None;
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(err.contains("couldn't read the message"), "{err}");
+    }
+
+    #[test]
+    fn an_oversized_template_is_refused() {
+        let big = "x".repeat(MAX_TEMPLATE_BYTES + 100);
+        let cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": format!("{{directory}} {big}") }
+        ]));
+        assert!(validate_config(&cfg).unwrap_err().contains("too large"));
+    }
+
+    /// Reply output — the default — must not acquire any of these requirements.
+    #[test]
+    fn reply_output_needs_no_template_or_token() {
+        let mut cfg = base_config();
+        cfg.roles = vec![role_ref(&good_role_id())];
+        assert_eq!(cfg.output, crate::store::OUTPUT_REPLY);
+        assert!(validate_config(&cfg).is_ok());
+    }
+
     // ── Select targets ──────────────────────────────────────────────────────
 
-    /// A select with no sections would post a menu with no options, which
-    /// Discord rejects — so it's caught here, with a message that offers the
-    /// button as the way out.
+    /// A select with no sections would post a menu with no options, which Discord
+    /// rejects — so it's caught here, with a message that offers the button as the
+    /// way out.
     #[test]
     fn a_select_needs_sections() {
         let mut cfg = base_config();

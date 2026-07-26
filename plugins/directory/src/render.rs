@@ -46,6 +46,15 @@ const MAX_SECTION_BLOCKS: usize = 24;
 /// A channel topic is up to 1024 characters; that's a paragraph, not a caption.
 const MAX_TOPIC: usize = 140;
 
+/// Budget for a list substituted into the author's own message.
+///
+/// Well under [`MAX_V2_TEXT`] on purpose: in `"message"` output the list shares
+/// the message's single 4000-character allowance with everything the author
+/// wrote, and a message over that limit is rejected by Discord *entirely* — so an
+/// unbounded list wouldn't just look bad, it would make the refresh fail. Half
+/// leaves the author generous room for their own copy.
+const MAX_INLINE_TEXT: usize = 2000;
+
 /// Select-option value meaning "show the whole directory".
 pub const SECTION_ALL: &str = "all";
 /// Prefix for a roles-mode section pick: `g:<group key>`.
@@ -152,6 +161,62 @@ pub fn render(input: &RenderInput<'_>) -> Vec<Value> {
         container["accent_color"] = json!(color & 0xFF_FF_FF);
     }
     vec![container]
+}
+
+/// What one `{directory}` placeholder resolves to, plus the scalars beside it.
+pub struct ListText {
+    /// The rendered list — the value of `{directory}`.
+    pub list: String,
+    /// How many roles / channels the list actually names — `{directory_count}`.
+    pub count: usize,
+}
+
+/// Render the directory as **plain markdown text**, for substitution into the
+/// author's own message.
+///
+/// Deliberately built on the same `role_sections` / `channel_sections` the
+/// component renderer uses, so the two views can never disagree about *what* is
+/// listed — only about how it's wrapped. The only difference is the budget: this
+/// text lands inside the author's message, which shares one 4000-character
+/// Components V2 allowance with their own prose, so it gets [`MAX_INLINE_TEXT`]
+/// rather than the whole thing. Header and footnotes are omitted — the author
+/// writes their own heading around the token.
+pub fn render_text(input: &RenderInput<'_>) -> ListText {
+    let mut budget = Budget::new(MAX_INLINE_TEXT);
+    // `Budget::new` reserves room for footnotes this view doesn't emit; hand it
+    // back so the inline cap is the real one.
+    budget.remaining = MAX_INLINE_TEXT;
+
+    let sections = if input.cfg.is_roles() {
+        role_sections(input, &mut budget)
+    } else {
+        channel_sections(input, &mut budget)
+    };
+    let count = if input.cfg.is_roles() {
+        roster_roles(input.cfg, input.structure).len()
+    } else {
+        index_channels(input.cfg, input.structure).len()
+    };
+
+    if sections.is_empty() {
+        return ListText {
+            list: empty_notice(input.cfg),
+            count: 0,
+        };
+    }
+    let mut list = sections.join("\n");
+    if budget.exhausted {
+        list.push_str("\n-# (list truncated)");
+    }
+    // A member list that couldn't be read is worth one line here too: without it
+    // the author's message would silently show a roster with no names and no
+    // explanation of why.
+    match input.member_state {
+        MemberState::Unavailable => list.push_str("\n-# Member lists aren't available right now."),
+        MemberState::Busy => list.push_str("\n-# Couldn't load member lists just now."),
+        _ => {}
+    }
+    ListText { list, count }
 }
 
 /// The heading, falling back to a per-mode default.
@@ -1563,6 +1628,193 @@ mod tests {
         assert!(budget.remaining < MAX_V2_TEXT, "no reserve held back");
         while budget.take("x") {}
         assert!(budget.exhausted);
+    }
+
+    // ── Inline text render (`{directory}`) ──────────────────────────────────
+
+    #[test]
+    fn the_text_render_lists_the_same_things_as_the_component_render() {
+        let mut cfg = base_config();
+        cfg.roles = vec![
+            RoleRef {
+                id: "r1".into(),
+                name: "Admin".into(),
+                color: 0,
+            },
+            RoleRef {
+                id: "r2".into(),
+                name: "Mod".into(),
+                color: 0,
+            },
+        ];
+        cfg.notes = vec![Note {
+            id: "r2".into(),
+            text: "Mod queue".into(),
+        }];
+        let st = structure(
+            vec![
+                role("r1", "Admin", true, 1 << 3),
+                role("r2", "Mod", true, 1 << 2),
+            ],
+            vec![],
+        );
+        let input = RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            members: None,
+            member_state: MemberState::NotRequested,
+            section: None,
+        };
+        let text = render_text(&input);
+        assert_eq!(text.count, 2);
+        assert!(text.list.contains("<@&r1>"), "{}", text.list);
+        assert!(text.list.contains("`Bans`"), "{}", text.list);
+        assert!(text.list.contains("-# Mod queue"), "{}", text.list);
+        // No heading: the author writes their own around the token.
+        assert!(!text.list.contains("## "), "{}", text.list);
+    }
+
+    /// The inline list shares the message's single 4000-char budget with the
+    /// author's own prose, and Discord rejects an over-budget message *entirely* —
+    /// so an unbounded list wouldn't look bad, it would make the refresh fail.
+    #[test]
+    fn the_text_render_is_capped_well_below_the_message_budget() {
+        let mut cfg = base_config();
+        cfg.show_members = true;
+        cfg.max_members_per_role = crate::store::MAX_MEMBERS_PER_ROLE;
+        cfg.roles = (0..25)
+            .map(|i| RoleRef {
+                id: format!("r{i}"),
+                name: format!("Role {i}"),
+                color: 0,
+            })
+            .collect();
+        let st = structure(
+            (0..25)
+                .map(|i| role(&format!("r{i}"), &format!("Role {i}"), true, 1 << 3))
+                .collect(),
+            vec![],
+        );
+        let entries: Vec<(String, usize, usize)> = (0..25)
+            .map(|i| (format!("r{i}"), 50usize, 0usize))
+            .collect();
+        let idx = index(
+            &entries
+                .iter()
+                .map(|(a, b, c)| (a.as_str(), *b, *c))
+                .collect::<Vec<_>>(),
+        );
+        let text = render_text(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            members: Some(&idx),
+            member_state: MemberState::Ready,
+            section: None,
+        });
+        let len = text.list.chars().count();
+        assert!(
+            len <= MAX_INLINE_TEXT + 40,
+            "inline list ran to {len} chars"
+        );
+        assert!(
+            len < MAX_V2_TEXT,
+            "must leave room for the author's own text"
+        );
+        assert!(text.list.contains("truncated"), "a cut list must say so");
+    }
+
+    /// An unavailable member list must be explained inside the substituted text
+    /// too — otherwise the author's message shows a roster with no names and no
+    /// hint as to why.
+    #[test]
+    fn the_text_render_carries_the_member_state_note() {
+        let mut cfg = base_config();
+        cfg.roles = vec![RoleRef {
+            id: "r1".into(),
+            name: "Mod".into(),
+            color: 0,
+        }];
+        cfg.show_members = true;
+        let st = structure(vec![role("r1", "Mod", true, 0)], vec![]);
+        let unavailable = render_text(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            members: None,
+            member_state: MemberState::Unavailable,
+            section: None,
+        });
+        assert!(
+            unavailable.list.contains("aren't available"),
+            "{}",
+            unavailable.list
+        );
+
+        let busy = render_text(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            members: None,
+            member_state: MemberState::Busy,
+            section: None,
+        });
+        assert!(busy.list.contains("Couldn't load"), "{}", busy.list);
+    }
+
+    /// An empty directory must resolve the token to a readable sentence, never to
+    /// an empty string that would leave a hole in the author's message.
+    #[test]
+    fn the_text_render_never_resolves_to_nothing() {
+        let mut cfg = base_config();
+        cfg.role_source = ROLE_SOURCE_STAFF.into();
+        let st = structure(vec![role("r1", "Member", false, 0)], vec![]);
+        let text = render_text(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            members: None,
+            member_state: MemberState::NotRequested,
+            section: None,
+        });
+        assert_eq!(text.count, 0);
+        assert!(!text.list.trim().is_empty());
+        assert!(
+            text.list.contains("moderation permissions"),
+            "{}",
+            text.list
+        );
+    }
+
+    #[test]
+    fn the_text_render_honours_a_select_section_pick() {
+        let mut cfg = base_config();
+        cfg.groups = vec![
+            Group {
+                key: "g1".into(),
+                name: "Leads".into(),
+                emoji: None,
+                role_ids: vec!["r1".into()],
+            },
+            Group {
+                key: "g2".into(),
+                name: "Mods".into(),
+                emoji: None,
+                role_ids: vec!["r2".into()],
+            },
+        ];
+        let st = structure(
+            vec![
+                role("r1", "Lead", true, 1 << 3),
+                role("r2", "Mod", true, 1 << 2),
+            ],
+            vec![],
+        );
+        let text = render_text(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            members: None,
+            member_state: MemberState::NotRequested,
+            section: Some("g:g2"),
+        });
+        assert!(text.list.contains("Mods"), "{}", text.list);
+        assert!(!text.list.contains("Leads"), "{}", text.list);
     }
 
     #[test]

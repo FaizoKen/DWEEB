@@ -259,6 +259,31 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   styles cross newlines, so they are markdown-escaped and collapsed to one line (an unbalanced
   `*` would otherwise italicise every channel after it). Guarded by the tests in
   `render.rs`/`discord.rs`/`rest.rs`.
+- **A Directory can write its list into the author's own message, and that path
+  defers an UPDATE, not a reply** (2026-07-26). `output` is `"reply"` (default — a
+  reply to the clicker) or `"message"`: the author puts `{directory}` in their own
+  text and a click re-stamps the message, so **everyone reads the list without
+  clicking** and any click refreshes it for all. Five non-obvious constraints, all
+  load-bearing: (1) a member-expanding roster in `"message"` output must answer
+  `DEFERRED_UPDATE_MESSAGE` (**type 6**), because after a deferred *reply* (type 5)
+  `@original` names the reply — the list would land in an invisible ephemeral
+  instead of the message it belongs to; (2) re-rendering always starts from the
+  stored **raw** template, never the live message, or the second click finds nothing
+  left to substitute and the list freezes at its first value; (3) the update must
+  repeat `IS_COMPONENTS_V2` for a V2 message and re-send `content` for a legacy one,
+  or the edit **blanks the body**; (4) saving `"message"` output with **no**
+  `{directory}` anywhere `substitute_tree` visits (`content`/`label`/`placeholder`
+  — never `custom_id`) is **refused**, because it would post a button that
+  re-renders correctly and therefore appears to do nothing at all, with no error
+  anywhere; (5) the inline list is capped at 2000 chars (`MAX_INLINE_TEXT`) since it
+  shares the message's single 4000-char budget with the author's prose and Discord
+  rejects an over-budget message entirely. Tokens are namespaced (`directory`,
+  `directory_count`, `directory_updated`) because Self Role already declares a bare
+  `{roles}` and the host resolves collisions first-wins in binding order.
+  **Click-free updates are impossible — don't attempt them**: a webhook message is
+  editable only through an interaction on it or with the webhook token, which stays
+  sealed in the proxy. Guarded by the in-place tests in `discord.rs`, the
+  `render_text` tests, and the in-message arm of `validate.rs`.
 - **Adding an interaction plugin** touches the crate, compose service/volume + dispatcher
   `ROUTES`, Caddyfile, registry, `server/gatus/config.yaml`, `plugins-ci.yml` matrix,
   `.github/workflows/plugin-<id>.yml`, and `deploy.yml`'s workflow list. A link plugin is

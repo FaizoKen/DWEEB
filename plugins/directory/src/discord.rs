@@ -27,6 +27,11 @@ const RESPONSE_CHANNEL_MESSAGE: u8 = 4;
 /// original response. Used only when a member scan has to run (see
 /// [`needs_defer`]); everything else answers inline.
 const RESPONSE_DEFERRED_CHANNEL_MESSAGE: u8 = 5;
+/// Re-stamp the message the component sits on.
+const RESPONSE_UPDATE_MESSAGE: u8 = 7;
+/// Acknowledge with no visible loading state, then edit the *source* message.
+/// The `"message"`-output counterpart of [`RESPONSE_DEFERRED_CHANNEL_MESSAGE`].
+const RESPONSE_DEFERRED_UPDATE_MESSAGE: u8 = 6;
 
 // Component types + message flags. A directory reply is text only — a Container
 // holding Text Displays — so no interactive component types appear here.
@@ -143,6 +148,10 @@ pub struct Interaction {
     pub member: Option<Member>,
     #[serde(default)]
     pub user: Option<User>,
+    /// The message the component was clicked on. Needed only by `"message"`
+    /// output, to preserve its flags and legacy `content` across the edit.
+    #[serde(default)]
+    pub message: Option<MessageRef>,
 }
 
 /// A directory needs no `component_type`: a button click carries no `values`, so
@@ -340,6 +349,195 @@ pub fn followup_body(components: Vec<Value>) -> Value {
 /// channel topic, which is member-written text we render.
 fn silent_mentions() -> Value {
     json!({ "parse": [] })
+}
+
+// ── In-place message rendering (`"message"` output) ──────────────────────────
+//
+// The author drops `{directory}` into their own message text; a click re-stamps
+// that message so everyone sees the current list without clicking anything. Only
+// this service can do it: a webhook-authored message is editable solely through
+// an interaction on it (or with the webhook token, which lives in the proxy and
+// never comes here).
+//
+// Re-rendering always starts from the stored *raw* template, never from the live
+// message. That's what makes a refresh idempotent — reading back the already-
+// substituted message would leave nothing to substitute on the second click.
+
+/// The values this plugin's tokens resolve to for one render.
+pub struct RenderVars {
+    pub list: String,
+    pub count: usize,
+    /// A Discord relative timestamp, so "updated 2 minutes ago" stays true
+    /// without anyone re-rendering it.
+    pub updated_unix: i64,
+}
+
+impl RenderVars {
+    fn value_of(&self, token: &str) -> Option<String> {
+        match token {
+            crate::store::TOKEN_LIST => Some(self.list.clone()),
+            crate::store::TOKEN_COUNT => Some(self.count.to_string()),
+            crate::store::TOKEN_UPDATED => Some(format!("<t:{}:R>", self.updated_unix)),
+            _ => None,
+        }
+    }
+}
+
+/// Replace every token this plugin owns in `text`; anything else is left exactly
+/// as written.
+///
+/// Leaving unknown tokens verbatim is deliberate rather than lazy: the host bakes
+/// foreign tokens before handing over the template, but if one ever slips through
+/// it must survive as `{server}` for a later pass, not be blanked out of the
+/// author's message. Scans on the ASCII `{`/`}` delimiters so it never splits a
+/// multi-byte character.
+pub fn substitute(text: &str, vars: &RenderVars) -> String {
+    if !text.contains('{') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        if let Some(close) = after.find('}') {
+            let token = &after[..close];
+            if is_token(token) {
+                if let Some(value) = vars.value_of(token) {
+                    out.push_str(&value);
+                    rest = &after[close + 1..];
+                    continue;
+                }
+            }
+        }
+        // Not a token we own: emit the `{` literally and keep scanning.
+        out.push('{');
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A placeholder token: `[a-z0-9_]{1,32}`, matching DWEEB's `PLACEHOLDER_TOKEN_RE`.
+fn is_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 32
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// True when `text` carries at least one token this plugin would substitute.
+/// Used at save time to refuse a `"message"` setup whose message has no token —
+/// a click would otherwise appear to do nothing at all.
+pub fn has_own_token(text: &str) -> bool {
+    let probe = RenderVars {
+        list: String::new(),
+        count: 0,
+        updated_unix: 0,
+    };
+    let mut rest = text;
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        if let Some(close) = after.find('}') {
+            let token = &after[..close];
+            if is_token(token) && probe.value_of(token).is_some() {
+                return true;
+            }
+        }
+        rest = after;
+    }
+    false
+}
+
+/// Recursively substitute the user-text fields of a component tree: Text Display
+/// `content`, button `label`, select `placeholder`. The generic descent keeps this
+/// correct as layouts nest (containers, sections, rows) without enumerating them.
+///
+/// Bot-facing fields (`custom_id`, ids) are never touched — substituting into a
+/// `custom_id` would break the binding the click arrived on.
+pub fn substitute_tree(v: &mut Value, vars: &RenderVars) {
+    match v {
+        Value::Array(a) => {
+            for item in a.iter_mut() {
+                substitute_tree(item, vars);
+            }
+        }
+        Value::Object(o) => {
+            for field in ["content", "label", "placeholder"] {
+                // Compute first (ending the immutable borrow), then write.
+                if let Some(rendered) = o
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .map(|s| substitute(s, vars))
+                {
+                    o.insert(field.into(), Value::String(rendered));
+                }
+            }
+            for val in o.values_mut() {
+                substitute_tree(val, vars);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Just enough of the message a component was clicked on to edit it faithfully.
+#[derive(Debug, Deserialize, Default)]
+pub struct MessageRef {
+    #[serde(default)]
+    pub flags: Option<u64>,
+    #[serde(default)]
+    pub content: Option<String>,
+}
+
+/// Render `template` with `vars` — the components for an in-place edit.
+pub fn render_template(template: &Value, vars: &RenderVars) -> Value {
+    let mut out = template.clone();
+    substitute_tree(&mut out, vars);
+    out
+}
+
+/// An immediate `UPDATE_MESSAGE`: re-stamp the clicked message in place.
+pub fn update_message(message: &MessageRef, components: Value) -> Value {
+    json!({ "type": RESPONSE_UPDATE_MESSAGE, "data": update_data(message, components) })
+}
+
+/// Acknowledge a click with **no visible loading state**, keeping the right to
+/// edit the *source* message afterwards via `PATCH …/messages/@original`.
+///
+/// This is the one response type that composes with a slow member scan in
+/// `"message"` output. A plain deferred *reply* (type 5) would make `@original`
+/// mean the reply, not the message the button sits on — so the list could never
+/// reach the message it was supposed to update.
+pub fn deferred_update() -> Value {
+    json!({ "type": RESPONSE_DEFERRED_UPDATE_MESSAGE })
+}
+
+/// The edit body for the follow-up `PATCH …/messages/@original` after
+/// [`deferred_update`]. Same shape as an inline update's `data`.
+pub fn update_followup_body(message: &MessageRef, components: Value) -> Value {
+    update_data(message, components)
+}
+
+/// Preserve everything about the message the edit isn't meant to change.
+///
+/// The flag handling is load-bearing: Components V2 forbids `content`, so a V2
+/// message must repeat only that flag, while a legacy message must have its
+/// `content` re-sent or the edit **blanks the message body**. `allowed_mentions`
+/// is empty for the same reason it is on a reply — the re-rendered list is full
+/// of role and member mentions, and this edit lands in a public channel.
+fn update_data(message: &MessageRef, components: Value) -> Value {
+    let mut data = json!({
+        "components": components,
+        "allowed_mentions": silent_mentions(),
+    });
+    let flags = message.flags.unwrap_or(0);
+    if flags & FLAG_IS_COMPONENTS_V2 != 0 {
+        data["flags"] = json!(FLAG_IS_COMPONENTS_V2);
+    } else if let Some(content) = message.content.as_deref() {
+        data["content"] = json!(content);
+    }
+    data
 }
 
 fn message_data(components: Vec<Value>, public: bool) -> Value {
@@ -578,6 +776,196 @@ mod tests {
         .unwrap();
         assert_eq!(guild.actor_id(), Some("7"));
         assert_eq!(guild.actor_roles(), &["r1".to_string(), "r2".to_string()]);
+    }
+
+    // ── In-place message rendering ──────────────────────────────────────────
+
+    fn vars() -> RenderVars {
+        RenderVars {
+            list: "<@&1> `Admin`".into(),
+            count: 3,
+            updated_unix: 1_700_000_000,
+        }
+    }
+
+    #[test]
+    fn substitute_fills_our_tokens_and_leaves_everything_else_alone() {
+        let v = vars();
+        assert_eq!(
+            substitute("Staff:\n{directory}", &v),
+            "Staff:\n<@&1> `Admin`"
+        );
+        assert_eq!(substitute("{directory_count} people", &v), "3 people");
+        assert_eq!(
+            substitute("Updated {directory_updated}", &v),
+            "Updated <t:1700000000:R>"
+        );
+    }
+
+    /// A token we don't own must survive verbatim. The host bakes foreign tokens
+    /// before handing over the template, but if one ever slipped through, blanking
+    /// it would silently delete text from the author's message.
+    #[test]
+    fn substitute_never_blanks_a_foreign_or_malformed_token() {
+        let v = vars();
+        assert_eq!(substitute("{server} says hi", &v), "{server} says hi");
+        assert_eq!(substitute("{roles}", &v), "{roles}", "Self Role's token");
+        // Malformed / unterminated braces stay literal rather than eating the rest.
+        assert_eq!(substitute("{ nope }", &v), "{ nope }");
+        assert_eq!(substitute("{unclosed", &v), "{unclosed");
+        assert_eq!(substitute("{{directory}}", &v), "{<@&1> `Admin`}");
+        assert_eq!(substitute("no braces", &v), "no braces");
+    }
+
+    /// The scan is byte-oriented, so a multi-byte character next to a brace is
+    /// where an off-by-one would corrupt the author's text into invalid UTF-8.
+    #[test]
+    fn substitute_survives_multibyte_text() {
+        let v = vars();
+        assert_eq!(substitute("🛡️{directory}✨", &v), "🛡️<@&1> `Admin`✨");
+        assert_eq!(
+            substitute("日本語{unknown}日本語", &v),
+            "日本語{unknown}日本語"
+        );
+    }
+
+    #[test]
+    fn substitute_tree_rewrites_user_text_but_never_bot_facing_fields() {
+        let mut tree = json!([{
+            "type": COMPONENT_CONTAINER,
+            "components": [
+                { "type": COMPONENT_TEXT_DISPLAY, "content": "# Staff\n{directory}" },
+                { "type": 1, "components": [
+                    { "type": 2, "custom_id": "directory:abc", "label": "Refresh ({directory_count})" }
+                ]}
+            ]
+        }]);
+        substitute_tree(&mut tree, &vars());
+        let container = &tree[0]["components"];
+        assert_eq!(container[0]["content"], json!("# Staff\n<@&1> `Admin`"));
+        assert_eq!(container[1]["components"][0]["label"], json!("Refresh (3)"));
+        // The custom_id is the binding the click arrived on — substituting into it
+        // would break every later click on this message.
+        assert_eq!(
+            container[1]["components"][0]["custom_id"],
+            json!("directory:abc")
+        );
+    }
+
+    /// Re-rendering must start from the raw template every time. Rendering the
+    /// *output* of a previous render is the bug this guards: the token is already
+    /// gone, so the second click would freeze the list at its first value.
+    #[test]
+    fn rendering_is_idempotent_because_it_starts_from_the_template() {
+        let template = json!([{ "type": COMPONENT_TEXT_DISPLAY, "content": "{directory}" }]);
+        let first = render_template(&template, &vars());
+        assert_eq!(first[0]["content"], json!("<@&1> `Admin`"));
+
+        let later = RenderVars {
+            list: "<@&1> `Admin` · 9 members".into(),
+            count: 9,
+            updated_unix: 1_700_000_999,
+        };
+        let second = render_template(&template, &later);
+        assert_eq!(second[0]["content"], json!("<@&1> `Admin` · 9 members"));
+        // The template itself is never mutated, so a third render is just as fresh.
+        assert_eq!(template[0]["content"], json!("{directory}"));
+    }
+
+    /// A Components V2 message must repeat only that flag (V2 forbids `content`),
+    /// while a legacy message must have its `content` re-sent — otherwise the edit
+    /// blanks the message body.
+    #[test]
+    fn an_update_preserves_the_messages_own_shape() {
+        let components = json!([{ "type": COMPONENT_TEXT_DISPLAY, "content": "x" }]);
+
+        let v2 = MessageRef {
+            flags: Some(FLAG_IS_COMPONENTS_V2),
+            content: Some("ignored".into()),
+        };
+        let data = update_message(&v2, components.clone())["data"].clone();
+        assert_eq!(data["flags"], json!(FLAG_IS_COMPONENTS_V2));
+        assert!(data["content"].is_null(), "V2 forbids content");
+
+        let legacy = MessageRef {
+            flags: Some(0),
+            content: Some("keep me".into()),
+        };
+        let data = update_message(&legacy, components.clone())["data"].clone();
+        assert_eq!(data["content"], json!("keep me"));
+        assert!(data["flags"].is_null());
+
+        // An absent flags/content pair must not invent either.
+        let bare = MessageRef::default();
+        let data = update_message(&bare, components)["data"].clone();
+        assert!(data["flags"].is_null() && data["content"].is_null());
+    }
+
+    /// The in-place edit lands in a public channel and is full of role/member
+    /// mentions — it must never notify, on either path.
+    #[test]
+    fn in_place_updates_are_silent_too() {
+        let components = json!([{ "type": COMPONENT_TEXT_DISPLAY, "content": "<@1> <@&2>" }]);
+        let msg = MessageRef {
+            flags: Some(FLAG_IS_COMPONENTS_V2),
+            content: None,
+        };
+        assert_eq!(
+            update_message(&msg, components.clone())["data"]["allowed_mentions"]["parse"],
+            json!([])
+        );
+        assert_eq!(
+            update_followup_body(&msg, components)["allowed_mentions"]["parse"],
+            json!([])
+        );
+    }
+
+    /// In-message output must defer an **UPDATE** (type 6), not a reply (type 5).
+    /// After a deferred reply, `@original` names the reply — so the list would be
+    /// edited into an invisible ephemeral instead of the message it belongs to.
+    #[test]
+    fn the_in_place_defer_is_an_update_not_a_reply() {
+        assert_eq!(
+            deferred_update()["type"],
+            json!(RESPONSE_DEFERRED_UPDATE_MESSAGE)
+        );
+        assert_ne!(
+            deferred_update()["type"],
+            json!(RESPONSE_DEFERRED_CHANNEL_MESSAGE)
+        );
+        // …and it carries no data: there is no reply to configure.
+        assert!(deferred_update().get("data").is_none());
+    }
+
+    /// `has_own_token` gates the "you forgot the placeholder" refusal at save, so
+    /// it must recognise exactly the tokens substitution fills and nothing else.
+    #[test]
+    fn has_own_token_recognises_only_our_tokens() {
+        assert!(has_own_token("list: {directory}"));
+        assert!(has_own_token("{directory_count}"));
+        assert!(has_own_token("{directory_updated}"));
+        assert!(!has_own_token("{server} {roles} {results}"));
+        assert!(!has_own_token("no tokens here"));
+        assert!(!has_own_token("{directoryfoo}"));
+        assert!(!has_own_token("{unclosed"));
+    }
+
+    #[test]
+    fn the_clicked_message_is_read_off_the_interaction() {
+        let i: Interaction = serde_json::from_value(json!({
+            "type": 3,
+            "guild_id": "9",
+            "message": { "flags": 32768, "content": null },
+            "data": { "custom_id": "directory:abc" }
+        }))
+        .unwrap();
+        let msg = i.message.unwrap();
+        assert_eq!(msg.flags, Some(FLAG_IS_COMPONENTS_V2));
+        // A payload with no `message` must still parse — it just can't update.
+        let bare: Interaction =
+            serde_json::from_value(json!({ "type": 3, "data": { "custom_id": "directory:abc" } }))
+                .unwrap();
+        assert!(bare.message.is_none());
     }
 
     #[test]
