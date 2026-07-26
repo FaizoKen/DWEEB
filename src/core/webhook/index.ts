@@ -2,3 +2,4 @@
 export * from "./send";
 export * from "./history";
 export * from "./guildWebhooks";
+export * from "./prefetch";

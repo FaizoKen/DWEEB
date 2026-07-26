@@ -20,7 +20,12 @@ import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { useGuildStore } from "@/core/guild/guildStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { usePlanStore } from "@/core/plan/planStore";
-import { loadHistory, parseWebhookUrl, useCanManageGuildWebhooks } from "@/core/webhook";
+import {
+  loadHistory,
+  parseWebhookUrl,
+  prefetchSendDestination,
+  useCanManageGuildWebhooks,
+} from "@/core/webhook";
 import { useTemplateGalleryStore } from "@/features/templates/templateGalleryStore";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
@@ -240,6 +245,32 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
     setSendTarget,
   ]);
 
+  // Preload what the Send/Update dialog's destination section needs (the
+  // server's webhooks + its custom bots), so opening it lands on a resolved
+  // "Posting to" instead of "Loading this server…". Idle-scheduled so it never
+  // competes with the editor's own first paint, and re-run whenever the
+  // connected server changes; both fetches dedupe and cache, so the picker's
+  // mount-time load is then a cache hit. Same gate as the destination chip —
+  // without Manage Webhooks there's no picker to warm.
+  useEffect(() => {
+    if (!destActive || !connectedGuildId) return;
+    const run = () => prefetchSendDestination(connectedGuildId);
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(run, { timeout: 3_000 });
+      return () => window.cancelIdleCallback(handle);
+    }
+    const t = window.setTimeout(run, 600);
+    return () => window.clearTimeout(t);
+  }, [destActive, connectedGuildId]);
+
+  // Second chance for the warm-up: reaching for the primary action (or the
+  // destination chip) is the strongest signal the dialog is about to open, and
+  // by then the idle prefetch above may have aged past the stores' TTL. Cheap —
+  // a fresh cache makes this a no-op.
+  const warmDestination = () => {
+    if (destActive && connectedGuildId) prefetchSendDestination(connectedGuildId);
+  };
+
   // A *new* link (a restore, or a send that just landed) snaps the chip to the
   // message's channel — the destination and the linked message start out
   // agreeing, like the Activity. Once-per-origin (the ref), so the user can
@@ -408,7 +439,12 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
             picker resolves this channel's webhook when it opens. It only
             renders where it can steer a send — the paste-a-URL world keeps its
             destination in the dialog. */}
-        <div ref={leftRef} className={`${styles.actionGroup} ${styles.left}`}>
+        <div
+          ref={leftRef}
+          className={`${styles.actionGroup} ${styles.left}`}
+          onPointerEnter={warmDestination}
+          onFocusCapture={warmDestination}
+        >
           {isProxyConfigured() ? <AccountMenu /> : null}
           {destActive && connectedGuildId ? (
             <ChannelPicker
@@ -418,7 +454,12 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
           ) : null}
         </div>
 
-        <div ref={rightRef} className={`${styles.actionGroup} ${styles.right}`}>
+        <div
+          ref={rightRef}
+          className={`${styles.actionGroup} ${styles.right}`}
+          onPointerEnter={warmDestination}
+          onFocusCapture={warmDestination}
+        >
           {/* Quiet plan indicator, leading the utility cluster — a recessive
               pill showing the connected server's tier, opening a popover with
               the limits and the pricing modal. Hidden until a server is

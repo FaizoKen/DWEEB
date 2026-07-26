@@ -510,13 +510,15 @@ export function SendPanel({
   const barChannelId =
     connectedGuildId && sendTargetGuildId === connectedGuildId ? sendTargetChannelId : null;
 
-  // With a live bar pick, the Send screen stops offering the channel list and
-  // only *shows* the destination (the picker's "summary" variant) — re-picking
-  // a channel here was a confusing second ask when the bar already answered it.
-  // No pick yet (fresh user) keeps the full list: the dialog is then the first
-  // pick, not a re-pick. That decision is frozen per dialog open (the Modal
-  // unmounts this panel when closed): an in-dialog pick writes the bar store,
-  // and flipping the list away mid-flow would yank the UI and strand a
+  // With a live bar pick, the Send screen leads with the destination itself
+  // (the picker's "summary" variant) rather than a channel list to scroll
+  // past — offering the whole list up front was a confusing second ask when the
+  // bar already answered it. The other channels stay one click away in the
+  // summary's own disclosure, so a change of mind here doesn't mean closing the
+  // dialog. No pick yet (fresh user) keeps the full list up front: the dialog is
+  // then the first pick, not a re-pick. That decision is frozen per dialog open
+  // (the Modal unmounts this panel when closed): an in-dialog pick writes the
+  // bar store, and flipping the layout mid-flow would yank the UI and strand a
   // mis-click — the summary applies from the next open. While the channel list
   // is still loading the pick is assumed good; once loaded, a deleted or
   // unhostable channel drops back to the full list so a destination can be

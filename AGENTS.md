@@ -599,12 +599,23 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   essential discovery-banner text and branding inside the central vertical safe band because
   Discord's listing preview may center-crop the banner at larger display sizes. Persist the
   source upload assets in `public/activity-assets/`; `dist/activity-assets/` is generated.
-- **Web Send dialog shows the destination read-only.** When the action bar's channel chip has
-  a pick, the Send tab renders `GuildWebhookPicker variant="summary"` — one row for the picked
-  channel, no channel list (changing the channel lives in the bar chip; don't reintroduce an
-  in-dialog re-pick). The full list appears only when no bar pick exists yet (it's then the
-  first pick), and that decision is frozen per dialog open so an in-dialog pick doesn't yank
-  the list away mid-flow.
+- **A decided destination leads; the alternatives fold away behind it.** When the action bar's
+  channel chip has a pick, the Send tab renders `GuildWebhookPicker variant="summary"` — one row
+  for the picked channel first, and the rest of the server's channels folded into a
+  "Post to a different channel" disclosure (`changeHeader`/`changeOpen`) rather than a list to
+  scroll past. The same disclosure wraps the restore/update webhook list once a webhook is
+  already bound, under "Use a different webhook". The full list is only shown up front when
+  nothing is picked yet (it's then the first pick, not a re-pick), and *that* decision is still
+  frozen per dialog open so an in-dialog pick can't flip the layout mid-flow; the disclosure
+  itself is opened by the user and stays open for the same reason. Picking inside it writes the
+  bar store, so the toolbar chip follows — a pick is a pick wherever it's made. (2026-07-27
+  revision: the summary used to be strictly read-only and told the user to close the dialog,
+  which made a last-second change of mind cost a round trip. Don't re-hide the alternatives, and
+  don't promote them back to the top.) The two fetches that section needs — the guild's webhooks
+  and its custom bots — are warmed from the builder shell by `core/webhook/prefetch.ts` (idle
+  callback on connect + a pointer/focus touch of either action-bar cluster), so the dialog
+  usually opens on a resolved destination instead of "Loading this server…"; both stores dedupe
+  and cache, so the picker's own mount-time load lands as a cache hit.
 - **Built-in AI is a server-relayed Groq key with layered spend guards** (2026-07-19). The
   default AI provider is `dweeb`: `POST /api/ai/chat` on the proxy (`server/src/ai.rs`)
   relays a streamed completion under a server-held `GROQ_API_KEY` (unset ⇒ 501 and the FE

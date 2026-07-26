@@ -192,11 +192,11 @@ export function GuildWebhookPicker({
    *  nothing to reuse needs an OAuth popup, which must stay behind a real
    *  click. */
   initialChannelId?: string | null;
-  /** Send only. "list" offers the full channel list (the destination is still
-   *  being chosen); "summary" collapses it to a single read-only row for
-   *  `initialChannelId` — the channel was already picked in the action bar, so
-   *  the dialog only *shows* it (changing it lives in the bar). All the
-   *  resolution machinery still runs; only the re-picking UI goes away. */
+  /** Send only. "list" offers the full channel list up front (the destination
+   *  is still being chosen); "summary" leads with a single row for
+   *  `initialChannelId` — the channel was already picked in the action bar — and
+   *  folds the rest of the channels into a disclosure below it. All the
+   *  resolution machinery is identical either way; only the framing differs. */
   variant?: "list" | "summary";
 }) {
   const { active, connectedId, status, webhooks, dweebAppId, error, canReinvite, reload } =
@@ -212,6 +212,13 @@ export function GuildWebhookPicker({
   const [purgeBusy, setPurgeBusy] = useState(false);
   // The channel whose webhook is being resolved/created right now (Send).
   const [resolvingChannel, setResolvingChannel] = useState<string | null>(null);
+  // "Change the destination" disclosure. When the destination is already
+  // decided — a channel picked in the action bar (Send summary), or the webhook
+  // an update/restore is bound to — the alternatives fold away: the list is then
+  // a re-pick, not the main event, and showing it in full buries the one row
+  // that matters. Opened by the user and left open (a pick inside it must never
+  // yank the panel shut mid-flow).
+  const [changeOpen, setChangeOpen] = useState(false);
 
   // Scroll the already-selected destination into view when the picker opens, so
   // it's obvious which one is active rather than hidden below the fold (the list
@@ -476,18 +483,43 @@ export function GuildWebhookPicker({
         ? "Posting to"
         : "Post to a channel"
       : "Your server’s webhooks";
+  const refreshButton = (
+    <button
+      type="button"
+      className={styles.refresh}
+      onClick={reload}
+      disabled={status === "loading"}
+      title="Reload from Discord"
+    >
+      <RefreshIcon size={13} />
+    </button>
+  );
   const header = (
     <div className={styles.head}>
       <span className={styles.title}>{titleText}</span>
+      {refreshButton}
+    </div>
+  );
+
+  /** Header for a folded-away alternatives list: the disclosure toggle in the
+   *  title's place, with the reload control kept alongside it. */
+  const changeHeader = (label: string, count: number) => (
+    <div className={styles.head}>
       <button
         type="button"
-        className={styles.refresh}
-        onClick={reload}
-        disabled={status === "loading"}
-        title="Reload from Discord"
+        className={styles.changeToggle}
+        onClick={() => setChangeOpen((v) => !v)}
+        aria-expanded={changeOpen}
       >
-        <RefreshIcon size={13} />
+        {changeOpen ? (
+          <ChevronDownIcon size={13} className={styles.changeChevron} />
+        ) : (
+          <ChevronRightIcon size={13} className={styles.changeChevron} />
+        )}
+        <span className={styles.changeLabel}>{label}</span>
+        {count > 0 ? <span className={styles.changeCount}>{count}</span> : null}
       </button>
+      {refreshButton}
     </div>
   );
 
@@ -608,20 +640,47 @@ export function GuildWebhookPicker({
     // list, named with its server, and explain the list below is the connected
     // one. Details come from this browser's saved history (selection is always
     // remembered when picked/sent).
+    const selectedWebhook = activeId ? usable.find((w) => w.id === activeId) : undefined;
     const selectedEntry = activeId ? history.find((e) => e.id === activeId) : undefined;
-    const selectedInList = activeId != null && usable.some((w) => w.id === activeId);
+    const selectedInList = selectedWebhook != null;
+    // The pinned row's contents, from whichever source knows this webhook: the
+    // server's own list when it's in there, else this browser's saved entry.
+    const selected = selectedWebhook
+      ? {
+          id: selectedWebhook.id,
+          name: selectedWebhook.name ?? "",
+          avatar: selectedWebhook.avatar ?? null,
+          channelId: selectedWebhook.channel_id ?? null,
+          guildId: selectedWebhook.guild_id ?? undefined,
+          guildName: undefined as string | undefined,
+          channelName: undefined as string | undefined,
+        }
+      : selectedEntry
+        ? {
+            id: selectedEntry.id,
+            name: selectedEntry.name,
+            avatar: selectedEntry.avatar ?? null,
+            channelId: selectedEntry.channelId ?? null,
+            guildId: selectedEntry.guildId,
+            guildName: selectedEntry.guildName,
+            channelName: selectedEntry.channelName,
+          }
+        : null;
     const showSelectedCard = activeId != null && !selectedInList && selectedEntry != null;
-    const selectedGuildId = selectedEntry?.guildId;
+    const selectedGuildId = selected?.guildId;
     const crossServer =
       selectedGuildId != null && connectedId !== "" && selectedGuildId !== connectedId;
     const selectedGuildName =
-      selectedEntry?.guildName ??
+      selected?.guildName ??
       (selectedGuildId ? authGuilds.find((g) => g.id === selectedGuildId)?.name : undefined);
     const connectedGuildName = authGuilds.find((g) => g.id === connectedId)?.name;
     const selectedChannelLabel =
-      selectedEntry?.channelName ??
-      channelName(selectedEntry?.channelId ?? null) ??
-      selectedEntry?.channelId;
+      selected?.channelName ?? channelName(selected?.channelId ?? null) ?? selected?.channelId;
+    // A webhook is already bound (an update's posting webhook, a restore that
+    // was set earlier), so the rest of the server's list is a *re-pick* — fold
+    // it away behind the disclosure and lead with the one that's in play.
+    const collapsible = selected != null && usable.length > 0;
+    const listVisible = !collapsible || changeOpen;
 
     const list = usable
       .filter((w) => {
@@ -644,13 +703,13 @@ export function GuildWebhookPicker({
 
     return (
       <section className={styles.picker} aria-label="Server webhooks">
-        {showSelectedCard ? (
+        {selected ? (
           <div className={styles.selectedGroup}>
             <span className={styles.groupLabel}>Selected webhook</span>
             <div className={cn(styles.row, styles.rowSolo, styles.rowActive, styles.selectedRow)}>
               <img
                 className={styles.avatar}
-                src={webhookAvatarUrl(selectedEntry.id, selectedEntry.avatar ?? null, 40)}
+                src={webhookAvatarUrl(selected.id, selected.avatar, 40)}
                 alt=""
                 width={32}
                 height={32}
@@ -658,43 +717,47 @@ export function GuildWebhookPicker({
               />
               <span className={styles.rowText}>
                 <span className={styles.rowName}>
-                  {selectedEntry.name || "(unnamed)"}
+                  {selected.name || "(unnamed)"}
                   {crossServer ? <span className={styles.altServerChip}>other server</span> : null}
                 </span>
                 <span className={styles.rowDest}>
-                  <ChannelTypeIcon type={channelType(selectedEntry.channelId ?? null)} size={11} />
+                  <ChannelTypeIcon type={channelType(selected.channelId)} size={11} />
                   {selectedChannelLabel ?? "unknown channel"}
                   {selectedGuildName ? <> · {selectedGuildName}</> : null}
                 </span>
               </span>
               <CheckCircleIcon size={16} className={styles.check} />
             </div>
-            <p className={styles.note}>
-              {crossServer ? (
-                <>
-                  This webhook is in <strong>{selectedGuildName ?? "another server"}</strong>, not
-                  the server you’re connected to
-                  {connectedGuildName ? (
-                    <>
-                      {" "}
-                      (<strong>{connectedGuildName}</strong>)
-                    </>
-                  ) : null}
-                  . The list below is your connected server’s — pick one only to switch to a
-                  different message.
-                </>
-              ) : (
-                <>This webhook isn’t in the list below, but your edit still targets it.</>
-              )}
-            </p>
+            {showSelectedCard ? (
+              <p className={styles.note}>
+                {crossServer ? (
+                  <>
+                    This webhook is in <strong>{selectedGuildName ?? "another server"}</strong>, not
+                    the server you’re connected to
+                    {connectedGuildName ? (
+                      <>
+                        {" "}
+                        (<strong>{connectedGuildName}</strong>)
+                      </>
+                    ) : null}
+                    . The webhook list below is your connected server’s — pick one only to switch to
+                    a different message.
+                  </>
+                ) : (
+                  <>This webhook isn’t in the list below, but your edit still targets it.</>
+                )}
+              </p>
+            ) : null}
           </div>
         ) : null}
-        {header}
+        {collapsible ? changeHeader("Use a different webhook", usable.length) : header}
         {usable.length === 0 ? (
           <p className={styles.note}>No webhooks in this server to restore from.</p>
         ) : null}
-        {usable.length > SEARCH_THRESHOLD ? <SearchBox value={query} onChange={setQuery} /> : null}
-        {list.length > 0 ? (
+        {listVisible && usable.length > SEARCH_THRESHOLD ? (
+          <SearchBox value={query} onChange={setQuery} />
+        ) : null}
+        {listVisible && list.length > 0 ? (
           <ul className={styles.list} ref={listRef}>
             {list.map((w) => (
               <li key={w.id} ref={w.id === activeId ? activeRowRef : undefined}>
@@ -731,64 +794,17 @@ export function GuildWebhookPicker({
               </li>
             ))}
           </ul>
-        ) : usable.length > 0 ? (
+        ) : listVisible && usable.length > 0 ? (
           <p className={styles.note}>Nothing matches that search.</p>
         ) : null}
       </section>
     );
   }
 
-  /* ── Send: bar-picked destination (summary) ──────────────────────────── */
-  // The action bar already chose the channel, so this variant skips the whole
-  // channel list and just *shows* the destination: one row whose right edge is
-  // the resolve state — a check once its webhook is ready, "Setting up…" while
-  // DWEEB mints one, or "create as …" when a custom bot still needs its OAuth
-  // click. Falls through to the full list if the bar's channel turns out gone
-  // (deleted, or can't host a webhook), so a destination can be re-picked.
-  if (mode === "send" && variant === "summary" && initialChannelId) {
-    const barChannel = channelsLoaded ? guildData?.channelById[initialChannelId] : undefined;
-    if (!channelsLoaded || (barChannel && WEBHOOK_CHANNEL_TYPES.has(barChannel.type))) {
-      const summarySelectorVisible = secretBots.length > 0;
-      return (
-        <section className={styles.picker} aria-label="Destination">
-          {header}
-          {summarySelectorVisible ? (
-            <PostAsSelector
-              identity={identity}
-              bots={secretBots}
-              onSelect={(id) => {
-                identityTouched.current = true;
-                setIdentity(id);
-              }}
-            />
-          ) : null}
-          {actionError ? <p className={styles.error}>{actionError}</p> : null}
-          {barChannel ? (
-            <ul className={cn(styles.list, styles.channelPanel)}>
-              <li>
-                <ChannelRow
-                  channel={barChannel}
-                  active={barChannel.id === activeChannelId}
-                  busy={resolvingChannel === barChannel.id}
-                  reuse={reusableInChannel(barChannel.id, identity)}
-                  identity={identity}
-                  selectorVisible={summarySelectorVisible}
-                  onPick={() => void onPickChannel(barChannel.id)}
-                />
-              </li>
-            </ul>
-          ) : (
-            <p className={styles.note}>Loading this server…</p>
-          )}
-          <p className={styles.note}>
-            Picked in the toolbar’s channel picker — close this dialog to change where it posts.
-          </p>
-        </section>
-      );
-    }
-  }
-
-  /* ── Send: channel-first ─────────────────────────────────────────────── */
+  /* ── Send: the channel list ──────────────────────────────────────────────
+     Built once and rendered by whichever Send layout is showing: the full
+     channel-first picker, or the summary's folded-away "post somewhere else"
+     disclosure (same rows, same resolution — only the framing differs). */
   const q = query.trim().toLowerCase();
   // While searching, narrow each category to its matches and drop empty ones.
   const filteredGroups = q
@@ -812,6 +828,134 @@ export function GuildWebhookPicker({
       return next;
     });
 
+  const channelSearch =
+    webhookChannels.length > 0 ? (
+      <SearchBox value={query} onChange={setQuery} placeholder="Search channels…" />
+    ) : null;
+
+  const channelList =
+    filteredGroups.length > 0 ? (
+      <ul className={cn(styles.list, styles.channelPanel)} ref={listRef}>
+        {filteredGroups.map((g) => {
+          const key = groupKey(g.id);
+          // Searching force-expands so a match is never hidden in a collapsed
+          // section.
+          const isCollapsed = !q && collapsed.has(key);
+          const showHeader = g.name != null || (g.id == null && hasCategories);
+          return (
+            <li key={key} className={styles.catGroup}>
+              {showHeader ? (
+                <button
+                  type="button"
+                  className={styles.catHeader}
+                  onClick={() => toggleCollapsed(key)}
+                  aria-expanded={!isCollapsed}
+                >
+                  {isCollapsed ? (
+                    <ChevronRightIcon size={13} className={styles.catChevron} />
+                  ) : (
+                    <ChevronDownIcon size={13} className={styles.catChevron} />
+                  )}
+                  <span className={styles.catName}>{g.name ?? "No category"}</span>
+                  <span className={styles.catCount}>{g.channels.length}</span>
+                </button>
+              ) : null}
+              {!isCollapsed ? (
+                <ul className={styles.catChannels}>
+                  {g.channels.map((c) => (
+                    <li key={c.id} ref={c.id === activeChannelId ? activeRowRef : undefined}>
+                      <ChannelRow
+                        channel={c}
+                        active={c.id === activeChannelId}
+                        busy={resolvingChannel === c.id}
+                        reuse={reusableInChannel(c.id, identity)}
+                        identity={identity}
+                        selectorVisible={selectorVisible}
+                        onPick={() => void onPickChannel(c.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    ) : webhookChannels.length > 0 ? (
+      <p className={styles.note}>No channels match that search.</p>
+    ) : null;
+
+  const postAsSelector = selectorVisible ? (
+    <PostAsSelector
+      identity={identity}
+      bots={secretBots}
+      onSelect={(id) => {
+        identityTouched.current = true;
+        setIdentity(id);
+      }}
+    />
+  ) : null;
+
+  /* ── Send: bar-picked destination (summary) ──────────────────────────── */
+  // The action bar already chose the channel, so this variant leads with the
+  // destination alone: one row whose right edge is the resolve state — a check
+  // once its webhook is ready, "Setting up…" while DWEEB mints one, or "create
+  // as …" when a custom bot still needs its OAuth click. The rest of the
+  // server's channels stay one click away in a folded disclosure, so a
+  // last-second change of mind doesn't mean closing the dialog; picking there
+  // re-points the toolbar chip too, since a pick is a pick wherever it's made.
+  // Falls through to the full list if the bar's channel turns out gone
+  // (deleted, or can't host a webhook), so a destination can be picked at all.
+  if (mode === "send" && variant === "summary" && initialChannelId) {
+    const barChannel = channelsLoaded ? guildData?.channelById[initialChannelId] : undefined;
+    if (!channelsLoaded || (barChannel && WEBHOOK_CHANNEL_TYPES.has(barChannel.type))) {
+      return (
+        <section className={styles.picker} aria-label="Destination">
+          {header}
+          {postAsSelector}
+          {actionError ? <p className={styles.error}>{actionError}</p> : null}
+          {barChannel ? (
+            <ul className={cn(styles.list, styles.channelPanel)}>
+              <li>
+                <ChannelRow
+                  channel={barChannel}
+                  active={barChannel.id === activeChannelId}
+                  busy={resolvingChannel === barChannel.id}
+                  reuse={reusableInChannel(barChannel.id, identity)}
+                  identity={identity}
+                  selectorVisible={selectorVisible}
+                  onPick={() => void onPickChannel(barChannel.id)}
+                />
+              </li>
+            </ul>
+          ) : (
+            <p className={styles.note}>Loading this server…</p>
+          )}
+          {webhookChannels.length > 0 ? (
+            <>
+              {changeHeader("Post to a different channel", webhookChannels.length)}
+              {changeOpen ? (
+                <>
+                  {channelSearch}
+                  {channelList}
+                  <p className={styles.note}>
+                    Picking here also moves the toolbar’s channel chip, so the next post goes to the
+                    same place.
+                  </p>
+                </>
+              ) : (
+                <p className={styles.note}>
+                  Picked in the toolbar’s channel picker — change it there, or above.
+                </p>
+              )}
+            </>
+          ) : null}
+        </section>
+      );
+    }
+  }
+
+  /* ── Send: channel-first ─────────────────────────────────────────────── */
   return (
     <section className={styles.picker} aria-label="Destination">
       {header}
@@ -820,16 +964,7 @@ export function GuildWebhookPicker({
         there's nothing to copy or configure.
       </p>
 
-      {selectorVisible ? (
-        <PostAsSelector
-          identity={identity}
-          bots={secretBots}
-          onSelect={(id) => {
-            identityTouched.current = true;
-            setIdentity(id);
-          }}
-        />
-      ) : null}
+      {postAsSelector}
 
       {webhookChannels.length === 0 ? (
         <p className={styles.note}>
@@ -839,62 +974,11 @@ export function GuildWebhookPicker({
         </p>
       ) : null}
 
-      {webhookChannels.length > 0 ? (
-        <SearchBox value={query} onChange={setQuery} placeholder="Search channels…" />
-      ) : null}
+      {channelSearch}
 
       {actionError ? <p className={styles.error}>{actionError}</p> : null}
 
-      {filteredGroups.length > 0 ? (
-        <ul className={cn(styles.list, styles.channelPanel)} ref={listRef}>
-          {filteredGroups.map((g) => {
-            const key = groupKey(g.id);
-            // Searching force-expands so a match is never hidden in a collapsed
-            // section.
-            const isCollapsed = !q && collapsed.has(key);
-            const showHeader = g.name != null || (g.id == null && hasCategories);
-            return (
-              <li key={key} className={styles.catGroup}>
-                {showHeader ? (
-                  <button
-                    type="button"
-                    className={styles.catHeader}
-                    onClick={() => toggleCollapsed(key)}
-                    aria-expanded={!isCollapsed}
-                  >
-                    {isCollapsed ? (
-                      <ChevronRightIcon size={13} className={styles.catChevron} />
-                    ) : (
-                      <ChevronDownIcon size={13} className={styles.catChevron} />
-                    )}
-                    <span className={styles.catName}>{g.name ?? "No category"}</span>
-                    <span className={styles.catCount}>{g.channels.length}</span>
-                  </button>
-                ) : null}
-                {!isCollapsed ? (
-                  <ul className={styles.catChannels}>
-                    {g.channels.map((c) => (
-                      <li key={c.id} ref={c.id === activeChannelId ? activeRowRef : undefined}>
-                        <ChannelRow
-                          channel={c}
-                          active={c.id === activeChannelId}
-                          busy={resolvingChannel === c.id}
-                          reuse={reusableInChannel(c.id, identity)}
-                          identity={identity}
-                          selectorVisible={selectorVisible}
-                          onPick={() => void onPickChannel(c.id)}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      ) : webhookChannels.length > 0 ? (
-        <p className={styles.note}>No channels match that search.</p>
-      ) : null}
+      {channelList}
 
       {/* Advanced: tidy up the webhooks DWEEB created — rename / move / delete,
           and purge duplicates. Most users never need to open this. */}

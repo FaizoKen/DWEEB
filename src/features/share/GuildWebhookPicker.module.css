@@ -686,6 +686,50 @@
   gap: 4px;
 }
 
+/* ── "Change the destination" disclosure ────────────────────────────────────
+   Once a destination is already picked — the action bar's channel (Send
+   summary) or the webhook an update is bound to — the alternatives fold away
+   and this toggle takes the header title's place, so the panel leads with what
+   is actually selected instead of a list to scroll past. */
+.changeToggle {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+.changeToggle:hover {
+  color: var(--app-text);
+}
+.changeChevron {
+  flex: none;
+}
+.changeLabel {
+  min-width: 0;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.changeCount {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.7;
+  background: var(--app-bg-hover);
+  color: var(--app-text-subtle);
+}
+
 /* ── Manage-webhooks disclosure (advanced) ──────────────────────────────── */
 .manage {
   margin-top: 2px;
