@@ -192,8 +192,14 @@ pub fn render_text(input: &RenderInput<'_>) -> ListText {
     } else {
         channel_sections(input, &mut budget)
     };
+    // Count what the list actually shows, not what it started from — a hidden
+    // empty role must not be counted, or `{directory_count}` contradicts the text
+    // right next to it.
     let count = if input.cfg.is_roles() {
-        roster_roles(input.cfg, input.structure).len()
+        roster_roles(input.cfg, input.structure)
+            .iter()
+            .filter(|r| role_is_shown(input, r))
+            .count()
     } else {
         index_channels(input.cfg, input.structure).len()
     };
@@ -358,14 +364,8 @@ fn push_role(
     let cfg = input.cfg;
     let members = input.members.and_then(|m| m.for_role(&role.id));
 
-    // Hiding empty roles only makes sense once we actually know the counts;
-    // with the member list unavailable, "empty" is unknowable and hiding
-    // everything would leave a blank roster.
-    if cfg.hide_empty_roles && input.member_state == MemberState::Ready {
-        let count = members.map_or(0, |m| visible_total(cfg, m));
-        if count == 0 {
-            return true;
-        }
+    if !role_is_shown(input, role) {
+        return true;
     }
 
     // The role mention renders as Discord's own colour pill, which no amount of
@@ -403,6 +403,26 @@ fn push_role(
         }
     }
     true
+}
+
+/// Whether a role in the roster actually gets a line.
+///
+/// Extracted so `{directory_count}` counts exactly what the list shows — counting
+/// the roster before this filter would report 5 while displaying 3.
+///
+/// "Hide empty roles" can only apply once the counts are actually known: with the
+/// member list unavailable, "empty" is unknowable, and applying it anyway would
+/// blank the entire roster on a server without the privileged intent.
+fn role_is_shown(input: &RenderInput<'_>, role: &RoleView) -> bool {
+    let cfg = input.cfg;
+    if !cfg.hide_empty_roles || input.member_state != MemberState::Ready {
+        return true;
+    }
+    let count = input
+        .members
+        .and_then(|m| m.for_role(&role.id))
+        .map_or(0, |m| visible_total(cfg, m));
+    count > 0
 }
 
 /// Members counted for display: bots only when the host opted in.
@@ -1780,6 +1800,50 @@ mod tests {
             "{}",
             text.list
         );
+    }
+
+    /// `{directory_count}` must agree with the list printed beside it. Counting the
+    /// roster before the hide-empty filter reported 3 while showing 1.
+    #[test]
+    fn the_count_matches_what_the_list_actually_shows() {
+        let mut cfg = base_config();
+        cfg.show_members = true;
+        cfg.hide_empty_roles = true;
+        cfg.roles = (1..=3)
+            .map(|i| RoleRef {
+                id: format!("r{i}"),
+                name: format!("R{i}"),
+                color: 0,
+            })
+            .collect();
+        let st = structure(
+            (1..=3)
+                .map(|i| role(&format!("r{i}"), &format!("R{i}"), true, 0))
+                .collect(),
+            vec![],
+        );
+        // Only r1 is held by anyone; r2 and r3 are hidden as empty.
+        let idx = index(&[("r1", 2, 0), ("r2", 0, 0), ("r3", 0, 0)]);
+        let text = render_text(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            members: Some(&idx),
+            member_state: MemberState::Ready,
+            section: None,
+        });
+        assert_eq!(text.count, 1, "hidden empty roles must not be counted");
+        assert!(text.list.contains("<@&r1>"), "{}", text.list);
+        assert!(!text.list.contains("<@&r2>"), "{}", text.list);
+
+        // With counts unknown, nothing is hidden — so all three are counted.
+        let text = render_text(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            members: None,
+            member_state: MemberState::Unavailable,
+            section: None,
+        });
+        assert_eq!(text.count, 3);
     }
 
     #[test]
