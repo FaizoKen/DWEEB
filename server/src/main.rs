@@ -83,6 +83,16 @@ const FEEDBACK_RATE_WINDOW: Duration = Duration::from_secs(15 * 60);
 const AI_RATE_PER_MIN: u32 = 10;
 const AI_RATE_BURST: u32 = 5;
 
+/// Starting a checkout creates a Stripe Checkout Session (and resolves a
+/// promotion code against Stripe when one was typed), so it gets its own per-IP
+/// budget: it bounds both what we spend on Stripe's API and how fast anyone can
+/// guess at promo codes. Generous for the real gesture — a buyer clicks Upgrade a
+/// handful of times, retypes a code once or twice — and nowhere near enough to
+/// sweep a code space. It sits on top of the global limiter, and the route is
+/// already gated to managers of the server being upgraded.
+const CHECKOUT_RATE_PER_MIN: u32 = 6;
+const CHECKOUT_RATE_BURST: u32 = 4;
+
 fn main() {
     // `dweeb-proxy healthcheck` is invoked by the Docker HEALTHCHECK on every
     // interval. Answer it before building any async runtime — the probe just
@@ -138,7 +148,7 @@ async fn run() {
     // through Redis so multiple instances coordinate; otherwise both are
     // process-local. The connection manager is cloned into each (cheap; it's an
     // Arc internally with its own reconnection loop).
-    let (cache, limiter, feedback_limiter, ai_limiter) = match &config.redis_url {
+    let (cache, limiter, feedback_limiter, ai_limiter, checkout_limiter) = match &config.redis_url {
         Some(url) => {
             let conn = match connect_redis(url).await {
                 Ok(c) => c,
@@ -169,9 +179,15 @@ async fn run() {
                     window_secs: FEEDBACK_RATE_WINDOW.as_secs(),
                 },
                 Limiter::Redis {
-                    conn,
+                    conn: conn.clone(),
                     key_prefix: "ai",
                     limit: AI_RATE_PER_MIN.saturating_add(AI_RATE_BURST),
+                    window_secs: 60,
+                },
+                Limiter::Redis {
+                    conn,
+                    key_prefix: "checkout",
+                    limit: CHECKOUT_RATE_PER_MIN.saturating_add(CHECKOUT_RATE_BURST),
                     window_secs: 60,
                 },
             )
@@ -187,11 +203,13 @@ async fn run() {
                 FEEDBACK_RATE_WINDOW,
             )),
             Limiter::Memory(RateLimiter::new(AI_RATE_PER_MIN, AI_RATE_BURST)),
+            Limiter::Memory(RateLimiter::new(CHECKOUT_RATE_PER_MIN, CHECKOUT_RATE_BURST)),
         ),
     };
     let limiter = Arc::new(limiter);
     let feedback_limiter = Arc::new(feedback_limiter);
     let ai_limiter = Arc::new(ai_limiter);
+    let checkout_limiter = Arc::new(checkout_limiter);
 
     // Cookie signing + encryption key, built from the configured secret
     // (validated to be ≥64 bytes in `Config::from_env`).
@@ -723,9 +741,14 @@ async fn run() {
         // receive Stripe webhooks. All but the webhook are cookie-gated; the
         // webhook is signature-verified. The webhook body is bounded but roomy
         // (Stripe events can carry a fair bit); the JSON bodies are tiny.
+        // Checkout also carries its own per-IP limiter: each call creates a Stripe
+        // session, and one that names a promotion code resolves it against Stripe
+        // (see `CHECKOUT_RATE_PER_MIN`).
         .route(
             "/api/stripe/checkout",
-            post(stripe::checkout).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
+            post(stripe::checkout)
+                .layer(axum::extract::DefaultBodyLimit::max(4 * 1024))
+                .layer(from_fn_with_state(checkout_limiter, rate_limit)),
         )
         .route(
             "/api/stripe/sync",

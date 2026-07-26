@@ -492,6 +492,34 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - Plans (Free/Plus/Pro) are **quota-raising only** — a plan must never lock a feature outright.
   Entitlement is keyed per **guild**, not per user. Guild moves have a 7-day cooldown;
   downgrades keep the oldest resources within cap, suspend overflow, and restore it on upgrade.
+- **A 100%-off-forever promo code takes no card — which forces the code through our
+  own field** (2026-07-27). Stripe skips card collection only with
+  `payment_method_collection: "if_required"` **and** a total that is already 0 **when the
+  Checkout Session is created**; the same code typed into Checkout's *own* promo box
+  arrives after the session exists and the card form it was built with does not go away.
+  So the pricing modal has a "Have a promo code?" field, `POST /api/stripe/checkout` takes
+  `promotion_code`, and the proxy applies it server-side as `discounts[0][promotion_code]`.
+  Five load-bearing details: (1) `discounts` and `allow_promotion_codes` are **mutually
+  exclusive** — sending both makes Stripe reject the session outright, so a code from us
+  *replaces* Checkout's own field (no code ⇒ `allow_promotion_codes=true`, exactly as
+  before); (2) `if_required` is set **only** when the coupon is `percent_off >= 100` **and**
+  `duration: "forever"` (`PromoCode::covers_everything`) — a time-limited 100%-off coupon
+  keeps collecting the card its first real renewal needs, and an `amount_off` coupon that
+  merely happens to equal today's price is excluded because a price change would strand a
+  card-less customer; (3) only the **customer-facing code** is accepted from the client,
+  never a `coupon`/`promo_…` id — a promotion code is the object Stripe means to be handed
+  out, and `parse_promotion_code` re-checks `active`, `expires_at`, `max_redemptions`, and
+  `coupon.valid` itself rather than trusting the `active=true` filter alone; (4) every
+  promo failure is a **4xx** — a typo (`PromoError::Invalid`) and a code whose restrictions
+  don't fit the purchase (`CheckoutError::PromoRejected`, logged at *info* under
+  `stripe_promo`) — because 5xx is the paging channel and neither is our fault; that is why
+  `post_form` carries Stripe's status (`StripeErr::is_client_error`) instead of a bare
+  string; (5) the route has its own per-IP limiter (`CHECKOUT_RATE_*` in main.rs) since each
+  call mints a Stripe session and may resolve a code. Expiry/redemption caps stay Stripe's
+  job (`max_redemptions`, `expires_at` on the coupon) — don't rebuild them here. A free
+  subscription still mirrors as `active`, so entitlement flows normally; if the coupon is
+  ever deleted the next invoice fails and the tier drops on its own. Guarded by the
+  `checkout_form_*`/`normalize_promo_code_*`/`parse_promotion_code_*` tests in stripe.rs.
 - **Stripe stays off the boot path.** Import Stripe.js only via `@stripe/stripe-js/pure`
   (the default entry injects the js.stripe.com script — cookies + fraud beacons — as an
   import side effect; it once rode the vendor chunk and hit every visitor on every page

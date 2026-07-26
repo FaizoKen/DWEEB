@@ -71,6 +71,17 @@ const WEBHOOK_TOLERANCE_SECS: i64 = 300;
 /// entitlement, the webhook, or the shared grant.
 const APP_SOURCE: &str = "dweeb";
 
+/// Longest promotion code we'll even look up. Stripe's own codes are short and
+/// alphanumeric; anything longer is someone poking at the endpoint, so it is
+/// rejected before it costs a Stripe round-trip.
+const MAX_PROMO_CODE_LEN: usize = 64;
+
+/// The single user-facing message for every "that code won't work" outcome —
+/// wrong, expired, fully redeemed, or attached to a dead coupon. Deliberately
+/// undifferentiated: which of those it is tells the visitor nothing useful and
+/// tells a prober more than it should.
+const INVALID_PROMO: &str = "That promo code isn't valid (or has expired).";
+
 /// How long after moving a subscription before it can be moved again. Premium is
 /// per-server and movable, so without this one paid sub could be cycled across
 /// many servers to seed each with creation-gated benefits (scheduled posts,
@@ -365,6 +376,146 @@ impl StripeStore {
     }
 }
 
+// ── Promotion codes ──────────────────────────────────────────────────────────
+
+/// A promotion code Stripe confirmed is live, reduced to the two things checkout
+/// needs from it.
+///
+/// Only the *customer-facing code* is ever accepted from the client, never a
+/// `coupon`/`promo_…` id: a promotion code is the object Stripe designed to be
+/// handed out publicly, while coupon ids are internal and may well name discounts
+/// that were never meant to be self-serve.
+pub struct PromoCode {
+    /// Stripe's id for the code (`promo_…`) — what Checkout takes; the typed code
+    /// itself is not a valid `discounts[0][promotion_code]` value.
+    pub id: String,
+    /// True only when the coupon zeroes **every** invoice for the life of the
+    /// subscription (100% off, `duration: forever`). This is the one case in which
+    /// Checkout may skip collecting a card: there is never a future invoice a
+    /// payment method would be needed for. A time-limited 100%-off coupon
+    /// deliberately does *not* qualify — the card it would have skipped is exactly
+    /// what the first real renewal needs.
+    pub covers_everything: bool,
+}
+
+/// Why a promotion code couldn't be applied. Split so the handler can answer 400
+/// for the visitor's typo and 502 only for our own upstream trouble — a 5xx here
+/// is the paging channel, and a mistyped code is not our fault.
+pub enum PromoError {
+    /// No live promotion code matches (typo, expired, fully redeemed, dead coupon).
+    Invalid,
+    /// Stripe itself didn't answer.
+    Upstream(String),
+}
+
+/// Trim a client-supplied promotion code and accept it only if it *could* be one:
+/// non-empty, bounded, and made of the characters Stripe's codes use. Returns
+/// `None` for anything else, so junk never reaches Stripe. Case is preserved —
+/// Stripe's `code` filter is case-insensitive.
+fn normalize_promo_code(raw: &str) -> Option<String> {
+    let code = raw.trim();
+    if code.is_empty() || code.len() > MAX_PROMO_CODE_LEN {
+        return None;
+    }
+    if !code
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    Some(code.to_string())
+}
+
+/// Read a live promotion code out of a `GET /v1/promotion_codes` list response,
+/// or `None` when the list holds nothing usable. Pure, so the "is this code
+/// redeemable, and does it cover the whole subscription forever?" decision is
+/// unit-testable without Stripe.
+fn parse_promotion_code(body: &Value) -> Option<PromoCode> {
+    let promo = body.get("data").and_then(Value::as_array)?.first()?;
+    let id = promo.get("id").and_then(Value::as_str)?.to_string();
+    if !id.starts_with("promo_") {
+        return None;
+    }
+    if promo.get("active").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    // Stripe flips `active` when a code expires or runs out of redemptions, but
+    // check both explicitly: this decision can waive payment entirely, so it
+    // must not rest on one field we didn't verify ourselves.
+    if let Some(expires) = promo.get("expires_at").and_then(Value::as_i64) {
+        if expires <= unix_now() {
+            return None;
+        }
+    }
+    if let Some(max) = promo.get("max_redemptions").and_then(Value::as_i64) {
+        let used = promo
+            .get("times_redeemed")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        if used >= max {
+            return None;
+        }
+    }
+    let coupon = promo.get("coupon")?;
+    if coupon.get("valid").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    // A 100%-off forever coupon is the only shape that makes the subscription free
+    // for good. An `amount_off` coupon is deliberately excluded even when it
+    // happens to equal the price: it is a fixed amount in one currency, so
+    // "covers it" is a coincidence of the current price rather than a property of
+    // the coupon, and a price change would silently strand a card-less customer.
+    let covers_everything = coupon
+        .get("percent_off")
+        .and_then(Value::as_f64)
+        .is_some_and(|p| p >= 100.0)
+        && coupon.get("duration").and_then(Value::as_str) == Some("forever");
+    Some(PromoCode {
+        id,
+        covers_everything,
+    })
+}
+
+/// Why a checkout session couldn't be created.
+pub enum CheckoutError {
+    /// Stripe answered 4xx while a promotion code was applied — its restrictions
+    /// (a product/price allowlist, a minimum amount, first-time-customer only…)
+    /// don't fit this purchase. The code passed our liveness check, so this is a
+    /// property of the coupon, i.e. the visitor's problem: it must stay a 4xx.
+    /// Carries Stripe's own explanation for the log, not for the visitor.
+    PromoRejected(String),
+    /// Our configuration is wrong, or Stripe is unreachable.
+    Other(String),
+}
+
+/// One purchase, as [`StripeClient::create_embedded_checkout`] needs it: who is
+/// buying, what, and for which server.
+pub struct CheckoutRequest<'a> {
+    /// The Discord user who will own (pay for) the subscription.
+    pub uid: &'a str,
+    /// Their display name, used only when a Stripe customer has to be created.
+    pub name: &'a str,
+    /// "plus" | "pro".
+    pub tier: &'a str,
+    /// "month" | "year".
+    pub interval: &'a str,
+    /// The server the subscription grants premium to.
+    pub guild_id: &'a str,
+    /// A promotion code already confirmed live, or `None` to let Checkout offer
+    /// its own code field instead.
+    pub promo: Option<&'a PromoCode>,
+}
+
+/// What a started checkout hands back to the client.
+pub struct CheckoutStart {
+    /// The embedded Checkout client secret (`cs_…`).
+    pub client_secret: String,
+    /// True when the applied code makes this subscription free forever, so
+    /// Checkout will render no card fields at all. Purely so the UI can say so
+    /// before the form appears — the server decides it either way.
+    pub no_card_needed: bool,
+}
+
 // ── Stripe REST client ───────────────────────────────────────────────────────
 
 /// Thin Stripe REST client (form-encoded POSTs, query GETs under the secret key)
@@ -380,8 +531,41 @@ pub struct StripeClient {
     return_url: String,
 }
 
+/// A failed Stripe write, keeping the HTTP status alongside the message.
+///
+/// The status is the difference between "Stripe refused what we sent" (a 4xx —
+/// which, for a customer-supplied promotion code, is the *visitor's* problem) and
+/// "Stripe didn't answer" (a 5xx or a transport error — ours). 5xx is the paging
+/// channel, so callers that can be reached by an ordinary user action must be able
+/// to tell those apart. `None` = never got a response at all.
+pub struct StripeErr {
+    pub status: Option<StatusCode>,
+    pub message: String,
+}
+
+impl StripeErr {
+    /// True when Stripe answered and rejected the request itself (as opposed to
+    /// failing or being unreachable).
+    fn is_client_error(&self) -> bool {
+        self.status.is_some_and(|s| s.is_client_error())
+    }
+}
+
+impl std::fmt::Display for StripeErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.status {
+            Some(s) => write!(f, "stripe {s}: {}", self.message),
+            None => write!(f, "{}", self.message),
+        }
+    }
+}
+
 impl StripeClient {
-    async fn post_form(&self, path: &str, form: &[(String, String)]) -> Result<Value, String> {
+    async fn post_form(&self, path: &str, form: &[(String, String)]) -> Result<Value, StripeErr> {
+        let fail = |message: String| StripeErr {
+            status: None,
+            message,
+        };
         let resp = self
             .http
             .post(format!("{STRIPE_API}{path}"))
@@ -389,16 +573,19 @@ impl StripeClient {
             .form(form)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| fail(e.to_string()))?;
         let status = resp.status();
-        let body: Value = resp.json().await.map_err(|e| e.to_string())?;
+        let body: Value = resp.json().await.map_err(|e| fail(e.to_string()))?;
         if !status.is_success() {
             let msg = body
                 .get("error")
                 .and_then(|e| e.get("message"))
                 .and_then(Value::as_str)
                 .unwrap_or("Stripe request failed");
-            return Err(format!("stripe {status}: {msg}"));
+            return Err(StripeErr {
+                status: Some(status),
+                message: msg.to_string(),
+            });
         }
         Ok(body)
     }
@@ -441,7 +628,10 @@ impl StripeClient {
         if !name.is_empty() {
             form.push(("name".to_string(), name.to_string()));
         }
-        let body = self.post_form("/v1/customers", &form).await?;
+        let body = self
+            .post_form("/v1/customers", &form)
+            .await
+            .map_err(|e| e.to_string())?;
         id_of(&body["id"]).ok_or_else(|| "customer create: no id".into())
     }
 
@@ -467,65 +657,68 @@ impl StripeClient {
         Ok(cid)
     }
 
+    /// Resolve a customer-typed promotion code to the live Stripe object behind it.
+    /// `active=true` narrows the search to redeemable codes; [`parse_promotion_code`]
+    /// re-checks expiry, redemption cap, and coupon validity itself.
+    pub async fn find_promotion_code(&self, code: &str) -> Result<PromoCode, PromoError> {
+        let body = self
+            .get(
+                "/v1/promotion_codes",
+                &[("code", code), ("active", "true"), ("limit", "1")],
+            )
+            .await
+            .map_err(PromoError::Upstream)?;
+        parse_promotion_code(&body).ok_or(PromoError::Invalid)
+    }
+
     /// Create an **embedded** Checkout session for `tier` and return its client
     /// secret (the FE renders the payment form inline). The Discord id rides as
     /// `client_reference_id` AND subscription metadata so the webhook can attribute
-    /// the sub even before the customer link is cached.
+    /// the sub even before the customer link is cached. `promo`, when present, is
+    /// applied server-side — see [`checkout_form`] for why that is the only way a
+    /// 100%-off code can skip the card form.
     pub async fn create_embedded_checkout(
         &self,
         store: &StripeStore,
-        uid: &str,
-        name: &str,
-        tier: &str,
-        interval: &str,
-        guild_id: &str,
-    ) -> Result<String, String> {
-        let key = checkout_key(tier, interval);
-        let price = self
-            .checkout_price
-            .get(&key)
-            .ok_or_else(|| format!("no checkout price configured for '{key}'"))?;
-        let customer = self.get_or_create_customer(store, uid, name).await?;
-        let mut form = vec![
-            ("mode".into(), "subscription".into()),
-            // Stripe renamed the embedded Checkout ui_mode: the account's API
-            // version rejects the old `embedded` with "use `embedded_page`". The
-            // returned client_secret is the same `cs_…` the FE's EmbeddedCheckout
-            // consumes, so only this value changes.
-            ("ui_mode".into(), "embedded_page".into()),
-            ("customer".into(), customer),
-            ("line_items[0][price]".into(), price.clone()),
-            ("line_items[0][quantity]".into(), "1".into()),
-            ("client_reference_id".into(), uid.to_string()),
-            (
-                "subscription_data[metadata][discord_user_id]".into(),
-                uid.to_string(),
-            ),
-            // Which app's checkout created this payment (see [`APP_SOURCE`]) — the
-            // Stripe account/prices are shared with RoleLogic, so this is the tell
-            // that it's a DWEEB purchase. Additive: the webhook/backfill ignore it.
-            (
-                "subscription_data[metadata][source]".into(),
-                APP_SOURCE.to_string(),
-            ),
-            // The server this subscription grants premium to — read back off the
-            // subscription by the webhook/backfill to bind it to the guild.
-            (
-                "subscription_data[metadata][guild_id]".into(),
-                guild_id.to_string(),
-            ),
-            ("allow_promotion_codes".into(), "true".into()),
-            // Stay in our modal; the FE refreshes the plan on completion.
-            ("redirect_on_completion".into(), "never".into()),
-        ];
-        if let Some(txr) = &self.tax_rate_id {
-            form.push(("line_items[0][tax_rates][0]".into(), txr.clone()));
-        }
-        let body = self.post_form("/v1/checkout/sessions", &form).await?;
-        body.get("client_secret")
+        req: CheckoutRequest<'_>,
+    ) -> Result<CheckoutStart, CheckoutError> {
+        let key = checkout_key(req.tier, req.interval);
+        let price = self.checkout_price.get(&key).ok_or_else(|| {
+            CheckoutError::Other(format!("no checkout price configured for '{key}'"))
+        })?;
+        let customer = self
+            .get_or_create_customer(store, req.uid, req.name)
+            .await
+            .map_err(CheckoutError::Other)?;
+        let form = checkout_form(
+            price,
+            &customer,
+            req.uid,
+            req.guild_id,
+            self.tax_rate_id.as_deref(),
+            req.promo,
+        );
+        let body = self
+            .post_form("/v1/checkout/sessions", &form)
+            .await
+            .map_err(|e| {
+                // Everything else in this form is server-controlled and known to
+                // work, so a rejection with a code attached is about the code.
+                if req.promo.is_some() && e.is_client_error() {
+                    CheckoutError::PromoRejected(e.message)
+                } else {
+                    CheckoutError::Other(e.to_string())
+                }
+            })?;
+        let client_secret = body
+            .get("client_secret")
             .and_then(Value::as_str)
             .map(String::from)
-            .ok_or_else(|| "checkout: no client_secret".into())
+            .ok_or_else(|| CheckoutError::Other("checkout: no client_secret".to_string()))?;
+        Ok(CheckoutStart {
+            client_secret,
+            no_card_needed: req.promo.is_some_and(|p| p.covers_everything),
+        })
     }
 
     /// A Stripe billing-portal URL so the user can manage/cancel/upgrade. Errors
@@ -543,7 +736,10 @@ impl StripeClient {
             ("customer".into(), customer),
             ("return_url".into(), self.return_url.clone()),
         ];
-        let body = self.post_form("/v1/billing_portal/sessions", &form).await?;
+        let body = self
+            .post_form("/v1/billing_portal/sessions", &form)
+            .await
+            .map_err(|e| e.to_string())?;
         body.get("url")
             .and_then(Value::as_str)
             .map(String::from)
@@ -619,7 +815,8 @@ impl StripeClient {
         let form = vec![("metadata[guild_id]".to_string(), new_guild.to_string())];
         let sub = self
             .post_form(&format!("/v1/subscriptions/{sub_id}"), &form)
-            .await?;
+            .await
+            .map_err(|e| e.to_string())?;
         // Re-mirror from Stripe's response so status/period/guild all stay in step.
         self.upsert_from_sub(store, &sub, None).await;
         // Defensive: guarantee the local guild matches even if the response was
@@ -798,6 +995,76 @@ impl StripeClient {
         }
         None
     }
+}
+
+/// Build the `POST /v1/checkout/sessions` form. Pure, because the discount half
+/// of it carries two Stripe rules that are easy to break and impossible to notice
+/// in review (guarded by the `checkout_form_*` tests):
+///
+/// 1. `discounts` and `allow_promotion_codes` are **mutually exclusive** — sending
+///    both makes Stripe reject the session outright ("You may only specify one of
+///    these parameters"), so a pre-applied code replaces Checkout's own code field
+///    rather than joining it.
+/// 2. `payment_method_collection: if_required` skips the card **only when the total
+///    due is already 0 as the session is created**. That is exactly why a
+///    100%-off code has to be applied here, server-side: the same code typed into
+///    Checkout's own promo field arrives after the session exists, and the card
+///    form it was created with does not go away. Left at Stripe's `always` default
+///    for every other case, so a code that merely discounts — or one that runs out
+///    after a few months — still collects the card its next real invoice needs.
+fn checkout_form(
+    price: &str,
+    customer: &str,
+    uid: &str,
+    guild_id: &str,
+    tax_rate_id: Option<&str>,
+    promo: Option<&PromoCode>,
+) -> Vec<(String, String)> {
+    let mut form = vec![
+        ("mode".into(), "subscription".into()),
+        // Stripe renamed the embedded Checkout ui_mode: the account's API
+        // version rejects the old `embedded` with "use `embedded_page`". The
+        // returned client_secret is the same `cs_…` the FE's EmbeddedCheckout
+        // consumes, so only this value changes.
+        ("ui_mode".into(), "embedded_page".into()),
+        ("customer".into(), customer.to_string()),
+        ("line_items[0][price]".into(), price.to_string()),
+        ("line_items[0][quantity]".into(), "1".into()),
+        ("client_reference_id".into(), uid.to_string()),
+        (
+            "subscription_data[metadata][discord_user_id]".into(),
+            uid.to_string(),
+        ),
+        // Which app's checkout created this payment (see [`APP_SOURCE`]) — the
+        // Stripe account/prices are shared with RoleLogic, so this is the tell
+        // that it's a DWEEB purchase. Additive: the webhook/backfill ignore it.
+        (
+            "subscription_data[metadata][source]".into(),
+            APP_SOURCE.to_string(),
+        ),
+        // The server this subscription grants premium to — read back off the
+        // subscription by the webhook/backfill to bind it to the guild.
+        (
+            "subscription_data[metadata][guild_id]".into(),
+            guild_id.to_string(),
+        ),
+        // Stay in our modal; the FE refreshes the plan on completion.
+        ("redirect_on_completion".into(), "never".into()),
+    ];
+    match promo {
+        Some(p) => {
+            form.push(("discounts[0][promotion_code]".into(), p.id.clone()));
+            if p.covers_everything {
+                form.push(("payment_method_collection".into(), "if_required".into()));
+            }
+        }
+        // No code from us → Checkout offers its own promo field, as before.
+        None => form.push(("allow_promotion_codes".into(), "true".into())),
+    }
+    if let Some(txr) = tax_rate_id {
+        form.push(("line_items[0][tax_rates][0]".into(), txr.to_string()));
+    }
+    form
 }
 
 /// Pull the fields we mirror out of a Stripe subscription object. `None` only
@@ -1050,12 +1317,18 @@ pub struct CheckoutBody {
     /// The server this subscription buys premium for (MEE6/Dyno-style per-server
     /// pricing). Required — a subscription always belongs to one server.
     pub guild_id: String,
+    /// Optional customer-facing promotion code, typed into the pricing modal's own
+    /// field. Applied to the session server-side; a code that covers the plan in
+    /// full and forever also drops the card form (see [`checkout_form`]).
+    #[serde(default)]
+    pub promotion_code: Option<String>,
 }
 
-/// `POST /api/stripe/checkout` `{ tier, interval, guild_id }` → `{ client_secret }`
-/// for the FE's embedded Checkout. The subscription is bound to `guild_id`, so
-/// the caller must manage that server (same gate as the other per-server
-/// features); the signed-in Discord user owns/pays for it.
+/// `POST /api/stripe/checkout` `{ tier, interval, guild_id, promotion_code? }` →
+/// `{ client_secret, no_card_needed }` for the FE's embedded Checkout. The
+/// subscription is bound to `guild_id`, so the caller must manage that server
+/// (same gate as the other per-server features); the signed-in Discord user
+/// owns/pays for it.
 pub async fn checkout(
     State(st): State<AppState>,
     jar: PrivateCookieJar,
@@ -1094,21 +1367,72 @@ pub async fn checkout(
             retry_after: None,
         });
     }
-    let client_secret = stripe
+    // A promo code, when one was typed. Resolved before the session is created —
+    // Stripe can only waive the card form for a discount it already knows about.
+    let promo = match body.promotion_code.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(raw) => {
+            // Shape-check first: junk is rejected without spending a Stripe call.
+            let code = normalize_promo_code(raw).ok_or_else(|| AppError::Status {
+                status: StatusCode::BAD_REQUEST,
+                message: INVALID_PROMO.into(),
+                retry_after: None,
+            })?;
+            match stripe.client.find_promotion_code(&code).await {
+                Ok(p) => Some(p),
+                // A wrong code is the visitor's typo, not our fault — 4xx, so it
+                // never reaches the ERROR-level paging channel.
+                Err(PromoError::Invalid) => {
+                    return Err(AppError::Status {
+                        status: StatusCode::BAD_REQUEST,
+                        message: INVALID_PROMO.into(),
+                        retry_after: None,
+                    })
+                }
+                Err(PromoError::Upstream(e)) => {
+                    return Err(AppError::BadGateway(format!(
+                        "Couldn't check that promo code: {e}"
+                    )))
+                }
+            }
+        }
+    };
+    let start = stripe
         .client
         .create_embedded_checkout(
             &stripe.store,
-            &session.uid,
-            &session.name,
-            &tier,
-            &interval,
-            &guild,
+            CheckoutRequest {
+                uid: &session.uid,
+                name: &session.name,
+                tier: &tier,
+                interval: &interval,
+                guild_id: &guild,
+                promo: promo.as_ref(),
+            },
         )
         .await
-        .map_err(|e| AppError::BadGateway(format!("Couldn't start checkout: {e}")))?;
+        .map_err(|e| match e {
+            CheckoutError::PromoRejected(why) => {
+                // Stripe's wording can name coupons/products, so it goes to the log
+                // (at info — a visitor's unusable code is nothing to page over) and
+                // the visitor gets a plain sentence.
+                tracing::info!(target: "stripe_promo", %guild, "promo code rejected: {why}");
+                AppError::Status {
+                    status: StatusCode::BAD_REQUEST,
+                    message: "That promo code can't be used on this plan.".into(),
+                    retry_after: None,
+                }
+            }
+            CheckoutError::Other(e) => {
+                AppError::BadGateway(format!("Couldn't start checkout: {e}"))
+            }
+        })?;
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
-        Json(json!({ "client_secret": client_secret })),
+        Json(json!({
+            "client_secret": start.client_secret,
+            "no_card_needed": start.no_card_needed,
+        })),
     )
         .into_response())
 }
@@ -1579,6 +1903,187 @@ mod tests {
         assert_eq!(f.6, None);
         // Not a subscription → None.
         assert!(extract_sub_fields(&json!({ "foo": 1 })).is_none());
+    }
+
+    /// Read a form value back out of the pair list.
+    fn field<'a>(form: &'a [(String, String)], key: &str) -> Option<&'a str> {
+        form.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+
+    fn promo(id: &str, covers_everything: bool) -> PromoCode {
+        PromoCode {
+            id: id.into(),
+            covers_everything,
+        }
+    }
+
+    #[test]
+    fn checkout_form_offers_stripes_own_promo_field_when_we_apply_none() {
+        let form = checkout_form("price_1", "cus_1", "u1", "g1", None, None);
+        assert_eq!(field(&form, "allow_promotion_codes"), Some("true"));
+        assert_eq!(field(&form, "discounts[0][promotion_code]"), None);
+        // Card collection stays at Stripe's `always` default: money is due.
+        assert_eq!(field(&form, "payment_method_collection"), None);
+        // The bindings the webhook/backfill read back are unchanged.
+        assert_eq!(
+            field(&form, "subscription_data[metadata][guild_id]"),
+            Some("g1")
+        );
+        assert_eq!(
+            field(&form, "subscription_data[metadata][discord_user_id]"),
+            Some("u1")
+        );
+        assert_eq!(field(&form, "line_items[0][tax_rates][0]"), None);
+    }
+
+    #[test]
+    fn checkout_form_drops_the_card_only_for_a_fully_covering_code() {
+        // 100% off forever → nothing is ever due, so no payment method is asked for.
+        let free = checkout_form(
+            "price_1",
+            "cus_1",
+            "u1",
+            "g1",
+            Some("txr_1"),
+            Some(&promo("promo_free", true)),
+        );
+        assert_eq!(
+            field(&free, "discounts[0][promotion_code]"),
+            Some("promo_free")
+        );
+        assert_eq!(
+            field(&free, "payment_method_collection"),
+            Some("if_required")
+        );
+        // Mutually exclusive with `discounts` — sending both makes Stripe reject
+        // the whole session.
+        assert_eq!(field(&free, "allow_promotion_codes"), None);
+        assert_eq!(field(&free, "line_items[0][tax_rates][0]"), Some("txr_1"));
+
+        // A partial (or time-limited) code discounts but still collects the card
+        // its next real invoice will need.
+        let partial = checkout_form(
+            "price_1",
+            "cus_1",
+            "u1",
+            "g1",
+            None,
+            Some(&promo("promo_half", false)),
+        );
+        assert_eq!(
+            field(&partial, "discounts[0][promotion_code]"),
+            Some("promo_half")
+        );
+        assert_eq!(field(&partial, "payment_method_collection"), None);
+        assert_eq!(field(&partial, "allow_promotion_codes"), None);
+    }
+
+    #[test]
+    fn normalize_promo_code_accepts_only_code_shaped_input() {
+        assert_eq!(normalize_promo_code("  DWEEB "), Some("DWEEB".into()));
+        assert_eq!(
+            normalize_promo_code("free-forever_2"),
+            Some("free-forever_2".into())
+        );
+        // Nothing to look up.
+        assert_eq!(normalize_promo_code(""), None);
+        assert_eq!(normalize_promo_code("   "), None);
+        // Unbounded / non-code junk never costs a Stripe round-trip.
+        assert_eq!(
+            normalize_promo_code(&"A".repeat(MAX_PROMO_CODE_LEN + 1)),
+            None
+        );
+        assert_eq!(normalize_promo_code("DWE EB"), None);
+        assert_eq!(normalize_promo_code("code&active=false"), None);
+        assert_eq!(normalize_promo_code("../../secrets"), None);
+    }
+
+    /// A `GET /v1/promotion_codes` list holding one code.
+    fn promo_list(promo: Value) -> Value {
+        json!({ "object": "list", "data": [promo] })
+    }
+
+    #[test]
+    fn parse_promotion_code_reads_a_live_code_and_whether_it_covers_everything() {
+        // 100% off forever → the one shape that may skip card collection.
+        let forever = parse_promotion_code(&promo_list(json!({
+            "id": "promo_1",
+            "code": "FREEFOREVER",
+            "active": true,
+            "coupon": { "valid": true, "percent_off": 100.0, "duration": "forever" }
+        })))
+        .unwrap();
+        assert_eq!(forever.id, "promo_1");
+        assert!(forever.covers_everything);
+
+        // 100% off, but only for three months — the card is still needed later.
+        let repeating = parse_promotion_code(&promo_list(json!({
+            "id": "promo_2",
+            "active": true,
+            "coupon": {
+                "valid": true, "percent_off": 100.0,
+                "duration": "repeating", "duration_in_months": 3
+            }
+        })))
+        .unwrap();
+        assert!(!repeating.covers_everything);
+
+        // Forever, but not free: a discount, so money is still due.
+        let half = parse_promotion_code(&promo_list(json!({
+            "id": "promo_3",
+            "active": true,
+            "coupon": { "valid": true, "percent_off": 50.0, "duration": "forever" }
+        })))
+        .unwrap();
+        assert!(!half.covers_everything);
+
+        // A fixed amount that happens to cover the price is NOT "covers
+        // everything" — it's currency- and price-dependent.
+        let amount = parse_promotion_code(&promo_list(json!({
+            "id": "promo_4",
+            "active": true,
+            "coupon": { "valid": true, "amount_off": 500, "currency": "usd", "duration": "forever" }
+        })))
+        .unwrap();
+        assert!(!amount.covers_everything);
+    }
+
+    #[test]
+    fn parse_promotion_code_rejects_anything_not_redeemable() {
+        let live = json!({
+            "id": "promo_1", "active": true,
+            "coupon": { "valid": true, "percent_off": 100.0, "duration": "forever" }
+        });
+        // Nothing matched the code.
+        assert!(parse_promotion_code(&json!({ "object": "list", "data": [] })).is_none());
+        // Deactivated.
+        let mut off = live.clone();
+        off["active"] = json!(false);
+        assert!(parse_promotion_code(&promo_list(off)).is_none());
+        // Expired — checked ourselves rather than trusting `active` alone.
+        let mut expired = live.clone();
+        expired["expires_at"] = json!(unix_now() - 60);
+        assert!(parse_promotion_code(&promo_list(expired)).is_none());
+        let mut future = live.clone();
+        future["expires_at"] = json!(unix_now() + 3_600);
+        assert!(parse_promotion_code(&promo_list(future)).is_some());
+        // Fully redeemed.
+        let mut spent = live.clone();
+        spent["max_redemptions"] = json!(5);
+        spent["times_redeemed"] = json!(5);
+        assert!(parse_promotion_code(&promo_list(spent)).is_none());
+        let mut left = live.clone();
+        left["max_redemptions"] = json!(5);
+        left["times_redeemed"] = json!(4);
+        assert!(parse_promotion_code(&promo_list(left)).is_some());
+        // The coupon behind it is dead.
+        let mut dead = live.clone();
+        dead["coupon"]["valid"] = json!(false);
+        assert!(parse_promotion_code(&promo_list(dead)).is_none());
+        // Not a promotion code id (so never a coupon id smuggled through).
+        let mut wrong = live.clone();
+        wrong["id"] = json!("coupon_1");
+        assert!(parse_promotion_code(&promo_list(wrong)).is_none());
     }
 
     #[test]
