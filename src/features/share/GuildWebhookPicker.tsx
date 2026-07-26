@@ -502,8 +502,11 @@ export function GuildWebhookPicker({
   );
 
   /** Header for a folded-away alternatives list: the disclosure toggle in the
-   *  title's place, with the reload control kept alongside it. */
-  const changeHeader = (label: string, count: number) => (
+   *  title's place. It carries the reload control only when it *replaces* the
+   *  section header (restore's "Use a different webhook") — in the Send summary
+   *  the real header is still above it, and one section must never show two
+   *  reload buttons reloading the same thing. */
+  const changeHeader = (label: string, count: number, withRefresh = true) => (
     <div className={styles.head}>
       <button
         type="button"
@@ -519,7 +522,7 @@ export function GuildWebhookPicker({
         <span className={styles.changeLabel}>{label}</span>
         {count > 0 ? <span className={styles.changeCount}>{count}</span> : null}
       </button>
-      {refreshButton}
+      {withRefresh ? refreshButton : null}
     </div>
   );
 
@@ -933,7 +936,7 @@ export function GuildWebhookPicker({
           )}
           {webhookChannels.length > 0 ? (
             <>
-              {changeHeader("Post to a different channel", webhookChannels.length)}
+              {changeHeader("Post to a different channel", webhookChannels.length, false)}
               {changeOpen ? (
                 <>
                   {channelSearch}
