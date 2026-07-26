@@ -20,6 +20,35 @@
 	}
 }
 
+# Ride out a container restart instead of turning it into a 502.
+#
+# A redeploy recreates a container, leaving a sub-second gap where Caddy dials
+# the address the service no longer holds and gets `connection refused` — which
+# it answers as a 502 and logs at ERROR. ERROR is the paging channel
+# (`dweeb-alerts` forwards it, and this class is deliberately NOT in its
+# CONN_ABORT_RE filter so a genuinely dead upstream still pages), so an ordinary
+# deploy paged the maintainer: observed 2026-07-26, one request to the directory
+# plugin's /api/meta landed in the window while CD recreated it. The member-facing
+# version of the same gap is worse — a Discord interaction arriving in it shows
+# "interaction failed" to whoever clicked.
+#
+# Retrying is safe here specifically because the failure is a DIAL failure: the
+# request never reached the upstream, and Caddy only retries while no response
+# headers have been written, so nothing can be processed twice. This is not a
+# blanket "retry 5xx" — an upstream that answers 500 is passed through untouched.
+#
+# The window is deliberately short. It does not delay the healthy path at all
+# (no retry happens when the dial succeeds), but during a REAL outage every
+# request waits this long before failing — so it must stay clear of Discord's ~3s
+# interaction budget, which is why this is 2s and not the 5s that would cover
+# even a slow restart. Deliberately NOT applied to the monitoring UIs below:
+# when Gatus or Beszel is down, failing fast is the honest answer, and retrying
+# would only obscure it.
+(upstream_retry) {
+	lb_try_duration 2s
+	lb_try_interval 200ms
+}
+
 # The Discord app's single Interactions Endpoint URL — its own hostname under
 # the plugins wildcard, so it NEVER moves when plugins come and go. The
 # dispatcher verifies the signature and fans out to plugins by custom_id
@@ -35,7 +64,9 @@ interactions.{$PLUGINS_DOMAIN} {
 		respond 404
 	}
 	handle {
-		reverse_proxy dispatcher:8095
+		reverse_proxy dispatcher:8095 {
+			import upstream_retry
+		}
 	}
 }
 
@@ -45,7 +76,9 @@ interactions.{$PLUGINS_DOMAIN} {
 	# Alias for the dispatcher (canonical URL above, which serves at "/").
 	handle /interactions {
 		rewrite * /
-		reverse_proxy dispatcher:8095
+		reverse_proxy dispatcher:8095 {
+			import upstream_retry
+		}
 	}
 
 	handle {
@@ -58,6 +91,7 @@ interactions.{$PLUGINS_DOMAIN} {
 			# the real client IP.
 			header_up -CF-Connecting-IP
 			header_up -X-Real-IP
+			import upstream_retry
 		}
 	}
 }
@@ -72,55 +106,73 @@ interactions.{$PLUGINS_DOMAIN} {
 # Modal Form.
 modalform.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy modal-form:8090
+	reverse_proxy modal-form:8090 {
+		import upstream_retry
+	}
 }
 
 # Ping Pong.
 pingpong.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy ping-pong:8091
+	reverse_proxy ping-pong:8091 {
+		import upstream_retry
+	}
 }
 
 # Self Role.
 selfrole.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy self-role:8092
+	reverse_proxy self-role:8092 {
+		import upstream_retry
+	}
 }
 
 # Tickets.
 tickets.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy tickets:8093
+	reverse_proxy tickets:8093 {
+		import upstream_retry
+	}
 }
 
 # Giveaway.
 giveaway.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy giveaway:8094
+	reverse_proxy giveaway:8094 {
+		import upstream_retry
+	}
 }
 
 # Quick Replies.
 quickreplies.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy quick-replies:8096
+	reverse_proxy quick-replies:8096 {
+		import upstream_retry
+	}
 }
 
 # Picker.
 picker.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy picker:8097
+	reverse_proxy picker:8097 {
+		import upstream_retry
+	}
 }
 
 # Poll.
 poll.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy poll:8098
+	reverse_proxy poll:8098 {
+		import upstream_retry
+	}
 }
 
 # Directory (live role / channel lists).
 directory.{$PLUGINS_DOMAIN} {
 	import site_defaults
-	reverse_proxy directory:8099
+	reverse_proxy directory:8099 {
+		import upstream_retry
+	}
 }
 
 # ── Monitoring ───────────────────────────────────────────────────────────────

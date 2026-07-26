@@ -374,6 +374,28 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   above it. Buffering the drain through `Bytes` is deliberate: it is bounded by the ambient
   `DefaultBodyLimit`, and a body past that limit is one to hang up on rather than read.
   Guarded by `fallback_drains_the_request_body` in `server/src/main.rs`.
+- **Caddy rides out a container restart instead of 502ing it** (`upstream_retry` snippet in
+  `server/Caddyfile`, added 2026-07-26). Recreating a container leaves a sub-second gap where
+  Caddy dials an address the service no longer holds, gets `connection refused`, answers
+  **502** and logs it at ERROR — which pages, because that class is deliberately *not* in
+  `dweeb-alerts`' `CONN_ABORT_RE` (a genuinely dead upstream must still page). So every
+  routine deploy could page: measured before the fix, one `--force-recreate` of a plugin
+  produced **6 consecutive 502s** out of 200 probes. Worse for members — a Discord
+  interaction landing in that gap shows "interaction failed". Every app-facing
+  `reverse_proxy` (proxy, both dispatcher routes, all 9 plugins) now imports
+  `lb_try_duration 2s` + `lb_try_interval 200ms`. Measured after: **0/200 failures and zero
+  ERROR-level log lines** — a successful retry logs nothing, which is the whole point.
+  Four properties to preserve if you touch it: (1) retrying is safe *only* because this is a
+  **dial** failure — nothing reached the upstream and Caddy retries only while no response
+  headers are written, so it can't double-process; it is **not** a blanket "retry 5xx", and
+  an upstream answering 500 still passes straight through. (2) The healthy path is unaffected
+  (~60ms measured before and after) since no retry happens when the dial succeeds. (3) A
+  genuinely stopped upstream **still 502s**, just ~2.2s later, so a real outage stays visible
+  and still pages — don't raise the window much past this, and keep it clear of Discord's ~3s
+  interaction budget. (4) The **monitoring** blocks (Gatus, Beszel) deliberately do *not*
+  import it: when they're down, failing fast is the honest answer. The Caddyfile is a
+  hand-synced bind mount — copy it and `docker exec dweeb-caddy-1 caddy reload
+  --config /etc/caddy/Caddyfile` after editing.
 - **The paging channel carries our faults, so `dweeb-alerts` drops Caddy connection aborts**
   (`broken pipe`, `connection reset by peer`, `context canceled`, `client disconnected` —
   `CONN_ABORT_RE`). Draining above removes the scanner case, but the honest residue stays: a
