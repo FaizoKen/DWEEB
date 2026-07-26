@@ -1050,20 +1050,28 @@ impl StripeClient {
 }
 
 /// Build the `POST /v1/checkout/sessions` form. Pure, because the discount half
-/// of it carries two Stripe rules that are easy to break and impossible to notice
-/// in review (guarded by the `checkout_form_*` tests):
+/// of it carries three rules that are easy to break and impossible to notice in
+/// review (guarded by the `checkout_form_*` tests):
 ///
-/// 1. `discounts` and `allow_promotion_codes` are **mutually exclusive** — sending
-///    both makes Stripe reject the session outright ("You may only specify one of
-///    these parameters"), so a pre-applied code replaces Checkout's own code field
-///    rather than joining it.
-/// 2. `payment_method_collection: if_required` skips the card **only when the total
+/// 1. `payment_method_collection: if_required` skips the card **only when the total
 ///    due is already 0 as the session is created**. That is exactly why a
 ///    100%-off code has to be applied here, server-side: the same code typed into
 ///    Checkout's own promo field arrives after the session exists, and the card
 ///    form it was created with does not go away. Left at Stripe's `always` default
 ///    for every other case, so a code that merely discounts — or one that runs out
 ///    after a few months — still collects the card its next real invoice needs.
+/// 2. **`allow_promotion_codes` is deliberately never sent**, so Checkout renders no
+///    promo field of its own and DWEEB's is the only way in. Offering both shipped a
+///    trap: Stripe's box sits beside the price and looks like the official one, so
+///    that is where people put the code — and a 100%-off code entered *there* takes
+///    the discount to $0.00 and still demands a card, with nothing able to warn them.
+///    One entrance that always behaves is worth more than a second that usually
+///    doesn't. Nothing is lost: this path takes any code, and a partial one still
+///    discounts and still collects the card.
+/// 3. The two are **mutually exclusive** anyway — sending `discounts` alongside
+///    `allow_promotion_codes` makes Stripe reject the session outright ("You may
+///    only specify one of these parameters"). Re-adding the latter would therefore
+///    break every coded purchase, not just soften rule 2.
 fn checkout_form(
     price: &str,
     customer: &str,
@@ -1103,15 +1111,11 @@ fn checkout_form(
         // Stay in our modal; the FE refreshes the plan on completion.
         ("redirect_on_completion".into(), "never".into()),
     ];
-    match promo {
-        Some(p) => {
-            form.push(("discounts[0][promotion_code]".into(), p.id.clone()));
-            if p.covers_everything {
-                form.push(("payment_method_collection".into(), "if_required".into()));
-            }
+    if let Some(p) = promo {
+        form.push(("discounts[0][promotion_code]".into(), p.id.clone()));
+        if p.covers_everything {
+            form.push(("payment_method_collection".into(), "if_required".into()));
         }
-        // No code from us → Checkout offers its own promo field, as before.
-        None => form.push(("allow_promotion_codes".into(), "true".into())),
     }
     if let Some(txr) = tax_rate_id {
         form.push(("line_items[0][tax_rates][0]".into(), txr.to_string()));
@@ -1970,9 +1974,12 @@ mod tests {
     }
 
     #[test]
-    fn checkout_form_offers_stripes_own_promo_field_when_we_apply_none() {
+    fn checkout_form_never_offers_stripes_own_promo_field() {
         let form = checkout_form("price_1", "cus_1", "u1", "g1", None, None);
-        assert_eq!(field(&form, "allow_promotion_codes"), Some("true"));
+        // Checkout must render no promo box of its own: a 100%-off code entered
+        // there discounts to $0.00 and still demands a card, and nothing can warn
+        // the buyer at that point. DWEEB's field is the only entrance.
+        assert_eq!(field(&form, "allow_promotion_codes"), None);
         assert_eq!(field(&form, "discounts[0][promotion_code]"), None);
         // Card collection stays at Stripe's `always` default: money is due.
         assert_eq!(field(&form, "payment_method_collection"), None);
@@ -2007,8 +2014,8 @@ mod tests {
             field(&free, "payment_method_collection"),
             Some("if_required")
         );
-        // Mutually exclusive with `discounts` — sending both makes Stripe reject
-        // the whole session.
+        // Also mutually exclusive with `discounts`: sending both would make Stripe
+        // reject the session outright, so re-adding it breaks coded purchases too.
         assert_eq!(field(&free, "allow_promotion_codes"), None);
         assert_eq!(field(&free, "line_items[0][tax_rates][0]"), Some("txr_1"));
 

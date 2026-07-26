@@ -499,10 +499,16 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   arrives after the session exists and the card form it was built with does not go away.
   So the pricing modal has a "Have a promo code?" field, `POST /api/stripe/checkout` takes
   `promotion_code`, and the proxy applies it server-side as `discounts[0][promotion_code]`.
-  Five load-bearing details: (1) `discounts` and `allow_promotion_codes` are **mutually
-  exclusive** — sending both makes Stripe reject the session outright, so a code from us
-  *replaces* Checkout's own field (no code ⇒ `allow_promotion_codes=true`, exactly as
-  before); (2) `if_required` is set **only** when the coupon is `percent_off >= 100` **and**
+  Five load-bearing details: (1) **`allow_promotion_codes` is never sent**, so Checkout has
+  no promo field of its own and ours is the only entrance. Shipping both was a trap
+  (fixed 2026-07-27, same day): Stripe's box sits beside the price and looks official, so
+  that's where people typed the code — and a 100%-off code entered *there* discounts to
+  $0.00 and **still demands a card**, with nothing able to warn them, because the session
+  was already minted with collection on. Nothing is lost by removing it (our field takes any
+  code; a partial one still discounts and still collects the card), the field is therefore
+  **always visible** rather than behind a disclosure, and re-adding the parameter would break
+  every *coded* purchase too — it is mutually exclusive with `discounts`, and Stripe rejects
+  a session carrying both; (2) `if_required` is set **only** when the coupon is `percent_off >= 100` **and**
   `duration: "forever"` (`PromoCode::covers_everything`) — a time-limited 100%-off coupon
   keeps collecting the card its first real renewal needs, and an `amount_off` coupon that
   merely happens to equal today's price is excluded because a price change would strand a
