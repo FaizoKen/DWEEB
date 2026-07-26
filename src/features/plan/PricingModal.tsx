@@ -88,8 +88,15 @@ export function PricingModal() {
   const currentTier: PlanTier | null = plan?.tier ?? null;
   const billing = (plan?.billing ?? false) && isCheckoutConfigured();
 
-  // Embedded-checkout state: the tier being purchased + its client secret.
-  const [checkout, setCheckout] = useState<{ tier: PaidTier; clientSecret: string } | null>(null);
+  // Embedded-checkout state: the tier being purchased, its client secret, and
+  // whether the applied promo code makes it free (so Checkout shows no card
+  // fields — worth saying before the form appears rather than leaving it a
+  // surprise).
+  const [checkout, setCheckout] = useState<{
+    tier: PaidTier;
+    clientSecret: string;
+    noCardNeeded: boolean;
+  } | null>(null);
   const [starting, setStarting] = useState<PaidTier | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -102,6 +109,13 @@ export function PricingModal() {
   );
   // Billing interval the Upgrade buttons buy — set by the Monthly/Annual toggle.
   const [period, setPeriod] = useState<BillingInterval>("month");
+  // Promo code, entered here rather than in Stripe's own field inside Checkout:
+  // the server has to apply it while creating the session for a fully-covering
+  // code to skip card entry at all (see `createCheckout`). `promoOpen` keeps the
+  // field out of the way until asked for; `promoError` is the server's verdict.
+  const [promoOpen, setPromoOpen] = useState(false);
+  const [promo, setPromo] = useState("");
+  const [promoError, setPromoError] = useState<string | null>(null);
 
   // The signed-in user's premium subscriptions (the "your premium servers" block
   // + move picker). Null until first load; [] when they own none.
@@ -123,17 +137,27 @@ export function PricingModal() {
       pushToast("Connect a server first, then upgrade it.", "error");
       return;
     }
+    const code = promo.trim();
     setStarting(tier);
-    const res = await createCheckout(tier, period, guildId);
+    setPromoError(null);
+    const res = await createCheckout(tier, period, guildId, code);
     setStarting(null);
     if (!res.ok) {
-      pushToast(res.error, "error");
+      // With a code in play the failure is almost always about the code, and it
+      // belongs beside the field that caused it — a toast over a modal reads as
+      // unrelated. Keep the field open so it can be corrected in place.
+      if (code) {
+        setPromoOpen(true);
+        setPromoError(res.error);
+      } else {
+        pushToast(res.error, "error");
+      }
       return;
     }
     // Snapshot the tier being left behind now — by the time checkout completes the
     // plan has reloaded to the new tier, and the success screen wants the "before".
     purchaseRef.current = { tier, from: currentTier ?? "free", interval: period };
-    setCheckout({ tier, clientSecret: res.clientSecret });
+    setCheckout({ tier, clientSecret: res.clientSecret, noCardNeeded: res.noCardNeeded });
   };
 
   const onComplete = () => {
@@ -254,6 +278,12 @@ export function PricingModal() {
           </Button>
         }
       >
+        {checkout.noCardNeeded ? (
+          <p className={styles.noCardNote}>
+            Your code covers this plan in full — <strong>no card details needed</strong>. Confirm
+            below to activate it.
+          </p>
+        ) : null}
         <div className={styles.checkout}>
           <EmbeddedCheckoutProvider
             stripe={getStripe()}
@@ -352,6 +382,50 @@ export function PricingModal() {
           </button>
         </div>
       </div>
+
+      {canUpgradeHere ? (
+        <div className={styles.promoRow}>
+          {promoOpen ? (
+            <>
+              <label className={styles.promoField}>
+                <span className={styles.promoLabel}>Promo code</span>
+                <input
+                  className={styles.promoInput}
+                  type="text"
+                  autoFocus
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={64}
+                  placeholder="e.g. DWEEB"
+                  value={promo}
+                  aria-invalid={promoError != null}
+                  aria-errormessage={promoError ? "promo-error" : undefined}
+                  disabled={starting !== null}
+                  onChange={(e) => {
+                    setPromo((e.target as HTMLInputElement).value);
+                    setPromoError(null);
+                  }}
+                />
+              </label>
+              {promoError ? (
+                <p className={styles.promoError} id="promo-error" role="alert">
+                  {promoError}
+                </p>
+              ) : (
+                <p className={styles.promoHint}>
+                  Applied when you pick a plan below. A code that covers the plan in full skips card
+                  entry entirely.
+                </p>
+              )}
+            </>
+          ) : (
+            <button type="button" className={styles.promoToggle} onClick={() => setPromoOpen(true)}>
+              Have a promo code?
+            </button>
+          )}
+        </div>
+      ) : null}
 
       <div className={styles.plans}>
         {TIERS.map((t) => {

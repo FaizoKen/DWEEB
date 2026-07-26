@@ -135,6 +135,92 @@
   color: var(--app-accent-text);
 }
 
+/* Promo code — ours rather than Stripe's own field inside Checkout, because only
+   a code applied while the session is created can drop the card form (see
+   stripeApi.createCheckout). Collapsed to a text button until asked for, so the
+   plans stay the focus. */
+.promoRow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.promoToggle {
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-accent-text);
+  border-radius: var(--app-radius-sm);
+}
+.promoToggle:hover {
+  text-decoration: underline;
+}
+.promoField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.promoLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text-muted);
+}
+.promoInput {
+  width: 170px;
+  padding: 6px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-input);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.promoInput:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 1px;
+}
+.promoInput[aria-invalid="true"] {
+  border-color: var(--app-danger);
+}
+.promoHint,
+.promoError {
+  margin: 0;
+  max-width: 42ch;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.promoHint {
+  color: var(--app-text-muted);
+}
+.promoError {
+  color: var(--app-danger-text);
+  font-weight: 600;
+}
+
+/* Shown above the embedded form when the applied code makes the plan free, so the
+   missing card fields read as intended rather than as a broken form. */
+.noCardNote {
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: var(--app-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--app-success) 40%, var(--app-border));
+  background: var(--app-success-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text);
+}
+.noCardNote strong {
+  font-weight: 700;
+}
+
 /* ── Plan cards ─────────────────────────────────────────────────────────── */
 .plans {
   display: grid;

@@ -39,35 +39,57 @@ export type PaidTier = "plus" | "pro";
 /** Billing interval for a subscription. */
 export type BillingInterval = "month" | "year";
 
-export type CheckoutResult = { ok: true; clientSecret: string } | { ok: false; error: string };
+export type CheckoutResult =
+  | { ok: true; clientSecret: string; noCardNeeded: boolean }
+  | { ok: false; error: string };
 
-/** `POST /api/stripe/checkout` `{ tier, interval, guild_id }` → the embedded
- *  Checkout client secret. The subscription is bound to `guildId` (per-server
- *  premium); `interval` defaults to monthly. */
+/** `POST /api/stripe/checkout` `{ tier, interval, guild_id, promotion_code? }` →
+ *  the embedded Checkout client secret. The subscription is bound to `guildId`
+ *  (per-server premium); `interval` defaults to monthly.
+ *
+ *  `promotionCode` is the code the buyer typed into our own field, applied to the
+ *  session **server-side**. That placement is the point: Stripe can only leave the
+ *  card fields out when the total is already zero as the session is created, so a
+ *  code that covers a plan in full and forever has to arrive here rather than in
+ *  Checkout's own promo box. The reply's `noCardNeeded` says whether it did.
+ *  A code Stripe won't honour comes back as `ok: false` with a message to show
+ *  next to the field — nothing is charged and no session is opened. */
 export async function createCheckout(
   tier: PaidTier,
   interval: BillingInterval,
   guildId: string,
+  promotionCode?: string,
 ): Promise<CheckoutResult> {
+  const code = promotionCode?.trim();
   let res: Response;
   try {
     res = await fetch(`${PROXY_BASE_URL}/api/stripe/checkout`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tier, interval, guild_id: guildId }),
+      body: JSON.stringify({
+        tier,
+        interval,
+        guild_id: guildId,
+        ...(code ? { promotion_code: code } : {}),
+      }),
     });
   } catch {
     return { ok: false, error: "Couldn't reach the billing service." };
   }
   const data = (await res.json().catch(() => null)) as {
     client_secret?: string;
+    no_card_needed?: boolean;
     error?: string;
   } | null;
   if (!res.ok || !data?.client_secret) {
     return { ok: false, error: data?.error ?? `Couldn't start checkout (${res.status}).` };
   }
-  return { ok: true, clientSecret: data.client_secret };
+  return {
+    ok: true,
+    clientSecret: data.client_secret,
+    noCardNeeded: data.no_card_needed === true,
+  };
 }
 
 /** `POST /api/stripe/sync` `{ guild_id }` — force the server to pick up a
