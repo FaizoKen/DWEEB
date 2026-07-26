@@ -95,10 +95,15 @@
   text-decoration: underline;
 }
 
-/* Row holding the Monthly / Annual switch, centered above the cards. */
+/* Row holding the Monthly / Annual switch and the promo field, centered above
+   the cards. Both controls share one line (and one height) so the header stays
+   compact; they wrap onto separate lines only when the modal is too narrow. */
 .toggleRow {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  align-items: stretch;
+  gap: 8px;
 }
 .periodToggle {
   display: inline-flex;
@@ -140,28 +145,38 @@
    drop the card form; see stripeApi.createCheckout). Always visible, never behind a
    disclosure: it replaces Stripe's own box rather than shortcutting it, so a buyer
    who can't find it has nowhere else to go. */
-.promoRow {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-}
+/* One pill matching the period toggle's shape, so the two read as a pair. The
+   border lives on the pill (not the input) so label and field share a focus
+   ring — see .promoFieldError for the invalid state, which is driven by a class
+   rather than :has() so it works wherever the toggle does. */
 .promoField {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-input);
+}
+.promoField:focus-within {
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 1px var(--app-accent);
+}
+.promoFieldError {
+  border-color: var(--app-danger);
 }
 .promoLabel {
-  font-size: 12px;
+  flex: none;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--app-text-muted);
 }
 .promoInput {
-  width: 170px;
-  padding: 6px 10px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
-  background: var(--app-bg-input);
+  width: 96px;
+  min-width: 0;
+  padding: 6px 0;
+  border: none;
+  background: none;
   color: var(--app-text);
   font: inherit;
   font-size: 12px;
@@ -170,16 +185,17 @@
   text-transform: uppercase;
 }
 .promoInput:focus-visible {
-  outline: 2px solid var(--app-accent);
-  outline-offset: 1px;
+  outline: none;
 }
-.promoInput[aria-invalid="true"] {
-  border-color: var(--app-danger);
+.promoInput::placeholder {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--app-text-subtle);
 }
 .promoHint,
 .promoError {
   margin: 0;
-  max-width: 42ch;
   text-align: center;
   font-size: 11.5px;
   line-height: 1.4;
@@ -374,6 +390,12 @@
 }
 .quotaLabel {
   font-weight: 500;
+}
+/* Scope suffix ("per person" / "server-wide") — present only where the quota's
+   scoping differs by tier, so it stays quieter than the label itself. */
+.quotaNote {
+  color: var(--app-text-subtle);
+  font-size: 11px;
 }
 
 /* Holds Stripe's embedded Checkout iframe — reserve height so the modal doesn't

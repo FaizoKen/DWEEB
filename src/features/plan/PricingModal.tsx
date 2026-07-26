@@ -53,13 +53,25 @@ const TIERS: TierDef[] = [
 ];
 
 /** The metered quotas, in the shipped default numbers (`server/src/config.rs`). */
-const ROWS: { label: string; values: Record<PlanTier, string> }[] = [
+const ROWS: {
+  label: string;
+  values: Record<PlanTier, string>;
+  /** Optional per-tier scope suffix, shown muted after the label on the cards. */
+  notes?: Partial<Record<PlanTier, string>>;
+}[] = [
   { label: "Scheduled posts", values: { free: "3", plus: "30", pro: "Unlimited" } },
   { label: "Never-expire panels", values: { free: "5", plus: "25", pro: "Unlimited" } },
   { label: "Saved messages", values: { free: "10", plus: "100", pro: "Unlimited" } },
   { label: "Posted history", values: { free: "Last 10", plus: "Last 100", pro: "Unlimited" } },
   { label: "Custom bots", values: { free: "1", plus: "2", pro: "5" } },
   { label: "Live co-editors", values: { free: "2", plus: "6", pro: "25" } },
+  // Free's allowance is per user; on paid tiers it's a pool the whole server
+  // shares (with a per-member ceiling), hence the differing scope note.
+  {
+    label: "AI requests / day",
+    values: { free: "8", plus: "20", pro: "40" },
+    notes: { free: "per person", plus: "server-wide", pro: "server-wide" },
+  },
 ];
 
 const INCLUDED =
@@ -380,12 +392,10 @@ export function PricingModal() {
             <span className={styles.periodSave}>2 months free</span>
           </button>
         </div>
-      </div>
 
-      {canUpgradeHere ? (
-        <div className={styles.promoRow}>
-          <label className={styles.promoField}>
-            <span className={styles.promoLabel}>Promo code</span>
+        {canUpgradeHere ? (
+          <label className={cn(styles.promoField, promoError && styles.promoFieldError)}>
+            <span className={styles.promoLabel}>Promo</span>
             <input
               className={styles.promoInput}
               type="text"
@@ -404,17 +414,19 @@ export function PricingModal() {
               }}
             />
           </label>
-          {promoError ? (
-            <p className={styles.promoError} id="promo-error" role="alert">
-              {promoError}
-            </p>
-          ) : (
-            <p className={styles.promoHint}>
-              Enter it here, not at payment — it’s applied as you pick a plan below, and a code
-              covering the plan in full skips card entry entirely.
-            </p>
-          )}
-        </div>
+        ) : null}
+      </div>
+
+      {canUpgradeHere ? (
+        promoError ? (
+          <p className={styles.promoError} id="promo-error" role="alert">
+            {promoError}
+          </p>
+        ) : (
+          <p className={styles.promoHint}>
+            Enter codes here, not at payment — one that covers the plan skips card entry.
+          </p>
+        )
       ) : null}
 
       <div className={styles.plans}>
@@ -521,7 +533,12 @@ function PlanCard({
               <span className={cn(styles.quotaVal, v === "Unlimited" && styles.quotaUnlimited)}>
                 {v}
               </span>
-              <span className={styles.quotaLabel}>{r.label}</span>
+              <span className={styles.quotaLabel}>
+                {r.label}
+                {r.notes?.[tier.id] ? (
+                  <span className={styles.quotaNote}> {r.notes[tier.id]}</span>
+                ) : null}
+              </span>
             </li>
           );
         })}
