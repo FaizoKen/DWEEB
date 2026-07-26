@@ -1344,6 +1344,97 @@ const REACTION_ROLES_MESSAGE: WebhookMessage = {
   ],
 };
 
+// The staff roster, written INTO the message rather than hidden behind a click.
+//
+// This is the Directory plugin's headline shape, and the one that isn't obvious
+// from the plugin alone: `{directory}` in the text is filled by the plugin, so
+// everyone reads the current staff list without interacting at all, and the
+// Refresh button re-stamps it for everyone. The `{directory_count}` /
+// `{directory_updated}` subtext line is there to show those two tokens exist.
+//
+// The Refresh slot seeds `directory-staff-inline` — the only preset that turns on
+// in-message output — so the whole thing works after a single Save instead of
+// needing the author to find that setting. The channel guide below it uses the
+// ordinary reply shape, so one template demonstrates both.
+//
+// The tokens live in the message text on purpose: the plugin refuses to save
+// in-message output if they're missing, and refuses reply output if an orphaned
+// one is left behind, so a template that ships them keeps both guards satisfied.
+const STAFF_DIRECTORY_MESSAGE: WebhookMessage = {
+  username: "Server Info",
+  components: [
+    {
+      _id: id(),
+      type: ComponentType.Container,
+      accent_color: ACCENT.blurple,
+      components: [
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "# 🛡️ Meet the team\nThe people keeping **{server}** running. This list is live — it reads the server every time it's refreshed, so a rename or a new moderator shows up on its own.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Large,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "{directory}",
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content: "-# {directory_count} roles · updated {directory_updated}",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Secondary,
+              label: "Refresh",
+              emoji: { name: "🔄" },
+              custom_id: "dir_staff_inline",
+            },
+          ],
+        },
+        {
+          _id: id(),
+          type: ComponentType.Separator,
+          divider: true,
+          spacing: SeparatorSpacing.Large,
+        },
+        {
+          _id: id(),
+          type: ComponentType.TextDisplay,
+          content:
+            "**🧭 Lost?** Get a private guide to every channel in the server, each with what it's for.",
+        },
+        {
+          _id: id(),
+          type: ComponentType.ActionRow,
+          components: [
+            {
+              _id: id(),
+              type: ComponentType.Button,
+              style: ButtonStyle.Primary,
+              label: "Channel guide",
+              emoji: { name: "🧭" },
+              custom_id: "dir_channel_guide",
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 // A single message that searches the whole server. It ships ALL FOUR
 // auto-populated selects — channel, role, user, and mentionable — each wired to
 // its own Picker instance, so one post becomes a directory: a member opens a
@@ -2588,6 +2679,39 @@ export const TEMPLATES: MessageTemplate[] = [
       { customId: "directory_anything", pluginId: "picker" },
     ],
     message: SERVER_DIRECTORY_MESSAGE,
+  },
+  {
+    id: "staff-directory",
+    name: "Staff directory",
+    description:
+      "Your staff list written into the message — everyone reads it without clicking, and a refresh keeps it current.",
+    emoji: "🛡️",
+    category: "Community",
+    tags: [
+      "staff",
+      "team",
+      "moderators",
+      "mods",
+      "admins",
+      "roster",
+      "who",
+      "roles",
+      "channels",
+      "directory",
+      "live",
+      "meet the team",
+    ],
+    accent: ACCENT.blurple,
+    requiresBot: true,
+    pairsWith: "Directory",
+    // Staff slot first: it's the one that writes into the message, and binding it
+    // before the reply-mode channel guide means the guide's save already sees a
+    // sibling Directory binding — so the plugin's orphaned-token check stays quiet.
+    pluginSlots: [
+      { customId: "dir_staff_inline", pluginId: "directory", preset: "directory-staff-inline" },
+      { customId: "dir_channel_guide", pluginId: "directory", preset: "directory-channels" },
+    ],
+    message: STAFF_DIRECTORY_MESSAGE,
   },
   {
     id: "suggestions",

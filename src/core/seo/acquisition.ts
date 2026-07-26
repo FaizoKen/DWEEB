@@ -52,6 +52,7 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
     "discord-introductions-template",
     "discord-reaction-roles-menu",
     "discord-server-directory-template",
+    "discord-staff-list-template",
     "discord-suggestion-box-template",
     "discord-staff-application-template",
     "discord-event-announcement-template",

@@ -410,6 +410,20 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     ],
     keywords: ["self roles", "role selector", "role picker", "self assign roles"],
   },
+  "staff-directory": {
+    slug: "discord-staff-list-template",
+    title: "Discord Staff List Template — Live Team Roster | DWEEB",
+    h1: "Discord Staff List Template",
+    description:
+      "A Discord staff list written into the message itself: roles, what each can do, and who holds them — readable without clicking, refreshed on demand.",
+    intro:
+      "Most staff lists go stale the day someone joins or leaves. This one is written into the message by the Directory plugin and read straight from the server — roles, what each one can do, and the people holding them — so everyone sees the current team without clicking anything, and a refresh brings it up to date. A second button hands out a private guide to every channel and its topic.",
+    whenToUse: [
+      "Publishing a staff or moderator list that stays current",
+      "Answering 'who do I contact?' without a pinned message going stale",
+      "Giving new members a channel-by-channel tour of the server",
+    ],
+  },
   "server-directory": {
     slug: "discord-server-directory-template",
     title: "Discord Server Directory Template & Select Menus | DWEEB",

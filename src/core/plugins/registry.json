@@ -335,9 +335,13 @@
       "managesSelectOptions": true,
       "managesFields": ["min_values", "max_values"],
       "placeholders": [
-        { "token": "directory", "label": "The list", "sample": "the list appears here" },
+        {
+          "token": "directory",
+          "label": "The list",
+          "sample": "_Click the button to load this list._"
+        },
         { "token": "directory_count", "label": "How many are listed", "sample": "0" },
-        { "token": "directory_updated", "label": "Last updated", "sample": "just now" }
+        { "token": "directory_updated", "label": "Last updated", "sample": "not loaded yet" }
       ],
       "presets": [
         {
@@ -345,6 +349,13 @@
           "name": "Staff list",
           "description": "Owners, admins and moderators in named groups, with who holds each role.",
           "emoji": "🛡️"
+        },
+        {
+          "id": "directory-staff-inline",
+          "name": "Staff list in the message",
+          "description": "The roster written into your message text, so everyone reads it without clicking. A click refreshes it.",
+          "emoji": "📋",
+          "targets": ["button"]
         },
         {
           "id": "directory-roles",
