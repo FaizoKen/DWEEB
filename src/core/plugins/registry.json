@@ -319,6 +319,50 @@
     },
     {
       "schemaVersion": 1,
+      "id": "directory",
+      "name": "Directory",
+      "description": "Answer a click with a live list of the server — a grouped staff roster (roles, permission badges, who holds them) or a channel index with each channel's topic. Read-only, always current.",
+      "version": "0.1.0",
+      "publisher": "DWEEB",
+      "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/directory",
+      "targets": ["button", "string_select"],
+      "requiresBot": true,
+      "resources": ["guild"],
+      "configUrl": "https://directory.dweeb.faizo.net/config.html",
+      "customIdPrefix": "directory:",
+      "apiVersion": 2,
+      "defaultEmoji": "🗂️",
+      "managesSelectOptions": true,
+      "managesFields": ["min_values", "max_values"],
+      "presets": [
+        {
+          "id": "directory-staff",
+          "name": "Staff list",
+          "description": "Owners, admins and moderators in named groups, with who holds each role.",
+          "emoji": "🛡️"
+        },
+        {
+          "id": "directory-roles",
+          "name": "Role guide",
+          "description": "Every role the server displays separately, with what each one is for.",
+          "emoji": "🎭"
+        },
+        {
+          "id": "directory-channels",
+          "name": "Channel index",
+          "description": "Every channel grouped by category, each with its topic.",
+          "emoji": "🧭"
+        },
+        {
+          "id": "directory-start-here",
+          "name": "Start here",
+          "description": "A short, hand-picked list of the channels a new member should read first.",
+          "emoji": "👋"
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
       "kind": "link",
       "id": "rolelogic-member-origin-role",
       "name": "Member Origin Role",
