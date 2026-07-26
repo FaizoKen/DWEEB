@@ -109,11 +109,11 @@ export function PricingModal() {
   );
   // Billing interval the Upgrade buttons buy — set by the Monthly/Annual toggle.
   const [period, setPeriod] = useState<BillingInterval>("month");
-  // Promo code, entered here rather than in Stripe's own field inside Checkout:
-  // the server has to apply it while creating the session for a fully-covering
-  // code to skip card entry at all (see `createCheckout`). `promoOpen` keeps the
-  // field out of the way until asked for; `promoError` is the server's verdict.
-  const [promoOpen, setPromoOpen] = useState(false);
+  // Promo code. This is the *only* place a code can be entered — Checkout is
+  // created without `allow_promotion_codes`, because the server has to apply a code
+  // while minting the session for a fully-covering one to skip card entry at all
+  // (see `createCheckout`). So the field is always visible rather than hidden
+  // behind a disclosure: it isn't a shortcut for Stripe's box, it replaces it.
   const [promo, setPromo] = useState("");
   const [promoError, setPromoError] = useState<string | null>(null);
 
@@ -145,9 +145,8 @@ export function PricingModal() {
     if (!res.ok) {
       // With a code in play the failure is almost always about the code, and it
       // belongs beside the field that caused it — a toast over a modal reads as
-      // unrelated. Keep the field open so it can be corrected in place.
+      // unrelated.
       if (code) {
-        setPromoOpen(true);
         setPromoError(res.error);
       } else {
         pushToast(res.error, "error");
@@ -385,44 +384,35 @@ export function PricingModal() {
 
       {canUpgradeHere ? (
         <div className={styles.promoRow}>
-          {promoOpen ? (
-            <>
-              <label className={styles.promoField}>
-                <span className={styles.promoLabel}>Promo code</span>
-                <input
-                  className={styles.promoInput}
-                  type="text"
-                  autoFocus
-                  autoCapitalize="characters"
-                  autoComplete="off"
-                  spellCheck={false}
-                  maxLength={64}
-                  placeholder="e.g. DWEEB"
-                  value={promo}
-                  aria-invalid={promoError != null}
-                  aria-errormessage={promoError ? "promo-error" : undefined}
-                  disabled={starting !== null}
-                  onChange={(e) => {
-                    setPromo((e.target as HTMLInputElement).value);
-                    setPromoError(null);
-                  }}
-                />
-              </label>
-              {promoError ? (
-                <p className={styles.promoError} id="promo-error" role="alert">
-                  {promoError}
-                </p>
-              ) : (
-                <p className={styles.promoHint}>
-                  Applied when you pick a plan below. A code that covers the plan in full skips card
-                  entry entirely.
-                </p>
-              )}
-            </>
+          <label className={styles.promoField}>
+            <span className={styles.promoLabel}>Promo code</span>
+            <input
+              className={styles.promoInput}
+              type="text"
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={64}
+              placeholder="Optional"
+              value={promo}
+              aria-invalid={promoError != null}
+              aria-errormessage={promoError ? "promo-error" : undefined}
+              disabled={starting !== null}
+              onChange={(e) => {
+                setPromo((e.target as HTMLInputElement).value);
+                setPromoError(null);
+              }}
+            />
+          </label>
+          {promoError ? (
+            <p className={styles.promoError} id="promo-error" role="alert">
+              {promoError}
+            </p>
           ) : (
-            <button type="button" className={styles.promoToggle} onClick={() => setPromoOpen(true)}>
-              Have a promo code?
-            </button>
+            <p className={styles.promoHint}>
+              Enter it here, not at payment — it’s applied as you pick a plan below, and a code
+              covering the plan in full skips card entry entirely.
+            </p>
           )}
         </div>
       ) : null}

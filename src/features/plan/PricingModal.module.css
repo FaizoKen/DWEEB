@@ -135,29 +135,16 @@
   color: var(--app-accent-text);
 }
 
-/* Promo code — ours rather than Stripe's own field inside Checkout, because only
-   a code applied while the session is created can drop the card form (see
-   stripeApi.createCheckout). Collapsed to a text button until asked for, so the
-   plans stay the focus. */
+/* Promo code — the only place a code can be entered, since Checkout is created
+   without `allow_promotion_codes` (only a code applied as the session is minted can
+   drop the card form; see stripeApi.createCheckout). Always visible, never behind a
+   disclosure: it replaces Stripe's own box rather than shortcutting it, so a buyer
+   who can't find it has nowhere else to go. */
 .promoRow {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 5px;
-}
-.promoToggle {
-  padding: 2px 4px;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--app-accent-text);
-  border-radius: var(--app-radius-sm);
-}
-.promoToggle:hover {
-  text-decoration: underline;
 }
 .promoField {
   display: flex;
