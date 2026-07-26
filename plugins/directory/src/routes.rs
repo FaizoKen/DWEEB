@@ -60,13 +60,23 @@ pub async fn registry(State(state): State<AppState>) -> Json<Value> {
             // Self Role already declares `{roles}`, and the host resolves a
             // collision first-wins in binding order, so two plugins on one
             // message would silently fight over it.
+            // The samples are the message's real pre-first-click state, not
+            // decoration: in "message" output DWEEB paints them at send and they
+            // stand until someone clicks. So `directory` reads as an instruction
+            // ("click to load") rather than a description of itself — the earlier
+            // "the list appears here" looked like a *rendered* result and made a
+            // message that hadn't been refreshed yet seem broken.
             "placeholders": [
-                { "token": crate::store::TOKEN_LIST, "label": "The list", "sample": "the list appears here" },
+                { "token": crate::store::TOKEN_LIST, "label": "The list", "sample": "_Click the button to load this list._" },
                 { "token": crate::store::TOKEN_COUNT, "label": "How many are listed", "sample": "0" },
-                { "token": crate::store::TOKEN_UPDATED, "label": "Last updated", "sample": "just now" }
+                { "token": crate::store::TOKEN_UPDATED, "label": "Last updated", "sample": "not loaded yet" }
             ],
             "presets": [
                 { "id": "directory-staff", "name": "Staff list", "description": "Owners, admins and moderators in named groups, with who holds each role.", "emoji": "\u{1F6E1}\u{FE0F}" },
+                // The only preset that turns on in-message output, so it's the one
+                // a template can seed to get a working `{directory}` message in a
+                // single Save. Button-only, like all in-message output.
+                { "id": "directory-staff-inline", "name": "Staff list in the message", "description": "The roster written into your message text, so everyone reads it without clicking. A click refreshes it.", "emoji": "\u{1F4CB}", "targets": ["button"] },
                 { "id": "directory-roles", "name": "Role guide", "description": "Every role the server displays separately, with what each one is for.", "emoji": "\u{1F3AD}" },
                 { "id": "directory-channels", "name": "Channel index", "description": "Every channel grouped by category, each with its topic.", "emoji": "\u{1F9ED}" },
                 { "id": "directory-start-here", "name": "Start here", "description": "A short, hand-picked list of the channels a new member should read first.", "emoji": "\u{1F44B}" }
@@ -611,6 +621,7 @@ mod tests {
         // The ids in the manifest built by `registry()` above.
         let advertised = [
             "directory-staff",
+            "directory-staff-inline",
             "directory-roles",
             "directory-channels",
             "directory-start-here",
@@ -628,6 +639,32 @@ mod tests {
             advertised.len(),
             "config.html declares {declared} presets but the manifest advertises {}",
             advertised.len()
+        );
+    }
+
+    /// `directory-staff-inline` is the only preset that turns on in-message
+    /// output, which is what lets the "Staff directory" template work after a
+    /// single Save. If it stopped setting `output: "message"` the template would
+    /// silently degrade to a reply and its `{directory}` token would sit unfilled
+    /// — the exact confusion the preset exists to prevent.
+    #[test]
+    fn the_inline_preset_is_the_one_that_enables_in_message_output() {
+        let after = CONFIG_HTML
+            .split("id: \"directory-staff-inline\"")
+            .nth(1)
+            .expect("config.html has no directory-staff-inline preset");
+        // Only that preset's own object, up to wherever the next entry starts.
+        let body = after.split("id: \"directory-").next().unwrap_or(after);
+        assert!(
+            body.contains("output: \"message\""),
+            "directory-staff-inline must set in-message output"
+        );
+        // No other preset may enable it: a plain attach must never silently
+        // require a `{directory}` token to be present in the message.
+        assert_eq!(
+            CONFIG_HTML.matches("output: \"message\"").count(),
+            1,
+            "exactly one preset may enable in-message output"
         );
     }
 

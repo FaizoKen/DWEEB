@@ -401,9 +401,14 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - Plugin-library presets and `init.preset` seeding stay; the duplicate in-config “Quick start”
   bars stay removed.
 - **Adding/removing a template**: update `src/data/presets.ts` + `scripts/seo/content.ts`
-  (build **throws** if a template has no SEO entry), check `scripts/seo/features.ts` and
-  `video/src/data.ts` references, and regenerate committed OG images with
-  `bun add -d sharp && bun scripts/gen-template-og.ts && bun remove sharp`.
+  (build **throws** if a template has no SEO entry) **+ its slug in `ENTRY_IDS`
+  (`src/core/seo/acquisition.ts`)** — the audit fails every CTA on the new page with
+  "unknown acquisition token" otherwise, exactly as it does for a guide or landing.
+  Check `scripts/seo/features.ts` and `video/src/data.ts` references, and regenerate
+  committed OG images with
+  `bun add -d sharp && bun scripts/gen-template-og.ts && bun remove sharp` (run from the
+  repo root; expect the new card **plus** `templates-og/templates.png`, the catalogue hub
+  card, to change — every other card stays byte-identical).
 - **Static discovery is a build contract.** `scripts/gen-template-pages.ts` generates the
   template and feature catalogues, `/guides/*`, the product landing pages, and the image
   sitemap. Build-critical generator code is covered by `tsconfig.seo.json`; `bun run build` then

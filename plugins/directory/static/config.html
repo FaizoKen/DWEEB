@@ -1287,6 +1287,19 @@
           showPermissions: true,
         },
         {
+          // The in-message showcase: the roster lands in the author's own text, so
+          // everyone reads it without clicking. Seeded by the "Staff directory"
+          // template, whose message already carries {directory}.
+          id: "directory-staff-inline",
+          mode: "roles",
+          roleSource: "staff",
+          output: "message",
+          title: "Our staff",
+          intro: "",
+          showMembers: true,
+          showPermissions: true,
+        },
+        {
           id: "directory-roles",
           mode: "roles",
           roleSource: "hoisted",
@@ -1317,6 +1330,10 @@
         mode = p.mode;
         if (p.roleSource) $("roleSource").value = p.roleSource;
         if (p.channelSource) $("channelSource").value = p.channelSource;
+        // Only a button can write into the message; `syncOutputAvailability` will
+        // fold this back to a reply on a menu, so a mis-targeted preset degrades
+        // rather than saving something the service would refuse.
+        if (p.output) $("output").value = p.output;
         $("title").value = p.title || "";
         $("intro").value = p.intro || "";
         $("showMembers").checked = !!p.showMembers;
@@ -1363,6 +1380,26 @@
               found = true;
               return;
             }
+          }
+          for (const k in n) visit(n[k]);
+        };
+        visit(components);
+        return found;
+      }
+
+      /// True when some OTHER component on the message is already bound to this
+      /// plugin — so a `{directory}` token there might be theirs to fill, and this
+      /// (reply-mode) instance must not claim the message is misconfigured.
+      function hasOtherDirectoryBinding(components) {
+        const mine = instanceId ? PREFIX + instanceId : null;
+        let found = false;
+        const visit = (n) => {
+          if (found || !n || typeof n !== "object") return;
+          if (Array.isArray(n)) return n.forEach(visit);
+          const cid = n.custom_id;
+          if (typeof cid === "string" && cid.startsWith(PREFIX) && cid !== mine) {
+            found = true;
+            return;
           }
           for (const k in n) visit(n[k]);
         };
@@ -1438,6 +1475,24 @@
               "Add {directory} to your message text where the list should appear — otherwise clicking would change nothing.",
             );
           messageTemplate = built.components;
+        } else {
+          // The mirror mistake, and the one people actually make: {directory} sits
+          // in the message but the list is set to go to a reply. Nothing can ever
+          // fill that token — DWEEB paints the sample at send and no click
+          // updates it — so the message shows placeholder text forever while the
+          // reply quietly works. Looks exactly like the plugin is broken.
+          //
+          // Only refuse when the token is definitely orphaned: another Directory
+          // component on the same message may legitimately be the one filling it
+          // (a "Refresh" button in message output beside this reply-mode one).
+          const built = await requestResource("message");
+          if (built && Array.isArray(built.components) && hasOurToken(built.components)) {
+            if (!hasOtherDirectoryBinding(built.components)) {
+              return fail(
+                "Your message contains {directory}, but this is set to answer in a reply — so that spot would just show placeholder text forever. Either set “Where the list appears” to “In this message itself”, or remove {directory} from your message.",
+              );
+            }
+          }
         }
 
         // Only keep groups that have roles in them — an empty section would
