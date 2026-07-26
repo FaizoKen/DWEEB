@@ -39,7 +39,7 @@ WEBHOOK = (
 SERVICES = os.environ.get(
     "ALERTS_SERVICES",
     "proxy,dispatcher,ping-pong,tickets,giveaway,quick-replies,self-role,modal-form,picker,"
-    "poll,caddy",
+    "poll,directory,caddy",
 ).split(",")
 
 FLUSH_SECS = int(os.environ.get("ALERTS_FLUSH_SECS", "45"))

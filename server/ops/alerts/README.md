@@ -7,7 +7,7 @@ on contabo (like `dweeb-maintenance.timer`). The webhook URL lives only in
 ## Pieces
 
 - `dweeb-log-alerts.py` → `/usr/local/sbin/dweeb-log-alerts.py`
-  Tails `docker compose logs -f` for the app services (proxy, dispatcher, 8 plugins, caddy;
+  Tails `docker compose logs -f` for the app services (proxy, dispatcher, 9 plugins, caddy;
   gatus/dozzle/beszel excluded). Alerts on tracing `ERROR` lines, Rust panics, `web_crash`
   warns, and Caddy JSON error entries — **except** Caddy connection aborts (`broken pipe`,
   `connection reset by peer`, `context canceled`, `client disconnected`), which are network
