@@ -117,6 +117,12 @@ poll.{$PLUGINS_DOMAIN} {
 	reverse_proxy poll:8098
 }
 
+# Directory (live role / channel lists).
+directory.{$PLUGINS_DOMAIN} {
+	import site_defaults
+	reverse_proxy directory:8099
+}
+
 # ── Monitoring ───────────────────────────────────────────────────────────────
 # Self-hosted monitoring UIs on the plugins wildcard (no DNS work). Dozzle (raw
 # container logs) is intentionally absent — it stays localhost-only and is

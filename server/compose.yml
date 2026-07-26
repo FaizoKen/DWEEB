@@ -173,7 +173,7 @@ services:
     environment:
       <<: *rust-env
       DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
-      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094", "quickreplies:": "http://quick-replies:8096", "picker:": "http://picker:8097", "poll:": "http://poll:8098"}'
+      ROUTES: '{"modalform:": "http://modal-form:8090", "pingpong:": "http://ping-pong:8091", "selfrole:": "http://self-role:8092", "tickets:": "http://tickets:8093", "giveaway:": "http://giveaway:8094", "quickreplies:": "http://quick-replies:8096", "picker:": "http://picker:8097", "poll:": "http://poll:8098", "directory:": "http://directory:8099"}'
       # The /dashboard slash command (answered inline, no plugin) replies with
       # this URL. Register the command once: node scripts/register-commands.mjs
       # NOT derived from DOMAIN — that is the API host, not the dashboard.
@@ -495,6 +495,45 @@ services:
       retries: 3
       start_period: 5s
 
+  directory:
+    image: ghcr.io/faizoken/dweeb-directory:${DIRECTORY_TAG:-latest}
+    # A little more headroom than the other plugins: this one caches a bounded
+    # per-guild read (roles/channels, plus a capped member index) so a spammed
+    # button doesn't hammer Discord. CACHE_MAX_GUILDS is the knob that bounds it.
+    mem_limit: 96m
+    mem_reservation: 24m
+    build: ../plugins/directory
+    <<: *svc-base
+    environment:
+      <<: *rust-env
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:?set DISCORD_PUBLIC_KEY in .env}
+      PUBLIC_BASE_URL: https://directory.${PLUGINS_DOMAIN:?set PLUGINS_DOMAIN in .env}
+      # Lets the dispatcher vouch for a custom app's verifying key (see the
+      # dispatcher service above). Must match the dispatcher's value.
+      DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
+      # REQUIRED in practice — every directory is READ through this bot. It needs
+      # NO permission bit (listing roles/channels only requires membership) and
+      # this plugin never writes to a server. Unset and the config UI refuses to
+      # set a directory up. We point it at the main DWEEB bot.
+      #
+      # "Show who holds each role" additionally needs Discord's privileged
+      # SERVER MEMBERS INTENT enabled on the application. Without it the roster
+      # still renders in full and says member lists are unavailable — see
+      # plugins/directory/.env.example.
+      BOT_TOKEN: ${DIRECTORY_BOT_TOKEN:-}
+      BOT_INVITE_URL: ${DIRECTORY_BOT_INVITE_URL:-}
+      RUST_LOG: info
+    volumes:
+      # The plugin's only state: the SQLite file with the saved directories.
+      - directory_data:/data
+    healthcheck:
+      # The image has no curl/wget; bash's /dev/tcp does the probe.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8099 && printf 'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 60s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   # Only started when you opt in with `--profile redis`. Shared cache +
   # rate-limit store for running several `proxy` replicas behind a balancer.
   redis:
@@ -590,6 +629,7 @@ volumes:
   quickreplies_data:
   picker_data:
   poll_data:
+  directory_data:
   beszel_data:
   beszel_agent_data:
   gatus_data:

@@ -31,6 +31,7 @@ on:
       - Plugin Quick Replies
       - Plugin Picker
       - Plugin Poll
+      - Plugin Directory
     types: [completed]
     branches: [main]
   workflow_dispatch:

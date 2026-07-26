@@ -1,0 +1,1479 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Directory — configure</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1f22;
+        --panel: #2b2d31;
+        --panel-2: #232428;
+        --border: #3a3c41;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #5865f2;
+        --green: #3ba55d;
+        --yellow: #f0b232;
+        --danger: #da373c;
+        --radius: 8px;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --panel: #f2f3f5;
+        --panel-2: #e3e5e8;
+        --border: #d7d9dc;
+        --text: #1e1f22;
+        --muted: #4e5058;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 20px 0 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h2:first-of-type { margin-top: 0; }
+      .step-num {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      label.lbl { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="text"], input[type="number"], input[type="color"], select, textarea {
+        width: 100%;
+        padding: 8px 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+      }
+      input[type="color"] { padding: 2px; height: 36px; cursor: pointer; }
+      input:focus-visible, select:focus-visible, textarea:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+      .hint code, .callout code { color: var(--accent); }
+      .row2 { display: flex; gap: 8px; }
+      .row2 > * { flex: 1; }
+      button {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .bar { display: flex; gap: 8px; margin-top: 24px; align-items: center; }
+      .bar .grow { flex: 1; }
+      .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+      .callout {
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+      .callout.good { border-left-color: var(--green); }
+      .callout.warn { border-left-color: var(--yellow); }
+      .callout.bad { border-left-color: var(--danger); }
+      .callout b { color: var(--text); }
+
+      details { margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+      summary { cursor: pointer; padding: 10px 12px; font-weight: 600; color: var(--text); list-style: none; }
+      summary::-webkit-details-marker { display: none; }
+      summary::before { content: "▸ "; color: var(--muted); }
+      details[open] summary::before { content: "▾ "; }
+      .details-body { padding: 0 12px 12px; }
+
+      .checkrow { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; }
+      .checkrow input { flex: none; width: auto; margin-top: 3px; accent-color: var(--accent); }
+      .checkrow label { margin: 0; cursor: pointer; font-size: 13px; color: var(--text); }
+
+      /* Mode switch. */
+      .modes { display: flex; gap: 8px; margin-bottom: 4px; }
+      .mode {
+        flex: 1;
+        text-align: left;
+        padding: 10px 12px;
+        line-height: 1.35;
+        border: 1px solid var(--border);
+        background: var(--panel-2);
+      }
+      .mode.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+      .mode b { display: block; font-size: 13px; }
+      .mode span { font-size: 11px; color: var(--muted); }
+
+      /* Entity lists (roles / channels). */
+      .picker { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 240px; overflow: auto; }
+      .item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 9px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-2);
+        cursor: pointer;
+      }
+      .item:hover { border-color: var(--accent); }
+      .item input { flex: none; margin: 0; width: auto; accent-color: var(--accent); }
+      .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
+      .item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .item .tag { flex: none; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--border); color: var(--muted); }
+      .search { margin-top: 8px; }
+      .count { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+      .locked { opacity: 0.5; pointer-events: none; }
+
+      /* Groups editor. */
+      .group {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-2);
+        padding: 10px;
+        margin-top: 8px;
+      }
+      .group-head { display: flex; gap: 6px; align-items: center; }
+      .group-head .emoji { flex: none; width: 52px; text-align: center; }
+      .group-head .gname { flex: 1; min-width: 0; }
+      .group-head .kill { flex: none; width: 32px; color: var(--muted); }
+      .group-head .kill:hover { color: var(--danger); border-color: var(--danger); }
+      .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+      .chip {
+        display: inline-flex; align-items: center; gap: 5px;
+        font-size: 12px; padding: 3px 7px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--panel);
+      }
+      .chip button { all: unset; cursor: pointer; color: var(--muted); font-size: 13px; line-height: 1; }
+      .chip button:hover { color: var(--danger); }
+
+      /* Notes editor. */
+      .note-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+      .note-row .who { flex: none; width: 34%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+      .note-row input { flex: 1; min-width: 0; }
+    </style>
+  </head>
+  <body>
+    <!-- Step 1 — server status ----------------------------------------------->
+    <h2><span class="step-num">1</span> Server</h2>
+    <div id="serverIntro"></div>
+    <!-- Hidden value-holder for the connected server id (no raw-id field). -->
+    <input id="guildId" type="hidden" />
+    <div class="err" id="connErr"></div>
+
+    <!-- Step 2 — what this lists ---------------------------------------------->
+    <h2><span class="step-num">2</span> What should it list?</h2>
+    <div class="modes">
+      <button type="button" class="mode" id="modeRoles" data-mode="roles">
+        <b>🛡️ Roles &amp; staff</b><span>Who's who — roles, what they can do, and who holds them.</span>
+      </button>
+      <button type="button" class="mode" id="modeChannels" data-mode="channels">
+        <b>🧭 Channels</b><span>Where's what — channels grouped by category, with topics.</span>
+      </button>
+    </div>
+
+    <!-- ── ROLES MODE ─────────────────────────────────────────────────────── -->
+    <div id="rolesMode">
+      <label class="lbl" for="roleSource">Which roles?</label>
+      <select id="roleSource">
+        <option value="picked">The roles I pick</option>
+        <option value="hoisted">Every role shown separately in the member list</option>
+        <option value="staff">Every role with moderation powers</option>
+      </select>
+      <div class="hint" id="roleSourceHint"></div>
+
+      <div id="pickedRoles">
+        <label class="lbl">Roles <span class="count" id="roleCount"></span></label>
+        <div id="rolesUnavailable" class="callout warn" style="display:none"></div>
+        <div id="rolesWrap">
+          <input id="roleSearch" class="search" type="text" placeholder="Search roles…" />
+          <div id="roles" class="picker"></div>
+        </div>
+
+        <label class="lbl" style="margin-top: 12px">Groups <span class="count" id="groupCount"></span></label>
+        <div class="hint">
+          Optional. Sort the roles you picked into named sections — <b>Owners</b>, <b>Moderators</b>,
+          <b>Content team</b> — and they render as headings. Leave this empty for one flat list.
+        </div>
+        <div id="groups"></div>
+        <button id="addGroup" type="button" style="margin-top: 8px">＋ Add a group</button>
+      </div>
+
+      <div class="checkrow" style="margin-top: 14px">
+        <input id="showMembers" type="checkbox" />
+        <label for="showMembers">Show <b>who holds each role</b></label>
+      </div>
+      <div id="membersNote" class="callout" style="display:none"></div>
+      <div id="memberOpts" style="display:none">
+        <div class="row2">
+          <div>
+            <label class="lbl" for="maxMembers">Names shown per role</label>
+            <input id="maxMembers" type="number" min="1" max="50" value="20" />
+          </div>
+          <div>
+            <label class="lbl" for="includeBots">Bot accounts</label>
+            <select id="includeBots">
+              <option value="no">Leave bots out</option>
+              <option value="yes">Include bots</option>
+            </select>
+          </div>
+        </div>
+        <div class="checkrow">
+          <input id="hideEmpty" type="checkbox" />
+          <label for="hideEmpty">Hide roles <b>nobody holds</b></label>
+        </div>
+      </div>
+
+      <div class="checkrow">
+        <input id="showPermissions" type="checkbox" checked />
+        <label for="showPermissions">Show what each role <b>can do</b> (Admin · Bans · Timeouts)</label>
+      </div>
+    </div>
+
+    <!-- ── CHANNELS MODE ──────────────────────────────────────────────────── -->
+    <div id="channelsMode" style="display:none">
+      <label class="lbl" for="channelSource">Which channels?</label>
+      <select id="channelSource">
+        <option value="all">Every channel</option>
+        <option value="categories">Everything in the categories I pick</option>
+        <option value="picked">Only the channels I pick</option>
+      </select>
+      <div class="hint" id="channelSourceHint"></div>
+
+      <div id="channelsUnavailable" class="callout warn" style="display:none"></div>
+      <div id="pickedChannels" style="display:none">
+        <label class="lbl">Channels <span class="count" id="channelCount"></span></label>
+        <input id="channelSearch" class="search" type="text" placeholder="Search channels…" />
+        <div id="channels" class="picker"></div>
+      </div>
+      <div id="pickedCategories" style="display:none">
+        <label class="lbl">Categories <span class="count" id="categoryCount"></span></label>
+        <div id="categories" class="picker"></div>
+      </div>
+
+      <div class="checkrow" style="margin-top: 14px">
+        <input id="showTopics" type="checkbox" checked />
+        <label for="showTopics">Show each channel's <b>topic</b> as its caption</label>
+      </div>
+      <div class="checkrow">
+        <input id="groupByCategory" type="checkbox" checked />
+        <label for="groupByCategory">Group them under their <b>category headings</b></label>
+      </div>
+      <div class="checkrow">
+        <input id="requireTopic" type="checkbox" />
+        <label for="requireTopic">Only list channels that <b>have a topic</b> (keeps a big server readable)</label>
+      </div>
+
+      <label class="lbl" style="margin-top: 12px">Channel types</label>
+      <div id="kinds" class="chips"></div>
+      <div class="hint">Threads are never listed — there can be thousands and they come and go.</div>
+    </div>
+
+    <!-- Step 3 — how it reads -------------------------------------------------->
+    <h2><span class="step-num">3</span> How it reads</h2>
+    <label class="lbl" for="title">Heading</label>
+    <input id="title" type="text" maxlength="100" placeholder="" />
+    <label class="lbl" for="intro">Line underneath (optional)</label>
+    <input id="intro" type="text" maxlength="400" placeholder="e.g. Ping a moderator only if it's urgent." />
+    <div class="row2" style="margin-top: 10px">
+      <div>
+        <label class="lbl" for="visibility">Who sees the answer</label>
+        <select id="visibility">
+          <option value="private">Only the person who clicked</option>
+          <option value="public">Everyone in the channel</option>
+        </select>
+      </div>
+      <div>
+        <label class="lbl" for="accent">Accent colour</label>
+        <div class="row2">
+          <input id="accent" type="color" value="#5865f2" />
+          <button id="clearAccent" type="button" title="No accent stripe">None</button>
+        </div>
+      </div>
+    </div>
+    <div class="hint" id="publicHint"></div>
+
+    <!-- Advanced — descriptions + access gate ---------------------------------->
+    <details id="advanced">
+      <summary>Descriptions &amp; access <span class="count" id="advSummary"></span></summary>
+      <div class="details-body">
+        <h2 style="margin-top: 12px"><span class="step-num">4</span> Descriptions
+          <span class="count" id="noteCount"></span></h2>
+        <div class="hint" id="notesHint"></div>
+        <div id="notes"></div>
+
+        <h2><span class="step-num">5</span> Who can use it
+          <span class="count" id="reqCount"></span></h2>
+        <div id="reqIntro" class="hint">By default <b>anyone</b> in the server can open this list.</div>
+        <label class="lbl">Required roles</label>
+        <div id="gateWrap">
+          <input id="gateSearch" class="search" type="text" placeholder="Search roles…" />
+          <div id="gateRoles" class="picker"></div>
+          <div class="checkrow" id="requireAllWrap" style="display:none">
+            <input id="requireAll" type="checkbox" />
+            <label for="requireAll">Must have <b>all</b> selected roles (otherwise any one)</label>
+          </div>
+        </div>
+        <label class="lbl" for="minAge" style="margin-top: 12px">Minimum account age</label>
+        <select id="minAge">
+          <option value="0">No minimum</option>
+          <option value="1">1 day old</option>
+          <option value="3">3 days old</option>
+          <option value="7">7 days old</option>
+          <option value="14">14 days old</option>
+          <option value="30">30 days old</option>
+          <option value="90">90 days old</option>
+        </select>
+        <div class="hint">Blocks brand-new alt accounts. Derived from the account's age — no extra setup.</div>
+      </div>
+    </details>
+
+    <div id="selectNote" class="callout good" style="display:none"></div>
+    <div class="err" id="error"></div>
+
+    <div class="bar">
+      <button id="cancel" type="button">Cancel</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+
+    <script>
+      "use strict";
+      const PREFIX = "directory:";
+      const MAX_ROLES = 25;
+      const MAX_GROUPS = 10;
+      const MAX_CHANNELS = 50;
+      const MAX_CATEGORIES = 25;
+      const CATEGORY_KIND = 4;
+
+      // Discord channel types this plugin can list, with the labels the toggles
+      // show. Must stay in step with DEFAULT_CHANNEL_KINDS in src/rest.rs.
+      const KINDS = [
+        { kind: 0, label: "Text", on: true },
+        { kind: 5, label: "Announcement", on: true },
+        { kind: 15, label: "Forum", on: true },
+        { kind: 16, label: "Media", on: true },
+        { kind: 2, label: "Voice", on: true },
+        { kind: 13, label: "Stage", on: true },
+      ];
+
+      // ── Session / protocol state ────────────────────────────────────────
+      let nonce = null;
+      let hostOrigin = "*";
+      let instanceId = null; // set when reconfiguring
+      let protocolVersion = 1;
+      // Browser-local edit credential for `instanceId` (protocol v2). Absent ⇒
+      // saving creates a replacement instance instead of updating in place.
+      let managementToken = null;
+      let target = "button"; // component kind, from init
+
+      // ── Capabilities (from /api/meta + /api/connect) ────────────────────
+      let defaultBot = false;
+      let inviteUrl = null;
+      let maxMembersCap = 50;
+      // Whether GET /guilds/{id}/members works for this app — i.e. whether the
+      // privileged GUILD_MEMBERS intent is enabled. Unknown until connect.
+      let membersAvailable = null;
+
+      // ── Host context (the server DWEEB is connected to) ─────────────────
+      let autoGuild = false;
+      let guildName = "";
+      let connected = false;
+
+      // ── Live server data ────────────────────────────────────────────────
+      let roles = [];    // [{ id, name, color, hoist, managed, staff, badges }]
+      let channels = []; // [{ id, name, kind, parent_id, topic, nsfw }]
+
+      // ── Editor model ────────────────────────────────────────────────────
+      let mode = "roles";
+      let pickedRoles = [];      // ordered role ids
+      let groups = [];           // [{ key, name, emoji, role_ids }]
+      let pickedChannels = [];   // ordered channel ids
+      let pickedCategories = []; // ordered category ids
+      let enabledKinds = new Set(KINDS.filter((k) => k.on).map((k) => k.kind));
+      let notes = new Map();     // id -> text
+      let gateRoles = new Set();
+      let accent = null;         // 24-bit int, or null for no stripe
+      let nextGroupKey = 1;
+
+      const $ = (id) => document.getElementById(id);
+      const isSnowflake = (s) => /^\d{15,25}$/.test((s || "").trim());
+      const hexColor = (n) => (n && n > 0 ? "#" + n.toString(16).padStart(6, "0") : "#99aab5");
+      const escapeHtml = (s) =>
+        String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+      function mintGroupKey() {
+        // g1, g2, … skipping any key already in use. A group's key is the value
+        // wired onto a select option, so it must stay stable across renames —
+        // never derive it from the name.
+        for (;;) {
+          const k = "g" + nextGroupKey++;
+          if (!groups.some((g) => g.key === k)) return k;
+        }
+      }
+
+      const channelById = (id) => channels.find((c) => c.id === id);
+      const roleById = (id) => roles.find((r) => r.id === id);
+
+      // ── Step-1 status ────────────────────────────────────────────────────
+      function renderServerIntro() {
+        const intro = $("serverIntro");
+        if (!autoGuild) {
+          intro.innerHTML = `<div class="callout warn">Connect your server in DWEEB first — sign in and pick the server you're building this message for, then reopen this panel. The list reads that exact server.</div>`;
+        } else if (!connected) {
+          intro.innerHTML = `<div class="callout">Reading <b>${escapeHtml(guildName || "your server")}</b>…</div>`;
+        } else {
+          intro.innerHTML = `<div class="callout good">✓ Reading <b>${escapeHtml(guildName)}</b> live — ${roles.length} roles, ${channels.filter((c) => c.kind !== CATEGORY_KIND).length} channels. Nothing is ever changed in your server.</div>`;
+        }
+        sendResize();
+      }
+
+      // ── Mode switch ──────────────────────────────────────────────────────
+      for (const btn of document.querySelectorAll(".mode")) {
+        btn.addEventListener("click", () => {
+          mode = btn.dataset.mode;
+          renderAll();
+        });
+      }
+
+      function renderMode() {
+        $("modeRoles").classList.toggle("on", mode === "roles");
+        $("modeChannels").classList.toggle("on", mode === "channels");
+        $("rolesMode").style.display = mode === "roles" ? "" : "none";
+        $("channelsMode").style.display = mode === "channels" ? "" : "none";
+        $("title").placeholder = mode === "roles" ? "Server roles" : "Channel directory";
+        $("notesHint").innerHTML =
+          mode === "roles"
+            ? "Give a role a one-line description — the thing Discord has no field for. Shows under the role."
+            : "Caption a channel in your own words. This <b>replaces</b> the channel's own topic, and it's the only way to caption a channel that has no topic set.";
+      }
+
+      // ── Role source ──────────────────────────────────────────────────────
+      $("roleSource").addEventListener("change", renderAll);
+      function roleSource() {
+        return $("roleSource").value;
+      }
+      function renderRoleSource() {
+        const src = roleSource();
+        $("pickedRoles").style.display = src === "picked" ? "" : "none";
+        $("roleSourceHint").innerHTML =
+          src === "picked"
+            ? "You choose exactly which roles appear, and in what order."
+            : src === "hoisted"
+              ? "Uses the server's own signal: any role set to <b>display separately</b> in the member list. The list updates itself as you add roles."
+              : "Any role that can moderate — ban, kick, timeout, manage messages, roles, channels or the server. Good for a staff list that maintains itself.";
+      }
+
+      // ── Channel source ───────────────────────────────────────────────────
+      $("channelSource").addEventListener("change", renderAll);
+      function channelSource() {
+        return $("channelSource").value;
+      }
+      function renderChannelSource() {
+        const src = channelSource();
+        $("pickedChannels").style.display = src === "picked" ? "" : "none";
+        $("pickedCategories").style.display = src === "categories" ? "" : "none";
+        $("channelSourceHint").innerHTML =
+          src === "all"
+            ? "Every channel the list can see, in the server's own order."
+            : src === "categories"
+              ? "Only what sits inside the categories you tick."
+              : "A short, hand-picked shortlist — ideal for a “start here” message.";
+        // `require_topic` doesn't apply to a hand-picked list: the host chose
+        // those channels on purpose, so they're always listed.
+        $("requireTopic").closest(".checkrow").style.display = src === "picked" ? "none" : "";
+      }
+
+      // ── Member expansion ─────────────────────────────────────────────────
+      $("showMembers").addEventListener("change", renderMembers);
+      function renderMembers() {
+        const on = $("showMembers").checked;
+        $("memberOpts").style.display = on ? "" : "none";
+        const box = $("membersNote");
+        // The one place this plugin depends on a privileged Discord intent. Say
+        // so plainly *before* the host saves, rather than letting them discover
+        // it from an empty roster.
+        if (!on || membersAvailable === null) {
+          box.style.display = "none";
+        } else if (membersAvailable) {
+          box.className = "callout good";
+          box.innerHTML = "✓ Member lists are available in this server. Names appear as clickable mentions — and they never ping anyone, even on a public list.";
+          box.style.display = "";
+        } else {
+          box.className = "callout warn";
+          box.innerHTML =
+            "Discord isn't letting this bot read the member list, so names won't appear — the roles, what they can do and your descriptions all still show. " +
+            "This needs the <b>Server Members Intent</b> enabled on the Discord application; ask whoever runs this DWEEB deployment. " +
+            "It's safe to leave this on: the list lights up by itself once the intent is enabled.";
+          box.style.display = "";
+        }
+        sendResize();
+      }
+
+      // ── Pickers ──────────────────────────────────────────────────────────
+      $("roleSearch").addEventListener("input", renderRoles);
+      $("channelSearch").addEventListener("input", renderChannels);
+      $("gateSearch").addEventListener("input", renderGateRoles);
+
+      function showUnavailable(msg) {
+        for (const id of ["rolesUnavailable", "channelsUnavailable"]) {
+          const box = $(id);
+          box.className = "callout warn";
+          box.innerHTML = msg;
+          box.style.display = "";
+        }
+        $("rolesWrap").classList.add("locked");
+        $("gateWrap").classList.add("locked");
+        sendResize();
+      }
+
+      function renderRoles() {
+        const wrap = $("roles");
+        const q = ($("roleSearch").value || "").trim().toLowerCase();
+        wrap.innerHTML = "";
+        const shown = roles.filter((r) => !q || r.name.toLowerCase().includes(q));
+        if (!roles.length) wrap.innerHTML = `<div class="hint">No roles loaded yet.</div>`;
+        else if (!shown.length) wrap.innerHTML = `<div class="hint">No roles match.</div>`;
+        for (const r of shown) {
+          const row = document.createElement("label");
+          row.className = "item";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = pickedRoles.includes(r.id);
+          input.addEventListener("change", () => {
+            if (input.checked) {
+              if (pickedRoles.length >= MAX_ROLES) {
+                input.checked = false;
+                return fail(`You can list at most ${MAX_ROLES} roles.`);
+              }
+              pickedRoles.push(r.id);
+            } else {
+              pickedRoles = pickedRoles.filter((id) => id !== r.id);
+              // A role removed from the pick list can't stay in a group.
+              for (const g of groups) g.role_ids = g.role_ids.filter((id) => id !== r.id);
+              notes.delete(r.id);
+            }
+            $("error").textContent = "";
+            renderGroups();
+            renderNotes();
+            updateCounts();
+          });
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = r.name;
+          row.append(input, dot, name);
+          for (const badge of (r.badges || []).slice(0, 2)) {
+            const tag = document.createElement("span");
+            tag.className = "tag";
+            tag.textContent = badge;
+            row.appendChild(tag);
+          }
+          if (r.hoist) {
+            const tag = document.createElement("span");
+            tag.className = "tag";
+            tag.textContent = "shown";
+            tag.title = "Displayed separately in the member list";
+            row.appendChild(tag);
+          }
+          wrap.appendChild(row);
+        }
+        updateCounts();
+      }
+
+      function renderChannels() {
+        const wrap = $("channels");
+        const q = ($("channelSearch").value || "").trim().toLowerCase();
+        wrap.innerHTML = "";
+        const listable = channels.filter((c) => c.kind !== CATEGORY_KIND && enabledKinds.has(c.kind));
+        const shown = listable.filter((c) => !q || c.name.toLowerCase().includes(q));
+        if (!listable.length) wrap.innerHTML = `<div class="hint">No channels loaded yet.</div>`;
+        else if (!shown.length) wrap.innerHTML = `<div class="hint">No channels match.</div>`;
+        for (const c of shown) {
+          const row = document.createElement("label");
+          row.className = "item";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = pickedChannels.includes(c.id);
+          input.addEventListener("change", () => {
+            if (input.checked) {
+              if (pickedChannels.length >= MAX_CHANNELS) {
+                input.checked = false;
+                return fail(`You can list at most ${MAX_CHANNELS} channels.`);
+              }
+              pickedChannels.push(c.id);
+            } else {
+              pickedChannels = pickedChannels.filter((id) => id !== c.id);
+              notes.delete(c.id);
+            }
+            $("error").textContent = "";
+            renderNotes();
+            updateCounts();
+          });
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = (c.kind === 2 || c.kind === 13 ? "🔊 " : "# ") + c.name;
+          row.append(input, name);
+          if (!c.topic) {
+            const tag = document.createElement("span");
+            tag.className = "tag";
+            tag.textContent = "no topic";
+            row.appendChild(tag);
+          }
+          wrap.appendChild(row);
+        }
+        updateCounts();
+      }
+
+      function renderCategories() {
+        const wrap = $("categories");
+        wrap.innerHTML = "";
+        const cats = channels.filter((c) => c.kind === CATEGORY_KIND);
+        if (!cats.length) {
+          wrap.innerHTML = `<div class="hint">This server has no categories.</div>`;
+          return;
+        }
+        for (const c of cats) {
+          const row = document.createElement("label");
+          row.className = "item";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = pickedCategories.includes(c.id);
+          input.addEventListener("change", () => {
+            if (input.checked) {
+              if (pickedCategories.length >= MAX_CATEGORIES) {
+                input.checked = false;
+                return fail(`You can pick at most ${MAX_CATEGORIES} categories.`);
+              }
+              pickedCategories.push(c.id);
+            } else {
+              pickedCategories = pickedCategories.filter((id) => id !== c.id);
+            }
+            $("error").textContent = "";
+            updateCounts();
+          });
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = "📁 " + c.name;
+          const inside = channels.filter((x) => x.parent_id === c.id && enabledKinds.has(x.kind)).length;
+          const tag = document.createElement("span");
+          tag.className = "tag";
+          tag.textContent = `${inside}`;
+          row.append(input, name, tag);
+          wrap.appendChild(row);
+        }
+        updateCounts();
+      }
+
+      function renderKinds() {
+        const wrap = $("kinds");
+        wrap.innerHTML = "";
+        for (const k of KINDS) {
+          const chip = document.createElement("label");
+          chip.className = "chip";
+          chip.style.cursor = "pointer";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.style.accentColor = "var(--accent)";
+          input.checked = enabledKinds.has(k.kind);
+          input.addEventListener("change", () => {
+            if (input.checked) enabledKinds.add(k.kind);
+            else enabledKinds.delete(k.kind);
+            // Dropping a type must drop any channel of that type already picked,
+            // or the saved list would quietly contain something the filter hides.
+            pickedChannels = pickedChannels.filter((id) => {
+              const c = channelById(id);
+              return !c || enabledKinds.has(c.kind);
+            });
+            renderChannels();
+            renderCategories();
+            renderNotes();
+          });
+          const span = document.createElement("span");
+          span.textContent = k.label;
+          chip.append(input, span);
+          wrap.appendChild(chip);
+        }
+      }
+
+      // ── Groups editor ────────────────────────────────────────────────────
+      $("addGroup").addEventListener("click", () => {
+        if (groups.length >= MAX_GROUPS) return fail(`You can have at most ${MAX_GROUPS} groups.`);
+        groups.push({ key: mintGroupKey(), name: "", emoji: "", role_ids: [] });
+        renderGroups();
+        updateCounts();
+      });
+
+      function renderGroups() {
+        const wrap = $("groups");
+        wrap.innerHTML = "";
+        groups.forEach((g, i) => {
+          const box = document.createElement("div");
+          box.className = "group";
+
+          const head = document.createElement("div");
+          head.className = "group-head";
+          const emoji = document.createElement("input");
+          emoji.type = "text";
+          emoji.className = "emoji";
+          emoji.maxLength = 8;
+          emoji.placeholder = "🙂";
+          emoji.title = "Optional emoji for the heading";
+          emoji.value = g.emoji || "";
+          emoji.addEventListener("input", () => { g.emoji = emoji.value; });
+          const name = document.createElement("input");
+          name.type = "text";
+          name.className = "gname";
+          name.maxLength = 60;
+          name.placeholder = `Section ${i + 1} name — e.g. Moderators`;
+          name.value = g.name || "";
+          name.addEventListener("input", () => { g.name = name.value; renderSelectNote(); });
+          const kill = document.createElement("button");
+          kill.type = "button";
+          kill.className = "kill";
+          kill.textContent = "✕";
+          kill.title = "Remove this group";
+          kill.addEventListener("click", () => {
+            groups.splice(i, 1);
+            renderGroups();
+            updateCounts();
+          });
+          head.append(emoji, name, kill);
+
+          const add = document.createElement("select");
+          add.style.marginTop = "8px";
+          const blank = document.createElement("option");
+          blank.value = "";
+          blank.textContent = "＋ Add a picked role to this section…";
+          add.appendChild(blank);
+          for (const id of pickedRoles) {
+            if (g.role_ids.includes(id)) continue;
+            const r = roleById(id);
+            const opt = document.createElement("option");
+            opt.value = id;
+            opt.textContent = r ? r.name : id;
+            add.appendChild(opt);
+          }
+          add.disabled = add.options.length <= 1;
+          if (add.disabled) blank.textContent = pickedRoles.length
+            ? "Every picked role is already in this section"
+            : "Pick some roles above first";
+          add.addEventListener("change", () => {
+            if (!add.value) return;
+            g.role_ids.push(add.value);
+            renderGroups();
+          });
+
+          const chips = document.createElement("div");
+          chips.className = "chips";
+          for (const id of g.role_ids) {
+            const r = roleById(id);
+            const chip = document.createElement("span");
+            chip.className = "chip";
+            const dot = document.createElement("span");
+            dot.className = "dot";
+            dot.style.background = hexColor(r ? r.color : 0);
+            const label = document.createElement("span");
+            label.textContent = r ? r.name : id;
+            const rm = document.createElement("button");
+            rm.type = "button";
+            rm.textContent = "✕";
+            rm.title = "Remove from this section";
+            rm.addEventListener("click", () => {
+              g.role_ids = g.role_ids.filter((x) => x !== id);
+              renderGroups();
+            });
+            chip.append(dot, label, rm);
+            chips.appendChild(chip);
+          }
+
+          box.append(head, add, chips);
+          wrap.appendChild(box);
+        });
+        renderSelectNote();
+        sendResize();
+      }
+
+      // ── Notes editor ─────────────────────────────────────────────────────
+      // One row per thing that's actually on the list, so a description can
+      // never outlive what it described.
+      function noteTargets() {
+        if (mode === "roles") {
+          if (roleSource() === "picked") return pickedRoles.map((id) => [id, roleById(id)]);
+          const pred = roleSource() === "hoisted" ? (r) => r.hoist : (r) => r.staff;
+          return roles.filter(pred).map((r) => [r.id, r]);
+        }
+        const src = channelSource();
+        let list;
+        if (src === "picked") list = pickedChannels.map((id) => channelById(id)).filter(Boolean);
+        else if (src === "categories")
+          list = channels.filter((c) => c.parent_id && pickedCategories.includes(c.parent_id) && enabledKinds.has(c.kind));
+        else list = channels.filter((c) => c.kind !== CATEGORY_KIND && enabledKinds.has(c.kind));
+        return list.map((c) => [c.id, c]);
+      }
+
+      function renderNotes() {
+        const wrap = $("notes");
+        wrap.innerHTML = "";
+        const targets = noteTargets();
+        if (!targets.length) {
+          wrap.innerHTML = `<div class="hint">Nothing on the list yet — pick some roles or channels first.</div>`;
+          updateCounts();
+          return;
+        }
+        for (const [id, entity] of targets.slice(0, 60)) {
+          const row = document.createElement("div");
+          row.className = "note-row";
+          const who = document.createElement("span");
+          who.className = "who";
+          who.textContent = entity
+            ? (mode === "roles" ? entity.name : "#" + entity.name)
+            : id;
+          who.title = who.textContent;
+          const input = document.createElement("input");
+          input.type = "text";
+          input.maxLength = 150;
+          input.placeholder =
+            mode === "channels" && entity && entity.topic
+              ? entity.topic.slice(0, 60)
+              : "Optional description";
+          input.value = notes.get(id) || "";
+          input.addEventListener("input", () => {
+            const v = input.value.trim();
+            if (v) notes.set(id, input.value);
+            else notes.delete(id);
+            updateCounts();
+          });
+          row.append(who, input);
+          wrap.appendChild(row);
+        }
+        if (targets.length > 60) {
+          const more = document.createElement("div");
+          more.className = "hint";
+          more.textContent = `Showing the first 60 of ${targets.length}.`;
+          wrap.appendChild(more);
+        }
+        updateCounts();
+      }
+
+      // ── Access gate ──────────────────────────────────────────────────────
+      function renderGateRoles() {
+        const wrap = $("gateRoles");
+        const q = ($("gateSearch").value || "").trim().toLowerCase();
+        wrap.innerHTML = "";
+        const shown = roles.filter((r) => !q || r.name.toLowerCase().includes(q));
+        if (!roles.length) wrap.innerHTML = `<div class="hint">No roles loaded.</div>`;
+        else if (!shown.length) wrap.innerHTML = `<div class="hint">No roles match.</div>`;
+        for (const r of shown) {
+          const row = document.createElement("label");
+          row.className = "item";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = gateRoles.has(r.id);
+          input.addEventListener("change", () => {
+            if (input.checked) gateRoles.add(r.id);
+            else gateRoles.delete(r.id);
+            updateCounts();
+          });
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = hexColor(r.color);
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = r.name;
+          row.append(input, dot, name);
+          wrap.appendChild(row);
+        }
+        updateCounts();
+      }
+      $("minAge").addEventListener("change", updateCounts);
+
+      // ── Accent ───────────────────────────────────────────────────────────
+      $("accent").addEventListener("input", () => {
+        accent = parseInt($("accent").value.slice(1), 16);
+        updateCounts();
+      });
+      $("clearAccent").addEventListener("click", () => {
+        accent = null;
+        updateCounts();
+      });
+
+      // ── Visibility hint ──────────────────────────────────────────────────
+      $("visibility").addEventListener("change", updateCounts);
+      function renderPublicHint() {
+        const pub = $("visibility").value === "public";
+        $("publicHint").innerHTML = pub
+          ? "Everyone in the channel sees each answer — good for a one-off staff announcement, noisy on a busy button. Mentions never ping."
+          : "Only the person clicking sees the answer, so the channel stays clean however often it's used.";
+      }
+
+      // ── Select-target note ───────────────────────────────────────────────
+      // A menu offers one section per option, so it needs sections to exist.
+      function currentSections() {
+        if (mode === "roles") {
+          return groups.map((g) => ({
+            value: "g:" + g.key,
+            label: (g.name || "Section").slice(0, 100),
+            emoji: (g.emoji || "").trim(),
+          }));
+        }
+        if (channelSource() !== "categories") return [];
+        return pickedCategories.map((id) => {
+          const c = channelById(id);
+          return { value: "c:" + id, label: (c ? c.name : id).slice(0, 100), emoji: "" };
+        });
+      }
+
+      function renderSelectNote() {
+        const box = $("selectNote");
+        if (target !== "string_select") {
+          box.style.display = "none";
+          return;
+        }
+        const sections = currentSections();
+        if (sections.length) {
+          box.className = "callout good";
+          box.innerHTML =
+            `✓ DWEEB wires ${sections.length} option${sections.length === 1 ? "" : "s"} onto your menu and locks them — a member picks a section and sees just that part. Plus an <b>Everything</b> option. Just <b>Save</b>.`;
+        } else {
+          box.className = "callout warn";
+          box.innerHTML =
+            mode === "roles"
+              ? "A menu needs <b>groups</b> to choose from — add at least one above, or attach this to a button instead."
+              : "A menu needs <b>categories</b> to choose from — switch “Which channels?” to <b>Everything in the categories I pick</b>, or attach this to a button instead.";
+        }
+        box.style.display = "";
+      }
+
+      // ── Counts / summaries ───────────────────────────────────────────────
+      function updateCounts() {
+        $("roleCount").textContent = pickedRoles.length ? `(${pickedRoles.length}/${MAX_ROLES})` : "";
+        $("groupCount").textContent = groups.length ? `(${groups.length}/${MAX_GROUPS})` : "";
+        $("channelCount").textContent = pickedChannels.length ? `(${pickedChannels.length}/${MAX_CHANNELS})` : "";
+        $("categoryCount").textContent = pickedCategories.length ? `(${pickedCategories.length}/${MAX_CATEGORIES})` : "";
+        $("noteCount").textContent = notes.size ? `(${notes.size} written)` : "";
+        $("reqCount").textContent = gateRoles.size ? `(${gateRoles.size} selected)` : "";
+        $("requireAllWrap").style.display = gateRoles.size > 1 ? "" : "none";
+        $("reqIntro").style.display = gateRoles.size || +$("minAge").value ? "none" : "";
+        $("accent").value = accent === null ? "#5865f2" : hexColor(accent);
+        $("accent").style.opacity = accent === null ? "0.45" : "1";
+        renderPublicHint();
+        renderSelectNote();
+
+        // The disclosure stays COLLAPSED by default, so this line on the closed
+        // summary is what keeps a written description or a saved gate from being
+        // silently invisible behind it.
+        const bits = [];
+        if (notes.size) bits.push(`${notes.size} description${notes.size === 1 ? "" : "s"}`);
+        if (gateRoles.size) bits.push(`gate: ${gateRoles.size} role${gateRoles.size === 1 ? "" : "s"}`);
+        if (+$("minAge").value) bits.push("account age");
+        $("advSummary").textContent = bits.length ? `(${bits.join(" · ")})` : "";
+        sendResize();
+      }
+
+      function renderAll() {
+        renderMode();
+        renderRoleSource();
+        renderChannelSource();
+        renderMembers();
+        renderRoles();
+        renderChannels();
+        renderCategories();
+        renderKinds();
+        renderGroups();
+        renderNotes();
+        renderGateRoles();
+        updateCounts();
+      }
+
+      // ── DWEEB protocol ──────────────────────────────────────────────────
+      parent.postMessage({ type: "dweeb:plugin:ready", apiVersion: 2 }, "*");
+
+      window.addEventListener("message", async (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "dweeb:plugin:response" && pendingReqs.has(msg.requestId)) {
+          const resolve = pendingReqs.get(msg.requestId);
+          pendingReqs.delete(msg.requestId);
+          resolve(msg.ok ? msg.data : null);
+          return;
+        }
+
+        if (msg.type !== "dweeb:plugin:init") return;
+        nonce = msg.nonce;
+        hostOrigin = event.origin;
+        protocolVersion = msg.apiVersion === 2 ? 2 : 1;
+        managementToken =
+          protocolVersion >= 2 && /^[0-9a-f]{64}$/.test(msg.managementToken || "")
+            ? msg.managementToken
+            : null;
+        if (msg.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+        target = msg.target === "string_select" ? "string_select" : "button";
+
+        await loadMeta();
+        const guild = await requestResource("guild");
+        if (guild && typeof guild.id === "string" && isSnowflake(guild.id)) {
+          autoGuild = true;
+          $("guildId").value = guild.id;
+          guildName = typeof guild.name === "string" ? guild.name : "";
+        }
+
+        if (typeof msg.customId === "string" && msg.customId.startsWith(PREFIX)) {
+          instanceId = msg.customId.slice(PREFIX.length);
+          await loadInstance(instanceId);
+        }
+        // A preset only ever seeds a FRESH attach — never overwrites a saved
+        // configuration the host came back to edit.
+        if (!instanceId) {
+          const seed = typeof msg.preset === "string" ? PRESETS.find((p) => p.id === msg.preset) : null;
+          if (seed) applyPreset(seed);
+        }
+
+        renderAll();
+        renderServerIntro();
+        await maybeConnect();
+      });
+
+      const pendingReqs = new Map();
+      function requestResource(resource) {
+        return new Promise((resolve) => {
+          if (nonce == null) return resolve(null);
+          const requestId = "req_" + Math.random().toString(36).slice(2);
+          pendingReqs.set(requestId, resolve);
+          parent.postMessage({ type: "dweeb:plugin:request", nonce, requestId, resource }, hostOrigin);
+          setTimeout(() => {
+            if (pendingReqs.has(requestId)) {
+              pendingReqs.delete(requestId);
+              resolve(null);
+            }
+          }, 4000);
+        });
+      }
+
+      function sendResize() {
+        if (nonce == null) return;
+        parent.postMessage(
+          { type: "dweeb:plugin:resize", nonce, height: document.body.scrollHeight + 24 },
+          hostOrigin,
+        );
+      }
+
+      async function loadMeta() {
+        try {
+          const res = await fetch("/api/meta");
+          if (res.ok) {
+            const m = await res.json();
+            defaultBot = !!m.defaultBot;
+            inviteUrl = m.inviteUrl || null;
+            maxMembersCap = m.maxMembersPerRole || 50;
+            $("maxMembers").max = String(maxMembersCap);
+          }
+        } catch {
+          /* leave defaults */
+        }
+      }
+
+      // ── Live read ────────────────────────────────────────────────────────
+      async function maybeConnect() {
+        if (!defaultBot) {
+          return showUnavailable(
+            "This DWEEB deployment has no shared bot configured, so a directory can't read your server. Ask whoever runs it.",
+          );
+        }
+        const gid = $("guildId").value.trim();
+        if (!isSnowflake(gid)) return;
+        try {
+          const res = await fetch("/api/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ guild_id: gid }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            return showUnavailable(
+              escapeHtml(data.error || "Couldn't read this server.") +
+                (inviteUrl ? ` <a href="${inviteUrl}" target="_blank" rel="noopener">Add the bot</a> and reopen.` : ""),
+            );
+          }
+          connected = true;
+          guildName = data.guild_name || guildName;
+          roles = Array.isArray(data.roles) ? data.roles : [];
+          channels = Array.isArray(data.channels) ? data.channels : [];
+          membersAvailable = !!data.members_available;
+
+          // Drop anything saved that no longer exists in the server, so a stale
+          // pick can never reach a save (or render as a dead id).
+          const roleIds = new Set(roles.map((r) => r.id));
+          const channelIds = new Set(channels.map((c) => c.id));
+          pickedRoles = pickedRoles.filter((id) => roleIds.has(id));
+          pickedChannels = pickedChannels.filter((id) => channelIds.has(id));
+          pickedCategories = pickedCategories.filter((id) => channelIds.has(id));
+          gateRoles = new Set([...gateRoles].filter((id) => roleIds.has(id)));
+          for (const g of groups) g.role_ids = g.role_ids.filter((id) => pickedRoles.includes(id));
+          for (const id of [...notes.keys()]) {
+            if (!roleIds.has(id) && !channelIds.has(id)) notes.delete(id);
+          }
+
+          $("rolesUnavailable").style.display = "none";
+          $("channelsUnavailable").style.display = "none";
+          $("rolesWrap").classList.remove("locked");
+          $("gateWrap").classList.remove("locked");
+          renderAll();
+          renderServerIntro();
+        } catch {
+          showUnavailable("Couldn't reach the directory service to read your server.");
+        }
+      }
+
+      // ── Reconfigure ─────────────────────────────────────────────────────
+      async function loadInstance(id) {
+        try {
+          const res = await fetch(`/api/instances/${encodeURIComponent(id)}`);
+          if (!res.ok) return;
+          const d = await res.json();
+          guildName = d.guild_name || guildName;
+          if (d.guild_id && isSnowflake(d.guild_id)) $("guildId").value = d.guild_id;
+          mode = d.mode === "channels" ? "channels" : "roles";
+          $("title").value = d.title || "";
+          $("intro").value = d.intro || "";
+          $("visibility").value = d.public ? "public" : "private";
+          accent = typeof d.accent_color === "number" ? d.accent_color : null;
+
+          $("roleSource").value = d.role_source || "picked";
+          pickedRoles = (d.roles || []).map((r) => r.id);
+          groups = (d.groups || []).map((g) => ({
+            key: g.key,
+            name: g.name || "",
+            emoji: g.emoji || "",
+            role_ids: Array.isArray(g.role_ids) ? g.role_ids.slice() : [],
+          }));
+          // Keep the counter clear of the STORED keys — a group's key is a select
+          // option value, so re-using one would make two options collide.
+          nextGroupKey = 1;
+          $("showMembers").checked = !!d.show_members;
+          $("maxMembers").value = String(d.max_members_per_role || 20);
+          $("includeBots").value = d.include_bots ? "yes" : "no";
+          $("hideEmpty").checked = !!d.hide_empty_roles;
+          $("showPermissions").checked = d.show_permissions !== false;
+
+          $("channelSource").value = d.channel_source || "all";
+          pickedChannels = (d.channels || []).map((c) => c.id);
+          pickedCategories = (d.categories || []).map((c) => c.id);
+          if (Array.isArray(d.include_kinds) && d.include_kinds.length)
+            enabledKinds = new Set(d.include_kinds);
+          $("showTopics").checked = d.show_topics !== false;
+          $("groupByCategory").checked = d.group_by_category !== false;
+          $("requireTopic").checked = !!d.require_topic;
+
+          notes = new Map((d.notes || []).map((n) => [n.id, n.text || ""]));
+          const reqs = d.requirements || {};
+          gateRoles = new Set((reqs.roles || []).map((r) => r.id));
+          $("requireAll").checked = !!reqs.require_all;
+          $("minAge").value = String(reqs.min_account_age_days || 0);
+
+          // Seed the pickers from the saved config so the form isn't blank while
+          // the live read is in flight; maybeConnect() then replaces them.
+          const seedRoles = [...(d.roles || []), ...(reqs.roles || [])];
+          for (const r of seedRoles)
+            if (!roleById(r.id)) roles.push({ id: r.id, name: r.name || r.id, color: r.color || 0, badges: [] });
+          for (const c of [...(d.channels || []), ...(d.categories || [])])
+            if (!channelById(c.id)) channels.push({ id: c.id, name: c.name || c.id, kind: c.kind || 0 });
+        } catch {
+          /* fresh form */
+        }
+      }
+
+      // ── Starter templates ───────────────────────────────────────────────
+      // Applied only via the host's `init.preset` (the plugin library or a
+      // template named it), and only on a fresh attach.
+      const PRESETS = [
+        {
+          id: "directory-staff",
+          mode: "roles",
+          roleSource: "staff",
+          title: "Our staff",
+          intro: "The people who keep this place running. Please don't DM — use the support channel.",
+          showMembers: true,
+          showPermissions: true,
+        },
+        {
+          id: "directory-roles",
+          mode: "roles",
+          roleSource: "hoisted",
+          title: "Server roles",
+          intro: "What each role means, and who has it.",
+          showMembers: false,
+          showPermissions: true,
+        },
+        {
+          id: "directory-channels",
+          mode: "channels",
+          channelSource: "all",
+          title: "Channel directory",
+          intro: "Every channel in the server and what it's for.",
+          requireTopic: true,
+        },
+        {
+          id: "directory-start-here",
+          mode: "channels",
+          channelSource: "picked",
+          title: "Start here",
+          intro: "The three channels worth reading before you post.",
+          requireTopic: false,
+        },
+      ];
+
+      function applyPreset(p) {
+        mode = p.mode;
+        if (p.roleSource) $("roleSource").value = p.roleSource;
+        if (p.channelSource) $("channelSource").value = p.channelSource;
+        $("title").value = p.title || "";
+        $("intro").value = p.intro || "";
+        $("showMembers").checked = !!p.showMembers;
+        $("showPermissions").checked = p.showPermissions !== false;
+        $("requireTopic").checked = !!p.requireTopic;
+        accent = 0x5865f2;
+      }
+
+      // ── Save ────────────────────────────────────────────────────────────
+      $("cancel").addEventListener("click", () => {
+        parent.postMessage({ type: "dweeb:plugin:cancel", nonce }, hostOrigin);
+      });
+      $("save").addEventListener("click", save);
+
+      function roleRefs(ids) {
+        return ids
+          .map((id) => roleById(id))
+          .filter(Boolean)
+          .map((r) => ({ id: r.id, name: r.name, color: r.color || 0 }));
+      }
+      function channelRefs(ids) {
+        return ids
+          .map((id) => channelById(id))
+          .filter(Boolean)
+          .map((c) => ({ id: c.id, name: c.name, kind: c.kind || 0 }));
+      }
+
+      function summaryLine() {
+        if (mode === "roles") {
+          const src = roleSource();
+          const what =
+            src === "picked"
+              ? `${pickedRoles.length} role${pickedRoles.length === 1 ? "" : "s"}`
+              : src === "hoisted"
+                ? "displayed roles"
+                : "staff roles";
+          return `Roles · ${what}${$("showMembers").checked ? " · with members" : ""}`;
+        }
+        const src = channelSource();
+        const what =
+          src === "picked"
+            ? `${pickedChannels.length} channel${pickedChannels.length === 1 ? "" : "s"}`
+            : src === "categories"
+              ? `${pickedCategories.length} categor${pickedCategories.length === 1 ? "y" : "ies"}`
+              : "every channel";
+        return `Channels · ${what}`;
+      }
+
+      async function save() {
+        $("error").textContent = "";
+        const guildId = $("guildId").value.trim();
+        if (!autoGuild || !isSnowflake(guildId))
+          return fail("Connect your server in DWEEB first — sign in and pick it, then reopen this panel.");
+
+        // Local pre-flight so the common mistakes get an instant answer. The
+        // service re-checks all of this — the browser is untrusted.
+        if (mode === "roles") {
+          const grouped = groups.some((g) => g.role_ids.length);
+          if (roleSource() === "picked" && !pickedRoles.length)
+            return fail("Pick at least one role to list — or switch “Which roles?” to build the list from the server automatically.");
+          if (grouped && groups.every((g) => !g.role_ids.length))
+            return fail("Your groups are empty — add roles to them, or remove them for one flat list.");
+        } else {
+          if (channelSource() === "picked" && !pickedChannels.length)
+            return fail("Pick at least one channel to list — or switch to “Every channel”.");
+          if (channelSource() === "categories" && !pickedCategories.length)
+            return fail("Pick at least one category — or switch to “Every channel”.");
+          if (!enabledKinds.size) return fail("Leave at least one channel type enabled.");
+        }
+        const sections = currentSections();
+        if (target === "string_select" && !sections.length)
+          return fail(
+            mode === "roles"
+              ? "A menu needs at least one group to choose from. Add a group, or attach this to a button instead."
+              : "A menu needs categories to choose from. Switch “Which channels?” to the category option, or attach this to a button instead.",
+          );
+
+        const onList = new Set(noteTargets().map(([id]) => id));
+
+        // Only keep groups that have roles in them — an empty section would
+        // render as a bare heading (and, on a menu, an option that shows nothing).
+        const cleanGroups = groups
+          .filter((g) => g.role_ids.length)
+          .map((g) => ({
+            key: g.key,
+            name: (g.name || "").trim(),
+            emoji: (g.emoji || "").trim() || null,
+            role_ids: g.role_ids.slice(),
+          }));
+
+        const body = {
+          target,
+          mode,
+          guild_id: guildId,
+          guild_name: guildName || "",
+          title: $("title").value.trim() || null,
+          intro: $("intro").value.trim() || null,
+          public: $("visibility").value === "public",
+          accent_color: accent,
+          // Only keep descriptions for things actually on the list. Switching
+          // mode or narrowing a source leaves the old text in `notes`, and a
+          // description that outlives what it described would sit in the config
+          // forever, count against the note cap, and reappear if the host ever
+          // switched back.
+          notes: [...notes.entries()]
+            .filter(([id]) => onList.has(id))
+            .map(([id, text]) => ({ id, text: (text || "").trim() }))
+            .filter((n) => n.text),
+          requirements: {
+            roles: roleRefs([...gateRoles]),
+            require_all: gateRoles.size > 1 && $("requireAll").checked,
+            min_account_age_days: parseInt($("minAge").value, 10) || 0,
+          },
+          role_source: roleSource(),
+          roles: roleRefs(pickedRoles),
+          groups: cleanGroups,
+          show_members: $("showMembers").checked,
+          max_members_per_role: Math.max(1, Math.min(maxMembersCap, parseInt($("maxMembers").value, 10) || 20)),
+          include_bots: $("includeBots").value === "yes",
+          show_permissions: $("showPermissions").checked,
+          hide_empty_roles: $("hideEmpty").checked,
+          channel_source: channelSource(),
+          channels: channelRefs(pickedChannels),
+          categories: channelRefs(pickedCategories),
+          include_kinds: [...enabledKinds],
+          require_topic: $("requireTopic").checked,
+          group_by_category: $("groupByCategory").checked,
+          show_topics: $("showTopics").checked,
+        };
+
+        setBusy(true);
+        try {
+          // In-place update needs the browser-local edit credential; without it
+          // (another browser, cleared storage) save a fresh replacement list and
+          // let DWEEB rebind the component. A directory keeps no per-member
+          // state, so unlike a poll or a giveaway a replacement loses nothing
+          // except this config — which is being rewritten anyway.
+          const canUpdate = !!(instanceId && managementToken);
+          const url = canUpdate
+            ? `/api/instances/${encodeURIComponent(instanceId)}`
+            : "/api/instances";
+          const res = await fetch(url, {
+            method: canUpdate ? "PUT" : "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(canUpdate ? { "X-DWEEB-Plugin-Edit-Token": managementToken } : {}),
+            },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setBusy(false);
+            if (res.status === 403) {
+              managementToken = null;
+              return fail(
+                "Edit access is no longer available in this browser. Save again to create a replacement list — nothing is lost, a directory keeps no history.",
+              );
+            }
+            return fail(data.error || `Server returned ${res.status}.`);
+          }
+          const id = data.id || instanceId;
+          const nextManagementToken = /^[0-9a-f]{64}$/.test(data.managementToken || "")
+            ? data.managementToken
+            : managementToken;
+          if (protocolVersion >= 2 && !nextManagementToken) {
+            setBusy(false);
+            return fail("The plugin service did not return edit access. Reload and try again.");
+          }
+
+          parent.postMessage(
+            {
+              type: "dweeb:plugin:save",
+              nonce,
+              customId: PREFIX + id,
+              guildId,
+              summary: {
+                label: mode === "roles" ? "Role directory" : "Channel directory",
+                description: summaryLine(),
+              },
+              // For a menu, hand DWEEB the section options to wire + lock, and
+              // pin the pick bounds to exactly one — the renderer resolves a
+              // single section, so a widened menu would silently ignore the rest.
+              ...(target === "string_select"
+                ? {
+                    options: [
+                      ...sections.map((s) => ({
+                        label: s.label,
+                        value: s.value,
+                        ...(s.emoji ? { emoji: { name: s.emoji } } : {}),
+                      })),
+                      { label: "Everything", value: "all", emoji: { name: "🗂️" } },
+                    ].slice(0, 25),
+                    fields: { min_values: 1, max_values: 1 },
+                  }
+                : {}),
+              ...(protocolVersion >= 2 && nextManagementToken
+                ? { managementToken: nextManagementToken }
+                : {}),
+            },
+            hostOrigin,
+          );
+        } catch {
+          setBusy(false);
+          fail("Couldn't reach the directory service.");
+        }
+      }
+
+      function fail(m) {
+        $("error").textContent = m;
+        sendResize();
+      }
+      function setBusy(b) {
+        $("save").disabled = b;
+        $("save").textContent = b ? "Saving…" : "Save";
+      }
+    </script>
+  </body>
+</html>

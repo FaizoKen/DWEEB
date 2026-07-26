@@ -739,7 +739,14 @@ under a hard latency budget. Its file layout is the suggested skeleton:
 
 The other bundled plugins are narrower references: [`ping-pong`](../plugins/ping-pong/)
 (minimal stateless), [`modal-form`](../plugins/modal-form/) (the iframe + a
-forwarding flow), [`dispatcher`](../plugins/dispatcher/) (routing).
+forwarding flow), [`dispatcher`](../plugins/dispatcher/) (routing), and
+[`directory`](../plugins/directory/) — the reference for a **read-only** plugin
+that answers from live guild data. Look at it for three problems the others
+don't have: a `render.rs` that keeps a reply inside the Components V2 4000-character
+budget while building it, per-guild caches bounded by both lifetime and
+cardinality (with the permit pool doubling as single-flight), and a feature that
+depends on a **privileged Discord intent** and degrades honestly when it's off
+rather than requiring it.
 
 ### Checklist
 

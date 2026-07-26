@@ -13,7 +13,7 @@ in a tool-private memory store.
 
 Visual Discord webhook & embed builder for Components V2 messages (Preact SPA), plus a
 Rust backend (`server/` = API proxy, `plugins/dispatcher` = interaction dispatcher,
-plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborative builder).
+plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborative builder).
 
 ## Commands
 
@@ -37,8 +37,8 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   telemetry). `src/features` — UI features. `src/activity` — Discord Activity entry.
 - `server/src` — Rust API proxy: Discord/OAuth auth, plain-SQLite shortlinks, and
   SQLite-backed schedules/message library/Activity drafts whose sensitive payloads are sealed.
-- `plugins/*` — 9 Rust crates total: the dispatcher plus ping-pong, tickets, giveaway,
-  quick-replies, self-role, modal-form, picker, and poll.
+- `plugins/*` — 10 Rust crates total: the dispatcher plus ping-pong, tickets, giveaway,
+  quick-replies, self-role, modal-form, picker, poll, and directory.
 
 ## Conventions & gotchas (hard-won — do not rediscover)
 
@@ -235,10 +235,36 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   route (a peer's collab op) is blocked from send instead of silently 400ing at Discord. When
   adding a field the schema layer will walk unguarded, guarantee it here. Guarded by the
   malformed-payload tests in `serialization/encode.test.ts` + `schema/validation.test.ts`.
+- **The Directory plugin's member expansion is an enhancement, never a requirement**
+  (`plugins/directory`, prefix `directory:`, port 8099, added 2026-07-26). It answers a click
+  with a live read of the guild in one of two modes — a role/staff roster or a channel index
+  with topics. `GET /guilds/{id}/roles` and `/channels` need **no permission bit** (guild
+  membership is enough) and this plugin never writes, but `GET /guilds/{id}/members` is gated
+  behind Discord's privileged **GUILD_MEMBERS (Server Members) intent**. So "show who holds
+  each role" degrades: `MemberScanOutcome::Unavailable` renders the full roster (mentions,
+  colours, permission badges, host notes) plus one line saying member lists aren't available,
+  logged at **info** — an intent being off is a deployment's steady state, not an incident, and
+  `info` keeps it out of the paging channel. `/api/connect` returns `members_available` so the
+  config UI says so *before* the host enables it. Don't restructure this into a hard dependency,
+  and don't make the refusal a 5xx. Three more load-bearing details: (1) a roster is built from
+  `<@&role>`/`<@user>` **mentions** (colour pill, clickable, rename-proof), so every reply sets
+  `allowed_mentions: {parse: []}` — without it one click on a *public* staff list pings the whole
+  team; (2) only a member-expanding roster **defers** (type 5 + `PATCH …/messages/@original`) —
+  a structure read is three concurrent requests and answers inline, and the defer's ephemeral bit
+  must match the config because Discord fixes visibility at the defer; (3) the member scan is
+  bounded by a page cap, an index holding **only the roles actually on show** (kilobytes per
+  guild regardless of guild size), and one permit pool that doubles as single-flight — a
+  truncated scan labels its counts a minimum rather than implying a complete roster. Channel
+  topics are member-written text rendered into a block joined on `\n`, and Discord's inline
+  styles cross newlines, so they are markdown-escaped and collapsed to one line (an unbalanced
+  `*` would otherwise italicise every channel after it). Guarded by the tests in
+  `render.rs`/`discord.rs`/`rest.rs`.
 - **Adding an interaction plugin** touches the crate, compose service/volume + dispatcher
   `ROUTES`, Caddyfile, registry, `server/gatus/config.yaml`, `plugins-ci.yml` matrix,
   `.github/workflows/plugin-<id>.yml`, and `deploy.yml`'s workflow list. A link plugin is
-  registry-only (no backend service). Plugin config iframes are forced dark theme.
+  registry-only (no backend service). Plugin config iframes are forced dark theme. Ports in
+  use: 8090 modal-form, 8091 ping-pong, 8092 self-role, 8093 tickets, 8094 giveaway,
+  8095 dispatcher, 8096 quick-replies, 8097 picker, 8098 poll, 8099 directory.
 - Every interaction plugin must verify custom-app signatures through the dispatcher-forwarded
   key attestation; `DISPATCHER_FORWARD_SECRET` must match the dispatcher and every plugin.
 - **Component expiry is a sliding window, enforced in the dispatcher** (2026-07-18; was a
@@ -305,7 +331,7 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   in each crate's `rest.rs`. When adding a plugin route, ask "would an ordinary user action reach
   this branch?" — if yes it is 4xx, never 5xx.
 - **Every router answers an unroutable path *after* draining the request body** (`not_found`,
-  wired with `.fallback()` in all 10 Rust `main.rs` files — proxy + dispatcher + 8 plugins).
+  wired with `.fallback()` in all 11 Rust `main.rs` files — proxy + dispatcher + 9 plugins).
   Axum's default fallback answers 404 without touching the body, so hyper can't reuse the
   connection and closes it; Caddy, still copying that body upstream, reports
   `write: broken pipe`, throws the 404 away and synthesises a **502** — which it logs at ERROR,
@@ -621,10 +647,10 @@ plus 8 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 
 ## CI
 
-- `web.yml` — FE build + Vitest + GitHub Pages deploy. `server.yml` — Rust fmt/clippy/test. `plugins-ci.yml` — fmt/clippy/test matrix over all 9 crates. `deploy.yml` — backend CD.
+- `web.yml` — FE build + Vitest + GitHub Pages deploy. `server.yml` — Rust fmt/clippy/test. `plugins-ci.yml` — fmt/clippy/test matrix over all 10 crates. `deploy.yml` — backend CD.
 - **Workflows must not depend on `api.github.com` at runtime** — calls to it from Actions
   runners fail intermittently (HTML error page). This broke `setup-bun`'s version lookup
-  (fixed by pinning `bun-version` in `web.yml`) and `docker/metadata-action` in all 9 image
+  (fixed by pinning `bun-version` in `web.yml`) and `docker/metadata-action` in all 10 image
   workflows (replaced 2026-07-17 with a shell tag-derivation step + static OCI labels; keep
   the `sha-<short>` tag scheme — `deploy.yml` rollback relies on it). Don't reintroduce
   actions that query the GitHub API mid-job.

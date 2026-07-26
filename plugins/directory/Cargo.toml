@@ -1,0 +1,54 @@
+[package]
+name = "dweeb-directory"
+version = "0.1.0"
+edition = "2021"
+description = "DWEEB plugin: answer a click with a live directory of the server — a grouped staff/role roster (with permission badges and optional member expansion) or a channel index with each channel's topic. Read-only; nothing is ever changed in the server."
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "net",
+    "time",
+    "sync",
+] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+# Loads a local `.env` for `cargo run`; a no-op under Docker (which injects env).
+dotenvy = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Reads the guild's roles / channels / members from the Discord REST API and
+# (for a deferred reply) edits the interaction's original response. rustls
+# avoids an OpenSSL system dependency, keeping the deploy image tiny.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
+# Verify Discord's Ed25519 interaction signatures.
+ed25519-dalek = "2"
+hex = "0.4"
+# Single-file embedded store — no separate DB server to pay for. `bundled`
+# compiles SQLite from source, so the image needs no system libsqlite.
+rusqlite = { version = "0.31", features = ["bundled"] }
+# CSPRNG for opaque instance ids and separate edit credentials.
+getrandom = "0.2"
+# Store only a one-way digest of each edit credential.
+sha2 = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# Builds a *counting* streaming request body, so the unroutable-path test can
+# assert the fallback actually drained it rather than just answered 404. Dev-only,
+# so it never reaches the deployed image.
+tokio-stream = "0.1"
+
+# Small, low-throughput service — optimise the release binary for size so it
+# fits the cheapest hosting tiers.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
