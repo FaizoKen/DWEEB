@@ -321,7 +321,7 @@
       "schemaVersion": 1,
       "id": "directory",
       "name": "Directory",
-      "description": "Answer a click with a live list of the server — a grouped staff roster (roles, permission badges, who holds them) or a channel index with each channel's topic. Read-only, always current.",
+      "description": "Answer a click with a live list of the server — a grouped staff roster (roles, permission badges, your own notes) or a channel index with each channel's topic. Read-only, always current.",
       "version": "0.1.0",
       "publisher": "DWEEB",
       "homepage": "https://github.com/FaizoKen/DWEEB/tree/main/plugins/directory",
@@ -347,7 +347,7 @@
         {
           "id": "directory-staff",
           "name": "Staff list",
-          "description": "Owners, admins and moderators in named groups, with who holds each role.",
+          "description": "Owners, admins and moderators in named groups, each with what it can do.",
           "emoji": "🛡️"
         },
         {

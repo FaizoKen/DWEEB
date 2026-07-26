@@ -235,41 +235,53 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   route (a peer's collab op) is blocked from send instead of silently 400ing at Discord. When
   adding a field the schema layer will walk unguarded, guarantee it here. Guarded by the
   malformed-payload tests in `serialization/encode.test.ts` + `schema/validation.test.ts`.
-- **The Directory plugin's member expansion is an enhancement, never a requirement**
-  (`plugins/directory`, prefix `directory:`, port 8099, added 2026-07-26). It answers a click
-  with a live read of the guild in one of two modes — a role/staff roster or a channel index
-  with topics. `GET /guilds/{id}/roles` and `/channels` need **no permission bit** (guild
-  membership is enough) and this plugin never writes, but `GET /guilds/{id}/members` is gated
-  behind Discord's privileged **GUILD_MEMBERS (Server Members) intent**. So "show who holds
-  each role" degrades: `MemberScanOutcome::Unavailable` renders the full roster (mentions,
-  colours, permission badges, host notes) plus one line saying member lists aren't available,
-  logged at **info** — an intent being off is a deployment's steady state, not an incident, and
-  `info` keeps it out of the paging channel. `/api/connect` returns `members_available` so the
-  config UI says so *before* the host enables it. Don't restructure this into a hard dependency,
-  and don't make the refusal a 5xx. Three more load-bearing details: (1) a roster is built from
-  `<@&role>`/`<@user>` **mentions** (colour pill, clickable, rename-proof), so every reply sets
-  `allowed_mentions: {parse: []}` — without it one click on a *public* staff list pings the whole
-  team; (2) only a member-expanding roster **defers** (type 5 + `PATCH …/messages/@original`) —
-  a structure read is three concurrent requests and answers inline, and the defer's ephemeral bit
-  must match the config because Discord fixes visibility at the defer; (3) the member scan is
-  bounded by a page cap, an index holding **only the roles actually on show** (kilobytes per
-  guild regardless of guild size), and one permit pool that doubles as single-flight — a
-  truncated scan labels its counts a minimum rather than implying a complete roster. Channel
-  topics are member-written text rendered into a block joined on `\n`, and Discord's inline
-  styles cross newlines, so they are markdown-escaped and collapsed to one line (an unbalanced
-  `*` would otherwise italicise every channel after it). Guarded by the tests in
-  `render.rs`/`discord.rs`/`rest.rs`.
-- **A Directory can write its list into the author's own message, and that path
-  defers an UPDATE, not a reply** (2026-07-26). `output` is `"reply"` (default — a
-  reply to the clicker) or `"message"`: the author puts `{directory}` in their own
-  text and a click re-stamps the message, so **everyone reads the list without
-  clicking** and any click refreshes it for all. Five non-obvious constraints, all
-  load-bearing: (1) a member-expanding roster in `"message"` output must answer
-  `DEFERRED_UPDATE_MESSAGE` (**type 6**), because after a deferred *reply* (type 5)
-  `@original` names the reply — the list would land in an invisible ephemeral
-  instead of the message it belongs to; (2) re-rendering always starts from the
-  stored **raw** template, never the live message, or the second click finds nothing
-  left to substitute and the list freezes at its first value; (3) the update must
+- **The Directory plugin needs no permission bit and no privileged intent — keep it that
+  way** (`plugins/directory`, prefix `directory:`, port 8099, added 2026-07-26). It answers a
+  click with a live read of the guild in one of two modes — a role/staff roster or a channel
+  index with topics — from `GET /guilds/{id}?with_counts=true` + `/roles` + `/channels`, all
+  of which work for a bot that is merely a guild member, and it never writes. There is
+  deliberately no deployment in which part of it works and the rest doesn't.
+  **"Who holds each role" was built and then removed (2026-07-26); don't rebuild it.**
+  `GET /guilds/{id}/members` is gated behind Discord's privileged **GUILD_MEMBERS (Server
+  Members) intent**, and nothing ungated substitutes: `/members/search` requires a name prefix
+  and cannot filter by role, and the role object carries no member count — verified against
+  Discord's docs, not assumed. It originally shipped as a graceful degradation (full roster +
+  one "Member lists aren't available right now." line, logged at info), which was correct
+  engineering but wrong product: **prod has the intent off permanently by the maintainer's
+  decision**, so the only thing that feature ever did in practice was put an apology in the
+  middle of members' messages — and in `"message"` output that apology read as the *author's
+  own words*. Removing it deleted the member scan, its cache/permit pool/page cap, three env
+  vars, and **the entire defer path** (see below). What replaced it: an opt-in, off-by-default
+  `show_member_count` rendering the guild's own `-# 1,204 members · 87 online` under the
+  heading. That rides on a request already being made, so it costs nothing, and an absent
+  count renders as **nothing** rather than `0` — Discord staying silent must never become a
+  false claim about someone's server. Three load-bearing details survive: (1) a roster is
+  built from `<@&role>` **mentions** (colour pill, clickable, rename-proof), so every reply
+  sets `allowed_mentions: {parse: []}` — without it one click on a *public* staff list pings
+  every role it names; (2) **nothing defers** — a read is three concurrent requests answering
+  inside Discord's ~3s window, so every response is terminal (no type 5/6, no
+  `PATCH …/messages/@original`, no interaction token retained); `every_response_this_plugin_can_send_is_terminal`
+  in discord.rs guards it, because a stray defer would look fine in review and show up as a
+  stuck spinner; (3) `InstanceConfig` has **no `deny_unknown_fields`** and must not gain one —
+  live instances still carry `show_members`/`max_members_per_role`/`include_bots`/
+  `hide_empty_roles` in their stored JSON, and rejecting those would take a posted, working
+  directory offline. Channel topics are member-written text rendered into a block joined on
+  `\n`, and Discord's inline styles cross newlines, so they are markdown-escaped and collapsed
+  to one line (an unbalanced `*` would otherwise italicise every channel after it). Guarded by
+  the tests in `render.rs`/`discord.rs`/`rest.rs`/`store.rs`.
+- **A Directory can write its list into the author's own message** (2026-07-26).
+  `output` is `"reply"` (default — a reply to the clicker) or `"message"`: the
+  author puts `{directory}` in their own text and a click re-stamps the message,
+  so **everyone reads the list without clicking** and any click refreshes it for
+  all. Five non-obvious constraints, all load-bearing: (1) the click answers an
+  immediate `UPDATE_MESSAGE` (**type 7**). It must never become a deferred
+  *reply* (type 5): after one, `@original` names the reply, so the list would
+  land in an invisible ephemeral instead of the message it belongs to. This arm
+  once deferred an UPDATE (type 6) to cover a slow member scan; that scan is gone
+  and so is the defer — see the plugin's entry above; (2) re-rendering always
+  starts from the stored **raw** template, never the live message, or the second
+  click finds nothing left to substitute and the list freezes at its first value;
+  (3) the update must
   repeat `IS_COMPONENTS_V2` for a V2 message and re-send `content` for a legacy one,
   or the edit **blanks the body**; (4) saving `"message"` output with **no**
   `{directory}` anywhere `substitute_tree` visits (`content`/`label`/`placeholder`

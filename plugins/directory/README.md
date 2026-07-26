@@ -38,40 +38,45 @@ readable by anyone at any time without interacting at all.
 
 ## What it needs
 
-**Only the shared DWEEB bot, invited to the server.** No permission bit:
-`GET /guilds/{id}/roles` and `/channels` work for any bot that is a member, and
-this plugin **never writes** anything to a server.
+**Only the shared DWEEB bot, invited to the server. Nothing else** — no permission
+bit and **no privileged intent**. `GET /guilds/{id}`, `/roles` and `/channels` all
+work for any bot that is simply a member, and this plugin **never writes**
+anything to a server. There is no deployment in which some of it works and the
+rest doesn't.
 
-### The one optional Discord setting
+### Why there is no "who holds each role"
 
-"Show who holds each role" reads `GET /guilds/{id}/members`, which Discord gates
-behind the privileged **Server Members Intent** (Developer Portal → Bot →
-Privileged Gateway Intents). Roles and channels do not need it.
+Because Discord doesn't offer it without the privileged **Server Members Intent**,
+and it can't be worked around:
 
-With the intent **off**, a roster still renders in full — roles, colours,
-permission badges, your descriptions — and adds one line saying member lists
-aren't available. The config panel probes this and tells the host before they
-turn the option on, and the feature lights up by itself once the intent is
-enabled. Member expansion is an enhancement here, never a requirement.
+- `GET /guilds/{id}/members` states the requirement outright.
+- `GET /guilds/{id}/members/search` — the one member endpoint that isn't gated —
+  requires a name prefix and **cannot filter by role**, so it enumerates nothing.
+- The role object carries no member count.
+
+An earlier version shipped this as a graceful degradation: with the intent off,
+the roster rendered and added "Member lists aren't available right now." In
+practice that put an apology in the middle of members' messages on every
+deployment that hadn't enabled the intent, which is most of them. It was removed
+rather than left to rot as a permanently dead option.
+
+What replaced it: an optional **"1,204 members · 87 online"** line under the
+heading. Those are the guild's own totals, they ride along on a request the
+plugin already makes (`?with_counts=true`), and they need no intent. If Discord
+doesn't send a total, the line is omitted rather than printed as `0`.
 
 ## Design notes worth knowing before changing it
 
-- **Mentions, not names.** A role renders as `<@&id>` and a member as `<@id>`, so
-  Discord paints its own colour pill, the entry is clickable, and a rename can't
-  stale the message. Every reply therefore sets `allowed_mentions: {parse: []}` —
-  **load-bearing**, not politeness: without it a *public* staff list would ping
-  every person and role it names on every single click.
-- **Only a member-expanding roster defers.** A structure read is three concurrent
-  requests and answers inline; a member scan pages at 1000 at a time, so it
-  answers "thinking…" and edits the real reply in. Deferring the cheap path would
-  add a visible flicker for nothing.
-- **The member scan is bounded three ways** and each bound matters: a page cap
-  (`MEMBER_SCAN_MAX_PAGES`, the hard ceiling on what one click can cost), an index
-  that keeps only the roles actually on show (so a cached scan is kilobytes, not
-  megabytes, whatever the guild's size), and one permit pool
-  (`MEMBER_SCAN_CONCURRENCY`) that doubles as single-flight — a burst of clicks on
-  one directory performs *one* scan. A truncated scan labels its counts as a
-  minimum rather than implying a complete roster.
+- **Mentions, not names.** A role renders as `<@&id>`, so Discord paints its own
+  colour pill, the entry is clickable, and a rename can't stale the message. Every
+  reply therefore sets `allowed_mentions: {parse: []}` — **load-bearing**, not
+  politeness: without it a *public* staff list would ping every role it names on
+  every single click.
+- **Nothing defers.** A read is three concurrent requests, which answers inside
+  Discord's ~3s window, so every click gets a terminal response — no "thinking…"
+  placeholder and no follow-up edit anywhere in the plugin. The defer path existed
+  only to cover the member scan and went with it. A guard test asserts no response
+  this plugin can build is type 5 or 6.
 - **Channel topics are untrusted text.** Discord's inline styles cross newlines,
   so one unbalanced `*` in a topic would italicise every channel listed after it.
   Topics are markdown-escaped and collapsed to a single line. Host-written copy
@@ -116,7 +121,7 @@ enabled. Member expansion is an enhancement here, never a requirement.
 | `GET /registry.json` | The plugin manifest DWEEB reads.                              |
 | `GET /config.html`   | The configuration iframe DWEEB embeds.                        |
 | `GET /api/meta`      | Capabilities the config UI adapts to.                         |
-| `POST /api/connect`  | Read a guild's roles/channels; reports `members_available`.    |
+| `POST /api/connect`  | Read a guild's roles/channels + identify the bot.              |
 | `POST /api/instances`         | Create a directory; returns the edit credential once. |
 | `GET|PUT /api/instances/:id`  | Read / replace one (PUT needs the credential).        |
 | `POST /interactions`          | Discord interactions (signature-verified).           |

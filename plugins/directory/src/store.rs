@@ -27,7 +27,6 @@ pub const MAX_TITLE: usize = 100;
 pub const MAX_INTRO: usize = 400;
 pub const MAX_NOTE_TEXT: usize = 150;
 pub const MAX_GROUP_NAME: usize = 60;
-pub const MAX_MEMBERS_PER_ROLE: u32 = 50;
 
 /// A role referenced by id. `name`/`color`/`position` are cached at save time so
 /// the config UI can render nicely and a reply can still name a role if a live
@@ -201,6 +200,16 @@ pub struct InstanceConfig {
     /// Container accent colour (24-bit). None = no accent stripe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accent_color: Option<u32>,
+    /// Add a "1,204 members · 87 online" line under the heading.
+    ///
+    /// These are the guild's own approximate totals, which ride along on the
+    /// `GET /guilds/{id}` call the structure read already makes (`?with_counts=1`)
+    /// — no extra request, no permission bit, and **no privileged intent**. They
+    /// are server-wide totals, never a per-role breakdown: Discord gates every
+    /// per-member read behind the privileged `GUILD_MEMBERS` intent, so a
+    /// breakdown is not something this plugin can offer at all.
+    #[serde(default)]
+    pub show_member_count: bool,
     /// Per-id host copy, for roles or channels depending on `mode`.
     #[serde(default)]
     pub notes: Vec<Note>,
@@ -220,33 +229,11 @@ pub struct InstanceConfig {
     /// Named sections. Empty = one flat list in Discord's hierarchy order.
     #[serde(default)]
     pub groups: Vec<Group>,
-    /// Expand each role into the members who hold it.
-    ///
-    /// This is the only part of the plugin that needs Discord's **privileged
-    /// `GUILD_MEMBERS` intent** — `GET /guilds/{id}/members` is gated on it while
-    /// roles and channels are not. It is therefore an *enhancement*: with the
-    /// intent off, the roster still renders (names, colours, permission badges,
-    /// host notes) and simply says the member list is unavailable. See
-    /// `rest::MemberScanOutcome`.
-    #[serde(default)]
-    pub show_members: bool,
-    /// Cap on names listed per role before "+N more". 1..=[`MAX_MEMBERS_PER_ROLE`].
-    #[serde(default = "default_max_members")]
-    pub max_members_per_role: u32,
-    /// List bot accounts alongside people. Off by default: a staff roster is
-    /// about people, and integration roles are usually held by a bot that would
-    /// pad every section. Counts follow the same rule, so "3 members" means
-    /// three humans unless this is on.
-    #[serde(default)]
-    pub include_bots: bool,
     /// Show a compact badge line derived from each role's permission bits
     /// ("Admin · Bans · Timeouts") — what makes a roster readable as a *staff*
-    /// list even when member expansion is unavailable.
+    /// list rather than a pile of coloured names.
     #[serde(default = "default_true")]
     pub show_permissions: bool,
-    /// Skip roles that nobody holds. Only meaningful once members are known.
-    #[serde(default)]
-    pub hide_empty_roles: bool,
 
     // ── Channels mode ───────────────────────────────────────────────────────
     /// `"picked"` (only `channels`), `"categories"` (everything under
@@ -287,9 +274,6 @@ fn default_channel_source() -> String {
 }
 fn default_output() -> String {
     OUTPUT_REPLY.to_string()
-}
-fn default_max_members() -> u32 {
-    20
 }
 fn default_true() -> bool {
     true
@@ -361,8 +345,6 @@ impl InstanceConfig {
         {
             self.channel_source = CHANNEL_SOURCE_ALL.to_string();
         }
-        self.max_members_per_role = self.max_members_per_role.clamp(1, MAX_MEMBERS_PER_ROLE);
-
         self.roles.truncate(MAX_ROLES);
         self.channels.truncate(MAX_CHANNELS);
         self.categories.truncate(MAX_CATEGORIES);
@@ -618,11 +600,8 @@ pub(crate) mod tests {
             role_source: ROLE_SOURCE_PICKED.into(),
             roles: vec![],
             groups: vec![],
-            show_members: false,
-            max_members_per_role: 20,
-            include_bots: false,
+            show_member_count: false,
             show_permissions: true,
-            hide_empty_roles: false,
             channel_source: CHANNEL_SOURCE_ALL.into(),
             channels: vec![],
             categories: vec![],
@@ -690,23 +669,41 @@ pub(crate) mod tests {
     #[test]
     fn normalize_clamps_counts_and_text() {
         let mut cfg = base_config();
-        cfg.max_members_per_role = 9999;
         cfg.title = Some(" ".repeat(4) + &"t".repeat(500));
         cfg.notes = vec![Note {
             id: "1".into(),
             text: "n".repeat(500),
         }];
         cfg.normalize();
-        assert_eq!(cfg.max_members_per_role, MAX_MEMBERS_PER_ROLE);
         assert_eq!(cfg.title.as_ref().unwrap().chars().count(), MAX_TITLE);
         assert_eq!(cfg.notes[0].text.chars().count(), MAX_NOTE_TEXT);
+    }
 
-        // A zero cap is raised to 1, never left at 0 (which would render every
-        // role as a bare "+N more").
-        let mut cfg = base_config();
-        cfg.max_members_per_role = 0;
-        cfg.normalize();
-        assert_eq!(cfg.max_members_per_role, 1);
+    /// Instances saved before member expansion was removed still carry
+    /// `show_members` & co. in their stored JSON. Deserialization must ignore
+    /// them rather than fail — a rejected config would take a *posted, working*
+    /// directory offline, turning a feature removal into an outage. There is no
+    /// `deny_unknown_fields` on `InstanceConfig`, and this test is what keeps it
+    /// that way.
+    #[test]
+    fn a_config_saved_with_the_old_member_options_still_loads() {
+        let stored = serde_json::json!({
+            "target": "button",
+            "mode": "roles",
+            "guild_id": "1",
+            "role_source": "staff",
+            "show_members": true,
+            "max_members_per_role": 20,
+            "include_bots": false,
+            "hide_empty_roles": true,
+            "show_permissions": true,
+        });
+        let cfg: InstanceConfig = serde_json::from_value(stored).expect("legacy config must load");
+        assert_eq!(cfg.role_source, ROLE_SOURCE_STAFF);
+        assert!(cfg.show_permissions);
+        // The removed options leave nothing behind: the roster renders as a plain
+        // role list, which is exactly what it did with the intent switched off.
+        assert!(!cfg.show_member_count);
     }
 
     /// A whitespace-only title is the same as no title: the renderer must fall
@@ -807,11 +804,11 @@ pub(crate) mod tests {
     fn create_then_get_round_trips_and_normalizes() {
         let (store, _dir) = temp_store();
         let mut cfg = base_config();
-        cfg.max_members_per_role = 9999; // stored raw, normalized on read
+        cfg.title = Some("t".repeat(500)); // stored raw, normalized on read
         store.create("abc", "t".repeat(64).as_str(), &cfg).unwrap();
         let loaded = store.get("abc").unwrap().expect("present");
         assert_eq!(loaded.guild_id, cfg.guild_id);
-        assert_eq!(loaded.max_members_per_role, MAX_MEMBERS_PER_ROLE);
+        assert_eq!(loaded.title.as_ref().unwrap().chars().count(), MAX_TITLE);
         assert!(store.get("nope").unwrap().is_none());
         store.ping().unwrap();
     }

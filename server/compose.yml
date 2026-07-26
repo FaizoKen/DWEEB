@@ -512,14 +512,10 @@ services:
       # dispatcher service above). Must match the dispatcher's value.
       DISPATCHER_FORWARD_SECRET: ${DISPATCHER_FORWARD_SECRET:-}
       # REQUIRED in practice — every directory is READ through this bot. It needs
-      # NO permission bit (listing roles/channels only requires membership) and
-      # this plugin never writes to a server. Unset and the config UI refuses to
-      # set a directory up. We point it at the main DWEEB bot.
-      #
-      # "Show who holds each role" additionally needs Discord's privileged
-      # SERVER MEMBERS INTENT enabled on the application. Without it the roster
-      # still renders in full and says member lists are unavailable — see
-      # plugins/directory/.env.example.
+      # NO permission bit (reading the guild/roles/channels only requires
+      # membership) and NO privileged intent, and this plugin never writes to a
+      # server. Unset and the config UI refuses to set a directory up. We point
+      # it at the main DWEEB bot.
       BOT_TOKEN: ${DIRECTORY_BOT_TOKEN:-}
       BOT_INVITE_URL: ${DIRECTORY_BOT_INVITE_URL:-}
       RUST_LOG: info

@@ -1372,7 +1372,7 @@ const STAFF_DIRECTORY_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.TextDisplay,
           content:
-            "# 🛡️ Meet the team\nThe people keeping **{server}** running. This list is live — it reads the server every time it's refreshed, so a rename or a new moderator shows up on its own.",
+            "# 🛡️ Meet the team\nThe teams keeping **{server}** running, and what each one can do. This list is live — it reads the server every time it's refreshed, so a renamed or newly added role shows up on its own.",
         },
         {
           _id: id(),

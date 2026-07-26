@@ -14,8 +14,8 @@ use serde_json::{json, Value};
 
 use crate::config::Config;
 use crate::discord::{self, PREFIX};
-use crate::render::{self, MemberState, RenderInput};
-use crate::rest::{self, Cache, MemberScanOutcome};
+use crate::render::{self, RenderInput};
+use crate::rest::{self, Cache};
 use crate::store::{EditLookup, InstanceConfig, MaskedInstance, Store};
 use crate::validate;
 
@@ -97,7 +97,6 @@ pub async fn meta(State(state): State<AppState>) -> Json<Value> {
         "apiVersion": 1,
         "defaultBot": state.config.has_default_bot(),
         "inviteUrl": state.config.bot_invite_url,
-        "maxMembersPerRole": crate::store::MAX_MEMBERS_PER_ROLE,
     }))
 }
 
@@ -131,11 +130,10 @@ pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectReque
         Ok(s) => s,
         Err(e) => return (e.status(), Json(json!({ "error": e.message() }))).into_response(),
     };
-    let (bot_id, bot_name, members_available) =
-        match rest::identify(&state.http, token, guild_id).await {
-            Ok(v) => v,
-            Err(e) => return (e.status(), Json(json!({ "error": e.message() }))).into_response(),
-        };
+    let (bot_id, bot_name) = match rest::identify(&state.http, token).await {
+        Ok(v) => v,
+        Err(e) => return (e.status(), Json(json!({ "error": e.message() }))).into_response(),
+    };
 
     // Opening the config panel is also the natural moment to drop any stale
     // cached read, so the host's next click reflects edits they just made in
@@ -146,7 +144,6 @@ pub async fn connect(State(state): State<AppState>, Json(req): Json<ConnectReque
         structure,
         bot_id,
         bot_name,
-        members_available,
     }))
     .into_response()
 }
@@ -331,48 +328,17 @@ async fn handle_component(state: &AppState, interaction: discord::Interaction) -
         .into_response();
     };
 
-    // Two output shapes, and the choice changes which *kind* of deferral is legal
-    // when a member scan has to run (see `discord::needs_defer`):
+    // Two output shapes, both answered in one shot — see the note on response
+    // types in `discord`. The whole read is three concurrent Discord calls, which
+    // fits inside the ~3s interaction window, so there is no deferral here:
     //
-    //  • "reply"   — answer the clicker. A slow scan defers a REPLY (type 5) and
-    //                later edits that reply.
+    //  • "reply"   — answer the clicker with a freshly rendered list.
     //  • "message" — re-stamp the author's own message, so everyone sees the fresh
-    //                list without clicking anything. A slow scan must defer an
-    //                UPDATE (type 6): after a deferred *reply*, `@original` means
-    //                the reply, so the list could never reach the message it
-    //                belongs to.
+    //                list without clicking anything.
     let section = interaction.picked_section().map(|s| s.to_string());
-    let deferring = discord::needs_defer(&cfg);
-    let followup = interaction
-        .application_id
-        .clone()
-        .zip(interaction.token.clone());
 
     if cfg.writes_to_message() {
-        return message_output(state, cfg, token, interaction, section, deferring, followup).await;
-    }
-
-    if deferring {
-        let Some((application_id, interaction_token)) = followup else {
-            // Without these we can't follow up at all. Fall through to an inline
-            // reply rather than leaving the click dead — it just can't expand
-            // members inside Discord's window.
-            tracing::warn!("component interaction carried no application_id/token");
-            return inline_reply(state, &cfg, &token, section.as_deref()).await;
-        };
-        let public = cfg.public;
-        let state = state.clone();
-        tokio::spawn(async move {
-            let components = build_components(&state, &cfg, &token, section.as_deref()).await;
-            rest::edit_original(
-                &state.http,
-                &application_id,
-                &interaction_token,
-                &discord::followup_body(components),
-            )
-            .await;
-        });
-        return Json(discord::deferred(public)).into_response();
+        return message_output(state, cfg, token, interaction, section).await;
     }
 
     inline_reply(state, &cfg, &token, section.as_deref()).await
@@ -386,8 +352,6 @@ async fn message_output(
     token: String,
     interaction: discord::Interaction,
     section: Option<String>,
-    deferring: bool,
-    followup: Option<(String, String)>,
 ) -> Response {
     // A normalized config can't reach here without a template (see
     // `validate::validate_output`), but a row written by an older build could.
@@ -397,29 +361,6 @@ async fn message_output(
         return inline_reply(state, &cfg, &token, section.as_deref()).await;
     };
     let message = interaction.message.unwrap_or_default();
-
-    if deferring {
-        let Some((application_id, interaction_token)) = followup else {
-            tracing::warn!("component interaction carried no application_id/token");
-            return Json(discord::ephemeral_text(
-                "Couldn't refresh the list just now — try again in a moment.",
-            ))
-            .into_response();
-        };
-        let state = state.clone();
-        tokio::spawn(async move {
-            let vars = build_vars(&state, &cfg, &token, section.as_deref()).await;
-            let components = discord::render_template(&template, &vars);
-            rest::edit_original(
-                &state.http,
-                &application_id,
-                &interaction_token,
-                &discord::update_followup_body(&message, components),
-            )
-            .await;
-        });
-        return Json(discord::deferred_update()).into_response();
-    }
 
     let vars = build_vars(state, &cfg, &token, section.as_deref()).await;
     let components = discord::render_template(&template, &vars);
@@ -454,12 +395,9 @@ async fn build_vars(
             };
         }
     };
-    let (members, member_state) = resolve_members(state, cfg, token, &structure).await;
     let text = render::render_text(&RenderInput {
         cfg,
         structure: &structure,
-        members: members.as_ref(),
-        member_state,
         section,
     });
     discord::RenderVars {
@@ -482,8 +420,8 @@ async fn inline_reply(
 /// Read what this directory needs and render it.
 ///
 /// Always returns renderable components: a failed structure read becomes a
-/// one-line explanation, and a refused member list degrades to a roster without
-/// members (see [`MemberScanOutcome`]). Nothing here can leave a click unanswered.
+/// one-line explanation rather than an error, so nothing here can leave a click
+/// unanswered.
 async fn build_components(
     state: &AppState,
     cfg: &InstanceConfig,
@@ -507,42 +445,11 @@ async fn build_components(
         }
     };
 
-    let (members, member_state) = resolve_members(state, cfg, token, &structure).await;
-
     render::render(&RenderInput {
         cfg,
         structure: &structure,
-        members: members.as_ref(),
-        member_state,
         section,
     })
-}
-
-/// Scan members when this directory expands them, mapping the outcome to the
-/// renderer's state. Shared by both output shapes so a reply and an in-place
-/// render can never disagree about what was available.
-async fn resolve_members(
-    state: &AppState,
-    cfg: &InstanceConfig,
-    token: &str,
-    structure: &rest::GuildStructure,
-) -> (Option<rest::MemberIndex>, MemberState) {
-    if !discord::needs_defer(cfg) {
-        return (None, MemberState::NotRequested);
-    }
-    // Only the roles actually on show are scanned — the bound that keeps a cached
-    // scan small (see the note in `rest`). `roster_role_ids` is the renderer's own
-    // selection logic, so the two can't drift.
-    let wanted: Vec<String> = render::roster_role_ids(cfg, structure);
-    match state
-        .cache
-        .members(&state.http, token, &cfg.guild_id, &wanted)
-        .await
-    {
-        MemberScanOutcome::Ok(index) => (Some(index), MemberState::Ready),
-        MemberScanOutcome::Unavailable => (None, MemberState::Unavailable),
-        MemberScanOutcome::Busy => (None, MemberState::Busy),
-    }
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

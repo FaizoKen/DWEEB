@@ -10,7 +10,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::store::{InstanceConfig, Requirement};
+use crate::store::Requirement;
 
 /// Every `custom_id` this plugin mints starts with this; the dispatcher routes
 /// on it, and DWEEB re-identifies the owning plugin by it on reload.
@@ -23,15 +23,14 @@ pub const TYPE_MESSAGE_COMPONENT: u8 = 3;
 // Interaction callback (response) types.
 const RESPONSE_PONG: u8 = 1;
 const RESPONSE_CHANNEL_MESSAGE: u8 = 4;
-/// "Thinking…" — buys up to 15 minutes to send the real answer as an edit of the
-/// original response. Used only when a member scan has to run (see
-/// [`needs_defer`]); everything else answers inline.
-const RESPONSE_DEFERRED_CHANNEL_MESSAGE: u8 = 5;
 /// Re-stamp the message the component sits on.
 const RESPONSE_UPDATE_MESSAGE: u8 = 7;
-/// Acknowledge with no visible loading state, then edit the *source* message.
-/// The `"message"`-output counterpart of [`RESPONSE_DEFERRED_CHANNEL_MESSAGE`].
-const RESPONSE_DEFERRED_UPDATE_MESSAGE: u8 = 6;
+
+// There is deliberately no deferred response type here. Every directory click is
+// answered by one concurrent structure read, which fits inside Discord's ~3s
+// interaction window — so a "thinking…" placeholder would be a visible flicker
+// that buys nothing. The defer path existed only to cover a member scan, which
+// this plugin no longer performs (see the `rest` module note).
 
 // Component types + message flags. A directory reply is text only — a Container
 // holding Text Displays — so no interactive component types appear here.
@@ -134,14 +133,11 @@ pub struct Interaction {
     pub kind: u8,
     #[serde(default)]
     pub guild_id: Option<String>,
-    /// Needed to edit the original response after a deferred reply
-    /// (`PATCH /webhooks/{application_id}/{token}/messages/@original`).
-    #[serde(default)]
-    pub application_id: Option<String>,
-    /// The interaction token — the credential for that follow-up edit. Never
-    /// logged, never stored.
-    #[serde(default)]
-    pub token: Option<String>,
+    // `application_id` and `token` are deliberately NOT read. They are the
+    // credential pair for `PATCH /webhooks/{application_id}/{token}/messages/
+    // @original`, which only a deferred response needs — and this plugin answers
+    // every click in one shot. Keeping an unused interaction token in memory buys
+    // nothing and is one more secret to avoid logging.
     #[serde(default)]
     pub data: Option<InteractionData>,
     #[serde(default)]
@@ -276,17 +272,6 @@ fn now_unix_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// True when answering this click requires a member scan, and therefore a
-/// deferred reply.
-///
-/// Only a roles-mode directory with member expansion on can be slow: it pages
-/// `GET /guilds/{id}/members` at 1000 members a call. Roles and channels are one
-/// cheap request each and comfortably answer inline, so deferring them would
-/// only add a visible "thinking…" flicker for nothing.
-pub fn needs_defer(cfg: &InstanceConfig) -> bool {
-    cfg.is_roles() && cfg.show_members
-}
-
 // ── Outgoing callbacks ───────────────────────────────────────────────────────
 
 pub fn pong() -> Value {
@@ -310,32 +295,6 @@ pub fn message_reply(components: Vec<Value>, public: bool) -> Value {
     json!({
         "type": RESPONSE_CHANNEL_MESSAGE,
         "data": message_data(components, public),
-    })
-}
-
-/// "Thinking…" — the placeholder that buys time for a member scan. The
-/// ephemeral choice must match the eventual reply's, because Discord fixes a
-/// response's visibility at the *defer*: a public directory that deferred
-/// ephemerally can never become public afterwards.
-pub fn deferred(public: bool) -> Value {
-    json!({
-        "type": RESPONSE_DEFERRED_CHANNEL_MESSAGE,
-        "data": { "flags": if public { 0 } else { FLAG_EPHEMERAL } },
-    })
-}
-
-/// The body of the follow-up `PATCH …/messages/@original` that replaces a
-/// deferred placeholder with the finished directory.
-///
-/// The ephemeral bit is deliberately not repeated — it was fixed by the defer —
-/// but `IS_COMPONENTS_V2` must be, or Discord rejects the `components` array on
-/// the edit. [`SILENT_MENTIONS`] applies here for the same reason it does on a
-/// direct reply.
-pub fn followup_body(components: Vec<Value>) -> Value {
-    json!({
-        "flags": FLAG_IS_COMPONENTS_V2,
-        "components": components,
-        "allowed_mentions": silent_mentions(),
     })
 }
 
@@ -502,23 +461,6 @@ pub fn update_message(message: &MessageRef, components: Value) -> Value {
     json!({ "type": RESPONSE_UPDATE_MESSAGE, "data": update_data(message, components) })
 }
 
-/// Acknowledge a click with **no visible loading state**, keeping the right to
-/// edit the *source* message afterwards via `PATCH …/messages/@original`.
-///
-/// This is the one response type that composes with a slow member scan in
-/// `"message"` output. A plain deferred *reply* (type 5) would make `@original`
-/// mean the reply, not the message the button sits on — so the list could never
-/// reach the message it was supposed to update.
-pub fn deferred_update() -> Value {
-    json!({ "type": RESPONSE_DEFERRED_UPDATE_MESSAGE })
-}
-
-/// The edit body for the follow-up `PATCH …/messages/@original` after
-/// [`deferred_update`]. Same shape as an inline update's `data`.
-pub fn update_followup_body(message: &MessageRef, components: Value) -> Value {
-    update_data(message, components)
-}
-
 /// Preserve everything about the message the edit isn't meant to change.
 ///
 /// The flag handling is load-bearing: Components V2 forbids `content`, so a V2
@@ -559,7 +501,7 @@ fn clamp(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{tests::base_config, RoleRef};
+    use crate::store::RoleRef;
 
     fn req(roles: &[&str], all: bool, age: u32) -> Requirement {
         Requirement {
@@ -629,27 +571,33 @@ mod tests {
         assert!(gate_denial(&req(&[], false, 30), &[], "not-a-snowflake").is_none());
     }
 
-    /// Only the expensive path defers. Deferring a cheap one would add a visible
-    /// "thinking…" flicker; NOT deferring the expensive one risks Discord's 3s
-    /// timeout killing the interaction outright.
+    /// Every click is answered in one shot, whatever the config says.
+    ///
+    /// This plugin has no deferred-response path at all: every reply and every
+    /// in-place update is a terminal interaction response, so a click can never
+    /// leave a "thinking…" placeholder that something else has to come back and
+    /// replace. Guarding it here because the alternative is invisible — a stray
+    /// type 5/6 would look fine in review and show up as a stuck spinner.
     #[test]
-    fn only_a_member_expanding_roster_defers() {
-        let mut cfg = base_config();
-        assert!(!needs_defer(&cfg));
-        cfg.show_members = true;
-        assert!(needs_defer(&cfg));
-        // Channels mode never scans members, even if the flag is somehow set.
-        cfg.mode = crate::store::MODE_CHANNELS.into();
-        assert!(!needs_defer(&cfg));
-    }
-
-    /// Discord fixes a response's visibility at the defer, so the placeholder's
-    /// ephemeral bit must track the config — a public directory that deferred
-    /// ephemerally can never surface publicly afterwards.
-    #[test]
-    fn the_defer_carries_the_eventual_visibility() {
-        assert_eq!(deferred(false)["data"]["flags"], json!(FLAG_EPHEMERAL));
-        assert_eq!(deferred(true)["data"]["flags"], json!(0));
+    fn every_response_this_plugin_can_send_is_terminal() {
+        const DEFERRED_CHANNEL_MESSAGE: u64 = 5;
+        const DEFERRED_UPDATE_MESSAGE: u64 = 6;
+        let msg = MessageRef {
+            flags: Some(FLAG_IS_COMPONENTS_V2),
+            content: None,
+        };
+        let body = vec![json!({"type": COMPONENT_TEXT_DISPLAY, "content": "x"})];
+        for response in [
+            pong(),
+            ephemeral_text("hi"),
+            message_reply(body.clone(), true),
+            message_reply(body.clone(), false),
+            update_message(&msg, json!(body)),
+        ] {
+            let kind = response["type"].as_u64().expect("a response type");
+            assert_ne!(kind, DEFERRED_CHANNEL_MESSAGE, "{response}");
+            assert_ne!(kind, DEFERRED_UPDATE_MESSAGE, "{response}");
+        }
     }
 
     /// Every reply is Components V2 (V2 forbids the plain `content` field), and
@@ -682,26 +630,20 @@ mod tests {
         );
     }
 
-    /// The follow-up edit must repeat `IS_COMPONENTS_V2` or Discord rejects the
-    /// `components` array outright.
-    #[test]
-    fn the_followup_repeats_the_v2_flag() {
-        let body = followup_body(vec![
-            json!({"type": COMPONENT_TEXT_DISPLAY, "content": "x"}),
-        ]);
-        assert_eq!(body["flags"], json!(FLAG_IS_COMPONENTS_V2));
-    }
-
-    /// A roster is built out of user and role mentions. Every path that can
-    /// carry them MUST suppress notifications, or one click on a public staff
-    /// directory pings the entire team (and any role it lists).
+    /// A roster is built out of role mentions. Every path that can carry them
+    /// MUST suppress notifications, or one click on a public staff directory
+    /// pings every role it lists.
     #[test]
     fn every_mention_carrying_reply_is_silent() {
         let block = vec![json!({"type": COMPONENT_TEXT_DISPLAY, "content": "<@1> <@&2>"})];
+        let msg = MessageRef {
+            flags: Some(FLAG_IS_COMPONENTS_V2),
+            content: None,
+        };
         for body in [
             message_reply(block.clone(), true)["data"].clone(),
             message_reply(block.clone(), false)["data"].clone(),
-            followup_body(block),
+            update_message(&msg, json!(block))["data"].clone(),
         ] {
             assert_eq!(
                 body["allowed_mentions"]["parse"],
@@ -901,8 +843,8 @@ mod tests {
         assert!(data["flags"].is_null() && data["content"].is_null());
     }
 
-    /// The in-place edit lands in a public channel and is full of role/member
-    /// mentions — it must never notify, on either path.
+    /// The in-place edit lands in a public channel and is full of role mentions
+    /// — it must never notify.
     #[test]
     fn in_place_updates_are_silent_too() {
         let components = json!([{ "type": COMPONENT_TEXT_DISPLAY, "content": "<@1> <@&2>" }]);
@@ -911,30 +853,9 @@ mod tests {
             content: None,
         };
         assert_eq!(
-            update_message(&msg, components.clone())["data"]["allowed_mentions"]["parse"],
+            update_message(&msg, components)["data"]["allowed_mentions"]["parse"],
             json!([])
         );
-        assert_eq!(
-            update_followup_body(&msg, components)["allowed_mentions"]["parse"],
-            json!([])
-        );
-    }
-
-    /// In-message output must defer an **UPDATE** (type 6), not a reply (type 5).
-    /// After a deferred reply, `@original` names the reply — so the list would be
-    /// edited into an invisible ephemeral instead of the message it belongs to.
-    #[test]
-    fn the_in_place_defer_is_an_update_not_a_reply() {
-        assert_eq!(
-            deferred_update()["type"],
-            json!(RESPONSE_DEFERRED_UPDATE_MESSAGE)
-        );
-        assert_ne!(
-            deferred_update()["type"],
-            json!(RESPONSE_DEFERRED_CHANNEL_MESSAGE)
-        );
-        // …and it carries no data: there is no reply to configure.
-        assert!(deferred_update().get("data").is_none());
     }
 
     /// `has_own_token` gates the "you forgot the placeholder" refusal at save, so

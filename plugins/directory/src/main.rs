@@ -6,8 +6,7 @@
 //!   • **Roles** — a staff roster. The roles you pick (or every role the server
 //!     displays separately, or every role with moderation powers), arranged into
 //!     named groups like "Owners" / "Moderators", each with a permission badge
-//!     line, your own one-line description, and — where Discord allows it — the
-//!     people who hold it.
+//!     line and your own one-line description.
 //!   • **Channels** — a channel index. Every channel (or a category, or a
 //!     hand-picked shortlist) grouped under its category heading, each with its
 //!     own topic as the caption.
@@ -17,19 +16,22 @@
 //! default; a directory can be made public instead.
 //!
 //! **This plugin only ever reads.** It needs no permission bit — being a member
-//! of the guild is enough for `GET /guilds/{id}/roles` and `/channels` — and it
-//! writes nothing back to Discord beyond its own reply.
+//! of the guild is enough for `GET /guilds/{id}`, `/roles` and `/channels` — and
+//! it writes nothing back to Discord beyond its own reply.
 //!
-//! ## The one privileged-intent dependency
+//! ## No privileged intent, by construction
 //!
-//! `GET /guilds/{id}/members` is gated on Discord's privileged `GUILD_MEMBERS`
-//! intent; roles and channels are not. So **member expansion is an enhancement,
-//! never a requirement**: with the intent off, a roster still renders in full
-//! (names, colours, permission badges, your notes) and adds one line saying
-//! member lists aren't available. The config UI probes this at connect time and
-//! tells the host *before* they turn the option on. Don't restructure this into
-//! a hard dependency — a deployment whose app lacks the intent must still get a
-//! working directory.
+//! Every read here works for a bot that is merely a guild member, so there is no
+//! deployment in which part of this plugin works and the rest doesn't. That is a
+//! deliberate constraint, not an accident: a roster of *who holds each role* was
+//! implemented and then removed, because `GET /guilds/{id}/members` is gated on
+//! the privileged `GUILD_MEMBERS` intent and no ungated endpoint can substitute
+//! (`/members/search` needs a name prefix and can't filter by role; the role
+//! object has no member count). Shipped as a graceful degradation, it put
+//! "Member lists aren't available right now." into members' messages on every
+//! deployment without the intent. Server-wide totals took its place — they come
+//! free with the guild fetch (`?with_counts=true`). Don't reintroduce per-member
+//! reads unless the intent is actually a deployment requirement.
 //!
 //! One small Rust service that is, all at once:
 //!   • the plugin **registry** DWEEB reads (`GET /registry.json`),
@@ -52,11 +54,8 @@
 //!   BOT_INVITE_URL            optional invite link surfaced by the config UI
 //!   DISPATCHER_FORWARD_SECRET shared secret attesting a custom app's key
 //!   DATABASE_PATH             SQLite file, default ./directory.db
-//!   STRUCTURE_CACHE_SECS      role/channel cache TTL, default 60 (0 = off)
-//!   MEMBER_CACHE_SECS         member-scan cache TTL, default 600 (0 = off)
-//!   CACHE_MAX_GUILDS          cached guilds per cache, default 64
-//!   MEMBER_SCAN_MAX_PAGES     1000-member pages one scan may read, default 10
-//!   MEMBER_SCAN_CONCURRENCY   concurrent scans (also single-flight), default 1
+//!   STRUCTURE_CACHE_SECS      guild/role/channel cache TTL, default 60 (0 = off)
+//!   CACHE_MAX_GUILDS          cached guilds, default 64
 //!   PORT                      bind port, default 8099
 
 mod config;
@@ -132,10 +131,10 @@ async fn run() {
         );
     }
 
-    // One shared client with a bounded idle pool. The 2.5s timeout keeps an
-    // inline reply inside Discord's ~3s window even after the dispatcher hop; a
-    // member scan is deferred, so its per-page calls have the same ceiling but
-    // no longer race the interaction.
+    // One shared client with a bounded idle pool. The 2.5s timeout keeps a reply
+    // inside Discord's ~3s window even after the dispatcher hop — and since
+    // nothing here defers, that ceiling applies to every click without
+    // exception.
     let http = reqwest::Client::builder()
         .timeout(Duration::from_millis(2500))
         .pool_idle_timeout(Duration::from_secs(30))

@@ -17,8 +17,8 @@ use std::env;
 // Bump both together when a plugin's needs change.
 //
 // This plugin itself needs NO permission bit at all — it only ever *reads*
-// (`GET /guilds/{id}/roles`, `/channels`, `/members`), which the bot may do
-// simply by being a member of the guild. It still normalizes the invite to the
+// (`GET /guilds/{id}`, `/roles`, `/channels`), which the bot may do simply by
+// being a member of the guild. It still normalizes the invite to the
 // full union so an operator pasting a narrower link here can't strip another
 // plugin's grant.
 
@@ -102,23 +102,10 @@ pub struct Config {
     /// hammering Discord rather than to save real time. Default 60; a 0 disables
     /// caching entirely (useful while testing a live edit).
     pub structure_cache_secs: u64,
-    /// Seconds a member scan stays warm. Much longer than the structure TTL: a
-    /// scan is the expensive call (a page per 1000 members) and staff rosters
-    /// barely move. Default 600.
-    pub member_cache_secs: u64,
-    /// How many guilds may hold a cached scan at once. Bounds process memory on
+    /// How many guilds may hold a cached read at once. Bounds process memory on
     /// a deployment serving many servers; the coldest entry is dropped past the
     /// cap. Default 64, floor 1.
     pub cache_max_guilds: usize,
-    /// Pages of 1000 members a single scan may read before it stops and reports
-    /// a partial result. This is the hard ceiling on what one click can cost:
-    /// 10 pages ≈ 10 sequential Discord calls ≈ 10k members. Default 10, floor 1.
-    pub member_scan_max_pages: usize,
-    /// How many member scans may run at once, process-wide. Also the plugin's
-    /// single-flight mechanism: a queued click re-checks the cache after
-    /// acquiring its permit, so a burst of clicks on one server performs ONE
-    /// scan. Default 1, floor 1.
-    pub member_scan_concurrency: usize,
 }
 
 impl Config {
@@ -168,10 +155,7 @@ impl Config {
             .map(|raw| normalize_invite_permissions(&raw));
 
         let structure_cache_secs = parse_num("STRUCTURE_CACHE_SECS", 60, 0)?;
-        let member_cache_secs = parse_num("MEMBER_CACHE_SECS", 600, 0)?;
         let cache_max_guilds = parse_num("CACHE_MAX_GUILDS", 64, 1)? as usize;
-        let member_scan_max_pages = parse_num("MEMBER_SCAN_MAX_PAGES", 10, 1)? as usize;
-        let member_scan_concurrency = parse_num("MEMBER_SCAN_CONCURRENCY", 1, 1)? as usize;
 
         Ok(Self {
             port,
@@ -182,10 +166,7 @@ impl Config {
             default_bot_token,
             bot_invite_url,
             structure_cache_secs,
-            member_cache_secs,
             cache_max_guilds,
-            member_scan_max_pages,
-            member_scan_concurrency,
         })
     }
 
@@ -200,7 +181,7 @@ impl Config {
 ///
 /// A *present but unparseable* value is a boot error rather than a silent fall
 /// back to the default — the house rule from the proxy's `config.rs`. Silently
-/// defaulting is how a typo'd `MEMBER_SCAN_MAX_PAGES=1O` becomes an unexplained
+/// defaulting is how a typo'd `CACHE_MAX_GUILDS=1O` becomes an unexplained
 /// behaviour change nobody can find. The value is trimmed first, so trailing
 /// whitespace in an `.env` file is harmless.
 fn parse_num(key: &str, default: u64, floor: u64) -> Result<u64, String> {

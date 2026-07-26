@@ -229,31 +229,6 @@
       </div>
 
       <div class="checkrow" style="margin-top: 14px">
-        <input id="showMembers" type="checkbox" />
-        <label for="showMembers">Show <b>who holds each role</b></label>
-      </div>
-      <div id="membersNote" class="callout" style="display:none"></div>
-      <div id="memberOpts" style="display:none">
-        <div class="row2">
-          <div>
-            <label class="lbl" for="maxMembers">Names shown per role</label>
-            <input id="maxMembers" type="number" min="1" max="50" value="20" />
-          </div>
-          <div>
-            <label class="lbl" for="includeBots">Bot accounts</label>
-            <select id="includeBots">
-              <option value="no">Leave bots out</option>
-              <option value="yes">Include bots</option>
-            </select>
-          </div>
-        </div>
-        <div class="checkrow">
-          <input id="hideEmpty" type="checkbox" />
-          <label for="hideEmpty">Hide roles <b>nobody holds</b></label>
-        </div>
-      </div>
-
-      <div class="checkrow">
         <input id="showPermissions" type="checkbox" checked />
         <label for="showPermissions">Show what each role <b>can do</b> (Admin · Bans · Timeouts)</label>
       </div>
@@ -304,6 +279,15 @@
     <input id="title" type="text" maxlength="100" placeholder="" />
     <label class="lbl" for="intro">Line underneath (optional)</label>
     <input id="intro" type="text" maxlength="400" placeholder="e.g. Ping a moderator only if it's urgent." />
+    <div class="checkrow" style="margin-top: 10px">
+      <input id="showMemberCount" type="checkbox" />
+      <label for="showMemberCount">Show the server's <b>member and online count</b></label>
+    </div>
+    <div class="hint">
+      A live "1,204 members · 87 online" line under the heading, straight from Discord.
+      This is the whole server's total — a breakdown of who holds each role isn't
+      something Discord lets a bot read.
+    </div>
     <label class="lbl" for="output">Where the list appears</label>
     <select id="output">
       <option value="reply">In a reply when someone clicks</option>
@@ -407,10 +391,6 @@
       // ── Capabilities (from /api/meta + /api/connect) ────────────────────
       let defaultBot = false;
       let inviteUrl = null;
-      let maxMembersCap = 50;
-      // Whether GET /guilds/{id}/members works for this app — i.e. whether the
-      // privileged GUILD_MEMBERS intent is enabled. Unknown until connect.
-      let membersAvailable = null;
 
       // ── Host context (the server DWEEB is connected to) ─────────────────
       let autoGuild = false;
@@ -519,32 +499,6 @@
         // `require_topic` doesn't apply to a hand-picked list: the host chose
         // those channels on purpose, so they're always listed.
         $("requireTopic").closest(".checkrow").style.display = src === "picked" ? "none" : "";
-      }
-
-      // ── Member expansion ─────────────────────────────────────────────────
-      $("showMembers").addEventListener("change", renderMembers);
-      function renderMembers() {
-        const on = $("showMembers").checked;
-        $("memberOpts").style.display = on ? "" : "none";
-        const box = $("membersNote");
-        // The one place this plugin depends on a privileged Discord intent. Say
-        // so plainly *before* the host saves, rather than letting them discover
-        // it from an empty roster.
-        if (!on || membersAvailable === null) {
-          box.style.display = "none";
-        } else if (membersAvailable) {
-          box.className = "callout good";
-          box.innerHTML = "✓ Member lists are available in this server. Names appear as clickable mentions — and they never ping anyone, even on a public list.";
-          box.style.display = "";
-        } else {
-          box.className = "callout warn";
-          box.innerHTML =
-            "Discord isn't letting this bot read the member list, so names won't appear — the roles, what they can do and your descriptions all still show. " +
-            "This needs the <b>Server Members Intent</b> enabled on the Discord application; ask whoever runs this DWEEB deployment. " +
-            "It's safe to leave this on: the list lights up by itself once the intent is enabled.";
-          box.style.display = "";
-        }
-        sendResize();
       }
 
       // ── Pickers ──────────────────────────────────────────────────────────
@@ -1063,7 +1017,6 @@
         renderMode();
         renderRoleSource();
         renderChannelSource();
-        renderMembers();
         renderRoles();
         renderChannels();
         renderCategories();
@@ -1154,8 +1107,6 @@
             const m = await res.json();
             defaultBot = !!m.defaultBot;
             inviteUrl = m.inviteUrl || null;
-            maxMembersCap = m.maxMembersPerRole || 50;
-            $("maxMembers").max = String(maxMembersCap);
           }
         } catch {
           /* leave defaults */
@@ -1188,7 +1139,6 @@
           guildName = data.guild_name || guildName;
           roles = Array.isArray(data.roles) ? data.roles : [];
           channels = Array.isArray(data.channels) ? data.channels : [];
-          membersAvailable = !!data.members_available;
 
           // Drop anything saved that no longer exists in the server, so a stale
           // pick can never reach a save (or render as a dead id).
@@ -1240,10 +1190,7 @@
           // Keep the counter clear of the STORED keys — a group's key is a select
           // option value, so re-using one would make two options collide.
           nextGroupKey = 1;
-          $("showMembers").checked = !!d.show_members;
-          $("maxMembers").value = String(d.max_members_per_role || 20);
-          $("includeBots").value = d.include_bots ? "yes" : "no";
-          $("hideEmpty").checked = !!d.hide_empty_roles;
+          $("showMemberCount").checked = !!d.show_member_count;
           $("showPermissions").checked = d.show_permissions !== false;
 
           $("channelSource").value = d.channel_source || "all";
@@ -1282,8 +1229,7 @@
           mode: "roles",
           roleSource: "staff",
           title: "Our staff",
-          intro: "The people who keep this place running. Please don't DM — use the support channel.",
-          showMembers: true,
+          intro: "The teams that keep this place running. Please don't DM — use the support channel.",
           showPermissions: true,
         },
         {
@@ -1296,7 +1242,6 @@
           output: "message",
           title: "Our staff",
           intro: "",
-          showMembers: true,
           showPermissions: true,
         },
         {
@@ -1304,8 +1249,8 @@
           mode: "roles",
           roleSource: "hoisted",
           title: "Server roles",
-          intro: "What each role means, and who has it.",
-          showMembers: false,
+          intro: "What each role means.",
+          showMemberCount: true,
           showPermissions: true,
         },
         {
@@ -1336,7 +1281,7 @@
         if (p.output) $("output").value = p.output;
         $("title").value = p.title || "";
         $("intro").value = p.intro || "";
-        $("showMembers").checked = !!p.showMembers;
+        $("showMemberCount").checked = !!p.showMemberCount;
         $("showPermissions").checked = p.showPermissions !== false;
         $("requireTopic").checked = !!p.requireTopic;
         accent = 0x5865f2;
@@ -1416,7 +1361,7 @@
               : src === "hoisted"
                 ? "displayed roles"
                 : "staff roles";
-          return `Roles · ${what}${$("showMembers").checked ? " · with members" : ""}`;
+          return `Roles · ${what}`;
         }
         const src = channelSource();
         const what =
@@ -1534,11 +1479,8 @@
           role_source: roleSource(),
           roles: roleRefs(pickedRoles),
           groups: cleanGroups,
-          show_members: $("showMembers").checked,
-          max_members_per_role: Math.max(1, Math.min(maxMembersCap, parseInt($("maxMembers").value, 10) || 20)),
-          include_bots: $("includeBots").value === "yes",
+          show_member_count: $("showMemberCount").checked,
           show_permissions: $("showPermissions").checked,
-          hide_empty_roles: $("hideEmpty").checked,
           channel_source: channelSource(),
           channels: channelRefs(pickedChannels),
           categories: channelRefs(pickedCategories),

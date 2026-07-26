@@ -8,7 +8,7 @@
 //!
 //! 1. **4000 characters of text**, total, across every Text Display in the
 //!    message ([`crate::discord::MAX_V2_TEXT`]). A directory is one of the few
-//!    things that can genuinely overflow this — 25 roles with member lists, or a
+//!    things that can genuinely overflow this — 25 roles with notes, or a
 //!    200-channel server. So lines are admitted through a [`Budget`] and the
 //!    reply ends with an honest "…and N more" rather than being rejected by
 //!    Discord as a whole.
@@ -31,9 +31,7 @@ use serde_json::{json, Value};
 use crate::discord::{
     COMPONENT_CONTAINER, COMPONENT_SEPARATOR, COMPONENT_TEXT_DISPLAY, MAX_V2_TEXT,
 };
-use crate::rest::{
-    ChannelView, GuildStructure, MemberIndex, RoleView, CHANNEL_CATEGORY, DEFAULT_CHANNEL_KINDS,
-};
+use crate::rest::{ChannelView, GuildStructure, RoleView, CHANNEL_CATEGORY, DEFAULT_CHANNEL_KINDS};
 use crate::store::{
     InstanceConfig, CHANNEL_SOURCE_CATEGORIES, CHANNEL_SOURCE_PICKED, ROLE_SOURCE_HOISTED,
     ROLE_SOURCE_PICKED, ROLE_SOURCE_STAFF,
@@ -62,28 +60,11 @@ pub const SECTION_GROUP_PREFIX: &str = "g:";
 /// Prefix for a channels-mode section pick: `c:<category id>`.
 pub const SECTION_CATEGORY_PREFIX: &str = "c:";
 
-/// How the member scan went, from the renderer's point of view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemberState {
-    /// Member expansion is off for this directory — say nothing about it.
-    NotRequested,
-    /// A scan succeeded (possibly truncated; the index knows).
-    Ready,
-    /// Discord refused the member list — the privileged intent is almost
-    /// certainly off. The roster still renders; one line explains the gap.
-    Unavailable,
-    /// A transient failure. Same rendering as `Unavailable`, different wording:
-    /// one says "ask an admin", the other says "try again".
-    Busy,
-}
-
-/// Everything the renderer needs. Borrowed, so a cached structure/index is
-/// rendered without being cloned.
+/// Everything the renderer needs. Borrowed, so a cached structure is rendered
+/// without being cloned.
 pub struct RenderInput<'a> {
     pub cfg: &'a InstanceConfig,
     pub structure: &'a GuildStructure,
-    pub members: Option<&'a MemberIndex>,
-    pub member_state: MemberState,
     /// The section a select pick narrowed to, if any. An unrecognised value
     /// renders everything — a read-only list fails open.
     pub section: Option<&'a str>,
@@ -94,9 +75,12 @@ pub fn render(input: &RenderInput<'_>) -> Vec<Value> {
     let cfg = input.cfg;
     let mut budget = Budget::new(MAX_V2_TEXT);
 
-    // Header: the heading, then the optional intro line.
+    // Header: the heading, the optional server totals, then the optional intro.
     let mut header = String::new();
     header.push_str(&format!("## {}\n", title_of(cfg)));
+    if let Some(counts) = server_counts(input) {
+        header.push_str(&format!("-# {counts}\n"));
+    }
     if let Some(intro) = cfg.intro.as_deref() {
         header.push_str(&one_line(intro));
         header.push('\n');
@@ -110,26 +94,8 @@ pub fn render(input: &RenderInput<'_>) -> Vec<Value> {
         channel_sections(input, &mut budget)
     };
 
-    // Footer: the honest small print — a truncated member scan, an unavailable
-    // member list, a text budget we ran out of. Never silently omitted.
+    // Footer: the honest small print. Never silently omitted.
     let mut footnotes: Vec<String> = Vec::new();
-    match input.member_state {
-        MemberState::Unavailable => footnotes.push(
-            "Member lists aren't available in this server right now — the roles below are live."
-                .into(),
-        ),
-        MemberState::Busy => {
-            footnotes.push("Couldn't load member lists just now — try again in a moment.".into())
-        }
-        MemberState::Ready => {
-            if input.members.is_some_and(|m| m.truncated) {
-                footnotes.push(
-                    "This server is large, so member counts are a minimum, not a total.".into(),
-                );
-            }
-        }
-        MemberState::NotRequested => {}
-    }
     if budget.exhausted {
         footnotes.push("The list was too long to show in full.".into());
     }
@@ -192,14 +158,10 @@ pub fn render_text(input: &RenderInput<'_>) -> ListText {
     } else {
         channel_sections(input, &mut budget)
     };
-    // Count what the list actually shows, not what it started from — a hidden
-    // empty role must not be counted, or `{directory_count}` contradicts the text
-    // right next to it.
+    // Count what the list actually shows, not what it started from, or
+    // `{directory_count}` contradicts the text right next to it.
     let count = if input.cfg.is_roles() {
-        roster_roles(input.cfg, input.structure)
-            .iter()
-            .filter(|r| role_is_shown(input, r))
-            .count()
+        roster_roles(input.cfg, input.structure).len()
     } else {
         index_channels(input.cfg, input.structure).len()
     };
@@ -214,14 +176,6 @@ pub fn render_text(input: &RenderInput<'_>) -> ListText {
     if budget.exhausted {
         list.push_str("\n-# (list truncated)");
     }
-    // A member list that couldn't be read is worth one line here too: without it
-    // the author's message would silently show a roster with no names and no
-    // explanation of why.
-    match input.member_state {
-        MemberState::Unavailable => list.push_str("\n-# Member lists aren't available right now."),
-        MemberState::Busy => list.push_str("\n-# Couldn't load member lists just now."),
-        _ => {}
-    }
     ListText { list, count }
 }
 
@@ -232,6 +186,44 @@ fn title_of(cfg: &InstanceConfig) -> String {
         None if cfg.is_roles() => "Server roles".to_string(),
         None => "Channel directory".to_string(),
     }
+}
+
+/// The optional "1,204 members · 87 online" line under the heading.
+///
+/// `None` unless the host asked for it *and* Discord actually sent a total. This
+/// is the server's own headline figure — never a per-role breakdown, which
+/// Discord only exposes behind the privileged `GUILD_MEMBERS` intent (see the
+/// `rest` module note). Rendering it as "0 members" when Discord stayed silent
+/// would put a plain falsehood in a public message, so silence stays silence.
+fn server_counts(input: &RenderInput<'_>) -> Option<String> {
+    if !input.cfg.show_member_count {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if let Some(total) = input.structure.member_count {
+        parts.push(format!(
+            "{} {}",
+            thousands(total),
+            if total == 1 { "member" } else { "members" }
+        ));
+    }
+    if let Some(online) = input.structure.online_count {
+        parts.push(format!("{} online", thousands(online)));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// Group a number with thin thousands separators: `1204` → `1,204`.
+fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// What to say when the configured directory resolves to nothing at all — a
@@ -272,18 +264,6 @@ fn roster_roles<'a>(cfg: &InstanceConfig, structure: &'a GuildStructure) -> Vec<
             .filter_map(|id| structure.role(id))
             .collect(),
     }
-}
-
-/// The ids of the roles a roster will display.
-///
-/// Exposed so the interaction path can scan **exactly** the roles that will be
-/// shown. Deriving that set anywhere else would let the two drift: scanning more
-/// wastes cache, scanning less renders "0 members" for a populated role.
-pub fn roster_role_ids(cfg: &InstanceConfig, structure: &GuildStructure) -> Vec<String> {
-    roster_roles(cfg, structure)
-        .iter()
-        .map(|r| r.id.clone())
-        .collect()
 }
 
 fn role_sections(input: &RenderInput<'_>, budget: &mut Budget) -> Vec<String> {
@@ -362,11 +342,6 @@ fn push_role(
     budget: &mut Budget,
 ) -> bool {
     let cfg = input.cfg;
-    let members = input.members.and_then(|m| m.for_role(&role.id));
-
-    if !role_is_shown(input, role) {
-        return true;
-    }
 
     // The role mention renders as Discord's own colour pill, which no amount of
     // markdown can reproduce — and it stays correct if the role is renamed.
@@ -376,10 +351,6 @@ fn push_role(
     }
     if cfg.show_permissions && !role.badges.is_empty() {
         head.push_str(&format!(" `{}`", role.badges.join(" · ")));
-    }
-    if let Some(m) = members {
-        let total = visible_total(cfg, m);
-        head.push_str(&format!(" · {}", pluralize(total, "member", "members")));
     }
     if !budget.take(&head) {
         return false;
@@ -393,73 +364,7 @@ fn push_role(
         }
         lines.push(line);
     }
-
-    if let Some(m) = members {
-        if let Some(line) = member_line(cfg, m) {
-            if !budget.take(&line) {
-                return false;
-            }
-            lines.push(line);
-        }
-    }
     true
-}
-
-/// Whether a role in the roster actually gets a line.
-///
-/// Extracted so `{directory_count}` counts exactly what the list shows — counting
-/// the roster before this filter would report 5 while displaying 3.
-///
-/// "Hide empty roles" can only apply once the counts are actually known: with the
-/// member list unavailable, "empty" is unknowable, and applying it anyway would
-/// blank the entire roster on a server without the privileged intent.
-fn role_is_shown(input: &RenderInput<'_>, role: &RoleView) -> bool {
-    let cfg = input.cfg;
-    if !cfg.hide_empty_roles || input.member_state != MemberState::Ready {
-        return true;
-    }
-    let count = input
-        .members
-        .and_then(|m| m.for_role(&role.id))
-        .map_or(0, |m| visible_total(cfg, m));
-    count > 0
-}
-
-/// Members counted for display: bots only when the host opted in.
-fn visible_total(cfg: &InstanceConfig, m: &crate::rest::RoleMembers) -> usize {
-    if cfg.include_bots {
-        m.human_total + m.bot_total
-    } else {
-        m.human_total
-    }
-}
-
-/// The `-# @a @b +3 more` line under a role, or None when nobody holds it.
-///
-/// Mentions rather than names: they're clickable, they survive a rename, and the
-/// reply's `allowed_mentions` makes them inert so a *public* staff list can't
-/// ping the whole team (see `discord::message_data`).
-fn member_line(cfg: &InstanceConfig, m: &crate::rest::RoleMembers) -> Option<String> {
-    let cap = cfg.max_members_per_role as usize;
-    let mut shown: Vec<String> = m
-        .humans
-        .iter()
-        .take(cap)
-        .map(|(id, _)| format!("<@{id}>"))
-        .collect();
-    if cfg.include_bots {
-        let room = cap.saturating_sub(shown.len());
-        shown.extend(m.bots.iter().take(room).map(|(id, _)| format!("<@{id}>")));
-    }
-    if shown.is_empty() {
-        return None;
-    }
-    let total = visible_total(cfg, m);
-    let mut line = format!("-# {}", shown.join(" "));
-    if total > shown.len() {
-        line.push_str(&format!(" *+{} more*", total - shown.len()));
-    }
-    Some(line)
 }
 
 // ── Channels mode ────────────────────────────────────────────────────────────
@@ -667,10 +572,6 @@ fn text_display(content: &str) -> Value {
     json!({ "type": COMPONENT_TEXT_DISPLAY, "content": content })
 }
 
-fn pluralize(n: usize, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
-}
-
 /// Collapse any run of whitespace (newlines included) into single spaces.
 ///
 /// Load-bearing, not cosmetic: the renderer builds blocks by joining lines with
@@ -753,9 +654,8 @@ impl Budget {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rest::{permission_badges, RoleMembers};
+    use crate::rest::permission_badges;
     use crate::store::{tests::base_config, ChannelRef, Group, Note, RoleRef};
-    use std::collections::HashMap;
 
     fn role(id: &str, name: &str, hoist: bool, perms: u64) -> RoleView {
         RoleView {
@@ -795,30 +695,21 @@ mod tests {
             guild_name: "Test Server".into(),
             roles,
             channels,
+            member_count: None,
+            online_count: None,
         }
     }
 
-    fn index(entries: &[(&str, usize, usize)]) -> MemberIndex {
-        let mut by_role = HashMap::new();
-        for (rid, humans, bots) in entries {
-            by_role.insert(
-                (*rid).to_string(),
-                RoleMembers {
-                    humans: (0..*humans)
-                        .map(|i| (format!("{rid}h{i}"), format!("human{i:02}")))
-                        .collect(),
-                    human_total: *humans,
-                    bots: (0..*bots)
-                        .map(|i| (format!("{rid}b{i}"), format!("bot{i:02}")))
-                        .collect(),
-                    bot_total: *bots,
-                },
-            );
-        }
-        MemberIndex {
-            by_role,
-            scanned: 100,
-            truncated: false,
+    /// A structure that carries the guild totals `?with_counts=true` supplies.
+    fn structure_with_counts(
+        roles: Vec<RoleView>,
+        members: Option<u64>,
+        online: Option<u64>,
+    ) -> GuildStructure {
+        GuildStructure {
+            member_count: members,
+            online_count: online,
+            ..structure(roles, vec![])
         }
     }
 
@@ -875,8 +766,6 @@ mod tests {
         let out = render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         });
         let text = text_of(&out);
@@ -910,8 +799,6 @@ mod tests {
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         }));
         assert!(!text.contains("Deleted Role"), "{text}");
@@ -933,8 +820,6 @@ mod tests {
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         }));
         assert!(text.contains("no longer exist"), "{text}");
@@ -994,8 +879,6 @@ mod tests {
         let out = render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         });
         let text = text_of(&out);
@@ -1024,202 +907,103 @@ mod tests {
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         }));
         assert!(!text.contains("### Leadership"), "{text}");
         assert!(text.contains("<@&r1>"), "{text}");
     }
 
-    #[test]
-    fn members_render_as_inert_mentions_with_an_overflow_count() {
+    // ── Server totals ───────────────────────────────────────────────────────
+    //
+    // The intent-free replacement for per-role member expansion: Discord's own
+    // guild totals, which ride along on the structure read. There is deliberately
+    // no per-role breakdown anywhere in this renderer — see the `rest` note.
+
+    fn count_cfg() -> InstanceConfig {
         let mut cfg = base_config();
         cfg.roles = vec![RoleRef {
             id: "r1".into(),
             name: "Mod".into(),
             color: 0,
         }];
-        cfg.show_members = true;
-        cfg.max_members_per_role = 2;
-        let st = structure(vec![role("r1", "Mod", true, 1 << 2)], vec![]);
-        let idx = index(&[("r1", 5, 0)]);
-        let text = text_of(&render(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: Some(&idx),
-            member_state: MemberState::Ready,
-            section: None,
-        }));
-        assert!(text.contains("5 members"), "{text}");
-        assert!(text.contains("<@r1h0>"), "{text}");
-        assert!(text.contains("*+3 more*"), "{text}");
-        // Capped at 2, so the third name must not appear.
-        assert!(!text.contains("<@r1h2>"), "{text}");
-    }
-
-    /// Bots are excluded from names *and* counts unless the host opts in — a
-    /// staff roster padded with integration bots is the common complaint.
-    #[test]
-    fn bots_are_excluded_from_names_and_counts_by_default() {
-        let mut cfg = base_config();
-        cfg.roles = vec![RoleRef {
-            id: "r1".into(),
-            name: "Team".into(),
-            color: 0,
-        }];
-        cfg.show_members = true;
-        let st = structure(vec![role("r1", "Team", true, 0)], vec![]);
-        let idx = index(&[("r1", 2, 3)]);
-
-        let text = text_of(&render(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: Some(&idx),
-            member_state: MemberState::Ready,
-            section: None,
-        }));
-        assert!(text.contains("2 members"), "{text}");
-        assert!(!text.contains("<@r1b0>"), "bot leaked: {text}");
-
-        cfg.include_bots = true;
-        let text = text_of(&render(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: Some(&idx),
-            member_state: MemberState::Ready,
-            section: None,
-        }));
-        assert!(text.contains("5 members"), "{text}");
-        assert!(text.contains("<@r1b0>"), "{text}");
+        cfg.show_member_count = true;
+        cfg
     }
 
     #[test]
-    fn one_member_is_singular() {
-        let mut cfg = base_config();
-        cfg.roles = vec![RoleRef {
-            id: "r1".into(),
-            name: "Owner".into(),
-            color: 0,
-        }];
-        cfg.show_members = true;
-        let st = structure(vec![role("r1", "Owner", true, 1 << 3)], vec![]);
-        let idx = index(&[("r1", 1, 0)]);
+    fn server_totals_render_under_the_heading_when_asked_for() {
+        let cfg = count_cfg();
+        let st = structure_with_counts(vec![role("r1", "Mod", true, 1 << 2)], Some(1204), Some(87));
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: Some(&idx),
-            member_state: MemberState::Ready,
+            section: None,
+        }));
+        assert!(text.contains("1,204 members · 87 online"), "{text}");
+        // The roster itself is unaffected.
+        assert!(text.contains("<@&r1>"), "{text}");
+        assert!(text.contains("`Bans`"), "{text}");
+    }
+
+    /// Off by default, and off means *absent* — not a zero.
+    #[test]
+    fn server_totals_are_omitted_unless_the_host_asked() {
+        let mut cfg = count_cfg();
+        cfg.show_member_count = false;
+        let st = structure_with_counts(vec![role("r1", "Mod", true, 0)], Some(1204), Some(87));
+        let text = text_of(&render(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+        }));
+        assert!(!text.contains("1,204"), "{text}");
+        assert!(!text.contains("online"), "{text}");
+    }
+
+    /// Discord may answer without the counts. Printing "0 members" then would be
+    /// a plain falsehood in a public message, so silence stays silence — and the
+    /// roster still renders, exactly as it does when the counts are present.
+    #[test]
+    fn a_missing_total_is_omitted_rather_than_rendered_as_zero() {
+        let cfg = count_cfg();
+        let st = structure_with_counts(vec![role("r1", "Mod", true, 0)], None, None);
+        let text = text_of(&render(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+        }));
+        assert!(!text.contains("0 members"), "{text}");
+        assert!(!text.contains("online"), "{text}");
+        assert!(text.contains("<@&r1>"), "the roster must survive: {text}");
+
+        // One count without the other renders just that one.
+        let st = structure_with_counts(vec![role("r1", "Mod", true, 0)], Some(12), None);
+        let text = text_of(&render(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
+            section: None,
+        }));
+        assert!(text.contains("12 members"), "{text}");
+        assert!(!text.contains("online"), "{text}");
+    }
+
+    #[test]
+    fn one_member_is_singular_and_thousands_are_grouped() {
+        let cfg = count_cfg();
+        let st = structure_with_counts(vec![role("r1", "Mod", true, 0)], Some(1), None);
+        let text = text_of(&render(&RenderInput {
+            cfg: &cfg,
+            structure: &st,
             section: None,
         }));
         assert!(text.contains("1 member"), "{text}");
         assert!(!text.contains("1 members"), "{text}");
-    }
 
-    /// The whole point of the graceful-degradation design: with the privileged
-    /// intent off, the roster still renders and says so once.
-    #[test]
-    fn an_unavailable_member_list_still_renders_the_roster() {
-        let mut cfg = base_config();
-        cfg.roles = vec![RoleRef {
-            id: "r1".into(),
-            name: "Mod".into(),
-            color: 0,
-        }];
-        cfg.show_members = true;
-        let st = structure(vec![role("r1", "Mod", true, 1 << 2)], vec![]);
-        let text = text_of(&render(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: None,
-            member_state: MemberState::Unavailable,
-            section: None,
-        }));
-        assert!(text.contains("<@&r1>"), "roster must survive: {text}");
-        assert!(text.contains("`Bans`"), "badges must survive: {text}");
-        assert!(text.contains("aren't available"), "{text}");
-        // No count is invented when the list is unknown.
-        assert!(!text.contains("0 members"), "{text}");
-    }
-
-    #[test]
-    fn a_transient_member_failure_says_try_again_not_ask_an_admin() {
-        let mut cfg = base_config();
-        cfg.roles = vec![RoleRef {
-            id: "r1".into(),
-            name: "Mod".into(),
-            color: 0,
-        }];
-        cfg.show_members = true;
-        let st = structure(vec![role("r1", "Mod", true, 0)], vec![]);
-        let text = text_of(&render(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: None,
-            member_state: MemberState::Busy,
-            section: None,
-        }));
-        assert!(text.contains("try again"), "{text}");
-    }
-
-    /// A truncated scan must be labelled — counts are minimums, and quietly
-    /// printing them as totals is the one dishonest thing this plugin could do.
-    #[test]
-    fn a_truncated_scan_labels_its_counts_as_minimums() {
-        let mut cfg = base_config();
-        cfg.roles = vec![RoleRef {
-            id: "r1".into(),
-            name: "Mod".into(),
-            color: 0,
-        }];
-        cfg.show_members = true;
-        let st = structure(vec![role("r1", "Mod", true, 0)], vec![]);
-        let mut idx = index(&[("r1", 3, 0)]);
-        idx.truncated = true;
-        let text = text_of(&render(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: Some(&idx),
-            member_state: MemberState::Ready,
-            section: None,
-        }));
-        assert!(text.contains("minimum"), "{text}");
-    }
-
-    /// "Hide empty roles" can only apply when counts are actually known —
-    /// otherwise it would blank the entire roster on a server without the intent.
-    #[test]
-    fn hide_empty_roles_is_ignored_when_counts_are_unknown() {
-        let mut cfg = base_config();
-        cfg.roles = vec![RoleRef {
-            id: "r1".into(),
-            name: "Mod".into(),
-            color: 0,
-        }];
-        cfg.show_members = true;
-        cfg.hide_empty_roles = true;
-        let st = structure(vec![role("r1", "Mod", true, 0)], vec![]);
-
-        // Unknown counts ⇒ the role still shows.
-        let text = text_of(&render(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: None,
-            member_state: MemberState::Unavailable,
-            section: None,
-        }));
-        assert!(text.contains("<@&r1>"), "{text}");
-
-        // Known and zero ⇒ hidden.
-        let idx = index(&[("r1", 0, 0)]);
-        let text = text_of(&render(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: Some(&idx),
-            member_state: MemberState::Ready,
-            section: None,
-        }));
-        assert!(!text.contains("<@&r1>"), "{text}");
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1000), "1,000");
+        assert_eq!(thousands(12_345), "12,345");
+        assert_eq!(thousands(1_234_567), "1,234,567");
     }
 
     // ── Channels mode ───────────────────────────────────────────────────────
@@ -1239,8 +1023,6 @@ mod tests {
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         }));
         assert!(text.contains("### Information"), "{text}");
@@ -1332,8 +1114,6 @@ mod tests {
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         }));
         assert!(
@@ -1353,8 +1133,6 @@ mod tests {
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         }));
         assert!(text.contains("`18+`"), "{text}");
@@ -1376,8 +1154,6 @@ mod tests {
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         }));
         assert!(text.contains("look \\*here"), "{text}");
@@ -1386,8 +1162,6 @@ mod tests {
         let text2 = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st2,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         }));
         assert!(text2.contains("\\# Huge"), "{text2}");
@@ -1412,8 +1186,6 @@ mod tests {
         let out = render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         });
         let block = out[0]["components"].as_array().unwrap().last().unwrap()["content"]
@@ -1432,8 +1204,6 @@ mod tests {
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         }));
         assert!(text.contains('…'), "{text}");
@@ -1474,8 +1244,6 @@ mod tests {
             text_of(&render(&RenderInput {
                 cfg: &cfg,
                 structure: &st,
-                members: None,
-                member_state: MemberState::NotRequested,
                 section,
             }))
         };
@@ -1545,8 +1313,6 @@ mod tests {
         let text = text_of(&render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: Some("c:cat2"),
         }));
         assert!(text.contains("<#c2>"), "{text}");
@@ -1560,8 +1326,7 @@ mod tests {
     #[test]
     fn a_huge_roster_stays_inside_the_v2_text_budget_and_says_it_was_cut() {
         let mut cfg = base_config();
-        cfg.show_members = true;
-        cfg.max_members_per_role = crate::store::MAX_MEMBERS_PER_ROLE;
+        cfg.show_member_count = true;
         cfg.notes = (0..25)
             .map(|i| Note {
                 id: format!("r{i}"),
@@ -1575,25 +1340,16 @@ mod tests {
                 color: 0,
             })
             .collect();
-        let st = structure(
+        let st = structure_with_counts(
             (0..25)
                 .map(|i| role(&format!("r{i}"), &format!("Role {i}"), true, 1 << 3))
                 .collect(),
-            vec![],
-        );
-        let idx = index(
-            &(0..25)
-                .map(|i| (format!("r{i}"), 50usize, 0usize))
-                .collect::<Vec<_>>()
-                .iter()
-                .map(|(a, b, c)| (a.as_str(), *b, *c))
-                .collect::<Vec<_>>(),
+            Some(120_000),
+            Some(9_000),
         );
         let out = render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: Some(&idx),
-            member_state: MemberState::Ready,
             section: None,
         });
         let total = char_total(&out);
@@ -1628,8 +1384,6 @@ mod tests {
         let out = render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         });
         assert!(char_total(&out) <= MAX_V2_TEXT, "{}", char_total(&out));
@@ -1681,8 +1435,6 @@ mod tests {
         let input = RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         };
         let text = render_text(&input);
@@ -1700,35 +1452,28 @@ mod tests {
     #[test]
     fn the_text_render_is_capped_well_below_the_message_budget() {
         let mut cfg = base_config();
-        cfg.show_members = true;
-        cfg.max_members_per_role = crate::store::MAX_MEMBERS_PER_ROLE;
-        cfg.roles = (0..25)
+        cfg.roles = (0..40)
             .map(|i| RoleRef {
                 id: format!("r{i}"),
                 name: format!("Role {i}"),
                 color: 0,
             })
             .collect();
+        cfg.notes = (0..40)
+            .map(|i| Note {
+                id: format!("r{i}"),
+                text: "n".repeat(150),
+            })
+            .collect();
         let st = structure(
-            (0..25)
+            (0..40)
                 .map(|i| role(&format!("r{i}"), &format!("Role {i}"), true, 1 << 3))
                 .collect(),
             vec![],
         );
-        let entries: Vec<(String, usize, usize)> = (0..25)
-            .map(|i| (format!("r{i}"), 50usize, 0usize))
-            .collect();
-        let idx = index(
-            &entries
-                .iter()
-                .map(|(a, b, c)| (a.as_str(), *b, *c))
-                .collect::<Vec<_>>(),
-        );
         let text = render_text(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: Some(&idx),
-            member_state: MemberState::Ready,
             section: None,
         });
         let len = text.list.chars().count();
@@ -1743,40 +1488,36 @@ mod tests {
         assert!(text.list.contains("truncated"), "a cut list must say so");
     }
 
-    /// An unavailable member list must be explained inside the substituted text
-    /// too — otherwise the author's message shows a roster with no names and no
-    /// hint as to why.
+    /// The substituted text is the list and nothing else.
+    ///
+    /// It lands inside the author's own prose, so it must never carry an
+    /// apology, a status note, or anything else the author didn't write. The
+    /// removed member expansion used to append "Member lists aren't available
+    /// right now." here, which read as the author's own words — that line is
+    /// what this test exists to keep out.
     #[test]
-    fn the_text_render_carries_the_member_state_note() {
+    fn the_text_render_carries_the_list_and_no_status_chatter() {
         let mut cfg = base_config();
         cfg.roles = vec![RoleRef {
             id: "r1".into(),
             name: "Mod".into(),
             color: 0,
         }];
-        cfg.show_members = true;
-        let st = structure(vec![role("r1", "Mod", true, 0)], vec![]);
-        let unavailable = render_text(&RenderInput {
+        cfg.show_member_count = true;
+        let st = structure_with_counts(vec![role("r1", "Mod", true, 0)], Some(1204), Some(87));
+        let text = render_text(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::Unavailable,
             section: None,
         });
-        assert!(
-            unavailable.list.contains("aren't available"),
-            "{}",
-            unavailable.list
-        );
-
-        let busy = render_text(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: None,
-            member_state: MemberState::Busy,
-            section: None,
-        });
-        assert!(busy.list.contains("Couldn't load"), "{}", busy.list);
+        assert!(text.list.contains("<@&r1>"), "{}", text.list);
+        for chatter in ["available", "Couldn't", "member", "online"] {
+            assert!(
+                !text.list.contains(chatter),
+                "inline list leaked {chatter:?}: {}",
+                text.list
+            );
+        }
     }
 
     /// An empty directory must resolve the token to a readable sentence, never to
@@ -1789,8 +1530,6 @@ mod tests {
         let text = render_text(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         });
         assert_eq!(text.count, 0);
@@ -1802,13 +1541,11 @@ mod tests {
         );
     }
 
-    /// `{directory_count}` must agree with the list printed beside it. Counting the
-    /// roster before the hide-empty filter reported 3 while showing 1.
+    /// `{directory_count}` must agree with the list printed beside it — a picked
+    /// role that no longer exists is neither listed nor counted.
     #[test]
     fn the_count_matches_what_the_list_actually_shows() {
         let mut cfg = base_config();
-        cfg.show_members = true;
-        cfg.hide_empty_roles = true;
         cfg.roles = (1..=3)
             .map(|i| RoleRef {
                 id: format!("r{i}"),
@@ -1816,34 +1553,21 @@ mod tests {
                 color: 0,
             })
             .collect();
+        // r3 was deleted in Discord since the host picked it.
         let st = structure(
-            (1..=3)
+            (1..=2)
                 .map(|i| role(&format!("r{i}"), &format!("R{i}"), true, 0))
                 .collect(),
             vec![],
         );
-        // Only r1 is held by anyone; r2 and r3 are hidden as empty.
-        let idx = index(&[("r1", 2, 0), ("r2", 0, 0), ("r3", 0, 0)]);
         let text = render_text(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: Some(&idx),
-            member_state: MemberState::Ready,
             section: None,
         });
-        assert_eq!(text.count, 1, "hidden empty roles must not be counted");
+        assert_eq!(text.count, 2, "a deleted role must not be counted");
         assert!(text.list.contains("<@&r1>"), "{}", text.list);
-        assert!(!text.list.contains("<@&r2>"), "{}", text.list);
-
-        // With counts unknown, nothing is hidden — so all three are counted.
-        let text = render_text(&RenderInput {
-            cfg: &cfg,
-            structure: &st,
-            members: None,
-            member_state: MemberState::Unavailable,
-            section: None,
-        });
-        assert_eq!(text.count, 3);
+        assert!(!text.list.contains("<@&r3>"), "{}", text.list);
     }
 
     #[test]
@@ -1873,8 +1597,6 @@ mod tests {
         let text = render_text(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: Some("g:g2"),
         });
         assert!(text.list.contains("Mods"), "{}", text.list);
@@ -1893,8 +1615,6 @@ mod tests {
         let rendered = render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         });
         assert!(rendered[0]["accent_color"].is_null());
@@ -1905,8 +1625,6 @@ mod tests {
         let rendered = render(&RenderInput {
             cfg: &cfg,
             structure: &st,
-            members: None,
-            member_state: MemberState::NotRequested,
             section: None,
         });
         assert_eq!(rendered[0]["accent_color"], json!(0x12_34_56));
@@ -1937,7 +1655,5 @@ mod tests {
             truncate(&"x".repeat(30), 10),
             format!("{}…", "x".repeat(10))
         );
-        assert_eq!(pluralize(1, "member", "members"), "1 member");
-        assert_eq!(pluralize(0, "member", "members"), "0 members");
     }
 }
