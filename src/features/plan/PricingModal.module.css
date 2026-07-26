@@ -95,14 +95,13 @@
   text-decoration: underline;
 }
 
-/* Row holding the Monthly / Annual switch and the promo field, centered above
-   the cards. Both controls share one line (and one height) so the header stays
-   compact; they wrap onto separate lines only when the modal is too narrow. */
+/* Monthly / Annual switch with the promo field stacked underneath, both centered
+   above the cards. Each control keeps its own line so neither is read as a
+   modifier of the other, and the promo pill can't crowd the period toggle. */
 .toggleRow {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: stretch;
+  flex-direction: column;
+  align-items: center;
   gap: 8px;
 }
 .periodToggle {
