@@ -509,7 +509,18 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   card-less customer; (3) only the **customer-facing code** is accepted from the client,
   never a `coupon`/`promo_…` id — a promotion code is the object Stripe means to be handed
   out, and `parse_promotion_code` re-checks `active`, `expires_at`, `max_redemptions`, and
-  `coupon.valid` itself rather than trusting the `active=true` filter alone; (4) every
+  `coupon.valid` itself rather than trusting the `active=true` filter alone. **The coupon
+  is not where the old docs put it**: on the account's current API version a promotion code
+  carries it as a bare id under `promotion.coupon` (needing
+  `expand[]=data.promotion.coupon`), while older versions inline a top-level `coupon` —
+  same both-shapes hazard as `current_period_end` in `extract_sub_fields`. Reading only the
+  top level shipped a live 100%-off-forever code reporting itself as *expired* (2026-07-27),
+  found only by querying Stripe by hand, which is why a refused lookup now logs under
+  `stripe_promo`. A coupon that can't be read is **not** a rejection — the code is still
+  applied (Stripe validates it at session creation) and merely doesn't qualify as
+  free-forever; refusing a code we only failed to *parse* is the worse failure. Don't add
+  more `expand` paths: a rejected query is a 502 that pages, and the legacy path needs none.
+  (4) every
   promo failure is a **4xx** — a typo (`PromoError::Invalid`) and a code whose restrictions
   don't fit the purchase (`CheckoutError::PromoRejected`, logged at *info* under
   `stripe_promo`) — because 5xx is the paging channel and neither is our fault; that is why

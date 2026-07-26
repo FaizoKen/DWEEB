@@ -456,20 +456,41 @@ fn parse_promotion_code(body: &Value) -> Option<PromoCode> {
             return None;
         }
     }
-    let coupon = promo.get("coupon")?;
-    if coupon.get("valid").and_then(Value::as_bool) != Some(true) {
-        return None;
-    }
-    // A 100%-off forever coupon is the only shape that makes the subscription free
-    // for good. An `amount_off` coupon is deliberately excluded even when it
-    // happens to equal the price: it is a fixed amount in one currency, so
-    // "covers it" is a coincidence of the current price rather than a property of
-    // the coupon, and a price change would silently strand a card-less customer.
-    let covers_everything = coupon
-        .get("percent_off")
-        .and_then(Value::as_f64)
-        .is_some_and(|p| p >= 100.0)
-        && coupon.get("duration").and_then(Value::as_str) == Some("forever");
+    // The coupon lives in one of two places depending on the account's API
+    // version — `promotion.coupon` on current versions (what production returns),
+    // a top-level `coupon` on older ones — exactly like `current_period_end` in
+    // `extract_sub_fields`. Reading only one of them is what made a live
+    // 100%-off-forever code report itself as expired.
+    let coupon = promo
+        .pointer("/promotion/coupon")
+        .or_else(|| promo.get("coupon"))
+        .filter(|c| c.is_object());
+    let covers_everything = match coupon {
+        Some(coupon) => {
+            // An explicit `valid: false` is proof the coupon is spent or past its
+            // redeem-by date; that's a dead code.
+            if coupon.get("valid").and_then(Value::as_bool) != Some(true) {
+                return None;
+            }
+            // A 100%-off forever coupon is the only shape that makes the
+            // subscription free for good. An `amount_off` coupon is deliberately
+            // excluded even when it happens to equal the price: it is a fixed
+            // amount in one currency, so "covers it" is a coincidence of the
+            // current price rather than a property of the coupon, and a price
+            // change would silently strand a card-less customer.
+            coupon
+                .get("percent_off")
+                .and_then(Value::as_f64)
+                .is_some_and(|p| p >= 100.0)
+                && coupon.get("duration").and_then(Value::as_str) == Some("forever")
+        }
+        // Not expanded (a bare coupon id), or a promotion kind that isn't a coupon
+        // at all. Absence is ignorance, not proof — so the code is still applied
+        // and Stripe validates it at session creation; we just can't claim it's
+        // free forever, so the card is collected. Never reject on this: refusing a
+        // code we merely failed to read is the worse failure by far.
+        None => false,
+    };
     Some(PromoCode {
         id,
         covers_everything,
@@ -658,17 +679,48 @@ impl StripeClient {
     }
 
     /// Resolve a customer-typed promotion code to the live Stripe object behind it.
-    /// `active=true` narrows the search to redeemable codes; [`parse_promotion_code`]
-    /// re-checks expiry, redemption cap, and coupon validity itself.
+    /// The `code` filter is case-insensitive, `active=true` narrows the search to
+    /// redeemable codes, and [`parse_promotion_code`] re-checks expiry, redemption
+    /// cap, and coupon validity itself.
+    ///
+    /// The `expand` is load-bearing, not an optimisation: on current API versions a
+    /// promotion code carries its coupon as a bare id under `promotion.coupon`, and
+    /// the coupon's `percent_off`/`duration` are the whole basis for waiving card
+    /// entry. Without it the code still works — it just never qualifies as
+    /// free-forever.
     pub async fn find_promotion_code(&self, code: &str) -> Result<PromoCode, PromoError> {
         let body = self
             .get(
                 "/v1/promotion_codes",
-                &[("code", code), ("active", "true"), ("limit", "1")],
+                &[
+                    ("code", code),
+                    ("active", "true"),
+                    ("limit", "1"),
+                    // Only this one path: older API versions return their
+                    // top-level `coupon` already inline, so expanding it too would
+                    // buy nothing while giving Stripe one more thing it could one
+                    // day reject — and a rejected *query* is a 502 that pages.
+                    ("expand[]", "data.promotion.coupon"),
+                ],
             )
             .await
             .map_err(PromoError::Upstream)?;
-        parse_promotion_code(&body).ok_or(PromoError::Invalid)
+        parse_promotion_code(&body).ok_or_else(|| {
+            // Without this the only trace of a refused code was the visitor's own
+            // error message — which is how a *live* code reading as expired (the
+            // coupon shape moving under `promotion`) took a manual Stripe query to
+            // find. Info, not warn: a mistyped code must never page.
+            let found = body
+                .get("data")
+                .and_then(Value::as_array)
+                .is_some_and(|d| !d.is_empty());
+            tracing::info!(
+                target: "stripe_promo",
+                matched = found,
+                "promo code not usable (matched={found})"
+            );
+            PromoError::Invalid
+        })
     }
 
     /// Create an **embedded** Checkout session for `tier` and return its client
@@ -2003,6 +2055,47 @@ mod tests {
         json!({ "object": "list", "data": [promo] })
     }
 
+    /// The shape production actually returns (current API version): the coupon
+    /// hangs off `promotion`, not the top level. Reading only the top level made a
+    /// live 100%-off-forever code report itself as expired.
+    #[test]
+    fn parse_promotion_code_reads_the_coupon_from_either_api_shape() {
+        let coupon = json!({
+            "id": "OwyoUqe5", "object": "coupon", "valid": true,
+            "percent_off": 100.0, "duration": "forever", "amount_off": null
+        });
+        // Current: promotion.coupon (expanded).
+        let current = parse_promotion_code(&promo_list(json!({
+            "id": "promo_1", "code": "TYLCFPVP", "active": true,
+            "max_redemptions": 1, "times_redeemed": 0, "expires_at": null,
+            "promotion": { "type": "coupon", "coupon": coupon.clone() }
+        })))
+        .unwrap();
+        assert_eq!(current.id, "promo_1");
+        assert!(current.covers_everything);
+        // Older: a top-level coupon object.
+        let legacy = parse_promotion_code(&promo_list(json!({
+            "id": "promo_1", "active": true, "coupon": coupon
+        })))
+        .unwrap();
+        assert!(legacy.covers_everything);
+        // Unexpanded (a bare coupon id) — we can't prove it's free, so the code is
+        // still accepted and the card is collected. Never rejected: refusing a code
+        // we merely failed to read is the worse failure.
+        let bare = parse_promotion_code(&promo_list(json!({
+            "id": "promo_1", "active": true,
+            "promotion": { "type": "coupon", "coupon": "OwyoUqe5" }
+        })))
+        .unwrap();
+        assert!(!bare.covers_everything);
+        // A promotion that isn't a coupon at all behaves the same way.
+        let other = parse_promotion_code(&promo_list(json!({
+            "id": "promo_1", "active": true, "promotion": { "type": "something_new" }
+        })))
+        .unwrap();
+        assert!(!other.covers_everything);
+    }
+
     #[test]
     fn parse_promotion_code_reads_a_live_code_and_whether_it_covers_everything() {
         // 100% off forever → the one shape that may skip card collection.
@@ -2076,10 +2169,18 @@ mod tests {
         left["max_redemptions"] = json!(5);
         left["times_redeemed"] = json!(4);
         assert!(parse_promotion_code(&promo_list(left)).is_some());
-        // The coupon behind it is dead.
+        // The coupon behind it is dead — in either shape. An explicit
+        // `valid: false` is proof, unlike a coupon we simply couldn't read.
         let mut dead = live.clone();
         dead["coupon"]["valid"] = json!(false);
         assert!(parse_promotion_code(&promo_list(dead)).is_none());
+        let dead_current = json!({
+            "id": "promo_1", "active": true,
+            "promotion": { "type": "coupon", "coupon": {
+                "valid": false, "percent_off": 100.0, "duration": "forever"
+            } }
+        });
+        assert!(parse_promotion_code(&promo_list(dead_current)).is_none());
         // Not a promotion code id (so never a coupon id smuggled through).
         let mut wrong = live.clone();
         wrong["id"] = json!("coupon_1");
