@@ -84,6 +84,11 @@ enabled. Member expansion is an enhancement here, never a requirement.
   giveaway's entries, there is nothing to lose — which is why a replacement
   instance (the protocol-v2 cache-miss path) costs the host nothing but a
   re-save.
+- **In-message output is button-only.** A menu's section pick is per-person while
+  the message body is shared, so one pick would re-stamp what everyone else sees.
+  It would also break: the template is captured before DWEEB wires the menu's
+  options onto it, so a refresh would re-send an option-less select and Discord
+  would reject it.
 - **In-message output defers an UPDATE (type 6), never a reply (type 5).** After a
   deferred *reply*, `@original` names the reply — so a member-expanding roster
   would edit its list into an invisible ephemeral instead of the message it

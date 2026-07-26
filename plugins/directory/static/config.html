@@ -941,11 +941,28 @@
       $("visibility").addEventListener("change", updateCounts);
       $("output").addEventListener("change", updateCounts);
 
+      // In-message output is button-only — see `validate_output` in the service.
+      // A menu's section pick is per-person, and the message body is shared, so
+      // one pick would re-stamp what everyone else sees. (It would also break:
+      // the template is captured before DWEEB wires the menu's options, so a
+      // refresh would re-send an option-less select and Discord would reject it.)
       function outputMode() {
+        if (target === "string_select") return "reply";
         return $("output").value === "message" ? "message" : "reply";
       }
 
+      function syncOutputAvailability() {
+        const menu = target === "string_select";
+        const opt = $("output").querySelector('option[value="message"]');
+        opt.disabled = menu;
+        opt.textContent = menu
+          ? "In this message itself — not available on a menu"
+          : "In this message itself — no click needed to read it";
+        if (menu && $("output").value === "message") $("output").value = "reply";
+      }
+
       function renderPublicHint() {
+        syncOutputAvailability();
         const inMessage = outputMode() === "message";
         // In-message output has no separate reply to make public or to style, so
         // those two controls would be lying if they stayed enabled.
@@ -969,7 +986,9 @@
 
         $("tokenHelp").style.display = "none";
         $("outputHint").innerHTML =
-          "A click answers with the list. Best for a long roster: the reply gets its own space and your message stays short.";
+          target === "string_select"
+            ? "A pick answers with that section of the list. A menu always replies — its pick is per-person, so it can't rewrite the shared message."
+            : "A click answers with the list. Best for a long roster: the reply gets its own space and your message stays short.";
         const pub = $("visibility").value === "public";
         $("publicHint").innerHTML = pub
           ? "Everyone in the channel sees each answer — good for a one-off staff announcement, noisy on a busy button. Mentions never ping."

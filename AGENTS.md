@@ -280,6 +280,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   rejects an over-budget message entirely. Tokens are namespaced (`directory`,
   `directory_count`, `directory_updated`) because Self Role already declares a bare
   `{roles}` and the host resolves collisions first-wins in binding order.
+  **`"message"` output is button-only**, for two independent reasons: a menu's
+  section pick is per-person while the message body is shared (one pick would
+  re-stamp what everyone *else* sees), *and* the template is captured before the
+  host wires the menu's options onto it, so a refresh would re-send an option-less
+  select that Discord rejects.
   **Click-free updates are impossible — don't attempt them**: a webhook message is
   editable only through an interaction on it or with the webhook token, which stays
   sealed in the proxy. Guarded by the in-place tests in `discord.rs`, the

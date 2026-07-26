@@ -84,6 +84,22 @@ fn validate_output(cfg: &InstanceConfig) -> Result<(), String> {
     if !cfg.writes_to_message() {
         return Ok(());
     }
+    // In-message output is button-only, for two independent reasons.
+    //
+    // Product: the message body is shared, so one member picking a section would
+    // re-stamp it and change what *everyone* else sees — a per-person filter and a
+    // shared surface are fundamentally at odds.
+    //
+    // Mechanics: the template is captured before the host wires this plugin's
+    // options onto the menu, so a fresh attach would store an option-less select.
+    // Re-rendering that is rejected by Discord (a string select needs 1–25
+    // options), and the refresh would simply fail.
+    if cfg.target == TARGET_STRING_SELECT {
+        return Err(
+            "A menu can't write into the message — one person's pick would change what everyone else sees. Attach this to a button instead, or switch to \"in a reply\"."
+                .into(),
+        );
+    }
     let Some(template) = cfg.message_template.as_ref() else {
         return Err(
             "I couldn't read the message you're building, so the list can't be written into it. Reload the editor, or switch this back to \"a private reply\"."
@@ -512,6 +528,34 @@ mod tests {
             { "type": 10, "content": format!("{{directory}} {big}") }
         ]));
         assert!(validate_config(&cfg).unwrap_err().contains("too large"));
+    }
+
+    /// In-message output is button-only. A menu would both break (its options are
+    /// wired *after* the template is captured, so the refresh would re-send an
+    /// option-less select that Discord rejects) and confuse — one person's section
+    /// pick would re-stamp the shared message for everyone.
+    #[test]
+    fn a_menu_cannot_write_into_the_message() {
+        let mut cfg = with_message_output(serde_json::json!([
+            { "type": 10, "content": "{directory}" }
+        ]));
+        cfg.target = TARGET_STRING_SELECT.into();
+        cfg.groups = vec![Group {
+            key: "g1".into(),
+            name: "Staff".into(),
+            emoji: None,
+            role_ids: vec![good_role_id()],
+        }];
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(
+            err.contains("button"),
+            "the error must offer the fix: {err}"
+        );
+
+        // The same menu is fine in reply output, where the pick is per-person.
+        cfg.output = crate::store::OUTPUT_REPLY.into();
+        cfg.message_template = None;
+        assert!(validate_config(&cfg).is_ok(), "{:?}", validate_config(&cfg));
     }
 
     /// Reply output — the default — must not acquire any of these requirements.
