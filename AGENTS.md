@@ -199,6 +199,19 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
      means a broken deploy or SW precache gap. Don't "simplify" any of this into an
      unconditional drop, and deploy the server change before (or with) the web one — the old
      proxy logs every stale-chunk beacon at warn.
+  5. **Optional background imports must handle their own rejection** (2026-07-27). The
+     escalation in (4) reads only "was it handled", so a *fire-and-forget* `import()` failing
+     post-boot pages even though nothing on screen was waiting for it. `virtual:pwa-register`
+     — the service-worker registration `main.tsx` schedules ~8s after first paint — did exactly
+     that: a backgrounded tab's timers are throttled to a standstill, so the import can fire
+     hours later against a deploy that purged the chunk, and the editor is running perfectly
+     the whole time. Pass `reportBackgroundFailure` (reporter.ts) as the `.catch` of any such
+     task: a stale chunk reports as handled `stale-chunk`, anything else keeps the honest
+     `unhandledrejection` and still pages. `BACKGROUND_ONLY_CHUNKS` in telemetry.rs mirrors
+     this for pre-fix SW-cached clients, which keep sending the fatal shape for weeks — add a
+     chunk there only if it is reachable *solely* from fire-and-forget work, since the entry
+     exempts it from paging for good. (`workbox-window` needs no entry: `manualChunks` folds it
+     into `vendor`, which is already loaded, so its inner import can never 404.)
 - **`Field` rewrites the caller's element tree — it must never descend into a render prop.**
   `ui/Field`'s `wireControl` walks the tree its render-prop child returns and clones
   `aria-describedby`/`aria-errormessage`/`aria-invalid` onto the element carrying the control id.

@@ -25,9 +25,11 @@ import { isProxyConfigured } from "@/core/guild/config";
 import { isActivityMode } from "@/core/activity/runtime";
 import { isStaleChunkReloadInProgress } from "@/core/pwa/staleChunkRecovery";
 import {
+  backgroundFailureKind,
   buildCrashPayload,
   crashSignature,
   CrashThrottle,
+  describeError,
   isForeignCodeError,
   isNonCrashMessage,
   resolveCrashKind,
@@ -103,6 +105,21 @@ export function reportBoundaryError(error: unknown): void {
 export function reportHandledStaleChunk(error: unknown): void {
   if (!enabled()) return;
   report("stale-chunk", error);
+}
+
+/**
+ * Report a rejection from optional post-boot background work — something the app
+ * fires and forgets, that nothing on screen waits for (today: the service-worker
+ * registration in `main.tsx`). Pass this as the `.catch` of such a task so the
+ * rejection is *handled* rather than escaping to the global trap, where a failed
+ * chunk load would be escalated to the page-worthy `stale-chunk-fatal` even
+ * though the app never faltered. See [`backgroundFailureKind`] for the policy
+ * (and the 2026-07-27 page that motivated it); a genuine fault in our own code
+ * still reports — and pages — exactly as an unhandled rejection would.
+ */
+export function reportBackgroundFailure(error: unknown): void {
+  if (!enabled()) return;
+  report(backgroundFailureKind(describeError(error).message), error);
 }
 
 /** Shared path: build → throttle → beacon. Never throws. */

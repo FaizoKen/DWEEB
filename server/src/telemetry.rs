@@ -107,6 +107,25 @@ const STALE_CHUNK_MESSAGES: [&str; 4] = [
     "unable to preload css",                       // Vite preload helper
 ];
 
+/// Chunks that *only* optional post-boot background work loads — nothing on
+/// screen waits for them, so their failure cannot be fatal no matter what kind
+/// the client reported.
+///
+/// Just one today: `virtual:pwa-register`, the service-worker registration
+/// module that `main.tsx` imports well after first paint. A tab that outlives a
+/// deploy 404s it with the editor running perfectly, yet the pre-fix client
+/// escalated that to `stale-chunk-fatal` (the rejection was unhandled, and the
+/// escalation rule can't see that nothing depended on it) and paged the
+/// maintainer on 2026-07-27. The client now reports it as handled, but the app
+/// ships from a service-worker cache — clients without that fix keep sending the
+/// fatal shape for weeks — so the demotion lives here too, where it is the
+/// authority. Match on the bundler's chunk name, which Vite derives from the
+/// module id and is present in every engine's message (which carries the URL).
+///
+/// Keep this list to modules genuinely reachable *only* from fire-and-forget
+/// work: an entry here permanently exempts a chunk from paging.
+const BACKGROUND_ONLY_CHUNKS: [&str; 1] = ["virtual_pwa-register"];
+
 /// Whether this beacon is *routine* deploy skew — logged at `info` (greppable,
 /// aggregatable) instead of `warn` so it never pages through the log alerter.
 ///
@@ -119,15 +138,22 @@ const STALE_CHUNK_MESSAGES: [&str; 4] = [
 /// The one shape that stays `warn` (and pages) is `stale-chunk-fatal`: a
 /// current client whose app actually went down on a missing chunk — boot
 /// recovery exhausted or an unguarded lazy path — which means a broken deploy
-/// or an SW precache gap, not routine skew.
+/// or an SW precache gap, not routine skew. Its single exception is a chunk from
+/// [`BACKGROUND_ONLY_CHUNKS`], which no user-visible path can be waiting on.
 fn is_routine_stale_chunk(kind: &str, message: &str) -> bool {
-    if kind == "stale-chunk-fatal" {
-        return false;
-    }
     let lower = message.to_lowercase();
-    STALE_CHUNK_MESSAGES
+    if !STALE_CHUNK_MESSAGES
         .iter()
         .any(|known| lower.contains(known))
+    {
+        return false;
+    }
+    if kind == "stale-chunk-fatal" {
+        return BACKGROUND_ONLY_CHUNKS
+            .iter()
+            .any(|chunk| lower.contains(&chunk.to_lowercase()));
+    }
+    true
 }
 
 /// Whether a `window.onerror` beacon reports someone else's code, not ours.
@@ -349,6 +375,36 @@ mod tests {
         assert!(!is_routine_stale_chunk(
             "stale-chunk-fatal",
             "Failed to fetch dynamically imported module: https://x/a.js"
+        ));
+    }
+
+    #[test]
+    fn background_only_chunk_is_routine_even_when_reported_fatal() {
+        // The 2026-07-27 page verbatim: the post-paint service-worker
+        // registration chunk, purged by a deploy the tab outlived. Nothing on
+        // screen waited for it, so it is skew — never a page — no matter that a
+        // pre-fix client (which keeps shipping from its SW cache for weeks)
+        // escalated the unhandled rejection to `stale-chunk-fatal`.
+        let msg = "Failed to fetch dynamically imported module: \
+                   https://dweeb.faizo.net/assets/virtual_pwa-register-BgZHO7yx.js";
+        assert!(is_routine_stale_chunk("stale-chunk-fatal", msg));
+        // And the kind the fixed client now sends for the same event.
+        assert!(is_routine_stale_chunk("stale-chunk", msg));
+    }
+
+    #[test]
+    fn only_background_chunks_are_exempt_from_the_fatal_rule() {
+        // A real surface chunk going down keeps paging — the exemption is by
+        // chunk name, not a blanket softening of `stale-chunk-fatal`.
+        assert!(!is_routine_stale_chunk(
+            "stale-chunk-fatal",
+            "Failed to fetch dynamically imported module: \
+             https://dweeb.faizo.net/assets/TemplateGallery-eyaR9UxE.js"
+        ));
+        // Naming the module without failing to load it isn't skew at all.
+        assert!(!is_routine_stale_chunk(
+            "stale-chunk-fatal",
+            "Cannot read properties of undefined (reading 'virtual_pwa-register')"
         ));
     }
 

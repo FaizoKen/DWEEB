@@ -213,6 +213,28 @@ export function resolveCrashKind(
 }
 
 /**
+ * The wire kind for a failure in *optional post-boot background work* — work the
+ * app fires and forgets, whose failure costs the user nothing on screen (today:
+ * the service-worker registration scheduled after first paint in `main.tsx`).
+ *
+ * Left alone, such a rejection reaches the `unhandledrejection` trap, and
+ * [`resolveCrashKind`] escalates a stale chunk there to `stale-chunk-fatal` —
+ * the one shape the proxy pages on, reserved for the app actually going down.
+ * That is precisely what `virtual:pwa-register` did on 2026-07-27: a tab that
+ * outlived a deploy 404'd the registration chunk while the editor ran perfectly,
+ * and paged the maintainer over a tab that had merely missed its offline cache.
+ *
+ * So a stale chunk on this path reports as **handled** (`stale-chunk`, logged
+ * below paging level — still counted, because a spike means many tabs are
+ * outliving deploys), while anything else keeps the honest `unhandledrejection`
+ * it would have had: an unexpected fault in our own code stays page-worthy
+ * whether or not it happened in the background.
+ */
+export function backgroundFailureKind(message: string): CrashKind {
+  return isStaleChunkMessage(message) ? "stale-chunk" : "unhandledrejection";
+}
+
+/**
  * Whether a `window.onerror` report describes someone else's code, not ours.
  *
  * The global `error` trap hears every uncaught exception in the page context —

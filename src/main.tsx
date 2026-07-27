@@ -2,7 +2,7 @@ import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { isActivityMode } from "@/core/activity/runtime";
-import { installCrashReporter } from "@/core/telemetry/reporter";
+import { installCrashReporter, reportBackgroundFailure } from "@/core/telemetry/reporter";
 import { installStaleChunkRecovery } from "@/core/pwa/staleChunkRecovery";
 import { trackAnalytics } from "@/core/telemetry/analytics";
 import "@/styles/global.css";
@@ -134,7 +134,14 @@ async function bootWeb(): Promise<void> {
  */
 function schedulePwaRegistration(): void {
   if (!import.meta.env.PROD) return;
-  const run = () => void registerWebPwa();
+  // Handle the rejection rather than dropping it. This runs long after the app
+  // is interactive and — because a backgrounded tab's timers are throttled to a
+  // standstill — can fire hours later, by which time a deploy may have purged
+  // the `virtual:pwa-register` chunk. Left unhandled, that 404 reached the
+  // global rejection trap and was escalated to `stale-chunk-fatal`, paging the
+  // maintainer (2026-07-27) about a tab whose editor was running perfectly and
+  // had only missed its offline cache. See `reportBackgroundFailure`.
+  const run = () => void registerWebPwa().catch(reportBackgroundFailure);
   // A first visit commits a lightweight shell before its lazy gallery becomes
   // interactive. Give that critical chunk a real head start; rIC alone can run
   // immediately in the network gap and make Workbox's full precache compete.

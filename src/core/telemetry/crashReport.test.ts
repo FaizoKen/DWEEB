@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  backgroundFailureKind,
   buildCrashPayload,
   crashSignature,
   CrashThrottle,
@@ -205,6 +206,29 @@ describe("resolveCrashKind", () => {
     expect(resolveCrashKind("boundary", STALE, false)).toBe("stale-chunk-fatal");
     expect(resolveCrashKind("error", STALE, false)).toBe("stale-chunk-fatal");
     expect(resolveCrashKind("unhandledrejection", STALE, false)).toBe("stale-chunk-fatal");
+  });
+});
+
+describe("backgroundFailureKind", () => {
+  it("reports a background chunk failure as handled, not fatal", () => {
+    // The 2026-07-27 page verbatim: the post-paint service-worker registration
+    // import, 404'd because the tab outlived a deploy. Handing this to
+    // `resolveCrashKind` as `stale-chunk` keeps it below paging level — the
+    // editor was running fine and only the offline cache was missed.
+    const message =
+      "Failed to fetch dynamically imported module: " +
+      "https://dweeb.faizo.net/assets/virtual_pwa-register-BgZHO7yx.js";
+    expect(backgroundFailureKind(message)).toBe("stale-chunk");
+    expect(resolveCrashKind(backgroundFailureKind(message), message, false)).toBe("stale-chunk");
+  });
+
+  it("keeps an unexpected fault page-worthy, background or not", () => {
+    // Not deploy skew — a real bug in code we shipped. It reports exactly as the
+    // unhandled rejection it would otherwise have been.
+    expect(backgroundFailureKind("Cannot read properties of undefined (reading 'id')")).toBe(
+      "unhandledrejection",
+    );
+    expect(backgroundFailureKind("")).toBe("unhandledrejection");
   });
 });
 
