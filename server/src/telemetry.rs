@@ -38,7 +38,9 @@ use crate::routes::AppState;
 #[derive(Deserialize)]
 pub struct CrashBody {
     /// Where the error surfaced: `error` (window.onerror), `unhandledrejection`,
-    /// or `boundary` (the React error boundary). A short enum-like tag.
+    /// or `boundary` (the React error boundary), plus the three chunk-load
+    /// refinements the client resolves for itself — `stale-chunk`,
+    /// `chunk-unreachable`, `stale-chunk-fatal`. A short enum-like tag.
     #[serde(default)]
     kind: String,
     /// The error message. Not user content — an exception string like
@@ -49,10 +51,20 @@ pub struct CrashBody {
     /// a deep stack can't blow up one log line.
     #[serde(default)]
     stack: String,
-    /// The app build version (`__APP_VERSION__`), so a crash can be pinned to a
-    /// deploy.
+    /// The app release version (`__APP_VERSION__`), so a crash can be pinned to
+    /// a release.
     #[serde(default)]
     version: String,
+    /// Identity of the *bundle* reporting (`__BUILD_ID__` — the commit it was
+    /// built from, or a build timestamp). `version` cannot answer this: it is
+    /// the package.json semver and has read `1.0.0` since launch. The app ships
+    /// from a service-worker cache, so clients keep running — and beaconing
+    /// from — a bundle for weeks after it is replaced; this is what tells a log
+    /// reader whether a report comes from a build that already carries the fix
+    /// for what it describes. Empty from any client predating the field, which
+    /// is itself the signal that it is an old one.
+    #[serde(default)]
+    build: String,
     /// Which shell was running: `web` or `activity`.
     #[serde(default)]
     surface: String,
@@ -68,6 +80,8 @@ const KIND_MAX: usize = 20;
 const MESSAGE_MAX: usize = 300;
 const STACK_MAX: usize = 800;
 const VERSION_MAX: usize = 24;
+/// A short commit sha plus a `-dirty` marker, with room to spare.
+const BUILD_MAX: usize = 32;
 const SURFACE_MAX: usize = 12;
 const PATH_MAX: usize = 120;
 
@@ -96,10 +110,15 @@ fn is_non_crash(message: &str) -> bool {
         .any(|known| message.contains(known))
 }
 
-/// How each engine words a dynamic `import()` whose chunk failed to fetch —
-/// the signature of deploy skew (a tab from an older build requesting a hashed
-/// chunk the next deploy purged). Mirrors the frontend's list in
-/// `core/telemetry/crashReport.ts`; matched case-insensitively on containment.
+/// How each engine words a dynamic `import()` whose chunk failed to load.
+/// Mirrors the frontend's list in `core/telemetry/crashReport.ts`; matched
+/// case-insensitively on containment.
+///
+/// Note these words describe a *symptom*: a chunk didn't load. Deploy skew (a
+/// tab from an older build requesting a hashed chunk the next deploy purged)
+/// produces them, and so does a visitor whose connection dropped mid-load. The
+/// client tells the two apart by re-requesting the chunk before it reports (see
+/// `chunkFailureKind` there); the proxy only reads the kind it settled on.
 const STALE_CHUNK_MESSAGES: [&str; 4] = [
     "failed to fetch dynamically imported module", // Chromium
     "error loading dynamically imported module",   // Firefox
@@ -126,20 +145,23 @@ const STALE_CHUNK_MESSAGES: [&str; 4] = [
 /// work: an entry here permanently exempts a chunk from paging.
 const BACKGROUND_ONLY_CHUNKS: [&str; 1] = ["virtual_pwa-register"];
 
-/// Whether this beacon is *routine* deploy skew — logged at `info` (greppable,
-/// aggregatable) instead of `warn` so it never pages through the log alerter.
+/// Whether this beacon is a *routine* chunk-load failure — logged at `info`
+/// (greppable, aggregatable) instead of `warn` so it never pages through the
+/// log alerter.
 ///
-/// Routine covers the frontend's handled shapes (`stale-chunk` from a
-/// `ChunkErrorBoundary` that showed a refresh prompt while the app kept
-/// running) *and* every legacy kind (`boundary`/`error`/`unhandledrejection`):
+/// Routine covers the frontend's non-fatal shapes — `stale-chunk` (a
+/// `ChunkErrorBoundary` showed a refresh prompt while the app kept running) and
+/// `chunk-unreachable` (the app went down, but re-requesting the chunk proved
+/// our host is still serving it, so the visitor's connection failed, not our
+/// deploy) — *and* every legacy kind (`boundary`/`error`/`unhandledrejection`):
 /// pre-fix clients ship from service-worker caches for weeks and keep sending
 /// the old crash shape for what is the same self-healing skew event.
 ///
 /// The one shape that stays `warn` (and pages) is `stale-chunk-fatal`: a
-/// current client whose app actually went down on a missing chunk — boot
-/// recovery exhausted or an unguarded lazy path — which means a broken deploy
-/// or an SW precache gap, not routine skew. Its single exception is a chunk from
-/// [`BACKGROUND_ONLY_CHUNKS`], which no user-visible path can be waiting on.
+/// current client whose app went down on a chunk the server confirmed is
+/// **gone** — a broken deploy or an SW precache gap. Its single exception is a
+/// chunk from [`BACKGROUND_ONLY_CHUNKS`], which no user-visible path can be
+/// waiting on.
 fn is_routine_stale_chunk(kind: &str, message: &str) -> bool {
     let lower = message.to_lowercase();
     if !STALE_CHUNK_MESSAGES
@@ -220,6 +242,12 @@ pub async fn crash_report(
     let message = clamp_field(&body.message, MESSAGE_MAX);
     let stack = clamp_field(&body.stack, STACK_MAX);
     let version = clamp_field(&body.version, VERSION_MAX);
+    // Older clients don't send this at all; say so explicitly rather than
+    // logging an empty field, since "which bundle?" is the question it answers.
+    let build = match clamp_field(&body.build, BUILD_MAX) {
+        b if b.is_empty() => "pre-build-id".to_string(),
+        b => b,
+    };
     let surface = clamp_field(&body.surface, SURFACE_MAX);
     let path = clamp_field(&body.path, PATH_MAX);
 
@@ -227,15 +255,23 @@ pub async fn crash_report(
     // below the log alerter's paging threshold (which fires on `web_crash`
     // WARNs). See [`is_routine_stale_chunk`] for what still pages.
     if is_routine_stale_chunk(&kind, &message) {
+        // Same target and level either way; only the wording differs, so a log
+        // reader isn't told "deploy skew" about someone's dropped connection.
+        let summary = if kind == "chunk-unreachable" {
+            "web app chunk unreachable (client network, chunk still served)"
+        } else {
+            "web app stale chunk (deploy skew)"
+        };
         tracing::info!(
             target: "web_crash",
             %kind,
             %surface,
             %version,
+            %build,
             %path,
             %message,
             %stack,
-            "web app stale chunk (deploy skew)",
+            "{summary}",
         );
     } else if is_foreign_code_error(&kind, &message, &stack) {
         // Someone else's code crashing in our visitors' pages — extensions,
@@ -247,6 +283,7 @@ pub async fn crash_report(
             %kind,
             %surface,
             %version,
+            %build,
             %path,
             %message,
             %stack,
@@ -258,6 +295,7 @@ pub async fn crash_report(
             %kind,
             %surface,
             %version,
+            %build,
             %path,
             %message,
             %stack,
@@ -370,11 +408,27 @@ mod tests {
 
     #[test]
     fn fatal_stale_chunk_still_pages() {
-        // A current client whose app actually went down on the missing chunk —
-        // broken deploy or SW precache gap. Stays warn.
+        // A current client whose app went down on a chunk the client re-requested
+        // and found gone — broken deploy or SW precache gap. Stays warn.
         assert!(!is_routine_stale_chunk(
             "stale-chunk-fatal",
             "Failed to fetch dynamically imported module: https://x/a.js"
+        ));
+    }
+
+    #[test]
+    fn a_chunk_that_is_still_served_is_the_visitors_network_not_a_page() {
+        // The 2026-07-28 page verbatim: the app went down on these two, but both
+        // were being served by the current deploy — the fetches lost, nothing was
+        // stale. The client now re-requests before reporting and sends this kind.
+        assert!(is_routine_stale_chunk(
+            "chunk-unreachable",
+            "Failed to fetch dynamically imported module: \
+             https://dweeb.faizo.net/assets/acquisition-rapBslg9.js"
+        ));
+        assert!(is_routine_stale_chunk(
+            "chunk-unreachable",
+            "Unable to preload CSS for /assets/useBarWidth-CLpGG8DF.css"
         ));
     }
 
