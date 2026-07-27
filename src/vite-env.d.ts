@@ -1,9 +1,16 @@
 /// <reference types="vite/client" />
 /// <reference types="vite-plugin-pwa/client" />
 
-// App build version, inlined at build time via Vite's `define` (see
-// vite.config.ts). Read by the crash reporter to pin a report to a deploy.
+// App release version (the package.json semver), inlined at build time via
+// Vite's `define` (see vite.config.ts). Read by the crash reporter.
 declare const __APP_VERSION__: string;
+
+// Identity of the specific build — the commit it was built from, or a build
+// timestamp when git isn't available. Unlike `__APP_VERSION__` this changes on
+// every deploy, so a crash beacon says which bundle is reporting (the app ships
+// from a service-worker cache, so old bundles keep beaconing for weeks) and the
+// boot recovery can grant one reload attempt per build. See vite.config.ts.
+declare const __BUILD_ID__: string;
 
 // Build-time configuration for the optional DWEEB proxy (see `server/` and
 // `.env.example`). Both are optional: with no base URL the guild features stay

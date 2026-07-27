@@ -27,12 +27,15 @@ import { isStaleChunkReloadInProgress } from "@/core/pwa/staleChunkRecovery";
 import {
   backgroundFailureKind,
   buildCrashPayload,
+  chunkFailureKind,
+  chunkProbeUrl,
   crashSignature,
   CrashThrottle,
   describeError,
   isForeignCodeError,
   isNonCrashMessage,
   resolveCrashKind,
+  type ChunkProbe,
   type CrashKind,
   type CrashPayload,
 } from "./crashReport";
@@ -43,6 +46,16 @@ import {
 function appVersion(): string {
   try {
     return typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/** `__BUILD_ID__`, the sibling define that identifies *this bundle* rather than
+ *  the release. See `CrashInput.build` for why a report needs both. */
+function buildId(): string {
+  try {
+    return typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "unknown";
   } catch {
     return "unknown";
   }
@@ -132,6 +145,7 @@ function report(kind: CrashKind, error: unknown): void {
       path: typeof location !== "undefined" ? location.pathname : "",
       surface: isActivityMode() ? "activity" : "web",
       version: appVersion(),
+      build: buildId(),
     });
     // Some things the browser hands to `onerror` aren't crashes at all (the
     // ResizeObserver loop notice). Drop them before the throttle so they can't
@@ -140,7 +154,8 @@ function report(kind: CrashKind, error: unknown): void {
     // Stale-chunk policy (see resolveCrashKind): dropped while the boot
     // recovery is already reloading past it; kept as `stale-chunk` when a
     // ChunkErrorBoundary handled it in place; escalated to `stale-chunk-fatal`
-    // when nothing did — that last shape is the one that still pages.
+    // when nothing did. That escalation is provisional — it is checked against
+    // the server below before the page-worthy shape is allowed out.
     const resolvedKind = resolveCrashKind(kind, payload.message, isStaleChunkReloadInProgress());
     if (resolvedKind === null) return;
     // Someone else's code (an extension/userscript/console script with an
@@ -151,11 +166,74 @@ function report(kind: CrashKind, error: unknown): void {
     // same rule to beacons from clients older than this filter.
     if (isForeignCodeError(resolvedKind, payload.message, payload.stack)) return;
     payload.kind = resolvedKind;
+    // Throttle on the resolved kind, before any verification: the slot must be
+    // claimed synchronously so a crash loop can't fire a probe per frame.
     const sig = crashSignature(resolvedKind, payload.message, payload.stack);
     if (!throttle.shouldSend(sig)) return;
+    if (resolvedKind === "stale-chunk-fatal") {
+      // "The app went down on a chunk load" — but not yet whose fault. Ask the
+      // server whether that chunk is actually gone before sending the one shape
+      // that pages. Probe from the UNCLAMPED message: a URL truncated by the
+      // 300-char cap would 404 and manufacture a false page.
+      void verifyChunkFailure(payload, describeError(error).message);
+      return;
+    }
     send(payload);
   } catch {
     // A reporter that throws is worse than one that misses a crash.
+  }
+}
+
+/** How long to wait for the probe before calling the network unreachable. Long
+ *  enough to outlast a slow link, short enough that the beacon still goes out
+ *  while the page is alive. */
+const PROBE_TIMEOUT_MS = 4_000;
+
+/**
+ * Re-request the chunk that failed and send the beacon with the kind its answer
+ * justifies (see [`chunkFailureKind`]). Deliberately delays the beacon by up to
+ * `PROBE_TIMEOUT_MS`: telemetry is best-effort and losing a report to a closed
+ * tab costs far less than paging the maintainer about a visitor's dropped
+ * connection. Never throws and never rejects — an escaping rejection here would
+ * land straight back in our own `unhandledrejection` trap.
+ */
+async function verifyChunkFailure(payload: CrashPayload, rawMessage: string): Promise<void> {
+  try {
+    const origin = typeof location !== "undefined" ? location.origin : "";
+    const url = origin ? chunkProbeUrl(rawMessage, origin) : null;
+    payload.kind = chunkFailureKind(url === null ? "unknown" : await probeChunk(url));
+  } catch {
+    payload.kind = chunkFailureKind("unknown");
+  }
+  send(payload);
+}
+
+/** Ask our own host whether `url` is still served. Same-origin by construction
+ *  (`chunkProbeUrl` guarantees it) and credential-free — this is a liveness
+ *  question about a public static asset, nothing more. */
+async function probeChunk(url: string): Promise<ChunkProbe> {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      // Bypass every cache: a cached hit would answer for the deploy the tab
+      // booted on, which is exactly the question we're asking.
+      cache: "no-store",
+      mode: "same-origin",
+      credentials: "omit",
+      signal: controller.signal,
+    });
+    if (res.ok) return "served";
+    // 4xx is the host saying the asset is gone — the deploy-skew signature.
+    // A 5xx is our host being broken, which is neither skew nor the visitor.
+    return res.status >= 400 && res.status < 500 ? "missing" : "unknown";
+  } catch {
+    // Aborted, offline, DNS failure, blocked by an extension — the same class
+    // of fault that killed the original import.
+    return "unreachable";
+  } finally {
+    globalThis.clearTimeout(timer);
   }
 }
 

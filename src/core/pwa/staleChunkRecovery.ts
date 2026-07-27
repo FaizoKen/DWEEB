@@ -15,8 +15,8 @@
  * correct one: reload, which revalidates the document and boots the fresh shell.
  * Three guards keep it safe:
  *
- *  - **Once per version, per tab.** The attempt is recorded in `sessionStorage`
- *    keyed by the build version; if the reload lands on the same stale shell
+ *  - **Once per build, per tab.** The attempt is recorded in `sessionStorage`
+ *    keyed by the running build; if the reload lands on the same stale shell
  *    (or storage is unwritable) there is no second reload and the error reports
  *    normally — a reload loop is strictly worse than a crash report.
  *  - **Boot only.** Once the app surface has committed (`dweeb:surface-ready`)
@@ -36,22 +36,22 @@
 export interface StaleChunkReloadInput {
   /** Has the app surface committed? (`dweeb:surface-ready` fired) */
   bootFinished: boolean;
-  /** The running build's version. */
-  version: string;
-  /** The version a previous reload attempt was recorded for, if any. */
-  attemptedVersion: string | null;
+  /** Identifies the shell currently running — see [`buildKey`]. */
+  buildKey: string;
+  /** The build a previous reload attempt was recorded for, if any. */
+  attemptedBuildKey: string | null;
 }
 
 /** Whether a failed chunk load should trigger the one recovery reload. */
 export function shouldAttemptStaleChunkReload(input: StaleChunkReloadInput): boolean {
   // Past boot a reload could destroy unsaved editor state — never automatic.
   if (input.bootFinished) return false;
-  // One attempt per version: a second failure on the same shell means the
+  // One attempt per build: a second failure on the same shell means the
   // reload didn't get a fresher one, so reloading again would just loop.
-  return input.attemptedVersion !== input.version;
+  return input.attemptedBuildKey !== input.buildKey;
 }
 
-/** sessionStorage (per-tab, survives the reload) key holding the version the
+/** sessionStorage (per-tab, survives the reload) key holding the build the
  *  recovery reload was attempted for. */
 const STORAGE_KEY = "dweeb.stale-chunk-reload";
 
@@ -66,16 +66,35 @@ export function isStaleChunkReloadInProgress(): boolean {
   return reloadInitiated;
 }
 
-/** Mirror of reporter.ts's fallback-guarded read of the build-time version. */
-function appVersion(): string {
+/**
+ * Identity of the shell that is running, for the one-reload-per-build guard.
+ *
+ * `__BUILD_ID__` (vite.config.ts) changes on exactly the event that should grant
+ * a tab a fresh recovery attempt: a new deploy. `__APP_VERSION__` used to serve
+ * here and doesn't work — it reads from package.json, which has sat at `1.0.0`
+ * across every deploy since launch, so "once per version, per tab" degraded to
+ * "once per tab, ever": a long-lived tab that recovered from one deploy's skew
+ * could never recover from the next, and reported it as page-worthy
+ * `stale-chunk-fatal` instead.
+ *
+ * Falls back to this module's own chunk URL, which Vite also hashes per build.
+ * Any per-build-unique string works; a *constant* would still keep the loop
+ * guard sound, it would just share one attempt across every build.
+ */
+function buildKey(): string {
   try {
-    return typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "unknown";
+    if (typeof __BUILD_ID__ === "string" && __BUILD_ID__) return __BUILD_ID__;
+  } catch {
+    /* fall through */
+  }
+  try {
+    return typeof import.meta.url === "string" && import.meta.url ? import.meta.url : "unknown";
   } catch {
     return "unknown";
   }
 }
 
-function readAttemptedVersion(): string | null {
+function readAttemptedBuildKey(): string | null {
   try {
     return sessionStorage.getItem(STORAGE_KEY);
   } catch {
@@ -86,10 +105,10 @@ function readAttemptedVersion(): string | null {
 /** Record the attempt before navigating; a read-back verifies the write stuck.
  *  Returns false when storage is unavailable — then we must NOT reload, because
  *  without the marker a persistent failure would reload forever. */
-function claimReloadAttempt(version: string): boolean {
+function claimReloadAttempt(key: string): boolean {
   try {
-    sessionStorage.setItem(STORAGE_KEY, version);
-    return sessionStorage.getItem(STORAGE_KEY) === version;
+    sessionStorage.setItem(STORAGE_KEY, key);
+    return sessionStorage.getItem(STORAGE_KEY) === key;
   } catch {
     return false;
   }
@@ -115,13 +134,14 @@ export function installStaleChunkRecovery(): void {
 
   window.addEventListener("vite:preloadError", () => {
     if (reloadInitiated) return;
+    const key = buildKey();
     const decision = shouldAttemptStaleChunkReload({
       bootFinished,
-      version: appVersion(),
-      attemptedVersion: readAttemptedVersion(),
+      buildKey: key,
+      attemptedBuildKey: readAttemptedBuildKey(),
     });
     if (!decision) return;
-    if (!claimReloadAttempt(appVersion())) return;
+    if (!claimReloadAttempt(key)) return;
     reloadInitiated = true;
     // Reload revalidates the top-level document even inside its HTTP
     // freshness window, so the new shell (and its live chunks) come down.

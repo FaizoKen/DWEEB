@@ -178,10 +178,14 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
      `registerType: "prompt"`: an *updated* worker never skips waiting, so it can't activate
      (or claim) under an old tab.
   2. **Boot**: `core/pwa/staleChunkRecovery.ts` (armed first thing in `main.tsx`) listens for
-     Vite's `vite:preloadError` and reloads once — guarded per version via sessionStorage so
+     Vite's `vite:preloadError` and reloads once — guarded per **build** via sessionStorage so
      it can never loop, and only **before** `dweeb:surface-ready` so an automatic reload can't
      destroy a user's in-progress message. Keep new boot-path dynamic imports behind this
-     ordering.
+     ordering. The guard key is `__BUILD_ID__`, not `__APP_VERSION__`: package.json has read
+     `1.0.0` across every deploy since launch, so a version key turned "once per version, per
+     tab" into "once per tab, ever" — a long-lived tab that recovered from one deploy's skew
+     could never recover from the next and reported it as fatal instead (2026-07-28). Any
+     per-build-unique string works; don't key it on the semver again.
   3. **Post-boot**: every lazy surface (all 10 in `App.tsx` + the Activity's FeedbackDialog)
      is wrapped in `ui/ChunkErrorBoundary`, which turns exactly the stale-chunk failure into a
      "refresh to update" Modal while the app keeps running (draft autosave + preserved URL
@@ -199,6 +203,39 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
      means a broken deploy or SW precache gap. Don't "simplify" any of this into an
      unconditional drop, and deploy the server change before (or with) the web one — the old
      proxy logs every stale-chunk beacon at warn.
+     **A chunk-load message is a symptom, not a diagnosis — the fatal shape must be verified**
+     (2026-07-28). Every engine's wording ("Failed to fetch dynamically imported module",
+     Vite's "Unable to preload CSS for …") is emitted for *any* failed fetch, so a visitor whose
+     connection dropped mid-boot is byte-identical to deploy skew. That paged the maintainer:
+     four `stale-chunk-fatal` beacons naming `acquisition-*.js` and `useBarWidth-*.css`, both
+     of which were being served, from the same build the live `index.html` pointed at — nothing
+     was stale, the fetches had simply lost, and boot recovery's one reload lost the same way,
+     which the escalation rule reads as "recovery exhausted on a broken deploy". So before the
+     page-worthy shape goes out, `verifyChunkFailure` (reporter.ts) re-requests the failing
+     chunk same-origin (HEAD, `cache:"no-store"`, 4s abort) and `chunkFailureKind` decides:
+     a **4xx** confirms the chunk is gone → `stale-chunk-fatal`, pages; **200 / an unreachable
+     probe / nothing to ask** (Safari's message carries no URL, cross-origin, 5xx) →
+     `chunk-unreachable`, which the proxy logs at info under the same target. Err toward
+     `chunk-unreachable` — a genuinely broken deploy still pages through every visitor whose
+     engine names the URL. Probe the **unclamped** message: a URL cut by the 300-char cap would
+     404 and manufacture a false page. The throttle slot is claimed synchronously *before* the
+     probe so a crash loop can't fire one request per frame, and the probe must never reject —
+     an escaping rejection lands back in our own `unhandledrejection` trap. This one is
+     client-authoritative by necessity (only the client can ask), so SW-cached clients keep
+     sending the old fatal shape until they update — which is exactly what `build` is for.
+  6. **A crash beacon carries `build`, not just `version`** (2026-07-28). `__APP_VERSION__` is
+     the package.json semver and has read `1.0.0` since launch, so it could never answer the
+     question every one of these incidents ends on: *is this report from a bundle that already
+     has the fix?* The app ships from a service-worker cache, so clients keep running — and
+     beaconing from — a bundle for weeks after it is replaced. `__BUILD_ID__` (vite.config.ts)
+     is the commit (`GITHUB_SHA` in CI, else `git rev-parse --short=10`, `-dirty` when the tree
+     is uncommitted — in a prod log that means someone deployed by hand), falling back to a
+     timestamp when git is unavailable so it is always unique per build. The proxy logs it
+     beside `version`; a client predating the field logs as `build=pre-build-id`, which is
+     itself the answer. Keep both fields — `version` is the release users see, `build` is the
+     bundle. Neither the field nor the new `chunk-unreachable` kind needs deploy ordering: the
+     old proxy ignores unknown JSON fields, and it already logs any non-`stale-chunk-fatal`
+     kind at info.
   5. **Optional background imports must handle their own rejection** (2026-07-27). The
      escalation in (4) reads only "was it handled", so a *fire-and-forget* `import()` failing
      post-boot pages even though nothing on screen was waiting for it. `virtual:pwa-register`

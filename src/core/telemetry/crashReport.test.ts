@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   backgroundFailureKind,
   buildCrashPayload,
+  chunkFailureKind,
+  chunkProbeUrl,
   crashSignature,
   CrashThrottle,
   describeError,
@@ -89,6 +91,7 @@ describe("buildCrashPayload", () => {
     path: "/",
     surface: "web",
     version: "0.10.0",
+    build: "a1b2c3d4e5",
   };
 
   it("assembles a content-free payload", () => {
@@ -101,6 +104,15 @@ describe("buildCrashPayload", () => {
       path: "/",
     });
     expect(typeof p.stack).toBe("string");
+  });
+
+  it("carries the build id alongside the release version", () => {
+    // The semver has read 1.0.0 across every deploy, so it alone can't say
+    // whether a beacon comes from a bundle that already has the fix. Clients
+    // ship from an SW cache and keep reporting from old builds for weeks.
+    const p = buildCrashPayload(base);
+    expect(p.build).toBe("a1b2c3d4e5");
+    expect(p.build).not.toBe(p.version);
   });
 
   it("clamps an oversized message to 300 chars", () => {
@@ -202,10 +214,72 @@ describe("resolveCrashKind", () => {
 
   it("escalates an unhandled stale chunk to stale-chunk-fatal (the page-worthy shape)", () => {
     // The top boundary catching it means the app actually went down — recovery
-    // exhausted on a broken deploy, or a lazy path no ChunkErrorBoundary covers.
+    // exhausted, or a lazy path no ChunkErrorBoundary covers. Provisional:
+    // `chunkFailureKind` decides whether our deploy is why.
     expect(resolveCrashKind("boundary", STALE, false)).toBe("stale-chunk-fatal");
     expect(resolveCrashKind("error", STALE, false)).toBe("stale-chunk-fatal");
     expect(resolveCrashKind("unhandledrejection", STALE, false)).toBe("stale-chunk-fatal");
+  });
+});
+
+describe("chunkFailureKind", () => {
+  it("pages only when the server confirms the chunk is gone", () => {
+    expect(chunkFailureKind("missing")).toBe("stale-chunk-fatal");
+  });
+
+  it("blames the connection, not the deploy, when the chunk is still served", () => {
+    // The 2026-07-28 page verbatim: `acquisition-*.js` and `useBarWidth-*.css`
+    // were both being served, from the build the live index.html pointed at.
+    expect(chunkFailureKind("served")).toBe("chunk-unreachable");
+  });
+
+  it("treats an unreachable probe as the visitor's network", () => {
+    expect(chunkFailureKind("unreachable")).toBe("chunk-unreachable");
+  });
+
+  it("errs away from paging when there is nothing to check", () => {
+    // Safari's "Importing a module script failed." carries no URL; a real
+    // broken deploy still pages through every engine that does name one.
+    expect(chunkFailureKind("unknown")).toBe("chunk-unreachable");
+  });
+});
+
+describe("chunkProbeUrl", () => {
+  const ORIGIN = "https://dweeb.faizo.net";
+
+  it("reads the absolute URL Chromium and Firefox append", () => {
+    expect(
+      chunkProbeUrl(
+        "Failed to fetch dynamically imported module: https://dweeb.faizo.net/assets/acquisition-rapBslg9.js",
+        ORIGIN,
+      ),
+    ).toBe("https://dweeb.faizo.net/assets/acquisition-rapBslg9.js");
+    expect(
+      chunkProbeUrl(
+        "error loading dynamically imported module: https://dweeb.faizo.net/assets/App-abc.js",
+        ORIGIN,
+      ),
+    ).toBe("https://dweeb.faizo.net/assets/App-abc.js");
+  });
+
+  it("resolves the root-relative path Vite's CSS preload wording carries", () => {
+    expect(
+      chunkProbeUrl("Unable to preload CSS for /assets/useBarWidth-CLpGG8DF.css", ORIGIN),
+    ).toBe("https://dweeb.faizo.net/assets/useBarWidth-CLpGG8DF.css");
+  });
+
+  it("refuses a cross-origin URL — the probe asks our host about our asset", () => {
+    expect(
+      chunkProbeUrl(
+        "Failed to fetch dynamically imported module: https://evil.example/assets/x.js",
+        ORIGIN,
+      ),
+    ).toBe(null);
+  });
+
+  it("returns null when the message names no chunk", () => {
+    expect(chunkProbeUrl("Importing a module script failed.", ORIGIN)).toBe(null);
+    expect(chunkProbeUrl("", ORIGIN)).toBe(null);
   });
 });
 

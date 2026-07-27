@@ -2,15 +2,63 @@ import { defineConfig, type Plugin, type ServerOptions } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { VitePWA } from "vite-plugin-pwa";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { SPA_NAVIGATION_ALLOWLIST } from "./src/core/seo/navigationRoutes";
 
 // Build version, read from package.json and injected as `__APP_VERSION__` so the
-// crash reporter (src/core/telemetry) can pin a report to a deploy. A literal
+// crash reporter (src/core/telemetry) can pin a report to a release. A literal
 // string, so it's inlined and tree-shakeable — no runtime `import` of the JSON.
 const APP_VERSION: string = createRequire(import.meta.url)("./package.json").version;
+
+/**
+ * Identity of *this build*, injected as `__BUILD_ID__`.
+ *
+ * `__APP_VERSION__` cannot do this job: it is the package.json semver, which has
+ * read `1.0.0` across every deploy since launch, so a crash beacon carrying it
+ * says nothing about which bundle the reporting tab is running. That matters
+ * because the app ships from a service-worker cache — clients keep running (and
+ * beaconing from) a bundle for weeks after it is replaced — so "is this an old
+ * build still reporting a fixed bug?" is a question the logs must be able to
+ * answer. It is also what the boot recovery keys its one-reload-per-build guard
+ * on (`core/pwa/staleChunkRecovery.ts`).
+ *
+ * The commit is the most useful answer — a beacon maps straight back to source.
+ * `-dirty` marks a build from an uncommitted tree, which in a production log
+ * would mean someone deployed by hand. Falls back to a build timestamp when git
+ * isn't available (a source tarball, a container build git refuses as "dubious
+ * ownership"): less useful, but still unique per build, which is what both
+ * consumers actually require. Never throws — a missing `git` must not fail the
+ * build.
+ *
+ * `GITHUB_SHA` is read first because in CI it is the authoritative answer and
+ * needs no subprocess at all. A `workflow_dispatch` redeploy of the same commit
+ * reuses its id, which is correct: it is the same build.
+ */
+function buildId(): string {
+  const ciSha = process.env.GITHUB_SHA?.trim();
+  if (ciSha) return ciSha.slice(0, 10);
+  try {
+    const sha = execFileSync("git", ["rev-parse", "--short=10", "HEAD"], {
+      cwd: __dirname,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!sha) return `t${Date.now().toString(36)}`;
+    const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+      cwd: __dirname,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return dirty ? `${sha}-dirty` : sha;
+  } catch {
+    return `t${Date.now().toString(36)}`;
+  }
+}
+
+const BUILD_ID: string = buildId();
 
 // Serve Activity dev mode over HTTPS when a locally-trusted cert is present.
 //
@@ -210,6 +258,7 @@ function stampBuildMeta(): Plugin {
 export default defineConfig(({ mode }) => ({
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
   },
   plugins: [
     react(),

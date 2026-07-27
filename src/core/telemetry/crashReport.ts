@@ -16,18 +16,24 @@
  *     and a hard per-session cap bounds the total regardless.
  */
 
-/** Where the error surfaced. Beyond the three raw traps, two stale-chunk
- *  refinements (see [`resolveCrashKind`]) tell the proxy how bad it was:
+/** Where the error surfaced. Beyond the three raw traps, three chunk-load
+ *  refinements (see [`resolveCrashKind`] and [`chunkFailureKind`]) tell the
+ *  proxy how bad it was:
  *  `stale-chunk` = a lazy surface failed post-boot but was handled in place
  *  (the user got a refresh prompt, the app kept running — the proxy logs it
- *  below paging level); `stale-chunk-fatal` = the same failure took the app
- *  down (boot recovery exhausted, or a path no boundary covers) — that one
- *  still pages, because it means broken deploy or SW precache gap. */
+ *  below paging level); `chunk-unreachable` = the app went down on a chunk
+ *  load, but re-requesting that chunk proved it is still being served (or the
+ *  network couldn't be reached at all), so the fault is the visitor's
+ *  connection, not our deploy — counted, never paged; `stale-chunk-fatal` =
+ *  the same failure took the app down *and* the chunk is genuinely gone
+ *  (the re-request 404'd) — that one still pages, because it means a broken
+ *  deploy or an SW precache gap. */
 export type CrashKind =
   | "error"
   | "unhandledrejection"
   | "boundary"
   | "stale-chunk"
+  | "chunk-unreachable"
   | "stale-chunk-fatal";
 
 /** The content-free beacon sent to `POST /api/telemetry/crash`. */
@@ -36,6 +42,8 @@ export interface CrashPayload {
   message: string;
   stack: string;
   version: string;
+  /** Which bundle is reporting — see [`CrashInput.build`]. */
+  build: string;
   surface: string;
   path: string;
 }
@@ -49,8 +57,17 @@ export interface CrashInput {
   path: string;
   /** `"web"` or `"activity"`. */
   surface: string;
-  /** The app build version. */
+  /** The app release version (package.json semver). */
   version: string;
+  /**
+   * Identity of the running bundle (`__BUILD_ID__` — the commit, or a build
+   * timestamp). Distinct from `version`, which is the release semver and has
+   * read `1.0.0` since launch: the app ships from a service-worker cache, so
+   * clients keep beaconing from a bundle for weeks after it is replaced, and
+   * without this a log line can't say whether it comes from a build that
+   * already contains the fix for what it is reporting.
+   */
+  build: string;
 }
 
 // Client-side caps. Mirror the server's (`telemetry.rs`) so what we build is what
@@ -164,11 +181,15 @@ export function isNonCrashMessage(message: string): boolean {
 }
 
 /**
- * How each engine words a dynamic `import()` whose chunk failed to fetch —
- * the signature of deploy skew (a stale shell requesting a purged hashed
- * chunk). Matched case-insensitively on containment: the message carries the
- * chunk URL and browsers vary the "Uncaught (in promise) TypeError:" framing.
- * The last entry is Vite's own preload-helper wording for a failed CSS dep.
+ * How each engine words a dynamic `import()` whose chunk failed to load.
+ * Matched case-insensitively on containment: the message carries the chunk URL
+ * and browsers vary the "Uncaught (in promise) TypeError:" framing. The last
+ * entry is Vite's own preload-helper wording for a failed CSS dep.
+ *
+ * These messages are emitted for *any* failed fetch, not only a 404 — an
+ * offline tab, a dropped mobile connection and a blocking extension produce
+ * exactly the same words as deploy skew does. Matching one therefore only says
+ * "a chunk didn't load"; [`chunkFailureKind`] is what decides whose fault it was.
  */
 const STALE_CHUNK_MESSAGES = [
   "failed to fetch dynamically imported module", // Chromium
@@ -198,9 +219,11 @@ export function isStaleChunkMessage(message: string): boolean {
  *    below paging level — the user got a refresh prompt and the app kept
  *    running, but a spike still flags an SW precache gap.
  *  - Any other stale chunk (the top-level `ErrorBoundary`, a raw
- *    window trap): rewritten to `stale-chunk-fatal`. Nothing recovered and
- *    nothing handled it, so this is the page-worthy shape — recovery exhausted
- *    on a broken deploy, or a lazy path no boundary covers.
+ *    window trap): rewritten to `stale-chunk-fatal` — nothing recovered and
+ *    nothing handled it, so the app went down. That is only a *provisional*
+ *    answer: it says the failure was fatal, not that our deploy caused it. The
+ *    reporter re-requests the chunk and downgrades to `chunk-unreachable`
+ *    unless the server confirms it is gone (see [`chunkFailureKind`]).
  */
 export function resolveCrashKind(
   kind: CrashKind,
@@ -210,6 +233,74 @@ export function resolveCrashKind(
   if (!isStaleChunkMessage(message)) return kind;
   if (reloadInProgress) return null;
   return kind === "stale-chunk" ? kind : "stale-chunk-fatal";
+}
+
+/** What re-requesting the chunk that failed to load told us.
+ *  `missing` = the server answered 4xx, so the chunk really is gone;
+ *  `served` = it answered it fine, so that one fetch just lost;
+ *  `unreachable` = the probe itself failed (offline, DNS, blocked, timed out);
+ *  `unknown` = we couldn't ask (no URL in the message, cross-origin, 5xx). */
+export type ChunkProbe = "missing" | "served" | "unreachable" | "unknown";
+
+/**
+ * Final kind for a chunk load that took the app down, given what the re-request
+ * found. **Only `missing` pages.**
+ *
+ * The wording engines use for a failed `import()` describes the *symptom*, and
+ * the symptom of deploy skew is identical to the symptom of a visitor's flaky
+ * connection. Treating the two as one shipped in 1.0.0 and paged the maintainer
+ * on 2026-07-28: four `stale-chunk-fatal` beacons naming `acquisition-*.js` and
+ * `useBarWidth-*.css`, both of which were being served, from the very build the
+ * live `index.html` pointed at — the shell and its chunks were the same, current
+ * deploy, and the fetches had simply failed. (Boot recovery had already spent its
+ * one reload on the first failure; the retry lost the same way, which the
+ * escalation rule reads as "recovery exhausted on a broken deploy".)
+ *
+ * So the fatal shape now requires the server to *confirm* the chunk is gone.
+ * Everything else reports as `chunk-unreachable`: still counted at the proxy
+ * (the app did go down for that user, and a spike is worth seeing), never a
+ * page, because nothing we deploy could have prevented it.
+ *
+ * Erring toward `chunk-unreachable` on `unknown` is deliberate. It covers the
+ * cases where we have no evidence at all — Safari's "Importing a module script
+ * failed." carries no URL, a cross-origin chunk isn't ours to probe — and a
+ * genuinely broken deploy still pages through every other visitor whose engine
+ * does name the URL, which is the large majority.
+ */
+export function chunkFailureKind(probe: ChunkProbe): CrashKind {
+  return probe === "missing" ? "stale-chunk-fatal" : "chunk-unreachable";
+}
+
+/** An absolute `https?://…` in the message (Chromium/Firefox both append the
+ *  chunk URL), else a root-relative asset path (Vite's CSS preload wording). */
+const CHUNK_URL_PATTERNS = [
+  /\bhttps?:\/\/[^\s"'<>]+/i,
+  /(?:^|\s)(\/[^\s"'<>]*\.(?:js|mjs|css))(?=$|[\s)"'])/i,
+];
+
+/**
+ * The same-origin URL of the chunk a load-failure message names, or `null` when
+ * the message doesn't name one we may re-request.
+ *
+ * Same-origin is required, not incidental: the probe exists to ask *our* host
+ * whether *our* asset is still there, and a cross-origin URL in an error message
+ * is not something the crash reporter should be firing requests at. `null` lands
+ * on `unknown`, which never pages — the safe direction.
+ */
+export function chunkProbeUrl(message: string, origin: string): string | null {
+  for (const pattern of CHUNK_URL_PATTERNS) {
+    const match = pattern.exec(message);
+    if (!match) continue;
+    const raw = match[1] ?? match[0];
+    try {
+      const url = new URL(raw, origin);
+      if (url.origin !== origin) return null;
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 /**
@@ -278,6 +369,7 @@ export function buildCrashPayload(input: CrashInput): CrashPayload {
     message: clamp(message, MESSAGE_MAX),
     stack: clamp(topFrames(stack), STACK_MAX),
     version: input.version,
+    build: input.build,
     surface: input.surface,
     path: input.path,
   };
