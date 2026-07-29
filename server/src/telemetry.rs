@@ -38,9 +38,10 @@ use crate::routes::AppState;
 #[derive(Deserialize)]
 pub struct CrashBody {
     /// Where the error surfaced: `error` (window.onerror), `unhandledrejection`,
-    /// or `boundary` (the React error boundary), plus the three chunk-load
-    /// refinements the client resolves for itself — `stale-chunk`,
-    /// `chunk-unreachable`, `stale-chunk-fatal`. A short enum-like tag.
+    /// or `boundary` (the React error boundary), plus `dom-desync` (a crash the
+    /// client *prevented*) and the three chunk-load refinements the client
+    /// resolves for itself — `stale-chunk`, `chunk-unreachable`,
+    /// `stale-chunk-fatal`. A short enum-like tag.
     #[serde(default)]
     kind: String,
     /// The error message. Not user content — an exception string like
@@ -178,6 +179,22 @@ fn is_routine_stale_chunk(kind: &str, message: &str) -> bool {
     true
 }
 
+/// The kind a client sends for a crash it *prevented*: something rewrote the
+/// DOM out from under Preact — an in-page translator moving our text nodes into
+/// `<font>` wrappers is the known cause — and `core/dom/domGuard` repaired the
+/// node placement instead of letting `insertBefore`/`removeChild` throw the app
+/// to the ErrorBoundary.
+///
+/// Logged at `info`: nothing broke for the user, so it must never page. It is
+/// still recorded, and its message carries the two facts that say *why* it
+/// fired — the tag the stale reference turned up under and any translator
+/// markers on the document. `parent=FONT translator=google` is a browser
+/// rewriting the page; `translator=none` under an ordinary tag would mean the
+/// guard is masking a bug of ours and wants a look.
+fn is_repaired_dom_desync(kind: &str) -> bool {
+    kind == "dom-desync"
+}
+
 /// Whether a `window.onerror` beacon reports someone else's code, not ours.
 ///
 /// The global `error` trap hears every uncaught exception in the page context —
@@ -272,6 +289,21 @@ pub async fn crash_report(
             %message,
             %stack,
             "{summary}",
+        );
+    } else if is_repaired_dom_desync(&kind) {
+        // A crash the client caught and repaired before it happened. Counted so
+        // a spike is visible (and so `translator=none` can be spotted), never
+        // paged — the user's app kept running. See [`is_repaired_dom_desync`].
+        tracing::info!(
+            target: "web_crash",
+            %kind,
+            %surface,
+            %version,
+            %build,
+            %path,
+            %message,
+            %stack,
+            "web app DOM desync (repaired)",
         );
     } else if is_foreign_code_error(&kind, &message, &stack) {
         // Someone else's code crashing in our visitors' pages — extensions,
@@ -470,6 +502,32 @@ mod tests {
             "Cannot read properties of undefined (reading 'id')"
         ));
         assert!(!is_routine_stale_chunk("boundary", ""));
+    }
+
+    #[test]
+    fn a_repaired_dom_desync_is_counted_never_paged() {
+        // The 2026-07-29 crash, after the client learned to repair it: the app
+        // kept running, so this must not reach warn.
+        assert!(is_repaired_dom_desync("dom-desync"));
+        // It is a kind, not a message match — the guard fires on renders that
+        // never mention a translator.
+        assert!(!is_repaired_dom_desync("boundary"));
+        assert!(!is_repaired_dom_desync("error"));
+        assert!(!is_repaired_dom_desync(""));
+    }
+
+    #[test]
+    fn an_unrepaired_insertbefore_crash_still_pages() {
+        // A client too old to carry the guard (they ship from a service-worker
+        // cache for weeks) still sends the crash as `boundary`, and that is a
+        // real app-down event: none of the demotions may claim it.
+        let msg = "Failed to execute 'insertBefore' on 'Node': The node before \
+                   which the new node is to be inserted is not a child of this node.";
+        let stack =
+            "NotFoundError: … at j (https://dweeb.faizo.net/assets/vendor-CL7zUJq1.js:1:3031)";
+        assert!(!is_repaired_dom_desync("boundary"));
+        assert!(!is_routine_stale_chunk("boundary", msg));
+        assert!(!is_foreign_code_error("boundary", msg, stack));
     }
 
     #[test]
