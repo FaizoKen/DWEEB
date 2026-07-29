@@ -24,6 +24,7 @@ import { proxyFetch } from "@/core/net/proxyFetch";
 import { isProxyConfigured } from "@/core/guild/config";
 import { isActivityMode } from "@/core/activity/runtime";
 import { isStaleChunkReloadInProgress } from "@/core/pwa/staleChunkRecovery";
+import type { DomDesync } from "@/core/dom/domGuard";
 import {
   backgroundFailureKind,
   buildCrashPayload,
@@ -32,6 +33,7 @@ import {
   crashSignature,
   CrashThrottle,
   describeError,
+  domDesyncMessage,
   isForeignCodeError,
   isNonCrashMessage,
   resolveCrashKind,
@@ -118,6 +120,42 @@ export function reportBoundaryError(error: unknown): void {
 export function reportHandledStaleChunk(error: unknown): void {
   if (!enabled()) return;
   report("stale-chunk", error);
+}
+
+/**
+ * Report a DOM desync that `core/dom/domGuard` repaired: something moved a node
+ * out from under Preact, and the guard placed the new one sensibly instead of
+ * letting `insertBefore`/`removeChild` throw the whole app to the
+ * `ErrorBoundary`. Nothing broke for the user, so the proxy logs it below paging
+ * level — but it is still worth counting, because it is the only way to tell an
+ * in-page translator (the expected cause) from a bug of ours that the guard is
+ * hiding.
+ *
+ * Sent through a synthetic `Error` so the beacon carries the stack of whatever
+ * was placing the node — Preact's `insert`/`diffChildren` frames say a render
+ * hit it, anything else says something we didn't expect did. The guard already
+ * calls this at most once per page.
+ */
+export function reportDomDesync(desync: DomDesync): void {
+  if (!enabled()) return;
+  report("dom-desync", new Error(domDesyncMessage(desync, detectTranslator())));
+}
+
+/** Which in-page translator, if any, has left its markers on the document.
+ *  Read once, on the first repair — Google Translate (and Chrome's built-in
+ *  translation, which is the same machinery) stamps the class on `<html>`;
+ *  Edge's translator tags the elements it rewrote. */
+function detectTranslator(): string {
+  try {
+    const html = document.documentElement;
+    if (html.classList.contains("translated-ltr") || html.classList.contains("translated-rtl")) {
+      return "google";
+    }
+    if (document.querySelector("[_msttexthash]") !== null) return "microsoft";
+    return "none";
+  } catch {
+    return "unknown";
+  }
 }
 
 /**

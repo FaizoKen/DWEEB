@@ -167,6 +167,41 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   URL keep paging. `clamp_field` now replaces control chars with spaces so a multi-line stack stays
   legible in the one-line log (`@ @ @ Pk@` instead of the fused `@@@Pk@` that made this incident
   cryptic) without weakening the log-injection guarantee.
+- **Preact must survive a DOM something else rewrote — an in-page translator is the
+  known rewriter** (2026-07-29). Preact places a node with
+  `parentDom.insertBefore(newNode, oldDom)`, where `oldDom` is the sibling it remembers;
+  `diff/children.js`'s `insert` guards only a *detached* reference (`!oldDom.parentNode`),
+  **not a re-parented one**. Chrome's built-in translation (same machinery as the Google
+  Translate widget) rewrites each text node into `<font><font>…</font></font>` and **moves
+  the original text node inside the wrapper**, so the next render that inserts an element
+  beside it — a conditional leading icon next to a bare text child, an emoji span appearing
+  mid-paragraph — hands `insertBefore` a reference whose parent is now the `<font>`, and the
+  whole app falls to the `ErrorBoundary`. That is the 2026-07-29 `boundary` page
+  ("…the node before which the new node is to be inserted is not a child of this node",
+  top frames `insert` ← `diffChildren` in `vendor`); it reproduces exactly by wrapping one
+  rendered text node that way, and the app *is* the fix's target — the user asked for a
+  translated page, not a dead editor. Preact exposes no `options` hook around DOM insertion,
+  so `core/dom/domGuard.ts` (installed in `main.tsx` **before the first render**, after the
+  crash reporter it reports through) patches the two `Node` methods that throw on a moved
+  node. **Both only change behaviour where the native call would otherwise throw**, so no
+  working path is affected: `insertBefore` walks up from the stale reference to the ancestor
+  that *is* our child and inserts before that — the `<font>` stands exactly where the text
+  did, so the intended order survives, where a plain append would put the icon after its
+  label — and `removeChild` no-ops on a foreign child (deliberately **not** "remove it from
+  wherever it really lives"; that node isn't ours). A non-node argument still gets the
+  native `TypeError`: a real bug of ours must stay loud. Measured cost ≈100 ns per
+  `insertBefore` (18% of a microbenchmark that does nothing else; nothing next to layout).
+  The guard reports **once per page** as kind `dom-desync`, whose message carries the two
+  facts that diagnose the next one — the tag the stale reference turned up under and any
+  translator markers on the document (`translated-ltr`/`-rtl` = google, `_msttexthash` =
+  microsoft). `parent=FONT translator=google` is a browser rewriting the page;
+  **`translator=none` under an ordinary tag means the guard is masking a bug of ours and
+  wants investigating**. The proxy logs `dom-desync` at **info** (`is_repaired_dom_desync`,
+  same `web_crash` target) — nothing broke for the user, so it must never page — which makes
+  this **server-first deploy ordering**: the old proxy logs an unknown kind at warn, and
+  SW-cached clients keep sending plain `boundary` for the unrepaired crash for weeks.
+  Guarded by `src/core/dom/domGuard.test.ts` + the `domDesyncMessage` and
+  `*_dom_desync` tests.
 - **Deploy skew self-heals — don't page for it.** GitHub Pages caches `index.html` ~10 min
   and every deploy purges the old hashed chunks, so a tab that isn't SW-controlled can hit a
   404 on a lazy `import()` ("Failed to fetch dynamically imported module" — this paged the

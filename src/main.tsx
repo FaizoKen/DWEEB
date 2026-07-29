@@ -2,7 +2,12 @@ import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { isActivityMode } from "@/core/activity/runtime";
-import { installCrashReporter, reportBackgroundFailure } from "@/core/telemetry/reporter";
+import {
+  installCrashReporter,
+  reportBackgroundFailure,
+  reportDomDesync,
+} from "@/core/telemetry/reporter";
+import { installDomDesyncGuard } from "@/core/dom/domGuard";
 import { installStaleChunkRecovery } from "@/core/pwa/staleChunkRecovery";
 import { trackAnalytics } from "@/core/telemetry/analytics";
 import "@/styles/global.css";
@@ -13,6 +18,13 @@ const bootStartedAt = performance.now();
 // surface boots — so a crash during startup is reported too. Self-gates to a
 // production build with a configured proxy; a no-op otherwise.
 installCrashReporter();
+
+// Make Preact's DOM bookkeeping survive a page something else rewrites —
+// notably an in-page translator, which moves our text nodes into `<font>`
+// wrappers and made the next render throw the whole app to the ErrorBoundary
+// (see core/dom/domGuard). Must precede the first render, and its one-per-page
+// report needs the reporter installed above.
+installDomDesyncGuard(reportDomDesync);
 
 // Arm deploy-skew recovery before the first dynamic import below: a stale
 // cached shell whose hashed chunks were purged by a newer deploy gets one

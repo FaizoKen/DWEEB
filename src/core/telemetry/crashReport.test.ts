@@ -8,6 +8,7 @@ import {
   crashSignature,
   CrashThrottle,
   describeError,
+  domDesyncMessage,
   isForeignCodeError,
   isNonCrashMessage,
   isStaleChunkMessage,
@@ -356,6 +357,29 @@ describe("isForeignCodeError", () => {
     expect(isForeignCodeError("boundary", "boom", "@\n@\nPk@")).toBe(false);
     expect(isForeignCodeError("unhandledrejection", "boom", "@\n@\nPk@")).toBe(false);
     expect(isForeignCodeError("boundary", "Script error.", "")).toBe(false);
+  });
+});
+
+describe("domDesyncMessage", () => {
+  it("names the wrapper and the translator, which is the whole diagnosis", () => {
+    // `FONT` + a translator marker: a browser rewrote the page, the guard
+    // repaired it, nothing to do.
+    expect(domDesyncMessage({ api: "insertBefore", actualParent: "FONT" }, "google")).toBe(
+      "dom desync repaired: insertBefore reference under FONT (translator=google)",
+    );
+  });
+
+  it("reads as a bug of ours when no translator is involved", () => {
+    // The shape worth investigating: nothing rewrote the page, so the guard is
+    // masking something we did.
+    expect(domDesyncMessage({ api: "removeChild", actualParent: "DIV" }, "none")).toBe(
+      "dom desync repaired: removeChild reference under DIV (translator=none)",
+    );
+  });
+
+  it("stays well inside the beacon's message cap", () => {
+    const message = domDesyncMessage({ api: "insertBefore", actualParent: "FONT" }, "microsoft");
+    expect(message.length).toBeLessThan(300);
   });
 });
 

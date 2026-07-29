@@ -16,9 +16,12 @@
  *     and a hard per-session cap bounds the total regardless.
  */
 
-/** Where the error surfaced. Beyond the three raw traps, three chunk-load
- *  refinements (see [`resolveCrashKind`] and [`chunkFailureKind`]) tell the
- *  proxy how bad it was:
+/** Where the error surfaced. Beyond the three raw traps, `dom-desync` reports a
+ *  crash the app *prevented* (see `core/dom/domGuard`: something rewrote the DOM
+ *  under Preact and the guard repaired the placement instead of letting it
+ *  throw) — counted, never paged. Three chunk-load refinements (see
+ *  [`resolveCrashKind`] and [`chunkFailureKind`]) tell the proxy how bad the
+ *  rest was:
  *  `stale-chunk` = a lazy surface failed post-boot but was handled in place
  *  (the user got a refresh prompt, the app kept running — the proxy logs it
  *  below paging level); `chunk-unreachable` = the app went down on a chunk
@@ -32,6 +35,7 @@ export type CrashKind =
   | "error"
   | "unhandledrejection"
   | "boundary"
+  | "dom-desync"
   | "stale-chunk"
   | "chunk-unreachable"
   | "stale-chunk-fatal";
@@ -323,6 +327,24 @@ export function chunkProbeUrl(message: string, origin: string): string | null {
  */
 export function backgroundFailureKind(message: string): CrashKind {
   return isStaleChunkMessage(message) ? "stale-chunk" : "unhandledrejection";
+}
+
+/**
+ * The message for a `dom-desync` report — a crash `core/dom/domGuard` repaired
+ * rather than a crash that happened.
+ *
+ * Both facts it carries answer the same question, and neither is user content:
+ * the tag name of the element the stale reference node actually turned up under
+ * (`FONT` is an in-page translator's fingerprint) and whichever translator left
+ * markers on the document. A report saying `parent=FONT translator=google` is a
+ * browser rewriting the page; one saying `parent=DIV translator=none` is a bug
+ * of ours that the guard is quietly papering over, and wants investigating.
+ */
+export function domDesyncMessage(
+  desync: { api: string; actualParent: string },
+  translator: string,
+): string {
+  return `dom desync repaired: ${desync.api} reference under ${desync.actualParent} (translator=${translator})`;
 }
 
 /**
