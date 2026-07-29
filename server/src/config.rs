@@ -122,6 +122,21 @@ pub struct Config {
     /// the feedback endpoints answer 501.
     pub feedback_webhook_url: Option<String>,
 
+    // ── Public listing (Top.gg) ────────────────────────────────────────────
+    /// API token for this deployment's Top.gg bot listing. A credential, so it
+    /// lives only on the proxy and never in a frontend build. None (unset) ⇒
+    /// no stats are posted and the background task never starts — the right
+    /// default for every deployment that isn't the public one, since a
+    /// self-hosted DWEEB has no listing of its own to keep current.
+    pub topgg_token: Option<String>,
+    /// The bot whose listing is updated. A Top.gg bot page is keyed by the
+    /// Discord **application id**, so this defaults to `DISCORD_CLIENT_ID` and
+    /// is only worth setting explicitly if the two ever diverge.
+    pub topgg_bot_id: String,
+    /// Seconds between stats posts. Nothing but a public counter depends on
+    /// this, so the default is deliberately slow.
+    pub topgg_post_interval_secs: u64,
+
     // ── Authorization policy ───────────────────────────────────────────────
     /// When true, a user may only read servers where they own or hold
     /// `MANAGE_GUILD` — appropriate for a webhook-builder tool. When false, any
@@ -298,6 +313,10 @@ pub struct Config {
     pub ai_monthly_token_budget: u64,
 }
 
+/// Floor for `TOPGG_POST_INTERVAL_SECS`. See where it's enforced for why this
+/// is a boot error rather than a clamp.
+const TOPGG_MIN_INTERVAL_SECS: u64 = 60;
+
 #[derive(Clone, Copy)]
 pub enum SameSitePolicy {
     Lax,
@@ -382,6 +401,19 @@ impl Config {
             }
             None => None,
         };
+
+        let topgg_token = opt_env("TOPGG_TOKEN");
+        let topgg_bot_id = opt_env("TOPGG_BOT_ID").unwrap_or_else(|| client_id.clone());
+        let topgg_post_interval_secs = parse_or("TOPGG_POST_INTERVAL_SECS", 1800)?;
+        // Validated even when the feature is off, so a typo is found on the boot
+        // that introduced it rather than on the one that enables the token. The
+        // floor is well inside Top.gg's budget and exists only so a misplaced
+        // decimal can't turn a cosmetic counter into a request loop.
+        if topgg_post_interval_secs < TOPGG_MIN_INTERVAL_SECS {
+            return Err(format!(
+                "TOPGG_POST_INTERVAL_SECS must be at least {TOPGG_MIN_INTERVAL_SECS} seconds"
+            ));
+        }
 
         let require_manage_guild = parse_bool("REQUIRE_MANAGE_GUILD", true)?;
 
@@ -559,6 +591,9 @@ impl Config {
             activity_draft_retention_days,
             activity_upload_concurrency,
             feedback_webhook_url,
+            topgg_token,
+            topgg_bot_id,
+            topgg_post_interval_secs,
             session_secret,
             session_ttl,
             cookie_secure,

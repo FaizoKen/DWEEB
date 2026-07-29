@@ -500,6 +500,23 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   and an upstream genuinely going down still pages three other ways — its own panic/tracing
   ERROR, Caddy's `dial tcp … connection refused`/DNS errors (which carry no abort wording and
   pass the filter), and Gatus on `/ready`. Don't widen that regex into a blanket Caddy mute.
+- **The Top.gg listing's server count is pushed, and its failures must stay quiet**
+  (`server/src/topgg.rs`, added 2026-07-30). Top.gg renders whatever count a bot last
+  **posted** — there is no pull, and stats are the only writable part of a listing — so a
+  page nobody posts to keeps showing the number it was created with. A background task
+  reports the live guild count every `TOPGG_POST_INTERVAL_SECS` (default 30 min) under
+  `TOPGG_TOKEN` (unset ⇒ never spawns, which is right for every self-hosted deployment).
+  Three load-bearing details: (1) it **never logs `error!`** — tracing ERROR is the paging
+  channel, and a stale public counter is not worth waking anyone, so a Top.gg outage/429 is
+  `info` + retry on the next tick and only refused credentials earn a `warn`; (2) a failed
+  guild read is **skipped, never published as `server_count: 0`** — the picker's cached
+  `bot_guild_set` folds an error into an empty set, which is why this reads
+  `discord.bot_guild_ids()` directly; a published zero is visibly wrong on a public page and
+  sorts the listing to the bottom, where a stale count merely lags; (3) the token goes in
+  `Authorization` **bare** (the documented form). Verified against the live API 2026-07-30:
+  the stats route resolves the bot from the **token** and ignores the id in the path — a
+  request naming a completely unrelated bot returns *our* stats — so a wrong `TOPGG_BOT_ID`
+  will appear to work and a 200 is no proof the id is right.
 - **Plugin request and storage work is resource-bounded.** Every plugin router caps request
   bodies at 256 KiB. Interaction services parse their primary Ed25519 key once at boot (custom
   attested keys remain dynamic), bound idle HTTP pools, and configure SQLite with WAL,

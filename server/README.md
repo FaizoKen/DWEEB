@@ -101,6 +101,22 @@ instance starts with three reports and refills one every five minutes; with
 Redis, the shared fleet permits three per fixed 15-minute window. Unset
 `FEEDBACK_WEBHOOK_URL` to disable relay delivery (both routes answer 501).
 
+### Top.gg listing stats
+
+Top.gg renders whatever server count a bot last **pushed** to it — there is no
+pull, and stats are the only writable part of a listing — so a page nobody posts
+to keeps showing the count it was created with. `topgg.rs` is that push: a
+background task that reports the live guild count every
+`TOPGG_POST_INTERVAL_SECS` (default 30 min) under `TOPGG_TOKEN`.
+
+Unset the token (the default) and the task never starts, which is correct for
+any self-hosted deployment — it has no listing of its own. Failures are
+deliberately quiet: a Top.gg outage or a 429 logs at `info` and is retried on the
+next tick, and only credentials Top.gg refuses earn a `warn`. Nothing here logs
+`error`, because a stale public counter must never page anyone. A guild read that
+fails is skipped rather than published as `server_count: 0`, so the last good
+number stands.
+
 ### Scheduled posts
 
 The opt-in **schedule** lets the builder post a message later — once, or on a

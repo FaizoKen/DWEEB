@@ -39,6 +39,7 @@ mod singleflight;
 mod sqlite_pool;
 mod stripe;
 mod telemetry;
+mod topgg;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -535,6 +536,11 @@ async fn run() {
             state.config.schedule_retention_days,
         );
     }
+
+    // Public Top.gg listing: push the bot's server count on a timer so the page
+    // doesn't drift away from reality. Inert without `TOPGG_TOKEN`, and every
+    // failure it can hit is deliberately quiet — see `topgg.rs`.
+    topgg::spawn(state.clone());
 
     let app = Router::new()
         .route("/health", get(health))
