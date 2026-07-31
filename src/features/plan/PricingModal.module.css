@@ -220,14 +220,6 @@
 .promoHint {
   color: var(--app-text-muted);
 }
-/* The campaign's code, in the hint that says it is applied automatically —
-   monospaced so it reads as something typeable rather than as emphasis. */
-.promoHintCode {
-  font-family: var(--app-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--app-success-text);
-}
 .promoError {
   color: var(--app-danger-text);
   font-weight: 600;

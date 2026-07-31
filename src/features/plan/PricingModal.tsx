@@ -189,18 +189,16 @@ export function PricingModal() {
 
   // The running campaign priced per card, for the tiers it covers that this
   // buyer can actually act on. A "50% off" flash over a tier they already hold
-  // (or can't buy here) advertises nothing they can take.
+  // (or can't buy here) advertises nothing they can take. The card itself is the
+  // whole announcement — discounted price, struck list price, and what the next
+  // invoice costs — so the code is never named in the UI: it is applied for the
+  // buyer, and printing a code they don't have to type only invites typing it.
   const promoByTier = new Map<PlanTier, PromoPricing>();
   for (const t of TIERS) {
     if (!buyable(t.id)) continue;
     const campaign = promoFor(t.id as PaidTier, period);
     if (campaign) promoByTier.set(t.id, promoPricing(t, period, campaign));
   }
-  // The campaign named beside the promo field — only while a card on this row
-  // can redeem it. Pointing at an offer nobody here can take is a broken promise.
-  const promoted = [...promoByTier.entries()];
-  const promoCampaign = promoted[0]?.[1].campaign ?? null;
-  const promotedNames = promoted.map(([id]) => tierName(id)).join(" · ");
 
   const startCheckout = async (tier: PaidTier) => {
     if (!guildId) {
@@ -486,13 +484,6 @@ export function PricingModal() {
         promoError ? (
           <p className={styles.promoError} id="promo-error" role="alert">
             {promoError}
-          </p>
-        ) : promoCampaign ? (
-          <p className={styles.promoHint}>
-            <strong className={styles.promoHintCode}>{promoCampaign.code}</strong> —{" "}
-            {promoCampaign.percentOff}% off your{" "}
-            {promoCampaign.duration === "forever" ? "subscription" : "first payment"} on{" "}
-            {promotedNames} — is applied for you. Enter any other code here, not at payment.
           </p>
         ) : (
           <p className={styles.promoHint}>
