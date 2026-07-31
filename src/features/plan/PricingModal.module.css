@@ -192,6 +192,24 @@
   text-transform: none;
   color: var(--app-text-subtle);
 }
+/* On touch the reset forces every input to 16px !important (below that, iOS
+   Safari zooms the page on focus — see reset.css), so the field's own 12px never
+   applies there and the "Optional" placeholder rendered far larger than its
+   11.5px label. Don't re-override the 16px; grow the pill's label and metrics to
+   match it, which also makes the control a proper touch target. */
+@media (pointer: coarse) {
+  .promoField {
+    padding: 0 15px;
+  }
+  .promoLabel {
+    font-size: 14px;
+  }
+  .promoInput {
+    width: 124px;
+    padding: 8px 0;
+  }
+}
+
 .promoHint,
 .promoError {
   margin: 0;
@@ -201,6 +219,14 @@
 }
 .promoHint {
   color: var(--app-text-muted);
+}
+/* The campaign's code, in the hint that says it is applied automatically —
+   monospaced so it reads as something typeable rather than as emphasis. */
+.promoHintCode {
+  font-family: var(--app-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--app-success-text);
 }
 .promoError {
   color: var(--app-danger-text);
@@ -300,11 +326,45 @@
   border: 1px solid var(--app-border);
 }
 
+/* Campaign flash. Only ever rendered on a card the buyer can actually purchase,
+   so it reads as an offer rather than as decoration — and it takes the success
+   tone, not the accent, so it can sit beside the "Most popular" tag without the
+   two competing. */
+.promoPill {
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border-radius: 999px;
+  color: var(--app-success-text);
+  background: var(--app-success-soft);
+  border: 1px solid color-mix(in srgb, var(--app-success) 45%, transparent);
+}
+
 .cardPrice {
   display: flex;
   align-items: baseline;
   gap: 3px;
   margin-top: 8px;
+}
+/* The undiscounted price, struck through beside the discounted headline. */
+.cardWas {
+  margin-left: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text-subtle);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--app-danger) 70%, transparent);
+}
+/* What the next invoice costs once a one-time discount is spent. */
+.promoThen {
+  margin-top: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--app-text-muted);
 }
 .cardAmount {
   font-size: 24px;

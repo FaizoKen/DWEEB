@@ -639,6 +639,35 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   subscription still mirrors as `active`, so entitlement flows normally; if the coupon is
   ever deleted the next invoice fails and the tier drops on its own. Guarded by the
   `checkout_form_*`/`normalize_promo_code_*`/`parse_promotion_code_*` tests in stripe.rs.
+- **An advertised promo campaign is presentation only, and must be kept true by hand**
+  (`src/core/plan/promo.ts`, added 2026-08-01). `ACTIVE_PROMO` is what the pricing modal
+  *claims* — the discount itself is a coupon in the shared live Stripe account, created by
+  the maintainer; nothing in-repo creates or checks it. The live campaign is
+  **`MEDIUMPROMO` = 50% off the first payment on Plus** (monthly and annual), auto-applied
+  by `PricingModal` on the tiers it covers, since the card already shows the discounted
+  price and making the buyer type a code to reach it would be a trap. Rules that hold the
+  claim together: (1) it is applied **only where a card can act on it** — `promoFor` is
+  consulted for a tier only when that tier is `buyable` here, so a "50% off" flash never
+  lands on the plan the server already holds; (2) a **typed code always wins** over the
+  campaign's (they chose it, and Stripe takes one per session); (3) a checkout refused with
+  the auto-applied code **fails loudly as a toast** and is never silently retried at list
+  price — that would charge more than the card advertised; (4) a `first-payment` campaign
+  must print the renewal price beside the discounted one (`thenNote`), or the headline is a
+  bait price; (5) which tiers a campaign may name is a **Stripe** question — a coupon can
+  carry `applies_to` product restrictions, and DWEEB's tiers buy the sibling RoleLogic
+  prices (Plus = Medium, Pro = Expanded). `MEDIUMPROMO`'s coupon is scoped to the **Medium
+  product**, which owns both prices Plus buys, so Plus is safe on either interval and
+  **Pro must never be added** — Stripe refuses the session and the buyer gets "That promo
+  code can't be used on this plan" from a card that promised a discount (the existing
+  `PromoRejected` 400; verified live). Reading that restriction has a trap: `applies_to` is
+  an **expandable** field, so a plain `GET /v1/coupons/{id}` omits it and a restricted
+  coupon looks unrestricted — ask with `?expand[]=applies_to`, and never conclude
+  "unrestricted" from its absence (the same shape of hazard as `promotion.coupon` in
+  stripe.rs; a first pass at this account got it exactly backwards). If the coupon is
+  edited, expires, or is archived, edit `ACTIVE_PROMO` (or set it to `null`) in the same
+  change; `promo.test.ts` pins code/percent/duration/tiers as a change-detector so Stripe
+  and the modal can't drift apart silently. Purely a web change — the proxy already resolves
+  and applies whatever code it is handed, so no deploy ordering.
 - **Stripe stays off the boot path.** Import Stripe.js only via `@stripe/stripe-js/pure`
   (the default entry injects the js.stripe.com script — cookies + fraud beacons — as an
   import side effect; it once rode the vendor chunk and hit every visitor on every page

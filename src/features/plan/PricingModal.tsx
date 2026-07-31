@@ -34,23 +34,59 @@ import {
   type PremiumSubscription,
 } from "@/core/plan/stripeApi";
 import { isCheckoutConfigured } from "@/core/plan/stripeConfig";
+import { applyPercentOff, formatUsd, promoFor, type PromoCampaign } from "@/core/plan/promo";
 import { guildIconUrl, type PickerGuild, type PlanTier } from "@/core/guild/api";
 import styles from "./PricingModal.module.css";
 
 interface TierDef {
   id: PlanTier;
   name: string;
-  /** Display price per interval (annual = 2 months free). */
-  monthly: string;
-  yearly: string;
+  /** Price per interval in USD (annual = 2 months free). Numbers, not strings,
+   *  because a campaign discounts them — the figure the card prints and the one
+   *  the code is worth have to come from the same source. */
+  monthly: number;
+  yearly: number;
   tagline: string;
 }
 
 const TIERS: TierDef[] = [
-  { id: "free", name: "Free", monthly: "$0", yearly: "$0", tagline: "Build & send" },
-  { id: "plus", name: "Plus", monthly: "$5", yearly: "$50", tagline: "Automate & persist" },
-  { id: "pro", name: "Pro", monthly: "$10", yearly: "$100", tagline: "Run a community" },
+  { id: "free", name: "Free", monthly: 0, yearly: 0, tagline: "Build & send" },
+  { id: "plus", name: "Plus", monthly: 5, yearly: 50, tagline: "Automate & persist" },
+  { id: "pro", name: "Pro", monthly: 10, yearly: 100, tagline: "Run a community" },
 ];
+
+/** Everything a card needs to advertise the running campaign. Computed once per
+ *  card, so the discounted price the buyer reads and the code checkout receives
+ *  can never disagree. */
+interface PromoPricing {
+  campaign: PromoCampaign;
+  /** Discounted headline price ("$2.50"). */
+  price: string;
+  /** Undiscounted headline price, shown struck through ("$5"). */
+  listPrice: string;
+  /** What happens after a one-time discount ("then $5/mo after the first
+   *  month") — `null` for a campaign that discounts every invoice. A
+   *  first-payment price shown alone is a bait price. */
+  thenNote: string | null;
+}
+
+function promoPricing(
+  tier: TierDef,
+  period: BillingInterval,
+  campaign: PromoCampaign,
+): PromoPricing {
+  const list = period === "year" ? tier.yearly : tier.monthly;
+  const unit = period === "year" ? "/yr" : "/mo";
+  return {
+    campaign,
+    price: formatUsd(applyPercentOff(list, campaign.percentOff)),
+    listPrice: formatUsd(list),
+    thenNote:
+      campaign.duration === "first-payment"
+        ? `then ${formatUsd(list)}${unit} after the first ${period === "year" ? "year" : "month"}`
+        : null,
+  };
+}
 
 /** The metered quotas, in the shipped default numbers (`server/src/config.rs`). */
 const ROWS: {
@@ -99,6 +135,7 @@ export function PricingModal() {
 
   const currentTier: PlanTier | null = plan?.tier ?? null;
   const billing = (plan?.billing ?? false) && isCheckoutConfigured();
+  const canUpgradeHere = billing && !!guildId;
 
   // Embedded-checkout state: the tier being purchased, its client secret, and
   // whether the applied promo code makes it free (so Checkout shows no card
@@ -144,21 +181,50 @@ export function PricingModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [billing]);
 
+  /** Whether this tier is an upgrade the buyer can purchase from here — the same
+   *  test behind a card's Upgrade button and behind its campaign pricing, so the
+   *  two can't drift apart. */
+  const buyable = (id: PlanTier): boolean =>
+    canUpgradeHere && id !== "free" && RANK[currentTier ?? "free"] < RANK[id];
+
+  // The running campaign priced per card, for the tiers it covers that this
+  // buyer can actually act on. A "50% off" flash over a tier they already hold
+  // (or can't buy here) advertises nothing they can take.
+  const promoByTier = new Map<PlanTier, PromoPricing>();
+  for (const t of TIERS) {
+    if (!buyable(t.id)) continue;
+    const campaign = promoFor(t.id as PaidTier, period);
+    if (campaign) promoByTier.set(t.id, promoPricing(t, period, campaign));
+  }
+  // The campaign named beside the promo field — only while a card on this row
+  // can redeem it. Pointing at an offer nobody here can take is a broken promise.
+  const promoted = [...promoByTier.entries()];
+  const promoCampaign = promoted[0]?.[1].campaign ?? null;
+  const promotedNames = promoted.map(([id]) => tierName(id)).join(" · ");
+
   const startCheckout = async (tier: PaidTier) => {
     if (!guildId) {
       pushToast("Connect a server first, then upgrade it.", "error");
       return;
     }
-    const code = promo.trim();
+    const typed = promo.trim();
+    // The campaign's code is applied for the buyer on the tiers it covers: the
+    // price on the card is already the discounted one, so making them type the
+    // code to reach it would just be a trap. A code they typed always wins —
+    // they chose it, and Stripe takes only one per session.
+    const code = typed || (promoByTier.get(tier)?.campaign.code ?? "");
     setStarting(tier);
     setPromoError(null);
     const res = await createCheckout(tier, period, guildId, code);
     setStarting(null);
     if (!res.ok) {
-      // With a code in play the failure is almost always about the code, and it
-      // belongs beside the field that caused it — a toast over a modal reads as
-      // unrelated.
-      if (code) {
+      // With a *typed* code in play the failure is almost always about that
+      // code, and it belongs beside the field that caused it — a toast over a
+      // modal reads as unrelated. A campaign code the buyer never typed has no
+      // field to point at, so it stays a toast; and it deliberately fails loudly
+      // rather than silently retrying at list price, which would charge more
+      // than the card advertised.
+      if (typed) {
         setPromoError(res.error);
       } else {
         pushToast(res.error, "error");
@@ -308,7 +374,6 @@ export function PricingModal() {
   }
 
   const canManage = billing && subs != null && subs.length > 0;
-  const canUpgradeHere = billing && !!guildId;
   // Whether one of *my* subscriptions covers this server. If the server is
   // already on a paid tier but none of my subs is bound to it, another member is
   // paying — surfaced below so a second mod doesn't stack a redundant sub.
@@ -422,6 +487,13 @@ export function PricingModal() {
           <p className={styles.promoError} id="promo-error" role="alert">
             {promoError}
           </p>
+        ) : promoCampaign ? (
+          <p className={styles.promoHint}>
+            <strong className={styles.promoHintCode}>{promoCampaign.code}</strong> —{" "}
+            {promoCampaign.percentOff}% off your{" "}
+            {promoCampaign.duration === "forever" ? "subscription" : "first payment"} on{" "}
+            {promotedNames} — is applied for you. Enter any other code here, not at payment.
+          </p>
         ) : (
           <p className={styles.promoHint}>
             Enter codes here, not at payment — one that covers the plan skips card entry.
@@ -431,13 +503,13 @@ export function PricingModal() {
 
       <div className={styles.plans}>
         {TIERS.map((t) => {
-          const canBuy =
-            canUpgradeHere && t.id !== "free" && RANK[currentTier ?? "free"] < RANK[t.id];
+          const canBuy = buyable(t.id);
           return (
             <PlanCard
               key={t.id}
               tier={t}
               period={period}
+              promo={promoByTier.get(t.id)}
               isCurrent={currentTier === t.id}
               // Highlight the natural upgrade (Plus) only while it's actually an
               // upgrade — i.e. the server is still on Free. Once it's on any paid
@@ -482,6 +554,7 @@ export function PricingModal() {
 function PlanCard({
   tier,
   period,
+  promo,
   isCurrent,
   featured,
   canBuy,
@@ -491,6 +564,8 @@ function PlanCard({
 }: {
   tier: TierDef;
   period: BillingInterval;
+  /** Set only while a campaign covers this tier *and* the buyer can purchase it. */
+  promo?: PromoPricing;
   isCurrent: boolean;
   featured: boolean;
   canBuy: boolean;
@@ -498,6 +573,7 @@ function PlanCard({
   disabled: boolean;
   onBuy: () => void;
 }) {
+  const listPrice = formatUsd(period === "year" ? tier.yearly : tier.monthly);
   return (
     <div
       className={cn(styles.card, isCurrent && styles.cardCurrent, featured && styles.cardFeatured)}
@@ -506,11 +582,24 @@ function PlanCard({
       <div className={styles.cardHead}>
         <span className={styles.cardName}>{tier.name}</span>
         {isCurrent ? <span className={styles.currentPill}>Current</span> : null}
+        {promo ? <span className={styles.promoPill}>{promo.campaign.percentOff}% off</span> : null}
       </div>
       <div className={styles.cardPrice}>
-        <span className={styles.cardAmount}>{period === "year" ? tier.yearly : tier.monthly}</span>
+        <span className={styles.cardAmount}>{promo ? promo.price : listPrice}</span>
         <span className={styles.cardPer}>{period === "year" ? "/yr" : "/mo"}</span>
+        {promo ? (
+          // The old price beside the new one. It carries its own label for screen
+          // readers, where a line-through is silent and the two figures would
+          // otherwise read as one contradiction.
+          <span className={styles.cardWas} aria-label={`was ${promo.listPrice}`}>
+            {promo.listPrice}
+          </span>
+        ) : null}
       </div>
+      {/* A one-time discount has to say what happens next, right beside the
+          headline it discounted — a first-payment price shown alone is a bait
+          price, however clearly the fine print explains itself elsewhere. */}
+      {promo?.thenNote ? <span className={styles.promoThen}>{promo.thenNote}</span> : null}
       <span className={styles.cardTagline}>{tier.tagline}</span>
 
       <div className={styles.cardCta}>
