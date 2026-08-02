@@ -774,6 +774,25 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   real provider money) — that stays consistent with "plans are quota-raising only"
   because Free keeps the feature too. BYOK providers remain unlimited and untouched; the
   relay streams Groq's OpenAI-shaped SSE verbatim so the FE reuses the same decoder.
+  **A provider rate limit is a 429 to the caller, never a 5xx** (2026-08-01). Every 5xx the
+  proxy returns is logged at ERROR by `tower_http`'s failure classifier and forwarded to
+  Discord by `dweeb-alerts`, so the status a handler picks *is* the paging decision.
+  `start_stream` treated only Groq's **413** as a rate limit (`is_capacity`); a plain **429**
+  was retryable but fell through to the terminal 502 — so when the free tier's per-minute
+  token budget binds on every model in the chain, a working assistant paged the maintainer
+  (three times in one minute, `latency≈690 ms`, which is just the three attempts). Both
+  shapes now answer 429 through `terminal_error`: 413 keeps the size-aware copy (prompt +
+  reserved `max_tokens` exceeds the per-minute budget — waiting alone won't help), 429 gets
+  "at its rate limit right now". Only `Unavailable` (network, timeout, upstream 5xx) still
+  502s, and a non-retryable 4xx (our key, our malformed request) still logs `error!` — those
+  *should* page. `Retry-After` is read off the provider's response when it sends one
+  (Groq's hints ranged from <1s to 23s, against a hardcoded 30), clamped to 1–300s, with the
+  HTTP-date form ignored. A rate-limited model also **skips its remaining attempts** — a
+  per-minute bucket cannot clear in the 300 ms before the retry, so that call could only fail
+  while spending another request from the full bucket; the fallback model has its own bucket
+  and is still tried. Note the FE needs no deploy: `describeDweebError` renders `error` for
+  any un-`kind`ed status. Guarded by the `provider_rate_limits_answer_429_and_never_page` +
+  `retry_after_prefers_the_providers_own_hint` tests in ai.rs.
 - **AI assistant (src/core/ai) reliability contract.** The chat panel strips the model's
   JSON payload from the displayed bubble, but provider history must carry the RAW reply —
   `ChatMessage.raw` + `toTurns` — or follow-ups like "do it" leave the model blind to its

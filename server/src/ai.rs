@@ -643,19 +643,99 @@ fn build_system(context: &str) -> String {
     )
 }
 
+/// Why a retryable attempt failed. The variant picks the status the caller
+/// sees, and that decides whether the failure *pages*: every 5xx the proxy
+/// returns is logged at ERROR by `tower_http`'s failure classifier, which
+/// `dweeb-alerts` forwards to Discord. So a condition an ordinary user action
+/// can reach must never be a 5xx.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum UpstreamFailure {
+    /// A network error, a timeout, or the provider's own 5xx — genuinely
+    /// unwell upstream, which is worth knowing about.
+    Unavailable,
+    /// The provider answered **429**: our shared key is over its per-minute
+    /// request/token budget. Routine on a constrained tier and nothing is
+    /// broken — several members using the assistant in the same minute is
+    /// enough.
+    RateLimited,
+    /// The provider answered **413** (`code: rate_limit_exceeded`,
+    /// `type: tokens`): this one request's prompt **plus its reserved
+    /// `max_tokens`** exceeds the model's per-minute token budget, so waiting
+    /// alone won't help unless the message shrinks.
+    TooLarge,
+}
+
+/// Classify an unsuccessful provider status. `None` = not retryable: a 4xx
+/// that isn't a rate limit is our key or our own malformed request.
+fn classify_upstream(status: StatusCode) -> Option<UpstreamFailure> {
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        Some(UpstreamFailure::RateLimited)
+    } else if status == StatusCode::PAYLOAD_TOO_LARGE {
+        Some(UpstreamFailure::TooLarge)
+    } else if status.is_server_error() {
+        Some(UpstreamFailure::Unavailable)
+    } else {
+        None
+    }
+}
+
+/// The provider's own `Retry-After` (delta-seconds, occasionally fractional),
+/// so the client waits the real amount rather than our guess — Groq's hints
+/// ranged from under a second to 23s in the 2026-08-01 burst. The HTTP-date
+/// form and out-of-range values are ignored; the caller then falls back to a
+/// fixed hint.
+fn retry_after_secs(headers: &reqwest::header::HeaderMap) -> Option<f64> {
+    let raw = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    let secs: f64 = raw.trim().parse().ok()?;
+    if secs.is_finite() && (0.0..=300.0).contains(&secs) {
+        // Never advertise a sub-second wait: the limit is per *minute*, and a
+        // client that retries instantly just spends another call from it.
+        Some(secs.max(1.0))
+    } else {
+        None
+    }
+}
+
+/// The response for a run that exhausted every attempt, keyed on how the last
+/// one failed.
+///
+/// Both rate-limit shapes answer **429**, not a 5xx. That is the honest status
+/// (the provider throttled a request we were right to send), it carries a
+/// `Retry-After` the client already understands, and it keeps routine tier
+/// throttling out of the paging channel. `RateLimited` used to fall through to
+/// the 502 below: on 2026-08-01 a burst of free-tier TPM limits paged the
+/// maintainer three times in one minute while the assistant was working
+/// normally for everyone who waited a few seconds.
+fn terminal_error(failure: UpstreamFailure, retry_hint: Option<f64>) -> AppError {
+    match failure {
+        UpstreamFailure::TooLarge => AppError::Status {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: "This request is too large for the AI service's current rate limit. Try a \
+                      shorter message, wait a minute, or use your own API key in AI settings."
+                .into(),
+            retry_after: Some(retry_hint.unwrap_or(30.0)),
+        },
+        UpstreamFailure::RateLimited => AppError::Status {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: "The built-in AI is at its rate limit right now — try again in a few \
+                      seconds, or use your own API key in AI settings."
+                .into(),
+            retry_after: Some(retry_hint.unwrap_or(20.0)),
+        },
+        UpstreamFailure::Unavailable => AppError::Status {
+            status: StatusCode::BAD_GATEWAY,
+            message:
+                "The AI provider is having trouble — try again in a moment, or use your own API key."
+                    .into(),
+            retry_after: Some(5.0),
+        },
+    }
+}
+
 /// Start the provider stream: primary model, one retry, then the fallback
 /// model (when configured). Transient/capacity failures (network, 429, 413,
 /// 5xx) are retried and fall through to the fallback model; any other 4xx is
 /// our bug or our key and retrying can't fix it.
-///
-/// A 413 is a *capacity* condition, not a malformed request: Groq returns it
-/// (with `code: rate_limit_exceeded`, `type: tokens`) when a single request's
-/// prompt **plus its reserved `max_tokens`** exceeds the model's per-minute
-/// token budget — the free tier's is small enough that the reserved
-/// completion budget alone can breach it. So it must NOT be logged at error or
-/// surfaced as a "we rejected your request" 502; it flows to the fallback
-/// model (which may have a bigger budget) and otherwise returns a clear,
-/// retryable, size-aware message.
 async fn start_stream(
     ai: &AiRuntime,
     messages: &[Value],
@@ -666,11 +746,20 @@ async fn start_stream(
     }
     let url = format!("{}/chat/completions", ai.base_url);
     let mut last_transient = String::new();
-    // True when the last failure was a token-budget/size limit, so the final
-    // message can steer toward a shorter message / higher tier rather than a
-    // generic "provider is having trouble".
-    let mut last_was_capacity = false;
+    // How the last attempt failed, so the terminal response can be the honest
+    // status and steer toward the lever the caller actually has.
+    let mut last_failure = UpstreamFailure::Unavailable;
+    // The provider's own "try again in N seconds", when it sends one.
+    let mut retry_hint: Option<f64> = None;
+    // Set when a model answers a rate limit. Its budget is per *minute*, so it
+    // cannot clear in the 300 ms before we'd retry the same model — that call
+    // can only fail, and it spends another request from the very bucket that is
+    // full. Skip straight to the fallback, which has its own bucket.
+    let mut exhausted: Option<&str> = None;
     for (i, model) in attempts.iter().enumerate() {
+        if exhausted == Some(*model) {
+            continue;
+        }
         if i > 0 {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
@@ -703,19 +792,27 @@ async fn start_stream(
         if status.is_success() {
             return Ok((sent, model.to_string()));
         }
+        // Read the hint before the body: `text()` consumes the response.
+        let hint = retry_after_secs(sent.headers());
         let body = sent.text().await.unwrap_or_default();
-        let is_capacity = status == StatusCode::PAYLOAD_TOO_LARGE;
-        if status == StatusCode::TOO_MANY_REQUESTS || is_capacity || status.is_server_error() {
+        if let Some(failure) = classify_upstream(status) {
             // Capacity/rate conditions are expected on constrained tiers — warn,
             // don't error (an error here reads like a broken deploy and pages).
             tracing::warn!(
                 model = %model,
                 status = %status,
+                retry_after = hint.unwrap_or_default(),
                 detail = %clamp_chars(&body, 300),
                 "ai upstream transient/capacity error"
             );
             last_transient = format!("upstream {status}");
-            last_was_capacity = is_capacity;
+            last_failure = failure;
+            if hint.is_some() {
+                retry_hint = hint;
+            }
+            if failure != UpstreamFailure::Unavailable {
+                exhausted = Some(model);
+            }
             continue;
         }
         // Non-retryable: our key or a genuinely malformed request. Log detail
@@ -733,32 +830,11 @@ async fn start_stream(
     }
     tracing::warn!(
         error = %last_transient,
-        capacity = last_was_capacity,
+        failure = ?last_failure,
+        retry_after = retry_hint.unwrap_or_default(),
         "ai upstream unavailable after retries"
     );
-    if last_was_capacity {
-        // A token-budget/rate condition IS a rate limit, so answer 429 (not a
-        // 5xx): it's the honest status, it carries a Retry-After the client
-        // already understands, and it keeps tower_http's on_failure layer from
-        // logging routine tier throttling at ERROR. The request's prompt +
-        // reserved max_tokens exceeded the model's per-minute budget; the
-        // durable fix is a smaller AI_MAX_TOKENS or a higher Groq tier, so
-        // point the user at the lever they have.
-        return Err(AppError::Status {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            message: "This request is too large for the AI service's current rate limit. Try a \
-                      shorter message, wait a minute, or use your own API key in AI settings."
-                .into(),
-            retry_after: Some(30.0),
-        });
-    }
-    Err(AppError::Status {
-        status: StatusCode::BAD_GATEWAY,
-        message:
-            "The AI provider is having trouble — try again in a moment, or use your own API key."
-                .into(),
-        retry_after: Some(5.0),
-    })
+    Err(terminal_error(last_failure, retry_hint))
 }
 
 // ── Usage summary (GET /api/ai/usage) ───────────────────────────────────────
@@ -978,6 +1054,90 @@ mod tests {
         assert!(!is_snowflake("123456789012345678a"));
         assert_eq!(estimate_tokens(0), 1);
         assert_eq!(estimate_tokens(400), 100);
+    }
+
+    fn status_of(e: &AppError) -> StatusCode {
+        match e {
+            AppError::Status { status, .. } => *status,
+            _ => panic!("start_stream must return a Status error"),
+        }
+    }
+
+    fn retry_of(e: &AppError) -> Option<f64> {
+        match e {
+            AppError::Status { retry_after, .. } => *retry_after,
+            _ => panic!("start_stream must return a Status error"),
+        }
+    }
+
+    /// 5xx is the paging channel (tower_http logs it at ERROR, `dweeb-alerts`
+    /// forwards it), so a provider throttling us must answer 4xx. A plain 429
+    /// used to reach the 502 branch and paged three times on 2026-08-01.
+    #[test]
+    fn provider_rate_limits_answer_429_and_never_page() {
+        assert_eq!(
+            classify_upstream(StatusCode::TOO_MANY_REQUESTS),
+            Some(UpstreamFailure::RateLimited)
+        );
+        assert_eq!(
+            classify_upstream(StatusCode::PAYLOAD_TOO_LARGE),
+            Some(UpstreamFailure::TooLarge)
+        );
+        assert_eq!(
+            classify_upstream(StatusCode::BAD_GATEWAY),
+            Some(UpstreamFailure::Unavailable)
+        );
+        // Our key or our own malformed request: not retryable, handled inline.
+        assert_eq!(classify_upstream(StatusCode::UNAUTHORIZED), None);
+        assert_eq!(classify_upstream(StatusCode::BAD_REQUEST), None);
+
+        for failure in [UpstreamFailure::RateLimited, UpstreamFailure::TooLarge] {
+            let status = status_of(&terminal_error(failure, None));
+            assert_eq!(
+                status,
+                StatusCode::TOO_MANY_REQUESTS,
+                "{failure:?} must not page"
+            );
+            assert!(!status.is_server_error());
+        }
+        // A provider that is genuinely unwell still pages.
+        assert_eq!(
+            status_of(&terminal_error(UpstreamFailure::Unavailable, None)),
+            StatusCode::BAD_GATEWAY
+        );
+    }
+
+    #[test]
+    fn retry_after_prefers_the_providers_own_hint() {
+        fn hdrs(v: &str) -> reqwest::header::HeaderMap {
+            let mut h = reqwest::header::HeaderMap::new();
+            h.insert(reqwest::header::RETRY_AFTER, v.parse().unwrap());
+            h
+        }
+        assert_eq!(retry_after_secs(&hdrs("7")), Some(7.0));
+        assert_eq!(retry_after_secs(&hdrs(" 6.4875 ")), Some(6.4875));
+        // Never advertise a sub-second wait against a per-minute budget.
+        assert_eq!(retry_after_secs(&hdrs("0.93")), Some(1.0));
+        // HTTP-date form and absurd values fall back to our fixed hint.
+        assert_eq!(
+            retry_after_secs(&hdrs("Wed, 21 Oct 2026 07:28:00 GMT")),
+            None
+        );
+        assert_eq!(retry_after_secs(&hdrs("99999")), None);
+        assert_eq!(retry_after_secs(&reqwest::header::HeaderMap::new()), None);
+
+        assert_eq!(
+            retry_of(&terminal_error(UpstreamFailure::RateLimited, Some(7.5))),
+            Some(7.5)
+        );
+        assert_eq!(
+            retry_of(&terminal_error(UpstreamFailure::RateLimited, None)),
+            Some(20.0)
+        );
+        assert_eq!(
+            retry_of(&terminal_error(UpstreamFailure::TooLarge, None)),
+            Some(30.0)
+        );
     }
 
     #[test]
