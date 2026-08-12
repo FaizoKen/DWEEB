@@ -1921,13 +1921,13 @@ pub async fn activity_image(
     // SSRF: resolve the host and refuse if any address is non-public, before we
     // connect. (Redirect hops are vetted by the client's redirect policy, and the
     // final connection is re-checked below to catch DNS rebinding.)
-    ensure_public_host(&parsed).await?;
+    ensure_public_host(&parsed, UrlOwner::Caller).await?;
 
     let mut resp = image_client()
         .get(parsed)
         .send()
         .await
-        .map_err(|e| AppError::BadGateway(format!("couldn't fetch the image: {e}")))?;
+        .map_err(|_| unreachable_target("that URL couldn't be reached"))?;
 
     // Drop a response served from a private address even if the hostname looked
     // public (DNS rebinding) — before relaying any bytes.
@@ -1937,8 +1937,8 @@ pub async fn activity_image(
         }
     }
     if !resp.status().is_success() {
-        return Err(AppError::BadGateway(format!(
-            "upstream returned {}",
+        return Err(unreachable_target(&format!(
+            "that URL returned {}",
             resp.status().as_u16()
         )));
     }
@@ -1975,7 +1975,7 @@ pub async fn activity_image(
     while let Some(chunk) = resp
         .chunk()
         .await
-        .map_err(|e| AppError::BadGateway(format!("couldn't read the image: {e}")))?
+        .map_err(|_| unreachable_target("that URL stopped responding mid-download"))?
     {
         if buf.len() + chunk.len() > MAX_IMAGE_BYTES {
             return Err(bad_request("image is too large"));
@@ -1996,10 +1996,30 @@ pub async fn activity_image(
     Ok(out)
 }
 
+/// Who chose the URL being vetted, which decides what a hostname that won't
+/// resolve means. For a URL someone pasted into the builder it is the caller's
+/// typo or a domain that has lapsed — a 4xx, and it must not page. For one of our
+/// own allow-listed plugin hosts it is our DNS or our infrastructure — a 5xx, and
+/// it should.
+#[derive(Clone, Copy)]
+enum UrlOwner {
+    Caller,
+    Ours,
+}
+
+impl UrlOwner {
+    fn unresolvable(self) -> AppError {
+        match self {
+            UrlOwner::Caller => unreachable_target("that URL's host couldn't be found"),
+            UrlOwner::Ours => AppError::BadGateway("couldn't resolve the plugin host".into()),
+        }
+    }
+}
+
 /// Refuse a fetch target whose host is plainly internal: an IP-literal in a
 /// private/reserved range, an internal-looking name, or a hostname that *resolves*
 /// only/partly to non-public addresses.
-async fn ensure_public_host(url: &Url) -> Result<(), AppError> {
+async fn ensure_public_host(url: &Url, owner: UrlOwner) -> Result<(), AppError> {
     let host = url
         .host_str()
         .ok_or_else(|| bad_request("url has no host"))?;
@@ -2017,7 +2037,7 @@ async fn ensure_public_host(url: &Url) -> Result<(), AppError> {
     let mut resolved = false;
     for addr in tokio::net::lookup_host((host, port))
         .await
-        .map_err(|_| AppError::BadGateway("couldn't resolve the image host".into()))?
+        .map_err(|_| owner.unresolvable())?
     {
         resolved = true;
         if !ip_is_public(addr.ip()) {
@@ -2025,15 +2045,36 @@ async fn ensure_public_host(url: &Url) -> Result<(), AppError> {
         }
     }
     if !resolved {
-        return Err(AppError::BadGateway(
-            "couldn't resolve the image host".into(),
-        ));
+        return Err(owner.unresolvable());
     }
     Ok(())
 }
 
 fn blocked_host() -> AppError {
     AppError::Forbidden("that host isn't allowed".into())
+}
+
+/// A fetch target supplied by the caller didn't yield an image: it timed out,
+/// refused the connection, answered non-2xx, or died mid-body.
+///
+/// **This must not be a 5xx.** Every 5xx the proxy returns is logged at ERROR by
+/// `tower_http`'s failure classifier and forwarded to Discord by `dweeb-alerts`,
+/// so the status a handler picks *is* the paging decision — and the rule is that
+/// a 5xx means *our* fault. Nothing here is: the image proxy is unauthenticated
+/// by necessity (an `<img>` can't send a bearer) and fetches whatever URL someone
+/// pasted into the builder, so a typo'd link, a host that 404s, one that geo-blocks
+/// the VPS, or one that is simply slow would each page the maintainer over a
+/// message that is merely missing a picture. These branches used to answer 502 and
+/// did exactly that; the ten-second fetch deadline made a dead host indistinguishable
+/// in the alert from a real outage.
+///
+/// 400 matches the branch below it — a URL that fetches fine but isn't an image is
+/// already a 400 — and costs the caller nothing: this response is consumed by an
+/// `<img>`/`<video>` element, which renders the same broken placeholder for any
+/// non-2xx. Our *own* faults in this handler (the feature being disabled, a blocked
+/// host) keep their own statuses.
+fn unreachable_target(message: &str) -> AppError {
+    bad_request(message)
 }
 
 /// Hostnames that can't be a public site: localhost, the non-routable suffixes
@@ -2138,7 +2179,9 @@ async fn ensure_plugin_target(raw: &str, allow: &[String]) -> Result<Url, AppErr
     if !plugin_host_allowed(host, allow) {
         return Err(AppError::Forbidden("that plugin host isn't allowed".into()));
     }
-    ensure_public_host(&parsed).await?;
+    // Ours: the host has already passed the registry allow-list above, so a
+    // resolution failure here is our infrastructure, not someone's typo.
+    ensure_public_host(&parsed, UrlOwner::Ours).await?;
     Ok(parsed)
 }
 
@@ -2985,6 +3028,58 @@ fn valid_instance(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 5xx is the paging channel (`tower_http` logs it at ERROR, `dweeb-alerts`
+    /// forwards it to Discord), so the image proxy — which is unauthenticated and
+    /// fetches whatever URL a user pasted — must never answer 5xx for the remote
+    /// host's behaviour. It used to answer 502 for a timeout, a 404, or a dropped
+    /// body, meaning a typo'd image link woke the maintainer.
+    #[test]
+    fn a_third_party_url_failing_is_never_our_server_error() {
+        for message in [
+            "that URL couldn't be reached",
+            "that URL returned 404",
+            "that URL stopped responding mid-download",
+        ] {
+            let status = unreachable_target(message).into_response().status();
+            assert!(
+                status.is_client_error(),
+                "{message:?} answered {status} — a 5xx here pages over a URL that isn't ours"
+            );
+        }
+        // A hostname that won't resolve is the same class: a lapsed domain or a
+        // typo in what someone pasted.
+        assert!(UrlOwner::Caller
+            .unresolvable()
+            .into_response()
+            .status()
+            .is_client_error());
+    }
+
+    /// …but the *same* check guards our own allow-listed plugin hosts, where a
+    /// resolution failure is our infrastructure and must keep paging. The split
+    /// is the point: this is a reclassification by fault, not a blanket mute.
+    #[test]
+    fn our_own_host_failing_to_resolve_still_pages() {
+        assert_eq!(
+            UrlOwner::Ours.unresolvable().into_response().status(),
+            StatusCode::BAD_GATEWAY
+        );
+    }
+
+    /// The other half of the rule: our *own* faults in the same handler keep
+    /// their statuses, so this stays a reclassification and not a blanket mute.
+    #[test]
+    fn our_own_faults_in_the_image_proxy_keep_their_status() {
+        assert_eq!(
+            not_enabled().into_response().status(),
+            StatusCode::NOT_IMPLEMENTED
+        );
+        assert_eq!(
+            blocked_host().into_response().status(),
+            StatusCode::FORBIDDEN
+        );
+    }
 
     #[test]
     fn room_tickets_are_single_use_and_carry_their_claim() {

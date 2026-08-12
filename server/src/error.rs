@@ -56,6 +56,15 @@ impl IntoResponse for AppError {
             } => (status, message, retry_after),
         };
 
+        // Attach the reason to the request span so `tower_http`'s failure line —
+        // the one that pages — carries it. Without this the alert states only the
+        // status and the latency, and the message explaining *why* exists solely
+        // in the response body, which no operator ever sees. 5xx only: a 4xx is
+        // the caller's problem, is not logged, and is often high-volume.
+        if status.is_server_error() {
+            tracing::Span::current().record("error", tracing::field::display(&message));
+        }
+
         let mut obj = Map::new();
         obj.insert("error".to_string(), Value::String(message));
         obj.insert("status".to_string(), Value::from(status.as_u16()));

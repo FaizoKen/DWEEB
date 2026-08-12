@@ -500,6 +500,46 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   and an upstream genuinely going down still pages three other ways — its own panic/tracing
   ERROR, Caddy's `dial tcp … connection refused`/DNS errors (which carry no abort wording and
   pass the filter), and Gatus on `/ready`. Don't widen that regex into a blanket Caddy mute.
+- **A 502 must name its route, and a reqwest deadline must not become a bandwidth
+  requirement** (2026-08-12). A page arrived reading, in full, `response failed
+  classification=Status code: 502 Bad Gateway latency=10002 ms` — no method, no path, no
+  reason, and one occurrence in 21 days. `TraceLayer::new_for_http()`'s stock span
+  (`DefaultMakeSpan`) does record method and URI, but at **DEBUG**, and the deployed filter
+  is `info`, so the fields never reach the log. `main.rs`'s `request_span` replaces it at
+  INFO with `method` + **`path` only — never the query**, because these lines are forwarded
+  to Discord by `dweeb-alerts` and `/auth/callback?code=…` carries a live OAuth code (no
+  route embeds a credential in its *path*; ids only). It also declares an empty `error`
+  field that `AppError::into_response` records **for 5xx only**, so the reason lands on the
+  same line as the classification instead of living only in a response body no operator
+  sees. Note the side effect: every log line emitted during a request now carries that span
+  prefix — the documented `web_crash` / `activity_handshake` greps still work, since they
+  match the target.
+  The `10002 ms` was un-attributable because **two** subsystems had ten-second deadlines,
+  and both were wrong in a different way. (1) `Discord::http` set reqwest's `.timeout()`,
+  which is a **total** deadline covering the request body — so the flat 10s was silently a
+  bandwidth floor on the multipart calls. `/api/activity/post` and `/api/activity/edit`
+  accept **32 MiB** and are deliberately exempt from the inbound `TimeoutLayer` because a
+  large attachment legitimately takes a while to arrive, and the proxy then gave itself ten
+  seconds to forward those same bytes (~27 Mbit/s sustained to Discord's ingest — usually
+  fine, which is why it failed rarely rather than always). The user's post failed *and* it
+  paged. `upload_timeout(bytes)` now sizes the per-request deadline as the base allowance
+  plus the body at a pessimistic 1 MiB/s floor (~42s at 32 MiB) — still bounded, so a stuck
+  transfer can't hold the connection open. Don't put a flat `.timeout()` back on a call that
+  carries files. (2) The Activity **image proxy** answered 502 for the remote host's
+  behaviour: it is unauthenticated by necessity (an `<img>` can't send a bearer) and fetches
+  whatever URL someone pasted, so a typo'd link, a lapsed domain, a host that 404s or
+  geo-blocks the VPS each paged the maintainer over a message that was merely missing a
+  picture. Those branches are now 4xx via `unreachable_target`, matching the 400 the same
+  handler already returned for a URL that fetches fine but isn't an image, and costing the
+  caller nothing (an `<img>` renders the same broken placeholder for any non-2xx). The split
+  is by **fault, not by handler**: `ensure_public_host` takes a `UrlOwner`, so an
+  unresolvable host is 4xx for a pasted image URL and stays a paging **502** for one of our
+  own allow-listed plugin hosts — and the plugin relay's other 502s are left alone, since a
+  registry-allow-listed host being down really is our infrastructure. Server-only, no deploy
+  ordering (the FE only ever builds the image URL as an element `src`). Guarded by
+  `an_upload_deadline_covers_the_transfer_not_just_the_reply` in discord.rs, the
+  `*_never_our_server_error` / `our_own_*` pair in activity.rs, and
+  `a_paging_failure_names_the_route_and_reason_but_never_the_query` in main.rs.
 - **The Top.gg listing's server count is pushed, and its failures must stay quiet**
   (`server/src/topgg.rs`, added 2026-07-30). Top.gg renders whatever count a bot last
   **posted** — there is no pull, and stats are the only writable part of a listing — so a

@@ -871,7 +871,7 @@ async fn run() {
         .merge(activity_plugin_routes())
         // Rate limiting runs outermost so rejected requests never touch a handler.
         .layer(from_fn_with_state(limiter, rate_limit))
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http().make_span_with(request_span))
         .with_state(state);
 
     let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
@@ -934,6 +934,34 @@ async fn connect_redis(url: &str) -> Result<redis::aio::ConnectionManager, Strin
 /// making several sequential Discord calls, each already capped by the reqwest
 /// client) with headroom.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The tracing span every request runs inside, so a failure says *which* request
+/// failed.
+///
+/// `TraceLayer::new_for_http()`'s stock span is built by `DefaultMakeSpan`, which
+/// records method and URI — at **DEBUG**. The deployed filter is `info`, so that
+/// span is disabled and its fields never reach the log, leaving `on_failure` to
+/// report a bare `response failed classification=Status code: 502 Bad Gateway
+/// latency=10002 ms`. That is the whole alert: no method, no route, no reason. A
+/// 502 on 2026-08-11 could not be attributed to a handler even with the journal
+/// in hand, because two unrelated subsystems have ten-second deadlines. Naming the
+/// route is what makes the next one a five-second triage.
+///
+/// **Path only — never the query.** These lines are forwarded to Discord by
+/// `dweeb-alerts`, and query strings carry OAuth `code`s, Stripe identifiers, and
+/// pasted third-party URLs. `Uri::path()` excludes all of it, and no route embeds
+/// a credential in its path (ids only — webhook *tokens* are never routed).
+///
+/// `error` starts empty and is filled in by `AppError::into_response` for 5xx, so
+/// the reason lands on the same line as the classification.
+fn request_span(req: &axum::http::Request<axum::body::Body>) -> tracing::Span {
+    tracing::info_span!(
+        "http",
+        method = %req.method(),
+        path = %req.uri().path(),
+        error = tracing::field::Empty,
+    )
+}
 
 /// Fallback for a path this service doesn't route: 404 — but only *after* the
 /// request body has been read and dropped.
@@ -1063,6 +1091,136 @@ mod tests {
     use axum::body::{Body, Bytes};
     use axum::handler::Handler;
     use axum::http::{Request, StatusCode};
+    use axum::response::IntoResponse;
+
+    /// A 502 pages. It has to say what failed.
+    ///
+    /// On 2026-08-11 one arrived reading, in full, `response failed
+    /// classification=Status code: 502 Bad Gateway latency=10002 ms` — no method,
+    /// no route, no reason. Two unrelated subsystems have ten-second deadlines, so
+    /// it could not be attributed even with the journal in hand. The span supplies
+    /// the first two and `AppError` records the third.
+    ///
+    /// And the query string must stay out of it: these lines go to Discord via
+    /// `dweeb-alerts`, and `/auth/callback?code=…` carries a live OAuth code.
+    #[test]
+    fn a_paging_failure_names_the_route_and_reason_but_never_the_query() {
+        use std::io::Write;
+        use std::sync::Mutex;
+        use tracing_subscriber::fmt::MakeWriter;
+
+        #[derive(Clone, Default)]
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl Write for Capture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'a> MakeWriter<'a> for Capture {
+            type Writer = Capture;
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        let capture = Capture::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(capture.clone())
+            .with_ansi(false)
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            let req = Request::builder()
+                .method("POST")
+                .uri("/auth/callback?code=live-oauth-code-do-not-log")
+                .body(Body::empty())
+                .expect("request");
+            let span = request_span(&req);
+            let _entered = span.enter();
+            // A handler failing, exactly as axum converts it…
+            let _ = crate::error::AppError::BadGateway(
+                "could not reach Discord: operation timed out".into(),
+            )
+            .into_response();
+            // …and `tower_http`'s failure line, emitted inside the same span.
+            tracing::error!("response failed");
+        });
+
+        let logged = String::from_utf8(capture.0.lock().unwrap().clone()).expect("utf-8");
+        assert!(logged.contains("method=POST"), "no method in: {logged}");
+        assert!(
+            logged.contains("path=/auth/callback"),
+            "no route in: {logged}"
+        );
+        assert!(
+            logged.contains("operation timed out"),
+            "no reason in: {logged}"
+        );
+        assert!(
+            !logged.contains("live-oauth-code-do-not-log"),
+            "the query string reached the log (and Discord): {logged}"
+        );
+    }
+
+    /// A 4xx is the caller's problem and is often high-volume, so it must not
+    /// smuggle its message onto the span — that field exists to explain a page.
+    #[test]
+    fn a_client_error_records_no_reason() {
+        use std::io::Write;
+        use std::sync::Mutex;
+        use tracing_subscriber::fmt::MakeWriter;
+
+        #[derive(Clone, Default)]
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl Write for Capture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'a> MakeWriter<'a> for Capture {
+            type Writer = Capture;
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        let capture = Capture::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(capture.clone())
+            .with_ansi(false)
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            let req = Request::builder()
+                .method("GET")
+                .uri("/api/activity/image")
+                .body(Body::empty())
+                .expect("request");
+            let span = request_span(&req);
+            let _entered = span.enter();
+            let _ = crate::error::AppError::Status {
+                status: StatusCode::BAD_REQUEST,
+                message: "that URL returned 404".into(),
+                retry_after: None,
+            }
+            .into_response();
+            tracing::error!("still logging in this span");
+        });
+
+        let logged = String::from_utf8(capture.0.lock().unwrap().clone()).expect("utf-8");
+        assert!(
+            !logged.contains("that URL returned 404"),
+            "a 4xx recorded itself as a failure reason: {logged}"
+        );
+    }
 
     /// The 404 fallback must READ the request body, not just answer.
     ///

@@ -36,6 +36,37 @@ const API_BASE: &str = "https://discord.com/api/v10";
 const MAX_RETRIES: u32 = 2;
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(4);
 
+/// The client-wide deadline, which reqwest applies to the **whole** exchange —
+/// connect, request body, headers, response body. Ample for the JSON reads and
+/// writes that make up almost every call here.
+///
+/// It is deliberately *not* ample for a call carrying uploaded files, because it
+/// would then be bounding a transfer rather than a response: see
+/// [`upload_timeout`].
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Deadline for a multipart call, which has to push the user's attachments to
+/// Discord before Discord can answer. Because reqwest's timeout is a *total*
+/// deadline, the flat [`REQUEST_TIMEOUT`] was silently a bandwidth requirement:
+/// the two Activity upload routes accept **32 MiB** and are deliberately exempt
+/// from the inbound request timeout ("a slow client legitimately spends a while
+/// streaming a large attachment" — `untimed_routes` in main.rs), and the proxy
+/// then gave itself ten seconds to forward those same bytes. Clearing that needs
+/// ~27 Mbit/s sustained to Discord's ingest; the VPS usually manages it, which is
+/// why this failed rarely rather than always — and when it did, the user's post
+/// failed *and* the 502 paged the maintainer over a transfer that was merely slow.
+///
+/// So the deadline scales with what we're actually sending: the base allowance
+/// for Discord to respond, plus time for the body at a deliberately pessimistic
+/// floor rate. At 32 MiB that is ~42s — generous enough that only a genuinely
+/// stuck transfer trips it, still bounded so a wedged upload can't be held open
+/// forever.
+const UPLOAD_MIN_RATE_BYTES_PER_SEC: u64 = 1024 * 1024;
+
+fn upload_timeout(bytes: usize) -> Duration {
+    REQUEST_TIMEOUT + Duration::from_secs(bytes as u64 / UPLOAD_MIN_RATE_BYTES_PER_SEC)
+}
+
 /// `MANAGE_GUILD` permission bit — held by admins/owners; our default gate for
 /// "may this user read this server in a webhook-builder tool".
 pub const MANAGE_GUILD: u64 = 0x20;
@@ -260,7 +291,7 @@ impl Discord {
         let http = Client::builder()
             // Discord asks every API client to identify itself.
             .user_agent("DWEEB-Proxy/0.2 (+https://github.com/)")
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(REQUEST_TIMEOUT)
             .build()
             .expect("failed to build HTTP client");
         Discord {
@@ -607,9 +638,13 @@ impl Discord {
         }
         let url =
             format!("{API_BASE}/webhooks/{webhook_id}/{token}?wait=true&with_components=true");
+        // Per-request deadline sized to the body — the client-wide one would be
+        // bounding the upload rather than Discord's response. See `upload_timeout`.
+        let deadline = upload_timeout(upload_bytes(&files));
         let resp = send_with_retry(
             self.http
                 .post(&url)
+                .timeout(deadline)
                 .multipart(multipart_form(payload, files)),
         )
         .await
@@ -649,8 +684,11 @@ impl Discord {
         let req = if files.is_empty() {
             self.http.patch(&url).json(payload)
         } else {
+            // Body-sized deadline, as in `execute_webhook_with_files`.
+            let deadline = upload_timeout(upload_bytes(&files));
             self.http
                 .patch(&url)
+                .timeout(deadline)
                 .multipart(multipart_form(payload, files))
         };
         let resp = send_with_retry(req)
@@ -1162,6 +1200,13 @@ pub struct UploadFile {
     pub bytes: axum::body::Bytes,
 }
 
+/// Total attachment bytes in an upload, for sizing the request deadline (see
+/// [`upload_timeout`]). The multipart framing and `payload_json` add a little on
+/// top, which the base allowance absorbs.
+fn upload_bytes(files: &[UploadFile]) -> usize {
+    files.iter().map(|f| f.bytes.len()).sum()
+}
+
 /// Assemble Discord's multipart webhook body: `payload_json` + one part per
 /// uploaded file.
 fn multipart_form(payload: &Value, files: Vec<UploadFile>) -> reqwest::multipart::Form {
@@ -1381,6 +1426,47 @@ fn audit_reason(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The regression behind the 2026-08-11 502: reqwest's timeout is a *total*
+    /// deadline, so a flat one applied to a multipart call is a bandwidth
+    /// requirement in disguise. The upload routes accept 32 MiB and are exempt
+    /// from the inbound timeout precisely because a big attachment takes a while
+    /// to arrive — the forward to Discord has to be allowed the same courtesy.
+    #[test]
+    fn an_upload_deadline_covers_the_transfer_not_just_the_reply() {
+        // The 32 MiB the two upload routes admit, at the pessimistic floor rate.
+        let biggest = upload_timeout(32 * 1024 * 1024);
+        assert!(
+            biggest >= Duration::from_secs(40),
+            "a full-size upload must not be held to the plain reply deadline \
+             (got {biggest:?}, plain is {REQUEST_TIMEOUT:?})"
+        );
+        // …but still bounded: a stuck transfer can't hold the connection forever.
+        assert!(
+            biggest <= Duration::from_secs(60),
+            "the deadline must stay a deadline (got {biggest:?})"
+        );
+        // It scales with the body rather than jumping to the cap, so a small
+        // attachment still fails fast.
+        assert!(upload_timeout(1024 * 1024) < upload_timeout(16 * 1024 * 1024));
+        // A file-less call keeps the plain deadline exactly.
+        assert_eq!(upload_timeout(0), REQUEST_TIMEOUT);
+    }
+
+    #[test]
+    fn upload_bytes_totals_every_part() {
+        let file = |n: &str, len: usize| UploadFile {
+            name: n.into(),
+            filename: format!("{n}.png"),
+            content_type: None,
+            bytes: axum::body::Bytes::from(vec![0u8; len]),
+        };
+        assert_eq!(upload_bytes(&[]), 0);
+        assert_eq!(
+            upload_bytes(&[file("files[0]", 100), file("files[1]", 923)]),
+            1023
+        );
+    }
 
     #[test]
     fn parses_fractional_retry_after_with_padding() {
