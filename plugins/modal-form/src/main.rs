@@ -69,11 +69,17 @@ async fn run() {
         .expect("DISCORD_PUBLIC_KEY must encode a valid Ed25519 point");
     let store = Store::open(&config.database_path).expect("failed to open database");
     // The modal-submit handler awaits this forward POST before replying, so its
-    // timeout is part of the interaction's latency budget. 2.5s keeps the whole
+    // timeout is part of the interaction's latency budget. 2.2s keeps the whole
     // round-trip inside Discord's ~3s window even after the dispatcher hop; the
     // forward is best-effort and the reply is sent whether or not it succeeds.
+    // It is deliberately SHORTER than the dispatcher's 2.5s forward budget:
+    // both were 2.5s, and since this clock starts later the outer one always
+    // expired first — a slow upstream then surfaced as the dispatcher's
+    // nonspecific "the plugin didn't respond" plus a paging alert, instead of
+    // this plugin's own reply. Keep it under FORWARD_BUDGET
+    // (plugins/dispatcher/src/main.rs).
     let http = reqwest::Client::builder()
-        .timeout(Duration::from_millis(2500))
+        .timeout(Duration::from_millis(2200))
         .pool_idle_timeout(Duration::from_secs(30))
         .pool_max_idle_per_host(16)
         .user_agent(concat!(

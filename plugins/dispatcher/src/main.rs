@@ -96,7 +96,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
     sync::{Arc, RwLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use axum::{
@@ -131,6 +131,54 @@ const CAP_CUSTOM_APPS: &str = "custom_apps";
 fn is_snowflake(s: &str) -> bool {
     (15..=25).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
 }
+
+/// Total wall-clock the forward hop may consume, retries included. Discord
+/// gives the whole chain ~3s; the remainder covers the two Discord↔VPS legs,
+/// this service's own work, and enough slack to still emit the fallback reply.
+///
+/// **This must stay strictly larger than a plugin's own upstream deadline.**
+/// Every plugin gives its Discord REST calls [`PLUGIN_UPSTREAM_BUDGET_MS`], and
+/// those calls start *after* this clock does — so an equal deadline means the
+/// outer one always loses, and a slow Discord turns into "the plugin didn't
+/// respond" from here instead of the plugin's own, accurate "try again".
+const FORWARD_BUDGET: Duration = Duration::from_millis(2500);
+/// The deadline every plugin gives its own upstream calls, recorded here only
+/// so the ordering above can be read in one place. Changing it means changing
+/// the constant in each plugin's `main.rs` — there is no shared crate.
+const PLUGIN_UPSTREAM_BUDGET_MS: u64 = 2200;
+/// Pause between dial attempts, and how long new attempts keep being started —
+/// five tries spanning ~800ms. Mirrors Caddy's `upstream_retry` snippet
+/// (`lb_try_interval 200ms` / `lb_try_duration 2s`) on the one hop Caddy does
+/// not cover, shortened because a *late* success still needs to leave the
+/// plugin time to answer. Sized against the same measurement that produced
+/// that snippet — one `--force-recreate` cost 6 refused dials out of 200
+/// probes, i.e. a sub-second gap — so widening this buys little and eats the
+/// plugin's share. See [`should_retry_dial`] for why only a dial qualifies.
+const DIAL_RETRY_DELAY: Duration = Duration::from_millis(200);
+const DIAL_RETRY_WINDOW: Duration = Duration::from_millis(1000);
+/// How long a single dial may take before it counts as a failed attempt. A
+/// refused connection is instant on the compose network; this only bounds the
+/// pathological case where the SYN is black-holed, so a retry can still happen
+/// inside the window instead of the whole budget draining on one attempt.
+const FORWARD_CONNECT_TIMEOUT: Duration = Duration::from_millis(400);
+/// Below this there is no point starting another attempt.
+const MIN_FORWARD_ATTEMPT: Duration = Duration::from_millis(50);
+
+// The two budget rules above are enforced here rather than left as prose: get
+// either wrong and the failure is a paging alert in production, weeks later.
+const _: () = assert!(
+    FORWARD_BUDGET.as_millis() >= (PLUGIN_UPSTREAM_BUDGET_MS + 250) as u128,
+    "FORWARD_BUDGET must exceed a plugin's own upstream deadline by a clear \
+     margin — equal deadlines mean this outer one always loses, and a slow \
+     Discord is then reported from here instead of by the plugin that knows"
+);
+const _: () = assert!(
+    DIAL_RETRY_WINDOW.as_millis() + DIAL_RETRY_DELAY.as_millis() < FORWARD_BUDGET.as_millis(),
+    "dial retries must never be able to consume the whole forward budget"
+);
+/// Longest cause chain written to a log line. These lines are forwarded
+/// verbatim into a Discord channel by `dweeb-alerts`, which samples 280 chars.
+const MAX_CAUSE_CHARS: usize = 200;
 
 /// Most messages the in-memory bump throttle tracks at once. Enough for every
 /// message plausibly clicked inside one throttle window; overflowing it only
@@ -407,8 +455,14 @@ async fn run() {
         server_url,
         client: reqwest::Client::builder()
             // Discord gives the whole chain 3s; leave headroom to still send
-            // the fallback reply if an upstream stalls.
-            .timeout(Duration::from_millis(2500))
+            // the fallback reply if an upstream stalls. The forward hop sets
+            // its own per-attempt deadline from the remaining FORWARD_BUDGET,
+            // which overrides this — this is the backstop for the dispatcher's
+            // other, detached calls (shortlinks, component revival).
+            .timeout(FORWARD_BUDGET)
+            // Bound the dial separately so one unreachable attempt can't eat
+            // the whole budget that the retry in `interactions` needs.
+            .connect_timeout(FORWARD_CONNECT_TIMEOUT)
             // Keep upstream connections warm — the forward hop stays sub-ms.
             .pool_idle_timeout(Duration::from_secs(30))
             .pool_max_idle_per_host(16)
@@ -797,49 +851,143 @@ async fn interactions(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_micros())
         .unwrap_or(0);
-    let mut request = app
-        .client
-        .post(format!("{base}/interactions"))
-        .header("content-type", "application/json")
-        .header("x-signature-ed25519", signature)
-        .header("x-signature-timestamp", timestamp)
-        .header("x-dweeb-dispatcher-received", received_us.to_string());
-    // Tell the plugin which key verified this request, vouched for by the
-    // shared secret — that's what lets it re-verify a custom app's signature
-    // itself. Plugins ignore the key header without a valid secret, so a
-    // caller reaching a plugin directly can never substitute its own key.
-    if let Some(secret) = &app.forward_secret {
-        request = request
-            .header("x-dweeb-public-key", verified_key_hex.as_ref())
-            .header("x-dweeb-forward-auth", secret);
-    }
-    let forwarded = request.body(body.clone()).send().await;
+    let url = format!("{base}/interactions");
+    let started = Instant::now();
+    let mut attempts: u32 = 0;
 
-    match forwarded {
-        Ok(resp) => {
-            let status =
-                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let content_type = resp
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("application/json")
-                .to_string();
-            let bytes = resp.bytes().await.unwrap_or_default();
-            (
-                status,
-                [(axum::http::header::CONTENT_TYPE, content_type)],
-                bytes,
-            )
-                .into_response()
+    // A failed *dial* is retried inside a short window: a plugin container
+    // being recreated refuses connections for well under a second, and this is
+    // the hop Caddy's `upstream_retry` cannot cover (the dispatcher reaches
+    // plugins directly over the compose network). Every attempt is given only
+    // the budget that is left, so retrying can never push the reply past the
+    // wall this hop started with. See [`should_retry_dial`] for why nothing
+    // else may be repeated.
+    let (failure, detail) = loop {
+        let remaining = FORWARD_BUDGET.saturating_sub(started.elapsed());
+        if remaining < MIN_FORWARD_ATTEMPT {
+            break (
+                ForwardFailure::Timeout,
+                "forward budget exhausted before an attempt could complete".to_string(),
+            );
         }
-        Err(err) => {
-            // Still answer Discord within its 3s window so the user sees a
-            // message instead of "This interaction failed".
-            tracing::error!(prefix, upstream = %base, %err, "forward failed");
-            ephemeral("The plugin behind this component didn't respond — try again shortly.")
+        attempts += 1;
+
+        let mut request = app
+            .client
+            .post(&url)
+            .timeout(remaining)
+            .header("content-type", "application/json")
+            .header("x-signature-ed25519", signature)
+            .header("x-signature-timestamp", timestamp)
+            .header("x-dweeb-dispatcher-received", received_us.to_string());
+        // Tell the plugin which key verified this request, vouched for by the
+        // shared secret — that's what lets it re-verify a custom app's signature
+        // itself. Plugins ignore the key header without a valid secret, so a
+        // caller reaching a plugin directly can never substitute its own key.
+        if let Some(secret) = &app.forward_secret {
+            request = request
+                .header("x-dweeb-public-key", verified_key_hex.as_ref())
+                .header("x-dweeb-forward-auth", secret);
         }
+
+        match request.body(body.clone()).send().await {
+            Ok(resp) => {
+                if attempts > 1 {
+                    // Info, not warn: a recovered dial is a deploy behaving
+                    // normally. Logged at all only so the retry can be seen
+                    // working, and so a rising count is greppable.
+                    tracing::info!(
+                        prefix,
+                        upstream = %base,
+                        attempts,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "forward recovered after a failed dial"
+                    );
+                }
+                let status =
+                    StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+                let content_type = resp
+                    .headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("application/json")
+                    .to_string();
+                let bytes = resp.bytes().await.unwrap_or_default();
+                return (
+                    status,
+                    [(axum::http::header::CONTENT_TYPE, content_type)],
+                    bytes,
+                )
+                    .into_response();
+            }
+            Err(err) => {
+                let failure = classify_forward_failure(&err);
+                if should_retry_dial(failure, started.elapsed()) {
+                    tokio::time::sleep(DIAL_RETRY_DELAY).await;
+                    continue;
+                }
+                break (failure, forward_detail(&err));
+            }
+        }
+    };
+
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    match failure {
+        // The dial never succeeded across the whole retry window, so this is
+        // not the sub-second gap of a container recreate — the plugin is
+        // genuinely unreachable, and that is our own infrastructure failing.
+        // Same stance as Caddy's `upstream_retry`: a real outage still pages.
+        ForwardFailure::Dial => tracing::error!(
+            prefix,
+            upstream = %base,
+            failure = failure.as_str(),
+            attempts,
+            elapsed_ms,
+            err = %detail,
+            "forward failed"
+        ),
+        // The plugin is up and took the request, it just didn't finish in
+        // time — overwhelmingly a slow or rate-limiting Discord behind it,
+        // which is nobody's fault here, is not actionable, and self-heals.
+        // ERROR is the paging channel (`dweeb-alerts`), so this must not use
+        // it; WARN keeps the line greppable without waking anyone. A plugin
+        // genuinely wedged rather than merely slow still pages, from the
+        // monitor that can actually tell the difference: Gatus probes every
+        // plugin's own `/health` every 120s.
+        ForwardFailure::Timeout => tracing::warn!(
+            prefix,
+            upstream = %base,
+            failure = failure.as_str(),
+            attempts,
+            elapsed_ms,
+            err = %detail,
+            "forward timed out"
+        ),
+        // Reached the plugin and then broke — it died mid-request, or spoke
+        // something we couldn't read. Unclassified and unexpected, so it keeps
+        // paging; the cause chain above is what makes the next one diagnosable.
+        ForwardFailure::Broken => tracing::error!(
+            prefix,
+            upstream = %base,
+            failure = failure.as_str(),
+            attempts,
+            elapsed_ms,
+            err = %detail,
+            "forward failed"
+        ),
     }
+
+    // Still answer Discord within its 3s window so the user sees a message
+    // instead of "This interaction failed". A timeout gets its own copy: the
+    // plugin may have completed the action after we stopped listening, and
+    // telling someone to "try again" is actively wrong when the click worked —
+    // on a self-role toggle a second click would undo it.
+    ephemeral(match failure {
+        ForwardFailure::Timeout => {
+            "This took longer than Discord allows. Check whether it went through before clicking again."
+        }
+        _ => "The plugin behind this component didn't respond — try again shortly.",
+    })
 }
 
 /// When the message a component sits on was sent, from its snowflake id.
@@ -1560,6 +1708,107 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 /// Minimal user-facing reply for the cases where no plugin answered. Always
 /// Components V2: the text rides in a Text Display, not the plain `content`
 /// field (which the V2 flag forbids).
+/// What a failed forward hop actually was.
+///
+/// `reqwest` collapses every transport failure into one Display sentence —
+/// "error sending request for url (…)" — keeping the real reason in the
+/// `source()` chain, which is never printed. That is what made the 2026-08-15
+/// `selfrole:` page unattributable: a container recreate, a DNS blip, our own
+/// deadline and a connection dying mid-flight all log identically, and they
+/// want opposite handling (retry vs never retry, page vs never page).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForwardFailure {
+    /// The dial itself failed — nothing reached the plugin. A container being
+    /// recreated looks exactly like this for a sub-second window.
+    Dial,
+    /// The plugin took the request and our deadline elapsed first.
+    Timeout,
+    /// Anything else: the connection died after the request went out, or the
+    /// response was unreadable.
+    Broken,
+}
+
+impl ForwardFailure {
+    fn as_str(self) -> &'static str {
+        match self {
+            ForwardFailure::Dial => "dial",
+            ForwardFailure::Timeout => "timeout",
+            ForwardFailure::Broken => "broken",
+        }
+    }
+}
+
+fn classify_forward_failure(err: &reqwest::Error) -> ForwardFailure {
+    // Order matters: a *connect* timeout answers true to both, and it belongs
+    // with the dial failures — nothing reached the upstream, so it is the
+    // retryable one.
+    if err.is_connect() {
+        ForwardFailure::Dial
+    } else if err.is_timeout() {
+        ForwardFailure::Timeout
+    } else {
+        ForwardFailure::Broken
+    }
+}
+
+/// May a failed attempt be tried again?
+///
+/// **Only a dial failure**, and only inside the retry window. This is the same
+/// reasoning that makes Caddy's `upstream_retry` safe: a failed dial means the
+/// request never reached the plugin, so retrying cannot process one
+/// interaction twice. It is emphatically *not* a blanket "retry a failure" —
+/// a connection that dies after the request was written may well have been
+/// acted on, and re-sending it would double-toggle a role or double-enter a
+/// giveaway. `hyper` already retries the one safe variant of that (a pooled
+/// connection the upstream had closed before we wrote), so what survives to
+/// [`ForwardFailure::Broken`] here is exactly what must not be repeated.
+fn should_retry_dial(failure: ForwardFailure, elapsed: Duration) -> bool {
+    failure == ForwardFailure::Dial && elapsed + DIAL_RETRY_DELAY < DIAL_RETRY_WINDOW
+}
+
+/// The `source()` chain of an error, flattened onto one line; `None` when the
+/// error has no sources.
+///
+/// Without this a forward failure logs only reqwest's top-level sentence; the
+/// operator needs the tail — "tcp connect error: Connection refused (os error
+/// 111)" — to tell a restarting container from a wedged one. Control
+/// characters become spaces and the result is clamped, on the same reasoning
+/// as the proxy's `clamp_field`: these lines are forwarded into a Discord
+/// channel and must stay one legible line.
+fn cause_chain(err: &dyn std::error::Error) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut next = err.source();
+    while let Some(cause) = next {
+        parts.push(
+            cause
+                .to_string()
+                .chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .collect(),
+        );
+        next = cause.source();
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let joined = parts.join(": ");
+    if joined.chars().count() > MAX_CAUSE_CHARS {
+        return Some(joined.chars().take(MAX_CAUSE_CHARS).collect::<String>() + "…");
+    }
+    Some(joined)
+}
+
+/// The most specific description available for a failed forward.
+///
+/// The cause chain when there is one, and reqwest's own Display only when
+/// there isn't. Not both: reqwest's sentence is "error sending request for url
+/// (…)", which only repeats what the `upstream` field already carries — and
+/// `dweeb-alerts` samples these lines at 280 characters, cutting the *tail*,
+/// which is precisely where the specific reason sits.
+fn forward_detail(err: &reqwest::Error) -> String {
+    cause_chain(err).unwrap_or_else(|| err.to_string())
+}
+
 pub(crate) fn ephemeral(message: &str) -> Response {
     Json(json!({
         "type": RESPONSE_CHANNEL_MESSAGE,
@@ -1636,6 +1885,123 @@ mod tests {
         }
         assert!(marks.should_persist("overflow", 2_050, 100));
         assert!(marks.0.lock().unwrap().len() <= ACTIVITY_MARKS_CAP);
+    }
+
+    #[test]
+    fn only_a_failed_dial_is_ever_retried() {
+        // A recreate's refused connection retries at once...
+        assert!(should_retry_dial(ForwardFailure::Dial, Duration::ZERO));
+        // ...and keeps retrying while another attempt still fits the window.
+        assert!(should_retry_dial(
+            ForwardFailure::Dial,
+            DIAL_RETRY_WINDOW - DIAL_RETRY_DELAY - Duration::from_millis(1)
+        ));
+        // Past that we report instead of eating into Discord's window.
+        assert!(!should_retry_dial(
+            ForwardFailure::Dial,
+            DIAL_RETRY_WINDOW - DIAL_RETRY_DELAY
+        ));
+        assert!(!should_retry_dial(ForwardFailure::Dial, DIAL_RETRY_WINDOW));
+        // Nothing else is EVER repeated, at any point in the window: the
+        // request reached the plugin and may already have been acted on, so a
+        // resend would double-toggle a role or double-enter a giveaway.
+        for elapsed in [Duration::ZERO, Duration::from_millis(10)] {
+            assert!(!should_retry_dial(ForwardFailure::Timeout, elapsed));
+            assert!(!should_retry_dial(ForwardFailure::Broken, elapsed));
+        }
+    }
+
+    #[test]
+    fn a_cause_chain_stays_one_bounded_line() {
+        #[derive(Debug)]
+        struct Inner(String);
+        impl std::fmt::Display for Inner {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+        impl std::error::Error for Inner {}
+
+        #[derive(Debug)]
+        struct Outer(Inner);
+        impl std::fmt::Display for Outer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("outer")
+            }
+        }
+        impl std::error::Error for Outer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        // Only the causes are collected — the caller decides what to do with
+        // the top level — and a multi-line cause is flattened, so the alert
+        // stays one legible line (the 2026-07-24 lesson from `clamp_field`).
+        let chain = cause_chain(&Outer(Inner("refused\n\tat line two".into())));
+        assert_eq!(chain.as_deref(), Some("refused  at line two"));
+
+        // A source-less error has no chain — which is what makes the caller
+        // fall back to the error's own wording instead of printing both.
+        assert_eq!(cause_chain(&Inner("solo".into())), None);
+
+        // One pathological error can't flood the alert channel.
+        let long = cause_chain(&Outer(Inner("x".repeat(MAX_CAUSE_CHARS * 2)))).unwrap();
+        assert_eq!(long.chars().count(), MAX_CAUSE_CHARS + 1);
+        assert!(long.ends_with('…'));
+    }
+
+    #[tokio::test]
+    async fn a_refused_dial_is_classified_as_one_and_names_the_reason() {
+        // Bind then drop: the port is now certainly free, so the connect is
+        // refused rather than merely slow — what a recreating container does.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let err = reqwest::Client::new()
+            .post(format!("http://127.0.0.1:{port}/interactions"))
+            .body("{}")
+            .send()
+            .await
+            .expect_err("nothing is listening on that port");
+
+        assert_eq!(classify_forward_failure(&err), ForwardFailure::Dial);
+        // The whole point of the fix: the reason reqwest keeps in `source()`,
+        // and used to drop on the floor, reaches the log line — and it is the
+        // OS-level refusal, not a restatement of the URL already in `upstream`.
+        let detail = forward_detail(&err);
+        assert!(detail.to_lowercase().contains("connect"), "{detail}");
+        assert!(!detail.contains("error sending request"), "{detail}");
+        assert!(!detail.contains('\n'), "{detail}");
+    }
+
+    #[tokio::test]
+    async fn a_stalled_upstream_is_a_timeout_not_a_dial_failure() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((sock, _)) = listener.accept().await {
+                // Take the request and answer nothing — a plugin waiting on a
+                // slow Discord looks exactly like this from here.
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                drop(sock);
+            }
+        });
+
+        let err = reqwest::Client::builder()
+            .timeout(Duration::from_millis(150))
+            .build()
+            .unwrap()
+            .post(format!("http://{addr}/interactions"))
+            .body("{}")
+            .send()
+            .await
+            .expect_err("a silent upstream cannot answer");
+
+        // Classified apart from a dial failure precisely so it is neither
+        // retried (the plugin already has the request) nor paged for.
+        assert_eq!(classify_forward_failure(&err), ForwardFailure::Timeout);
     }
 
     #[test]

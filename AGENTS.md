@@ -500,6 +500,53 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   and an upstream genuinely going down still pages three other ways — its own panic/tracing
   ERROR, Caddy's `dial tcp … connection refused`/DNS errors (which carry no abort wording and
   pass the filter), and Gatus on `/ready`. Don't widen that regex into a blanket Caddy mute.
+- **A failed forward must name what failed, and nested deadlines must not be equal**
+  (2026-08-15). A page arrived reading, in full, `forward failed prefix="selfrole:"
+  upstream=http://self-role:8092 err=error sending request for url (…)`. That sentence is
+  reqwest's `Display` for **every** transport failure — a refused dial, a DNS blip, our own
+  deadline, a connection dying mid-flight all print identically, with the real reason left in
+  the `source()` chain, which was never printed. Unattributable, and the four classes want
+  opposite handling. Three things changed in `plugins/dispatcher/src/main.rs`:
+  1. **Classification + cause.** `classify_forward_failure` splits `Dial` / `Timeout` /
+     `Broken` (checking `is_connect()` **before** `is_timeout()` — a *connect* timeout answers
+     true to both and belongs with the dial failures), and `forward_detail` logs the flattened
+     `source()` chain — "client error (Connect): tcp connect error: Connection refused (os
+     error 111)". It prints the chain **or** reqwest's own Display, never both: the Display
+     only repeats the `upstream` field, and `dweeb-alerts` samples at 280 chars cutting the
+     *tail*, which is exactly where the specific reason sits. Control chars become spaces and
+     the chain is clamped at `MAX_CAUSE_CHARS`, same reasoning as the proxy's `clamp_field`.
+  2. **A dial is retried; nothing else ever is.** This is the one hop Caddy's `upstream_retry`
+     cannot cover — the dispatcher reaches plugins directly over the compose network — so a
+     plugin container recreate used to page exactly as a deploy once did through Caddy. Retry
+     is safe **only** because a failed dial means nothing reached the plugin, so an interaction
+     cannot be processed twice; a connection that dies *after* the request was written may well
+     have been acted on, and re-sending would double-toggle a role or double-enter a giveaway
+     (hyper already retries the one safe variant — a pooled connection closed before we wrote —
+     so what survives to `Broken` is precisely what must not be repeated). `should_retry_dial`
+     is the guard and is tested against every class. Each attempt gets only
+     `FORWARD_BUDGET - elapsed` as its deadline, so retrying can never push the reply past the
+     wall the hop started with, and `connect_timeout` bounds a black-holed SYN so one attempt
+     can't drain the budget. A recovered dial logs `info`, never `warn`.
+  3. **Log level by fault.** `Dial` exhausted across the whole window = the plugin is genuinely
+     unreachable = our infrastructure = **ERROR, pages** (same stance as `upstream_retry`: a
+     real outage still pages). `Broken` is unclassified and unexpected = **ERROR, pages**.
+     `Timeout` = the plugin took the request and a slow/rate-limiting Discord behind it ran
+     long — not actionable, self-heals — so **WARN, never pages**; a plugin genuinely *wedged*
+     rather than merely slow still pages from the monitor that can tell the difference, Gatus
+     probing each plugin's own `/health` every 120s. The member-facing copy also splits: a
+     timeout says "check whether it went through before clicking again", because the plugin may
+     have completed the action after we stopped listening and "try again" would undo a toggle.
+  **The nested deadlines were equal, so the outer one always lost.** The dispatcher gave the
+  forward 2500 ms and *every* plugin gave its own Discord REST calls 2500 ms — but the inner
+  clock starts later, so any Discord call running near its limit guaranteed a forward timeout:
+  the member saw "the plugin didn't respond" for a click that had *worked*, and it paged. Plugin
+  clients are now **2200 ms** (`self-role`, `tickets`, `giveaway`, `poll`, `directory`,
+  `modal-form` — the ones whose client is on the interaction path; `quick-replies` stays at 2500
+  because its client is config-time only, and `picker` has none), and two `const _: () =
+  assert!(…)` in the dispatcher enforce the ordering at compile time rather than leaving it as
+  prose. **An inner deadline must always be strictly smaller than the outer one that waits on
+  it**, so the fault is reported by the component that knows what it was — the same principle
+  as the entry below. No deploy ordering: nothing here is a contract between the two.
 - **A 502 must name its route, and a reqwest deadline must not become a bandwidth
   requirement** (2026-08-12). A page arrived reading, in full, `response failed
   classification=Status code: 502 Bad Gateway latency=10002 ms` — no method, no path, no

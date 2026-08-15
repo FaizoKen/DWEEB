@@ -6,7 +6,9 @@ description = "Routes Discord interactions to DWEEB plugin services by custom_id
 
 [dependencies]
 axum = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+# "time" is needed explicitly for the forward hop's dial-retry backoff — it
+# would otherwise only be present by feature unification with reqwest.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
 tower-http = { version = "0.5", features = ["trace"] }
 # Loads a local `.env` for `cargo run`; a no-op under Docker (which injects env).
 dotenvy = "0.15"

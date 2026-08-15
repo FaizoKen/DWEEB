@@ -80,7 +80,9 @@ async fn run() {
     let store = Store::open(&config.database_path).expect("failed to open database");
     // One client, used only at config time to list a guild's roles for the
     // gate picker. 2.5s keeps that probe responsive; the interaction path makes
-    // no outbound call at all.
+    // no outbound call at all. That is also why this one was NOT lowered to
+    // 2.2s with the other plugins' clients: nothing here can hold a click open
+    // long enough to outlast the dispatcher's forward budget.
     let http = reqwest::Client::builder()
         .timeout(Duration::from_millis(2500))
         .pool_idle_timeout(Duration::from_secs(30))
