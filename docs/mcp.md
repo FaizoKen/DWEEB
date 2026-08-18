@@ -137,9 +137,18 @@ MCP_PUBLIC_URL=             # only if /mcp is served under a different hostname
 ```
 
 No Caddy change is needed: the `{$DOMAIN}` block already routes everything to the
-proxy. `/ready` covers the MCP store, `/api/capabilities` reports `"mcp"`, and
-`server/gatus/config.yaml` carries a commented-out discovery monitor to enable
-alongside the feature.
+proxy. `/ready` covers the MCP store and `/api/capabilities` reports `"mcp"`.
+
+**Monitoring.** `server/gatus/config.yaml` watches the discovery document — the
+only unauthenticated step of the flow, and the first thing every client fetches.
+It asserts the `resource` field, not just a 200, because a *wrong* public URL
+still answers 200 while handing clients an issuer that does not match where they
+are connecting; that reaches the user as an opaque connector failure with nothing
+in our logs. That monitor is only valid while `MCP_ENABLED` is on — with the
+feature off the endpoint answers 501 by design and it would page forever, so
+comment it out if the deployment ever switches MCP off. The file is a hand-synced
+bind mount: copy it to `/opt/dweeb/gatus/config.yaml` in place and
+`docker compose restart gatus`.
 
 `server/ops/mcp-smoke.sh` drives the real binary over real HTTP — discovery, the
 401 challenge, registration, the authorize refusals, the token endpoint, and the

@@ -386,6 +386,13 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   **No Caddy change is needed** (the `{$DOMAIN}` catch-all already routes `/mcp`,
   `/oauth/*`, `/.well-known/*`). Wiring checks that no unit test can reach live in
   `server/ops/mcp-smoke.sh`, which drives the real binary over HTTP and runs in `server.yml`.
+  **Gatus watches the discovery document** (`server/gatus/config.yaml`, live 2026-08-18),
+  asserting the `resource` field rather than only a 200: a wrong `MCP_PUBLIC_URL` still answers
+  200 while handing clients an issuer that doesn't match where they connect, which reaches the
+  user as an opaque connector failure with nothing in our logs. **That monitor is only valid
+  while `MCP_ENABLED` is on** — with the feature off the endpoint answers 501 by design and it
+  pages forever, so comment it out if MCP is ever switched off. Gatus's config is a hand-synced
+  bind mount (copy in place, `docker compose restart gatus`).
   **The feature is surfaced in the app** by "Connect an AI client" in the builder's More menu
   (`features/mcp/ConnectAiDialog`), which hands over the connector URL and the local setup
   command with copy buttons. The URL is **derived from `PROXY_BASE_URL`**, never hard-coded, so
