@@ -1,0 +1,35 @@
+{
+  // Type-check project for the MCP server. Referenced from the root solution
+  // file so `bun run typecheck` / `bun run build` cover it — the server shares
+  // `src/core` with the web app, and a schema change that breaks it should
+  // fail the same build that made the change.
+  //
+  // `lib` carries DOM because the shared core is written against the browser's
+  // fetch/FormData/Response types, and `types` carries `vite/client` because
+  // those modules read `import.meta.env` and one of them imports the AI prompt
+  // with Vite's `?raw` suffix. Neither is used by this server directly; both
+  // have to typecheck.
+  //
+  // Tests are excluded here for the same reason the app's are — they belong to
+  // `tsconfig.vitest.json`, which supplies Vitest's globals.
+  "extends": "../tsconfig.node.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
+    "resolveJsonModule": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  // `../src/vite-env.d.ts` carries the app's ambient declarations (the
+  // `ImportMetaEnv` keys, the `?raw` module shape, the inline early-resolve
+  // handle the short-link reader reads off `window`). The shared core is typed
+  // against them, so a project that compiles core files needs them too.
+  "include": ["src/**/*.ts", "../src/vite-env.d.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

@@ -392,6 +392,28 @@ work from the deployed site, so you supply your own public endpoint. The browser
 calls Ollama directly, so allow the site's origin with
 `OLLAMA_ORIGINS=https://dweeb.faizo.net` (or `*`) when starting Ollama.
 
+## MCP server
+
+`mcp/` is a **Model Context Protocol** server: it exposes DWEEB's builder to an
+AI assistant, so Claude Code, Claude Desktop, or any other MCP client can list
+templates, build a message, validate it against Discord's rules, preview the
+layout, hand you a share link to review it in the visual editor, and post it
+through a webhook.
+
+```bash
+bun run mcp:check   # what this environment would give the server
+bun run mcp         # serve MCP on stdio
+```
+
+It is a shell around `src/core`, not a second implementation — same schema, same
+validator, same wire encoder, same templates — so a message posted through MCP
+is byte-for-byte the message the editor would have posted. With no configuration
+it can build, validate, preview, and share; a `DWEEB_WEBHOOK_URL` (or a named
+set in `DWEEB_WEBHOOKS`) lets it post, edit, and delete as well, and
+`DWEEB_MCP_READ_ONLY=1` withholds those three tools entirely.
+
+Full guide, including client setup: [`docs/mcp.md`](docs/mcp.md).
+
 ## Wire-format compatibility
 
 The exported payload (from the **JSON export** tab) is the body you POST to

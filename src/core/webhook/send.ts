@@ -287,7 +287,15 @@ function retryAfterFrom(res: Response, body: unknown): number | undefined {
       : undefined;
 }
 
-function describeError(status: number, body: unknown): string {
+/**
+ * Turn a Discord error response into one human-readable line (plus the
+ * flattened `errors` tree, which is where the actionable detail lives).
+ *
+ * Exported because the MCP server (`mcp/`) issues the one webhook call this
+ * module has no need for — deleting a previously-posted message — and its
+ * failures must read exactly like every other Discord failure the app reports.
+ */
+export function describeError(status: number, body: unknown): string {
   // Discord shapes: { code, message, errors? }
   if (body && typeof body === "object") {
     const obj = body as { message?: unknown; code?: unknown; errors?: unknown };

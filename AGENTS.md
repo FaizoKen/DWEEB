@@ -19,7 +19,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 
 - `bun run dev` — web FE (Vite). `bun run dev:activity` — Activity mode. `bun run dev:server` — Rust proxy.
 - `bun run build` — typecheck + Vite build + SEO template pages (`scripts/gen-template-pages.ts`).
-- `bun run test` — Vitest (core logic, stores, and feature contracts). `bun run typecheck`, `bun run format:check`.
+- `bun run test` — Vitest (core logic, stores, feature contracts, **and the MCP server** —
+  `mcp/src/**/*.test.ts` is in the same run). `bun run typecheck`, `bun run format:check`
+  (both now cover `mcp/` too).
+- `bun run mcp` — the MCP server on stdio; `bun run mcp:check` prints what the environment
+  would give it without starting anything. See `docs/mcp.md`.
 - `bun run lint` — ESLint (flat config, `eslint.config.js`). Enforces the React hooks rules
   (`rules-of-hooks` + `exhaustive-deps`) and `no-explicit-any` as **errors**; other recommended
   rules are advisory warnings. Suppress an _intentional_ hooks case with a
@@ -37,6 +41,9 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   telemetry). `src/features` — UI features. `src/activity` — Discord Activity entry.
 - `server/src` — Rust API proxy: Discord/OAuth auth, plain-SQLite shortlinks, and
   SQLite-backed schedules/message library/Activity drafts whose sensitive payloads are sealed.
+- `mcp/src` — the MCP server (stdio): a shell around `src/core` that exposes the builder to
+  an AI client. No dependencies of its own; typechecked via `mcp/tsconfig.json`, referenced
+  from the root solution file.
 - `plugins/*` — 10 Rust crates total: the dispatcher plus ping-pong, tickets, giveaway,
   quick-replies, self-role, modal-form, picker, poll, and directory.
 
@@ -320,6 +327,49 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   route (a peer's collab op) is blocked from send instead of silently 400ing at Discord. When
   adding a field the schema layer will walk unguarded, guarantee it here. Guarded by the
   malformed-payload tests in `serialization/encode.test.ts` + `schema/validation.test.ts`.
+  **The same rule covers required *strings*, not just structures** (2026-08-18, found by
+  feeding the schema layer model-authored payloads through the MCP server): `validateNode`
+  reads `TextDisplay.content.trim()` and `validateButton` hands a Link button's `url` straight
+  to `containsPlaceholder`, both unguarded — so `{"type":10}` or
+  `{"type":2,"style":5,"label":"x"}`, either of which a person can paste into JSON Import,
+  threw a TypeError out of the **live** validator (it runs on every keystroke) instead of
+  reporting an empty field. `repairStructure` now fills both with `""` — the validator already
+  says "Text display can't be empty" and "Link button needs a valid https:// URL" — and both
+  derefs tolerate an absent value as the second layer.
+- **The MCP server is a shell around `src/core`, never a second implementation** (`mcp/`,
+  added 2026-08-18; full guide in `docs/mcp.md`). It speaks the Model Context Protocol over
+  stdio so an AI client can drive the builder: templates, validation, previews, share links,
+  and webhook post/edit/delete. The validator is `schema/validation.ts`, the payload is
+  `serialization/normalize.ts`, the client is `webhook/send.ts`, the templates are
+  `data/presets.ts`, and the authoring guide is sliced from `server/src/ai_prompt.txt` — the
+  same text the proxy and the AI panel already share. **A rule added in `mcp/` that the app
+  doesn't have is a bug**; put it in `src/core` and both get it. Load-bearing details:
+  (1) **there is no MCP SDK dependency** — the official TypeScript SDK pulls ~92 transitive
+  packages (express, hono, jose, ajv, zod) to run a pipe, so the protocol is spoken directly
+  in `protocol.ts`; that keeps `bun run mcp` install-free and its tests inside the existing
+  `bun run test`, and makes spec correctness ours — `protocol.test.ts` covers version
+  negotiation, notifications, batching, error codes, and the structured-output gate. **A
+  protocol version we don't know must be answered with ours, never refused**, or the server
+  locks itself out of every future revision; `outputSchema`/`structuredContent` are withheld
+  below 2025-06-18, since a field the negotiated revision doesn't define is what a strict
+  client rejects. (2) **stdout carries the protocol and nothing else** — one stray
+  `console.log` in the process breaks the client's parser; diagnostics go to stderr, which is
+  where the client shows them. (3) **Destinations are named, never passed as URLs**: a webhook
+  URL is a bearer credential, and `DWEEB_WEBHOOKS` aliases keep the token out of the model's
+  context. The scrub (`redact.ts`) runs inside `callTool`, the single funnel every call passes
+  through, because a scrubber you must remember to call at each of a dozen output paths is one
+  you will forget — a model can put a webhook URL in a link button and the preview echoes it
+  straight back. (4) **Read-only mode withholds the three mutating tools from `tools/list`
+  rather than refusing them at call time** — a tool a model can see is one it will plan around.
+  (5) `send_message`/`update_message` validate first and refuse before any request is made, and
+  a share link is local (URL fragment, nothing uploaded) unless `short: true` is asked for.
+  (6) Config parsing mirrors the proxy's `config.rs`: trimmed, and a present-but-unparseable
+  value is a boot error, not a default. (7) The entry runs under **Bun only** — it imports TS
+  from `src/core` through the `@/…` alias Bun resolves from `tsconfig.json`. Adding a tool =
+  a `ToolDefinition` in `tools.ts` (schema + annotations + handler) and a case in
+  `tools.test.ts`; nothing in `protocol.ts` knows about individual tools. Stdio is the only
+  transport, deliberately: an HTTP one would need its own auth story for a server that can
+  post to a Discord channel.
 - **The Directory plugin needs no permission bit and no privileged intent — keep it that
   way** (`plugins/directory`, prefix `directory:`, port 8099, added 2026-07-26). It answers a
   click with a live read of the guild in one of two modes — a role/staff roster or a channel
