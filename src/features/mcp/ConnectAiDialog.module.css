@@ -4,7 +4,7 @@
 .hero {
   display: flex;
   justify-content: center;
-  margin: 2px 0 16px;
+  margin: 2px 0 14px;
 }
 .heroIcon {
   display: inline-flex;
@@ -19,7 +19,7 @@
 }
 
 .lead {
-  margin: 0 0 18px;
+  margin: 0 0 16px;
   font-size: 13px;
   line-height: 1.55;
   color: var(--app-text-muted);
@@ -30,34 +30,101 @@
   font-weight: 600;
 }
 
-/* One connection route (remote / local). */
-.section {
-  margin: 0 0 14px;
-  padding: 12px 14px;
+/* The three-step procedure, as one panel. The numbered badges and the rule
+   joining them carry the order, so the steps read as a sequence to work
+   through rather than three unrelated notes — the copy row (step 1) lives
+   inside its own step instead of floating loose above the prose. */
+.steps {
+  margin: 0;
+  padding: 14px;
+  list-style: none;
   border-radius: var(--app-radius-sm);
   background: var(--app-bg-subtle);
   border: 1px solid var(--app-border);
-}
-.section:last-of-type {
-  margin-bottom: 0;
+  counter-reset: step;
 }
 
-.heading {
-  margin: 0 0 6px;
+.step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 10px;
+}
+.step:not(:last-child) {
+  padding-bottom: 14px;
+}
+
+/* Badge carrying the step number. It's a grid item in column 1. */
+.step::before {
+  counter-increment: step;
+  content: counter(step);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--app-accent-soft);
+  border: 1px solid var(--app-border-focus);
+  color: var(--app-accent-text);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rule from one badge to the next. */
+.step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 11.5px;
+  top: 28px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--app-border);
+}
+
+.stepBody {
+  min-width: 0;
+}
+.stepTitle {
+  margin: 3px 0 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--app-text);
+  line-height: 1.4;
 }
-
-.body {
-  margin: 0 0 10px;
+.stepText {
+  margin: 5px 0 0;
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--app-text-muted);
 }
-.body strong {
+.stepText strong {
   color: var(--app-text);
   font-weight: 600;
+}
+.stepText em {
+  color: var(--app-text);
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* Shortcut to the page the step just described. Sized down from the step body
+   so it reads as an assist rather than the instruction itself. */
+.stepLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--app-accent-text);
+  text-decoration: none;
+}
+.stepLink:hover,
+.stepLink:focus-visible {
+  text-decoration: underline;
 }
 
 /* The copyable value plus its button. The value is allowed to wrap — a
@@ -68,9 +135,10 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin-top: 8px;
 }
 .code {
-  flex: 1 1 220px;
+  flex: 1 1 200px;
   min-width: 0;
   padding: 7px 10px;
   border-radius: var(--app-radius-sm);
@@ -83,12 +151,11 @@
   overflow-wrap: anywhere;
 }
 
-.fine {
-  margin: 10px 0 0;
+/* What connecting is *for*, once the three steps are done. */
+.example {
+  margin: 12px 0 0;
   font-size: 11.5px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--app-text-muted);
-}
-.fine a {
-  color: var(--app-accent-text);
+  text-align: center;
 }

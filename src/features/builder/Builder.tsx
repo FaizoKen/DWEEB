@@ -596,8 +596,8 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
                     icon={<SparkleIcon />}
                     onSelect={() => {
                       close();
-                      // Hands over the connector URL for claude.ai plus the
-                      // local Claude Code / Desktop setup (see ConnectAiDialog).
+                      // Hands over the hosted connector URL and the three steps
+                      // that add it to an AI client (see ConnectAiDialog).
                       openMcp();
                     }}
                   >
