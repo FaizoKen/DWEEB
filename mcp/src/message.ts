@@ -20,7 +20,7 @@
  * described error rather than an exception.
  */
 
-import { countCharacters, countComponents } from "@/core/schema/traversal";
+import { buildPathIndex, countCharacters, countComponents } from "@/core/schema/traversal";
 import { validateMessage, type ValidationIssue } from "@/core/schema/validation";
 import { inspectCapabilities, type CapabilityNote } from "@/core/schema/capability";
 import { isActionRow, isContainer, isMediaGallery, isSection } from "@/core/schema/guards";
@@ -165,39 +165,6 @@ export function messageStats(message: WebhookMessage): MessageStats {
     total_components: countComponents(message),
     characters: countCharacters(message),
   };
-}
-
-/**
- * Map every editor id to a JSON path into the wire payload
- * (`components[0].components[2].accessory`).
- *
- * The validator reports problems against the editor's opaque `_id`, which is
- * meaningless to a model that only ever sees the wire JSON — it cannot act on
- * "node xk3f9 is missing a label". A path it can act on: it points at the
- * exact object to fix in the payload it just sent.
- */
-export function buildPathIndex(message: WebhookMessage): Map<EditorId, string> {
-  const index = new Map<EditorId, string>();
-  message.components.forEach((node, i) => indexNode(node, `components[${i}]`, index));
-  return index;
-}
-
-function indexNode(node: AnyComponent, path: string, index: Map<EditorId, string>): void {
-  index.set(node._id, path);
-  if (isContainer(node) || isActionRow(node)) {
-    node.components.forEach((child, i) =>
-      indexNode(child as AnyComponent, `${path}.components[${i}]`, index),
-    );
-    return;
-  }
-  if (isSection(node)) {
-    node.components.forEach((child, i) => indexNode(child, `${path}.components[${i}]`, index));
-    if (node.accessory) indexNode(node.accessory, `${path}.accessory`, index);
-    return;
-  }
-  if (isMediaGallery(node)) {
-    node.items.forEach((item, i) => index.set(item._id, `${path}.items[${i}]`));
-  }
 }
 
 export interface ReportedIssue {

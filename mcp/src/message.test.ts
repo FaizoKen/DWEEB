@@ -5,7 +5,7 @@ import { encodeShare } from "@/core/serialization/encode";
 import { attachEditorFields } from "@/core/serialization/normalize";
 
 import { loadConfig, type Config } from "./config";
-import { buildPathIndex, reportMessage, resolveMessage, toWire } from "./message";
+import { reportMessage, resolveMessage, toWire } from "./message";
 
 const config: Config = loadConfig({});
 const offline: Config = loadConfig({ DWEEB_PROXY_URL: "" });
@@ -162,29 +162,6 @@ describe("reportMessage", () => {
       }),
     );
     expect(report.requirements.map((r) => r.kind)).toContain("app_webhook");
-  });
-});
-
-describe("buildPathIndex", () => {
-  it("addresses section texts, accessories, and gallery items", () => {
-    const message = editor({
-      components: [
-        {
-          type: ComponentType.Section,
-          components: [{ type: ComponentType.TextDisplay, content: "hi" }],
-          accessory: { type: ComponentType.Thumbnail, media: { url: "https://e.test/i.png" } },
-        },
-        {
-          type: ComponentType.MediaGallery,
-          items: [{ media: { url: "https://e.test/a.png" } }],
-        },
-      ],
-    });
-    const paths = [...buildPathIndex(message).values()];
-    expect(paths).toContain("components[0]");
-    expect(paths).toContain("components[0].components[0]");
-    expect(paths).toContain("components[0].accessory");
-    expect(paths).toContain("components[1].items[0]");
   });
 });
 

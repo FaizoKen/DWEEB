@@ -280,3 +280,48 @@ function removeInside(node: AnyComponent, id: EditorId): AnyComponent {
   }
   return node;
 }
+
+/**
+ * Map every editor id to a JSON path into the **wire** payload
+ * (`components[0].components[2].accessory`).
+ *
+ * The validator reports each problem against a node's `_id`, which is an
+ * editor-internal handle: meaningful to the builder, meaningless to anything
+ * holding only the payload. Both MCP servers report issues to a model that has
+ * never seen an `_id` and can only act on "the object at this path", and the
+ * shared validator corpus records the path of every issue so the TypeScript and
+ * Rust implementations can be held to the same answer. Hence one path builder
+ * here, rather than one per consumer.
+ *
+ * Gallery items are addressed too (`…items[1]`): they are not components, but
+ * the validator does attach media issues to them.
+ */
+export function buildPathIndex(message: WebhookMessage): Map<EditorId, string> {
+  const index = new Map<EditorId, string>();
+  message.components.forEach((node, i) => indexNode(node, `components[${i}]`, index));
+  return index;
+}
+
+function indexNode(node: AnyComponent, path: string, index: Map<EditorId, string>): void {
+  index.set(node._id, path);
+  if (isContainer(node)) {
+    node.components.forEach((child, i) => indexNode(child, `${path}.components[${i}]`, index));
+    return;
+  }
+  if (isActionRow(node)) {
+    node.components.forEach((child, i) =>
+      indexNode(child as AnyComponent, `${path}.components[${i}]`, index),
+    );
+    return;
+  }
+  if (isSection(node)) {
+    node.components.forEach((child, i) => indexNode(child, `${path}.components[${i}]`, index));
+    // Guarded: a tree that reached us without one must be reported, not crashed
+    // on — see the note on `walkNode` above.
+    if (node.accessory) indexNode(node.accessory, `${path}.accessory`, index);
+    return;
+  }
+  if (isMediaGallery(node)) {
+    node.items.forEach((item, i) => index.set(item._id, `${path}.items[${i}]`));
+  }
+}
