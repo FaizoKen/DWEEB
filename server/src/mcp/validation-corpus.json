@@ -156,7 +156,7 @@
                 "accessory": {
                   "type": 11,
                   "media": {
-                    "url": "http://localhost:5173/media/defaults/dweeb-default-thumbnail.jpg"
+                    "url": "https://dweeb.faizo.net/media/defaults/dweeb-default-thumbnail.jpg"
                   },
                   "description": "Thumbnail accessory"
                 }
@@ -181,19 +181,19 @@
                 "items": [
                   {
                     "media": {
-                      "url": "http://localhost:5173/media/defaults/dweeb-showcase-gallery-1.jpg"
+                      "url": "https://dweeb.faizo.net/media/defaults/dweeb-showcase-gallery-1.jpg"
                     },
                     "description": "Media galleries hold up to 10 images or clips"
                   },
                   {
                     "media": {
-                      "url": "http://localhost:5173/media/defaults/dweeb-showcase-gallery-2.jpg"
+                      "url": "https://dweeb.faizo.net/media/defaults/dweeb-showcase-gallery-2.jpg"
                     },
                     "description": "Give every item its own description…"
                   },
                   {
                     "media": {
-                      "url": "http://localhost:5173/media/defaults/dweeb-showcase-gallery-3.jpg"
+                      "url": "https://dweeb.faizo.net/media/defaults/dweeb-showcase-gallery-3.jpg"
                     },
                     "description": "…or mark any one of them as a spoiler"
                   }
@@ -259,7 +259,7 @@
                 "items": [
                   {
                     "media": {
-                      "url": "http://localhost:5173/media/defaults/dweeb-welcome-banner.jpg"
+                      "url": "https://dweeb.faizo.net/media/defaults/dweeb-welcome-banner.jpg"
                     },
                     "description": "Welcome banner"
                   }
@@ -321,7 +321,7 @@
             "items": [
               {
                 "media": {
-                  "url": "http://localhost:5173/media/defaults/dweeb-announcement-banner.jpg"
+                  "url": "https://dweeb.faizo.net/media/defaults/dweeb-announcement-banner.jpg"
                 },
                 "description": "Announcement banner"
               }
@@ -377,25 +377,25 @@
             "items": [
               {
                 "media": {
-                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-1.jpg"
+                  "url": "https://dweeb.faizo.net/media/defaults/dweeb-spotlight-1.jpg"
                 },
                 "description": "Featured work 1"
               },
               {
                 "media": {
-                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-2.jpg"
+                  "url": "https://dweeb.faizo.net/media/defaults/dweeb-spotlight-2.jpg"
                 },
                 "description": "Featured work 2"
               },
               {
                 "media": {
-                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-3.jpg"
+                  "url": "https://dweeb.faizo.net/media/defaults/dweeb-spotlight-3.jpg"
                 },
                 "description": "Featured work 3"
               },
               {
                 "media": {
-                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-4.jpg"
+                  "url": "https://dweeb.faizo.net/media/defaults/dweeb-spotlight-4.jpg"
                 },
                 "description": "Featured work 4"
               }
@@ -439,7 +439,7 @@
                 "accessory": {
                   "type": 11,
                   "media": {
-                    "url": "http://localhost:5173/media/defaults/dweeb-event-thumb.jpg"
+                    "url": "https://dweeb.faizo.net/media/defaults/dweeb-event-thumb.jpg"
                   },
                   "description": "Event cover"
                 }
@@ -515,7 +515,7 @@
                 "accessory": {
                   "type": 11,
                   "media": {
-                    "url": "http://localhost:5173/media/defaults/dweeb-giveaway-prize.jpg"
+                    "url": "https://dweeb.faizo.net/media/defaults/dweeb-giveaway-prize.jpg"
                   },
                   "description": "Prize"
                 }
@@ -1131,7 +1131,7 @@
                 "accessory": {
                   "type": 11,
                   "media": {
-                    "url": "http://localhost:5173/media/defaults/dweeb-product-hoodie.jpg"
+                    "url": "https://dweeb.faizo.net/media/defaults/dweeb-product-hoodie.jpg"
                   },
                   "description": "Aurora Hoodie"
                 }

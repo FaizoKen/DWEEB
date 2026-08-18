@@ -54,9 +54,45 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = join(ROOT, "server", "src", "mcp");
 const VALIDATION_SOURCE = join(ROOT, "src", "core", "schema", "validation.ts");
 
-/** Wire form: no editor ids, `flags` computed — what the Rust side receives. */
+/**
+ * The canonical public origin the built-in templates' stock images live on.
+ *
+ * `DEFAULT_MEDIA` resolves its URLs against `VITE_WEB_APP_URL`, falling back to
+ * the browser's own origin — which is right for the app and wrong for this
+ * generator. What it writes is a **production artifact**: `catalog.json` is
+ * compiled into the Rust MCP server and served to every client, so a run on a
+ * machine with a dev `.env` would bake `http://localhost:5173/media/...` into
+ * templates that people then post to Discord, where the images are simply
+ * broken for everyone. The output has to be the same regardless of who runs it.
+ */
+const CANONICAL_MEDIA_ORIGIN = "https://dweeb.faizo.net";
+const DEFAULT_MEDIA_PATH = "/media/defaults/";
+
+/** Repoint a stock-image URL at the canonical origin, whatever this machine's
+ *  environment resolved it to. Any other URL is left exactly as written. */
+function canonicalizeMedia(value: unknown): unknown {
+  if (typeof value === "string") {
+    const at = value.indexOf(DEFAULT_MEDIA_PATH);
+    return at === -1 ? value : `${CANONICAL_MEDIA_ORIGIN}${value.slice(at)}`;
+  }
+  if (Array.isArray(value)) return value.map(canonicalizeMedia);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, canonicalizeMedia(v)]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Wire form: no editor ids, `flags` computed — what the Rust side receives.
+ *
+ * Every message reaching the generated files goes through here (the catalog's
+ * templates, the corpus's template cases, the LZ vector), so this is the one
+ * place the media origin has to be pinned.
+ */
 function wire(message: WebhookMessage): unknown {
-  return stripEditorFields(message);
+  return canonicalizeMedia(stripEditorFields(message));
 }
 
 /** Round-trip an untyped payload through the import boundary so the validator
@@ -775,11 +811,32 @@ function assertCoverage(cases: CorpusCase[]): void {
 
 /* ─── Write ──────────────────────────────────────────────────────────── */
 
+/**
+ * Hostnames that mean "this was generated on someone's laptop".
+ *
+ * The output is compiled into the deployed server and served to every client, so
+ * one of these reaching it is a broken image in a real Discord message. Worse,
+ * the only symptom would be CI failing the drift check on the *next* person's
+ * machine, long after the cause — which is exactly what happened once
+ * (2026-08-18) before {@link canonicalizeMedia} existed.
+ */
+const MACHINE_LOCAL_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"];
+
 function writeJson(name: string, value: unknown): void {
+  const serialized = `${JSON.stringify(value, null, 2)}\n`;
+  for (const host of MACHINE_LOCAL_HOSTS) {
+    if (serialized.includes(`//${host}`)) {
+      throw new Error(
+        `${name} contains a ${host} URL, so it was generated against a local environment ` +
+          "rather than the deployed one. These files are compiled into the server and served " +
+          "to every client — they must not depend on whose machine ran the generator.",
+      );
+    }
+  }
   mkdirSync(OUT_DIR, { recursive: true });
   const path = join(OUT_DIR, name);
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  const bytes = Buffer.byteLength(JSON.stringify(value));
+  writeFileSync(path, serialized, "utf8");
+  const bytes = Buffer.byteLength(serialized);
   console.log(`[mcp] wrote server/src/mcp/${name} (${(bytes / 1024).toFixed(1)} KiB)`);
 }
 
