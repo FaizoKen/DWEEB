@@ -392,34 +392,27 @@ work from the deployed site, so you supply your own public endpoint. The browser
 calls Ollama directly, so allow the site's origin with
 `OLLAMA_ORIGINS=https://dweeb.faizo.net` (or `*`) when starting Ollama.
 
-## MCP server
+## Connect an AI client (MCP)
 
-`mcp/` is a **Model Context Protocol** server: it exposes DWEEB's builder to an
-AI assistant, so Claude Code, Claude Desktop, or any other MCP client can list
-templates, build a message, validate it against Discord's rules, preview the
-layout, hand you a share link to review it in the visual editor, and post it
-through a webhook.
+DWEEB speaks the **Model Context Protocol**, so Claude — or any MCP client — can
+list templates, build a message, validate it against Discord's rules, preview the
+layout, hand you a share link to review in the visual editor, and post it.
 
-```bash
-bun run mcp:check   # what this environment would give the server
-bun run mcp         # serve MCP on stdio
+It is a hosted connector: add one URL in Claude, sign in with Discord, done.
+In the app it lives under **More ▸ Connect an AI client**, which hands over the
+address with a copy button.
+
+```
+https://api.dweeb.faizo.net/mcp
 ```
 
-It is a shell around `src/core`, not a second implementation — same schema, same
-validator, same wire encoder, same templates — so a message posted through MCP
-is byte-for-byte the message the editor would have posted. With no configuration
-it can build, validate, preview, and share; a `DWEEB_WEBHOOK_URL` (or a named
-set in `DWEEB_WEBHOOKS`) lets it post, edit, and delete as well, and
-`DWEEB_MCP_READ_ONLY=1` withholds those three tools entirely.
+The server lives inside the Rust proxy (`server/src/mcp/`) behind an OAuth 2.1
+authorization server with Discord as the identity provider. A caller acts with
+the Discord account that authorized it, so it reaches exactly the servers and
+channels that account can already reach — and no webhook URL ever leaves the
+server. Off by default on a self-hosted deployment (`MCP_ENABLED`).
 
-There is also a **remote** server (`server/src/mcp/`) inside the Rust proxy,
-serving MCP over HTTPS at `/mcp` behind an OAuth 2.1 authorization server with
-Discord as the identity provider — that is the one claude.ai's custom connectors
-connect to. It is off by default (`MCP_ENABLED`), and a caller acts with the
-Discord account that authorized it, so it can only reach servers and channels
-that account can already reach.
-
-Full guide for both, including client setup: [`docs/mcp.md`](docs/mcp.md).
+Full guide: [`docs/mcp.md`](docs/mcp.md).
 
 ## Wire-format compatibility
 

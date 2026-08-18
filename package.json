@@ -18,10 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:golden": "bun scripts/gen-golden-fixtures.ts",
-    "mcp": "bun mcp/src/main.ts",
-    "mcp:check": "bun mcp/src/main.ts --check",
-    "format": "prettier --write \"{src,mcp/src}/**/*.{ts,tsx,css}\"",
-    "format:check": "prettier --check \"{src,mcp/src}/**/*.{ts,tsx,css}\"",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
     "gen:mcp": "bun scripts/gen-mcp-catalog.ts"
   },
   "dependencies": {

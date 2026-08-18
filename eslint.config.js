@@ -85,24 +85,8 @@ export default tseslint.config(
     rules: { "@typescript-eslint/no-unused-vars": "off" },
   },
   {
-    // The MCP server (`mcp/`) is a Node/Bun process, not browser code: no React
-    // hooks, but `process`, `console`, and the Node stream types are globals it
-    // legitimately reaches for.
-    files: ["mcp/**/*.ts"],
-    languageOptions: {
-      globals: { ...globals.node },
-    },
-    rules: {
-      "@typescript-eslint/no-explicit-any": "error",
-      "@typescript-eslint/no-unused-vars": [
-        "error",
-        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
-      ],
-    },
-  },
-  {
     // Test files lean on `any` and loose globals; keep them out of the way.
-    files: ["src/**/*.test.{ts,tsx}", "src/test/**", "mcp/**/*.test.ts"],
+    files: ["src/**/*.test.{ts,tsx}", "src/test/**"],
     languageOptions: { globals: { ...globals.node } },
     rules: {
       "@typescript-eslint/no-explicit-any": "off",

@@ -19,13 +19,10 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 
 - `bun run dev` — web FE (Vite). `bun run dev:activity` — Activity mode. `bun run dev:server` — Rust proxy.
 - `bun run build` — typecheck + Vite build + SEO template pages (`scripts/gen-template-pages.ts`).
-- `bun run test` — Vitest (core logic, stores, feature contracts, **and the MCP server** —
-  `mcp/src/**/*.test.ts` is in the same run). `bun run typecheck`, `bun run format:check`
-  (both now cover `mcp/` too).
-- `bun run mcp` — the local MCP server on stdio; `bun run mcp:check` prints what the
-  environment would give it without starting anything. `bun run gen:mcp` regenerates the
-  data + pinning corpus the **remote** (Rust) MCP server serves — also run by `bun run
-  build`, and `web.yml` fails on a resulting diff. See `docs/mcp.md`.
+- `bun run test` — Vitest (core logic, stores, and feature contracts). `bun run typecheck`, `bun run format:check`.
+- `bun run gen:mcp` — regenerates the data + pinning corpus the Rust MCP server serves
+  (`server/src/mcp/*.json`). Also run by `bun run build`, and `web.yml` fails on a resulting
+  diff, so a stale catalog cannot be committed. See `docs/mcp.md`.
 - `bun run lint` — ESLint (flat config, `eslint.config.js`). Enforces the React hooks rules
   (`rules-of-hooks` + `exhaustive-deps`) and `no-explicit-any` as **errors**; other recommended
   rules are advisory warnings. Suppress an _intentional_ hooks case with a
@@ -43,12 +40,9 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   telemetry). `src/features` — UI features. `src/activity` — Discord Activity entry.
 - `server/src` — Rust API proxy: Discord/OAuth auth, plain-SQLite shortlinks, and
   SQLite-backed schedules/message library/Activity drafts whose sensitive payloads are sealed.
-- `mcp/src` — the **local** MCP server (stdio): a shell around `src/core` that exposes the
-  builder to an AI client. No dependencies of its own; typechecked via `mcp/tsconfig.json`,
-  referenced from the root solution file.
-- `server/src/mcp` — the **remote** MCP server (HTTPS at `/mcp`, OAuth-guarded) plus its
-  generated data (`catalog.json`, `validation-corpus.json`, `lz-vectors.json` — never
-  hand-edit; run `bun run gen:mcp`).
+- `server/src/mcp` — the MCP server (HTTPS at `/mcp`, OAuth-guarded) plus its generated data
+  (`catalog.json`, `validation-corpus.json`, `lz-vectors.json` — never hand-edit; run
+  `bun run gen:mcp`).
 - `plugins/*` — 10 Rust crates total: the dispatcher plus ping-pong, tickets, giveaway,
   quick-replies, self-role, modal-form, picker, poll, and directory.
 
@@ -341,43 +335,13 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   reporting an empty field. `repairStructure` now fills both with `""` — the validator already
   says "Text display can't be empty" and "Link button needs a valid https:// URL" — and both
   derefs tolerate an absent value as the second layer.
-- **The MCP server is a shell around `src/core`, never a second implementation** (`mcp/`,
-  added 2026-08-18; full guide in `docs/mcp.md`). It speaks the Model Context Protocol over
-  stdio so an AI client can drive the builder: templates, validation, previews, share links,
-  and webhook post/edit/delete. The validator is `schema/validation.ts`, the payload is
-  `serialization/normalize.ts`, the client is `webhook/send.ts`, the templates are
-  `data/presets.ts`, and the authoring guide is sliced from `server/src/ai_prompt.txt` — the
-  same text the proxy and the AI panel already share. **A rule added in `mcp/` that the app
-  doesn't have is a bug**; put it in `src/core` and both get it. Load-bearing details:
-  (1) **there is no MCP SDK dependency** — the official TypeScript SDK pulls ~92 transitive
-  packages (express, hono, jose, ajv, zod) to run a pipe, so the protocol is spoken directly
-  in `protocol.ts`; that keeps `bun run mcp` install-free and its tests inside the existing
-  `bun run test`, and makes spec correctness ours — `protocol.test.ts` covers version
-  negotiation, notifications, batching, error codes, and the structured-output gate. **A
-  protocol version we don't know must be answered with ours, never refused**, or the server
-  locks itself out of every future revision; `outputSchema`/`structuredContent` are withheld
-  below 2025-06-18, since a field the negotiated revision doesn't define is what a strict
-  client rejects. (2) **stdout carries the protocol and nothing else** — one stray
-  `console.log` in the process breaks the client's parser; diagnostics go to stderr, which is
-  where the client shows them. (3) **Destinations are named, never passed as URLs**: a webhook
-  URL is a bearer credential, and `DWEEB_WEBHOOKS` aliases keep the token out of the model's
-  context. The scrub (`redact.ts`) runs inside `callTool`, the single funnel every call passes
-  through, because a scrubber you must remember to call at each of a dozen output paths is one
-  you will forget — a model can put a webhook URL in a link button and the preview echoes it
-  straight back. (4) **Read-only mode withholds the three mutating tools from `tools/list`
-  rather than refusing them at call time** — a tool a model can see is one it will plan around.
-  (5) `send_message`/`update_message` validate first and refuse before any request is made, and
-  a share link is local (URL fragment, nothing uploaded) unless `short: true` is asked for.
-  (6) Config parsing mirrors the proxy's `config.rs`: trimmed, and a present-but-unparseable
-  value is a boot error, not a default. (7) The entry runs under **Bun only** — it imports TS
-  from `src/core` through the `@/…` alias Bun resolves from `tsconfig.json`. Adding a tool =
-  a `ToolDefinition` in `tools.ts` (schema + annotations + handler) and a case in
-  `tools.test.ts`; nothing in `protocol.ts` knows about individual tools. Stdio is the only
-  transport for THIS server — the remote one is separate, in Rust, below.
-- **The remote MCP server is Rust, and its agreement with the schema layer is generated
+- **The MCP server is Rust, and its agreement with the schema layer is generated
   and pinned, never remembered** (`server/src/mcp/`, added 2026-08-18; guide in
-  `docs/mcp.md`). It serves MCP over HTTPS at `/mcp` so claude.ai's **custom connectors**
-  can reach it — the local stdio server cannot, since claude.ai launches no commands. It
+  `docs/mcp.md`). It serves MCP over HTTPS at `/mcp` so an AI client — claude.ai's **custom
+  connectors**, Claude Desktop, Claude Code — connects with one URL and a Discord sign-in,
+  nothing installed. A **local stdio server also existed and was removed** (2026-08-18, same
+  day): it needed a checkout, a runtime, and a webhook URL in an env var, which is a
+  developer's path in a product aimed at end users — don't reintroduce one. It
   lives inside the proxy because that is where Discord auth, the guild gates, the webhook
   resolution, the entitlement reader, and the short-link store already are; the maintainer
   chose the Rust port over a Bun sidecar (2026-08-18) with the duplication cost stated.

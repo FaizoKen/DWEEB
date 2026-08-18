@@ -1,26 +1,21 @@
 /**
  * "Connect an AI client" dialog.
  *
- * DWEEB speaks the Model Context Protocol, but until this existed the feature
- * was invisible from inside the app: the connector URL lived only in
- * `docs/mcp.md`, so the one thing a person actually needs — a URL to paste into
- * Claude — was somewhere they would never look. This is that URL, with the two
- * ways to connect and a copy button on each.
+ * DWEEB speaks the Model Context Protocol, but the feature was invisible from
+ * inside the app: the connector URL lived only in `docs/mcp.md`, so the one
+ * thing a person actually needs — a URL to paste into Claude — was somewhere
+ * they would never look. This is that URL, with a copy button.
  *
- * Two paths, because the clients split cleanly:
+ * One route on purpose. There is a second way to speak MCP (a server the client
+ * launches locally from a clone of this repository), but that is a developer's
+ * path: it needs a checkout, a runtime, and a webhook URL pasted into an
+ * environment variable. Offering it here would put a dead end in front of
+ * everyone who just wants to connect Claude to the app they are already using.
  *
- *  - **Remote** — claude.ai's custom connectors, which cannot launch a local
- *    process, so they need the hosted `/mcp` endpoint. One URL, and Discord
- *    handles the sign-in.
- *  - **Local** — Claude Code / Claude Desktop, which do launch commands, so
- *    they run the stdio server straight out of a clone. Nothing to host, and no
- *    account.
- *
- * The remote half is shown only when the deployment actually serves it (see
- * `core/mcp/availability`); handing someone a URL that answers 501 would send
+ * Shown only when the deployment actually serves the endpoint (see
+ * `core/mcp/availability`) — handing someone a URL that answers 501 would send
  * them through a setup that cannot work and make it look like their mistake.
- * The whole entry point is gated the same way, so this dialog never opens with
- * nothing useful in it.
+ * The menu entry is gated the same way, so this never opens empty.
  */
 
 import { useState } from "react";
@@ -29,52 +24,27 @@ import { Button } from "@/ui/Button";
 import { CopyIcon, ExternalLinkIcon, SparkleIcon } from "@/ui/Icon";
 import { pushToast } from "@/ui/Toast";
 import { copyText } from "@/core/serialization/clipboard";
-import { mcpEndpointUrl, useMcpConfigured } from "@/core/mcp/availability";
+import { mcpEndpointUrl } from "@/core/mcp/availability";
 import { useMcpStore } from "./mcpStore";
 import styles from "./ConnectAiDialog.module.css";
 
 const DOCS_URL = "https://github.com/FaizoKen/DWEEB/blob/main/docs/mcp.md";
 
-/** The command a local client is pointed at. `<path-to-DWEEB>` is left as a
- *  placeholder on purpose — only the person running it knows where they cloned
- *  it, and a fake absolute path would look copy-pasteable and fail. */
-const LOCAL_COMMAND = "claude mcp add dweeb -- bun <path-to-DWEEB>/mcp/src/main.ts";
-
-/** One copyable line: monospace value plus a copy button. */
-function CopyRow({ value, label }: { value: string; label: string }) {
+export function ConnectAiDialog() {
+  const close = useMcpStore((s) => s.closeMcp);
+  const endpoint = mcpEndpointUrl();
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
-    const ok = await copyText(value);
+    const ok = await copyText(endpoint);
     if (!ok) {
-      pushToast("Couldn't copy — select the text and copy it manually.", "error");
+      pushToast("Couldn't copy — select the address and copy it manually.", "error");
       return;
     }
     setCopied(true);
     pushToast("Copied.", "success");
     window.setTimeout(() => setCopied(false), 1600);
   };
-
-  return (
-    <div className={styles.copyRow}>
-      <code className={styles.code}>{value}</code>
-      <Button
-        variant="secondary"
-        size="sm"
-        leadingIcon={<CopyIcon />}
-        onClick={() => void copy()}
-        aria-label={label}
-      >
-        {copied ? "Copied" : "Copy"}
-      </Button>
-    </div>
-  );
-}
-
-export function ConnectAiDialog() {
-  const close = useMcpStore((s) => s.closeMcp);
-  const remoteAvailable = useMcpConfigured();
-  const endpoint = mcpEndpointUrl();
 
   return (
     <Modal
@@ -108,34 +78,27 @@ export function ConnectAiDialog() {
         editor.
       </p>
 
-      {remoteAvailable && endpoint ? (
-        <section className={styles.section}>
-          <h3 className={styles.heading}>claude.ai</h3>
-          <p className={styles.body}>
-            In claude.ai, open <strong>Settings → Connectors → Add custom connector</strong> and
-            paste this URL. Leave the OAuth fields blank.
-          </p>
-          <CopyRow value={endpoint} label="Copy the connector URL" />
-          <p className={styles.fine}>
-            You&rsquo;ll sign in with Discord. The connector acts as your account, so it can only
-            reach servers and channels you can already reach.
-          </p>
-        </section>
-      ) : null}
-
       <section className={styles.section}>
-        <h3 className={styles.heading}>Claude Code &amp; Claude Desktop</h3>
+        <h3 className={styles.heading}>Add DWEEB as a connector</h3>
         <p className={styles.body}>
-          These launch the server themselves, straight from a clone of the DWEEB repository — no
-          account needed.
+          In Claude, open <strong>Settings → Connectors → Add custom connector</strong> and paste
+          this address. Leave the OAuth fields blank.
         </p>
-        <CopyRow value={LOCAL_COMMAND} label="Copy the setup command" />
+        <div className={styles.copyRow}>
+          <code className={styles.code}>{endpoint}</code>
+          <Button
+            variant="secondary"
+            size="sm"
+            leadingIcon={<CopyIcon />}
+            onClick={() => void copy()}
+            aria-label="Copy the connector address"
+          >
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
         <p className={styles.fine}>
-          Needs{" "}
-          <a href="https://bun.sh" target="_blank" rel="noopener noreferrer">
-            Bun
-          </a>{" "}
-          and the repository on your machine. Point it at a webhook to let it post.
+          You&rsquo;ll sign in with Discord. The connector acts as your account, so it can only
+          reach servers and channels you can already reach.
         </p>
       </section>
     </Modal>

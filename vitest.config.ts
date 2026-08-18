@@ -31,11 +31,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    // The MCP server (`mcp/`) is covered by the same run: it is pure logic over
-    // the same `src/core`, it pulls in no dependency the app doesn't already
-    // have, and a schema change that breaks it should fail one `bun run test`
-    // rather than a second suite nobody remembers to run.
-    include: ["src/**/*.test.ts", "mcp/src/**/*.test.ts"],
+    include: ["src/**/*.test.ts"],
     // Fixture builders and the golden generator are not tests.
     exclude: ["**/node_modules/**", "**/__fixtures__/**", "src/test/**"],
   },
