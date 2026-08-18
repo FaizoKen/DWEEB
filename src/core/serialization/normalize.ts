@@ -18,6 +18,7 @@
 
 import { newId } from "@/lib/id";
 import {
+  ButtonStyle,
   ComponentType,
   computeMessageFlags,
   flagsHaveSuppressNotifications,
@@ -182,15 +183,25 @@ const CHILD_BEARING_TYPES: ReadonlySet<number> = new Set([
  * `Cannot use 'in' operator to search for 'content' in undefined`, thrown by
  * `countCharacters` on a section with no accessory).
  *
- * A missing array repairs to `[]`, and missing media to an empty URL: that
- * invents nothing, and the validator already has a precise complaint for each
- * empty case ("Container must contain at least one component", "select needs
- * options", "Thumbnail needs a URL"). A missing Section accessory has no such
- * neutral value — anything synthesized is content the user never wrote, and a
- * placeholder image would silently post to Discord — so it is refused outright.
- * Every `attachEditorFields` caller already treats a throw as "malformed
- * payload" and surfaces it, so the user reads the reason instead of hitting a
- * crash.
+ * A missing array repairs to `[]`, a missing media to an empty URL, and a
+ * missing required *string* to `""`: that invents nothing, and the validator
+ * already has a precise complaint for each empty case ("Container must contain
+ * at least one component", "select needs options", "Thumbnail needs a URL",
+ * "Text display can't be empty", "Link button needs a valid https:// URL"). A
+ * missing Section accessory has no such neutral value — anything synthesized is
+ * content the user never wrote, and a placeholder image would silently post to
+ * Discord — so it is refused outright. Every `attachEditorFields` caller already
+ * treats a throw as "malformed payload" and surfaces it, so the user reads the
+ * reason instead of hitting a crash.
+ *
+ * The two required strings were the same bug one layer down, found while
+ * feeding the schema layer model-authored payloads through the MCP server
+ * (`mcp/`): `validateNode` reads `TextDisplay.content.trim()` and
+ * `validateButton` hands `Link.url` straight to `containsPlaceholder`, both
+ * unguarded, so `{"type":10}` or `{"type":2,"style":5,"label":"x"}` — either of
+ * which a person can paste into JSON Import — threw a TypeError out of the
+ * *live* validator rather than reporting a problem. Same failure shape as the
+ * accessory case above: the throw preempts the error the user should have seen.
  */
 function repairStructure(stamped: Record<string, unknown>, type: number): void {
   if (CHILD_BEARING_TYPES.has(type) && !Array.isArray(stamped.components)) {
@@ -207,6 +218,16 @@ function repairStructure(stamped: Record<string, unknown>, type: number): void {
   }
   if (type === ComponentType.File && !isPlainObject(stamped.file)) {
     stamped.file = { url: "" };
+  }
+  if (type === ComponentType.TextDisplay && typeof stamped.content !== "string") {
+    stamped.content = "";
+  }
+  if (
+    type === ComponentType.Button &&
+    stamped.style === ButtonStyle.Link &&
+    typeof stamped.url !== "string"
+  ) {
+    stamped.url = "";
   }
   if (type === ComponentType.Section && !isPlainObject(stamped.accessory)) {
     throw new Error("Section is missing its `accessory` — it needs one thumbnail or button.");

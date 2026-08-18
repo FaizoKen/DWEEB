@@ -4,7 +4,8 @@ import { decodeJson, decodeShare, encodeJson, encodeShare, type DecodeResult } f
 import { stripEditorFields, attachEditorFields } from "./normalize";
 import { CURRENT_VERSION, migrate } from "./version";
 import { FIXTURES, richMessage, simpleTextMessage } from "@/test/fixtures";
-import { ComponentType, type WebhookMessage } from "@/core/schema/types";
+import { ButtonStyle, ComponentType, type WebhookMessage } from "@/core/schema/types";
+import { validateMessage } from "@/core/schema/validation";
 
 /** Narrow a DecodeResult to its ok branch or fail the test with the error. */
 function unwrap(result: DecodeResult): WebhookMessage {
@@ -214,6 +215,32 @@ describe("attachEditorFields — structurally incomplete payloads", () => {
   it("fills a missing `items` array on a media gallery", () => {
     const attached = attachEditorFields({ components: [{ type: ComponentType.MediaGallery }] });
     expect((attached.components[0] as unknown as { items: unknown[] }).items).toEqual([]);
+  });
+
+  // Same bug one layer down: `validateNode` reads `content.trim()` and
+  // `validateButton` hands `url` to `containsPlaceholder`, both unguarded, so
+  // either omission threw a TypeError out of the *live* validator — which runs
+  // on every keystroke — instead of reporting the empty field.
+  it("fills a missing `content` on a text display", () => {
+    const attached = attachEditorFields({ components: [{ type: ComponentType.TextDisplay }] });
+    expect((attached.components[0] as unknown as { content: string }).content).toBe("");
+    expect(() => validateMessage(attached)).not.toThrow();
+    expect(validateMessage(attached).issues.map((i) => i.code)).toContain("TEXT_EMPTY");
+  });
+
+  it("fills a missing `url` on a link button", () => {
+    const attached = attachEditorFields({
+      components: [
+        {
+          type: ComponentType.ActionRow,
+          components: [{ type: ComponentType.Button, style: ButtonStyle.Link, label: "Go" }],
+        },
+      ],
+    });
+    const row = attached.components[0] as unknown as { components: Array<{ url: string }> };
+    expect(row.components[0]!.url).toBe("");
+    expect(() => validateMessage(attached)).not.toThrow();
+    expect(validateMessage(attached).issues.map((i) => i.code)).toContain("BUTTON_URL_INVALID");
   });
 
   it("leaves a well-formed payload untouched", () => {

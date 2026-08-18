@@ -517,7 +517,11 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
   }
 
   if (isTextDisplay(node)) {
-    if (node.content.trim().length === 0) {
+    // Second layer, same reasoning as the section accessory above: the import
+    // boundary fills a missing `content` with `""`, and this deref must report
+    // rather than throw for a tree that arrived some other way.
+    const content = typeof node.content === "string" ? node.content : "";
+    if (content.trim().length === 0) {
       // `content` is a required field (1–4000 chars) — Discord rejects a Text
       // Display with empty/whitespace-only content, so this blocks send.
       issues.push({
@@ -527,7 +531,7 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
         message: "Text display can't be empty — Discord requires content here.",
       });
     }
-    if (node.content.length > LIMITS.TEXT_DISPLAY_CONTENT) {
+    if (content.length > LIMITS.TEXT_DISPLAY_CONTENT) {
       issues.push({
         nodeId: node._id,
         severity: "error",
@@ -540,16 +544,22 @@ function validateNode(node: AnyComponent, issues: ValidationIssue[]): void {
 
 function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
   if (btn.style === ButtonStyle.Link) {
+    // Second layer, same reasoning as the section accessory above: the import
+    // boundary fills a missing `url` with `""`, and `containsPlaceholder` reads
+    // `.indexOf` off whatever it is handed — so an absent URL must arrive here
+    // as an empty string that gets reported, not as a TypeError thrown out of
+    // the live validator.
+    const url = typeof btn.url === "string" ? btn.url : "";
     // A URL holding a `{token}` resolves to a real https link only at send, so
     // skip the format check on its raw form — the length cap still applies.
-    if (!containsPlaceholder(btn.url) && !isValidHttpsUrl(btn.url)) {
+    if (!containsPlaceholder(url) && !isValidHttpsUrl(url)) {
       issues.push({
         nodeId: btn._id,
         severity: "error",
         code: "BUTTON_URL_INVALID",
         message: "Link button needs a valid https:// URL.",
       });
-    } else if (btn.url.length > LIMITS.BUTTON_URL) {
+    } else if (url.length > LIMITS.BUTTON_URL) {
       issues.push({
         nodeId: btn._id,
         severity: "error",
@@ -563,9 +573,9 @@ function validateButton(btn: ButtonComponent, issues: ValidationIssue[]): void {
     // the placeholder exemption above but nothing ever substitutes it, so the
     // posted button would open a dead link — flag it here, where it blocks
     // send. One rule for every link plugin; no per-plugin machinery.
-    const linkPlugin = matchLinkPlugin(LINK_PLUGINS, btn.url);
+    const linkPlugin = matchLinkPlugin(LINK_PLUGINS, url);
     if (linkPlugin) {
-      for (const token of unfilledLinkTokens(btn.url)) {
+      for (const token of unfilledLinkTokens(url)) {
         issues.push({
           nodeId: btn._id,
           severity: "error",

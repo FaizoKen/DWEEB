@@ -138,6 +138,14 @@ describe("validateMessage — containers & sections", () => {
     expect(() => validateMessage(message)).not.toThrow();
     expect(errorCodes(message)).toContain("SECTION_ACCESSORY_MISSING");
   });
+
+  /** Same shape as the accessory case: `content.trim()` on an absent field. */
+  it("reports a text display with no `content` rather than throwing", () => {
+    const text = { _id: "t", type: ComponentType.TextDisplay } as unknown as AnyComponent;
+    const message = msg([text]);
+    expect(() => validateMessage(message)).not.toThrow();
+    expect(errorCodes(message)).toContain("TEXT_EMPTY");
+  });
 });
 
 describe("validateMessage — buttons", () => {
@@ -152,6 +160,21 @@ describe("validateMessage — buttons", () => {
       label: "Open",
       url: "not a url",
     } as unknown as AnyComponent;
+    expect(errorCodes(msg([row([btn])]))).toContain("BUTTON_URL_INVALID");
+  });
+
+  // Second layer behind `repairStructure`, which fills a missing `url` with
+  // "". A tree that reaches the validator some other way (a peer's collab op,
+  // a stale draft) must be *reported* — the deref used to throw a TypeError
+  // out of the live validator, which runs on every keystroke.
+  it("reports a link button with no `url` at all instead of throwing", () => {
+    const btn = {
+      _id: "b",
+      type: ComponentType.Button,
+      style: ButtonStyle.Link,
+      label: "Open",
+    } as unknown as AnyComponent;
+    expect(() => validateMessage(msg([row([btn])]))).not.toThrow();
     expect(errorCodes(msg([row([btn])]))).toContain("BUTTON_URL_INVALID");
   });
 
