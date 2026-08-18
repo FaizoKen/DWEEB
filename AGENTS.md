@@ -22,8 +22,10 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - `bun run test` — Vitest (core logic, stores, feature contracts, **and the MCP server** —
   `mcp/src/**/*.test.ts` is in the same run). `bun run typecheck`, `bun run format:check`
   (both now cover `mcp/` too).
-- `bun run mcp` — the MCP server on stdio; `bun run mcp:check` prints what the environment
-  would give it without starting anything. See `docs/mcp.md`.
+- `bun run mcp` — the local MCP server on stdio; `bun run mcp:check` prints what the
+  environment would give it without starting anything. `bun run gen:mcp` regenerates the
+  data + pinning corpus the **remote** (Rust) MCP server serves — also run by `bun run
+  build`, and `web.yml` fails on a resulting diff. See `docs/mcp.md`.
 - `bun run lint` — ESLint (flat config, `eslint.config.js`). Enforces the React hooks rules
   (`rules-of-hooks` + `exhaustive-deps`) and `no-explicit-any` as **errors**; other recommended
   rules are advisory warnings. Suppress an _intentional_ hooks case with a
@@ -41,9 +43,12 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   telemetry). `src/features` — UI features. `src/activity` — Discord Activity entry.
 - `server/src` — Rust API proxy: Discord/OAuth auth, plain-SQLite shortlinks, and
   SQLite-backed schedules/message library/Activity drafts whose sensitive payloads are sealed.
-- `mcp/src` — the MCP server (stdio): a shell around `src/core` that exposes the builder to
-  an AI client. No dependencies of its own; typechecked via `mcp/tsconfig.json`, referenced
-  from the root solution file.
+- `mcp/src` — the **local** MCP server (stdio): a shell around `src/core` that exposes the
+  builder to an AI client. No dependencies of its own; typechecked via `mcp/tsconfig.json`,
+  referenced from the root solution file.
+- `server/src/mcp` — the **remote** MCP server (HTTPS at `/mcp`, OAuth-guarded) plus its
+  generated data (`catalog.json`, `validation-corpus.json`, `lz-vectors.json` — never
+  hand-edit; run `bun run gen:mcp`).
 - `plugins/*` — 10 Rust crates total: the dispatcher plus ping-pong, tickets, giveaway,
   quick-replies, self-role, modal-form, picker, poll, and directory.
 
@@ -368,8 +373,55 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   from `src/core` through the `@/…` alias Bun resolves from `tsconfig.json`. Adding a tool =
   a `ToolDefinition` in `tools.ts` (schema + annotations + handler) and a case in
   `tools.test.ts`; nothing in `protocol.ts` knows about individual tools. Stdio is the only
-  transport, deliberately: an HTTP one would need its own auth story for a server that can
-  post to a Discord channel.
+  transport for THIS server — the remote one is separate, in Rust, below.
+- **The remote MCP server is Rust, and its agreement with the schema layer is generated
+  and pinned, never remembered** (`server/src/mcp/`, added 2026-08-18; guide in
+  `docs/mcp.md`). It serves MCP over HTTPS at `/mcp` so claude.ai's **custom connectors**
+  can reach it — the local stdio server cannot, since claude.ai launches no commands. It
+  lives inside the proxy because that is where Discord auth, the guild gates, the webhook
+  resolution, the entitlement reader, and the short-link store already are; the maintainer
+  chose the Rust port over a Bun sidecar (2026-08-18) with the duplication cost stated.
+  **Off by default** (`MCP_ENABLED`, and every route including the two discovery documents
+  answers 501 while off) — it is a public surface through which an AI client can post to
+  people's channels, so a deployment opts in rather than inheriting it.
+  **How the duplication is contained, which is the whole design:** (a) **data is
+  generated** — `bun run gen:mcp` (inside `bun run build`) writes
+  `server/src/mcp/catalog.json` from `src/data/presets.ts` + `limits.ts`: all 36 templates,
+  every cap, the core placeholder tokens, the link-plugin prefixes, the share-token
+  version. (b) **rules are pinned** — the same script writes `validation-corpus.json`, ~105
+  messages with the exact `(code, path)` pairs the TS validator emits, and BOTH sides are
+  tested against it (`src/core/schema/corpus.test.ts` + `components.rs`). The generator
+  **refuses** to emit a corpus that does not exercise every code the validator can emit, so
+  a new rule without a case fails the build, and `web.yml` fails on a `git diff` in
+  `server/src/mcp` so a stale catalog cannot be committed. (c) the share-link encoder is
+  pinned the same way (`lz-vectors.json` → `lz.rs`). **Change a rule, a limit, or a
+  template ⇒ `bun run gen:mcp`, then expect both suites to move together.**
+  Traps worth knowing: character limits are **UTF-16 code units** (JS `.length`), so
+  `chars().count()` lets a message of emoji through at twice the cap and `len()` rejects one
+  at half — pinned by the `astral-characters-*` cases; LZ-String is likewise defined over
+  UTF-16 units, so a `chars()`-based port yields links the browser cannot decode for any
+  message with an emoji; the corpus is sorted in **code-point** order, never
+  `localeCompare` (locale- and ICU-dependent, so Rust could not reproduce it). One
+  deliberate boundary divergence: a Section with no `accessory` is **reported**
+  (`SECTION_ACCESSORY_MISSING`) rather than refused, because a model handed that can fix its
+  payload — the TS boundary throws instead, and the corpus records the Rust behaviour.
+  **Auth**: OAuth 2.1 with **Discord as the identity provider** — `/oauth/authorize` hands
+  the browser to Discord and the `mcp_` state prefix routes the callback back
+  (`auth.rs`, same dispatch the Activity connect flow uses), with the whole request sealed
+  inside `state` because the connector's browser carries none of our cookies. PKCE S256 is
+  mandatory, `plain` is not offered, and **there are no refresh tokens** (ours could not
+  refresh Discord's, so an expired grant means re-authorizing, which is silent while the
+  Discord session lives; a token's life is capped at the Discord token's). An error raised
+  **before** the redirect URI is verified renders as a page — redirecting one to an
+  unverified URI is how an open redirector is built. Every call then acts with the user's
+  own Discord token through `authorize_member_session` / `authorize_activity_webhooks`, so
+  a caller reaches exactly what that person can and **no webhook URL ever leaves the
+  server**. `mcp.db` stores digests only, with the Discord token sealed under its own AAD
+  domain. The transport is **stateless** (POST only; GET/DELETE are 405) because the server
+  sends nothing unsolicited — that is what lets it survive a redeploy mid-conversation.
+  **No Caddy change is needed** (the `{$DOMAIN}` catch-all already routes `/mcp`,
+  `/oauth/*`, `/.well-known/*`). Wiring checks that no unit test can reach live in
+  `server/ops/mcp-smoke.sh`, which drives the real binary over HTTP and runs in `server.yml`.
 - **The Directory plugin needs no permission bit and no privileged intent — keep it that
   way** (`plugins/directory`, prefix `directory:`, port 8099, added 2026-07-26). It answers a
   click with a live read of the guild in one of two modes — a role/staff roster or a channel

@@ -83,6 +83,11 @@ pub struct AppState {
     /// concurrency lanes. None when `GROQ_API_KEY` isn't configured — the
     /// `/api/ai` endpoints then answer 501 and the FE hides the provider.
     pub ai: Option<Arc<crate::ai::AiRuntime>>,
+    /// Remote MCP endpoint state: registered OAuth clients, authorization
+    /// codes, and access tokens (see `mcp/store.rs`). None when `MCP_ENABLED`
+    /// is off, which is the default — `/mcp` and the OAuth endpoints then
+    /// answer 501 and nothing about this deployment is internet-authorizable.
+    pub mcp: Option<Arc<crate::mcp::store::McpStore>>,
     /// Master key for encrypting/decrypting cookies.
     pub key: Key,
 }
@@ -135,6 +140,10 @@ pub async fn capabilities(State(st): State<AppState>) -> impl IntoResponse {
         // Uploaded webhook avatars. Off ⇒ the builder shows only the
         // paste-a-URL field rather than an upload control that would 501.
         "avatarUploads": st.avatars.is_some(),
+        // Remote MCP endpoint. Nothing in the web app reads this — it is here so
+        // an operator can confirm from outside whether `/mcp` is live, without
+        // having to complete an OAuth flow to find out.
+        "mcp": st.mcp.is_some(),
     }))
 }
 
@@ -179,6 +188,7 @@ pub async fn ready(State(st): State<AppState>) -> Response {
     probe!(st.schedules, "schedules");
     probe!(st.activity_drafts, "activity_drafts");
     probe!(st.library, "library");
+    probe!(st.mcp, "mcp");
     // The AI usage ledger lives inside `AiRuntime`, so pluck the store out.
     probe!(st.ai.as_ref().map(|ai| Arc::clone(&ai.store)), "ai_usage");
 
@@ -1586,7 +1596,7 @@ async fn usable_guilds(
 
 /// The user's full membership (see [`GuildLens::Member`]) as a full list — for
 /// the Activity's DM-launch destination picker.
-async fn member_guilds(
+pub(crate) async fn member_guilds(
     st: &AppState,
     session: &Session,
     fresh: bool,
@@ -1648,7 +1658,7 @@ fn scan_cached_guilds(value: &Value, guild: &str) -> Option<Option<UsableGuild>>
 
 /// The set of guild ids the bot is in (cached). Best-effort: an error here only
 /// costs the picker its "bot already added" annotation, never a failed request.
-async fn bot_guild_set(st: &AppState, fresh: bool) -> HashSet<String> {
+pub(crate) async fn bot_guild_set(st: &AppState, fresh: bool) -> HashSet<String> {
     const KEY: &str = "botguilds";
     if !fresh {
         if let Some(v) = st.cache.get(KEY).await {
@@ -1687,7 +1697,11 @@ async fn fetch_roles(st: &AppState, guild: &str, fresh: bool) -> Result<Arc<Valu
     cached_or_fetch(st, &key, fresh, || st.discord.roles(guild)).await
 }
 
-async fn fetch_channels(st: &AppState, guild: &str, fresh: bool) -> Result<Arc<Value>, AppError> {
+pub(crate) async fn fetch_channels(
+    st: &AppState,
+    guild: &str,
+    fresh: bool,
+) -> Result<Arc<Value>, AppError> {
     let key = format!("channels:{guild}");
     cached_or_fetch(st, &key, fresh, || st.discord.channels(guild)).await
 }

@@ -9,7 +9,7 @@
     "dev": "vite",
     "dev:server": "cd server && cargo run",
     "dev:activity": "vite --mode activity",
-    "build": "tsc -b && vite build && bun scripts/gen-template-pages.ts && bun scripts/seo/audit.ts",
+    "build": "tsc -b && bun scripts/gen-mcp-catalog.ts && vite build && bun scripts/gen-template-pages.ts && bun scripts/seo/audit.ts",
     "gen:seo": "bun scripts/gen-template-pages.ts",
     "seo:audit": "bun scripts/seo/audit.ts",
     "preview": "vite preview --host",
@@ -21,7 +21,8 @@
     "mcp": "bun mcp/src/main.ts",
     "mcp:check": "bun mcp/src/main.ts --check",
     "format": "prettier --write \"{src,mcp/src}/**/*.{ts,tsx,css}\"",
-    "format:check": "prettier --check \"{src,mcp/src}/**/*.{ts,tsx,css}\""
+    "format:check": "prettier --check \"{src,mcp/src}/**/*.{ts,tsx,css}\"",
+    "gen:mcp": "bun scripts/gen-mcp-catalog.ts"
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",

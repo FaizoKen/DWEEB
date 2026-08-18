@@ -1367,7 +1367,7 @@ async fn dweeb_webhook_in_channel(
 /// Resolve the DWEEB webhook a standard-identity post rides: reuse a DWEEB-owned
 /// incoming webhook already in the channel (so we don't spawn duplicates, and
 /// never hijack a third party's hook), or mint one. Returns `(webhook_id, token)`.
-async fn require_dweeb_webhook(
+pub(crate) async fn require_dweeb_webhook(
     st: &AppState,
     session_uid: &str,
     guild: &str,

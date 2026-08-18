@@ -412,7 +412,14 @@ it can build, validate, preview, and share; a `DWEEB_WEBHOOK_URL` (or a named
 set in `DWEEB_WEBHOOKS`) lets it post, edit, and delete as well, and
 `DWEEB_MCP_READ_ONLY=1` withholds those three tools entirely.
 
-Full guide, including client setup: [`docs/mcp.md`](docs/mcp.md).
+There is also a **remote** server (`server/src/mcp/`) inside the Rust proxy,
+serving MCP over HTTPS at `/mcp` behind an OAuth 2.1 authorization server with
+Discord as the identity provider — that is the one claude.ai's custom connectors
+connect to. It is off by default (`MCP_ENABLED`), and a caller acts with the
+Discord account that authorized it, so it can only reach servers and channels
+that account can already reach.
+
+Full guide for both, including client setup: [`docs/mcp.md`](docs/mcp.md).
 
 ## Wire-format compatibility
 

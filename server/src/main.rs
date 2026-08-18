@@ -25,6 +25,7 @@ mod entitlement;
 mod error;
 mod feedback;
 mod library;
+mod mcp;
 mod ratelimit;
 mod reconcile;
 mod routes;
@@ -361,6 +362,47 @@ async fn run() {
         None
     };
 
+    // Remote MCP endpoint: registered OAuth clients + live grants. Off by
+    // default — see `Config::mcp_enabled`. A store that cannot be opened is
+    // fatal for the same reason the others are: booting with the feature
+    // advertised but unable to remember a single grant would fail every
+    // connection with an opaque error.
+    let mcp_store = if config.mcp_enabled {
+        match mcp::store::McpStore::open(&config.mcp_db_path, key.clone()) {
+            Ok(store) => {
+                tracing::info!(db = %config.mcp_db_path, "MCP endpoint enabled");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                eprintln!("mcp store error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
+    // Expired MCP authorization codes and access tokens. A code lives ten
+    // minutes and a token at most a week, so nothing here is urgent — but a
+    // live grant is a credential, and one that has expired should stop existing
+    // rather than linger until someone happens to present it.
+    if let Some(store) = &mcp_store {
+        let store = Arc::clone(store);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(3600));
+            loop {
+                tick.tick().await;
+                let s = Arc::clone(&store);
+                match tokio::task::spawn_blocking(move || s.sweep()).await {
+                    Ok(Ok(0)) => {}
+                    Ok(Ok(n)) => tracing::info!(deleted = n, "swept expired MCP grants"),
+                    Ok(Err(e)) => tracing::warn!("MCP sweep failed: {e}"),
+                    Err(e) => tracing::warn!("MCP sweep panicked: {e}"),
+                }
+            }
+        });
+    }
+
     // Scheduled posts: a small SQLite file on the same persistent volume as the
     // short links (a schedule is a promise to post later, so it must outlive a
     // redeploy). Boot fails loudly if it can't be opened — a deployment that
@@ -504,6 +546,7 @@ async fn run() {
             config.activity_upload_concurrency,
         )),
         library,
+        mcp: mcp_store,
         entitlements,
         stripe,
         ai,
@@ -549,6 +592,37 @@ async fn run() {
     let app = Router::new()
         .route("/health", get(health))
         .route("/api/capabilities", get(capabilities))
+        // ── Remote MCP endpoint (see `mcp/` and docs/mcp.md) ──────────────
+        //
+        // Off unless `MCP_ENABLED`; every handler answers 501 otherwise. The
+        // two well-known documents are how a client that knows only the `/mcp`
+        // URL discovers where to authorize — they are unauthenticated by
+        // necessity, and carry no secret.
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(mcp::oauth::protected_resource),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(mcp::oauth::authorization_server),
+        )
+        .route("/oauth/authorize", get(mcp::oauth::authorize))
+        .route(
+            "/oauth/register",
+            post(mcp::oauth::register).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route("/oauth/token", post(mcp::oauth::token))
+        // The MCP endpoint itself. Bearer-authenticated inside the handler so
+        // an unauthenticated call can answer with the `WWW-Authenticate` header
+        // that bootstraps discovery. The body limit is generous enough for a
+        // maxed-out Components V2 message and nothing like an upload.
+        .route(
+            "/mcp",
+            post(mcp::protocol::endpoint)
+                .get(mcp::protocol::endpoint_unsupported)
+                .delete(mcp::protocol::endpoint_unsupported)
+                .layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
+        )
         // Readiness: verifies each present SQLite store answers a `SELECT 1`, so
         // a monitor can distinguish "up" from "a data volume is wedged". 503 (with
         // the failing store) when a probe fails; see `routes::ready`.

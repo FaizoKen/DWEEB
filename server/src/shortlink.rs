@@ -216,7 +216,7 @@ fn new_short_id() -> Result<String, String> {
 
 /// `<digits>.<lz-string url-safe body>` — lz-string's URL-safe alphabet is
 /// `[A-Za-z0-9]` plus `+ - $`; the prefix is the numeric schema version.
-fn is_share_token(s: &str) -> bool {
+pub(crate) fn is_share_token(s: &str) -> bool {
     let Some((version, body)) = s.split_once('.') else {
         return false;
     };

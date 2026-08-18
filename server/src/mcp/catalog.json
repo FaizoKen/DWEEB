@@ -1,0 +1,2729 @@
+{
+  "generatedFrom": "src/data/presets.ts + src/core/schema/limits.ts",
+  "shareTokenVersion": 1,
+  "limits": {
+    "TOTAL_COMPONENTS": 40,
+    "TOP_LEVEL_COMPONENTS": 10,
+    "TOTAL_CHARACTERS": 4000,
+    "CONTAINER_CHILDREN": 39,
+    "SECTION_TEXTS_MIN": 1,
+    "SECTION_TEXTS_MAX": 3,
+    "GALLERY_ITEMS": 10,
+    "ACTION_ROW_BUTTONS": 5,
+    "TEXT_DISPLAY_CONTENT": 4000,
+    "BUTTON_LABEL": 80,
+    "BUTTON_CUSTOM_ID": 100,
+    "BUTTON_URL": 512,
+    "MEDIA_DESCRIPTION": 1024,
+    "SELECT_CUSTOM_ID": 100,
+    "SELECT_PLACEHOLDER": 150,
+    "SELECT_OPTIONS": 25,
+    "SELECT_MIN_VALUES": 0,
+    "SELECT_MAX_VALUES": 25,
+    "SELECT_OPTION_LABEL": 100,
+    "SELECT_OPTION_VALUE": 100,
+    "SELECT_OPTION_DESCRIPTION": 100,
+    "SELECT_DEFAULT_VALUES": 25,
+    "WEBHOOK_USERNAME": 80,
+    "WEBHOOK_AVATAR_URL": 2048,
+    "THREAD_NAME": 100,
+    "APPLIED_TAGS": 5,
+    "SNOWFLAKE_MAX": 25,
+    "COLOR_MAX": 16777215
+  },
+  "corePlaceholderTokens": [
+    "server",
+    "server_id",
+    "server_icon",
+    "channel",
+    "channel_id",
+    "channel_mention",
+    "channel_category"
+  ],
+  "linkPlugins": [
+    {
+      "id": "rolelogic-member-origin-role",
+      "name": "Member Origin Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/member-origin-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-topgg-voter-role",
+      "name": "Top.gg Voter Role",
+      "prefix": "https://top.gg/"
+    },
+    {
+      "id": "rolelogic-genshin-player-role",
+      "name": "Genshin Player Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/genshin-player-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-youtube-subscriber-role",
+      "name": "YouTube Subscriber Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/youtube-subscriber-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-twitch-follower-role",
+      "name": "Twitch Follower Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/twitch-follower-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-steam-player-role",
+      "name": "Steam Player Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/steam-player-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-referral-code-role",
+      "name": "Referral Code Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/referral-code-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-roblox-player-role",
+      "name": "Roblox Player Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/roblox-player-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-tiktok-creator-role",
+      "name": "TikTok Creator Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/tiktok-creator-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-form-respondent-role",
+      "name": "Form Respondent Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/form-respondent-role/f/"
+    },
+    {
+      "id": "rolelogic-kick-channel-role",
+      "name": "Kick Channel Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/kick-channel-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-birthday-role",
+      "name": "Birthday Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/birthday-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-osu-player-role",
+      "name": "osu! Player Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/osu-player-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-bluesky-account-role",
+      "name": "Bluesky Account Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/bluesky-account-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-github-contributor-role",
+      "name": "GitHub Contributor Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/github-contributor-role/verify?guild="
+    },
+    {
+      "id": "rolelogic-stripe-subscriber-role",
+      "name": "Stripe Subscriber Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/stripe-subscriber-role/verify"
+    },
+    {
+      "id": "rolelogic-lootlabs-reward-role",
+      "name": "LootLabs Reward Role",
+      "prefix": "https://plugin-rolelogic.faizo.net/lootlabs-reward-role/claim/"
+    }
+  ],
+  "templates": [
+    {
+      "id": "showcase",
+      "name": "Component showcase",
+      "description": "A guided tour of every block — the best place to learn the editor.",
+      "emoji": "🧩",
+      "category": "Featured",
+      "tags": [
+        "tour",
+        "demo",
+        "kit",
+        "learn",
+        "example"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "DWEEB",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🧩 The Components V2 starter kit\nA hands-on tour of every block DWEEB gives you — and it's all live. **Click any component on the left to edit it**, watch the preview update instantly, then hit **Send** or **Share** when it looks right."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "**Sections** set a short stack of text beside a single accessory. Pair one with a **thumbnail** — like this — for profile cards, product shots, and tidy call-outs."
+                  }
+                ],
+                "accessory": {
+                  "type": 11,
+                  "media": {
+                    "url": "http://localhost:5173/media/defaults/dweeb-default-thumbnail.jpg"
+                  },
+                  "description": "Thumbnail accessory"
+                }
+              },
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "Give a section a **button** instead and the same layout becomes an action card: a headline, a line of detail, and one tappable action docked on the right."
+                  }
+                ],
+                "accessory": {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Open",
+                  "url": "https://dweeb.faizo.net"
+                }
+              },
+              {
+                "type": 12,
+                "items": [
+                  {
+                    "media": {
+                      "url": "http://localhost:5173/media/defaults/dweeb-showcase-gallery-1.jpg"
+                    },
+                    "description": "Media galleries hold up to 10 images or clips"
+                  },
+                  {
+                    "media": {
+                      "url": "http://localhost:5173/media/defaults/dweeb-showcase-gallery-2.jpg"
+                    },
+                    "description": "Give every item its own description…"
+                  },
+                  {
+                    "media": {
+                      "url": "http://localhost:5173/media/defaults/dweeb-showcase-gallery-3.jpg"
+                    },
+                    "description": "…or mark any one of them as a spoiler"
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**Every text block speaks full Discord markdown.**\nBlend **bold**, *italic*, __underline__, ~~strikethrough~~, `inline code`, and ||spoilers|| — each renders exactly as Discord shows it. Drop in [masked links](https://dweeb.faizo.net), lists, and quotes wherever you need them:\n> Good messages look effortless. DWEEB just makes effortless easy."
+              },
+              {
+                "type": 10,
+                "content": "**There's even more in the box** — dropdown menus, clickable (non-link) buttons, and file uploads are all one tap away in the **Add component** menu."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "📖 Read the docs",
+                    "url": "https://discord.com/developers/docs/components/reference"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "💬 Join the Discord",
+                    "url": "https://discord.gg/2wB7rHRDg2"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 💡 **Posts through any webhook:** text, layout, media, and link buttons. Interactive pieces — clickable buttons and select menus — need a **bot or app** to own the webhook; a plain user webhook will reject them.\n-# Reopen this tour any time from the **Template Gallery**, or hit **Reset** (top-left) to start fresh."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "welcome",
+      "name": "Welcome",
+      "description": "Greet new members and point them to the essentials.",
+      "emoji": "👋",
+      "category": "Welcome",
+      "tags": [
+        "onboarding",
+        "intro",
+        "greeting",
+        "new members",
+        "banner"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "Welcome",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 👋 Welcome to the server!\nWe're really glad you found us. Here's everything you need to settle in."
+              },
+              {
+                "type": 12,
+                "items": [
+                  {
+                    "media": {
+                      "url": "http://localhost:5173/media/defaults/dweeb-welcome-banner.jpg"
+                    },
+                    "description": "Welcome banner"
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**Get started in three steps**\n- 📜 Read the **#rules** so everyone stays on the same page\n- 🎭 Pick up your roles in **#get-roles**\n- 💬 Say hi and introduce yourself in **#general**"
+              },
+              {
+                "type": 10,
+                "content": "Stuck on anything? A friendly mod is only a message away."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "📖 Community guide",
+                    "url": "https://example.com/guide"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "💬 Jump into chat",
+                    "url": "https://discord.gg/2wB7rHRDg2"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Glad to have you — enjoy your stay! 💜"
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "announcement",
+      "name": "Announcement",
+      "description": "A borderless, image-led banner for big news.",
+      "emoji": "📢",
+      "category": "Community",
+      "tags": [
+        "news",
+        "update",
+        "broadcast",
+        "banner"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "Announcements",
+        "components": [
+          {
+            "type": 10,
+            "content": "# 📢 Announcement\n**A quick heads-up for everyone** — here's what's new and what it means for you."
+          },
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-announcement-banner.jpg"
+                },
+                "description": "Announcement banner"
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "We just rolled out a big update — faster, cleaner, and packed with the features you asked for. Skim the highlights, then dive in:\n- 🚀 Noticeably faster across the board\n- 🎨 A fresh new look\n- 🛠️ Dozens of fixes and tweaks"
+          },
+          {
+            "type": 14,
+            "divider": true,
+            "spacing": 1
+          },
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Read the full post",
+                "url": "https://example.com/announcement"
+              },
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Join the discussion",
+                "url": "https://discord.gg/2wB7rHRDg2"
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Posted by the team • Thanks for being part of the community 💜"
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "spotlight",
+      "name": "Member spotlight",
+      "description": "A borderless gallery to feature community work.",
+      "emoji": "🌟",
+      "category": "Fun",
+      "tags": [
+        "feature",
+        "gallery",
+        "showcase",
+        "highlight",
+        "art"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "Spotlight",
+        "components": [
+          {
+            "type": 10,
+            "content": "# 🌟 Member Spotlight"
+          },
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-1.jpg"
+                },
+                "description": "Featured work 1"
+              },
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-2.jpg"
+                },
+                "description": "Featured work 2"
+              },
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-3.jpg"
+                },
+                "description": "Featured work 3"
+              },
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-4.jpg"
+                },
+                "description": "Featured work 4"
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "This week we're celebrating **@artist** for their incredible series above. Drop a 💜 to show some love, and tag us to be featured next!"
+          },
+          {
+            "type": 10,
+            "content": "-# Want the spotlight? Post in #showcase with the tag #feature-me."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "event",
+      "name": "Event / RSVP",
+      "description": "A dated event card with cover art and a working one-tap RSVP button.",
+      "emoji": "🎟️",
+      "category": "Events",
+      "tags": [
+        "event",
+        "rsvp",
+        "calendar",
+        "meetup",
+        "schedule",
+        "attendee",
+        "button"
+      ],
+      "interactive": true,
+      "pairs_with": "Self Role",
+      "message": {
+        "username": "Events",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15105570,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎟️ Community Game Night"
+              },
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "### Friday, June 20 · 8:00 PM ET\nJump into voice for a relaxed evening of party games. All skill levels welcome — bring a friend!"
+                  }
+                ],
+                "accessory": {
+                  "type": 11,
+                  "media": {
+                    "url": "http://localhost:5173/media/defaults/dweeb-event-thumb.jpg"
+                  },
+                  "description": "Event cover"
+                }
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**📍 Where:** Game Night voice channel\n**🎮 Playing:** Jackbox, Gartic Phone & more\n**👥 Spots:** Unlimited"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 3,
+                    "label": "RSVP — I'm in!",
+                    "emoji": {
+                      "name": "🎟️"
+                    },
+                    "custom_id": "event_rsvp"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Add to calendar",
+                    "url": "https://example.com/event.ics"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Event details",
+                    "url": "https://example.com/event"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# RSVP grants the Attendee role so we can ping everyone who's coming — tap again to bow out. Set a role expiry and it cleans itself up after the event."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "giveaway-button",
+      "name": "Giveaway",
+      "description": "One-click entry — the prize, live entrant count, and winners fill themselves in.",
+      "emoji": "🎉",
+      "category": "Events",
+      "tags": [
+        "prize",
+        "raffle",
+        "contest",
+        "button",
+        "enter",
+        "winner"
+      ],
+      "interactive": true,
+      "pairs_with": "Giveaway",
+      "message": {
+        "username": "Giveaways",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 16705372,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎉 GIVEAWAY 🎉"
+              },
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "### 🎁 {prize}\nTap **Enter** below — the count ticks up live and a fair winner is drawn on its own."
+                  }
+                ],
+                "accessory": {
+                  "type": 11,
+                  "media": {
+                    "url": "http://localhost:5173/media/defaults/dweeb-giveaway-prize.jpg"
+                  },
+                  "description": "Prize"
+                }
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🏆 Winners:** {winner_count} • **👥 Entered:** {entries} • **✨ Status:** {status}\n**🎊 Winner(s):** {winners}"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 3,
+                    "label": "Enter Giveaway",
+                    "emoji": {
+                      "name": "🎉"
+                    },
+                    "custom_id": "giveaway_enter"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🍀 Open to everyone in {server} • one entry per person • winners drawn at random"
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "server-directory",
+      "name": "Server directory",
+      "description": "One message that finds any channel, role, or member — all select types in one.",
+      "emoji": "🗂️",
+      "category": "Community",
+      "tags": [
+        "directory",
+        "search",
+        "find",
+        "lookup",
+        "channels",
+        "roles",
+        "members",
+        "select",
+        "menu",
+        "picker",
+        "resources"
+      ],
+      "interactive": true,
+      "pairs_with": "Picker",
+      "message": {
+        "username": "Server Directory",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 1752220,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🗂️ Server Directory\nOne message to find anything in **{server}** — channels, roles, and members. Pick from a menu and your results come back **privately**, with clickable mentions to jump straight there."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**🧭 Channels** — find a place to read, post, or hop into voice."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 8,
+                    "custom_id": "directory_channels",
+                    "placeholder": "Search for a channel…",
+                    "min_values": 1,
+                    "max_values": 5
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🎭 Roles** — look up a role and who carries it."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 6,
+                    "custom_id": "directory_roles",
+                    "placeholder": "Browse roles…",
+                    "min_values": 1,
+                    "max_values": 5
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**👋 Members** — search for a member or staffer."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 5,
+                    "custom_id": "directory_members",
+                    "placeholder": "Look up a member…",
+                    "min_values": 1,
+                    "max_values": 5
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🔎 Find anything** — not sure what it is? Search members and roles together."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 7,
+                    "custom_id": "directory_anything",
+                    "placeholder": "Find any member or role…",
+                    "min_values": 1,
+                    "max_values": 5
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Wire each menu to the Picker plugin — every result is private to whoever searched. Pick up to five at a time."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "help-center",
+      "name": "Help center",
+      "description": "Instant FAQ answers plus topic tickets — two plugins working in one panel.",
+      "emoji": "🛟",
+      "category": "Support",
+      "tags": [
+        "help",
+        "support",
+        "faq",
+        "tickets",
+        "menu",
+        "select",
+        "self-serve",
+        "hub"
+      ],
+      "interactive": true,
+      "pairs_with": "Quick Replies + Tickets",
+      "message": {
+        "username": "Help Center",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 3447003,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🛟 Help Center\nEverything in one place — grab an instant answer, or open a private ticket with the team."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**⚡ Instant answers** — the questions we get every day, answered on the spot."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 3,
+                    "custom_id": "help_faq",
+                    "placeholder": "Browse common questions…",
+                    "min_values": 1,
+                    "max_values": 1,
+                    "options": [
+                      {
+                        "label": "How do I get roles?",
+                        "value": "faq_roles",
+                        "description": "Pick them up yourself in seconds",
+                        "emoji": {
+                          "name": "🙋"
+                        }
+                      },
+                      {
+                        "label": "How do I report someone?",
+                        "value": "faq_report",
+                        "description": "The right way to flag rule-breaking",
+                        "emoji": {
+                          "name": "🚨"
+                        }
+                      },
+                      {
+                        "label": "Where are the invite & socials?",
+                        "value": "faq_links",
+                        "description": "Share the server or follow us",
+                        "emoji": {
+                          "name": "🔗"
+                        }
+                      },
+                      {
+                        "label": "Something's broken",
+                        "value": "faq_bug",
+                        "description": "Where to send bug reports",
+                        "emoji": {
+                          "name": "🐛"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🎫 Talk to the team** — pick a topic and a private ticket opens just for you."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 3,
+                    "custom_id": "help_topics",
+                    "placeholder": "Open a ticket…",
+                    "min_values": 1,
+                    "max_values": 1,
+                    "options": [
+                      {
+                        "label": "General help",
+                        "value": "topic_general",
+                        "description": "Questions and general support",
+                        "emoji": {
+                          "name": "❓"
+                        }
+                      },
+                      {
+                        "label": "Report a player",
+                        "value": "topic_report",
+                        "description": "Report rule-breaking privately",
+                        "emoji": {
+                          "name": "🚨"
+                        }
+                      },
+                      {
+                        "label": "Billing / store",
+                        "value": "topic_billing",
+                        "description": "Purchases and payments",
+                        "emoji": {
+                          "name": "🛒"
+                        }
+                      },
+                      {
+                        "label": "Something else",
+                        "value": "topic_other",
+                        "description": "Anything not listed",
+                        "emoji": {
+                          "name": "💬"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Answers arrive privately — only you see them. Tickets open a private channel with staff."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "staff-directory",
+      "name": "Staff directory",
+      "description": "Your staff list written into the message — everyone reads it without clicking, and a refresh keeps it current.",
+      "emoji": "🛡️",
+      "category": "Community",
+      "tags": [
+        "staff",
+        "team",
+        "moderators",
+        "mods",
+        "admins",
+        "roster",
+        "who",
+        "roles",
+        "channels",
+        "directory",
+        "live",
+        "meet the team"
+      ],
+      "interactive": true,
+      "pairs_with": "Directory",
+      "message": {
+        "username": "Server Info",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🛡️ Meet the team\nThe teams keeping **{server}** running, and what each one can do. This list is live — it reads the server every time it's refreshed, so a renamed or newly added role shows up on its own."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "{directory}"
+              },
+              {
+                "type": 10,
+                "content": "-# {directory_count} roles · updated {directory_updated}"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 2,
+                    "label": "Refresh",
+                    "emoji": {
+                      "name": "🔄"
+                    },
+                    "custom_id": "dir_staff_inline"
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**🧭 Lost?** Get a private guide to every channel in the server, each with what it's for."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Channel guide",
+                    "emoji": {
+                      "name": "🧭"
+                    },
+                    "custom_id": "dir_channel_guide"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "poll",
+      "name": "Poll",
+      "description": "A live poll with real ballots — bars, counts and status update on the message.",
+      "emoji": "📊",
+      "category": "Events",
+      "tags": [
+        "vote",
+        "survey",
+        "question",
+        "ballot",
+        "results",
+        "select"
+      ],
+      "interactive": true,
+      "pairs_with": "Poll",
+      "message": {
+        "username": "Polls",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 3447003,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 📊 Community Poll\n**{question}**"
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "{results}"
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "> 🗳️ **{votes}** ballots cast · status: **{status}**\n> One ballot each — pick below, change it anytime."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 3,
+                    "custom_id": "poll_select",
+                    "placeholder": "Cast your vote…",
+                    "min_values": 1,
+                    "max_values": 1,
+                    "options": [
+                      {
+                        "label": "Movie night",
+                        "value": "o1",
+                        "description": "Popcorn and a big screen",
+                        "emoji": {
+                          "name": "🍿"
+                        }
+                      },
+                      {
+                        "label": "Game tournament",
+                        "value": "o2",
+                        "description": "Bracket, prizes, glory",
+                        "emoji": {
+                          "name": "🎮"
+                        }
+                      },
+                      {
+                        "label": "Art jam",
+                        "value": "o3",
+                        "description": "Draw together on a theme",
+                        "emoji": {
+                          "name": "🎨"
+                        }
+                      },
+                      {
+                        "label": "Q&A with the team",
+                        "value": "o4",
+                        "description": "Ask the mods anything",
+                        "emoji": {
+                          "name": "🎤"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🔒 Ballots are anonymous — the results update live on this message."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "reaction-roles",
+      "name": "Role menu",
+      "description": "A select menu members use to self-assign roles by interest.",
+      "emoji": "🎭",
+      "category": "Community",
+      "tags": [
+        "self role",
+        "reaction roles",
+        "menu",
+        "select",
+        "interests",
+        "pings"
+      ],
+      "interactive": true,
+      "pairs_with": "Self Role",
+      "message": {
+        "username": "Roles",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎭 Pick your roles\nChoose what you're into — it unlocks channels and pings for the things you care about."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Open the menu and select any that fit. Pick as many as you like."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 3,
+                    "custom_id": "reaction_roles",
+                    "placeholder": "Choose your interests…",
+                    "min_values": 0,
+                    "max_values": 4,
+                    "options": [
+                      {
+                        "label": "Gaming",
+                        "value": "gaming",
+                        "description": "Squad up and find players",
+                        "emoji": {
+                          "name": "🎮"
+                        }
+                      },
+                      {
+                        "label": "Art & Design",
+                        "value": "art",
+                        "description": "Share and critique creative work",
+                        "emoji": {
+                          "name": "🎨"
+                        }
+                      },
+                      {
+                        "label": "Music",
+                        "value": "music",
+                        "description": "Recommendations and listening parties",
+                        "emoji": {
+                          "name": "🎵"
+                        }
+                      },
+                      {
+                        "label": "Movies & TV",
+                        "value": "movies",
+                        "description": "Watch parties and hot takes",
+                        "emoji": {
+                          "name": "🍿"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Wire the menu to the Self Role plugin so picks instantly grant/remove roles."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "links",
+      "name": "Link hub",
+      "description": "All your social links as tidy rows of buttons.",
+      "emoji": "🔗",
+      "category": "Fun",
+      "tags": [
+        "social",
+        "links",
+        "linktree",
+        "follow",
+        "buttons"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "Links",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 10181046,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🔗 Find us everywhere\nFollow along and never miss a thing."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "🌐 Website",
+                    "url": "https://example.com"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "🐦 Twitter / X",
+                    "url": "https://twitter.com"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "📺 YouTube",
+                    "url": "https://youtube.com"
+                  }
+                ]
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "📸 Instagram",
+                    "url": "https://instagram.com"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "🎵 TikTok",
+                    "url": "https://tiktok.com"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "💜 Support us",
+                    "url": "https://example.com/donate"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "product",
+      "name": "Product card",
+      "description": "A shop listing with thumbnail, rating, and buy link.",
+      "emoji": "✨",
+      "category": "Commerce",
+      "tags": [
+        "shop",
+        "store",
+        "product",
+        "sell",
+        "buy"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "Shop",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "# ✨ Aurora Hoodie\n**$48.00** · Free shipping over $50\n\nUltra-soft brushed fleece in three colourways. Runs true to size."
+                  }
+                ],
+                "accessory": {
+                  "type": 11,
+                  "media": {
+                    "url": "http://localhost:5173/media/defaults/dweeb-product-hoodie.jpg"
+                  },
+                  "description": "Aurora Hoodie"
+                }
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "⭐ **4.8/5** from 320+ reviews · 🚚 Ships in 1–2 business days"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Buy now",
+                    "url": "https://example.com/product"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "View sizing",
+                    "url": "https://example.com/sizing"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "pricing",
+      "name": "Pricing tiers",
+      "description": "Three side-by-side plans with an upgrade call-to-action.",
+      "emoji": "💎",
+      "category": "Commerce",
+      "tags": [
+        "plans",
+        "membership",
+        "subscription",
+        "tiers",
+        "pricing"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "Pricing",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5763719,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 💎 Membership Tiers\nPick the plan that fits — upgrade or cancel any time."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "### 🌱 Free — $0\n- Access to public channels\n- Community events\n- Basic role"
+              },
+              {
+                "type": 10,
+                "content": "### ⭐ Plus — $5/mo\n- Everything in Free\n- Members-only channels\n- Custom colour role\n- Priority support"
+              },
+              {
+                "type": 10,
+                "content": "### 🚀 Pro — $12/mo\n- Everything in Plus\n- Early access drops\n- Monthly AMA seat\n- Shiny Pro badge"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Upgrade now",
+                    "url": "https://example.com/upgrade"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Prices in USD • Cancel anytime • 7-day money-back guarantee"
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "rules",
+      "name": "Server rules",
+      "description": "A clean, numbered rulebook with a consequences note.",
+      "emoji": "📜",
+      "category": "Welcome",
+      "tags": [
+        "guidelines",
+        "moderation",
+        "terms",
+        "conduct"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "Server Rules",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5763719,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 📜 Server Rules\nWelcome! Being here means you agree to follow these."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**1.** Be respectful — no harassment, hate speech, or discrimination.\n**2.** Keep it civil — no spam, flooding, or wall-to-wall caps.\n**3.** Use the right channels and stay on topic.\n**4.** No NSFW, gore, or illegal content.\n**5.** No unsolicited advertising or DM spam.\n**6.** Follow staff direction — their word is final."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "> Breaking the rules may lead to a warning, mute, kick, or ban depending on severity."
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Last updated June 2026 • Questions? Ask a moderator."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "channel-guide",
+      "name": "Channel guide",
+      "description": "Map out where everything lives so newcomers don't get lost.",
+      "emoji": "🧭",
+      "category": "Welcome",
+      "tags": [
+        "onboarding",
+        "navigation",
+        "channels",
+        "map",
+        "directory"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "Server Guide",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 1752220,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🧭 Find your way around\nA quick map of where everything lives."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🚪 Start here**\n**#welcome** — you are here\n**#rules** — the house rules\n**#announcements** — important updates"
+              },
+              {
+                "type": 10,
+                "content": "**💬 Hang out**\n**#general** — everyday chatter\n**#introductions** — say hello\n**#media** — share your pics & clips"
+              },
+              {
+                "type": 10,
+                "content": "**🛟 Need help?**\n**#support** — open a ticket\n**#faq** — answers to common questions"
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Tip: long-press (or right-click) any channel to mute or favourite it."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "suggestions",
+      "name": "Suggestion box",
+      "description": "A share-an-idea button that pops a form and forwards ideas to the team.",
+      "emoji": "💡",
+      "category": "Community",
+      "tags": [
+        "suggestions",
+        "ideas",
+        "feedback",
+        "form",
+        "modal",
+        "button"
+      ],
+      "interactive": true,
+      "pairs_with": "Modal Form",
+      "message": {
+        "username": "Suggestions",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 16705372,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 💡 Suggestion Box\nGot an idea to make **{server}** better? We want to hear it — big or small."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**What makes a great suggestion**\n- 🎯 One idea per submission\n- 📝 Say what problem it solves\n- 🔍 Check it hasn't been suggested already"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Share an idea",
+                    "emoji": {
+                      "name": "💡"
+                    },
+                    "custom_id": "suggest_idea"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# The button opens a pop-up form — your idea goes straight to the team, and you get a private confirmation."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "introductions",
+      "name": "Introductions",
+      "description": "A one-tap form that gets new members introducing themselves — no copy-paste.",
+      "emoji": "🙋",
+      "category": "Community",
+      "tags": [
+        "intro",
+        "icebreaker",
+        "about",
+        "prompt",
+        "form",
+        "modal"
+      ],
+      "interactive": true,
+      "pairs_with": "Modal Form",
+      "message": {
+        "username": "Introductions",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🙋 Introduce yourself!\nNew here? Tap the button below, fill in a quick form, and your intro posts right here so everyone can say hi."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**We'd love to know**\n- 🙂 Your name or nickname\n- 🌍 Where you're from\n- ✨ What brought you here\n- 🎯 A hobby or what you're currently into"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Introduce yourself",
+                    "emoji": {
+                      "name": "🙋"
+                    },
+                    "custom_id": "introduce_self"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# The button opens a quick pop-up form — don't be shy, everyone started with their first message. 😊"
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "staff-apps",
+      "name": "Staff applications",
+      "description": "A recruitment panel with a pop-up application form — one entry per person.",
+      "emoji": "🛡️",
+      "category": "Community",
+      "tags": [
+        "staff",
+        "moderator",
+        "application",
+        "recruit",
+        "apply",
+        "form",
+        "modal"
+      ],
+      "interactive": true,
+      "pairs_with": "Modal Form",
+      "message": {
+        "username": "Staff Team",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15548997,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🛡️ Join the team\n**{server}** is growing and we're looking for moderators and helpers to keep it awesome."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**What we look for**\n- 🕒 Active a few hours a week\n- 🤝 Calm, fair, and friendly under pressure\n- 🧠 Knows the rules inside out"
+              },
+              {
+                "type": 10,
+                "content": "**What you get**\n- 🛡️ The staff role and badge\n- 🔧 Access to staff channels and tools\n- 💜 A real say in where the server goes"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Apply now",
+                    "emoji": {
+                      "name": "📋"
+                    },
+                    "custom_id": "staff_apply"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Applying opens a pop-up questionnaire that goes straight to the review team — one application per person."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "patch-notes",
+      "name": "Patch notes",
+      "description": "Tidy New / Improved / Fixed changelog sections.",
+      "emoji": "🛠️",
+      "category": "Community",
+      "tags": [
+        "changelog",
+        "release",
+        "update",
+        "version",
+        "notes"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "Changelog",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 10181046,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🛠️ Patch Notes — v2.4\n-# Released June 16, 2026"
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "### ✨ New\n- Added dark-mode dashboards\n- You can now pin up to 10 favourites"
+              },
+              {
+                "type": 10,
+                "content": "### 🔧 Improved\n- 30% faster load times\n- Cleaner mobile layout"
+              },
+              {
+                "type": 10,
+                "content": "### 🐛 Fixed\n- Notifications no longer double-fire\n- Squashed a rare crash on export"
+              }
+            ]
+          },
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Full changelog",
+                "url": "https://example.com/changelog"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "faq",
+      "name": "FAQ",
+      "description": "Common questions answered up front to cut repeat pings.",
+      "emoji": "❓",
+      "category": "Support",
+      "tags": [
+        "help",
+        "questions",
+        "answers",
+        "support"
+      ],
+      "interactive": false,
+      "pairs_with": null,
+      "message": {
+        "username": "FAQ",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 1752220,
+            "components": [
+              {
+                "type": 10,
+                "content": "# ❓ Frequently Asked Questions"
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**How do I get roles?**\nHead to **#get-roles** and pick from the menu — they apply instantly."
+              },
+              {
+                "type": 10,
+                "content": "**How do I report someone?**\nOpen a ticket in **#support** or DM a moderator with details."
+              },
+              {
+                "type": 10,
+                "content": "**Can I promote my own stuff?**\nOnly in **#self-promo**, and please keep it occasional."
+              },
+              {
+                "type": 10,
+                "content": "**I found a bug — where do I post it?**\nDrop it in **#feedback** with steps to reproduce. Thank you! 🙏"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "verify",
+      "name": "Verification gate",
+      "description": "A one-click verify button to unlock the server.",
+      "emoji": "✅",
+      "category": "Welcome",
+      "tags": [
+        "verify",
+        "gate",
+        "human",
+        "captcha",
+        "role",
+        "button",
+        "origin",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Member Origin Role",
+      "message": {
+        "username": "Verification",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5763719,
+            "components": [
+              {
+                "type": 10,
+                "content": "# ✅ One last step\nClick the button below to verify you're human and unlock the rest of the server."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "By verifying you confirm you've read and agree to the **#rules**. Welcome aboard! 🎉"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Verify me",
+                    "emoji": {
+                      "name": "✅"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/member-origin-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified members in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/member-origin-role/members/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "youtube-sub-role",
+      "name": "YouTube subscriber role",
+      "description": "Subscribers link YouTube with one click and get their role.",
+      "emoji": "▶️",
+      "category": "Roles",
+      "tags": [
+        "youtube",
+        "subscriber",
+        "creator",
+        "oauth",
+        "verify",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "YouTube Subscriber Role",
+      "message": {
+        "username": "Subscriber Perks",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15548997,
+            "components": [
+              {
+                "type": 10,
+                "content": "# ▶️ Claim your Subscriber role\nSubscribed on YouTube? Link your account with one click and get the **Subscriber** role automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Sign-in uses Google OAuth — we never see your password, and you can unlink anytime."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link YouTube",
+                    "emoji": {
+                      "name": "▶️"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/youtube-subscriber-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review linked subscribers in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/youtube-subscriber-role/subscribers/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "twitch-follower",
+      "name": "Twitch follower role",
+      "description": "Followers and Tier 1/2/3 subs get live-updating channel roles.",
+      "emoji": "📺",
+      "category": "Roles",
+      "tags": [
+        "twitch",
+        "follower",
+        "subscriber",
+        "tier",
+        "stream",
+        "verify",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Twitch Follower Role",
+      "message": {
+        "username": "Stream Crew",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 10181046,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 📺 Link your Twitch\nFollowers and subs get their roles here — **Follower**, and **Tier 1 / 2 / 3** roles update in real time as your sub status changes."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Link once and you're done — roles follow your Twitch status automatically. 💜"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link Twitch",
+                    "emoji": {
+                      "name": "📺"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/twitch-follower-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review linked viewers in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/twitch-follower-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "roblox-verify",
+      "name": "Roblox verification",
+      "description": "Players verify their Roblox account and get stat-based roles.",
+      "emoji": "🧱",
+      "category": "Roles",
+      "tags": [
+        "roblox",
+        "gamepass",
+        "group rank",
+        "badges",
+        "verify",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Roblox Player Role",
+      "message": {
+        "username": "Roblox Check-in",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15548997,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🧱 Verify your Roblox account\nLink your Roblox account to unlock roles for account age, badges, gamepasses, group rank — even your in-game stats."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Verification is through Roblox's official sign-in — no passwords, no follow-for-proof tricks."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Verify Roblox",
+                    "emoji": {
+                      "name": "🧱"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/roblox-player-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/roblox-player-role/players/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "genshin-verify",
+      "name": "Genshin verification",
+      "description": "Players link their UID and get AR, World Level and Abyss roles.",
+      "emoji": "⚔️",
+      "category": "Roles",
+      "tags": [
+        "genshin",
+        "genshin impact",
+        "uid",
+        "adventure rank",
+        "verify",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Genshin Player Role",
+      "message": {
+        "username": "Traveler Check-in",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 1752220,
+            "components": [
+              {
+                "type": 10,
+                "content": "# ⚔️ Verify your Genshin account\nLink your UID to unlock traveler roles — Adventure Rank, World Level, Spiral Abyss and region roles are granted automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Set your in-game profile to public first, then verify — it only takes a minute. ✨"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Verify my UID",
+                    "emoji": {
+                      "name": "⚔️"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/genshin-player-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/genshin-player-role/players/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "steam-verify",
+      "name": "Steam verification",
+      "description": "Players sign in via Steam and get roles for games and playtime.",
+      "emoji": "🎮",
+      "category": "Roles",
+      "tags": [
+        "steam",
+        "openid",
+        "playtime",
+        "games",
+        "achievements",
+        "verify",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Steam Player Role",
+      "message": {
+        "username": "Steam Check-in",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 3447003,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎮 Verify your Steam profile\nSign in through Steam and get roles for the games you own, your playtime, achievements and Steam level — automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Verification uses Steam's own OpenID sign-in — set your profile to public so your stats can be read."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link Steam",
+                    "emoji": {
+                      "name": "🎮"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/steam-player-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/steam-player-role/players/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "tiktok-creator",
+      "name": "TikTok creator role",
+      "description": "Creators link TikTok and get follower- and badge-based roles.",
+      "emoji": "🎵",
+      "category": "Roles",
+      "tags": [
+        "tiktok",
+        "creator",
+        "follower",
+        "verified",
+        "verify",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "TikTok Creator Role",
+      "message": {
+        "username": "Creator Corner",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎵 TikTok creator? Prove it\nLink your TikTok account and get creator roles based on your follower count, verified badge, videos and likes."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Sign-in uses TikTok's official Login Kit — takes under a minute, unlink anytime."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link TikTok",
+                    "emoji": {
+                      "name": "🎵"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/tiktok-creator-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: manage creator tiers in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftiktok-creator-role)."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "topgg-vote",
+      "name": "Top.gg vote rewards",
+      "description": "A vote-for-us button that pays voters back with a temporary role.",
+      "emoji": "🗳️",
+      "category": "Roles",
+      "tags": [
+        "topgg",
+        "top.gg",
+        "vote",
+        "voter",
+        "upvote",
+        "reward",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Top.gg Voter Role",
+      "message": {
+        "username": "Vote Rewards",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🗳️ Vote for us on Top.gg\nA vote takes ten seconds and helps new members find us — and it earns you the exclusive **Voter** role as thanks."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "The role expires after a while, so vote again whenever the cooldown resets to keep it. 💜"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Vote on Top.gg",
+                    "emoji": {
+                      "name": "🗳️"
+                    },
+                    "url": "https://top.gg/discord/servers/{server_id}/vote"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: connect your Top.gg vote webhook in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftopgg-voter-role)."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "birthdays",
+      "name": "Birthday roles",
+      "description": "Members set their birthday once and get the role on the day.",
+      "emoji": "🎂",
+      "category": "Roles",
+      "tags": [
+        "birthday",
+        "bday",
+        "zodiac",
+        "celebration",
+        "timezone",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Birthday Role",
+      "message": {
+        "username": "Birthdays",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 16705372,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎂 Tell us your birthday\nSet it once and the magic happens on the day: a shiny **Birthday** role, plus zodiac and birth-month roles all year round."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Timezone-aware, so your role shows up on *your* midnight. The year is optional if you'd rather not share your age."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Set my birthday",
+                    "emoji": {
+                      "name": "🎂"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/birthday-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: see upcoming birthdays in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/birthday-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "form-role",
+      "name": "Form & quiz role",
+      "description": "An application form or rules quiz that grants the role itself.",
+      "emoji": "📝",
+      "category": "Roles",
+      "tags": [
+        "form",
+        "quiz",
+        "application",
+        "survey",
+        "onboarding",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Form Respondent Role",
+      "message": {
+        "username": "Applications",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 📝 Fill in the form\nAnswer a short form to get your role — applications, rules quizzes and surveys are graded automatically and the role lands instantly."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "One submission per person — take your time and answer honestly. ✅"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Open the form",
+                    "emoji": {
+                      "name": "📝"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/form-respondent-role/f/{form_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: build your form in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role), then paste its link over the button's URL."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "github-contributor",
+      "name": "GitHub contributor role",
+      "description": "Contributors link GitHub and get roles for commits, PRs and issues.",
+      "emoji": "🐙",
+      "category": "Roles",
+      "tags": [
+        "github",
+        "contributor",
+        "commits",
+        "pull requests",
+        "open source",
+        "developer",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "GitHub Contributor Role",
+      "message": {
+        "username": "GitHub Link",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 10181046,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🐙 Link your GitHub\nCommits, pull requests, merged PRs and issues — link your GitHub account and the roles you've earned as a contributor are granted automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Works with any public repository — perfect for open-source projects, hackathons and dev communities."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link GitHub",
+                    "emoji": {
+                      "name": "🐙"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/github-contributor-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: choose repos and contribution tiers in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fgithub-contributor-role)."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "osu-verify",
+      "name": "osu! verification",
+      "description": "Players link osu! and get rank, PP and accuracy roles per mode.",
+      "emoji": "🎯",
+      "category": "Roles",
+      "tags": [
+        "osu",
+        "osu!",
+        "rank",
+        "pp",
+        "rhythm game",
+        "verify",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "osu! Player Role",
+      "message": {
+        "username": "osu! Check-in",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎯 Verify your osu! account\nLink your account and earn roles for global rank, PP, play count and accuracy — per game mode, supporter and BN/GMT/NAT included."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Sign-in is osu!'s own OAuth — one click and your rank roles are live. 🩷"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link osu!",
+                    "emoji": {
+                      "name": "🎯"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/osu-player-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/osu-player-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "kick-channel",
+      "name": "Kick channel role",
+      "description": "Kick followers, subs, VIPs, mods and OGs get live channel roles.",
+      "emoji": "🎥",
+      "category": "Roles",
+      "tags": [
+        "kick",
+        "kick.com",
+        "follower",
+        "subscriber",
+        "vip",
+        "stream",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Kick Channel Role",
+      "message": {
+        "username": "Kick Crew",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5763719,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎥 Link your Kick account\nFollowers, subs, VIPs, mods and OGs — link once and your channel roles arrive in real time, gift subs and tenure included."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Sign-in uses Kick's official OAuth — no passwords shared, unlink anytime. 💚"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link Kick",
+                    "emoji": {
+                      "name": "🎥"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/kick-channel-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review linked viewers in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/kick-channel-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "bluesky-role",
+      "name": "Bluesky roles",
+      "description": "Followers, mutuals and list members get roles for linking Bluesky.",
+      "emoji": "🦋",
+      "category": "Roles",
+      "tags": [
+        "bluesky",
+        "bsky",
+        "atproto",
+        "follower",
+        "mutual",
+        "social",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Bluesky Account Role",
+      "message": {
+        "username": "Bluesky Link",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 3447003,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🦋 Link your Bluesky\nFollowers, mutuals, starter-pack and list members — link your Bluesky account and the matching roles are granted automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Account-age, follower-count and custom-domain roles work too — one link covers them all."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link Bluesky",
+                    "emoji": {
+                      "name": "🦋"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/bluesky-account-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review linked accounts in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/bluesky-account-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    },
+    {
+      "id": "referral-code",
+      "name": "Code redemption",
+      "description": "Members redeem a referral code or QR and get the matching role.",
+      "emoji": "🎟️",
+      "category": "Roles",
+      "tags": [
+        "referral",
+        "code",
+        "redeem",
+        "qr",
+        "event",
+        "giveaway",
+        "role",
+        "rolelogic"
+      ],
+      "interactive": false,
+      "pairs_with": "Referral Code Role",
+      "message": {
+        "username": "Code Redemption",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15105570,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎟️ Got a code? Redeem it here\nEnter the code from your ticket, flyer, wristband or invite and the matching role lands on your account instantly."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Codes are one-per-person and some are time-limited — redeem yours early!"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Redeem a code",
+                    "emoji": {
+                      "name": "🎟️"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/referral-code-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: create codes and QR batches in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/referral-code-role/admin?guild_id={server_id})."
+          }
+        ],
+        "flags": 32768
+      }
+    }
+  ]
+}

@@ -1,0 +1,4656 @@
+{
+  "cases": [
+    {
+      "name": "fixture:simpleText",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "Hello, world!"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "fixture:rich",
+      "message": {
+        "username": "Announcer",
+        "avatar_url": "https://example.com/avatar.png",
+        "allowed_mentions": {
+          "parse": [
+            "users"
+          ]
+        },
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "# Welcome\nGlad you're here."
+                  }
+                ],
+                "accessory": {
+                  "type": 11,
+                  "media": {
+                    "url": "https://example.com/logo.png"
+                  },
+                  "description": "Server logo"
+                }
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Docs",
+                    "url": "https://example.com/docs"
+                  },
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Verify",
+                    "custom_id": "verify_me"
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              }
+            ]
+          },
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "https://example.com/1.png"
+                },
+                "description": "One"
+              },
+              {
+                "media": {
+                  "url": "https://example.com/2.png"
+                }
+              }
+            ]
+          }
+        ],
+        "flags": 36864
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "fixture:select",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick_role",
+                "placeholder": "Choose a role",
+                "min_values": 1,
+                "max_values": 2,
+                "options": [
+                  {
+                    "label": "Red",
+                    "value": "red"
+                  },
+                  {
+                    "label": "Green",
+                    "value": "green"
+                  },
+                  {
+                    "label": "Blue",
+                    "value": "blue"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:showcase",
+      "message": {
+        "username": "DWEEB",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🧩 The Components V2 starter kit\nA hands-on tour of every block DWEEB gives you — and it's all live. **Click any component on the left to edit it**, watch the preview update instantly, then hit **Send** or **Share** when it looks right."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "**Sections** set a short stack of text beside a single accessory. Pair one with a **thumbnail** — like this — for profile cards, product shots, and tidy call-outs."
+                  }
+                ],
+                "accessory": {
+                  "type": 11,
+                  "media": {
+                    "url": "http://localhost:5173/media/defaults/dweeb-default-thumbnail.jpg"
+                  },
+                  "description": "Thumbnail accessory"
+                }
+              },
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "Give a section a **button** instead and the same layout becomes an action card: a headline, a line of detail, and one tappable action docked on the right."
+                  }
+                ],
+                "accessory": {
+                  "type": 2,
+                  "style": 5,
+                  "label": "Open",
+                  "url": "https://dweeb.faizo.net"
+                }
+              },
+              {
+                "type": 12,
+                "items": [
+                  {
+                    "media": {
+                      "url": "http://localhost:5173/media/defaults/dweeb-showcase-gallery-1.jpg"
+                    },
+                    "description": "Media galleries hold up to 10 images or clips"
+                  },
+                  {
+                    "media": {
+                      "url": "http://localhost:5173/media/defaults/dweeb-showcase-gallery-2.jpg"
+                    },
+                    "description": "Give every item its own description…"
+                  },
+                  {
+                    "media": {
+                      "url": "http://localhost:5173/media/defaults/dweeb-showcase-gallery-3.jpg"
+                    },
+                    "description": "…or mark any one of them as a spoiler"
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**Every text block speaks full Discord markdown.**\nBlend **bold**, *italic*, __underline__, ~~strikethrough~~, `inline code`, and ||spoilers|| — each renders exactly as Discord shows it. Drop in [masked links](https://dweeb.faizo.net), lists, and quotes wherever you need them:\n> Good messages look effortless. DWEEB just makes effortless easy."
+              },
+              {
+                "type": 10,
+                "content": "**There's even more in the box** — dropdown menus, clickable (non-link) buttons, and file uploads are all one tap away in the **Add component** menu."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "📖 Read the docs",
+                    "url": "https://discord.com/developers/docs/components/reference"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "💬 Join the Discord",
+                    "url": "https://discord.gg/2wB7rHRDg2"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 💡 **Posts through any webhook:** text, layout, media, and link buttons. Interactive pieces — clickable buttons and select menus — need a **bot or app** to own the webhook; a plain user webhook will reject them.\n-# Reopen this tour any time from the **Template Gallery**, or hit **Reset** (top-left) to start fresh."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:welcome",
+      "message": {
+        "username": "Welcome",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 👋 Welcome to the server!\nWe're really glad you found us. Here's everything you need to settle in."
+              },
+              {
+                "type": 12,
+                "items": [
+                  {
+                    "media": {
+                      "url": "http://localhost:5173/media/defaults/dweeb-welcome-banner.jpg"
+                    },
+                    "description": "Welcome banner"
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**Get started in three steps**\n- 📜 Read the **#rules** so everyone stays on the same page\n- 🎭 Pick up your roles in **#get-roles**\n- 💬 Say hi and introduce yourself in **#general**"
+              },
+              {
+                "type": 10,
+                "content": "Stuck on anything? A friendly mod is only a message away."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "📖 Community guide",
+                    "url": "https://example.com/guide"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "💬 Jump into chat",
+                    "url": "https://discord.gg/2wB7rHRDg2"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Glad to have you — enjoy your stay! 💜"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:announcement",
+      "message": {
+        "username": "Announcements",
+        "components": [
+          {
+            "type": 10,
+            "content": "# 📢 Announcement\n**A quick heads-up for everyone** — here's what's new and what it means for you."
+          },
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-announcement-banner.jpg"
+                },
+                "description": "Announcement banner"
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "We just rolled out a big update — faster, cleaner, and packed with the features you asked for. Skim the highlights, then dive in:\n- 🚀 Noticeably faster across the board\n- 🎨 A fresh new look\n- 🛠️ Dozens of fixes and tweaks"
+          },
+          {
+            "type": 14,
+            "divider": true,
+            "spacing": 1
+          },
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Read the full post",
+                "url": "https://example.com/announcement"
+              },
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Join the discussion",
+                "url": "https://discord.gg/2wB7rHRDg2"
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Posted by the team • Thanks for being part of the community 💜"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:spotlight",
+      "message": {
+        "username": "Spotlight",
+        "components": [
+          {
+            "type": 10,
+            "content": "# 🌟 Member Spotlight"
+          },
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-1.jpg"
+                },
+                "description": "Featured work 1"
+              },
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-2.jpg"
+                },
+                "description": "Featured work 2"
+              },
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-3.jpg"
+                },
+                "description": "Featured work 3"
+              },
+              {
+                "media": {
+                  "url": "http://localhost:5173/media/defaults/dweeb-spotlight-4.jpg"
+                },
+                "description": "Featured work 4"
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "This week we're celebrating **@artist** for their incredible series above. Drop a 💜 to show some love, and tag us to be featured next!"
+          },
+          {
+            "type": 10,
+            "content": "-# Want the spotlight? Post in #showcase with the tag #feature-me."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:event",
+      "message": {
+        "username": "Events",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15105570,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎟️ Community Game Night"
+              },
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "### Friday, June 20 · 8:00 PM ET\nJump into voice for a relaxed evening of party games. All skill levels welcome — bring a friend!"
+                  }
+                ],
+                "accessory": {
+                  "type": 11,
+                  "media": {
+                    "url": "http://localhost:5173/media/defaults/dweeb-event-thumb.jpg"
+                  },
+                  "description": "Event cover"
+                }
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**📍 Where:** Game Night voice channel\n**🎮 Playing:** Jackbox, Gartic Phone & more\n**👥 Spots:** Unlimited"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 3,
+                    "label": "RSVP — I'm in!",
+                    "emoji": {
+                      "name": "🎟️"
+                    },
+                    "custom_id": "event_rsvp"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Add to calendar",
+                    "url": "https://example.com/event.ics"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Event details",
+                    "url": "https://example.com/event"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# RSVP grants the Attendee role so we can ping everyone who's coming — tap again to bow out. Set a role expiry and it cleans itself up after the event."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:giveaway-button",
+      "message": {
+        "username": "Giveaways",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 16705372,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎉 GIVEAWAY 🎉"
+              },
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "### 🎁 {prize}\nTap **Enter** below — the count ticks up live and a fair winner is drawn on its own."
+                  }
+                ],
+                "accessory": {
+                  "type": 11,
+                  "media": {
+                    "url": "http://localhost:5173/media/defaults/dweeb-giveaway-prize.jpg"
+                  },
+                  "description": "Prize"
+                }
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🏆 Winners:** {winner_count} • **👥 Entered:** {entries} • **✨ Status:** {status}\n**🎊 Winner(s):** {winners}"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 3,
+                    "label": "Enter Giveaway",
+                    "emoji": {
+                      "name": "🎉"
+                    },
+                    "custom_id": "giveaway_enter"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🍀 Open to everyone in {server} • one entry per person • winners drawn at random"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:server-directory",
+      "message": {
+        "username": "Server Directory",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 1752220,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🗂️ Server Directory\nOne message to find anything in **{server}** — channels, roles, and members. Pick from a menu and your results come back **privately**, with clickable mentions to jump straight there."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**🧭 Channels** — find a place to read, post, or hop into voice."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 8,
+                    "custom_id": "directory_channels",
+                    "placeholder": "Search for a channel…",
+                    "min_values": 1,
+                    "max_values": 5
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🎭 Roles** — look up a role and who carries it."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 6,
+                    "custom_id": "directory_roles",
+                    "placeholder": "Browse roles…",
+                    "min_values": 1,
+                    "max_values": 5
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**👋 Members** — search for a member or staffer."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 5,
+                    "custom_id": "directory_members",
+                    "placeholder": "Look up a member…",
+                    "min_values": 1,
+                    "max_values": 5
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🔎 Find anything** — not sure what it is? Search members and roles together."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 7,
+                    "custom_id": "directory_anything",
+                    "placeholder": "Find any member or role…",
+                    "min_values": 1,
+                    "max_values": 5
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Wire each menu to the Picker plugin — every result is private to whoever searched. Pick up to five at a time."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:help-center",
+      "message": {
+        "username": "Help Center",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 3447003,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🛟 Help Center\nEverything in one place — grab an instant answer, or open a private ticket with the team."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**⚡ Instant answers** — the questions we get every day, answered on the spot."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 3,
+                    "custom_id": "help_faq",
+                    "placeholder": "Browse common questions…",
+                    "min_values": 1,
+                    "max_values": 1,
+                    "options": [
+                      {
+                        "label": "How do I get roles?",
+                        "value": "faq_roles",
+                        "description": "Pick them up yourself in seconds",
+                        "emoji": {
+                          "name": "🙋"
+                        }
+                      },
+                      {
+                        "label": "How do I report someone?",
+                        "value": "faq_report",
+                        "description": "The right way to flag rule-breaking",
+                        "emoji": {
+                          "name": "🚨"
+                        }
+                      },
+                      {
+                        "label": "Where are the invite & socials?",
+                        "value": "faq_links",
+                        "description": "Share the server or follow us",
+                        "emoji": {
+                          "name": "🔗"
+                        }
+                      },
+                      {
+                        "label": "Something's broken",
+                        "value": "faq_bug",
+                        "description": "Where to send bug reports",
+                        "emoji": {
+                          "name": "🐛"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🎫 Talk to the team** — pick a topic and a private ticket opens just for you."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 3,
+                    "custom_id": "help_topics",
+                    "placeholder": "Open a ticket…",
+                    "min_values": 1,
+                    "max_values": 1,
+                    "options": [
+                      {
+                        "label": "General help",
+                        "value": "topic_general",
+                        "description": "Questions and general support",
+                        "emoji": {
+                          "name": "❓"
+                        }
+                      },
+                      {
+                        "label": "Report a player",
+                        "value": "topic_report",
+                        "description": "Report rule-breaking privately",
+                        "emoji": {
+                          "name": "🚨"
+                        }
+                      },
+                      {
+                        "label": "Billing / store",
+                        "value": "topic_billing",
+                        "description": "Purchases and payments",
+                        "emoji": {
+                          "name": "🛒"
+                        }
+                      },
+                      {
+                        "label": "Something else",
+                        "value": "topic_other",
+                        "description": "Anything not listed",
+                        "emoji": {
+                          "name": "💬"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Answers arrive privately — only you see them. Tickets open a private channel with staff."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:staff-directory",
+      "message": {
+        "username": "Server Info",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🛡️ Meet the team\nThe teams keeping **{server}** running, and what each one can do. This list is live — it reads the server every time it's refreshed, so a renamed or newly added role shows up on its own."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "{directory}"
+              },
+              {
+                "type": 10,
+                "content": "-# {directory_count} roles · updated {directory_updated}"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 2,
+                    "label": "Refresh",
+                    "emoji": {
+                      "name": "🔄"
+                    },
+                    "custom_id": "dir_staff_inline"
+                  }
+                ]
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**🧭 Lost?** Get a private guide to every channel in the server, each with what it's for."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Channel guide",
+                    "emoji": {
+                      "name": "🧭"
+                    },
+                    "custom_id": "dir_channel_guide"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:poll",
+      "message": {
+        "username": "Polls",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 3447003,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 📊 Community Poll\n**{question}**"
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "{results}"
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "> 🗳️ **{votes}** ballots cast · status: **{status}**\n> One ballot each — pick below, change it anytime."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 3,
+                    "custom_id": "poll_select",
+                    "placeholder": "Cast your vote…",
+                    "min_values": 1,
+                    "max_values": 1,
+                    "options": [
+                      {
+                        "label": "Movie night",
+                        "value": "o1",
+                        "description": "Popcorn and a big screen",
+                        "emoji": {
+                          "name": "🍿"
+                        }
+                      },
+                      {
+                        "label": "Game tournament",
+                        "value": "o2",
+                        "description": "Bracket, prizes, glory",
+                        "emoji": {
+                          "name": "🎮"
+                        }
+                      },
+                      {
+                        "label": "Art jam",
+                        "value": "o3",
+                        "description": "Draw together on a theme",
+                        "emoji": {
+                          "name": "🎨"
+                        }
+                      },
+                      {
+                        "label": "Q&A with the team",
+                        "value": "o4",
+                        "description": "Ask the mods anything",
+                        "emoji": {
+                          "name": "🎤"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🔒 Ballots are anonymous — the results update live on this message."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:reaction-roles",
+      "message": {
+        "username": "Roles",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎭 Pick your roles\nChoose what you're into — it unlocks channels and pings for the things you care about."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Open the menu and select any that fit. Pick as many as you like."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 3,
+                    "custom_id": "reaction_roles",
+                    "placeholder": "Choose your interests…",
+                    "min_values": 0,
+                    "max_values": 4,
+                    "options": [
+                      {
+                        "label": "Gaming",
+                        "value": "gaming",
+                        "description": "Squad up and find players",
+                        "emoji": {
+                          "name": "🎮"
+                        }
+                      },
+                      {
+                        "label": "Art & Design",
+                        "value": "art",
+                        "description": "Share and critique creative work",
+                        "emoji": {
+                          "name": "🎨"
+                        }
+                      },
+                      {
+                        "label": "Music",
+                        "value": "music",
+                        "description": "Recommendations and listening parties",
+                        "emoji": {
+                          "name": "🎵"
+                        }
+                      },
+                      {
+                        "label": "Movies & TV",
+                        "value": "movies",
+                        "description": "Watch parties and hot takes",
+                        "emoji": {
+                          "name": "🍿"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Wire the menu to the Self Role plugin so picks instantly grant/remove roles."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:links",
+      "message": {
+        "username": "Links",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 10181046,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🔗 Find us everywhere\nFollow along and never miss a thing."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "🌐 Website",
+                    "url": "https://example.com"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "🐦 Twitter / X",
+                    "url": "https://twitter.com"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "📺 YouTube",
+                    "url": "https://youtube.com"
+                  }
+                ]
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "📸 Instagram",
+                    "url": "https://instagram.com"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "🎵 TikTok",
+                    "url": "https://tiktok.com"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "💜 Support us",
+                    "url": "https://example.com/donate"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:product",
+      "message": {
+        "username": "Shop",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 9,
+                "components": [
+                  {
+                    "type": 10,
+                    "content": "# ✨ Aurora Hoodie\n**$48.00** · Free shipping over $50\n\nUltra-soft brushed fleece in three colourways. Runs true to size."
+                  }
+                ],
+                "accessory": {
+                  "type": 11,
+                  "media": {
+                    "url": "http://localhost:5173/media/defaults/dweeb-product-hoodie.jpg"
+                  },
+                  "description": "Aurora Hoodie"
+                }
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "⭐ **4.8/5** from 320+ reviews · 🚚 Ships in 1–2 business days"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Buy now",
+                    "url": "https://example.com/product"
+                  },
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "View sizing",
+                    "url": "https://example.com/sizing"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:pricing",
+      "message": {
+        "username": "Pricing",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5763719,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 💎 Membership Tiers\nPick the plan that fits — upgrade or cancel any time."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "### 🌱 Free — $0\n- Access to public channels\n- Community events\n- Basic role"
+              },
+              {
+                "type": 10,
+                "content": "### ⭐ Plus — $5/mo\n- Everything in Free\n- Members-only channels\n- Custom colour role\n- Priority support"
+              },
+              {
+                "type": 10,
+                "content": "### 🚀 Pro — $12/mo\n- Everything in Plus\n- Early access drops\n- Monthly AMA seat\n- Shiny Pro badge"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Upgrade now",
+                    "url": "https://example.com/upgrade"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Prices in USD • Cancel anytime • 7-day money-back guarantee"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:rules",
+      "message": {
+        "username": "Server Rules",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5763719,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 📜 Server Rules\nWelcome! Being here means you agree to follow these."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 2
+              },
+              {
+                "type": 10,
+                "content": "**1.** Be respectful — no harassment, hate speech, or discrimination.\n**2.** Keep it civil — no spam, flooding, or wall-to-wall caps.\n**3.** Use the right channels and stay on topic.\n**4.** No NSFW, gore, or illegal content.\n**5.** No unsolicited advertising or DM spam.\n**6.** Follow staff direction — their word is final."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "> Breaking the rules may lead to a warning, mute, kick, or ban depending on severity."
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Last updated June 2026 • Questions? Ask a moderator."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:channel-guide",
+      "message": {
+        "username": "Server Guide",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 1752220,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🧭 Find your way around\nA quick map of where everything lives."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**🚪 Start here**\n**#welcome** — you are here\n**#rules** — the house rules\n**#announcements** — important updates"
+              },
+              {
+                "type": 10,
+                "content": "**💬 Hang out**\n**#general** — everyday chatter\n**#introductions** — say hello\n**#media** — share your pics & clips"
+              },
+              {
+                "type": 10,
+                "content": "**🛟 Need help?**\n**#support** — open a ticket\n**#faq** — answers to common questions"
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Tip: long-press (or right-click) any channel to mute or favourite it."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:suggestions",
+      "message": {
+        "username": "Suggestions",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 16705372,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 💡 Suggestion Box\nGot an idea to make **{server}** better? We want to hear it — big or small."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**What makes a great suggestion**\n- 🎯 One idea per submission\n- 📝 Say what problem it solves\n- 🔍 Check it hasn't been suggested already"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Share an idea",
+                    "emoji": {
+                      "name": "💡"
+                    },
+                    "custom_id": "suggest_idea"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# The button opens a pop-up form — your idea goes straight to the team, and you get a private confirmation."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:introductions",
+      "message": {
+        "username": "Introductions",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🙋 Introduce yourself!\nNew here? Tap the button below, fill in a quick form, and your intro posts right here so everyone can say hi."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**We'd love to know**\n- 🙂 Your name or nickname\n- 🌍 Where you're from\n- ✨ What brought you here\n- 🎯 A hobby or what you're currently into"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Introduce yourself",
+                    "emoji": {
+                      "name": "🙋"
+                    },
+                    "custom_id": "introduce_self"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# The button opens a quick pop-up form — don't be shy, everyone started with their first message. 😊"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:staff-apps",
+      "message": {
+        "username": "Staff Team",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15548997,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🛡️ Join the team\n**{server}** is growing and we're looking for moderators and helpers to keep it awesome."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**What we look for**\n- 🕒 Active a few hours a week\n- 🤝 Calm, fair, and friendly under pressure\n- 🧠 Knows the rules inside out"
+              },
+              {
+                "type": 10,
+                "content": "**What you get**\n- 🛡️ The staff role and badge\n- 🔧 Access to staff channels and tools\n- 💜 A real say in where the server goes"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Apply now",
+                    "emoji": {
+                      "name": "📋"
+                    },
+                    "custom_id": "staff_apply"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# Applying opens a pop-up questionnaire that goes straight to the review team — one application per person."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:patch-notes",
+      "message": {
+        "username": "Changelog",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 10181046,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🛠️ Patch Notes — v2.4\n-# Released June 16, 2026"
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "### ✨ New\n- Added dark-mode dashboards\n- You can now pin up to 10 favourites"
+              },
+              {
+                "type": 10,
+                "content": "### 🔧 Improved\n- 30% faster load times\n- Cleaner mobile layout"
+              },
+              {
+                "type": 10,
+                "content": "### 🐛 Fixed\n- Notifications no longer double-fire\n- Squashed a rare crash on export"
+              }
+            ]
+          },
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Full changelog",
+                "url": "https://example.com/changelog"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:faq",
+      "message": {
+        "username": "FAQ",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 1752220,
+            "components": [
+              {
+                "type": 10,
+                "content": "# ❓ Frequently Asked Questions"
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "**How do I get roles?**\nHead to **#get-roles** and pick from the menu — they apply instantly."
+              },
+              {
+                "type": 10,
+                "content": "**How do I report someone?**\nOpen a ticket in **#support** or DM a moderator with details."
+              },
+              {
+                "type": 10,
+                "content": "**Can I promote my own stuff?**\nOnly in **#self-promo**, and please keep it occasional."
+              },
+              {
+                "type": 10,
+                "content": "**I found a bug — where do I post it?**\nDrop it in **#feedback** with steps to reproduce. Thank you! 🙏"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:verify",
+      "message": {
+        "username": "Verification",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5763719,
+            "components": [
+              {
+                "type": 10,
+                "content": "# ✅ One last step\nClick the button below to verify you're human and unlock the rest of the server."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "By verifying you confirm you've read and agree to the **#rules**. Welcome aboard! 🎉"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Verify me",
+                    "emoji": {
+                      "name": "✅"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/member-origin-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified members in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/member-origin-role/members/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:youtube-sub-role",
+      "message": {
+        "username": "Subscriber Perks",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15548997,
+            "components": [
+              {
+                "type": 10,
+                "content": "# ▶️ Claim your Subscriber role\nSubscribed on YouTube? Link your account with one click and get the **Subscriber** role automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Sign-in uses Google OAuth — we never see your password, and you can unlink anytime."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link YouTube",
+                    "emoji": {
+                      "name": "▶️"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/youtube-subscriber-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review linked subscribers in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/youtube-subscriber-role/subscribers/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:twitch-follower",
+      "message": {
+        "username": "Stream Crew",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 10181046,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 📺 Link your Twitch\nFollowers and subs get their roles here — **Follower**, and **Tier 1 / 2 / 3** roles update in real time as your sub status changes."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Link once and you're done — roles follow your Twitch status automatically. 💜"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link Twitch",
+                    "emoji": {
+                      "name": "📺"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/twitch-follower-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review linked viewers in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/twitch-follower-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:roblox-verify",
+      "message": {
+        "username": "Roblox Check-in",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15548997,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🧱 Verify your Roblox account\nLink your Roblox account to unlock roles for account age, badges, gamepasses, group rank — even your in-game stats."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Verification is through Roblox's official sign-in — no passwords, no follow-for-proof tricks."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Verify Roblox",
+                    "emoji": {
+                      "name": "🧱"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/roblox-player-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/roblox-player-role/players/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:genshin-verify",
+      "message": {
+        "username": "Traveler Check-in",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 1752220,
+            "components": [
+              {
+                "type": 10,
+                "content": "# ⚔️ Verify your Genshin account\nLink your UID to unlock traveler roles — Adventure Rank, World Level, Spiral Abyss and region roles are granted automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Set your in-game profile to public first, then verify — it only takes a minute. ✨"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Verify my UID",
+                    "emoji": {
+                      "name": "⚔️"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/genshin-player-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/genshin-player-role/players/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:steam-verify",
+      "message": {
+        "username": "Steam Check-in",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 3447003,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎮 Verify your Steam profile\nSign in through Steam and get roles for the games you own, your playtime, achievements and Steam level — automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Verification uses Steam's own OpenID sign-in — set your profile to public so your stats can be read."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link Steam",
+                    "emoji": {
+                      "name": "🎮"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/steam-player-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/steam-player-role/players/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:tiktok-creator",
+      "message": {
+        "username": "Creator Corner",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎵 TikTok creator? Prove it\nLink your TikTok account and get creator roles based on your follower count, verified badge, videos and likes."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Sign-in uses TikTok's official Login Kit — takes under a minute, unlink anytime."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link TikTok",
+                    "emoji": {
+                      "name": "🎵"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/tiktok-creator-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: manage creator tiers in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftiktok-creator-role)."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:topgg-vote",
+      "message": {
+        "username": "Vote Rewards",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🗳️ Vote for us on Top.gg\nA vote takes ten seconds and helps new members find us — and it earns you the exclusive **Voter** role as thanks."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "The role expires after a while, so vote again whenever the cooldown resets to keep it. 💜"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Vote on Top.gg",
+                    "emoji": {
+                      "name": "🗳️"
+                    },
+                    "url": "https://top.gg/discord/servers/{server_id}/vote"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: connect your Top.gg vote webhook in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Ftopgg-voter-role)."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:birthdays",
+      "message": {
+        "username": "Birthdays",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 16705372,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎂 Tell us your birthday\nSet it once and the magic happens on the day: a shiny **Birthday** role, plus zodiac and birth-month roles all year round."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Timezone-aware, so your role shows up on *your* midnight. The year is optional if you'd rather not share your age."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Set my birthday",
+                    "emoji": {
+                      "name": "🎂"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/birthday-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: see upcoming birthdays in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/birthday-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:form-role",
+      "message": {
+        "username": "Applications",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 📝 Fill in the form\nAnswer a short form to get your role — applications, rules quizzes and surveys are graded automatically and the role lands instantly."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "One submission per person — take your time and answer honestly. ✅"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Open the form",
+                    "emoji": {
+                      "name": "📝"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/form-respondent-role/f/{form_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: build your form in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fform-respondent-role), then paste its link over the button's URL."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_LINK_URL_UNFINISHED",
+          "path": "components[0].components[3].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "template:github-contributor",
+      "message": {
+        "username": "GitHub Link",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 10181046,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🐙 Link your GitHub\nCommits, pull requests, merged PRs and issues — link your GitHub account and the roles you've earned as a contributor are granted automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Works with any public repository — perfect for open-source projects, hackathons and dev communities."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link GitHub",
+                    "emoji": {
+                      "name": "🐙"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/github-contributor-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: choose repos and contribution tiers in the [RoleLogic dashboard](https://rolelogic.faizo.net/dashboard?plugin_select=https%3A%2F%2Fplugin-rolelogic.faizo.net%2Fgithub-contributor-role)."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:osu-verify",
+      "message": {
+        "username": "osu! Check-in",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15418782,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎯 Verify your osu! account\nLink your account and earn roles for global rank, PP, play count and accuracy — per game mode, supporter and BN/GMT/NAT included."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Sign-in is osu!'s own OAuth — one click and your rank roles are live. 🩷"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link osu!",
+                    "emoji": {
+                      "name": "🎯"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/osu-player-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review verified players in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/osu-player-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:kick-channel",
+      "message": {
+        "username": "Kick Crew",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 5763719,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎥 Link your Kick account\nFollowers, subs, VIPs, mods and OGs — link once and your channel roles arrive in real time, gift subs and tenure included."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Sign-in uses Kick's official OAuth — no passwords shared, unlink anytime. 💚"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link Kick",
+                    "emoji": {
+                      "name": "🎥"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/kick-channel-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review linked viewers in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/kick-channel-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:bluesky-role",
+      "message": {
+        "username": "Bluesky Link",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 3447003,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🦋 Link your Bluesky\nFollowers, mutuals, starter-pack and list members — link your Bluesky account and the matching roles are granted automatically."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Account-age, follower-count and custom-domain roles work too — one link covers them all."
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Link Bluesky",
+                    "emoji": {
+                      "name": "🦋"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/bluesky-account-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: review linked accounts in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/bluesky-account-role/users/{server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "template:referral-code",
+      "message": {
+        "username": "Code Redemption",
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 15105570,
+            "components": [
+              {
+                "type": 10,
+                "content": "# 🎟️ Got a code? Redeem it here\nEnter the code from your ticket, flyer, wristband or invite and the matching role lands on your account instantly."
+              },
+              {
+                "type": 14,
+                "divider": true,
+                "spacing": 1
+              },
+              {
+                "type": 10,
+                "content": "Codes are one-per-person and some are time-limited — redeem yours early!"
+              },
+              {
+                "type": 1,
+                "components": [
+                  {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Redeem a code",
+                    "emoji": {
+                      "name": "🎟️"
+                    },
+                    "url": "https://plugin-rolelogic.faizo.net/referral-code-role/verify?guild={server_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": 10,
+            "content": "-# 🛡️ Admins: create codes and QR batches in the [RoleLogic dashboard](https://plugin-rolelogic.faizo.net/referral-code-role/admin?guild_id={server_id})."
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "empty-message",
+      "message": {
+        "components": [],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "EMPTY_MESSAGE",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "too-many-top-level",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "block 0"
+          },
+          {
+            "type": 10,
+            "content": "block 1"
+          },
+          {
+            "type": 10,
+            "content": "block 2"
+          },
+          {
+            "type": 10,
+            "content": "block 3"
+          },
+          {
+            "type": 10,
+            "content": "block 4"
+          },
+          {
+            "type": 10,
+            "content": "block 5"
+          },
+          {
+            "type": 10,
+            "content": "block 6"
+          },
+          {
+            "type": 10,
+            "content": "block 7"
+          },
+          {
+            "type": 10,
+            "content": "block 8"
+          },
+          {
+            "type": 10,
+            "content": "block 9"
+          },
+          {
+            "type": 10,
+            "content": "block 10"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "TOP_LEVEL_LIMIT",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "too-many-components",
+      "message": {
+        "components": [
+          {
+            "type": 17,
+            "components": [
+              {
+                "type": 10,
+                "content": "c0"
+              },
+              {
+                "type": 10,
+                "content": "c1"
+              },
+              {
+                "type": 10,
+                "content": "c2"
+              },
+              {
+                "type": 10,
+                "content": "c3"
+              },
+              {
+                "type": 10,
+                "content": "c4"
+              },
+              {
+                "type": 10,
+                "content": "c5"
+              },
+              {
+                "type": 10,
+                "content": "c6"
+              },
+              {
+                "type": 10,
+                "content": "c7"
+              },
+              {
+                "type": 10,
+                "content": "c8"
+              },
+              {
+                "type": 10,
+                "content": "c9"
+              },
+              {
+                "type": 10,
+                "content": "c10"
+              },
+              {
+                "type": 10,
+                "content": "c11"
+              },
+              {
+                "type": 10,
+                "content": "c12"
+              },
+              {
+                "type": 10,
+                "content": "c13"
+              },
+              {
+                "type": 10,
+                "content": "c14"
+              },
+              {
+                "type": 10,
+                "content": "c15"
+              },
+              {
+                "type": 10,
+                "content": "c16"
+              },
+              {
+                "type": 10,
+                "content": "c17"
+              },
+              {
+                "type": 10,
+                "content": "c18"
+              },
+              {
+                "type": 10,
+                "content": "c19"
+              },
+              {
+                "type": 10,
+                "content": "c20"
+              },
+              {
+                "type": 10,
+                "content": "c21"
+              },
+              {
+                "type": 10,
+                "content": "c22"
+              },
+              {
+                "type": 10,
+                "content": "c23"
+              },
+              {
+                "type": 10,
+                "content": "c24"
+              },
+              {
+                "type": 10,
+                "content": "c25"
+              },
+              {
+                "type": 10,
+                "content": "c26"
+              },
+              {
+                "type": 10,
+                "content": "c27"
+              },
+              {
+                "type": 10,
+                "content": "c28"
+              },
+              {
+                "type": 10,
+                "content": "c29"
+              },
+              {
+                "type": 10,
+                "content": "c30"
+              },
+              {
+                "type": 10,
+                "content": "c31"
+              },
+              {
+                "type": 10,
+                "content": "c32"
+              },
+              {
+                "type": 10,
+                "content": "c33"
+              },
+              {
+                "type": 10,
+                "content": "c34"
+              },
+              {
+                "type": 10,
+                "content": "c35"
+              },
+              {
+                "type": 10,
+                "content": "c36"
+              },
+              {
+                "type": 10,
+                "content": "c37"
+              },
+              {
+                "type": 10,
+                "content": "c38"
+              },
+              {
+                "type": 10,
+                "content": "c39"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "CONTAINER_CHILDREN_LIMIT",
+          "path": "components[0]"
+        },
+        {
+          "code": "TOTAL_COMPONENT_LIMIT",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "too-many-characters",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "TEXT_TOO_LONG",
+          "path": "components[0]"
+        },
+        {
+          "code": "TOTAL_CHARACTER_LIMIT",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "astral-characters-count-as-two",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "TEXT_TOO_LONG",
+          "path": "components[0]"
+        },
+        {
+          "code": "TOTAL_CHARACTER_LIMIT",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "astral-characters-under-the-cap",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "username-too-long",
+      "message": {
+        "username": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "USERNAME_TOO_LONG",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "username-reserved",
+      "message": {
+        "username": "Discord Alerts",
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "USERNAME_RESERVED",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "avatar-url-bad",
+      "message": {
+        "avatar_url": "not a url",
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": [
+        {
+          "code": "AVATAR_URL_INVALID",
+          "path": null
+        }
+      ]
+    },
+    {
+      "name": "avatar-url-long",
+      "message": {
+        "avatar_url": "https://example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "AVATAR_URL_TOO_LONG",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "avatar-url-placeholder-is-fine",
+      "message": {
+        "avatar_url": "{server_icon}",
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "allowed-mentions-conflicts",
+      "message": {
+        "allowed_mentions": {
+          "parse": [
+            "roles",
+            "users"
+          ],
+          "roles": [
+            "123456789012345678"
+          ],
+          "users": [
+            "123456789012345678"
+          ]
+        },
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "ALLOWED_MENTIONS_CONFLICT_ROLES",
+          "path": null
+        },
+        {
+          "code": "ALLOWED_MENTIONS_CONFLICT_USERS",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "allowed-mentions-bad-ids",
+      "message": {
+        "allowed_mentions": {
+          "roles": [
+            "nope"
+          ],
+          "users": [
+            "also-nope"
+          ]
+        },
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "ALLOWED_MENTIONS_BAD_ROLE",
+          "path": null
+        },
+        {
+          "code": "ALLOWED_MENTIONS_BAD_USER",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "thread-name-long",
+      "message": {
+        "thread_name": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "THREAD_NAME_LONG",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "applied-tags-problems",
+      "message": {
+        "applied_tags": [
+          "bad",
+          "bad",
+          "bad",
+          "bad",
+          "bad",
+          "bad"
+        ],
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "APPLIED_TAGS_LIMIT",
+          "path": null
+        },
+        {
+          "code": "APPLIED_TAG_BAD",
+          "path": null
+        }
+      ],
+      "warnings": [
+        {
+          "code": "APPLIED_TAGS_NO_THREAD",
+          "path": null
+        }
+      ]
+    },
+    {
+      "name": "applied-tags-without-thread-name",
+      "message": {
+        "applied_tags": [
+          "123456789012345678"
+        ],
+        "components": [
+          {
+            "type": 10,
+            "content": "hi"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": [
+        {
+          "code": "APPLIED_TAGS_NO_THREAD",
+          "path": null
+        }
+      ]
+    },
+    {
+      "name": "text-empty",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "   "
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "TEXT_EMPTY",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "text-missing-content",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": ""
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "TEXT_EMPTY",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "text-too-long",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "TEXT_TOO_LONG",
+          "path": "components[0]"
+        },
+        {
+          "code": "TOTAL_CHARACTER_LIMIT",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "container-empty",
+      "message": {
+        "components": [
+          {
+            "type": 17,
+            "components": []
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "CONTAINER_EMPTY",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "container-too-many-children",
+      "message": {
+        "components": [
+          {
+            "type": 17,
+            "components": [
+              {
+                "type": 10,
+                "content": "c0"
+              },
+              {
+                "type": 10,
+                "content": "c1"
+              },
+              {
+                "type": 10,
+                "content": "c2"
+              },
+              {
+                "type": 10,
+                "content": "c3"
+              },
+              {
+                "type": 10,
+                "content": "c4"
+              },
+              {
+                "type": 10,
+                "content": "c5"
+              },
+              {
+                "type": 10,
+                "content": "c6"
+              },
+              {
+                "type": 10,
+                "content": "c7"
+              },
+              {
+                "type": 10,
+                "content": "c8"
+              },
+              {
+                "type": 10,
+                "content": "c9"
+              },
+              {
+                "type": 10,
+                "content": "c10"
+              },
+              {
+                "type": 10,
+                "content": "c11"
+              },
+              {
+                "type": 10,
+                "content": "c12"
+              },
+              {
+                "type": 10,
+                "content": "c13"
+              },
+              {
+                "type": 10,
+                "content": "c14"
+              },
+              {
+                "type": 10,
+                "content": "c15"
+              },
+              {
+                "type": 10,
+                "content": "c16"
+              },
+              {
+                "type": 10,
+                "content": "c17"
+              },
+              {
+                "type": 10,
+                "content": "c18"
+              },
+              {
+                "type": 10,
+                "content": "c19"
+              },
+              {
+                "type": 10,
+                "content": "c20"
+              },
+              {
+                "type": 10,
+                "content": "c21"
+              },
+              {
+                "type": 10,
+                "content": "c22"
+              },
+              {
+                "type": 10,
+                "content": "c23"
+              },
+              {
+                "type": 10,
+                "content": "c24"
+              },
+              {
+                "type": 10,
+                "content": "c25"
+              },
+              {
+                "type": 10,
+                "content": "c26"
+              },
+              {
+                "type": 10,
+                "content": "c27"
+              },
+              {
+                "type": 10,
+                "content": "c28"
+              },
+              {
+                "type": 10,
+                "content": "c29"
+              },
+              {
+                "type": 10,
+                "content": "c30"
+              },
+              {
+                "type": 10,
+                "content": "c31"
+              },
+              {
+                "type": 10,
+                "content": "c32"
+              },
+              {
+                "type": 10,
+                "content": "c33"
+              },
+              {
+                "type": 10,
+                "content": "c34"
+              },
+              {
+                "type": 10,
+                "content": "c35"
+              },
+              {
+                "type": 10,
+                "content": "c36"
+              },
+              {
+                "type": 10,
+                "content": "c37"
+              },
+              {
+                "type": 10,
+                "content": "c38"
+              },
+              {
+                "type": 10,
+                "content": "c39"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "CONTAINER_CHILDREN_LIMIT",
+          "path": "components[0]"
+        },
+        {
+          "code": "TOTAL_COMPONENT_LIMIT",
+          "path": null
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "container-accent-out-of-range",
+      "message": {
+        "components": [
+          {
+            "type": 17,
+            "accent_color": 16777216,
+            "components": [
+              {
+                "type": 10,
+                "content": "hi"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "CONTAINER_ACCENT_RANGE",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "section-missing-accessory",
+      "message": {
+        "components": [
+          {
+            "type": 9,
+            "components": [
+              {
+                "type": 10,
+                "content": "hi"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SECTION_ACCESSORY_MISSING",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "section-wrong-text-count",
+      "message": {
+        "components": [
+          {
+            "type": 9,
+            "components": [
+              {
+                "type": 10,
+                "content": "a"
+              },
+              {
+                "type": 10,
+                "content": "b"
+              },
+              {
+                "type": 10,
+                "content": "c"
+              },
+              {
+                "type": 10,
+                "content": "d"
+              }
+            ],
+            "accessory": {
+              "type": 11,
+              "media": {
+                "url": "https://example.test/i.png"
+              }
+            }
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SECTION_TEXT_COUNT",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "row-empty",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": []
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "ROW_EMPTY",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "row-too-many-buttons",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "b0"
+              },
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "b1"
+              },
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "b2"
+              },
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "b3"
+              },
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "b4"
+              },
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "b5"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "ROW_LIMIT",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "row-mixes-select-and-button",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": "1"
+                  }
+                ]
+              },
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "go"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "ROW_SELECT_MIXED",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-url-invalid",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Open",
+                "url": "nope"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_URL_INVALID",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-url-long",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Open",
+                "url": "https://e.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_URL_LONG",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-url-placeholder-is-fine",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Open",
+                "url": "{server_icon}"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "button-custom-id-missing",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": ""
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_CUSTOM_ID_MISSING",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-custom-id-long",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_CUSTOM_ID_LONG",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-label-long",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 1,
+                "label": "lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+                "custom_id": "go"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_LABEL_LONG",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-no-label-or-emoji",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 1,
+                "custom_id": "x"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_NO_LABEL",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-emoji-id-without-name",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "go",
+                "emoji": {
+                  "id": "123456789012345678"
+                }
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "EMOJI_NAME_MISSING",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-premium-sku-missing",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 6
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_SKU_MISSING",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-premium-sku-invalid",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 6,
+                "sku_id": "abc"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "BUTTON_SKU_INVALID",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "button-duplicate-custom-ids",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "same"
+              },
+              {
+                "type": 2,
+                "style": 1,
+                "label": "Go",
+                "custom_id": "same"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "CUSTOM_ID_DUPLICATE",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "CUSTOM_ID_DUPLICATE",
+          "path": "components[0].components[1]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "component-id-duplicate",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "a",
+            "id": 5
+          },
+          {
+            "type": 10,
+            "content": "b",
+            "id": 5
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "COMPONENT_ID_DUPLICATE",
+          "path": "components[0]"
+        },
+        {
+          "code": "COMPONENT_ID_DUPLICATE",
+          "path": "components[1]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "component-id-not-integer",
+      "message": {
+        "components": [
+          {
+            "type": 10,
+            "content": "a",
+            "id": 1.5
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "COMPONENT_ID_NOT_INTEGER",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "link-plugin-url-unfinished",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 2,
+                "style": 5,
+                "label": "Open",
+                "url": "https://plugin-rolelogic.faizo.net/member-origin-role/verify?guild={server_id}"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "select-custom-id-missing",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": "1"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_CUSTOM_ID_MISSING",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-custom-id-long",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": "1"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_CUSTOM_ID_LONG",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-placeholder-long",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": "1"
+                  }
+                ],
+                "placeholder": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_PLACEHOLDER_LONG",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-min-out-of-range",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": "1"
+                  }
+                ],
+                "min_values": 26
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_MIN_GT_MAX",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "SELECT_MIN_RANGE",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-max-out-of-range",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": "1"
+                  }
+                ],
+                "max_values": 0
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_MAX_RANGE",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "SELECT_MIN_GT_MAX",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-min-greater-than-max",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": [
+                  {
+                    "label": "One",
+                    "value": "1"
+                  }
+                ],
+                "min_values": 2,
+                "max_values": 1
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_MIN_GT_MAX",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-no-options",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": []
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_NO_OPTIONS",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-too-many-options",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": [
+                  {
+                    "label": "o0",
+                    "value": "v0"
+                  },
+                  {
+                    "label": "o1",
+                    "value": "v1"
+                  },
+                  {
+                    "label": "o2",
+                    "value": "v2"
+                  },
+                  {
+                    "label": "o3",
+                    "value": "v3"
+                  },
+                  {
+                    "label": "o4",
+                    "value": "v4"
+                  },
+                  {
+                    "label": "o5",
+                    "value": "v5"
+                  },
+                  {
+                    "label": "o6",
+                    "value": "v6"
+                  },
+                  {
+                    "label": "o7",
+                    "value": "v7"
+                  },
+                  {
+                    "label": "o8",
+                    "value": "v8"
+                  },
+                  {
+                    "label": "o9",
+                    "value": "v9"
+                  },
+                  {
+                    "label": "o10",
+                    "value": "v10"
+                  },
+                  {
+                    "label": "o11",
+                    "value": "v11"
+                  },
+                  {
+                    "label": "o12",
+                    "value": "v12"
+                  },
+                  {
+                    "label": "o13",
+                    "value": "v13"
+                  },
+                  {
+                    "label": "o14",
+                    "value": "v14"
+                  },
+                  {
+                    "label": "o15",
+                    "value": "v15"
+                  },
+                  {
+                    "label": "o16",
+                    "value": "v16"
+                  },
+                  {
+                    "label": "o17",
+                    "value": "v17"
+                  },
+                  {
+                    "label": "o18",
+                    "value": "v18"
+                  },
+                  {
+                    "label": "o19",
+                    "value": "v19"
+                  },
+                  {
+                    "label": "o20",
+                    "value": "v20"
+                  },
+                  {
+                    "label": "o21",
+                    "value": "v21"
+                  },
+                  {
+                    "label": "o22",
+                    "value": "v22"
+                  },
+                  {
+                    "label": "o23",
+                    "value": "v23"
+                  },
+                  {
+                    "label": "o24",
+                    "value": "v24"
+                  },
+                  {
+                    "label": "o25",
+                    "value": "v25"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_OPTIONS_LIMIT",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-option-problems",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": [
+                  {
+                    "label": "",
+                    "value": ""
+                  },
+                  {
+                    "label": "lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+                    "value": "dup"
+                  },
+                  {
+                    "label": "ok",
+                    "value": "dup"
+                  },
+                  {
+                    "label": "ok2",
+                    "value": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+                    "description": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                  },
+                  {
+                    "label": "ok3",
+                    "value": "v3",
+                    "emoji": {
+                      "id": "123456789012345678"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "OPTION_DESC_LONG",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "OPTION_EMOJI_NAME",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "OPTION_LABEL_LONG",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "OPTION_LABEL_MISSING",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "OPTION_VALUE_DUP",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "OPTION_VALUE_LONG",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "OPTION_VALUE_MISSING",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-defaults-over-max",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": [
+                  {
+                    "label": "a",
+                    "value": "a",
+                    "default": true
+                  },
+                  {
+                    "label": "b",
+                    "value": "b",
+                    "default": true
+                  }
+                ],
+                "max_values": 1
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "OPTION_DEFAULT_OVER_MAX",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-max-over-option-count",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 3,
+                "custom_id": "pick",
+                "options": [
+                  {
+                    "label": "a",
+                    "value": "a"
+                  },
+                  {
+                    "label": "b",
+                    "value": "b"
+                  }
+                ],
+                "max_values": 5
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_MAX_OVER_OPTIONS",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-default-values-limit",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 6,
+                "custom_id": "roles",
+                "default_values": [
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  },
+                  {
+                    "id": "123456789012345678",
+                    "type": "role"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_DEFAULTS_LIMIT",
+          "path": "components[0].components[0]"
+        },
+        {
+          "code": "SELECT_DEFAULTS_OVER_MAX",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-default-values-bad-id",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 5,
+                "custom_id": "users",
+                "max_values": 5,
+                "default_values": [
+                  {
+                    "id": "nope",
+                    "type": "user"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_DEFAULT_BAD_ID",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "select-default-values-over-max",
+      "message": {
+        "components": [
+          {
+            "type": 1,
+            "components": [
+              {
+                "type": 8,
+                "custom_id": "channels",
+                "max_values": 1,
+                "default_values": [
+                  {
+                    "id": "123456789012345678",
+                    "type": "channel"
+                  },
+                  {
+                    "id": "123456789012345679",
+                    "type": "channel"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "SELECT_DEFAULTS_OVER_MAX",
+          "path": "components[0].components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "media-required",
+      "message": {
+        "components": [
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": ""
+                }
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "MEDIA_REQUIRED",
+          "path": "components[0].items[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "media-url-invalid",
+      "message": {
+        "components": [
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "nope"
+                }
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "MEDIA_URL_INVALID",
+          "path": "components[0].items[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "media-attachment-id-bad",
+      "message": {
+        "components": [
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "attachment_id": "abc"
+                }
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "MEDIA_ATTACHMENT_ID_BAD",
+          "path": "components[0].items[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "gallery-empty",
+      "message": {
+        "components": [
+          {
+            "type": 12,
+            "items": []
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "GALLERY_EMPTY",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "gallery-too-many-items",
+      "message": {
+        "components": [
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              },
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                }
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "GALLERY_LIMIT",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "gallery-description-long",
+      "message": {
+        "components": [
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "https://example.test/i.png"
+                },
+                "description": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "GALLERY_DESC_LONG",
+          "path": "components[0].items[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "thumbnail-description-long",
+      "message": {
+        "components": [
+          {
+            "type": 9,
+            "components": [
+              {
+                "type": 10,
+                "content": "hi"
+              }
+            ],
+            "accessory": {
+              "type": 11,
+              "media": {
+                "url": "https://example.test/i.png"
+              },
+              "description": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "THUMB_DESC_LONG",
+          "path": "components[0].accessory"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "file-external-url",
+      "message": {
+        "components": [
+          {
+            "type": 13,
+            "file": {
+              "url": "https://example.test/a.pdf"
+            }
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "FILE_URL_NOT_ATTACHMENT",
+          "path": "components[0]"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "file-attachment-reference-is-fine",
+      "message": {
+        "components": [
+          {
+            "type": 13,
+            "file": {
+              "url": "attachment://report.pdf"
+            }
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "file-discord-cdn-is-fine",
+      "message": {
+        "components": [
+          {
+            "type": 13,
+            "file": {
+              "url": "https://cdn.discordapp.com/attachments/1/2/a.pdf"
+            }
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "session-upload-reference",
+      "message": {
+        "components": [
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "session://abc123/photo.png"
+                }
+              }
+            ]
+          }
+        ],
+        "flags": 32768
+      },
+      "errors": [
+        {
+          "code": "ATTACHMENT_MISSING",
+          "path": "components[0].items[0]"
+        }
+      ],
+      "warnings": []
+    }
+  ]
+}

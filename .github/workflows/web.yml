@@ -113,6 +113,21 @@ jobs:
           # default 7 (the dispatcher's own default).
           VITE_COMPONENT_TTL_DAYS: ${{ vars.VITE_COMPONENT_TTL_DAYS }}
 
+      # `bun run build` regenerates the data the Rust MCP server serves — the
+      # template catalog, the shared validator corpus, the LZ-String vectors —
+      # from `src/`. A diff here means the committed copies were stale: someone
+      # edited a template, a limit, or a validation rule without running
+      # `bun run gen:mcp`, and the remote MCP server would ship yesterday's
+      # answers while its own tests passed against the old corpus. Fail rather
+      # than let the two implementations drift apart quietly.
+      - name: Generated MCP data is up to date
+        run: |
+          if ! git diff --quiet -- server/src/mcp; then
+            echo "::error::server/src/mcp is stale — run 'bun run gen:mcp' and commit the result."
+            git diff --stat -- server/src/mcp
+            exit 1
+          fi
+
       # GitHub Pages has no rewrite rules, so serve the SPA shell as the 404
       # page — deep links (e.g. a stale `/s/<id>` short link) still load the
       # app. Doubles as a smoke test that the build produced the entry point.

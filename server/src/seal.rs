@@ -37,6 +37,15 @@ use axum_extra::extract::cookie::Key;
 const AAD_CLIENT_SECRET: &[u8] = b"dweeb-custom-app-client-secret-v1";
 const AAD_ACTIVITY_HOOK: &[u8] = b"dweeb-activity-hook-token-v1";
 const AAD_ACTIVITY_STATE: &[u8] = b"dweeb-activity-oauth-state-v1";
+/// The Discord access token an MCP OAuth grant acts on behalf of, stored in
+/// `mcp.db`. Unlike the other payloads this one is read on every MCP request,
+/// so it must be sealed rather than hashed — see `mcp/store.rs`.
+const AAD_MCP_TOKEN: &[u8] = b"dweeb-mcp-discord-token-v1";
+/// The MCP authorization request, round-tripped through Discord's OAuth as the
+/// `state` parameter. The browser running that flow is the connector's, which
+/// carries none of our cookies, so the request travels sealed inside `state`
+/// exactly as the Activity connect flow's does.
+const AAD_MCP_STATE: &[u8] = b"dweeb-mcp-oauth-state-v1";
 
 const NONCE_LEN: usize = 12;
 
@@ -58,6 +67,26 @@ pub fn seal_hook(key: &Key, plaintext: &str) -> Option<String> {
 /// Open a value produced by [`seal_hook`].
 pub fn open_hook(key: &Key, sealed_hex: &str) -> Option<String> {
     open_in(key, AAD_ACTIVITY_HOOK, sealed_hex)
+}
+
+/// Seal the Discord access token behind an MCP OAuth grant. See [`seal_in`].
+pub fn seal_mcp(key: &Key, plaintext: &str) -> Option<String> {
+    seal_in(key, AAD_MCP_TOKEN, plaintext)
+}
+
+/// Open a value produced by [`seal_mcp`].
+pub fn open_mcp(key: &Key, sealed_hex: &str) -> Option<String> {
+    open_in(key, AAD_MCP_TOKEN, sealed_hex)
+}
+
+/// Seal an MCP authorization request for the round trip through Discord OAuth.
+pub fn seal_mcp_state(key: &Key, plaintext: &str) -> Option<String> {
+    seal_in(key, AAD_MCP_STATE, plaintext)
+}
+
+/// Open a value produced by [`seal_mcp_state`].
+pub fn open_mcp_state(key: &Key, sealed_hex: &str) -> Option<String> {
+    open_in(key, AAD_MCP_STATE, sealed_hex)
 }
 
 /// Seal the Activity connect flow's OAuth `state` payload.

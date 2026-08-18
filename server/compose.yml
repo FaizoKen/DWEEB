@@ -147,6 +147,18 @@ services:
       # AI_MAX_TOKENS / AI_MONTHLY_TOKEN_BUDGET and the PLAN_*_AI_* tiers are
       # tuned in .env — see .env.example.
       AI_DB_PATH: ${AI_DB_PATH:-/data/ai-usage.db}
+      # Remote MCP endpoint (`/mcp` + its OAuth authorization server). OFF by
+      # default and opted into with MCP_ENABLED=true in .env: it is a public,
+      # internet-reachable surface through which an AI client can post to
+      # people's Discord channels, so it is not something a deployment should
+      # inherit by upgrading. See docs/mcp.md.
+      #
+      # The path is set unconditionally so turning the feature on needs one
+      # variable, not two — and so the store lands on the persistent volume
+      # rather than the container's writable layer, where every registered
+      # client and live grant would vanish on the next deploy.
+      MCP_ENABLED: ${MCP_ENABLED:-false}
+      MCP_DB_PATH: ${MCP_DB_PATH:-/data/mcp.db}
     volumes:
       # The proxy's only state: the SQLite file with the opt-in share short
       # links (auto-expiring, default 7 days).

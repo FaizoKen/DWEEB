@@ -56,6 +56,16 @@ redis = { version = "0.27", default-features = false, features = ["tokio-comp", 
 # body, so the Groq SSE stream is forwarded chunk-by-chunk while a background
 # task keeps reading it for the final usage accounting.
 tokio-stream = "0.1"
+# URL parsing for the MCP server's Components V2 validator. Already in the tree
+# via reqwest — declared directly so the validator can parse a caller's URLs the
+# same way the browser's `new URL()` does, rather than hand-rolling a check that
+# would drift from the TypeScript validator it is pinned against.
+url = "2"
+# base64url for PKCE (RFC 7636): the code challenge is the URL-safe, unpadded
+# base64 of a SHA-256 digest. Already in the tree via reqwest — declared here
+# rather than hand-rolled, because a subtle bug in this encoding is a bug in the
+# check that stops an intercepted authorization code being redeemed.
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 tracing = "0.1"

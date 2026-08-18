@@ -223,6 +223,23 @@ pub struct Config {
     /// the worker sweeps it.
     pub schedule_retention_days: i64,
 
+    // ── MCP (Model Context Protocol) ───────────────────────────────────────
+    /// Master switch for the remote MCP endpoint (`/mcp`) and the OAuth
+    /// authorization server that guards it. **Default off**: it is a public,
+    /// internet-reachable surface that can post to people's Discord channels,
+    /// so a deployment opts in rather than inherits it. See `docs/mcp.md`.
+    pub mcp_enabled: bool,
+    /// SQLite file holding registered MCP clients, authorization codes, and
+    /// access tokens. Must sit on persistent storage — a connector that keeps
+    /// working across a redeploy is the whole point, and every row here is a
+    /// live grant.
+    pub mcp_db_path: String,
+    /// Public origin this service is reached at, which every OAuth metadata
+    /// document must agree on. `None` ⇒ derived from `OAUTH_REDIRECT_URL`,
+    /// which is already necessarily the public address of this server. Set it
+    /// only when the MCP endpoint is served under a different hostname.
+    pub mcp_public_url: Option<String>,
+
     // ── Message library ────────────────────────────────────────────────────
     /// Master switch for the per-server message library. False ⇒ the
     /// `/api/guilds/:id/library` endpoints answer 501 and both frontends fall
@@ -455,6 +472,23 @@ impl Config {
         let scheduler_batch = parse_or("SCHEDULER_BATCH", 25)?;
         let schedule_retention_days = parse_or("SCHEDULE_RETENTION_DAYS", 7)?;
 
+        let mcp_enabled = parse_bool("MCP_ENABLED", false)?;
+        let mcp_db_path = opt_env("MCP_DB_PATH").unwrap_or_else(|| "mcp.db".to_string());
+        let mcp_public_url = opt_env("MCP_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string());
+        if let Some(base) = &mcp_public_url {
+            // Every metadata document and the WWW-Authenticate header are built
+            // from this, and a client compares the issuer it discovers against
+            // the one it was told. A wrong value breaks the handshake in a way
+            // that is very hard to read from the client's end, so refuse it now.
+            let parsed = reqwest::Url::parse(base)
+                .map_err(|_| format!("MCP_PUBLIC_URL must be an absolute URL, got {base:?}"))?;
+            if parsed.scheme() != "https" && parsed.host_str() != Some("localhost") {
+                return Err(format!(
+                    "MCP_PUBLIC_URL must be https (OAuth metadata is not served over plain http), got {base:?}"
+                ));
+            }
+        }
+
         let library_enabled = parse_bool("LIBRARY_ENABLED", true)?;
         let library_db_path =
             opt_env("LIBRARY_DB_PATH").unwrap_or_else(|| "library.db".to_string());
@@ -571,6 +605,7 @@ impl Config {
                     .is_some()
                     .then_some(stripe_db_path.as_str()),
                 ai_usage: groq_api_key.is_some().then_some(ai_db_path.as_str()),
+                mcp: mcp_enabled.then_some(mcp_db_path.as_str()),
             },
             parse_bool("STRICT_DB_PATHS", false)?,
         )?;
@@ -622,6 +657,9 @@ impl Config {
             scheduler_lease_secs,
             scheduler_batch,
             schedule_retention_days,
+            mcp_enabled,
+            mcp_db_path,
+            mcp_public_url,
             library_enabled,
             library_db_path,
             library_max_entries,
@@ -663,6 +701,7 @@ struct DurableStores<'a> {
     activity_draft: Option<&'a str>,
     stripe: Option<&'a str>,
     ai_usage: Option<&'a str>,
+    mcp: Option<&'a str>,
 }
 
 impl<'a> DurableStores<'a> {
@@ -676,6 +715,7 @@ impl<'a> DurableStores<'a> {
             ("ACTIVITY_DRAFT_DB_PATH", self.activity_draft),
             ("STRIPE_DB_PATH", self.stripe),
             ("AI_DB_PATH", self.ai_usage),
+            ("MCP_DB_PATH", self.mcp),
         ]
         .into_iter()
         .filter_map(|(key, path)| path.map(|p| (key, p)))
@@ -896,6 +936,7 @@ mod tests {
             activity_draft: None,
             stripe: None,
             ai_usage: None,
+            mcp: None,
         }
     }
 

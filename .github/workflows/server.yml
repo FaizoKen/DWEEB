@@ -64,3 +64,12 @@ jobs:
 
       - name: Build
         run: cargo build --locked
+
+      # The MCP endpoint's wiring — routes mounted, discovery documents correct,
+      # the 401 that bootstraps a client, the authorization refusals, and the
+      # feature gate — cannot be reached from a unit test without an
+      # eighty-field `AppState` fixture and process-global env mutation, which
+      # this crate deliberately avoids. So it is checked against the real binary
+      # over real HTTP. Nothing here talks to Discord.
+      - name: MCP endpoint smoke test
+        run: bash ops/mcp-smoke.sh ./target/debug/dweeb-proxy

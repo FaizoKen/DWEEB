@@ -618,6 +618,36 @@ impl Discord {
         Err(webhook_error_from(resp).await)
     }
 
+    /// [`execute_webhook`], optionally into a thread of the webhook's channel.
+    ///
+    /// Discord executes a webhook in its own channel unless `thread_id` names a
+    /// thread inside it, so a post meant for a thread that omits the parameter
+    /// silently lands in the parent channel — visible to everyone, in the wrong
+    /// place, and not something an edit can move.
+    pub async fn execute_webhook_in_thread(
+        &self,
+        webhook_id: &str,
+        token: &str,
+        payload: &Value,
+        thread_id: Option<&str>,
+    ) -> Result<Value, AppError> {
+        let mut url =
+            format!("{API_BASE}/webhooks/{webhook_id}/{token}?wait=true&with_components=true");
+        if let Some(thread) = thread_id {
+            url.push_str("&thread_id=");
+            url.push_str(thread);
+        }
+        let resp = send_with_retry(self.http.post(&url).json(payload))
+            .await
+            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        if resp.status().is_success() {
+            return resp.json::<Value>().await.map_err(|e| {
+                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
+            });
+        }
+        Err(webhook_error_from(resp).await)
+    }
+
     /// [`execute_webhook`], but carrying uploaded files: the payload rides as a
     /// `payload_json` multipart field and each file as its `files[i]` part, the
     /// exact shape the web builder sends to Discord directly. The payload's

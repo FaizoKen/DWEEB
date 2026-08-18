@@ -306,6 +306,9 @@ pub async fn callback(
             .unwrap_or_default();
         // An Activity connect flow ends on a standalone page, not the builder —
         // it runs in the user's external browser, where the Activity isn't.
+        if flow_state.starts_with(crate::mcp::oauth::STATE_PREFIX) {
+            return Ok(crate::mcp::oauth::cancelled_page());
+        }
         if flow_state.starts_with(ACTIVITY_WEBHOOK_STATE_PREFIX) {
             return Ok(activity_connect_page(
                 false,
@@ -339,6 +342,20 @@ pub async fn callback(
         let state = q.state.unwrap_or_default();
         let code = q.code.unwrap_or_default();
         return Ok(activity_connect_callback(&st, &state, &code).await);
+    }
+
+    // The MCP OAuth flow: the browser completing it belongs to the connector,
+    // not to a DWEEB tab, so it carries none of our cookies. Like the Activity
+    // flow above it authenticates itself by the sealed `state` instead — see
+    // `mcp::oauth`.
+    if q.state
+        .as_deref()
+        .unwrap_or_default()
+        .starts_with(crate::mcp::oauth::STATE_PREFIX)
+    {
+        let state = q.state.unwrap_or_default();
+        let code = q.code.unwrap_or_default();
+        return Ok(crate::mcp::oauth::complete_authorization(&st, &state, &code).await);
     }
 
     // CSRF: the round-tripped `state` must equal the one we stored at /login.

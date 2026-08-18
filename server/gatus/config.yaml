@@ -69,6 +69,25 @@ endpoints:
     alerts:
       - type: discord
 
+  # Remote MCP endpoint. Commented out because the feature is off by default
+  # (MCP_ENABLED) — a monitor for a switched-off feature would page forever.
+  # Uncomment when it is enabled on this deployment.
+  #
+  # The protected-resource document is the right thing to watch: it is
+  # unauthenticated, it is the first thing every client fetches, and it answers
+  # 501 when the feature is off — so this check failing means the endpoint is
+  # genuinely unreachable, not merely unconfigured. The `/ready` monitor above
+  # already covers the MCP store's own health.
+  # - name: mcp discovery
+  #   group: edge
+  #   url: "https://${DOMAIN}/.well-known/oauth-protected-resource"
+  #   interval: 120s
+  #   conditions:
+  #     - "[STATUS] == 200"
+  #     - "[BODY].authorization_servers[0] == pat(https://*)"
+  #   alerts:
+  #     - type: discord
+
   # ── Plugins ────────────────────────────────────────────────────────────────
   - name: modal-form
     group: plugins
