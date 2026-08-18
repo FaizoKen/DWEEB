@@ -103,6 +103,7 @@ import { usePlanStore } from "@/core/plan/planStore";
 import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import { useInstallStore } from "@/features/install/installStore";
 import { useMcpStore } from "@/features/mcp/mcpStore";
+import { ensureMcpAvailability } from "@/core/mcp/availability";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
 import { readCustomBotParam } from "@/core/guild/customBotLink";
@@ -409,6 +410,14 @@ export function App() {
     window.history.replaceState(null, "", stripFeatureIntent(window.location.href));
     if (intent === "ai") {
       openAiWithPreview();
+    } else if (intent === "mcp") {
+      // The connector dialog is only useful where the deployment actually
+      // serves the endpoint, so confirm before opening rather than showing a
+      // panel with an address that answers 501. A build without it simply
+      // lands on the editor.
+      void ensureMcpAvailability().then((available) => {
+        if (available) useMcpStore.getState().openMcp();
+      });
     } else if (intent === "json" || intent === "restore") {
       openShareDialog(intent);
     } else {

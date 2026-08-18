@@ -77,6 +77,7 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
     "schedule-discord-messages",
     "discord-webhook-manager",
     "ai-discord-message-writer",
+    "discord-mcp-server",
   ]),
   guide: new Set([
     "index",

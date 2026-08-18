@@ -721,6 +721,85 @@ export const FEATURES: FeatureSeo[] = [
     requiresBot: false,
     appPath: "/?intent=ai",
   },
+  {
+    id: "mcp-connector",
+    slug: "discord-mcp-server",
+    emoji: "🔌",
+    category: "Publishing",
+    accent: 0x5865f2,
+    title: "Discord MCP Server — Connect Claude to Discord | DWEEB",
+    h1: "Discord MCP Server",
+    tagline: "Let Claude build and post your Discord messages.",
+    description:
+      "Connect Claude to Discord with one URL. DWEEB's MCP server lets an AI client draft, validate and post Components V2 messages to the channels you choose.",
+    intro:
+      "DWEEB speaks the Model Context Protocol, so an AI client can use the builder directly — no copying JSON between a chat window and an editor. Add one connector URL in Claude, sign in with Discord, and you can ask for a message the way you would ask a person: 'announce Friday's event in #general with an RSVP button'. The assistant starts from DWEEB's own templates, checks the result against Discord's rules before anything is sent, and can hand you a link to review the message in the visual editor first.",
+    howItWorks: [
+      {
+        name: "Add the connector",
+        text: "In Claude, open Settings → Connectors → Add custom connector and paste DWEEB's MCP address. There is nothing to install, clone or host.",
+      },
+      {
+        name: "Sign in with Discord",
+        text: "You authorize the connector with your own Discord account, so it can reach exactly the servers and channels you can — and nothing else.",
+      },
+      {
+        name: "Ask for a message",
+        text: "Describe what you want. The assistant builds it, validates it against Discord's limits, and posts it to the channel you name once you say go.",
+      },
+    ],
+    configurable: [
+      "Start from any of DWEEB's built-in message templates",
+      "Validate against Discord's rules before sending — every problem named by where it is in the message",
+      "Preview the layout as a reader would see it",
+      "Get a share link to review the message in the visual editor",
+      "Post to a channel you pick, then edit that message in place afterwards",
+    ],
+    whenToUse: [
+      "Writing an announcement while you are already talking to an assistant",
+      "Turning meeting notes or a changelog into a formatted post",
+      "Updating a message you already published, without hunting for it",
+      "Drafting several variations quickly and reviewing them in the editor",
+    ],
+    faq: [
+      {
+        q: "What is an MCP server?",
+        a: "The Model Context Protocol is an open standard that lets an AI assistant use an external tool directly instead of guessing at it. DWEEB's MCP server exposes the message builder — its templates, its validation and its sending — so an assistant like Claude can work with real Discord messages rather than producing text you then have to paste somewhere.",
+      },
+      {
+        q: "Which AI clients can connect?",
+        a: "Any client that supports remote MCP servers over HTTP. That includes Claude's custom connectors. You add the address once and the client handles the sign-in.",
+      },
+      {
+        q: "What can the connector actually reach?",
+        a: "Only what your Discord account can. Authorization is your own Discord sign-in, and every request is checked against your server membership and your Manage Webhooks permission — the same checks the web app makes. It cannot see or post to a server you are not in.",
+      },
+      {
+        q: "Does it post without asking me?",
+        a: "It posts when you tell it to. Building, validating and previewing a message change nothing; sending is a separate step, and a message that Discord would reject is refused before any request is made.",
+      },
+      {
+        q: "Do I need to install a bot?",
+        a: "DWEEB's app has to be in the server you want to post to, because it creates and reuses the webhook the message is delivered through. Adding it is the same one-click invite the rest of DWEEB uses.",
+      },
+    ],
+    setupNote: {
+      badge: "Sign in with Discord",
+      title: "One URL, then a Discord sign-in.",
+      text: "The connector authorizes against your own Discord account — there is no API key to create and no webhook URL to paste into your AI client. It can then reach exactly the servers and channels you can, and posting still needs the Manage Webhooks permission you would need by hand.",
+    },
+    keywords: [
+      "discord mcp server",
+      "connect claude to discord",
+      "claude discord integration",
+      "model context protocol discord",
+      "mcp discord message",
+      "ai post to discord",
+    ],
+    requiresBot: true,
+    previewTemplateId: "announcement",
+    appPath: "/?intent=mcp",
+  },
 ];
 
 /** Fully resolved, render-ready SEO data for one feature. */
@@ -793,6 +872,6 @@ export function resolveAllFeatures(): ResolvedFeature[] {
 }
 
 /** Last time the feature catalogue was reviewed — used for sitemap `<lastmod>`. */
-export const FEATURES_LASTMOD = "2026-07-15";
+export const FEATURES_LASTMOD = "2026-08-18";
 
 export { ACCENT_BLURPLE };

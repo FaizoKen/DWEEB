@@ -1,7 +1,14 @@
 /** Safe, non-mutating UI intents carried by static feature-page CTAs. */
-export type FeatureIntent = "ai" | "json" | "manage-webhooks" | "restore" | "schedule";
+export type FeatureIntent = "ai" | "json" | "manage-webhooks" | "mcp" | "restore" | "schedule";
 
-const INTENTS = new Set<FeatureIntent>(["ai", "json", "manage-webhooks", "restore", "schedule"]);
+const INTENTS = new Set<FeatureIntent>([
+  "ai",
+  "json",
+  "manage-webhooks",
+  "mcp",
+  "restore",
+  "schedule",
+]);
 
 export function readFeatureIntent(search: string): FeatureIntent | null {
   const value = new URLSearchParams(search).get("intent") as FeatureIntent | null;
