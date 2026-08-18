@@ -679,6 +679,31 @@ fn classify_upstream(status: StatusCode) -> Option<UpstreamFailure> {
     }
 }
 
+/// Does a refusal mean the **model** is gone rather than the request bad?
+///
+/// Groq retires models on a published schedule (`llama-3.1-8b-instant` went on
+/// 2026-08-16) and answers a request naming a retired one with **404
+/// `model_not_found`**. That is our configuration, not the caller's request, so
+/// it must not end the run the way a bad key does: the next model in the chain
+/// is a different model and may well answer. Before this split, one decommissioned
+/// entry in `AI_MODEL`/`AI_FALLBACK_MODEL` failed every request that reached it
+/// with a paging 502, even when the other model was healthy.
+///
+/// A 404 whose body we can't parse still counts — nothing else at
+/// `/chat/completions` answers 404, and treating it as "this model isn't there"
+/// only costs one more attempt.
+fn is_model_gone(status: StatusCode, body: &str) -> bool {
+    if status != StatusCode::NOT_FOUND {
+        return false;
+    }
+    match serde_json::from_str::<Value>(body) {
+        Ok(v) => v["error"]["code"]
+            .as_str()
+            .is_none_or(|c| c == "model_not_found"),
+        Err(_) => true,
+    }
+}
+
 /// The provider's own `Retry-After` (delta-seconds, occasionally fractional),
 /// so the client waits the real amount rather than our guess — Groq's hints
 /// ranged from under a second to 23s in the 2026-08-01 burst. The HTTP-date
@@ -734,7 +759,8 @@ fn terminal_error(failure: UpstreamFailure, retry_hint: Option<f64>) -> AppError
 
 /// Start the provider stream: primary model, one retry, then the fallback
 /// model (when configured). Transient/capacity failures (network, 429, 413,
-/// 5xx) are retried and fall through to the fallback model; any other 4xx is
+/// 5xx) are retried and fall through to the fallback model; a model the
+/// provider has retired is skipped and the chain carries on; any other 4xx is
 /// our bug or our key and retrying can't fix it.
 async fn start_stream(
     ai: &AiRuntime,
@@ -756,6 +782,9 @@ async fn start_stream(
     // can only fail, and it spends another request from the very bucket that is
     // full. Skip straight to the fallback, which has its own bucket.
     let mut exhausted: Option<&str> = None;
+    // Models the provider says it no longer serves. Permanent and ours to fix,
+    // so it is reported once at the end rather than per attempt.
+    let mut retired: Vec<&str> = Vec::new();
     for (i, model) in attempts.iter().enumerate() {
         if exhausted == Some(*model) {
             continue;
@@ -815,6 +844,21 @@ async fn start_stream(
             }
             continue;
         }
+        if is_model_gone(status, &body) {
+            // Not this run's fault and not fatal to it — warn (never pages) and
+            // let the next model try. If nothing serves the run, the terminal
+            // block below reports the retirement at ERROR.
+            tracing::warn!(
+                model = %model,
+                status = %status,
+                detail = %clamp_chars(&body, 300),
+                "ai model is no longer served upstream — trying the next configured model"
+            );
+            retired.push(model);
+            last_transient = format!("model {model} is no longer served");
+            exhausted = Some(model);
+            continue;
+        }
         // Non-retryable: our key or a genuinely malformed request. Log detail
         // server-side, keep the client-facing message generic (never echo
         // provider internals).
@@ -828,12 +872,27 @@ async fn start_stream(
             "The AI provider rejected the request. This has been logged — try again later.".into(),
         ));
     }
+    if !retired.is_empty() {
+        // ERROR is the paging channel, and this is precisely what a human has
+        // to fix: a pinned model was decommissioned, so this run had fewer
+        // chances than it was configured for — and if every model is retired,
+        // the assistant is down until the env names live ones again. A run that
+        // still found a working model never reaches here, so recovery is quiet.
+        tracing::error!(
+            models = %retired.join(", "),
+            "configured ai model no longer served by the provider — update AI_MODEL/AI_FALLBACK_MODEL"
+        );
+    }
     tracing::warn!(
         error = %last_transient,
         failure = ?last_failure,
         retry_after = retry_hint.unwrap_or_default(),
         "ai upstream unavailable after retries"
     );
+    // Status stays keyed on how the *provider* failed us, not on our stale
+    // config: a caller throttled by a 429 gets the 429 and its Retry-After,
+    // which is the lever they actually have. The retirement pages on its own
+    // line above.
     Err(terminal_error(last_failure, retry_hint))
 }
 
@@ -1105,6 +1164,29 @@ mod tests {
             status_of(&terminal_error(UpstreamFailure::Unavailable, None)),
             StatusCode::BAD_GATEWAY
         );
+    }
+
+    /// A model the provider has retired is *our* configuration going stale, not
+    /// a bad request: the run must move on to the next model instead of failing
+    /// on the spot. Groq retired `llama-3.1-8b-instant` on 2026-08-16 and the
+    /// 404 ended every run that reached it with a paging 502.
+    #[test]
+    fn a_retired_model_is_skipped_not_fatal() {
+        let gone = r#"{"error":{"message":"The model `llama-3.1-8b-instant` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}"#;
+        assert!(is_model_gone(StatusCode::NOT_FOUND, gone));
+        // A 404 we can't read is still "this model isn't there" — nothing else
+        // at /chat/completions answers 404.
+        assert!(is_model_gone(StatusCode::NOT_FOUND, ""));
+        assert!(is_model_gone(StatusCode::NOT_FOUND, "<html>404</html>"));
+        // A broken key or a malformed request is NOT a retirement: those must
+        // keep ending the run inline.
+        assert!(!is_model_gone(StatusCode::UNAUTHORIZED, gone));
+        assert!(!is_model_gone(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":{"code":"invalid_api_key"}}"#
+        ));
+        // And it is not a retry class — retrying the same model can't help.
+        assert_eq!(classify_upstream(StatusCode::NOT_FOUND), None);
     }
 
     #[test]

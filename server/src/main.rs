@@ -449,9 +449,13 @@ async fn run() {
     let ai = match ai::AiRuntime::from_config(&config) {
         Ok(runtime) => {
             if runtime.is_some() {
+                // The fallback is named too: it is only reached when the
+                // primary is unwell, so a decommissioned one hides until the
+                // day it is needed (2026-08-16). Boot is where to notice it.
                 tracing::info!(
                     db = %config.ai_db_path,
                     model = %config.ai_model,
+                    fallback = %config.ai_fallback_model.as_deref().unwrap_or("none"),
                     "built-in AI relay enabled"
                 );
             }

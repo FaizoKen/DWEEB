@@ -880,6 +880,23 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   and is still tried. Note the FE needs no deploy: `describeDweebError` renders `error` for
   any un-`kind`ed status. Guarded by the `provider_rate_limits_answer_429_and_never_page` +
   `retry_after_prefers_the_providers_own_hint` tests in ai.rs.
+  **A pinned model gets decommissioned out from under us** (2026-08-17). Groq retires
+  models on a published schedule — `llama-3.1-8b-instant` and `llama-3.3-70b-versatile`
+  both went on 2026-08-16 — and answers a request naming one with **404
+  `model_not_found`**. That is our configuration going stale, not a bad request, but it
+  arrived at the same branch as a broken key: the run ended on the spot with a paging 502,
+  so a healthy primary could not rescue a retired fallback (it paged exactly that way, the
+  `latency=382 ms` being a rate-limited primary skipping its retry and the fallback 404ing).
+  `is_model_gone` now splits it out: the model is marked exhausted, the chain **carries on
+  to the next model**, and the attempt logs `warn` — so a run another model can serve is
+  silent. Only a run that ends with no model left logs `error!` naming every retired id
+  (that pages, and it is exactly what a human must fix). The terminal *status* still comes
+  from how the **provider** failed us, not from our stale config — a throttled caller keeps
+  its 429 and `Retry-After`, which is the lever they have. Both `AI_MODEL` and
+  `AI_FALLBACK_MODEL` must name a currently-served model; check the live list
+  (`curl -H "Authorization: Bearer $GROQ_API_KEY" https://api.groq.com/openai/v1/models`)
+  rather than assuming, and remember prod's values live in `/opt/dweeb/.env`, so a repo-only
+  change fixes nothing. Guarded by `a_retired_model_is_skipped_not_fatal` in ai.rs.
 - **AI assistant (src/core/ai) reliability contract.** The chat panel strips the model's
   JSON payload from the displayed bubble, but provider history must carry the RAW reply —
   `ChatMessage.raw` + `toTurns` — or follow-ups like "do it" leave the model blind to its
