@@ -69,24 +69,31 @@ endpoints:
     alerts:
       - type: discord
 
-  # Remote MCP endpoint. Commented out because the feature is off by default
-  # (MCP_ENABLED) — a monitor for a switched-off feature would page forever.
-  # Uncomment when it is enabled on this deployment.
+  # The MCP connector's discovery document — the first thing every AI client
+  # fetches, and the only unauthenticated part of the flow, so it is the one
+  # piece of that feature a monitor can watch end to end.
   #
-  # The protected-resource document is the right thing to watch: it is
-  # unauthenticated, it is the first thing every client fetches, and it answers
-  # 501 when the feature is off — so this check failing means the endpoint is
-  # genuinely unreachable, not merely unconfigured. The `/ready` monitor above
-  # already covers the MCP store's own health.
-  # - name: mcp discovery
-  #   group: edge
-  #   url: "https://${DOMAIN}/.well-known/oauth-protected-resource"
-  #   interval: 120s
-  #   conditions:
-  #     - "[STATUS] == 200"
-  #     - "[BODY].authorization_servers[0] == pat(https://*)"
-  #   alerts:
-  #     - type: discord
+  # It asserts the `resource` field rather than just a 200 because the two ways
+  # this breaks look completely different from outside. A dead endpoint fails
+  # the status check; a *wrong* public URL (MCP_PUBLIC_URL set, or derived from
+  # a changed OAUTH_REDIRECT_URL) still answers 200 while handing every client
+  # an issuer that does not match where they are connecting — which surfaces to
+  # the user as an opaque connector failure with nothing in our logs. Comparing
+  # against ${DOMAIN} catches that.
+  #
+  # NOTE: this only makes sense while MCP_ENABLED is on (it is, in production —
+  # enabled 2026-08-18). With the feature off the endpoint answers 501 by
+  # design, and this monitor would page forever; comment it out again if the
+  # deployment ever switches MCP off.
+  - name: mcp discovery
+    group: edge
+    url: "https://${DOMAIN}/.well-known/oauth-protected-resource"
+    interval: 120s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].resource == https://${DOMAIN}/mcp"
+    alerts:
+      - type: discord
 
   # ── Plugins ────────────────────────────────────────────────────────────────
   - name: modal-form
