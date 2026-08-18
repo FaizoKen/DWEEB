@@ -63,6 +63,12 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
     keysUrl: "",
     keyPlaceholder: "(no key needed)",
   },
+  // Both of these ship an id the provider must still serve today: a retired
+  // default 404s on a BYOK user's very first message. Groq decommissions on a
+  // published schedule (llama-3.1-8b-instant went 2026-08-16) and OpenRouter's
+  // `:free` slots rotate — llama-3.3-70b-instruct:free was the default until it
+  // stopped being listed. Re-check against the provider's own model list
+  // (`/api/v1/models`, `/openai/v1/models`) before changing either.
   groq: {
     label: "Groq (LPU Cloud)",
     defaultModel: "openai/gpt-oss-120b",
@@ -75,7 +81,7 @@ export const PROVIDERS: Record<AiProvider, ProviderMeta> = {
   },
   openrouter: {
     label: "OpenRouter (Models API)",
-    defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
+    defaultModel: "openai/gpt-oss-20b:free",
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     requiresBaseUrl: false,
     requiresKey: true,
