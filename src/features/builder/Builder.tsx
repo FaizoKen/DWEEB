@@ -43,6 +43,7 @@ import {
   SaveIcon,
   SendIcon,
   ShareIcon,
+  SparkleIcon,
   SupportIcon,
   TrashIcon,
   UndoIcon,
@@ -59,6 +60,8 @@ import { useFeedbackConfigured } from "@/core/feedback/submit";
 import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import { useInstallStore } from "@/features/install/installStore";
+import { useMcpStore } from "@/features/mcp/mcpStore";
+import { useMcpConfigured } from "@/core/mcp/availability";
 import { useInstallState } from "@/features/install/useInstallState";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
 import { MAX_INLINE_UTILITIES, measureNeededWidth } from "@/lib/measureBarFit";
@@ -128,6 +131,11 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
   const feedbackOn = useFeedbackConfigured();
   const openCollaborate = useCollaborateStore((s) => s.openCollaborate);
   const openInstall = useInstallStore((s) => s.openInstall);
+  // The MCP connector is per-deployment (the endpoint is off by default), so the
+  // entry only appears once the proxy confirms it serves one — offering a URL
+  // that answers 501 would send someone through a setup that cannot work.
+  const mcpOn = useMcpConfigured();
+  const openMcp = useMcpStore((s) => s.openMcp);
   // Hide the install entry once we're already running as the installed app —
   // there's nothing left to install. Every browser (installable or not) still
   // sees it otherwise: the dialog either replays the native prompt or shows
@@ -581,6 +589,19 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
                     }}
                   >
                     Send feedback
+                  </MenuItem>
+                ) : null}
+                {mcpOn ? (
+                  <MenuItem
+                    icon={<SparkleIcon />}
+                    onSelect={() => {
+                      close();
+                      // Hands over the connector URL for claude.ai plus the
+                      // local Claude Code / Desktop setup (see ConnectAiDialog).
+                      openMcp();
+                    }}
+                  >
+                    Connect an AI client
                   </MenuItem>
                 ) : null}
                 <MenuItem

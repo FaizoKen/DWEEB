@@ -422,6 +422,13 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   **No Caddy change is needed** (the `{$DOMAIN}` catch-all already routes `/mcp`,
   `/oauth/*`, `/.well-known/*`). Wiring checks that no unit test can reach live in
   `server/ops/mcp-smoke.sh`, which drives the real binary over HTTP and runs in `server.yml`.
+  **The feature is surfaced in the app** by "Connect an AI client" in the builder's More menu
+  (`features/mcp/ConnectAiDialog`), which hands over the connector URL and the local setup
+  command with copy buttons. The URL is **derived from `PROXY_BASE_URL`**, never hard-coded, so
+  a self-hosted build advertises its own address; the entry is gated on the proxy reporting
+  `mcp: true` (`core/mcp/availability`, same shape as feedback/avatar uploads) because handing
+  someone a URL that answers 501 sends them through a connector setup that cannot work and reads
+  as their mistake. Keep it a lazy surface inside a `ChunkErrorBoundary` like every other dialog.
 - **The Directory plugin needs no permission bit and no privileged intent — keep it that
   way** (`plugins/directory`, prefix `directory:`, port 8099, added 2026-07-26). It answers a
   click with a live read of the guild in one of two modes — a role/staff roster or a channel

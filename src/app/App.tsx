@@ -68,6 +68,9 @@ const CollaborateDialog = lazy(() =>
 const InstallDialog = lazy(() =>
   import("@/features/install/InstallDialog").then((m) => ({ default: m.InstallDialog })),
 );
+const ConnectAiDialog = lazy(() =>
+  import("@/features/mcp/ConnectAiDialog").then((m) => ({ default: m.ConnectAiDialog })),
+);
 const PricingModal = lazy(() =>
   import("@/features/plan/PricingModal").then((m) => ({ default: m.PricingModal })),
 );
@@ -99,6 +102,7 @@ import { useFeedbackStore } from "@/features/feedback/feedbackStore";
 import { usePlanStore } from "@/core/plan/planStore";
 import { useCollaborateStore } from "@/features/collaborate/collaborateStore";
 import { useInstallStore } from "@/features/install/installStore";
+import { useMcpStore } from "@/features/mcp/mcpStore";
 import { readShareTokenFromHash } from "@/core/serialization/url";
 import { readShortLinkId } from "@/core/serialization/shortlink";
 import { readCustomBotParam } from "@/core/guild/customBotLink";
@@ -256,6 +260,8 @@ export function App() {
   // the captured native PWA prompt on Chromium, or shows per-platform manual
   // steps elsewhere. Mounted lazily only while open.
   const installOpen = useInstallStore((s) => s.open);
+  const mcpOpen = useMcpStore((s) => s.open);
+  const closeMcp = useMcpStore((s) => s.closeMcp);
   const closeInstall = useInstallStore((s) => s.closeInstall);
 
   // The intro film — auto-played once for brand-new users (layered over the
@@ -596,6 +602,13 @@ export function App() {
           <ChunkErrorBoundary onDismiss={closeInstall}>
             <Suspense fallback={null}>
               <InstallDialog />
+            </Suspense>
+          </ChunkErrorBoundary>
+        ) : null}
+        {mcpOpen ? (
+          <ChunkErrorBoundary onDismiss={closeMcp}>
+            <Suspense fallback={null}>
+              <ConnectAiDialog />
             </Suspense>
           </ChunkErrorBoundary>
         ) : null}

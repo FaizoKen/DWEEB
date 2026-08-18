@@ -1,0 +1,94 @@
+/* "Connect an AI client" dialog — mirrors the Install/Collaborate panels. */
+
+/* Rounded accent tile holding the glyph, centered above the copy. */
+.hero {
+  display: flex;
+  justify-content: center;
+  margin: 2px 0 16px;
+}
+.heroIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--app-radius-lg);
+  color: var(--app-accent-text);
+  background: var(--app-accent-soft);
+  border: 1px solid var(--app-border-focus);
+}
+
+.lead {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--app-text-muted);
+  text-align: center;
+}
+.lead strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+/* One connection route (remote / local). */
+.section {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-subtle);
+  border: 1px solid var(--app-border);
+}
+.section:last-of-type {
+  margin-bottom: 0;
+}
+
+.heading {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.body {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.body strong {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+/* The copyable value plus its button. The value is allowed to wrap — a
+   connector URL on a narrow phone must stay fully readable rather than being
+   truncated into something that looks copy-pasteable but isn't. */
+.copyRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.code {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  color: var(--app-text);
+  font-family: var(--app-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.fine {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+.fine a {
+  color: var(--app-accent-text);
+}
