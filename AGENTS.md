@@ -736,6 +736,16 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   Bump `GUIDES_LASTMOD` when guides change — the audit fails a hub whose lastmod is older
   than its newest child, and bump a guide's `modified` when its visible content (including
   related-link cards) changes.
+  **A feature page's setup copy is derived, and `requiresBot` does not mean "plugin"**
+  (2026-08-19). `resolveFeature` maps `requiresBot` to `deliveryMode: "bot-install"`, and every
+  such feature was a plugin until the MCP connector, which needs the app in the server only
+  because posting resolves DWEEB's own webhook. So the delivery callout, the appended "Is DWEEB
+  free?" answer, and the CTA instruction gate their plugin wording on `pluginId`, never on
+  `deliveryMode` — the generic copy otherwise walks the reader through detecting a component and
+  pairing a plugin that doesn't exist for that feature. A feature whose CTA opens something other
+  than the editor (an `appPath` with its own `intent=`) also needs an entry in `ctaLabels` and
+  `ctaNotes` (features-layout.ts), since neither can be derived from the shape of its data. The
+  audit checks structure, not truthfulness; these claims stay honest only by hand.
 - **Search attribution is first-party and privacy-bounded.** Static CTAs use
   `entry=<landing|template|feature|guide>:<public-slug>` (never internal UTM tags), and optional
   `intent=` values may only open a non-mutating app surface. `gtag-init.js` drops hashes,

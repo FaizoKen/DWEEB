@@ -841,7 +841,9 @@ export function resolveFeature(f: FeatureSeo): ResolvedFeature {
   const deliveryMode = f.requiresBot ? "bot-install" : f.pluginId ? "app-owned" : "plain";
   const freeAnswer =
     deliveryMode === "bot-install"
-      ? "Yes. Build the message for free, then follow the guided app installation and plugin setup. Plans only raise per-server quotas; they do not lock this feature."
+      ? f.pluginId
+        ? "Yes. Build the message for free, then follow the guided app installation and plugin setup. Plans only raise per-server quotas; they do not lock this feature."
+        : "Yes. The feature is free to use; it only needs DWEEB's app in the server you post to. Plans only raise per-server quotas; they do not lock this feature."
       : deliveryMode === "app-owned"
         ? "Yes. Build the message for free and let DWEEB create a compatible app-owned destination for the hosted interaction. No server bot install or self-hosting is required."
         : "Yes. DWEEB's visual builder is free and needs no account. Optional connected services and plans only add server-backed capacity; they do not lock the feature.";

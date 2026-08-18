@@ -47,6 +47,7 @@ export function renderFeaturePage(
     "scheduled-posts": "Schedule a message",
     "webhook-manager": "Manage webhooks",
     "ai-assistant": "Draft with AI",
+    "mcp-connector": "Connect an AI client",
   };
   const ctaLabel = ctaLabels[feature.id] ?? "Build this in DWEEB";
   const deliveryBadge =
@@ -60,11 +61,21 @@ export function renderFeaturePage(
     : "";
   const botBadge = `${deliveryBadge}${setupBadge}`;
 
+  // A bot-install feature is USUALLY a plugin, where the setup really is
+  // "DWEEB detects the component and pairs it with the plugin". A feature that
+  // needs the app in the server without being a plugin (the MCP connector) has
+  // no component to detect and no plugin to pair, so claiming otherwise would
+  // describe a setup flow that does not exist.
   const deliveryCallout =
     feature.deliveryMode === "bot-install"
-      ? `<aside class="callout">
+      ? feature.pluginId
+        ? `<aside class="callout">
         <strong>This feature is interactive.</strong>
         Its privileged actions require a Discord app installation and an app-owned webhook. DWEEB detects the component and walks you through pairing it with the <strong>${escapeHtml(feature.h1)}</strong> plugin.
+      </aside>`
+        : `<aside class="callout">
+        <strong>DWEEB's app has to be in the server.</strong>
+        Posting goes through a webhook DWEEB creates and reuses for you, which needs the app present in that server — the same one-click invite the rest of DWEEB uses. Nothing is self-hosted and there is no code to run.
       </aside>`
       : feature.deliveryMode === "app-owned"
         ? `<aside class="callout callout-setup">
@@ -91,13 +102,21 @@ export function renderFeaturePage(
   const whenToUse = `<section class="block"><h2>When to use it</h2>
     <ul class="ticks">${feature.whenToUse.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></section>`;
 
-  const ctaInstructions = feature.previewTemplateId
-    ? `Build it visually in DWEEB${feature.deliveryMode !== "plain" ? ", complete the guided interaction setup," : ""} and send it to your server in minutes.`
-    : feature.pluginId
-      ? "Choose a starting message, add a compatible control, then attach the hosted plugin from its Action panel."
-      : feature.setupNote
-        ? "Open the visual editor, connect your chosen provider, and generate an editable draft."
-        : "Open the visual editor and continue directly into this workflow.";
+  // Keyed by id: a feature whose CTA opens something other than the editor
+  // can't be described from the shape of its data.
+  const ctaNotes: Record<string, string> = {
+    "mcp-connector":
+      "Open DWEEB, copy the connector address, and add it to your AI client — then ask it for your first message.",
+  };
+  const ctaInstructions =
+    ctaNotes[feature.id] ??
+    (feature.previewTemplateId
+      ? `Build it visually in DWEEB${feature.pluginId ? ", complete the guided interaction setup," : ""} and send it to your server in minutes.`
+      : feature.pluginId
+        ? "Choose a starting message, add a compatible control, then attach the hosted plugin from its Action panel."
+        : feature.setupNote
+          ? "Open the visual editor, connect your chosen provider, and generate an editable draft."
+          : "Open the visual editor and continue directly into this workflow.");
 
   const preview = previewHtml
     ? `<section class="preview-block" aria-label="Example message">
