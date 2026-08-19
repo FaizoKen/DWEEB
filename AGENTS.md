@@ -780,6 +780,42 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   this query is visual-tool pages with the phrase in their title, competing with discord.js's
   `MessageBuilder` docs for the same words. The two sibling landings stay narrower on purpose
   (webhook workflow, embed conversion) so all three do not chase one query.
+  **The head-term landing has to be linked *to*, contextually, and an audit gate keeps it that
+  way** (2026-08-20). Its inbound links were 126 nav/footer anchors reading "Message builder" and
+  nine contextual ones: the 47 template and feature pages — the site's largest content mass and
+  the pages a search visitor actually lands on — pointed at it from nowhere inside their own
+  copy, so the page carrying the depth for the primary query received no descriptive anchor text
+  from the site that owns it. Every template detail page now links it from its closing CTA
+  sentence and every feature page from a "Part of DWEEB" block (which is also the honest answer
+  to "a feature of *what*" — those pages carried only two to five in-body links each). Both are
+  enforced: `audit.ts` counts links found inside `<main>` separately from the nav/footer
+  boilerplate every page repeats verbatim, and fails the build if a template or feature page has
+  no contextual link to `/discord-message-builder/`. Deliberately not extended to the sitewide
+  nav anchor — a generic boilerplate anchor plus contextual exact-match anchors is the natural
+  shape; 66 identical exact-match sitewide links is the over-optimised one.
+  **Landing and guide prose may carry inline internal links, and the escaping order is the whole
+  safety argument** (`renderProse` in guides-layout.ts, 2026-08-20). All section copy is
+  `escapeHtml`'d, which is why these pages could not link contextually at all. `renderProse`
+  escapes **first**, then converts a `[label](/path)` form into an anchor: by substitution time
+  every author-supplied `<`, `>`, `&` and quote is already an entity, so the syntax cannot
+  introduce markup, and the href is constrained to a site-relative path from a conservative
+  character class, so an external or `javascript:` target cannot be expressed. Never reorder
+  those two steps and never widen the href class. Applies to paragraphs, bullets and table cells;
+  `code` blocks stay escape-only. FAQ answers deliberately do **not** use it — their text is
+  reused verbatim as `FAQPage` JSON-LD, and schema must match the visible text. The audit fails
+  on any `[label](/path)` surviving into rendered HTML, since a mistyped target ships as visible
+  punctuation rather than as a broken link the link gate would catch.
+  **The head term's SERP is mixed intent, and half of it is a code library** (2026-08-20). A
+  search sample for "Discord message builder" returns visual tools *and* discord.js's
+  `MessageBuilder` class reference; the site addressed the second half nowhere. The landing now
+  answers it directly — a "Visual builder or raw JSON" section and a FAQ stating plainly that
+  `MessageBuilder` is the code-side way to assemble the same payload and that DWEEB exports it —
+  and `/guides/discord-components-v2/` gained a "Sending the payload from a bot or your own code"
+  table. This is honest disambiguation, not a competitor mention: the JSON export is real and it
+  is what that visitor came for. Don't delete it as off-topic. Same reasoning covers the
+  "is a message builder the same as an embed generator?" FAQ — "generator", "creator" and "maker"
+  are separate searches for this tool, and the answer is a real product distinction (legacy embed
+  versus Components V2 layout), not a synonym list.
   Discord markdown in the live message preview is subordinate page content: visual H1/H2/H3
   levels render as document H2/H3/H4 while retaining their measured CSS classes. Never emit a
   real `<h1>` from user-authored preview text; the root product heading must remain the only one.

@@ -39,6 +39,13 @@ const WEB_BOOT_SOURCE_ROOTS = [
   { source: "src/core/oauth/flows.ts", chunkName: "flows" },
 ] as const;
 const MAX_CRITICAL_REQUESTS = 16;
+/**
+ * The `[label](/path)` form `renderProse` converts into an inline internal
+ * link. Matching it in the *rendered* HTML means the renderer never saw it —
+ * an authoring typo shipping as visible punctuation, which the broken-link gate
+ * cannot catch because no link was ever emitted.
+ */
+const UNRENDERED_INLINE_LINK = /\[[^[\]<>]+\]\(\/[A-Za-z0-9\-._~/]*\)/;
 
 interface PageAudit {
   url: string;
@@ -49,6 +56,7 @@ interface PageAudit {
   words: number;
   jsonLdBlocks: number;
   internalLinks: string[];
+  contextualLinks: string[];
 }
 
 interface SitemapEntry {
@@ -463,6 +471,12 @@ async function main(): Promise<void> {
       errors.push(`${entry.url}: obsolete meta keywords found`);
     if (/without the JSON/i.test(html))
       errors.push(`${entry.url}: forbidden positioning phrase found`);
+    // Landing and guide prose may carry inline internal links written as
+    // [label](/path) — see `renderProse`. Anything the renderer did not convert
+    // reaches the reader as literal punctuation, so a mistyped target ships as
+    // visible syntax rather than as a broken link the link gate would catch.
+    if (UNRENDERED_INLINE_LINK.test(html))
+      errors.push(`${entry.url}: unrendered inline link syntax in page copy`);
     if (/no (?:usage )?limits?|unlimited usage/i.test(html)) {
       errors.push(`${entry.url}: copy conflicts with quota-only plan positioning`);
     }
@@ -584,6 +598,19 @@ async function main(): Promise<void> {
     const internalLinks = hrefs
       .map((href) => normalizedInternalPath(href))
       .filter((path): path is string => !!path);
+    // Links inside <main> are the ones that carry descriptive anchor text and
+    // real editorial weight; the nav and footer repeat the same generic anchors
+    // on all 66 pages and say nothing about any one of them. They have to be
+    // counted apart or the boilerplate makes every page look well linked.
+    const mainHtml = html.slice(
+      Math.max(html.indexOf("<main"), 0),
+      html.includes("<footer") ? html.indexOf("<footer") : undefined,
+    );
+    const contextualLinks = new Set(
+      [...mainHtml.matchAll(/<a\s+[^>]*href="([^"]+)"/gi)]
+        .map((match) => normalizedInternalPath(decode(match[1]!)))
+        .filter((path): path is string => !!path),
+    );
 
     const contentPath = new URL(entry.url).pathname;
     if (
@@ -639,6 +666,7 @@ async function main(): Promise<void> {
       words,
       jsonLdBlocks: jsonLdMatches.length,
       internalLinks,
+      contextualLinks: [...contextualLinks],
     });
   }
 
@@ -660,6 +688,22 @@ async function main(): Promise<void> {
   }
   for (const [path, count] of inbound) {
     if (count === 0) errors.push(`${path}: template has no contextual inbound detail-page link`);
+  }
+
+  // "Discord message builder" is the site's primary query, and `/` is a working
+  // editor whose crawlable body is a UI rather than prose — so the landing that
+  // carries the depth for that term is the page that has to be linked *to*.
+  // Before 2026-08-20 its only inbound links were the nav and footer anchors
+  // every page repeats verbatim, which describe nothing; the 47 template and
+  // feature pages, the site's largest content mass, pointed at it from nowhere
+  // inside their own copy. Losing that ring again would be invisible in review.
+  const HEAD_TERM_LANDING = "/discord-message-builder/";
+  for (const page of pages) {
+    const path = new URL(page.url).pathname;
+    if (!/^\/(?:templates|features)\/[^/]+\/$/.test(path)) continue;
+    if (!page.contextualLinks.includes(HEAD_TERM_LANDING)) {
+      errors.push(`${page.url}: no contextual link to ${HEAD_TERM_LANDING}`);
+    }
   }
 
   // Non-flaky transfer budgets complement Lighthouse: they catch a critical

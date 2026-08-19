@@ -97,7 +97,9 @@ const HOWTO_START = [
   },
 ];
 
-function howToSteps(seo: ResolvedSeo): { name: string; text: string }[] {
+function howToSteps(
+  seo: ResolvedSeo,
+): { name: string; text: string; href?: string; hrefText?: string }[] {
   const destination =
     seo.deliveryMode === "app-owned"
       ? {
@@ -112,6 +114,8 @@ function howToSteps(seo: ResolvedSeo): { name: string; text: string }[] {
         : {
             name: "Paste your webhook URL",
             text: "In Discord, go to Server Settings → Integrations → Webhooks, copy a webhook URL, and paste it into DWEEB.",
+            href: "/discord-webhook-builder/",
+            hrefText: "See the full webhook workflow",
           };
   return [
     ...HOWTO_START,
@@ -324,8 +328,13 @@ export function renderTemplatePage(
     .map((w) => `<li>${escapeHtml(w)}</li>`)
     .join("")}</ul></section>`;
 
+  const hasContainer = seo.componentKinds.some((kind) => /container/i.test(kind));
   const whatsInside = `<section class="block"><h2>What's inside</h2>
-    <p>Built with Discord's <a href="/guides/discord-components-v2/">Components V2 layout system</a>:</p>
+    <p>Built with Discord's <a href="/guides/discord-components-v2/">Components V2 layout system</a>${
+      hasContainer
+        ? ` — the accent-striped card the <a href="/discord-embed-builder/">Discord embed builder</a> produces in place of a legacy embed`
+        : ""
+    }:</p>
     <ul class="chips">${seo.componentKinds.map((k) => `<li>${escapeHtml(k)}</li>`).join("")}</ul></section>`;
 
   const tips = `<section class="block"><h2>Tips</h2><ul class="ticks">${seo.tips
@@ -334,7 +343,12 @@ export function renderTemplatePage(
 
   const steps = howToSteps(seo);
   const howto = `<section class="block"><h2>How to use this template</h2>
-    <ol class="steps">${steps.map((s) => `<li><strong>${escapeHtml(s.name)}.</strong> ${escapeHtml(s.text)}</li>`).join("")}</ol></section>`;
+    <ol class="steps">${steps
+      .map(
+        (s) =>
+          `<li><strong>${escapeHtml(s.name)}.</strong> ${escapeHtml(s.text)}${s.href ? ` <a href="${attr(s.href)}">${escapeHtml(s.hrefText ?? "Learn more")}</a>.` : ""}</li>`,
+      )
+      .join("")}</ol></section>`;
 
   const relatedSection = related.length
     ? `<section class="block"><h2>Related templates</h2><div class="card-grid">${related
@@ -387,7 +401,7 @@ export function renderTemplatePage(
 
       <section class="cta-band">
         <h2>Ready to use this template?</h2>
-        <p>Open it in DWEEB, customize it for your server, and send it in under a minute.</p>
+        <p>Open it in the visual <a href="/discord-message-builder/">Discord message builder</a>, customize it for your server, and send it in under a minute.</p>
         <a class="btn btn-primary btn-lg" href="${attr(seo.appUrl)}" data-analytics="template" data-analytics-id="${attr(seo.slug)}" data-analytics-location="body">Use “${escapeHtml(seo.h1.replace(/ Template$/, ""))}” →</a>
       </section>
 

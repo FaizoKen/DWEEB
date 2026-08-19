@@ -24,14 +24,37 @@ function trackedAppPath(path: string, type: "guide" | "landing", id: string): st
   return withClientParams(path, { entry: `${type}:${id}` });
 }
 
+/**
+ * Prose written for these pages is HTML-escaped, which used to make a
+ * contextual internal link impossible — every landing and guide body could only
+ * link through its nav, footer and card rings, so the pages that carry the most
+ * on-topic copy passed no descriptive anchor text anywhere. This accepts one
+ * markdown-style link form inside that copy.
+ *
+ * Escaping runs FIRST and is never relaxed: by the time this substitution sees
+ * the string, any author-supplied `<`, `>`, `&` or quote is already an entity,
+ * so nothing here can introduce markup. The href is additionally constrained to
+ * a site-relative path from a conservative character class, so an external or
+ * javascript: target cannot be expressed at all — an internal link is the only
+ * thing this syntax can produce, which is also all the SEO audit will accept.
+ */
+const INLINE_LINK = /\[([^[\]]+)\]\((\/[A-Za-z0-9\-._~/]*)\)/g;
+
+export function renderProse(text: string): string {
+  return escapeHtml(text).replace(
+    INLINE_LINK,
+    (_match, label: string, href: string) => `<a href="${href}">${label}</a>`,
+  );
+}
+
 function renderSections(sections: readonly GuideSection[]): string {
   return sections
     .map((section) => {
       const paragraphs = (section.paragraphs ?? [])
-        .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
+        .map((paragraph) => `<p>${renderProse(paragraph)}</p>`)
         .join("");
       const bullets = section.bullets?.length
-        ? `<ul class="ticks">${section.bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+        ? `<ul class="ticks">${section.bullets.map((item) => `<li>${renderProse(item)}</li>`).join("")}</ul>`
         : "";
       const code = section.code
         ? `<pre class="code-block"><code>${escapeHtml(section.code)}</code></pre>`
@@ -40,7 +63,7 @@ function renderSections(sections: readonly GuideSection[]): string {
         ? `<div class="table-scroll"><table><caption class="sr-only">${escapeHtml(section.heading)}</caption><thead><tr>${section.table.headers
             .map((cell) => `<th scope="col">${escapeHtml(cell)}</th>`)
             .join("")}</tr></thead><tbody>${section.table.rows
-            .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`)
+            .map((row) => `<tr>${row.map((cell) => `<td>${renderProse(cell)}</td>`).join("")}</tr>`)
             .join("")}</tbody></table></div>`
         : "";
       return `<section class="block prose"><h2>${escapeHtml(section.heading)}</h2>${paragraphs}${bullets}${table}${code}</section>`;

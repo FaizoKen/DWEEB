@@ -24,6 +24,8 @@ import {
 } from "./features";
 import { withClientParams } from "@/core/seo/clientParams";
 
+const TEMPLATES_INDEX_PATH = "/templates/";
+const GUIDES_INDEX_PATH = "/guides/";
 const FEATURES_INDEX_PATH = "/features/";
 const FEATURES_INDEX_URL = `${SITE.origin}${FEATURES_INDEX_PATH}`;
 const FEATURES_OG_INDEX = `${SITE.origin}/features-og/features.png`;
@@ -137,6 +139,9 @@ export function renderFeaturePage(
           .join("")}</div></section>`
     : "";
 
+  const partOfDweeb = `<section class="block"><h2>Part of DWEEB</h2>
+    <p>${escapeHtml(feature.h1)} is one part of DWEEB, a free visual <a href="/discord-message-builder/">Discord message builder</a> for webhook messages and embed-style Components V2 layouts. Design the message itself, start from a <a href="${TEMPLATES_INDEX_PATH}">ready-made template</a>, or read the <a href="${GUIDES_INDEX_PATH}">guides</a>.</p></section>`;
+
   const body = `<main id="main-content" class="wrap">
     ${breadcrumbNav([
       { name: "Home", url: "/" },
@@ -173,6 +178,7 @@ export function renderFeaturePage(
 
       ${faqSection(feature.resolvedFaq)}
       ${relatedSection}
+      ${partOfDweeb}
     </article>
   </main>`;
 

@@ -42,11 +42,22 @@ detail-page link ring so no template is contextually orphaned. Interactive templ
 the feature that explains setup and permissions. Guides link to the exact builder surface they
 describe.
 
+Anchor text is measured, not assumed. Before 2026-08-20 the head-term landing had 135 inbound
+internal links of which 126 were the identical nav/footer anchor "Message builder"; only nine were
+contextual. Every template detail page now links it from its closing CTA sentence and every feature
+page from a "Part of DWEEB" block, taking contextual exact-match anchors to 53, with 35 for the
+embed landing (from templates that genuinely contain a Container) and descriptive workflow anchors
+for the webhook landing. The audit counts links inside `<main>` separately from the sitewide
+boilerplate and fails the build if a template or feature page loses its contextual link to
+`/discord-message-builder/`. The sitewide nav anchor stays generic on purpose: a boilerplate anchor
+plus contextual exact-match anchors is the natural shape, and 66 identical sitewide exact-match
+links is the over-optimised one.
+
 ## Release baseline
 
 The 2026-08-20 production build produces:
 
-- 66 indexable URLs and 46,245 words of crawlable/rendered content under the release audit.
+- 66 indexable URLs and 48,071 words of crawlable/rendered content under the release audit.
 - 36 template pages, 11 feature pages, 9 long-form guides, 3 product landings, 3 section indexes, a
   first-hand author/testing methodology page, home, and two legal pages.
 - A 1200×630 social card for every template, feature, guide, index, and product landing page, plus
@@ -181,6 +192,26 @@ tool intent, discord.builders for Components V2, and Discohook for community rec
 not copy their breadth mechanically. Its defensible gaps are measured preview methodology, complete
 Components V2 coverage, honest plain-versus-app-owned webhook guidance, local-by-default boundaries,
 editable templates, restore/update, scheduling, and collaboration.
+
+A second sample on 2026-08-20 (again a search sample, not a rank tracker) returned a **mixed-intent**
+result set for the head term: discord.js's `MessageBuilder` and `ComponentBuilder` class references
+alongside visual tools (whumple.com/studio, discord.builders, guildbase.gg, discord-webhook.com,
+discordmessageplannerbot.com). Two things follow, both now implemented:
+
+1. The developer half of the query was addressed nowhere on the site. The landing gained a "Visual
+   builder or raw JSON" section and a FAQ that says plainly what `MessageBuilder` is and that DWEEB
+   exports the same payload; `/guides/discord-components-v2/` gained a table for sending that payload
+   from a webhook URL, a bot library, a library without V2 helpers, or the MCP connector. The JSON
+   export is real, so this is disambiguation rather than a competitor mention — and it is the honest
+   reason a developer arriving on that query would stay.
+2. Competitor titles use **generator**, **creator** and **maker** where DWEEB only says _builder_.
+   Rather than stuffing synonyms, one FAQ answers whether a message builder is the same as an embed
+   generator, and the answer is a real product distinction: a legacy embed is one fixed card with
+   named slots, a Components V2 message is an arrangeable layout. Revisit with Search Console query
+   data before dedicating a URL to any of those variants.
+
+DWEEB still did not appear in the returned top set. Local code cannot change that on its own —
+deployment, recrawl and Search Console measurement remain the next step, exactly as recorded above.
 
 ## Next query-led expansion
 
