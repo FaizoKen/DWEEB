@@ -144,7 +144,12 @@ export function htmlDocument(opts: {
     "img-src 'self' https: data:",
     "style-src 'self' 'unsafe-inline'",
     "script-src 'self' https://www.googletagmanager.com",
-    "connect-src https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com",
+    // `self` is load-bearing for discovery tooling, not for the page: these
+    // pages ship no first-party JS, but Lighthouse and AI browsing agents fetch
+    // /robots.txt and /llms.txt *from the page context*, and without `self`
+    // those same-origin reads are refused as CSP violations (which Lighthouse
+    // then reports as an invalid robots.txt).
+    "connect-src 'self' https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com",
     "base-uri 'self'",
     "form-action 'self'",
   ].join("; ");
@@ -202,7 +207,7 @@ export function htmlDocument(opts: {
     <header class="site">
       <a class="brand" href="/" aria-label="DWEEB home">DWEEB</a>
       <nav class="site-nav">
-        <a href="/discord-webhook-builder/">Builder</a>
+        <a href="/discord-message-builder/">Message builder</a>
         <a href="/features/">Features</a>
         <a href="${TEMPLATES_INDEX_PATH}">Templates</a>
         <a href="/guides/">Guides</a>
@@ -212,11 +217,12 @@ export function htmlDocument(opts: {
     ${opts.body}
     <footer class="site-footer">
       <p>
-        <strong>DWEEB</strong> — the free visual Discord webhook &amp; embed builder for Components V2.
+        <strong>DWEEB</strong> — the free visual Discord message builder for webhook messages, embeds and Components V2.
         Build, preview and send rich messages in a local-by-default editor. No account is required for the core builder.
       </p>
       <p class="muted">
         <a href="${builderUrl}" data-analytics="${attr(opts.pageType)}" data-analytics-id="${attr(opts.pageId)}" data-analytics-location="footer">Open the builder</a> ·
+        <a href="/discord-message-builder/">Message builder</a> ·
         <a href="/discord-webhook-builder/">Webhook builder</a> ·
         <a href="/discord-embed-builder/">Embed builder</a> ·
         <a href="/features/">Features</a> ·
@@ -478,7 +484,7 @@ export function renderIndexPage(all: ResolvedSeo[]): string {
     <header class="hero">
       <span class="chip">📋 Templates</span>
       <h1>Discord Message Templates</h1>
-      <p class="lede">A growing library of free, ready-to-use Discord message templates built with Components V2 — welcome messages, server rules, announcements, role menus, giveaways, support tickets and more. Open any template in DWEEB, customize every word, colour and link, then send it to Discord. Each card makes its webhook and integration requirements clear.</p>
+      <p class="lede">A growing library of free, ready-to-use Discord message templates built with Components V2 — welcome messages, server rules, announcements, role menus, giveaways, support tickets and more. Open any template in the <a href="/discord-message-builder/">Discord message builder</a>, customize every word, colour and link, then send it to Discord. Each card makes its webhook and integration requirements clear.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="/?entry=template%3Aindex" data-analytics="template" data-analytics-id="index" data-analytics-location="hero">Build a Discord message →</a>
       </div>

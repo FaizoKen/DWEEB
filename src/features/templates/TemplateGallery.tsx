@@ -1016,7 +1016,7 @@ export function TemplateGallery() {
             </div>
 
             <nav className={styles.discoveryLinks} aria-label="Explore DWEEB">
-              <a href="/discord-webhook-builder/">Webhook builder</a>
+              <a href="/discord-message-builder/">Message builder</a>
               <a href="/templates/">Templates</a>
               <a href="/features/">Features</a>
               <a href="/guides/">Guides</a>

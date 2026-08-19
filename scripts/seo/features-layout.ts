@@ -270,7 +270,7 @@ export function renderFeaturesIndexPage(all: ResolvedFeature[]): string {
     <header class="hero">
       <span class="chip">⚙️ Features</span>
       <h1>Discord Webhook Tools &amp; Features</h1>
-      <p class="lede">DWEEB is more than a message builder. Add self-assignable roles, private support tickets, one-click giveaways, pop-up application forms, hosted replies, scheduled posts and a built-in webhook manager. Every page identifies whether it uses a normal webhook, an app-owned destination or an installed app.</p>
+      <p class="lede">DWEEB is more than a <a href="/discord-message-builder/">Discord message builder</a>. Add self-assignable roles, private support tickets, one-click giveaways, pop-up application forms, hosted replies, scheduled posts and a built-in webhook manager. Every page identifies whether it uses a normal webhook, an app-owned destination or an installed app.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="/?entry=feature%3Aindex" data-analytics="feature" data-analytics-id="index" data-analytics-location="hero">Open the builder →</a>
         <a class="btn btn-ghost" href="/templates/">Browse templates</a>

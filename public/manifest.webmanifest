@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "DWEEB — Discord Webhook Embed Builder",
+  "name": "DWEEB — Discord Message Builder",
   "short_name": "DWEEB",
-  "description": "DWEEB — visually build, preview, and send Discord webhook & embed messages using Components V2. The core editor and browser drafts are local by default; optional connected features add scheduling, server libraries, and collaboration.",
+  "description": "DWEEB — a visual Discord message builder: design, preview and send webhook messages, embeds and Components V2 layouts. The core editor and browser drafts are local by default; optional connected features add scheduling, server libraries, and collaboration.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "/",
@@ -23,7 +23,7 @@
       "sizes": "1920x1080",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Building a Discord Components V2 message in DWEEB with a pixel-accurate live preview"
+      "label": "Building a Discord message in the DWEEB visual message builder, with a pixel-accurate live preview"
     }
   ]
 }

@@ -231,7 +231,7 @@ async function main(): Promise<void> {
     })),
     ...LANDINGS.map((landing) => ({
       loc: landing.url,
-      lastmod: GUIDES_LASTMOD,
+      lastmod: landing.modified,
       images: [landing.ogImage],
     })),
     {

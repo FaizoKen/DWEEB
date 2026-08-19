@@ -1,7 +1,7 @@
 /** Search-led, editorial pages generated into `/guides/` at build time. */
 
 import { LIMITS } from "@/core/schema/limits";
-import { SITE } from "./content";
+import { SITE, type FaqEntry } from "./content";
 
 export const GUIDES_LASTMOD = "2026-07-17";
 
@@ -1069,12 +1069,27 @@ export interface LandingPage {
   lede: string;
   description: string;
   keywords: string[];
+  /**
+   * ISO date this page's visible copy last changed. Landings carry their own
+   * date rather than sharing GUIDES_LASTMOD: they are revised independently of
+   * the guide cluster, and the audit cross-checks JSON-LD dateModified against
+   * the sitemap lastmod, so one shared constant would either lie about an
+   * untouched page or under-report a revised one.
+   */
+  modified: string;
   ctaLabel: string;
   /** OG-card kicker/category lines (build-time image generation). */
   ogCategory: string;
   ogKicker: string;
   imageAlt: string;
   sections: GuideSection[];
+  /**
+   * Visible Q&A rendered at the foot of the page and mirrored as FAQPage
+   * JSON-LD. Every competitor ranking for the head terms answers the
+   * definitional questions on-page; the schema must only ever describe text a
+   * reader can actually see, so this is one field driving both.
+   */
+  faq?: FaqEntry[];
   /** "Learn more" mini-cards — internal links only. */
   learn: { href: string; emoji: string; name: string; desc: string }[];
 }
@@ -1107,6 +1122,7 @@ const WEBHOOK_BUILDER_LANDING = landing({
     "discord webhook generator",
     "discord components v2 builder",
   ],
+  modified: "2026-08-19",
   ctaLabel: "Build a Discord message free",
   ogCategory: "Visual editor · Free core builder",
   ogKicker: "Build · Preview · Send · Edit · Schedule",
@@ -1177,6 +1193,32 @@ const WEBHOOK_BUILDER_LANDING = landing({
       ],
     },
   ],
+  faq: [
+    {
+      q: "How do I get a Discord webhook URL?",
+      a: "In Discord, open Server Settings → Integrations → Webhooks, create a webhook on the channel you want to post to, and copy its URL. You need the Manage Webhooks permission on that channel. The full walkthrough, including how to keep the URL out of a public repository, is in the webhook setup guide.",
+    },
+    {
+      q: "Is the webhook builder free?",
+      a: "Yes. Designing, previewing, importing, exporting and sending are free for noncommercial use and need no account. Per-server Plus and Pro plans raise quotas on hosted extras such as scheduled posts and saved messages; they do not lock any editor feature.",
+    },
+    {
+      q: "What can a plain webhook send without a bot?",
+      a: "Formatted text, headings, lists, mentions and timestamps, coloured containers, sections with thumbnails, media galleries, file attachments, separators and link buttons — plus a custom display name and avatar for the post. Only components that must react to a click need an application-owned webhook.",
+    },
+    {
+      q: "Can I schedule a webhook message for later?",
+      a: "Yes. Switch the send step from Send now to Schedule, pick a time, and the post is delivered from DWEEB's server at that moment. Upcoming posts for a connected server are listed together so you can review or cancel them before they fire.",
+    },
+    {
+      q: "Can I edit a webhook message after it has been posted?",
+      a: "Yes. Restore the message from its link or from your server library, change it in the builder, and update the original in place through the same webhook rather than posting a correction underneath it.",
+    },
+    {
+      q: "Why does Discord reject a message that looks fine?",
+      a: "Almost always a limit: the message-wide character budget, the component count, or a media URL Discord cannot fetch. The builder enforces those ceilings while you type and marks the offending block, so the check happens before the send rather than after it.",
+    },
+  ],
 });
 
 const EMBED_BUILDER_LANDING = landing({
@@ -1195,6 +1237,7 @@ const EMBED_BUILDER_LANDING = landing({
     "discord embed maker",
     "discord embed json",
   ],
+  modified: "2026-08-19",
   ctaLabel: "Build a Discord embed free",
   ogCategory: "Visual editor · Embeds & Components V2",
   ogKicker: "Design · Convert · Preview · Send",
@@ -1299,7 +1342,213 @@ const EMBED_BUILDER_LANDING = landing({
       ],
     },
   ],
+  faq: [
+    {
+      q: "What is a Discord embed?",
+      a: "An embed is the coloured card Discord renders instead of plain text: an accent stripe down the left, a title, a description, an optional thumbnail and large image, a grid of fields and a footer. Only webhooks and apps can send one — the normal message box cannot.",
+    },
+    {
+      q: "Does this builder produce embed JSON or Components V2?",
+      a: "It builds the embed's visual identity with Components V2, which is the layout system Discord's current clients render, and sends that. Existing embed JSON can be pasted in and converted, and the whole message can be exported as JSON at any point.",
+    },
+    {
+      q: "What happens to my old embed JSON when I import it?",
+      a: "The accent colour, title, description, thumbnail, image and footer text carry across into editable Components V2 blocks. Anything with no exact modern equivalent — inline field grids, polls, stickers, provider video — is named in a conversion report rather than silently dropped, so you can decide what to do with it before applying.",
+    },
+    {
+      q: "Do I need a bot to send an embed?",
+      a: "No. Any incoming webhook URL will post an embed-style card, including its images and link buttons. A bot or application-owned webhook is only needed once a button or select menu has to respond to a click.",
+    },
+    {
+      q: "Can I put buttons inside an embed?",
+      a: "Not in a classic embed — Discord attaches components beside a legacy embed rather than inside it. In Components V2 the buttons and select menus sit in the same container as the text and media, which is one of the main reasons to build the card this way.",
+    },
+    {
+      q: "How much text fits in one message?",
+      a: "Classic embeds share a 6,000-character budget across all embeds in a message. A Components V2 message has a 4,000-character budget across every text field, and the builder counts against it live so you know before you send rather than after Discord refuses it.",
+    },
+  ],
+});
+
+/**
+ * The head-term page. "Discord message builder" is the broadest way people
+ * describe what this product is, and the home page can only answer it so far:
+ * `/` renders the editor itself, so its crawlable body is a UI rather than
+ * prose. This page carries the depth — what a message builder is, which message
+ * types exist, and where each one can be delivered. The two sibling landings
+ * stay narrower on purpose (webhook workflow, embed conversion) so the three do
+ * not compete for one query.
+ */
+const MESSAGE_BUILDER_LANDING = landing({
+  slug: "discord-message-builder",
+  title: "Free Discord Message Builder with Live Preview | DWEEB",
+  h1: "Discord Message Builder",
+  breadcrumb: "Discord Message Builder",
+  chip: "💬 Visual message builder",
+  lede: "Build any Discord message visually — formatted text, embed-style cards, media, buttons and select menus — against a live preview measured off the real Discord client, then send it through a webhook.",
+  description:
+    "Build any Discord message visually: formatted text, embed-style cards, media, buttons and menus. Live preview, free, and no account for the core builder.",
+  keywords: [
+    "discord message builder",
+    "discord webhook message builder",
+    "discord message creator",
+    "discord message maker",
+    "discord embed builder",
+    "discord components v2 builder",
+  ],
+  modified: "2026-08-19",
+  ctaLabel: "Build a Discord message free",
+  ogCategory: "Message builder · Free core editor",
+  ogKicker: "Text · Embeds · Media · Buttons · Menus",
+  imageAlt:
+    "DWEEB — a visual Discord message builder showing a live preview of the finished message",
+  learn: [
+    {
+      href: "/discord-webhook-builder/",
+      emoji: "🛠️",
+      name: "Discord webhook builder",
+      desc: "The full send, edit and schedule workflow",
+    },
+    {
+      href: "/discord-embed-builder/",
+      emoji: "🎨",
+      name: "Discord embed builder",
+      desc: "Embed-style cards and legacy embed JSON",
+    },
+    {
+      href: "/templates/",
+      emoji: "📋",
+      name: "Discord message templates",
+      desc: "Editable starting points for every channel",
+    },
+    {
+      href: "/guides/discord-components-v2/",
+      emoji: "📘",
+      name: "Components V2 guide",
+      desc: "The layout system behind modern messages",
+    },
+  ],
+  sections: [
+    {
+      heading: "What a Discord message builder does",
+      paragraphs: [
+        "Discord's own message box sends plain text. Anything richer — a coloured card, a banner image, text beside a thumbnail, a row of buttons, a select menu — has to arrive as a structured payload from a webhook or an app. A message builder is the visual layer over that payload: you arrange the message the way you want people to read it, and the builder produces the JSON Discord accepts.",
+        "DWEEB is that layer. Add blocks from a component tree, type straight into them, and watch a preview whose colours, spacing and image geometry are measured against the live Discord client rather than approximated. Discord's character and structure limits are enforced while you type, so a message is checked as you build instead of failing at the API.",
+      ],
+    },
+    {
+      heading: "Every kind of Discord message, in one builder",
+      table: {
+        headers: ["What you want to post", "How you build it", "What it needs"],
+        rows: [
+          [
+            "Announcements and formatted text",
+            "Text Displays with Discord markdown, headings, lists, mentions and timestamps",
+            "Any webhook",
+          ],
+          [
+            "An embed-style card",
+            "A Container with an accent colour, text and media inside it",
+            "Any webhook",
+          ],
+          [
+            "A banner or an image gallery",
+            `A Media Gallery of up to ${LIMITS.GALLERY_ITEMS} images, with optional spoilers`,
+            "Any webhook",
+          ],
+          ["Text beside a small image", "A Section with a thumbnail accessory", "Any webhook"],
+          [
+            "Links to your site, docs or store",
+            `An Action Row of up to ${LIMITS.ACTION_ROW_BUTTONS} link buttons`,
+            "Any webhook",
+          ],
+          [
+            "Buttons and menus that act on a click",
+            "Interactive buttons or select menus paired with a built-in feature",
+            "An app-owned webhook",
+          ],
+          [
+            "Roles, tickets, forms or giveaways",
+            "The same message, with a guided plugin attached to the control",
+            "An installed app",
+          ],
+        ],
+      },
+      paragraphs: [
+        `One message can mix all of these. Up to ${LIMITS.TOP_LEVEL_COMPONENTS} top-level blocks stack in whatever order you arrange them, which is what separates a Components V2 layout from a classic embed's fixed slots.`,
+      ],
+    },
+    {
+      heading: "From blank canvas to posted message",
+      bullets: [
+        "Start blank, from an editable template, or by pasting webhook JSON you already have",
+        "Rearrange blocks in a component tree and edit each one in place",
+        "Watch the live preview render what Discord will actually show, including at mobile widths",
+        "Set the display name and avatar the message is posted under",
+        "Send to a pasted webhook URL, or pick a connected server and channel",
+        "Restore a message the webhook already posted and update it in place",
+        "Schedule the post for later, or hand the draft to someone else as one link",
+        "Export the finished message as JSON whenever you want the payload itself",
+      ],
+    },
+    {
+      heading: "Where the message is delivered",
+      paragraphs: [
+        "A standard incoming webhook — the kind anyone with Manage Webhooks can create in channel settings — carries text, layout, colour, media and link buttons. That covers most of what a server posts.",
+        "Discord only routes a click back to software when the message was posted by an application-owned webhook, so custom buttons and select menus need one. Actions that change the server, such as assigning a role or opening a private ticket channel, additionally need an app installed with the relevant permissions.",
+        "The builder labels which of the three a design needs before you commit to it, so you find out while you are still editing rather than at the send step.",
+      ],
+    },
+    {
+      heading: "Built for servers that post regularly",
+      paragraphs: [
+        "One-off builders stop at the send button. DWEEB keeps the message afterwards: a per-server library of what you posted and what is still a draft, scheduled posts with an upcoming queue, in-place editing of anything the webhook sent, and a webhook manager for the channels you publish to.",
+        "For teams, the builder also runs inside Discord as an embedded Activity so several people can edit one draft together, and an AI assistant can draft or restructure a message from a plain-English description. Plus and Pro plans raise per-server quotas on those hosted extras; they never lock an editor feature.",
+      ],
+    },
+    {
+      heading: "Free, local by default, no account for the core builder",
+      paragraphs: [
+        "The editor is free for noncommercial use and source-available. Your working draft, browser saves, recent webhook URLs and attachments stay on your device, and a default share link carries its message in the URL fragment, which browsers never send to a server. Optional features — short links, schedules, server libraries, collaboration, AI and billing — process only what they need to work, and the Privacy Policy itemises each one.",
+        "Nothing is posted until you review the preview and confirm it.",
+      ],
+    },
+  ],
+  faq: [
+    {
+      q: "What is a Discord message builder?",
+      a: "It is a visual editor for the rich messages Discord's own composer cannot send. You lay the message out on screen — text, colours, images, buttons, menus — and the builder generates the webhook payload Discord accepts, so the JSON is produced for you rather than written by hand.",
+    },
+    {
+      q: "Is DWEEB's Discord message builder free?",
+      a: "Yes. The full editor is free for noncommercial use, needs no account, and runs in the browser. Optional per-server Plus and Pro plans only raise quotas on hosted extras such as scheduled posts and saved messages — no editor feature is locked behind a plan.",
+    },
+    {
+      q: "Do I need a Discord bot to use it?",
+      a: "No. Any incoming webhook URL is enough for text, layout, media and link buttons. A bot or application-owned webhook is only required when a button or select menu has to respond to a click, and the builder tells you when a design has crossed that line.",
+    },
+    {
+      q: "Can I build Discord embeds with it?",
+      a: "Yes. The classic embed look — accent stripe, title, description, thumbnail, image, footer — is built from a Container with sections and media, and you can paste existing embed JSON to convert it. The embed builder page explains how each legacy field maps across.",
+    },
+    {
+      q: "Can I edit a Discord message after I have sent it?",
+      a: "Yes. Paste the message link or pick the post from your server library, edit it in the builder, and update the original in place through the same webhook, so it keeps its position in the channel.",
+    },
+    {
+      q: "Does it work on a phone?",
+      a: "Yes. The builder is responsive, and the preview opens as a sheet over the editor on small screens so you can check the result without leaving the block you are editing.",
+    },
+    {
+      q: "Where does my message go while I am building it?",
+      a: "The working draft stays in your browser. It reaches Discord only when you press send, through the webhook you chose, and reaches DWEEB's own services only for the optional features you turn on, such as scheduling or a server library.",
+    },
+  ],
 });
 
 /** Every generated product landing page, in nav order. */
-export const LANDINGS: LandingPage[] = [WEBHOOK_BUILDER_LANDING, EMBED_BUILDER_LANDING];
+export const LANDINGS: LandingPage[] = [
+  MESSAGE_BUILDER_LANDING,
+  WEBHOOK_BUILDER_LANDING,
+  EMBED_BUILDER_LANDING,
+];

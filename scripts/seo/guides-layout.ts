@@ -3,7 +3,15 @@
 import { escapeHtml } from "./render-message";
 import { SITE } from "./content";
 import { GUIDES_LASTMOD, type GuidePage, type GuideSection, type LandingPage } from "./guides";
-import { attr, breadcrumbLd, breadcrumbNav, htmlDocument, jsonLd } from "./layout";
+import {
+  attr,
+  breadcrumbLd,
+  breadcrumbNav,
+  faqLd,
+  faqSection,
+  htmlDocument,
+  jsonLd,
+} from "./layout";
 
 export const GUIDES_INDEX_PATH = "/guides/";
 export const GUIDES_INDEX_URL = `${SITE.origin}${GUIDES_INDEX_PATH}`;
@@ -150,7 +158,7 @@ export function renderGuidesIndexPage(all: GuidePage[]): string {
     <header class="hero">
       <span class="chip">📘 Guides</span>
       <h1>Discord Webhook &amp; Components V2 Guides</h1>
-      <p class="lede">Fact-checked, practical references built around the workflows DWEEB actually supports. Learn the current Discord model, see exact limits and payloads, then open the relevant example in the visual editor.</p>
+      <p class="lede">Fact-checked, practical references built around the workflows DWEEB actually supports. Learn the current Discord model, see exact limits and payloads, then open the relevant example in the <a href="/discord-message-builder/">visual Discord message builder</a>.</p>
       <div class="cta-row"><a class="btn btn-primary" href="/?entry=guide%3Aindex" data-analytics="guide" data-analytics-id="index" data-analytics-location="hero">Open the builder →</a></div>
     </header>
     <section class="cat-block"><h2 class="cat-title">Start here</h2><div class="card-grid">${cards}</div></section>
@@ -222,6 +230,7 @@ export function renderLandingPage(page: LandingPage): string {
         <p class="cta-note">No account required for the core builder. Nothing posts until you confirm it.</p>
       </header>
       ${renderSections(page.sections)}
+      ${page.faq?.length ? faqSection(page.faq) : ""}
       <section class="block"><h2>Learn or start from a proven design</h2><div class="card-grid">
         ${learnCards}
       </div></section>
@@ -236,7 +245,7 @@ export function renderLandingPage(page: LandingPage): string {
     headline: page.h1,
     description: page.description,
     url: page.url,
-    dateModified: GUIDES_LASTMOD,
+    dateModified: page.modified,
     inLanguage: "en",
     keywords: page.keywords.join(", "),
     isPartOf: { "@id": SITE.websiteId },
@@ -251,7 +260,7 @@ export function renderLandingPage(page: LandingPage): string {
     ogType: "website",
     pageType: "landing",
     pageId: page.slug,
-    modifiedTime: GUIDES_LASTMOD,
+    modifiedTime: page.modified,
     jsonLd: [
       jsonLd(
         breadcrumbLd([
@@ -260,6 +269,7 @@ export function renderLandingPage(page: LandingPage): string {
         ]),
       ),
       jsonLd(webPage),
+      ...(page.faq?.length ? [jsonLd(faqLd(page.faq))] : []),
     ],
     body,
   });

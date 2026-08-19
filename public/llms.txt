@@ -1,6 +1,6 @@
 # DWEEB
 
-> DWEEB (Discord Webhook Embed Builder) is a free, browser-based visual builder for Discord webhook messages using Components V2 — design rich messages with containers, sections, buttons, select menus, and media in a pixel-accurate live Discord preview, then send, schedule, or share them through a webhook. The core editor is local by default and needs no account; optional per-server Plus/Pro upgrades only raise quotas — no feature is ever locked behind a plan.
+> DWEEB is a free, browser-based visual Discord message builder for webhook messages, embed-style cards and Components V2 — design rich messages with containers, sections, buttons, select menus, and media in a pixel-accurate live Discord preview, then send, schedule, or share them through a webhook. The core editor is local by default and needs no account; optional per-server Plus/Pro upgrades only raise quotas — no feature is ever locked behind a plan.
 
 Key facts:
 
@@ -12,6 +12,7 @@ Key facts:
 
 ## Docs
 
+- [Discord message builder](https://dweeb.faizo.net/discord-message-builder/): what the builder is, every message type it can produce, and where each one can be delivered
 - [Visual Discord webhook builder](https://dweeb.faizo.net/discord-webhook-builder/): product overview and direct path into the editor
 - [Discord embed builder](https://dweeb.faizo.net/discord-embed-builder/): embed-style design, legacy embed JSON import, and conversion to Components V2
 - [Discord webhook and Components V2 guides](https://dweeb.faizo.net/guides/): official-source-led setup, JSON, limits, rate limits, markdown/text formatting, timestamps, webhook name/avatar, conversion, security, and message-editing guides

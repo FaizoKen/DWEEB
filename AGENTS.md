@@ -728,14 +728,43 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   are legitimately date-only, and are separately cross-checked against sitemap `lastmod` — don't
   widen it to them.
   Landing pages are a catalog (`LANDINGS` in `scripts/seo/guides.ts`, rendered by
-  `renderLandingPage`) — currently `/discord-webhook-builder/` and `/discord-embed-builder/`.
+  `renderLandingPage`) — currently `/discord-message-builder/`, `/discord-webhook-builder/`
+  and `/discord-embed-builder/`.
   **Adding a guide or landing** = entry in `GUIDES`/`LANDINGS` + its slug in `ENTRY_IDS`
   (`src/core/seo/acquisition.ts`, else the audit fails the CTA token) + a committed OG card via
   `bun add -d sharp && bun scripts/gen-template-og.ts --guides-only && bun remove sharp`
   (guide/landing cards only; output is deterministic, untouched cards stay byte-identical).
   Bump `GUIDES_LASTMOD` when guides change — the audit fails a hub whose lastmod is older
   than its newest child, and bump a guide's `modified` when its visible content (including
-  related-link cards) changes.
+  related-link cards) changes. A **landing** carries its own `modified` instead (added
+  2026-08-19): landings are revised independently of the guide cluster, and since the audit
+  cross-checks JSON-LD `dateModified` against the sitemap `lastmod`, one shared constant
+  would either claim freshness for an untouched page or under-report a revised one.
+  A landing may also carry an optional `faq`, which renders the shared `faqSection` **and**
+  `FAQPage` JSON-LD from the same array — never add schema Q&A a reader cannot see on the page.
+  **`/` and `/discord-message-builder/` deliberately target the same head term**
+  (2026-08-19). "Discord message builder" is how people search for this product, so the home
+  page leads with it in `<title>`, the sr-only `<h1>` in `App.tsx`, the manifest, and the
+  `WebSite`/`WebApplication` `alternateName` — it has the domain's authority and it *is* the
+  builder. But `/` renders the editor, so its crawlable body is a UI, not prose: Google indexes
+  the **rendered** DOM, which means index.html's substantive `<noscript>` copy never reaches it
+  and the app shell's whole textual signal is that one sr-only heading. The landing carries the
+  depth (~1,300 words: what a message builder is, every message type, delivery modes, FAQ) and
+  owns the nav/footer/hub-lede internal links. Don't "de-duplicate" these two by deleting or
+  redirecting one, and don't retitle `/` back to the internal Discord API term — the SERP for
+  this query is visual-tool pages with the phrase in their title, competing with discord.js's
+  `MessageBuilder` docs for the same words. The two sibling landings stay narrower on purpose
+  (webhook workflow, embed conversion) so all three do not chase one query.
+  **The generated pages' CSP needs `connect-src 'self'`** even though they ship no first-party
+  JS: Lighthouse and AI browsing agents fetch `/robots.txt` and `/llms.txt` **from the page
+  context**, and without it those same-origin reads are refused as CSP violations — which
+  Lighthouse reports as "robots.txt is not valid" (SEO 92) and "llms.txt does not follow
+  recommendations" (Agentic Browsing 67). With it, every generated page scores 100/100/100/100.
+  **The home page's only crawlable internal links come from the auto-opening template gallery**
+  (`discoveryLinks` in `TemplateGallery.tsx`). That is fine for search — a crawler always
+  arrives with empty storage, so the gallery opens and the four links render, verified — but a
+  *returning* visitor's `/` exposes none. Keep those four anchors real `<a href>`s; if the
+  auto-open is ever removed, `/` becomes a crawl dead end and the links need another home.
   **A feature page's setup copy is derived, and `requiresBot` does not mean "plugin"**
   (2026-08-19). `resolveFeature` maps `requiresBot` to `deliveryMode: "bot-install"`, and every
   such feature was a plugin until the MCP connector, which needs the app in the server only

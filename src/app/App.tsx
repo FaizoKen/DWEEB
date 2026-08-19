@@ -436,9 +436,15 @@ export function App() {
         aria-busy={bootstrapPending ? "true" : undefined}
         inert={galleryOpen || initialGalleryOpening ? true : undefined}
       >
+        {/* The app shell's only heading. Google indexes the RENDERED DOM, so the
+            substantive copy in index.html's <noscript> never reaches it — this
+            line is the home page's whole h1 signal and must name the product the
+            way people search for it ("Discord message builder"), not only by the
+            internal Discord API term. */}
         <h1 className="sr-only">
-          DWEEB — the visual Discord Components V2 builder. Build, preview, and send rich Discord
-          messages with containers, sections, buttons, select menus, and media.
+          DWEEB — the free visual Discord message builder. Build, preview, and send Discord webhook
+          messages, embeds, and Components V2 layouts with containers, sections, buttons, select
+          menus, and media.
         </h1>
         <section
           className="app-shell__pane app-shell__pane--builder"
