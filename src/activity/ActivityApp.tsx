@@ -2,7 +2,7 @@
  * Activity shell.
  *
  * Reuses the web app's heavy lifting — the `ComponentTree` editor and the
- * pixel-accurate `Preview` — and runs the SDK handshake on mount. Until the
+ * high-fidelity `Preview` — and runs the SDK handshake on mount. Until the
  * handshake resolves (or if it fails) it shows a splash; once ready, the two
  * panes are the same builder the web app renders, now scoped to the launching
  * server/channel and synced to everyone in the room.

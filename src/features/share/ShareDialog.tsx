@@ -320,8 +320,8 @@ function AboutPanel({ onClose }: { onClose: () => void }) {
       <p className={styles.lead}>
         <strong>DWEEB</strong> builds Discord's <strong>Components V2</strong> messages —
         containers, sections, buttons, select menus, and media galleries, not just legacy embeds.
-        You design against a pixel-accurate live preview, send straight to a webhook (then pull a
-        message back to edit it in place), and share any design as a single link.
+        You design against a measured, high-fidelity live preview, send straight to a webhook (then
+        pull a message back to edit it in place), and share any design as a single link.
       </p>
       <p className={styles.lead}>
         <strong>Local by default.</strong> Your working draft, browser saves, recent webhook URLs,
@@ -344,7 +344,7 @@ function AboutPanel({ onClose }: { onClose: () => void }) {
       </p>
       <p className={styles.lead}>
         Made with 💖 by{" "}
-        <a href="https://faizo.net" target="_blank" rel="noopener noreferrer">
+        <a href="/about/">
           <strong>Faizo</strong>
         </a>
         .

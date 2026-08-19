@@ -22,6 +22,7 @@ import {
   FEATURE_CATEGORY_BLURB,
   type ResolvedFeature,
 } from "./features";
+import { withClientParams } from "@/core/seo/clientParams";
 
 const FEATURES_INDEX_PATH = "/features/";
 const FEATURES_INDEX_URL = `${SITE.origin}${FEATURES_INDEX_PATH}`;
@@ -272,7 +273,7 @@ export function renderFeaturesIndexPage(all: ResolvedFeature[]): string {
       <h1>Discord Webhook Tools &amp; Features</h1>
       <p class="lede">DWEEB is more than a <a href="/discord-message-builder/">Discord message builder</a>. Add self-assignable roles, private support tickets, one-click giveaways, pop-up application forms, hosted replies, scheduled posts and a built-in webhook manager. Every page identifies whether it uses a normal webhook, an app-owned destination or an installed app.</p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="/?entry=feature%3Aindex" data-analytics="feature" data-analytics-id="index" data-analytics-location="hero">Open the builder →</a>
+        <a class="btn btn-primary" href="${attr(withClientParams("/", { entry: "feature:index" }))}" data-analytics="feature" data-analytics-id="index" data-analytics-location="hero">Open the builder →</a>
         <a class="btn btn-ghost" href="/templates/">Browse templates</a>
       </div>
     </header>

@@ -68,7 +68,11 @@ export function writeWelcomeRecord(status: WelcomeRecordStatus): void {
 /** What this load should do about the film, per the module rules above. */
 export type WelcomeAutoDecision = "show" | "announce" | "no";
 
-export function welcomeAutoDecision(): WelcomeAutoDecision {
+export function welcomeAutoDecision(suppress = false): WelcomeAutoDecision {
+  // A deliberate SEO/content-page handoff already has a job to do. Suppress
+  // the prompt without writing a record so a later organic visit can still
+  // receive the one-time orientation.
+  if (suppress) return "no";
   if (readWelcomeRecord()) return "no";
   if (hasGalleryEverAutoOpened() || loadDraft() !== null) return "announce";
   return "show";

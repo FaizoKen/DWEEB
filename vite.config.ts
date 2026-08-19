@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { SPA_NAVIGATION_ALLOWLIST } from "./src/core/seo/navigationRoutes";
+import { HOME_LASTMOD } from "./scripts/seo/constants";
 
 // Build version, read from package.json and injected as `__APP_VERSION__` so the
 // crash reporter (src/core/telemetry) can pin a report to a release. A literal
@@ -209,10 +210,10 @@ function injectSecurityMeta(): Plugin {
   };
 }
 
-/** Build stamps for index.html — keeps the hand-written JSON-LD/OG freshness
- *  fields honest. The source file carries readable last-known values (dev
- *  serves them as-is); every build overwrites them from package.json and the
- *  clock, and THROWS if a pattern goes missing so the stamp can't silently
+/** Build stamps for index.html — keeps the hand-written JSON-LD/OG fields
+ *  honest. Version comes from package.json; modification time comes from the
+ *  manually reviewed content date, never the build clock. The plugin THROWS
+ *  if a pattern goes missing so the stamp can't silently
  *  stop applying after an index.html refactor. (Discovered the hard way: the
  *  hand-maintained `softwareVersion` sat at 0.9.0 while the app shipped 0.11.0.) */
 function stampBuildMeta(): Plugin {
@@ -228,8 +229,6 @@ function stampBuildMeta(): Plugin {
     transformIndexHtml: {
       order: "pre",
       handler(html) {
-        const now = new Date();
-        const date = now.toISOString().slice(0, 10);
         let out = html;
         out = stamp(
           out,
@@ -237,11 +236,16 @@ function stampBuildMeta(): Plugin {
           `"softwareVersion": "${APP_VERSION}"`,
           '"softwareVersion"',
         );
-        out = stamp(out, /"dateModified": "[^"]*"/, `"dateModified": "${date}"`, '"dateModified"');
+        out = stamp(
+          out,
+          /"dateModified": "[^"]*"/,
+          `"dateModified": "${HOME_LASTMOD}"`,
+          '"dateModified"',
+        );
         out = stamp(
           out,
           /(<meta property="og:updated_time" content=")[^"]*(")/,
-          `$1${now.toISOString()}$2`,
+          `$1${HOME_LASTMOD}T00:00:00Z$2`,
           "og:updated_time",
         );
         return out;
@@ -356,6 +360,10 @@ export default defineConfig(({ mode }) => ({
     ],
   },
   build: {
+    // The post-build SEO contract walks Vite's real web boot graph from this
+    // manifest. This is Vite's private build manifest, not the public PWA
+    // manifest configured above.
+    manifest: true,
     target: "es2022",
     cssCodeSplit: true,
     sourcemap: false,

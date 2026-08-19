@@ -75,12 +75,16 @@
     if (!link) return;
     try {
       var destination = new URL(link.href, window.location.origin);
-      var entry = destination.searchParams.get("entry");
+      // New discovery links keep client-only state in the fragment so crawlers
+      // see one root URL. Query lookup remains for already-deployed links.
+      var entry =
+        destination.searchParams.get("entry") ||
+        new URLSearchParams(destination.hash.slice(1)).get("entry");
       var placement = link.getAttribute("data-analytics-location") || "";
       if (
         destination.origin === window.location.origin &&
         entry &&
-        /^(?:landing|template|feature|guide):[a-z0-9][a-z0-9-]{0,79}$/.test(entry) &&
+        /^(?:about|landing|template|feature|guide):[a-z0-9][a-z0-9-]{0,79}$/.test(entry) &&
         /^(?:hero|body|nav|footer)$/.test(placement)
       ) {
         window.sessionStorage.setItem(

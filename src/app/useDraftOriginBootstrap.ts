@@ -12,7 +12,7 @@
  * a plain draft rather than half-arming an update.
  *
  * It stands down whenever another source owns the editor on open — a share /
- * short link being decoded, or a `?template=` deep link — since those replace
+ * short link being decoded, or a `#template=` deep link — since those replace
  * the message (and its origin) themselves. It also never clobbers an origin
  * that's already set.
  */
@@ -45,7 +45,7 @@ export function useDraftOriginBootstrap(): void {
     if (readShareTokenFromHash(window.location.hash) || readShortLinkId(window.location.pathname)) {
       return;
     }
-    if (readTemplateParam(window.location.search)) return;
+    if (readTemplateParam(window.location.search, window.location.hash)) return;
 
     // Nothing to do unless the draft pointed at a posted message and no origin
     // has been set since (e.g. by a webhook redirect). The guild id is required

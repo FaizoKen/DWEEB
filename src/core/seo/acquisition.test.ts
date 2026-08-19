@@ -21,6 +21,13 @@ describe("SEO acquisition tokens", () => {
     expect(parseSeoEntry(search)).toEqual({ sourceType, sourceId });
   });
 
+  it("parses a client-only fragment token", () => {
+    expect(parseSeoEntry("", "#entry=landing%3Adiscord-message-builder")).toEqual({
+      sourceType: "landing",
+      sourceId: "discord-message-builder",
+    });
+  });
+
   it.each([
     "",
     "?entry=paid:discord-webhook-builder",
@@ -39,6 +46,11 @@ describe("SEO acquisition tokens", () => {
         "https://dweeb.faizo.net/?template=welcome&entry=template%3Adiscord-welcome-message&mode=edit#draft",
       ),
     ).toBe("/?template=welcome&mode=edit#draft");
+    expect(
+      stripSeoEntry(
+        "https://dweeb.faizo.net/?mode=edit#template=welcome&entry=template%3Adiscord-welcome-message",
+      ),
+    ).toBe("/?mode=edit#template=welcome");
   });
 
   it("replays a fresh, matching CTA placement after navigation", () => {
@@ -55,7 +67,7 @@ describe("SEO acquisition tokens", () => {
       ],
     ]);
     vi.stubGlobal("window", {
-      location: new URL("https://dweeb.faizo.net/?entry=guide%3Adiscord-components-v2&intent=json"),
+      location: new URL("https://dweeb.faizo.net/#intent=json&entry=guide%3Adiscord-components-v2"),
       history: { replaceState },
       sessionStorage: {
         getItem: (key: string) => values.get(key) ?? null,
@@ -64,7 +76,10 @@ describe("SEO acquisition tokens", () => {
       gtag,
     });
 
-    captureSeoAcquisition();
+    expect(captureSeoAcquisition()).toEqual({
+      sourceType: "guide",
+      sourceId: "discord-components-v2",
+    });
 
     expect(gtag).toHaveBeenNthCalledWith(1, "event", "seo_cta_click", {
       content_type: "guide",
@@ -75,7 +90,7 @@ describe("SEO acquisition tokens", () => {
       source_type: "guide",
       source_id: "discord-components-v2",
     });
-    expect(replaceState).toHaveBeenCalledWith(null, "", "/?intent=json");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/#intent=json");
     expect(values.size).toBe(0);
   });
 });

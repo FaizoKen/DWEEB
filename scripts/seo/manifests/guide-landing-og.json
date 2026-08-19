@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "generator": "scripts/gen-template-og.ts",
+  "assets": {
+    "/guides-og/discord-components-v2.png": {
+      "sourceSvgSha256": "a0d45945ef7a248d085f09763546c6e1d6be7944d12ea3f8f1aeb8af721a02cf",
+      "pngSha256": "3e15cb9bf3208ee33ff740c25f5c12fee3e3554a890c92efd4c62b180894e8fb",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/discord-embed-to-components-v2.png": {
+      "sourceSvgSha256": "6aeb9cd35956271ac24eccb7569c3fa26589f1c05265e1eb14ed59d74ba8adff",
+      "pngSha256": "6c6442a3d14f1f6db60894be9f3d4be5f8042a2936f1ad00594313ef9bc6145f",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/discord-text-formatting.png": {
+      "sourceSvgSha256": "c8c1727ce1955d8dae8d53c12b853dc5f8d73355f8226784dc156e7c6defb006",
+      "pngSha256": "4888479f5aa4c6758e8f6dbf0a964146e1d6bbc2bd2fc0f7189953d3f2a27928",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/discord-timestamp-format.png": {
+      "sourceSvgSha256": "9ceb239c8d6af9b54f563c8fe26d5b58b7a9eb6a48bcc7e41ed3b75506ef8966",
+      "pngSha256": "fd585f7ea16d7088a29fc781e00b5eb2dd09f7f0d1fa4f7c41e808f0f26fbfe9",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/discord-webhook-limits.png": {
+      "sourceSvgSha256": "8bb67ecb63219af5153936e9874df4c09ae4d67263b705bd02366d49b86c8219",
+      "pngSha256": "7e1aaad410504e0ef38130d11dc8ca0778571474e79aa3a5233a6ea519c9a616",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/discord-webhook-name-avatar.png": {
+      "sourceSvgSha256": "2734ba75ec4edd0dc8501241c808db4d28632463231eb9c1161b007d47547175",
+      "pngSha256": "b29cb95d71da93a4b37621a35062d955bff285e7e276ea9f323598d90b6794b7",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/discord-webhook-security.png": {
+      "sourceSvgSha256": "ad260e0849ef0efe25a386002a83afb5894001cbeac421776389aaebaf64ed59",
+      "pngSha256": "56df1e9c0343ee46da12eeb947e741ecf5e7bc68c440a758f701cbaa98462fb8",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/edit-discord-webhook-message.png": {
+      "sourceSvgSha256": "b89551c9ac37cb68b1d685439e1367bf8ea839fae3567cc0d11f84d44f8925af",
+      "pngSha256": "7cae79e6dabf20d50e98ac66dc5fb814ca5660983902aa951d0b055f175c0355",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/guides.png": {
+      "sourceSvgSha256": "039aa5c623d428eae699139442c7011339a347e5aeced98290982701457cbcf0",
+      "pngSha256": "a9186bb75180822181c220390e329a56b165ba4ad52240229d006bee21210add",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/how-to-create-a-discord-webhook.png": {
+      "sourceSvgSha256": "97790f170b0619afcb4a72a71f1dfe7be006a22b81a2021fdef0cb4ab628d707",
+      "pngSha256": "764a107b54c5aeea60d62d506feec6403bd8cdab4a7beb36f0e082d4a725bc52",
+      "width": 1200,
+      "height": 630
+    },
+    "/landing-og/discord-embed-builder.png": {
+      "sourceSvgSha256": "00a65c9262a3461bc67b141f450c197c89165e8b185702238ed76208551488ac",
+      "pngSha256": "b94debde320843b1831b536862f5fef85169465273dbc350e4353727e51bb8e6",
+      "width": 1200,
+      "height": 630
+    },
+    "/landing-og/discord-message-builder.png": {
+      "sourceSvgSha256": "b518106f3bc800a8ac5b7273750b37716ba4e45e838d02e097f54ae4c1f96d9f",
+      "pngSha256": "a08ca850ac8edb4eb1eb6583a1aaf245bbf43e7f42d45d7778d5ba3537995f2e",
+      "width": 1200,
+      "height": 630
+    },
+    "/landing-og/discord-webhook-builder.png": {
+      "sourceSvgSha256": "f25f52f8f0d9c51b3fcf3b2a463971a00486e8eede8a7aa574df44d78b195ffb",
+      "pngSha256": "20562bbc6f475ee38e0c28b446617247f576bfb85d2b62850a18b356f3475521",
+      "width": 1200,
+      "height": 630
+    }
+  }
+}

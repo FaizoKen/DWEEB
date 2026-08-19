@@ -25,6 +25,7 @@ on:
       - "tsconfig*.json"
       - "vite.config.ts"
       - "vitest.config.ts"
+      - "lighthouserc.json"
       - "eslint.config.js"
       - ".prettierrc.json"
       - ".github/workflows/web.yml"
@@ -52,7 +53,8 @@ jobs:
   build:
     name: Typecheck and build
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Six Lighthouse runs add a few minutes on top of install/test/build.
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -112,6 +114,12 @@ jobs:
           # expiry figure shown to signed-out users pre-send. Unset → code
           # default 7 (the dispatcher's own default).
           VITE_COMPONENT_TTL_DAYS: ${{ vars.VITE_COMPONENT_TTL_DAYS }}
+
+      # Three medianed lab runs on both search entry points catch LCP, layout,
+      # main-thread, accessibility and SEO regressions that byte budgets alone
+      # cannot see. Reports stay on the runner; nothing is uploaded publicly.
+      - name: Lighthouse regression check
+        run: bun run seo:lighthouse
 
       # `bun run build` regenerates the data the Rust MCP server serves — the
       # template catalog, the shared validator corpus, the LZ-String vectors —

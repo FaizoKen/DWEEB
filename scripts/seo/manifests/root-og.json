@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "generator": "scripts/gen-assets.mjs",
+  "assets": {
+    "/og-image.png": {
+      "sourceSvgSha256": "a55300372883942c037219cf06dc312845786cd6088a01ee94ce8cddc69d8362",
+      "pngSha256": "90ba2e128ceeb6ccad57c46f438ce781cb9442b3688ce662b06b7cdff03f2026",
+      "width": 1200,
+      "height": 630
+    }
+  }
+}

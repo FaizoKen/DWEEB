@@ -12,6 +12,10 @@
  * Guide/content-only changes can avoid rewriting established cards:
  *   bun add -d sharp && bun scripts/gen-template-og.ts --guides-only && bun remove sharp
  *
+ * Each guide/landing run also refreshes a deterministic source-SVG + emitted-
+ * PNG hash manifest under `scripts/seo/manifests/`; the SEO audit uses it to
+ * reject a copy change whose committed card was not regenerated.
+ *
  * The page generator (`gen-template-pages.ts`) references these by URL
  * (`/templates-og/<slug>.png`); see `resolveSeo().ogImage`.
  */
@@ -24,22 +28,34 @@ import sharp from "sharp";
 import { TEMPLATES } from "@/data/presets";
 import { resolveSeo } from "./seo/content";
 import { resolveAllFeatures } from "./seo/features";
-import { GUIDES, LANDINGS } from "./seo/guides";
 import { ogCardSvg, type OgCardData } from "./seo/og-card";
+import { guideLandingOgSources, OG_CARD_HEIGHT, OG_CARD_WIDTH } from "./seo/og-card-catalog";
+import {
+  fingerprintOgAsset,
+  serializeOgAssetManifest,
+  type OgAssetFingerprint,
+} from "./seo/og-asset-manifest";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_TEMPLATES = join(ROOT, "public", "templates-og");
 const OUT_FEATURES = join(ROOT, "public", "features-og");
 const OUT_GUIDES = join(ROOT, "public", "guides-og");
 const OUT_LANDING = join(ROOT, "public", "landing-og");
+const MANIFEST_DIR = join(ROOT, "scripts", "seo", "manifests");
+const GUIDE_LANDING_MANIFEST = join(MANIFEST_DIR, "guide-landing-og.json");
 const ACCENT_BLURPLE = 0x5865f2;
 
-async function writeCard(dir: string, slug: string, card: OgCardData): Promise<void> {
-  const png = await sharp(Buffer.from(ogCardSvg(card)), { density: 384 })
-    .resize(1200, 630)
+async function writeSvg(file: string, svg: string): Promise<OgAssetFingerprint> {
+  const png = await sharp(Buffer.from(svg), { density: 384 })
+    .resize(OG_CARD_WIDTH, OG_CARD_HEIGHT)
     .png({ compressionLevel: 9 })
     .toBuffer();
-  await writeFile(join(dir, `${slug}.png`), png);
+  await writeFile(file, png);
+  return fingerprintOgAsset(svg, png, OG_CARD_WIDTH, OG_CARD_HEIGHT);
+}
+
+async function writeCard(dir: string, slug: string, card: OgCardData): Promise<OgAssetFingerprint> {
+  return writeSvg(join(dir, `${slug}.png`), ogCardSvg(card));
 }
 
 async function main(): Promise<void> {
@@ -48,6 +64,7 @@ async function main(): Promise<void> {
   await mkdir(OUT_FEATURES, { recursive: true });
   await mkdir(OUT_GUIDES, { recursive: true });
   await mkdir(OUT_LANDING, { recursive: true });
+  await mkdir(MANIFEST_DIR, { recursive: true });
 
   if (!guidesOnly) {
     for (const template of TEMPLATES) {
@@ -84,31 +101,20 @@ async function main(): Promise<void> {
     });
   }
 
-  for (const guide of GUIDES) {
-    await writeCard(OUT_GUIDES, guide.slug, {
-      title: guide.h1,
-      category: guide.eyebrow.replace(" · ", " — "),
-      accent: ACCENT_BLURPLE,
-      kicker: "Fact-checked Discord guide · Editable examples in DWEEB",
-    });
+  const guideLandingSources = guideLandingOgSources();
+  const fingerprints: [string, OgAssetFingerprint][] = [];
+  for (const { assetPath, sourceSvg } of guideLandingSources) {
+    const fingerprint = await writeSvg(join(ROOT, "public", assetPath.slice(1)), sourceSvg);
+    fingerprints.push([assetPath, fingerprint]);
   }
-  await writeCard(OUT_GUIDES, "guides", {
-    title: "Discord Webhook Guides",
-    category: `${GUIDES.length} practical guides`,
-    accent: ACCENT_BLURPLE,
-    kicker: "Components V2 · Setup · Conversion · Security · Editing",
-  });
-  for (const landing of LANDINGS) {
-    await writeCard(OUT_LANDING, landing.slug, {
-      title: landing.h1,
-      category: landing.ogCategory,
-      accent: ACCENT_BLURPLE,
-      kicker: landing.ogKicker,
-    });
-  }
+  await writeFile(
+    GUIDE_LANDING_MANIFEST,
+    serializeOgAssetManifest("scripts/gen-template-og.ts", fingerprints),
+    "utf8",
+  );
 
   console.log(
-    `[seo] wrote ${GUIDES.length + 1 + LANDINGS.length} guide/landing OG cards${guidesOnly ? "" : " plus template/feature cards"}`,
+    `[seo] wrote ${guideLandingSources.length} guide/landing OG cards + manifest${guidesOnly ? "" : " plus template/feature cards"}`,
   );
 }
 

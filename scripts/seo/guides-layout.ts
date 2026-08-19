@@ -3,6 +3,7 @@
 import { escapeHtml } from "./render-message";
 import { SITE } from "./content";
 import { GUIDES_LASTMOD, type GuidePage, type GuideSection, type LandingPage } from "./guides";
+import { withClientParams } from "@/core/seo/clientParams";
 import {
   attr,
   breadcrumbLd,
@@ -15,11 +16,12 @@ import {
 
 export const GUIDES_INDEX_PATH = "/guides/";
 export const GUIDES_INDEX_URL = `${SITE.origin}${GUIDES_INDEX_PATH}`;
+export const ABOUT_PATH = "/about/";
+export const ABOUT_URL = `${SITE.origin}${ABOUT_PATH}`;
+export const ABOUT_LASTMOD = "2026-08-20";
 
 function trackedAppPath(path: string, type: "guide" | "landing", id: string): string {
-  const url = new URL(path, SITE.origin);
-  if (!url.searchParams.has("entry")) url.searchParams.set("entry", `${type}:${id}`);
-  return url.pathname + url.search + url.hash;
+  return withClientParams(path, { entry: `${type}:${id}` });
 }
 
 function renderSections(sections: readonly GuideSection[]): string {
@@ -35,7 +37,7 @@ function renderSections(sections: readonly GuideSection[]): string {
         ? `<pre class="code-block"><code>${escapeHtml(section.code)}</code></pre>`
         : "";
       const table = section.table
-        ? `<div class="table-scroll"><table><thead><tr>${section.table.headers
+        ? `<div class="table-scroll"><table><caption class="sr-only">${escapeHtml(section.heading)}</caption><thead><tr>${section.table.headers
             .map((cell) => `<th scope="col">${escapeHtml(cell)}</th>`)
             .join("")}</tr></thead><tbody>${section.table.rows
             .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`)
@@ -44,6 +46,31 @@ function renderSections(sections: readonly GuideSection[]): string {
       return `<section class="block prose"><h2>${escapeHtml(section.heading)}</h2>${paragraphs}${bullets}${table}${code}</section>`;
     })
     .join("");
+}
+
+function productContext(guide: GuidePage): string {
+  const embedGuide = guide.slug === "discord-embed-to-components-v2";
+  const broadGuide = [
+    "discord-components-v2",
+    "discord-text-formatting",
+    "discord-timestamp-format",
+  ].includes(guide.slug);
+  const href = embedGuide
+    ? "/discord-embed-builder/"
+    : broadGuide
+      ? "/discord-message-builder/"
+      : "/discord-webhook-builder/";
+  const label = embedGuide
+    ? "Discord embed builder"
+    : broadGuide
+      ? "Discord message builder"
+      : "Discord webhook message builder";
+  const detail = embedGuide
+    ? "Paste legacy embed JSON, review the conversion report and adjust the Components V2 result."
+    : broadGuide
+      ? "Apply the reference in the visual editor and check the result in the live preview."
+      : "Open the delivery workflow with validation, restore, update and scheduling available when relevant.";
+  return `<aside class="callout callout-setup"><strong>Build this instead of translating it by hand.</strong> Use the <a href="${href}">${label}</a>. ${detail}</aside>`;
 }
 
 export function renderGuidePage(guide: GuidePage, all: GuidePage[]): string {
@@ -77,13 +104,14 @@ export function renderGuidePage(guide: GuidePage, all: GuidePage[]): string {
         <span class="chip">${escapeHtml(guide.eyebrow)}</span>
         <h1>${escapeHtml(guide.h1)}</h1>
         <p class="lede">${escapeHtml(guide.lede)}</p>
-        <p class="byline">Published ${guide.published} · Updated ${guide.modified} · Reviewed against primary Discord documentation</p>
+        <p class="byline">By <a href="${ABOUT_PATH}">Faizo</a> · Published ${guide.published} · Updated ${guide.modified} · Reviewed against primary Discord documentation</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="${attr(cta)}" data-analytics="guide" data-analytics-id="${attr(guide.slug)}" data-analytics-location="hero">${escapeHtml(guide.ctaLabel)} →</a>
           <a class="btn btn-ghost" href="${GUIDES_INDEX_PATH}">All guides</a>
         </div>
       </header>
       ${renderSections(guide.sections)}
+      ${productContext(guide)}
       <section class="cta-band">
         <h2>Put the guide into practice</h2>
         <p>Open the exact workflow in DWEEB. Nothing posts until you review and confirm it.</p>
@@ -159,7 +187,7 @@ export function renderGuidesIndexPage(all: GuidePage[]): string {
       <span class="chip">📘 Guides</span>
       <h1>Discord Webhook &amp; Components V2 Guides</h1>
       <p class="lede">Fact-checked, practical references built around the workflows DWEEB actually supports. Learn the current Discord model, see exact limits and payloads, then open the relevant example in the <a href="/discord-message-builder/">visual Discord message builder</a>.</p>
-      <div class="cta-row"><a class="btn btn-primary" href="/?entry=guide%3Aindex" data-analytics="guide" data-analytics-id="index" data-analytics-location="hero">Open the builder →</a></div>
+      <div class="cta-row"><a class="btn btn-primary" href="${attr(withClientParams("/", { entry: "guide:index" }))}" data-analytics="guide" data-analytics-id="index" data-analytics-location="hero">Open the builder →</a></div>
     </header>
     <section class="cat-block"><h2 class="cat-title">Start here</h2><div class="card-grid">${cards}</div></section>
     <section class="block prose"><h2>From reference to a real Discord post</h2><p>Every guide separates static incoming-webhook behavior from app-owned interactions and privileged bot actions. That distinction prevents the most common failure: designing a custom button for a destination that Discord will not allow to receive it.</p><p>Examples link into a matching builder state, so you can inspect the component tree, export JSON and test the result instead of translating an article by hand.</p></section>
@@ -210,10 +238,18 @@ export function renderGuidesIndexPage(all: GuidePage[]): string {
 
 export function renderLandingPage(page: LandingPage): string {
   const cta = trackedAppPath("/", "landing", page.slug);
+  const productProof = page.productImage
+    ? `<figure class="product-shot">
+        <a href="${attr(cta)}" data-analytics="landing" data-analytics-id="${attr(page.slug)}" data-analytics-location="body" aria-label="Open the ${escapeHtml(page.h1)}">
+          <img src="${attr(page.productImage.src)}"${page.productImage.srcSet ? ` srcset="${attr(page.productImage.srcSet)}"` : ""}${page.productImage.sizes ? ` sizes="${attr(page.productImage.sizes)}"` : ""} width="${page.productImage.width}" height="${page.productImage.height}" alt="${attr(page.productImage.alt)}" loading="eager" decoding="async" fetchpriority="high" />
+        </a>
+        <figcaption>${escapeHtml(page.productImage.caption)} <a href="${ABOUT_PATH}">See how preview fidelity is measured.</a></figcaption>
+      </figure>`
+    : "";
   const learnCards = page.learn
     .map(
       (card) =>
-        `<a class="mini-card" href="${attr(card.href)}"><span class="mini-emoji">${escapeHtml(card.emoji)}</span><span class="mini-body"><span class="mini-name">${escapeHtml(card.name)}</span><span class="mini-cat">${escapeHtml(card.desc)}</span></span></a>`,
+        `<a class="mini-card" href="${attr(card.href)}"><span class="mini-emoji" aria-hidden="true">${escapeHtml(card.emoji)}</span><span class="mini-body"><span class="mini-name">${escapeHtml(card.name)}</span><span class="mini-cat">${escapeHtml(card.desc)}</span></span></a>`,
     )
     .join("\n        ");
   const body = `<main id="main-content" class="wrap">
@@ -223,14 +259,21 @@ export function renderLandingPage(page: LandingPage): string {
         <span class="chip">${escapeHtml(page.chip)}</span>
         <h1>${escapeHtml(page.h1)}</h1>
         <p class="lede">${escapeHtml(page.lede)}</p>
+        <p class="byline">Built and maintained by <a href="${ABOUT_PATH}">Faizo</a> · Updated ${page.modified}</p>
         <div class="cta-row">
           <a class="btn btn-primary btn-lg" href="${attr(cta)}" data-analytics="landing" data-analytics-id="${attr(page.slug)}" data-analytics-location="hero">${escapeHtml(page.ctaLabel)} →</a>
           <a class="btn btn-ghost" href="/templates/">Browse templates</a>
         </div>
         <p class="cta-note">No account required for the core builder. Nothing posts until you confirm it.</p>
       </header>
+      ${productProof}
       ${renderSections(page.sections)}
       ${page.faq?.length ? faqSection(page.faq) : ""}
+      <section class="block sources"><h2>Documentation and testing</h2><ul>
+        <li><a href="https://docs.discord.com/developers/components/reference" rel="noopener noreferrer" target="_blank">Discord message components reference</a></li>
+        <li><a href="https://docs.discord.com/developers/resources/webhook" rel="noopener noreferrer" target="_blank">Discord webhook resource documentation</a></li>
+        <li><a href="${ABOUT_PATH}">DWEEB preview and review methodology</a></li>
+      </ul></section>
       <section class="block"><h2>Learn or start from a proven design</h2><div class="card-grid">
         ${learnCards}
       </div></section>
@@ -250,6 +293,24 @@ export function renderLandingPage(page: LandingPage): string {
     keywords: page.keywords.join(", "),
     isPartOf: { "@id": SITE.websiteId },
     mainEntity: { "@id": SITE.appId },
+    author: { "@id": SITE.personId },
+    publisher: { "@id": SITE.orgId },
+    citation: [
+      "https://docs.discord.com/developers/components/reference",
+      "https://docs.discord.com/developers/resources/webhook",
+      ABOUT_URL,
+    ],
+    ...(page.productImage
+      ? {
+          primaryImageOfPage: {
+            "@type": "ImageObject",
+            url: `${SITE.origin}${page.productImage.src}`,
+            width: page.productImage.width,
+            height: page.productImage.height,
+            caption: page.productImage.caption,
+          },
+        }
+      : {}),
   };
   return htmlDocument({
     title: page.title,
@@ -270,6 +331,103 @@ export function renderLandingPage(page: LandingPage): string {
       ),
       jsonLd(webPage),
       ...(page.faq?.length ? [jsonLd(faqLd(page.faq))] : []),
+    ],
+    body,
+  });
+}
+
+/** Crawlable authorship and first-hand testing evidence for every guide/product claim. */
+export function renderAboutPage(): string {
+  const cta = withClientParams("/", { entry: "about:index" });
+  const title = "About DWEEB & Discord Preview Methodology | DWEEB";
+  const description =
+    "Meet the maintainer of DWEEB and see how its Discord message preview, payload validation, documentation and privacy claims are tested and reviewed.";
+  const body = `<main id="main-content" class="wrap">
+    ${breadcrumbNav([{ name: "Home", url: "/" }, { name: "About DWEEB" }])}
+    <article>
+      <header class="hero">
+        <span class="chip">About · Testing methodology</span>
+        <h1>About DWEEB and how it is tested</h1>
+        <p class="lede">DWEEB is built and maintained by Faizo as a source-available visual Discord message builder. This page documents the hands-on checks behind its preview, validation and publishing guidance.</p>
+        <p class="byline">By <strong>Faizo</strong> · Methodology last reviewed ${ABOUT_LASTMOD}</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="${attr(cta)}" data-analytics="about" data-analytics-id="index" data-analytics-location="hero">Open the Discord message builder →</a>
+          <a class="btn btn-ghost" href="${SITE.githubUrl}" rel="noopener noreferrer" target="_blank">Inspect the source</a>
+        </div>
+      </header>
+
+      <section class="block prose">
+        <h2>Who makes DWEEB</h2>
+        <p>Faizo designs, develops and maintains the editor, its Discord Activity, the delivery service and the public guides. Product claims are tied to workflows that exist in the shipped application. The repository exposes the implementation, issue history and automated tests so technical statements can be checked rather than taken on trust.</p>
+        <p>DWEEB is an independent project and is not affiliated with Discord Inc. Discord is the authority for API behavior; the editor translates that behavior into a visual workflow and links to primary Discord documentation where a guide depends on it.</p>
+      </section>
+
+      <section class="block prose">
+        <h2>How preview fidelity is measured</h2>
+        <p>The preview is calibrated against the live Discord web client, not styled from memory. A representative Components V2 payload is built in DWEEB, posted to a private test channel, and compared with the same message in the editor. Colors, spacing, typography, button geometry, containers and media-gallery layouts are checked from Discord's rendered DOM and computed styles.</p>
+        <ol class="steps">
+          <li><strong>Use the same payload.</strong> Build representative text, container, section, media, button and select-menu cases.</li>
+          <li><strong>Render it in Discord.</strong> Send the payload through the documented webhook API and inspect the current desktop and narrow layouts.</li>
+          <li><strong>Measure, then implement.</strong> Record computed values and image geometry before updating preview tokens or layout rules.</li>
+          <li><strong>Protect known behavior.</strong> Regression tests cover Discord-specific markdown, payload normalization, limits, conversion and component validation.</li>
+        </ol>
+        <p>A browser preview can still differ in native emoji artwork, fonts installed on the device and changes Discord rolls out after the latest review. Those boundaries are treated as limitations to re-test, not reasons to claim perfect equivalence without evidence.</p>
+      </section>
+
+      <section class="block prose">
+        <h2>How product and guide claims are reviewed</h2>
+        <p>Guides begin with Discord's developer documentation and are checked against the editor's actual import, validation, send, restore and update paths. Dates on a page change only after a substantive content review. Security and privacy copy distinguishes local browser data from optional connected services, and the <a href="/privacy">Privacy Policy</a> lists those boundaries.</p>
+        <p>Errors and edge cases are tested before release through TypeScript checks, unit tests, generated validation corpora shared with the server, a production build and a post-generation SEO audit. The audit checks canonical URLs, sitemap coverage, metadata, structured data, internal links, content depth and social assets across every indexable page.</p>
+      </section>
+
+      <section class="block sources">
+        <h2>Verify the work</h2>
+        <ul>
+          <li><a href="https://docs.discord.com/developers/components/reference" rel="noopener noreferrer" target="_blank">Discord message components reference</a></li>
+          <li><a href="https://docs.discord.com/developers/resources/webhook" rel="noopener noreferrer" target="_blank">Discord webhook resource documentation</a></li>
+          <li><a href="${SITE.githubUrl}" rel="noopener noreferrer" target="_blank">DWEEB source and test history on GitHub</a></li>
+          <li><a href="/guides/">DWEEB's reviewed Discord guides</a></li>
+        </ul>
+      </section>
+
+      <section class="cta-band">
+        <h2>Try the measured workflow</h2>
+        <p>Build a real message, inspect the live preview and keep the JSON or send only when you confirm.</p>
+        <a class="btn btn-primary btn-lg" href="${attr(cta)}" data-analytics="about" data-analytics-id="index" data-analytics-location="body">Open DWEEB →</a>
+      </section>
+    </article>
+  </main>`;
+  const profile = {
+    "@context": "https://schema.org",
+    "@type": "ProfilePage",
+    "@id": `${ABOUT_URL}#webpage`,
+    name: "About DWEEB and how it is tested",
+    description,
+    url: ABOUT_URL,
+    dateModified: ABOUT_LASTMOD,
+    inLanguage: "en",
+    isPartOf: { "@id": SITE.websiteId },
+    mainEntity: { "@id": SITE.personId },
+    about: { "@id": SITE.appId },
+  };
+  return htmlDocument({
+    title,
+    description,
+    canonical: ABOUT_URL,
+    ogImage: SITE.ogImage,
+    imageAlt: "DWEEB visual Discord message builder",
+    ogType: "website",
+    pageType: "about",
+    pageId: "index",
+    modifiedTime: ABOUT_LASTMOD,
+    jsonLd: [
+      jsonLd(
+        breadcrumbLd([
+          { name: "Home", url: `${SITE.origin}/` },
+          { name: "About DWEEB", url: ABOUT_URL },
+        ]),
+      ),
+      jsonLd(profile),
     ],
     body,
   });

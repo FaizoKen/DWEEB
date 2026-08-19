@@ -7,7 +7,7 @@
  * only after the user explicitly asks for it.
  *
  * Stands down entirely on deep-linked loads (a share/short link being decoded,
- * a `?template=`/`?plans=`/`?custom-bot=` param, or a webhook-create redirect) —
+ * a `#template=`/`?plans=`/`?custom-bot=` value, or a webhook-create redirect) —
  * the visitor
  * came for something specific, so nothing is recorded and a later organic
  * visit still gets the one prompt. Pre-film users (evidence of prior use)
@@ -37,25 +37,25 @@ function isDeepLinkedLoad(): boolean {
     hasReturn(webhookFlow) ||
     !!readShareTokenFromHash(window.location.hash) ||
     !!readShortLinkId(window.location.pathname) ||
-    !!readTemplateParam(window.location.search) ||
+    !!readTemplateParam(window.location.search, window.location.hash) ||
     !!readPlansParam(window.location.search) ||
     !!readCustomBotParam(window.location.search)
   );
 }
 
-export function useWelcomeAutoOpen(): void {
+export function useWelcomeAutoOpen(suppress = false): void {
   // Decided once per load, during first render — before App's mount effects
   // run (in particular before the gallery auto-open stamps its own record,
   // which the gate reads as "evidence of prior use").
-  const [decision] = useState(welcomeAutoDecision);
+  const [decision] = useState(() => welcomeAutoDecision(suppress));
 
   useEffect(() => {
-    if (decision === "no" || isDeepLinkedLoad()) return;
+    if (suppress || decision === "no" || isDeepLinkedLoad()) return;
 
     const t = setTimeout(() => {
       writeWelcomeRecord("announced");
       pushToast('Want a quick tour? Choose "Watch the intro" under More.', "info");
     }, ANNOUNCE_DELAY_MS);
     return () => clearTimeout(t);
-  }, [decision]);
+  }, [decision, suppress]);
 }

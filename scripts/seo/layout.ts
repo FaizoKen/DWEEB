@@ -18,6 +18,7 @@ import {
   type ResolvedSeo,
 } from "./content";
 import type { ResolvedFeature } from "./features";
+import { withClientParams } from "@/core/seo/clientParams";
 
 const TEMPLATES_INDEX_PATH = "/templates/";
 const TEMPLATES_INDEX_URL = `${SITE.origin}${TEMPLATES_INDEX_PATH}`;
@@ -54,8 +55,9 @@ export function identityLd(): object[] {
       "@type": "WebSite",
       "@id": SITE.websiteId,
       name: SITE.name,
-      alternateName: ["DWEEB — Discord Webhook Embed Builder", "Discord Webhook Embed Builder"],
+      alternateName: SITE.alternateNames,
       url: `${SITE.origin}/`,
+      description: SITE.description,
       inLanguage: "en",
       publisher: { "@id": SITE.orgId },
     },
@@ -72,13 +74,14 @@ export function identityLd(): object[] {
         height: 512,
       },
       founder: { "@id": SITE.personId },
+      sameAs: [SITE.communityUrl],
     },
     {
       "@context": "https://schema.org",
       "@type": "Person",
       "@id": SITE.personId,
       name: "Faizo",
-      url: `${SITE.origin}/`,
+      url: SITE.authorUrl,
     },
   ];
 }
@@ -131,7 +134,7 @@ export function htmlDocument(opts: {
   ogImage: string;
   imageAlt: string;
   ogType: "article" | "website";
-  pageType: "template" | "feature" | "guide" | "landing";
+  pageType: "about" | "template" | "feature" | "guide" | "landing";
   pageId: string;
   publishedTime?: string;
   modifiedTime?: string;
@@ -153,8 +156,7 @@ export function htmlDocument(opts: {
     "base-uri 'self'",
     "form-action 'self'",
   ].join("; ");
-  const entry = encodeURIComponent(`${opts.pageType}:${opts.pageId}`);
-  const builderUrl = `/?entry=${entry}`;
+  const builderUrl = withClientParams("/", { entry: `${opts.pageType}:${opts.pageId}` });
 
   return `<!doctype html>
 <html lang="en" data-page-type="${attr(opts.pageType)}" data-page-id="${attr(opts.pageId)}">
@@ -206,18 +208,19 @@ export function htmlDocument(opts: {
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site">
       <a class="brand" href="/" aria-label="DWEEB home">DWEEB</a>
-      <nav class="site-nav">
+      <nav class="site-nav" aria-label="Primary navigation">
         <a href="/discord-message-builder/">Message builder</a>
         <a href="/features/">Features</a>
         <a href="${TEMPLATES_INDEX_PATH}">Templates</a>
         <a href="/guides/">Guides</a>
+        <a href="/about/">About</a>
         <a class="nav-cta" href="${builderUrl}" data-analytics="${attr(opts.pageType)}" data-analytics-id="${attr(opts.pageId)}" data-analytics-location="nav">Open the builder</a>
       </nav>
     </header>
     ${opts.body}
     <footer class="site-footer">
       <p>
-        <strong>DWEEB</strong> — the free visual Discord message builder for webhook messages, embeds and Components V2.
+        <strong>DWEEB</strong> — the free visual Discord message builder for webhook messages and embed-style Components V2 layouts.
         Build, preview and send rich messages in a local-by-default editor. No account is required for the core builder.
       </p>
       <p class="muted">
@@ -228,10 +231,12 @@ export function htmlDocument(opts: {
         <a href="/features/">Features</a> ·
         <a href="${TEMPLATES_INDEX_PATH}">All templates</a> ·
         <a href="/guides/">Guides</a> ·
+        <a href="/about/">About</a> ·
         <a href="/privacy">Privacy</a> ·
         <a href="/terms">Terms</a> ·
         <a href="${SITE.githubUrl}" rel="noopener" target="_blank">GitHub</a>
       </p>
+      <p class="muted">Independent project; not affiliated with Discord Inc.</p>
     </footer>
   </body>
 </html>`;
@@ -401,7 +406,7 @@ export function renderTemplatePage(
     url: seo.url,
     image: seo.ogImage,
     thumbnailUrl: seo.ogImage,
-    dateModified: TEMPLATES_LASTMOD,
+    dateModified: seo.modified,
     mainEntityOfPage: { "@type": "WebPage", "@id": `${seo.url}#webpage` },
     inLanguage: "en",
     keywords: seo.keywords.join(", "),
@@ -421,7 +426,7 @@ export function renderTemplatePage(
     ogType: "article",
     pageType: "template",
     pageId: seo.slug,
-    modifiedTime: TEMPLATES_LASTMOD,
+    modifiedTime: seo.modified,
     section: seo.category,
     jsonLd: [
       jsonLd(
@@ -486,7 +491,7 @@ export function renderIndexPage(all: ResolvedSeo[]): string {
       <h1>Discord Message Templates</h1>
       <p class="lede">A growing library of free, ready-to-use Discord message templates built with Components V2 — welcome messages, server rules, announcements, role menus, giveaways, support tickets and more. Open any template in the <a href="/discord-message-builder/">Discord message builder</a>, customize every word, colour and link, then send it to Discord. Each card makes its webhook and integration requirements clear.</p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="/?entry=template%3Aindex" data-analytics="template" data-analytics-id="index" data-analytics-location="hero">Build a Discord message →</a>
+        <a class="btn btn-primary" href="${attr(withClientParams("/", { entry: "template:index" }))}" data-analytics="template" data-analytics-id="index" data-analytics-location="hero">Build a Discord message →</a>
       </div>
     </header>
     ${groupsHtml}
@@ -553,6 +558,7 @@ a{color:#00a8fc;text-decoration:none}
 a:hover{text-decoration:underline}
 h1,h2,h3{line-height:1.25;color:#f2f3f5}
 img{max-width:100%}
+.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 
 .site{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 22px;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(26,27,30,.86);backdrop-filter:blur(8px);z-index:5}
 .brand{font-weight:800;letter-spacing:1.5px;color:#fff;font-size:18px}
@@ -577,6 +583,13 @@ img{max-width:100%}
 h1{font-size:clamp(28px,5vw,40px);margin:6px 0 14px;letter-spacing:-.5px}
 .lede{font-size:18px;color:var(--muted);margin:0 0 22px;max-width:62ch}
 .byline{margin:-10px 0 20px;color:var(--dim);font-size:13px}
+.byline a{color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+
+.product-shot{margin:8px 0 34px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.product-shot>a{display:block}
+.product-shot img{display:block;width:100%;height:auto;background:var(--msg)}
+.product-shot figcaption{padding:11px 15px;color:var(--muted);font-size:13px}
+.product-shot figcaption a{text-decoration:underline;text-underline-offset:2px}
 
 .cta-row{display:flex;flex-wrap:wrap;gap:12px}
 .cta-note{margin:10px 0 0;color:var(--dim);font-size:13px}
@@ -727,7 +740,9 @@ tbody tr:last-child td{border-bottom:0}
 .dwx-file{display:flex;align-items:center;gap:10px;background:#1e1f22;border:1px solid var(--border);border-radius:8px;padding:10px 13px;color:var(--muted);font-size:14px}
 
 @media(max-width:700px){
-  .site-nav>a:not(.nav-cta){display:none}
+  .site{align-items:flex-start;flex-direction:column;gap:10px}
+  .site-nav{width:100%;overflow-x:auto;gap:14px;padding-bottom:2px;scrollbar-width:thin}
+  .site-nav a{white-space:nowrap}
   .site{backdrop-filter:none}
 }
 @media(max-width:560px){

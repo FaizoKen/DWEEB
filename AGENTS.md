@@ -707,6 +707,9 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   (build **throws** if a template has no SEO entry) **+ its slug in `ENTRY_IDS`
   (`src/core/seo/acquisition.ts`)** — the audit fails every CTA on the new page with
   "unknown acquisition token" otherwise, exactly as it does for a guide or landing.
+  Keep `templateLastmod()` in `scripts/seo/content.ts` honest too: unchanged template pages retain
+  the stable catalogue baseline, while a meaningfully revised template gets a dated override;
+  `TEMPLATES_LASTMOD` is the newest child date used by the catalogue hub.
   Check `scripts/seo/features.ts` and `video/src/data.ts` references, and regenerate
   committed OG images with
   `bun add -d sharp && bun scripts/gen-template-og.ts && bun remove sharp` (run from the
@@ -717,16 +720,22 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   sitemap. Build-critical generator code is covered by `tsconfig.seo.json`; `bun run build` then
   runs `scripts/seo/audit.ts`, which fails on broken sitemap
   targets/internal links, duplicate or missing metadata, invalid JSON-LD, missing/wrong-size
-  social cards, stale/future dates, late charset declarations, thin detail pages, and orphaned
-  templates. Add new discovery routes to that generator rather than hand-writing unverified
+  social cards, stale/future dates, inconsistent WebSite entities, crawlable app-state queries,
+  manifest-derived critical request/transfer budgets, rendered-H1 regressions, late charset
+  declarations, thin detail pages, and orphaned templates. Add new discovery routes to that
+  generator rather than hand-writing unverified
   files in `dist/`; keep source-backed guide claims and `lastmod` dates honest.
-  **Datetime-typed JSON-LD properties need a timezone.** `uploadDate` on the home page's
-  intro-film `VideoObject` shipped as a bare `"2026-07-17"`, which Search Console reported as
-  *two* issues at once — "Invalid datetime value" and "missing a timezone" (2026-07-20). It is
-  now a full zoned ISO 8601 datetime, and `DATETIME_PROPERTIES` in `audit.ts` fails the build on
-  any regression. That set is deliberately narrow: `datePublished`/`dateModified` are Date-typed,
-  are legitimately date-only, and are separately cross-checked against sitemap `lastmod` — don't
-  widen it to them.
+  `bun run seo:lighthouse` adds a three-run mobile median over `/` and
+  `/discord-message-builder/`; `web.yml` runs it after the build and gates Performance,
+  Accessibility, Best Practices, SEO, LCP, TBT, and CLS. Keep `lighthouserc.json` in the workflow's
+  path filter, and treat local single runs as diagnostics rather than field Core Web Vitals.
+  **The lazy intro film is not a root `VideoObject`** (2026-08-20). Google requires an indexed
+  video to be embedded and prominent without a user action; DWEEB mounts the opt-in film only
+  after More → Watch intro, so root video schema claimed eligibility the page did not satisfy and
+  was removed. Keep the film lazy. Add video schema only with a dedicated crawlable watch page
+  whose visible primary content is the player. `DATETIME_PROPERTIES` in `audit.ts` remains the
+  guard for any future datetime-typed schema: those values need a full ISO datetime + timezone;
+  `datePublished`/`dateModified` remain legitimate date-only values.
   Landing pages are a catalog (`LANDINGS` in `scripts/seo/guides.ts`, rendered by
   `renderLandingPage`) — currently `/discord-message-builder/`, `/discord-webhook-builder/`
   and `/discord-embed-builder/`.
@@ -734,6 +743,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   (`src/core/seo/acquisition.ts`, else the audit fails the CTA token) + a committed OG card via
   `bun add -d sharp && bun scripts/gen-template-og.ts --guides-only && bun remove sharp`
   (guide/landing cards only; output is deterministic, untouched cards stay byte-identical).
+  The run also refreshes `scripts/seo/manifests/guide-landing-og.json`, which pins the SHA-256 of
+  every source SVG and emitted PNG; a copy change without a regenerated card must fail the SEO
+  audit. Root `og-image.png` is pinned separately by `scripts/seo/manifests/root-og.json`; regenerate
+  it without touching icon bytes via
+  `bun add -d sharp && bun scripts/gen-assets.mjs --og-only && bun remove sharp`.
   Bump `GUIDES_LASTMOD` when guides change — the audit fails a hub whose lastmod is older
   than its newest child, and bump a guide's `modified` when its visible content (including
   related-link cards) changes. A **landing** carries its own `modified` instead (added
@@ -742,19 +756,33 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   would either claim freshness for an untouched page or under-report a revised one.
   A landing may also carry an optional `faq`, which renders the shared `faqSection` **and**
   `FAQPage` JSON-LD from the same array — never add schema Q&A a reader cannot see on the page.
+  The primary message-builder landing carries responsive 1280×680 and 768×408 WebP product views
+  through the optional `productImage`; keep their intrinsic dimensions/srcset, sitemap entry,
+  descriptive alt text, and transfer budget together. `/about/` is the crawlable Faizo
+  author/profile and preview-test methodology page; guide/landing bylines and the canonical
+  Person entity point there.
+  `SITE.alternateNames`/`description` in `scripts/seo/content.ts` define the canonical WebSite
+  identity for generated pages; root `index.html` must mirror them exactly because the audit
+  compares every definition of `#website`. Do not let old keyword positioning survive on one
+  section of the site as a conflicting entity.
   **`/` and `/discord-message-builder/` deliberately target the same head term**
   (2026-08-19). "Discord message builder" is how people search for this product, so the home
   page leads with it in `<title>`, the sr-only `<h1>` in `App.tsx`, the manifest, and the
   `WebSite`/`WebApplication` `alternateName` — it has the domain's authority and it *is* the
-  builder. But `/` renders the editor, so its crawlable body is a UI, not prose: Google indexes
-  the **rendered** DOM, which means index.html's substantive `<noscript>` copy never reaches it
-  and the app shell's whole textual signal is that one sr-only heading. The landing carries the
+  builder. `/` renders the editor, so its crawlable body is a UI, not prose. `index.html` paints
+  an HTML-first product shell with the same heading while the split app chunks load; `mount()`
+  removes that shell immediately before Preact commits, and the audit checks both states for one
+  product H1. The substantive `<noscript>` copy is a no-JavaScript fallback, not rendered-page
+  content. The landing carries the
   depth (~1,300 words: what a message builder is, every message type, delivery modes, FAQ) and
   owns the nav/footer/hub-lede internal links. Don't "de-duplicate" these two by deleting or
   redirecting one, and don't retitle `/` back to the internal Discord API term — the SERP for
   this query is visual-tool pages with the phrase in their title, competing with discord.js's
   `MessageBuilder` docs for the same words. The two sibling landings stay narrower on purpose
   (webhook workflow, embed conversion) so all three do not chase one query.
+  Discord markdown in the live message preview is subordinate page content: visual H1/H2/H3
+  levels render as document H2/H3/H4 while retaining their measured CSS classes. Never emit a
+  real `<h1>` from user-authored preview text; the root product heading must remain the only one.
   **The generated pages' CSP needs `connect-src 'self'`** even though they ship no first-party
   JS: Lighthouse and AI browsing agents fetch `/robots.txt` and `/llms.txt` **from the page
   context**, and without it those same-origin reads are refused as CSP violations — which
@@ -762,8 +790,8 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   recommendations" (Agentic Browsing 67). With it, every generated page scores 100/100/100/100.
   **The home page's only crawlable internal links come from the auto-opening template gallery**
   (`discoveryLinks` in `TemplateGallery.tsx`). That is fine for search — a crawler always
-  arrives with empty storage, so the gallery opens and the four links render, verified — but a
-  *returning* visitor's `/` exposes none. Keep those four anchors real `<a href>`s; if the
+  arrives with empty storage, so the gallery opens and the five links render, verified — but a
+  *returning* visitor's `/` exposes none. Keep those five anchors real `<a href>`s; if the
   auto-open is ever removed, `/` becomes a crawl dead end and the links need another home.
   **A feature page's setup copy is derived, and `requiresBot` does not mean "plugin"**
   (2026-08-19). `resolveFeature` maps `requiresBot` to `deliveryMode: "bot-install"`, and every
@@ -775,9 +803,17 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   than the editor (an `appPath` with its own `intent=`) also needs an entry in `ctaLabels` and
   `ctaNotes` (features-layout.ts), since neither can be derived from the shape of its data. The
   audit checks structure, not truthfulness; these claims stay honest only by hand.
-- **Search attribution is first-party and privacy-bounded.** Static CTAs use
-  `entry=<landing|template|feature|guide>:<public-slug>` (never internal UTM tags), and optional
-  `intent=` values may only open a non-mutating app surface. `gtag-init.js` drops hashes,
+- **Search attribution is first-party and privacy-bounded.** Static CTAs use browser-fragment
+  `entry=<about|landing|template|feature|guide>:<public-slug>` (never internal UTM tags); optional
+  `template=`, `setup=`, and `intent=` state lives in that fragment too, so the generated site
+  exposes zero crawlable root-query variants. Readers still accept the old query form for deployed
+  bookmarks. `captureSeoAcquisition` removes only `entry` but returns the validated handoff to
+  `App`, which suppresses both first-visit gallery auto-open and the delayed welcome-tour toast;
+  otherwise an explicit "Open builder" CTA is interrupted after arrival. Suppression writes no
+  welcome record, so a later organic visit can still receive the one-time orientation.
+  `seo_builder_open` records arrival, while `seo_builder_ready` is the
+  actual attributed activation. Optional `intent=` values may only open a non-mutating surface.
+  `gtag-init.js` drops hashes,
   Discord/OAuth/billing identifiers, arbitrary queries, and exact short-link ids by sending only
   the controlled canonical plus a referrer's origin; acquisition ids and product-event fields use
   exact allowlists. Keep GA Enhanced Measurement disabled (especially outbound clicks, site search,

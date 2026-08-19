@@ -41,6 +41,20 @@ describe("trackAnalytics", () => {
     });
   });
 
+  it("attributes a ready builder without accepting arbitrary fields", () => {
+    const gtag = vi.fn();
+    vi.stubGlobal("window", { gtag });
+    trackAnalytics("seo_builder_ready", {
+      source_type: "landing",
+      source_id: "discord-message-builder",
+      href: "https://dweeb.faizo.net/#s=private",
+    });
+    expect(gtag).toHaveBeenCalledWith("event", "seo_builder_ready", {
+      source_type: "landing",
+      source_id: "discord-message-builder",
+    });
+  });
+
   it("is a no-op when privacy gating omitted gtag", () => {
     expect(() => trackAnalytics("builder_ready", { boot_ms: 10 })).not.toThrow();
   });

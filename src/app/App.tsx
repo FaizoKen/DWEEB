@@ -116,8 +116,9 @@ import { useTemplateDeepLink, readTemplateParam } from "./useTemplateDeepLink";
 import { usePlansDeepLink, readPlansParam } from "./usePlansDeepLink";
 import { readFeatureIntent, stripFeatureIntent } from "./featureIntent";
 import { trackAnalytics } from "@/core/telemetry/analytics";
+import type { SeoEntry } from "@/core/seo/acquisition";
 
-export function App() {
+export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   // Share/short links outrank template links when a malformed URL contains
   // both. Until the selected source settles, keep the showcase's media-heavy
   // preview out of the tree so it can never flash or download first.
@@ -125,7 +126,7 @@ export function App() {
     if (readShareTokenFromHash(window.location.hash) || readShortLinkId(window.location.pathname)) {
       return "share";
     }
-    return readTemplateParam(window.location.search) ? "template" : null;
+    return readTemplateParam(window.location.search, window.location.hash) ? "template" : null;
   });
   const [bootstrapPending, setBootstrapPending] = useState(bootstrapKind !== null);
   const settleBootstrap = useCallback(() => setBootstrapPending(false), []);
@@ -139,18 +140,18 @@ export function App() {
   useAttachmentGc();
   // First-visit onboarding: plays the intro film once, layered over the
   // landing gallery; see the hook for the gating.
-  useWelcomeAutoOpen();
+  useWelcomeAutoOpen(Boolean(seoEntry));
 
   // Decide the first-visit gallery before the first editor render. The gallery
   // still opens from an effect (state ownership stays in its store), but the
   // heavyweight Builder and live Preview remain unmounted in that one-frame
   // gap and for as long as the full-screen gallery is visible.
   const [initialGalleryOpening, setInitialGalleryOpening] = useState(() => {
-    if (bootstrapKind || hasReturn(webhookFlow)) return false;
+    if (seoEntry || bootstrapKind || hasReturn(webhookFlow)) return false;
     if (
       readPlansParam(window.location.search) ||
       readCustomBotParam(window.location.search) ||
-      readFeatureIntent(window.location.search)
+      readFeatureIntent(window.location.search, window.location.hash)
     ) {
       return false;
     }
@@ -405,7 +406,7 @@ export function App() {
   // Preserve the exact promise made by a static feature landing page. These
   // intents only open UI; none posts, connects or mutates external state.
   useEffect(() => {
-    const intent = readFeatureIntent(window.location.search);
+    const intent = readFeatureIntent(window.location.search, window.location.hash);
     if (!intent) return;
     window.history.replaceState(null, "", stripFeatureIntent(window.location.href));
     if (intent === "ai") {
@@ -436,16 +437,10 @@ export function App() {
         aria-busy={bootstrapPending ? "true" : undefined}
         inert={galleryOpen || initialGalleryOpening ? true : undefined}
       >
-        {/* The app shell's only heading. Google indexes the RENDERED DOM, so the
-            substantive copy in index.html's <noscript> never reaches it — this
-            line is the home page's whole h1 signal and must name the product the
-            way people search for it ("Discord message builder"), not only by the
-            internal Discord API term. */}
-        <h1 className="sr-only">
-          DWEEB — the free visual Discord message builder. Build, preview, and send Discord webhook
-          messages, embeds, and Components V2 layouts with containers, sections, buttons, select
-          menus, and media.
-        </h1>
+        {/* The rendered app replaces index.html's HTML-first shell, so both
+            states carry the same single, concise product heading. User-authored
+            preview headings deliberately start at document level two. */}
+        <h1 className="sr-only">Discord Message Builder</h1>
         <section
           className="app-shell__pane app-shell__pane--builder"
           aria-label="Component builder"

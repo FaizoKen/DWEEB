@@ -1,13 +1,14 @@
-# DWEEB
+# DWEEB — Discord Message Builder
 
 > **DWEEB** — the **D**iscord **W**ebhook **E**mbed Builder.
 
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
 
-A visual editor for Discord webhook messages using **Components V2**. Build rich
-messages with containers, sections, buttons, media, and files, watch a
-pixel-accurate live preview, then send, schedule, save, or share the result. The
-core builder needs no account.
+A [visual Discord message builder](https://dweeb.faizo.net/discord-message-builder/)
+for rich webhook messages using **Components V2**. Build layouts with containers,
+sections, buttons, media, and files, watch a
+measured, high-fidelity live preview, then send, save, or share the result with
+no account. Sign in to schedule.
 
 **Local by default.** Your working draft, browser saves, recent webhook URLs,
 attachments, preferences, and AI keys stay on your device. Default share links
@@ -27,7 +28,7 @@ DWEEB is **source-available** and **free for noncommercial use** under the
 pull requests welcome. **Commercial use is not permitted** (see
 [License](#license)).
 
-![DWEEB — editor on the left, pixel-accurate Discord preview on the right](docs/screenshot.png)
+![DWEEB — editor on the left, high-fidelity Discord preview on the right](docs/screenshot.png)
 
 > Try it live at **[dweeb.faizo.net](https://dweeb.faizo.net)**
 
@@ -46,8 +47,8 @@ Layout at a glance:
   global control (undo / redo / Reset / Restore / Share / Send); below it
   the Components ↔ Message tabs flip between the component tree and the
   webhook's username/avatar. Selecting a node opens its inspector below.
-- **Right pane** — the Discord-style live preview. Pixel-accurate, so you
-  iterate in seconds.
+- **Right pane** — the measured, high-fidelity Discord-style live preview, so
+  you iterate in seconds.
 
 The action-bar buttons:
 
@@ -352,7 +353,7 @@ doesn't surface them.
 DWEEB also runs **inside Discord** as an Activity: the same builder, launched in
 a server, scoped to the current channel, with **real-time co-editing** and
 **one-click publishing** — build an announcement together with your mods and post
-it without ever leaving Discord. It reuses the editor and the pixel-accurate
+it without ever leaving Discord. It reuses the editor and the high-fidelity
 preview; only auth (a bearer token instead of the session cookie), publishing
 (the proxy posts on the iframe's behalf), and a collaboration WebSocket differ.
 

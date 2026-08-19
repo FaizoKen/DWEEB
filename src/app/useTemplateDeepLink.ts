@@ -1,16 +1,16 @@
 /**
- * Applies a `?template=<id>` deep link on first load.
+ * Applies a `#template=<id>` deep link on first load.
  *
  * The static, SEO-focused template pages under `/templates/<slug>/` (generated
  * by `scripts/gen-template-pages.ts`) link into the app with
- * `/?template=<id>` — their "Open in DWEEB" call to action. This hook reads that
+ * `/#template=<id>` — their "Open in DWEEB" call to action. This hook reads that
  * param, loads the matching template into the editor exactly as picking it from
  * the Template Gallery would (fresh ids, guided setup for interactive ones, a
  * "go Send" nudge otherwise), and strips the param from the address bar.
  *
  * The template catalogue (`@/data/presets`) is otherwise only reached through
  * the lazily-loaded gallery, so it's imported on demand here too — a plain visit
- * (no `?template=`) never pulls it into the main bundle.
+ * (no client-side `template=` value) never pulls it into the main bundle.
  */
 
 import { useEffect, useRef } from "react";
@@ -20,24 +20,26 @@ import { isRegisteredPluginId } from "@/core/plugins/registry";
 import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
 import { pushToast } from "@/ui/Toast";
 import { trackAnalytics } from "@/core/telemetry/analytics";
+import { readClientParam, withoutClientParams } from "@/core/seo/clientParams";
 
-/** The `?template=<id>` value, validated to the id shape templates use. */
-export function readTemplateParam(search: string): string | null {
-  const id = new URLSearchParams(search).get("template");
+/** The client-side `template=<id>` value, validated to the id shape templates use. */
+export function readTemplateParam(search: string, hash = ""): string | null {
+  const id = readClientParam("template", search, hash);
   return id && /^[a-z0-9-]{1,40}$/i.test(id) ? id : null;
 }
 
 /** Optional exact plugin requested by a generated feature landing page. */
-export function readTemplateSetupParam(search: string): string | null {
-  const id = new URLSearchParams(search).get("setup");
+export function readTemplateSetupParam(search: string, hash = ""): string | null {
+  const id = readClientParam("setup", search, hash);
   return id && isRegisteredPluginId(id) ? id : null;
 }
 
 function stripTemplateParam(): void {
-  const url = new URL(window.location.href);
-  url.searchParams.delete("template");
-  url.searchParams.delete("setup");
-  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  window.history.replaceState(
+    null,
+    "",
+    withoutClientParams(window.location.href, ["template", "setup"]),
+  );
 }
 
 export function useTemplateDeepLink(enabled = true, onSettled?: () => void): void {
@@ -48,8 +50,8 @@ export function useTemplateDeepLink(enabled = true, onSettled?: () => void): voi
     if (!enabled || ran.current) return;
     ran.current = true;
 
-    const id = readTemplateParam(window.location.search);
-    const preferredPluginId = readTemplateSetupParam(window.location.search);
+    const id = readTemplateParam(window.location.search, window.location.hash);
+    const preferredPluginId = readTemplateSetupParam(window.location.search, window.location.hash);
     if (!id) {
       onSettled?.();
       return;

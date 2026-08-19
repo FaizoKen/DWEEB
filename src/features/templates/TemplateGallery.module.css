@@ -96,6 +96,9 @@
   font-size: var(--app-text-xs);
 }
 .discoveryLinks a {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
   color: var(--app-accent-text);
   text-decoration: none;
 }

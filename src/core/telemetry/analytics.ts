@@ -3,6 +3,7 @@
 export type AnalyticsEvent =
   | "app_surface_ready"
   | "builder_ready"
+  | "seo_builder_ready"
   | "template_applied"
   | "send_dialog_opened"
   | "message_posted"
@@ -13,6 +14,7 @@ export type AnalyticsParams = Record<string, string | number | boolean>;
 const ALLOWED_PARAMS: Record<AnalyticsEvent, ReadonlySet<string>> = {
   app_surface_ready: new Set(["boot_ms", "surface"]),
   builder_ready: new Set(["boot_ms"]),
+  seo_builder_ready: new Set(["source_type", "source_id"]),
   template_applied: new Set(["template_id", "source"]),
   send_dialog_opened: new Set(["mode", "when"]),
   message_posted: new Set(["mode"]),

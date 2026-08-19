@@ -19,6 +19,7 @@
  */
 
 import { SITE, type FaqEntry } from "./content";
+import { withClientParams } from "@/core/seo/clientParams";
 
 /** Display order of feature categories on the `/features` index. */
 export const FEATURE_CATEGORIES = [
@@ -79,7 +80,7 @@ export interface FeatureSeo {
   setupNote?: { badge: string; title: string; text: string };
   /** Template id to render as a live preview + drive the "Open in DWEEB" CTA. */
   previewTemplateId?: string;
-  /** Builder deep-link path. Defaults to `?template=<previewTemplateId>` or `/`. */
+  /** Builder deep-link path. Client-only state belongs in the URL fragment. */
   appPath?: string;
 }
 
@@ -592,7 +593,7 @@ export const FEATURES: FeatureSeo[] = [
     ],
     requiresBot: false,
     previewTemplateId: "announcement",
-    appPath: "/?template=announcement&intent=schedule",
+    appPath: "/#template=announcement&intent=schedule",
   },
   {
     id: "webhook-manager",
@@ -652,7 +653,7 @@ export const FEATURES: FeatureSeo[] = [
       "delete discord webhook",
     ],
     requiresBot: false,
-    appPath: "/?intent=manage-webhooks",
+    appPath: "/#intent=manage-webhooks",
   },
   {
     id: "ai-assistant",
@@ -719,7 +720,7 @@ export const FEATURES: FeatureSeo[] = [
       "generate discord message",
     ],
     requiresBot: false,
-    appPath: "/?intent=ai",
+    appPath: "/#intent=ai",
   },
   {
     id: "mcp-connector",
@@ -798,7 +799,7 @@ export const FEATURES: FeatureSeo[] = [
     ],
     requiresBot: true,
     previewTemplateId: "announcement",
-    appPath: "/?intent=mcp",
+    appPath: "/#intent=mcp",
   },
 ];
 
@@ -824,13 +825,11 @@ export function resolveFeature(f: FeatureSeo): ResolvedFeature {
   const path = `/features/${f.slug}/`;
   const baseAppPath =
     f.appPath ??
-    (f.previewTemplateId ? `/?template=${encodeURIComponent(f.previewTemplateId)}` : "/");
-  const appPath =
-    f.pluginId && f.previewTemplateId
-      ? `${baseAppPath}${baseAppPath.includes("?") ? "&" : "?"}setup=${encodeURIComponent(f.pluginId)}`
-      : baseAppPath;
-  const separator = appPath.includes("?") ? "&" : "?";
-  const appUrl = `${SITE.origin}${appPath}${separator}entry=${encodeURIComponent(`feature:${f.slug}`)}`;
+    (f.previewTemplateId ? `/#template=${encodeURIComponent(f.previewTemplateId)}` : "/");
+  const appUrl = withClientParams(`${SITE.origin}${baseAppPath}`, {
+    ...(f.pluginId && f.previewTemplateId ? { setup: f.pluginId } : {}),
+    entry: `feature:${f.slug}`,
+  });
 
   const resolvedKeywords = uniq(
     [...f.keywords, f.h1, "discord", "discord webhook", "discord components v2", "dweeb"].map((k) =>

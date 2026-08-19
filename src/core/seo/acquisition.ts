@@ -8,12 +8,14 @@
  * share hashes, and every unrelated parameter untouched).
  */
 
+import { readClientParam, withoutClientParams } from "./clientParams";
+
 export interface SeoEntry {
-  sourceType: "landing" | "template" | "feature" | "guide";
+  sourceType: "about" | "landing" | "template" | "feature" | "guide";
   sourceId: string;
 }
 
-const ENTRY_PATTERN = /^(landing|template|feature|guide):([a-z0-9][a-z0-9-]{0,79})$/;
+const ENTRY_PATTERN = /^(about|landing|template|feature|guide):([a-z0-9][a-z0-9-]{0,79})$/;
 const CTA_STORAGE_KEY = "dweeb:seo-cta";
 const CTA_MAX_AGE_MS = 10 * 60 * 1000;
 const CTA_LOCATIONS = new Set(["hero", "body", "nav", "footer"]);
@@ -25,6 +27,7 @@ const CTA_LOCATIONS = new Set(["hero", "body", "nav", "footer"]);
  * shipped CTA against this list so content additions cannot silently drift.
  */
 const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
+  about: new Set(["index"]),
   landing: new Set(["discord-message-builder", "discord-webhook-builder", "discord-embed-builder"]),
   template: new Set([
     "index",
@@ -93,8 +96,8 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
   ]),
 };
 
-export function parseSeoEntry(search: string): SeoEntry | null {
-  const raw = new URLSearchParams(search).get("entry");
+export function parseSeoEntry(search: string, hash = ""): SeoEntry | null {
+  const raw = readClientParam("entry", search, hash);
   const match = raw ? ENTRY_PATTERN.exec(raw) : null;
   if (!match) return null;
   const sourceType = match[1] as SeoEntry["sourceType"];
@@ -108,9 +111,7 @@ export function parseSeoEntry(search: string): SeoEntry | null {
 
 /** A history-safe relative URL with only the attribution token removed. */
 export function stripSeoEntry(href: string): string {
-  const url = new URL(href);
-  url.searchParams.delete("entry");
-  return url.pathname + url.search + url.hash;
+  return withoutClientParams(href, ["entry"]);
 }
 
 function consumeCtaLocation(entry: SeoEntry): string | null {
@@ -140,10 +141,10 @@ function consumeCtaLocation(entry: SeoEntry): string | null {
  * by `/gtag-init.js`. When DNT/GPC is enabled that stub intentionally doesn't
  * exist, so this becomes a quiet no-op while the URL is still cleaned up.
  */
-export function captureSeoAcquisition(): void {
-  if (typeof window === "undefined") return;
-  const entry = parseSeoEntry(window.location.search);
-  if (!entry) return;
+export function captureSeoAcquisition(): SeoEntry | null {
+  if (typeof window === "undefined") return null;
+  const entry = parseSeoEntry(window.location.search, window.location.hash);
+  if (!entry) return null;
 
   const analyticsWindow = window as Window & {
     gtag?: (command: "event", eventName: string, params: Record<string, string>) => void;
@@ -162,4 +163,5 @@ export function captureSeoAcquisition(): void {
   });
 
   window.history.replaceState(null, "", stripSeoEntry(window.location.href));
+  return entry;
 }

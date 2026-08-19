@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.1.0",
   "type": "module",
-  "description": "DWEEB — a local-by-default visual Discord webhook & embed builder for Components V2 messages, with optional scheduling, server libraries, plugins, AI, and collaboration.",
+  "description": "DWEEB — a local-by-default visual Discord message builder for webhook messages and embed-style Components V2 layouts, with scheduling, plugins, AI, and collaboration.",
   "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "dev": "vite",
@@ -12,6 +12,7 @@
     "build": "tsc -b && bun scripts/gen-mcp-catalog.ts && vite build && bun scripts/gen-template-pages.ts && bun scripts/seo/audit.ts",
     "gen:seo": "bun scripts/gen-template-pages.ts",
     "seo:audit": "bun scripts/seo/audit.ts",
+    "seo:lighthouse": "lhci autorun",
     "preview": "vite preview --host",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
@@ -34,6 +35,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@lhci/cli": "0.15.1",
     "@types/node": "^20.16.10",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

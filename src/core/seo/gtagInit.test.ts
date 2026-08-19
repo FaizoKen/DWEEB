@@ -86,4 +86,48 @@ describe("analytics page-location privacy", () => {
       }).pageReferrer,
     ).toBe("https://example.com/");
   });
+
+  it("bridges a fragment-based discovery CTA without exposing its other state", () => {
+    let clickHandler: ((event: { target: unknown }) => void) | undefined;
+    const stored = new Map<string, string>();
+    const location = new URL("https://dweeb.faizo.net/discord-message-builder/");
+    const link = {
+      nodeType: 1,
+      href: "https://dweeb.faizo.net/#template=showcase&entry=landing%3Adiscord-message-builder",
+      closest: () => link,
+      getAttribute: (name: string) => (name === "data-analytics-location" ? "hero" : null),
+    };
+    runInNewContext(loaderSource, {
+      window: {
+        location,
+        dataLayer: [],
+        doNotTrack: "0",
+        sessionStorage: { setItem: (key: string, value: string) => stored.set(key, value) },
+        addEventListener() {},
+        removeEventListener() {},
+      },
+      navigator: { doNotTrack: "0", globalPrivacyControl: false },
+      document: {
+        referrer: "",
+        documentElement: { getAttribute: () => "landing", hasAttribute: () => false },
+        querySelector: () => ({ href: "https://dweeb.faizo.net/discord-message-builder/" }),
+        addEventListener: (name: string, handler: (event: { target: unknown }) => void) => {
+          if (name === "click") clickHandler = handler;
+        },
+        createElement: () => ({}),
+        head: { appendChild() {} },
+      },
+      URL,
+      URLSearchParams,
+      Date,
+      setTimeout: () => 0,
+    });
+
+    clickHandler?.({ target: link });
+
+    expect(JSON.parse(stored.get("dweeb:seo-cta") ?? "{}")).toMatchObject({
+      entry: "landing:discord-message-builder",
+      location: "hero",
+    });
+  });
 });

@@ -9,6 +9,7 @@ describe("feature CTA intents", () => {
     expect(readFeatureIntent("?intent=mcp")).toBe("mcp");
     expect(readFeatureIntent("?intent=post-now")).toBeNull();
     expect(readFeatureIntent("?intent=ai%0Asecret")).toBeNull();
+    expect(readFeatureIntent("", "#intent=json")).toBe("json");
   });
 
   it("removes only intent and preserves attribution/template/hash", () => {
@@ -17,5 +18,10 @@ describe("feature CTA intents", () => {
         "https://dweeb.faizo.net/?template=announcement&intent=schedule&entry=feature%3Aschedule#x",
       ),
     ).toBe("/?template=announcement&entry=feature%3Aschedule#x");
+    expect(
+      stripFeatureIntent(
+        "https://dweeb.faizo.net/#template=announcement&intent=schedule&entry=feature%3Aschedule",
+      ),
+    ).toBe("/#template=announcement&entry=feature%3Aschedule");
   });
 });

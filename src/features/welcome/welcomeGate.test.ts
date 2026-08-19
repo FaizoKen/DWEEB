@@ -34,6 +34,12 @@ describe("welcomeAutoDecision", () => {
     expect(welcomeAutoDecision()).toBe("show");
   });
 
+  it("stands down for an explicit SEO handoff without consuming the welcome record", () => {
+    expect(welcomeAutoDecision(true)).toBe("no");
+    expect(readWelcomeRecord()).toBeNull();
+    expect(welcomeAutoDecision()).toBe("show");
+  });
+
   it("uses the existing-user announcement when the gallery has auto-opened before", () => {
     store.set(GALLERY_STAMP_KEY, String(Date.now()));
     expect(welcomeAutoDecision()).toBe("announce");

@@ -10,7 +10,7 @@
  *
  * Each template page is pre-rendered HTML: the message itself, the SEO copy, a
  * "what's inside" breakdown, a how-to, an FAQ, JSON-LD, and an "Open in DWEEB"
- * deep link (`/?template=<id>`). No JS ships on these pages — they exist to be
+ * deep link (`/#template=<id>`). No JS ships on these pages — they exist to be
  * crawled and to convert a searcher into the builder.
  *
  *   bun scripts/gen-template-pages.ts
@@ -27,12 +27,19 @@ import { renderIndexPage, renderTemplatePage } from "./seo/layout";
 import { resolveAllFeatures, FEATURES_LASTMOD } from "./seo/features";
 import { renderFeaturePage, renderFeaturesIndexPage } from "./seo/features-layout";
 import { GUIDES, GUIDES_LASTMOD, LANDINGS } from "./seo/guides";
-import { renderGuidePage, renderGuidesIndexPage, renderLandingPage } from "./seo/guides-layout";
+import {
+  ABOUT_LASTMOD,
+  ABOUT_URL,
+  renderAboutPage,
+  renderGuidePage,
+  renderGuidesIndexPage,
+  renderLandingPage,
+} from "./seo/guides-layout";
+import { HOME_LASTMOD } from "./seo/constants";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
 
-const BUILD_DATE = new Date().toISOString().slice(0, 10);
 const PRIVACY_LASTMOD = "2026-07-15";
 const TERMS_LASTMOD = "2026-07-13";
 const MAX_RELATED = 4;
@@ -189,14 +196,15 @@ async function main(): Promise<void> {
   for (const landing of LANDINGS) {
     await writePage(join(landing.slug, "index.html"), renderLandingPage(landing));
   }
+  await writePage(join("about", "index.html"), renderAboutPage());
 
   // Full sitemap: home + legal + templates index + every template page.
   const sitemap = buildSitemap([
     {
       loc: `${SITE.origin}/`,
-      // Vite stamps the app shell's WebApplication + Open Graph modification
-      // dates on every release; keep the sitemap's signal identical.
-      lastmod: BUILD_DATE,
+      // Keep sitemap and app metadata aligned to a meaningful content edit.
+      // Code-only builds must not manufacture freshness.
+      lastmod: HOME_LASTMOD,
       images: [`${SITE.origin}/og-image.png`, `${SITE.origin}/screenshot.png`],
     },
     {
@@ -206,7 +214,7 @@ async function main(): Promise<void> {
     },
     ...all.map((t) => ({
       loc: t.url,
-      lastmod: TEMPLATES_LASTMOD,
+      lastmod: t.modified,
       images: [t.ogImage],
     })),
     {
@@ -232,8 +240,16 @@ async function main(): Promise<void> {
     ...LANDINGS.map((landing) => ({
       loc: landing.url,
       lastmod: landing.modified,
-      images: [landing.ogImage],
+      images: [
+        landing.ogImage,
+        ...(landing.productImage ? [`${SITE.origin}${landing.productImage.src}`] : []),
+      ],
     })),
+    {
+      loc: ABOUT_URL,
+      lastmod: ABOUT_LASTMOD,
+      images: [SITE.ogImage],
+    },
     {
       loc: `${SITE.origin}/privacy`,
       lastmod: PRIVACY_LASTMOD,
@@ -247,7 +263,7 @@ async function main(): Promise<void> {
   ]);
   await writeFile(join(DIST, "sitemap.xml"), sitemap, "utf8");
 
-  const sectionPages = 3 + LANDINGS.length; // templates/features/guides indexes + landings
+  const sectionPages = 4 + LANDINGS.length; // indexes + landings + about
   console.log(
     `[seo] generated ${all.length} templates + ${features.length} features + ${GUIDES.length} guides ` +
       `+ ${sectionPages} section/landing pages + home/legal + sitemap.xml (${all.length + features.length + GUIDES.length + sectionPages + 3} urls)`,

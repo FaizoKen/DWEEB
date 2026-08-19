@@ -47,22 +47,26 @@ function renderBlock(block: BlockNode, key: number): ReactNode {
     case "heading": {
       const cls = block.level === 1 ? styles.h1 : block.level === 2 ? styles.h2 : styles.h3;
       const inner = renderInline(block.children);
+      // This is message content embedded inside the product page, not the
+      // document outline. Shift Discord's visual H1â€“H3 levels to H2â€“H4 so a
+      // draft can never compete with the app's single product H1. CSS classes
+      // preserve the measured Discord sizes exactly.
       if (block.level === 1)
-        return (
-          <h1 key={key} className={cls}>
-            {inner}
-          </h1>
-        );
-      if (block.level === 2)
         return (
           <h2 key={key} className={cls}>
             {inner}
           </h2>
         );
+      if (block.level === 2)
+        return (
+          <h3 key={key} className={cls}>
+            {inner}
+          </h3>
+        );
       return (
-        <h3 key={key} className={cls}>
+        <h4 key={key} className={cls}>
           {inner}
-        </h3>
+        </h4>
       );
     }
     case "subtext":

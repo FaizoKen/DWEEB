@@ -23,6 +23,42 @@
   height: 100dvh;
 }
 
+/* Immediate HTML-first product shell. It paints while the split app chunks
+ * load, then `mount()` removes it in the same task that commits Preact. This
+ * gives people and crawlers a real product heading instead of an empty root. */
+.seo-boot {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: 24px;
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+.seo-boot__card {
+  max-width: 620px;
+  text-align: center;
+}
+
+.seo-boot__brand {
+  color: var(--app-accent-text);
+  font-size: var(--app-text-xs);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.seo-boot h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(30px, 7vw, 48px);
+  line-height: 1.05;
+}
+
+.seo-boot p {
+  margin: 0;
+  color: var(--app-text-muted);
+  font-size: var(--app-text-md);
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: minmax(420px, 1fr) minmax(0, 1fr);

@@ -3,7 +3,7 @@
 import { LIMITS } from "@/core/schema/limits";
 import { SITE, type FaqEntry } from "./content";
 
-export const GUIDES_LASTMOD = "2026-07-17";
+export const GUIDES_LASTMOD = "2026-08-20";
 
 export interface GuideSection {
   heading: string;
@@ -190,7 +190,7 @@ export const GUIDES: GuidePage[] = [
       "discord-webhook-limits",
     ],
     ctaLabel: "Open the editable Components V2 example",
-    ctaPath: "/?template=showcase",
+    ctaPath: "/#template=showcase",
   }),
   guide({
     slug: "how-to-create-a-discord-webhook",
@@ -416,7 +416,7 @@ export const GUIDES: GuidePage[] = [
     ],
     related: ["discord-components-v2", "edit-discord-webhook-message"],
     ctaLabel: "Open the JSON converter",
-    ctaPath: "/?intent=json",
+    ctaPath: "/#intent=json",
   }),
   guide({
     slug: "discord-webhook-security",
@@ -611,7 +611,7 @@ export const GUIDES: GuidePage[] = [
       "discord-components-v2",
     ],
     ctaLabel: "Restore a webhook message",
-    ctaPath: "/?intent=restore",
+    ctaPath: "/#intent=restore",
   }),
   guide({
     slug: "discord-text-formatting",
@@ -1082,6 +1082,16 @@ export interface LandingPage {
   ogCategory: string;
   ogKicker: string;
   imageAlt: string;
+  /** Optional real product UI shown near the hero with fixed dimensions. */
+  productImage?: {
+    src: string;
+    srcSet?: string;
+    sizes?: string;
+    width: number;
+    height: number;
+    alt: string;
+    caption: string;
+  };
   sections: GuideSection[];
   /**
    * Visible Q&A rendered at the foot of the page and mirrored as FAQPage
@@ -1108,25 +1118,24 @@ function landing(input: LandingInput): LandingPage {
 
 const WEBHOOK_BUILDER_LANDING = landing({
   slug: "discord-webhook-builder",
-  title: "Visual Discord Webhook & Embed Builder | DWEEB",
-  h1: "Visual Discord Webhook & Embed Builder",
-  breadcrumb: "Discord Webhook Builder",
+  title: "Discord Webhook Message Builder — Live Preview | DWEEB",
+  h1: "Discord Webhook Message Builder",
+  breadcrumb: "Discord Webhook Message Builder",
   chip: "🛠️ Visual builder",
-  lede: "Design, preview and send modern Discord messages from one visual editor—including Containers, Sections, buttons, media and legacy-embed conversion.",
+  lede: "Use a visual Discord webhook message builder to design, preview, send, restore and schedule Components V2 messages from one editor.",
   description:
-    "Design Discord webhook, embed and Components V2 messages visually. Preview, import JSON, send, edit, schedule and share—free with no account required.",
+    "Build Discord webhook messages visually. Preview, import JSON, send, restore and edit with no account; sign in to schedule.",
   keywords: [
+    "discord webhook message builder",
     "discord webhook builder",
-    "discord embed builder",
-    "discord message builder",
     "discord webhook generator",
     "discord components v2 builder",
   ],
-  modified: "2026-08-19",
-  ctaLabel: "Build a Discord message free",
+  modified: "2026-08-20",
+  ctaLabel: "Open the webhook message builder",
   ogCategory: "Visual editor · Free core builder",
   ogKicker: "Build · Preview · Send · Edit · Schedule",
-  imageAlt: "DWEEB visual Discord webhook and Components V2 message builder",
+  imageAlt: "DWEEB Discord webhook message builder with Components V2 live preview",
   learn: [
     {
       href: "/guides/discord-components-v2/",
@@ -1157,7 +1166,7 @@ const WEBHOOK_BUILDER_LANDING = landing({
     {
       heading: "Build the message Discord will actually receive",
       paragraphs: [
-        "DWEEB is a browser-based visual editor for Discord webhook and Components V2 messages. Add Containers, Sections, Text Displays, buttons, select menus, media galleries, thumbnails, files and separators from a component tree, then inspect the result in a Discord-style live preview. The core editor works without an account and keeps the working draft in your browser by default.",
+        "DWEEB is a browser-based Discord webhook message builder for Components V2. Add Containers, Sections, Text Displays, buttons, select menus, media galleries, thumbnails, files and separators from a component tree, then inspect the result in a Discord-style live preview. The core editor works without an account and keeps the working draft in your browser by default.",
         "Start from a blank message, a production-ready template, pasted Components V2 JSON or an older content-and-embeds payload. The importer converts legacy embeds into editable V2 Containers and tells you when an old field has no exact modern equivalent.",
       ],
     },
@@ -1223,11 +1232,11 @@ const WEBHOOK_BUILDER_LANDING = landing({
 
 const EMBED_BUILDER_LANDING = landing({
   slug: "discord-embed-builder",
-  title: "Discord Embed Builder — Create & Convert Embeds | DWEEB",
+  title: "Discord Embed Builder — Live Preview & V2 Converter | DWEEB",
   h1: "Discord Embed Builder",
   breadcrumb: "Discord Embed Builder",
   chip: "🎨 Embed builder",
-  lede: "Design embed-style Discord messages visually, or paste existing embed JSON and convert it to Components V2 — with a pixel-accurate live preview and webhook delivery built in.",
+  lede: "Design embed-style Components V2 messages visually, or paste a webhook payload containing legacy embeds and convert it — with a measured, high-fidelity preview and webhook delivery built in.",
   description:
     "Free visual Discord embed builder: design embed-style cards, paste legacy embed JSON, convert it to Components V2, preview live and send through your webhook.",
   keywords: [
@@ -1237,10 +1246,10 @@ const EMBED_BUILDER_LANDING = landing({
     "discord embed maker",
     "discord embed json",
   ],
-  modified: "2026-08-19",
-  ctaLabel: "Build a Discord embed free",
-  ogCategory: "Visual editor · Embeds & Components V2",
-  ogKicker: "Design · Convert · Preview · Send",
+  modified: "2026-08-20",
+  ctaLabel: "Build an embed-style message free",
+  ogCategory: "Embed converter · Components V2",
+  ogKicker: "Import · Convert · Preview · Send",
   imageAlt: "DWEEB visual Discord embed builder with live preview and JSON conversion",
   learn: [
     {
@@ -1281,7 +1290,7 @@ const EMBED_BUILDER_LANDING = landing({
       table: {
         headers: ["Classic embed part", "Modern equivalent in the builder", "What improves"],
         rows: [
-          ["Accent color stripe", "Container accent color", "Identical look, same hex value"],
+          ["Accent color stripe", "Container accent color", "Familiar stripe, same hex value"],
           ["Title + URL", "Heading text (optionally linked)", "Three heading sizes instead of one"],
           ["Description", "Text Display", "Full markdown including subtext and lists"],
           ["Thumbnail", "Section with a thumbnail accessory", "Text wraps beside it deliberately"],
@@ -1306,7 +1315,7 @@ const EMBED_BUILDER_LANDING = landing({
         "The JSON panel accepts a legacy content-plus-embeds payload and converts it into editable Components V2, with a conversion report that names every field that cannot map exactly — polls, stickers, inline field grids, provider video. Nothing is silently dropped, and you can adjust the converted layout visually before sending.",
       ],
       bullets: [
-        "Import a full webhook payload or a bare embed object",
+        "Import a webhook payload containing an embeds array",
         "Keep the accent color, title, description, thumbnail, image and footer text",
         "Get warnings for anything with no modern equivalent before you apply",
         "Export the converted JSON, or send it directly through a webhook",
@@ -1349,7 +1358,7 @@ const EMBED_BUILDER_LANDING = landing({
     },
     {
       q: "Does this builder produce embed JSON or Components V2?",
-      a: "It builds the embed's visual identity with Components V2, which is the layout system Discord's current clients render, and sends that. Existing embed JSON can be pasted in and converted, and the whole message can be exported as JSON at any point.",
+      a: "It does not export a native classic-embed payload. It builds the embed's visual identity with Components V2 and sends that. A webhook payload containing an embeds array can be pasted and converted, and the resulting V2 message can be exported as JSON at any point.",
     },
     {
       q: "What happens to my old embed JSON when I import it?",
@@ -1385,9 +1394,9 @@ const MESSAGE_BUILDER_LANDING = landing({
   h1: "Discord Message Builder",
   breadcrumb: "Discord Message Builder",
   chip: "💬 Visual message builder",
-  lede: "Build any Discord message visually — formatted text, embed-style cards, media, buttons and select menus — against a live preview measured off the real Discord client, then send it through a webhook.",
+  lede: "Build rich Discord webhook messages visually — formatted text, embed-style cards, media, buttons and select menus — against a live preview measured off the real Discord client.",
   description:
-    "Build any Discord message visually: formatted text, embed-style cards, media, buttons and menus. Live preview, free, and no account for the core builder.",
+    "Build rich Discord webhook messages visually: text, embed-style cards, media, buttons and menus. Live preview, free, and no account for the core builder.",
   keywords: [
     "discord message builder",
     "discord webhook message builder",
@@ -1396,12 +1405,22 @@ const MESSAGE_BUILDER_LANDING = landing({
     "discord embed builder",
     "discord components v2 builder",
   ],
-  modified: "2026-08-19",
+  modified: "2026-08-20",
   ctaLabel: "Build a Discord message free",
   ogCategory: "Message builder · Free core editor",
   ogKicker: "Text · Embeds · Media · Buttons · Menus",
   imageAlt:
     "DWEEB — a visual Discord message builder showing a live preview of the finished message",
+  productImage: {
+    src: "/builder-preview.webp",
+    srcSet: "/builder-preview-768.webp 768w, /builder-preview.webp 1280w",
+    sizes: "(max-width: 700px) calc(100vw - 32px), 880px",
+    width: 1280,
+    height: 680,
+    alt: "DWEEB Discord message builder with a component tree beside a live Discord message preview",
+    caption:
+      "The working editor: arrange Components V2 on the left and inspect the measured Discord preview on the right.",
+  },
   learn: [
     {
       href: "/discord-webhook-builder/",
@@ -1432,12 +1451,12 @@ const MESSAGE_BUILDER_LANDING = landing({
     {
       heading: "What a Discord message builder does",
       paragraphs: [
-        "Discord's own message box sends plain text. Anything richer — a coloured card, a banner image, text beside a thumbnail, a row of buttons, a select menu — has to arrive as a structured payload from a webhook or an app. A message builder is the visual layer over that payload: you arrange the message the way you want people to read it, and the builder produces the JSON Discord accepts.",
-        "DWEEB is that layer. Add blocks from a component tree, type straight into them, and watch a preview whose colours, spacing and image geometry are measured against the live Discord client rather than approximated. Discord's character and structure limits are enforced while you type, so a message is checked as you build instead of failing at the API.",
+        "Discord's composer handles everyday chat, formatting, attachments and polls. A structured coloured card, text beside a thumbnail, or controls laid out with the message must instead arrive as a webhook or app payload. A message builder is the visual layer over that payload: you arrange the message the way you want people to read it, and the builder produces the JSON Discord accepts.",
+        "DWEEB is that layer and works as a Discord webhook message builder from first draft to delivery. Add blocks from a component tree, type straight into them, and watch a high-fidelity preview whose colours, spacing and image geometry are measured against the live Discord client. The test method and known font, emoji and client-version differences are documented. Discord's character and structure limits are enforced while you type, so a message is checked as you build instead of failing at the API.",
       ],
     },
     {
-      heading: "Every kind of Discord message, in one builder",
+      heading: "Rich Discord webhook layouts, in one builder",
       table: {
         headers: ["What you want to post", "How you build it", "What it needs"],
         rows: [
@@ -1483,7 +1502,7 @@ const MESSAGE_BUILDER_LANDING = landing({
       bullets: [
         "Start blank, from an editable template, or by pasting webhook JSON you already have",
         "Rearrange blocks in a component tree and edit each one in place",
-        "Watch the live preview render what Discord will actually show, including at mobile widths",
+        "Check the measured, high-fidelity preview at desktop and mobile widths",
         "Set the display name and avatar the message is posted under",
         "Send to a pasted webhook URL, or pick a connected server and channel",
         "Restore a message the webhook already posted and update it in place",
@@ -1529,7 +1548,7 @@ const MESSAGE_BUILDER_LANDING = landing({
     },
     {
       q: "Can I build Discord embeds with it?",
-      a: "Yes. The classic embed look — accent stripe, title, description, thumbnail, image, footer — is built from a Container with sections and media, and you can paste existing embed JSON to convert it. The embed builder page explains how each legacy field maps across.",
+      a: "Yes. The classic embed look — accent stripe, title, description, thumbnail, image, footer — is built from a Container with sections and media, and you can paste a webhook payload containing an embeds array to convert it. The embed builder page explains how each legacy field maps across.",
     },
     {
       q: "Can I edit a Discord message after I have sent it?",

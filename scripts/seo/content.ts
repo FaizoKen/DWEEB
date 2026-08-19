@@ -14,6 +14,7 @@
  */
 
 import { TEMPLATES, type MessageTemplate } from "@/data/presets";
+import { withClientParams } from "@/core/seo/clientParams";
 import { collectComponentKinds } from "./render-message";
 
 /**
@@ -29,12 +30,21 @@ import { collectComponentKinds } from "./render-message";
 export const SITE = {
   origin: "https://dweeb.faizo.net",
   name: "DWEEB",
+  alternateNames: [
+    "DWEEB — Discord Message Builder",
+    "DWEEB Discord Message Builder",
+    "dweeb.faizo.net",
+  ],
+  description:
+    "A visual Discord message builder for webhook messages and embed-style Components V2, with a live preview, templates, JSON import and export, direct sending, editing and scheduling.",
   ogImage: "https://dweeb.faizo.net/og-image.png",
   websiteId: "https://dweeb.faizo.net/#website",
   appId: "https://dweeb.faizo.net/#webapp",
   orgId: "https://dweeb.faizo.net/#organization",
   personId: "https://dweeb.faizo.net/#faizo",
+  authorUrl: "https://dweeb.faizo.net/about/",
   githubUrl: "https://github.com/FaizoKen/DWEEB",
+  communityUrl: "https://discord.gg/2wB7rHRDg2",
 } as const;
 
 /**
@@ -43,7 +53,18 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-07-15";
+export const TEMPLATES_LASTMOD = "2026-07-26";
+
+const DEFAULT_TEMPLATE_LASTMOD = "2026-07-15";
+const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {
+  poll: "2026-07-18",
+  "staff-directory": "2026-07-26",
+};
+
+/** Meaningful content date for one generated template page. */
+export function templateLastmod(id: string): string {
+  return TEMPLATE_LASTMOD_OVERRIDES[id] ?? DEFAULT_TEMPLATE_LASTMOD;
+}
 
 export interface FaqEntry {
   q: string;
@@ -616,6 +637,7 @@ export interface ResolvedSeo {
   title: string;
   h1: string;
   description: string;
+  modified: string;
   intro: string;
   whenToUse: string[];
   tips: string[];
@@ -687,7 +709,7 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
     ...(o.tips ?? []),
     "Every piece of text, colour, emoji and link is editable — open it in DWEEB and make it yours.",
     botNote,
-    "Use the live preview to check it renders exactly as Discord will show it before you send.",
+    "Use the measured, high-fidelity preview to check the layout before you send.",
   ]);
 
   const faq: FaqEntry[] = [
@@ -716,13 +738,15 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
     slug: o.slug,
     path,
     url: `${SITE.origin}${path}`,
-    appUrl:
-      `${SITE.origin}/?template=${encodeURIComponent(template.id)}` +
-      `&entry=${encodeURIComponent(`template:${o.slug}`)}`,
+    appUrl: withClientParams(`${SITE.origin}/`, {
+      template: template.id,
+      entry: `template:${o.slug}`,
+    }),
     ogImage: `${SITE.origin}/templates-og/${o.slug}.png`,
     title: o.title,
     h1: o.h1,
     description: o.description,
+    modified: templateLastmod(template.id),
     intro: o.intro,
     whenToUse: o.whenToUse,
     tips,

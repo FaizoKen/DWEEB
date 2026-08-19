@@ -1020,6 +1020,7 @@ export function TemplateGallery() {
               <a href="/templates/">Templates</a>
               <a href="/features/">Features</a>
               <a href="/guides/">Guides</a>
+              <a href="/about/">About &amp; methodology</a>
             </nav>
 
             <div className={styles.controls}>

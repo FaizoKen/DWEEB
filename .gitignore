@@ -8,6 +8,7 @@ dist
 .env.production
 .vite
 .cache
+.lighthouseci
 bun.lockb
 # Bun is the canonical package manager (see engines + CI). Ignore npm's
 # lockfile so an `npm install` by a contributor doesn't create a second

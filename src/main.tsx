@@ -55,6 +55,10 @@ function mount(node: ReactNode): void {
   if (!container) {
     throw new Error("Missing #root element. Check index.html.");
   }
+  // Keep the HTML-first product heading visible while boot chunks load, then
+  // replace it immediately before Preact commits. It must never survive beside
+  // App's rendered document H1.
+  if (container.querySelector("[data-seo-boot]")) container.replaceChildren();
   createRoot(container).render(
     <StrictMode>
       <ErrorBoundary>{node}</ErrorBoundary>
@@ -105,7 +109,10 @@ async function bootWeb(): Promise<void> {
     acquisitionPromise,
   ]);
   captureInstallPrompt();
-  captureSeoAcquisition();
+  // Keep the validated discovery-page handoff through initial routing even
+  // though its URL token is removed before Preact mounts. An explicit "open
+  // builder" click must not fall into the first-visit template directory.
+  const seoEntry = captureSeoAcquisition();
   let finishedBoot = false;
   const finishBoot = (event: Event) => {
     if (finishedBoot) return;
@@ -133,10 +140,18 @@ async function bootWeb(): Promise<void> {
   // activation. Count `builder_ready` only once the actual editor commits.
   window.addEventListener(
     "dweeb:builder-ready",
-    () => trackAnalytics("builder_ready", { boot_ms: performance.now() - bootStartedAt }),
+    () => {
+      trackAnalytics("builder_ready", { boot_ms: performance.now() - bootStartedAt });
+      if (seoEntry) {
+        trackAnalytics("seo_builder_ready", {
+          source_type: seoEntry.sourceType,
+          source_id: seoEntry.sourceId,
+        });
+      }
+    },
     { once: true },
   );
-  mount(<App />);
+  mount(<App seoEntry={seoEntry} />);
 }
 
 /**
