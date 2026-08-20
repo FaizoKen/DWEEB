@@ -24,6 +24,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { ChunkErrorBoundary } from "@/ui/ChunkErrorBoundary";
 import { Builder } from "@/features/builder/Builder";
 import { SendCoachMark } from "@/features/builder/SendCoachMark";
+import { RatingPrompt } from "@/features/rating/RatingPrompt";
 import { useWelcomeAutoOpen } from "@/features/welcome/useWelcomeAutoOpen";
 import { useWelcomeStore } from "@/features/welcome/welcomeStore";
 import { Preview } from "@/features/preview/Preview";
@@ -631,6 +632,9 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
         ) : null}
         <SendCoachMark />
         <UpdatePrompt />
+        {/* Renders nothing until a successful send arms it, so it costs a null
+            return on every other frame and needs no lazy chunk. */}
+        <RatingPrompt />
         <ToastViewport />
       </main>
       {galleryOpen || initialGalleryOpening ? (

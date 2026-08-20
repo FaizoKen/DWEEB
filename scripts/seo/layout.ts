@@ -282,6 +282,75 @@ export function faqSection(faq: FaqEntry[]): string {
   return `<section class="block"><h2>Frequently asked questions</h2>${items}</section>`;
 }
 
+/**
+ * The visible ratings block that `ratingLd` is allowed to describe.
+ *
+ * These two must always ship together. Google's review-snippet rules require
+ * the rating in the markup to be visible to a reader on the same page, so a
+ * page that emitted the schema alone would be making an unverifiable claim —
+ * and `audit.ts` fails the build when one appears without the other.
+ *
+ * The stars are drawn with text, not an icon font or an image: this is the one
+ * number on the page a reader is most likely to want to check, and it must
+ * survive with CSS unstyled, in a text-only reader, and in whatever a search
+ * crawler renders. `aria-hidden` on the glyph row plus a real sentence beside
+ * it keeps the meaning available to a screen reader rather than as a run of
+ * five identical symbols.
+ */
+export function ratingSection(rating: {
+  average: number;
+  count: number;
+  best: number;
+  distribution: number[];
+}): string {
+  const filled = Math.round(rating.average);
+  const stars = "★".repeat(filled) + "☆".repeat(Math.max(0, rating.best - filled));
+  const bars = rating.distribution
+    .map((n, i) => {
+      const score = i + 1;
+      const pct = rating.count > 0 ? Math.round((n / rating.count) * 100) : 0;
+      return `<li><span class="rating-bar-label">${score}★</span><span class="rating-bar-track"><span class="rating-bar-fill" style="width:${pct}%"></span></span><span class="rating-bar-count">${n}</span></li>`;
+    })
+    .reverse()
+    .join("");
+  const people = rating.count === 1 ? "person" : "people";
+  return `<section class="block rating-block" id="ratings">
+      <h2>How DWEEB users rate it</h2>
+      <div class="rating-summary">
+        <p class="rating-score"><span class="rating-stars" aria-hidden="true">${stars}</span> <strong>${rating.average}</strong> out of ${rating.best}</p>
+        <p class="rating-count">Rated by ${rating.count} ${people} who signed in and sent a message with DWEEB.</p>
+      </div>
+      <ul class="rating-bars">${bars}</ul>
+      <p class="rating-note">Ratings come from signed-in Discord accounts, one rating each, collected in the builder after a message is sent. Nothing is solicited in exchange for a reward.</p>
+    </section>`;
+}
+
+/**
+ * `aggregateRating` for the canonical WebApplication entity.
+ *
+ * Emitted as a node carrying the same `@id` as the full definition on `/`
+ * rather than a second, competing description of the app: consumers merge
+ * nodes by `@id`, so this attaches the rating to the entity that already
+ * exists instead of publishing a rival one. Only ever call this on a page that
+ * also renders `ratingSection`.
+ */
+export function ratingLd(rating: { average: number; count: number; best: number }): object {
+  return {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "@id": SITE.appId,
+    name: SITE.name,
+    url: `${SITE.origin}/`,
+    aggregateRating: {
+      "@type": "AggregateRating",
+      ratingValue: rating.average,
+      ratingCount: rating.count,
+      bestRating: rating.best,
+      worstRating: 1,
+    },
+  };
+}
+
 export function faqLd(faq: FaqEntry[]): object {
   return {
     "@context": "https://schema.org",
@@ -649,6 +718,18 @@ tbody tr:last-child td{border-bottom:0}
 .cta-band h2{margin:0 0 8px}
 .cta-band p{color:var(--muted);margin:0 0 18px}
 
+.rating-block{border:1px solid var(--border);border-radius:var(--radius);background:var(--panel);padding:22px 24px}
+.rating-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px}
+.rating-score{margin:0;font-size:20px;color:#f2f3f5}
+.rating-stars{color:#f0b232;letter-spacing:2px}
+.rating-score strong{font-size:26px}
+.rating-count{margin:0;color:var(--muted);font-size:14px}
+.rating-bars{list-style:none;margin:18px 0 0;padding:0;display:grid;gap:7px;max-width:420px}
+.rating-bars li{display:grid;grid-template-columns:34px 1fr 40px;align-items:center;gap:10px;font-size:13px;color:var(--dim)}
+.rating-bar-track{background:#1a1b1e;border-radius:999px;height:8px;overflow:hidden}
+.rating-bar-fill{display:block;height:100%;background:#f0b232;border-radius:999px}
+.rating-bar-count{text-align:right}
+.rating-note{margin:18px 0 0;color:var(--dim);font-size:13px;max-width:74ch}
 .faq-item{border:1px solid var(--border);border-radius:10px;margin-bottom:10px;background:var(--panel);overflow:hidden}
 .faq-item summary{cursor:pointer;padding:14px 18px;font-weight:600;color:#f2f3f5;list-style:none}
 .faq-item summary::-webkit-details-marker{display:none}

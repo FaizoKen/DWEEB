@@ -839,6 +839,48 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   than the editor (an `appPath` with its own `intent=`) also needs an entry in `ctaLabels` and
   `ctaNotes` (features-layout.ts), since neither can be derived from the shape of its data. The
   audit checks structure, not truthfulness; these claims stay honest only by hand.
+- **A rating is published because it is ours, not because someone left it somewhere**
+  (`server/src/rating.rs`, `src/core/rating/*`, `src/core/seo/ratingAggregate.ts`, added
+  2026-08-20). Sending people to review DWEEB on Top.gg, Product Hunt, G2, AlternativeTo or
+  a Reddit thread does **nothing** for the site's ranking: every one of those platforms
+  marks its outbound links `nofollow`/`ugc`, so no signal reaches dweeb.faizo.net. What does
+  change our own result is `aggregateRating` on the `WebApplication` entity — Google's
+  review-snippet rich result covers software types, and the self-serving-review restriction
+  it applies to `LocalBusiness`/`Organization` does not extend to them. So the rating is
+  collected first-party and printed on `/discord-message-builder/`, the page targeting the
+  head term. Load-bearing decisions: (1) **one row per Discord user id, enforced by the
+  PRIMARY KEY** — the write is identity-gated through `resolve_identity` and re-rating
+  overwrites, because an anonymous endpoint behind a rate limit is inflatable and a rating
+  snippet Google judges fabricated is a manual action against the **whole domain**, not one
+  page; (2) **no review gating** — the score is recorded whatever its value and the prompt
+  never routes on it, since steering unhappy raters elsewhere would corrupt the average the
+  site publishes (a 4-5 additionally *offers* the Top.gg link afterwards, which is a
+  recommendation channel, not a rating channel; ≤3 is pointed at the feedback form); (3) the
+  visible block and the schema are gated on **one** expression in `renderLandingPage`, and
+  `audit.ts` **fails the build** if any `aggregateRating` names a `ratingValue`/`ratingCount`
+  that is not in the page's rendered text — Google requires the rating to be readable by a
+  visitor, so schema-only is not an option; (4) nothing publishes below
+  `MIN_RATINGS_TO_PUBLISH` (25) — a mean of a handful of scores is noise stated as fact;
+  raising it is safe, below ~10 is not; (5) the build **must never fail on this** — the
+  aggregate is fetched once by `scripts/seo/ratings.ts` with a 5s timeout and every failure
+  (proxy down, feature off, payload that fails `parseRatingAggregate`) ships a page without
+  stars, matching the standing rule that workflows must not depend on a network call.
+  `SKIP_RATINGS=1` forces that path for local builds; `RATINGS_API_ORIGIN` points a
+  self-hosted build at its own proxy. Only **one** page may set `showsRatings` — three
+  landings carrying it would put our own URLs in competition for the same stars. The prompt
+  itself is armed by the **Send-success dialog closing**, not by page load and not by the
+  send itself, and asks once ever: the "have they already rated" answer comes from the server
+  (`/api/rating/me`) so rating on a phone settles it on a laptop, and its three-state reply
+  matters — `unknown` (signed out, offline, unreadable) must never be read as "hasn't rated",
+  or the one prompt is spent on someone whose tap the server is bound to refuse.
+  **`RATINGS_ENABLED` is off by default and enabling it is two env changes, not one**: it
+  adds a durable store, so `RATINGS_DB_PATH` must be set absolute in the same change or the
+  table is destroyed on the next deploy (and under `STRICT_DB_PATHS` the proxy refuses to
+  boot) — same trap as `MCP_DB_PATH`, and prod's `/opt/dweeb/.env` is hand-managed, so a
+  repo-only change enables nothing. Server-first deploy ordering: the FE gates the prompt on
+  `/api/capabilities` reporting `ratings`, which an old proxy omits, so the web app simply
+  never prompts until the proxy ships. Guarded by the `rating::tests` in rating.rs,
+  `ratingAggregate.test.ts`, and `ratingStore.test.ts`.
 - **Search attribution is first-party and privacy-bounded.** Static CTAs use browser-fragment
   `entry=<about|landing|template|feature|guide>:<public-slug>` (never internal UTM tags); optional
   `template=`, `setup=`, and `intent=` state lives in that fragment too, so the generated site

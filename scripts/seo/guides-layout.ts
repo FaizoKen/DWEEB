@@ -12,7 +12,10 @@ import {
   faqSection,
   htmlDocument,
   jsonLd,
+  ratingLd,
+  ratingSection,
 } from "./layout";
+import { isPublishable, type RatingAggregate } from "./ratings";
 
 export const GUIDES_INDEX_PATH = "/guides/";
 export const GUIDES_INDEX_URL = `${SITE.origin}${GUIDES_INDEX_PATH}`;
@@ -259,8 +262,22 @@ export function renderGuidesIndexPage(all: GuidePage[]): string {
   });
 }
 
-export function renderLandingPage(page: LandingPage): string {
+/**
+ * Render one landing page.
+ *
+ * `rating` is threaded in rather than fetched here so the whole build resolves
+ * it exactly once, and so a page renders identically for a given aggregate —
+ * the audit re-reads these files and has to see a stable result. It is only
+ * ever honoured on the landing that opts in via `showsRatings`: an
+ * `aggregateRating` is a rich-result claim about the product, and repeating it
+ * on every sibling page would be three pages competing to be the one Google
+ * shows stars against.
+ */
+export function renderLandingPage(page: LandingPage, rating?: RatingAggregate | null): string {
   const cta = trackedAppPath("/", "landing", page.slug);
+  // Both halves or neither: the visible block and the schema below are gated on
+  // one expression, so the page can never claim a rating a reader cannot see.
+  const publishedRating = page.showsRatings && isPublishable(rating ?? null) ? rating : null;
   const productProof = page.productImage
     ? `<figure class="product-shot">
         <a href="${attr(cta)}" data-analytics="landing" data-analytics-id="${attr(page.slug)}" data-analytics-location="body" aria-label="Open the ${escapeHtml(page.h1)}">
@@ -291,6 +308,7 @@ export function renderLandingPage(page: LandingPage): string {
       </header>
       ${productProof}
       ${renderSections(page.sections)}
+      ${publishedRating ? ratingSection(publishedRating) : ""}
       ${page.faq?.length ? faqSection(page.faq) : ""}
       <section class="block sources"><h2>Documentation and testing</h2><ul>
         <li><a href="https://docs.discord.com/developers/components/reference" rel="noopener noreferrer" target="_blank">Discord message components reference</a></li>
@@ -353,6 +371,7 @@ export function renderLandingPage(page: LandingPage): string {
         ]),
       ),
       jsonLd(webPage),
+      ...(publishedRating ? [jsonLd(ratingLd(publishedRating))] : []),
       ...(page.faq?.length ? [jsonLd(faqLd(page.faq))] : []),
     ],
     body,

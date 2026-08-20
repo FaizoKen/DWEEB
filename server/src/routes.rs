@@ -53,6 +53,10 @@ pub struct AppState {
     pub shortlinks: Option<Arc<ShortLinkStore>>,
     /// Uploaded webhook avatars (see `avatar.rs`); None when the feature is off.
     pub avatars: Option<Arc<crate::avatar::AvatarStore>>,
+    /// First-party product ratings (see `rating.rs`) — the evidence behind the
+    /// `aggregateRating` the generated pages publish. None when the feature is
+    /// off, which is the default.
+    pub ratings: Option<Arc<crate::rating::RatingStore>>,
     /// Scheduled-post store (see `schedule.rs`); None when the feature is off.
     pub schedules: Option<Arc<crate::schedule::ScheduleStore>>,
     /// Live collaboration rooms for the embedded Activity (see `activity.rs`).
@@ -140,6 +144,9 @@ pub async fn capabilities(State(st): State<AppState>) -> impl IntoResponse {
         // Uploaded webhook avatars. Off ⇒ the builder shows only the
         // paste-a-URL field rather than an upload control that would 501.
         "avatarUploads": st.avatars.is_some(),
+        // First-party product ratings. Off ⇒ the post-send rating prompt never
+        // arms, rather than asking for a score the server would 501 on.
+        "ratings": st.ratings.is_some(),
         // Remote MCP endpoint. Nothing in the web app reads this — it is here so
         // an operator can confirm from outside whether `/mcp` is live, without
         // having to complete an OAuth flow to find out.
@@ -185,6 +192,7 @@ pub async fn ready(State(st): State<AppState>) -> Response {
 
     probe!(st.shortlinks, "shortlinks");
     probe!(st.avatars, "avatars");
+    probe!(st.ratings, "ratings");
     probe!(st.schedules, "schedules");
     probe!(st.activity_drafts, "activity_drafts");
     probe!(st.library, "library");

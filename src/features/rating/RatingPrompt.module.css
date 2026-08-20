@@ -1,0 +1,141 @@
+/* Anchored bottom-right rather than in the toast stack: this one waits for an
+   answer instead of expiring, so it must not sit above transient toasts that
+   will slide out from under it, and the bottom corner keeps it clear of the
+   action bar's Send/Restore controls at the top. */
+.card {
+  position: fixed;
+  bottom: calc(16px + var(--app-saib));
+  right: calc(16px + var(--app-sair));
+  z-index: calc(var(--app-z-tooltip) + 20);
+  width: min(340px, calc(100vw - 32px - var(--app-sail) - var(--app-sair)));
+  padding: 16px;
+  border-radius: var(--app-radius-lg);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-elevated);
+  color: var(--app-text);
+  box-shadow: var(--app-shadow-lg);
+  animation: rise 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    animation: none;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.close {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: -4px -4px 0 0;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--app-bg-hover);
+  color: var(--app-text);
+}
+
+.sub {
+  margin: 0 0 12px;
+  font-size: var(--app-text-xs);
+  color: var(--app-text-muted);
+  line-height: 1.45;
+}
+
+/* Laid out in reverse (5→1 in the DOM) purely so the hover rule below can use
+   `~` to reach the lower scores from the hovered star. The buttons carry their
+   own labels and an explicit tabindex-free order, so assistive tech and
+   keyboard traversal still meet them as 1…5. */
+.stars {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 4px;
+}
+
+/* One button per score. Large hit areas because this is a single-tap gesture
+   the person did not ask for — it has to be effortless or it is just noise. */
+.star {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 8px 0;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg);
+  color: var(--app-text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.star:disabled {
+  cursor: default;
+}
+
+/* Hovering a star lights it and every star before it, the way every rating
+   control the reader has ever used behaves. Pure CSS: the row is laid out in
+   reverse so `~` can reach the lower scores from the hovered one. */
+.stars:not([data-busy="true"]) .star:hover,
+.stars:not([data-busy="true"]) .star:hover ~ .star,
+.stars:not([data-busy="true"]) .star:focus-visible,
+.stars:not([data-busy="true"]) .star:focus-visible ~ .star {
+  color: var(--app-warning-text);
+  border-color: var(--app-warning-text);
+  background: var(--app-bg-hover);
+}
+
+.thanks {
+  margin: 0;
+  font-size: var(--app-text-sm);
+  line-height: 1.45;
+}
+
+.thanksNote {
+  margin: 8px 0 0;
+  font-size: var(--app-text-xs);
+  color: var(--app-text-muted);
+  line-height: 1.45;
+}
+
+.link {
+  color: var(--app-accent-text);
+  font-weight: 600;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

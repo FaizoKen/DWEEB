@@ -27,6 +27,7 @@ mod feedback;
 mod library;
 mod mcp;
 mod ratelimit;
+mod rating;
 mod reconcile;
 mod routes;
 mod schedule;
@@ -60,6 +61,7 @@ use crate::cache::{DataCache, TtlCache};
 use crate::config::Config;
 use crate::discord::Discord;
 use crate::ratelimit::{rate_limit, Limiter, RateLimiter};
+use crate::rating::{rating_mine, rating_put, rating_summary, RatingStore};
 use crate::routes::{
     bootstrap, capabilities, channels, custom_apps_add, custom_apps_list, custom_apps_remove,
     emojis, guild_activity_invite, health, list_guilds, permanent_add, permanent_list,
@@ -316,6 +318,27 @@ async fn run() {
         None
     };
 
+    // First-party product ratings (see `rating.rs`). Like avatars there is no
+    // sweep: a rating is something a person said about the product, and ageing
+    // one out would move a published average with nobody having changed their
+    // mind. Off by default — enabling it is a deliberate pair of env changes,
+    // because it adds a durable store and a relative path would be destroyed on
+    // the next deploy.
+    let ratings = if config.ratings_enabled {
+        match RatingStore::open(&config.ratings_db_path) {
+            Ok(store) => {
+                tracing::info!(db = %config.ratings_db_path, "product ratings enabled");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                eprintln!("rating store error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     if let Some(store) = &shortlinks {
         let store = Arc::clone(store);
         tokio::spawn(async move {
@@ -538,6 +561,7 @@ async fn run() {
         dispatcher,
         shortlinks,
         avatars,
+        ratings,
         schedules,
         activity_rooms: Arc::new(crate::activity::ActivityRooms::new()),
         activity_tickets: Arc::new(crate::activity::ActivityTickets::new()),
@@ -656,6 +680,21 @@ async fn run() {
             post(avatar_upload).layer(axum::extract::DefaultBodyLimit::max(avatar_body_limit)),
         )
         .route("/api/avatar/:file", get(avatar_get))
+        // First-party product ratings (see `rating.rs`) — what the generated
+        // pages publish as `aggregateRating`. The write is identity-gated and
+        // keyed on the Discord user id, so one person holds one rating no
+        // matter how often they submit; that, not a rate limit, is what makes
+        // the published average defensible, and it is why these routes need no
+        // dedicated limiter the way `/api/stripe/checkout` does (a call here
+        // costs nothing outside our own SQLite). The summary is anonymous
+        // because the build fetches it with no credential and prints it.
+        .route(
+            "/api/rating",
+            post(rating_put)
+                .get(rating_summary)
+                .layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
+        .route("/api/rating/me", get(rating_mine))
         // Frontend crash telemetry: the browser's global error handlers beacon a
         // content-free crash report (message, a few stack frames, version, URL
         // path — never the `#hash` payload) so runtime errors in the wild are

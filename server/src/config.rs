@@ -170,6 +170,20 @@ pub struct Config {
     /// keep resolving); bounds worst-case disk usage under abuse.
     pub shortlink_max_entries: u64,
 
+    // ── First-party product ratings ────────────────────────────────────────
+    /// Master switch for `/api/rating` (see `rating.rs`). **Default off**, for
+    /// the same reason MCP is: it adds a durable store, so a deployment that
+    /// inherited it silently would boot with a *relative* `RATINGS_DB_PATH` and
+    /// destroy the table on its next deploy — or, under `STRICT_DB_PATHS`, fail
+    /// to boot at all. Turning it on is therefore one deliberate change that
+    /// sets both variables together. Self-hosted deployments have no reason to
+    /// collect ratings for dweeb.faizo.net's search result anyway.
+    pub ratings_enabled: bool,
+    /// SQLite file the ratings live in. Durable: this is the evidence behind a
+    /// published `aggregateRating`, and losing it silently resets a public
+    /// claim about the product to "no rating".
+    pub ratings_db_path: String,
+
     // ── Uploaded webhook avatars ───────────────────────────────────────────
     /// Master switch for avatar uploads. False ⇒ `/api/avatar` answers 501 and
     /// the builder offers only the paste-a-URL field. Default on — the feature
@@ -445,6 +459,9 @@ impl Config {
             opt_env("SHORTLINK_DB_PATH").unwrap_or_else(|| "shortlinks.db".to_string());
         let shortlink_max_entries = parse_or("SHORTLINK_MAX_ENTRIES", 50_000)?;
 
+        let ratings_enabled = parse_bool("RATINGS_ENABLED", false)?;
+        let ratings_db_path =
+            opt_env("RATINGS_DB_PATH").unwrap_or_else(|| "ratings.db".to_string());
         let avatar_uploads_enabled = parse_bool("AVATAR_UPLOADS_ENABLED", true)?;
         let avatar_db_path = opt_env("AVATAR_DB_PATH").unwrap_or_else(|| "avatars.db".to_string());
         let avatar_max_entries = parse_or("AVATAR_MAX_ENTRIES", 20_000)?;
@@ -598,6 +615,7 @@ impl Config {
             &DurableStores {
                 shortlink: (shortlink_ttl_days > 0).then_some(shortlink_db_path.as_str()),
                 avatar: avatar_uploads_enabled.then_some(avatar_db_path.as_str()),
+                ratings: ratings_enabled.then_some(ratings_db_path.as_str()),
                 schedule: schedules_enabled.then_some(schedule_db_path.as_str()),
                 library: library_enabled.then_some(library_db_path.as_str()),
                 activity_draft: activities_enabled.then_some(activity_draft_db_path.as_str()),
@@ -642,6 +660,8 @@ impl Config {
             shortlink_ttl_days,
             shortlink_db_path,
             shortlink_max_entries,
+            ratings_enabled,
+            ratings_db_path,
             avatar_uploads_enabled,
             avatar_db_path,
             avatar_max_entries,
@@ -696,6 +716,7 @@ impl Config {
 struct DurableStores<'a> {
     shortlink: Option<&'a str>,
     avatar: Option<&'a str>,
+    ratings: Option<&'a str>,
     schedule: Option<&'a str>,
     library: Option<&'a str>,
     activity_draft: Option<&'a str>,
@@ -710,6 +731,7 @@ impl<'a> DurableStores<'a> {
         [
             ("SHORTLINK_DB_PATH", self.shortlink),
             ("AVATAR_DB_PATH", self.avatar),
+            ("RATINGS_DB_PATH", self.ratings),
             ("SCHEDULE_DB_PATH", self.schedule),
             ("LIBRARY_DB_PATH", self.library),
             ("ACTIVITY_DRAFT_DB_PATH", self.activity_draft),
@@ -931,6 +953,7 @@ mod tests {
         DurableStores {
             shortlink: None,
             avatar: None,
+            ratings: None,
             schedule,
             library,
             activity_draft: None,

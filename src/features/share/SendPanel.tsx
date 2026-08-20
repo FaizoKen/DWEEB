@@ -159,6 +159,7 @@ import { GuildWebhookPicker, WEBHOOK_CHANNEL_TYPES } from "./GuildWebhookPicker"
 import { GuildIdentity } from "./GuildIdentity";
 import { SendConfirm } from "./SendConfirm";
 import { SendSuccess } from "./SendSuccess";
+import { armRatingPrompt } from "@/core/rating/ratingStore";
 import type { PermanentStatusProps } from "./PermanentStatus";
 import { Callout } from "./Callout";
 import styles from "./SendPanel.module.css";
@@ -2426,7 +2427,15 @@ export function SendPanel({
         editOnResend={success?.editOnResend ?? false}
         messageId={success?.messageId}
         permanentStatus={success?.permanentStatus}
-        onClose={() => setSuccess(null)}
+        onClose={() => {
+          setSuccess(null);
+          // Armed as the receipt is dismissed, not as it opens: the prompt is a
+          // separate surface, and stacking it under a modal the user is still
+          // reading would mean the one time we get to ask lands unseen. It
+          // silently no-ops unless the deployment runs ratings, the user is
+          // signed in, and they have neither rated nor dismissed before.
+          armRatingPrompt();
+        }}
       />
     </>
   );

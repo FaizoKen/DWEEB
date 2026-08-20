@@ -36,6 +36,7 @@ import {
   renderLandingPage,
 } from "./seo/guides-layout";
 import { HOME_LASTMOD } from "./seo/constants";
+import { isPublishable, loadRatings, MIN_RATINGS_TO_PUBLISH } from "./seo/ratings";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
@@ -193,8 +194,20 @@ async function main(): Promise<void> {
     await writePage(join("guides", guide.slug, "index.html"), renderGuidePage(guide, GUIDES));
   }
   await writePage(join("guides", "index.html"), renderGuidesIndexPage(GUIDES));
+  // One read of the live aggregate for the whole build. Resolves to null when
+  // the proxy is unreachable, the feature is off, or too few people have rated
+  // — in every one of those cases the landing simply ships without stars rather
+  // than failing the build (see `seo/ratings.ts`).
+  const ratings = await loadRatings();
+  if (ratings) {
+    console.log(
+      isPublishable(ratings)
+        ? `  ratings: ${ratings.average}/5 from ${ratings.count} — publishing aggregateRating`
+        : `  ratings: ${ratings.count} so far, below the ${MIN_RATINGS_TO_PUBLISH} needed to publish`,
+    );
+  }
   for (const landing of LANDINGS) {
-    await writePage(join(landing.slug, "index.html"), renderLandingPage(landing));
+    await writePage(join(landing.slug, "index.html"), renderLandingPage(landing, ratings));
   }
   await writePage(join("about", "index.html"), renderAboutPage());
 

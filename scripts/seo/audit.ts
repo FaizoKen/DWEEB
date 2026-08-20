@@ -511,6 +511,12 @@ async function main(): Promise<void> {
       ...html.matchAll(/<script\s+type="application\/ld\+json">([\s\S]*?)<\/script>/gi),
     ];
     let websiteDefinitions = 0;
+    // Every `aggregateRating` found on this page, checked below against what a
+    // reader can actually see. Google requires a rating in the markup to be
+    // visible on the same page, and a rating snippet judged self-serving or
+    // fabricated is a manual action against the whole domain — so the build
+    // refuses to ship schema stating a figure the page does not print.
+    const ratingClaims: { value: unknown; count: unknown }[] = [];
     for (const [index, match] of jsonLdMatches.entries()) {
       try {
         const parsed = JSON.parse(match[1]!) as Record<string, unknown>;
@@ -519,6 +525,11 @@ async function main(): Promise<void> {
         for (const rawNode of nodes) {
           if (!rawNode || typeof rawNode !== "object") continue;
           const node = rawNode as Record<string, unknown>;
+          const rating = node.aggregateRating;
+          if (rating && typeof rating === "object") {
+            const r = rating as Record<string, unknown>;
+            ratingClaims.push({ value: r.ratingValue, count: r.ratingCount });
+          }
           if (node["@id"] !== SITE.websiteId) continue;
           websiteDefinitions += 1;
           if (
@@ -552,6 +563,29 @@ async function main(): Promise<void> {
       .replace(/\s+/g, " ")
       .trim();
     const words = visible ? visible.split(" ").length : 0;
+
+    // A rating may only be published where it is also printed. Both the score
+    // and the number of raters must appear in the rendered text: a page showing
+    // the average alone would let the sample size drift silently away from what
+    // the schema claims, and the sample size is the half a reader uses to judge
+    // whether the average means anything.
+    for (const claim of ratingClaims) {
+      if (typeof claim.value !== "number" || typeof claim.count !== "number") {
+        errors.push(`${entry.url}: aggregateRating must carry numeric ratingValue and ratingCount`);
+        continue;
+      }
+      for (const [label, needle] of [
+        ["ratingValue", String(claim.value)],
+        ["ratingCount", String(claim.count)],
+      ] as const) {
+        if (!visible.includes(needle)) {
+          errors.push(
+            `${entry.url}: aggregateRating ${label} ${needle} is not visible on the page — ` +
+              `structured-data ratings must be readable by a visitor, not schema-only`,
+          );
+        }
+      }
+    }
     const hrefs = [...html.matchAll(/<a\s+[^>]*href="([^"]+)"/gi)].map((match) =>
       decode(match[1]!),
     );

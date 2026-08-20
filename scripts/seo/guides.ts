@@ -1141,6 +1141,20 @@ export interface LandingPage {
    * reader can actually see, so this is one field driving both.
    */
   faq?: FaqEntry[];
+  /**
+   * Whether this landing carries the visible ratings block and the
+   * `aggregateRating` schema (see `ratings.ts` / `layout.ts`).
+   *
+   * Exactly **one** page should set this. A rich-result rating is a claim about
+   * the product, not about a page, so publishing it on all three landings would
+   * put three of our own URLs in competition to be the one Google shows stars
+   * against — and split the signal between them. It belongs on the page
+   * targeting the head term, which is the result the stars are meant to win.
+   *
+   * Nothing renders until the aggregate clears `MIN_RATINGS_TO_PUBLISH`, so
+   * this is safe to set before any ratings exist.
+   */
+  showsRatings?: boolean;
   /** "Learn more" mini-cards — internal links only. */
   learn: { href: string; emoji: string; name: string; desc: string }[];
 }
@@ -1447,6 +1461,11 @@ const MESSAGE_BUILDER_LANDING = landing({
     "discord components v2 builder",
   ],
   modified: "2026-08-20",
+  // The head-term page is the one that carries the rating: it is the result
+  // "Discord message builder" is meant to win, and stars beside it are worth
+  // more than on any sibling. See `showsRatings` on the interface for why only
+  // one page may set this.
+  showsRatings: true,
   ctaLabel: "Build a Discord message free",
   ogCategory: "Message builder · Free core editor",
   ogKicker: "Text · Embeds · Media · Buttons · Menus",
