@@ -24,15 +24,84 @@
 }
 
 /* Immediate HTML-first product shell. It paints while the split app chunks
- * load, then `mount()` removes it in the same task that commits Preact. This
- * gives people and crawlers a real product heading instead of an empty root. */
+ * load, then `mount()` hands it over to Preact. This gives people and crawlers
+ * a real product heading instead of an empty root, and it is what paints FCP —
+ * so the heading stays fully opaque from the first frame. Never delay or hide
+ * it to hide the handoff; smooth the handoff instead — that is what the rules
+ * below and `dismissBootShell` (main.tsx) are for. */
 .seo-boot {
   display: grid;
   min-height: 100%;
   place-items: center;
   padding: 24px;
+  /* The Activity's first screen is a flat `--app-bg` splash. `data-surface` is
+   * stamped in index.html before first paint, so this stays the Activity's
+   * background and the rule below gives the web app its own. */
   background: var(--app-bg);
   color: var(--app-text);
+}
+
+/* Web surface: wear `.app-shell`'s own two pane tones, so the shell is already
+ * showing the chrome the editor is about to commit to. Without this the right
+ * half of the screen jumped from near-black to `--app-preview-bg` in the same
+ * frame the editor appeared, which on a fast load (the shell is up for
+ * ~70-200ms, measured) reads as a flash rather than as a page loading.
+ *
+ * The panes meet at an exact half — `minmax(420px, 1fr)` only binds below 840px
+ * and the single-column breakpoint is 900px — but the seam is deliberately
+ * ramped rather than reproduced as the pane divider: the boot card is centred
+ * on the viewport, so a hard edge runs straight through the product title and
+ * is the first thing anyone sees. Ramping keeps the two tones where the two
+ * panes are and leaves only this middle band to resolve into a divider, under
+ * the dissolve, while the eye is on the title giving way to the editor. */
+html:not([data-surface="activity"]) .seo-boot {
+  background: linear-gradient(to right, var(--app-bg-elevated) 0 41%, var(--app-preview-bg) 59%);
+}
+
+@media (max-width: 900px) {
+  /* Mobile turns the preview into a sheet, so the builder pane is the whole
+   * screen — one tone, matching that layout. */
+  html:not([data-surface="activity"]) .seo-boot {
+    background: var(--app-bg-elevated);
+  }
+}
+
+/* The exiting shell, re-parented to <body> over the mounted app by
+ * `dismissBootShell` (main.tsx) — the shell cannot stay inside the Preact root
+ * container, but deleting it outright swapped a full-screen title for a
+ * full-screen editor in a single frame. Fading it out instead turns that cut
+ * into a dissolve; because its background is already the app's own chrome, the
+ * only thing that visibly changes is the title giving way to the editor. It
+ * stays above every app layer on the way out — including the landing gallery
+ * at `--app-z-tooltip`, which a first visit opens on the very same frame and
+ * portals into <body> after this — so the boot screen always dissolves to
+ * reveal what the app put there, whichever surface that is. It takes no
+ * pointer events while it does. */
+.seo-boot[data-seo-boot-exit] {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--app-z-tooltip) + 1);
+  pointer-events: none;
+  animation: seo-boot-exit 220ms ease forwards;
+}
+
+@keyframes seo-boot-exit {
+  to {
+    opacity: 0;
+  }
+}
+
+/* The one animation in the app that `prefers-reduced-motion` must NOT collapse.
+ * It is opacity-only — no movement, nothing that preference exists to prevent —
+ * and it is load-bearing rather than decorative: the blanket rule at the end of
+ * this file leaves the overlay sitting opaque over the already-rendered app
+ * until `animationend` lands, which during the mount task is ~230ms of holding
+ * the boot screen up (measured) and then cutting to the editor. Reduced motion
+ * asks for less movement, not for a longer wait ending in a harder flash. */
+@media (prefers-reduced-motion: reduce) {
+  .seo-boot[data-seo-boot-exit] {
+    animation-duration: 220ms !important;
+  }
 }
 
 .seo-boot__card {
@@ -100,6 +169,15 @@
   background: var(--app-preview-bg);
 }
 
+/* Builder-pane placeholder while the store hydrates a share token or the
+ * landing gallery takes over. Faded in after a beat, for the same reason as
+ * `.gallery-bootstrap__hint` below: on the usual first visit this is on screen
+ * for ~100ms between the boot shell leaving and the gallery covering it, which
+ * is far too short to read and lands as a third flash in a third of a second.
+ * A load slow enough to need the message still gets it. `role="status"` means
+ * assistive tech announces it either way, and `prefers-reduced-motion` (the
+ * block at the end of this file) collapses only the fade — the delay is not
+ * motion, so those users get the same no-flash behaviour, just without a ramp. */
 .app-bootstrap {
   display: grid;
   min-height: 100%;
@@ -107,6 +185,14 @@
   padding: 24px;
   color: var(--app-text-muted);
   font-weight: 600;
+  opacity: 0;
+  animation: app-bootstrap-in 200ms ease 250ms forwards;
+}
+
+@keyframes app-bootstrap-in {
+  to {
+    opacity: 1;
+  }
 }
 
 /* Suspense fallback while the gallery's lazy chunk loads. Deliberately
@@ -114,7 +200,11 @@
  * opaque fallback here would flash dark → light → dark across the handoff
  * (the old opaque var(--app-bg) fill read as a big black screen). Just a
  * quiet hint pill, faded in after a beat so a cached chunk (the usual case —
- * the SW precaches it) never even flashes it. */
+ * the SW precaches it) never even flashes it. That beat is kept under
+ * `prefers-reduced-motion`, which the blanket rule at the end of this file
+ * already handles by collapsing the fade alone: an override that dropped the
+ * delay too would hand exactly those users the flash this is here to prevent,
+ * and waiting is not motion. Same reasoning as `.app-bootstrap` above. */
 .gallery-bootstrap {
   position: fixed;
   inset: 0;

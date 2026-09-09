@@ -49,6 +49,10 @@ if (isActivityMode()) {
   void bootWeb();
 }
 
+/** How long the outgoing boot shell takes to dissolve. Must match the
+ *  `seo-boot-exit` animation in global.css. */
+const BOOT_SHELL_EXIT_MS = 220;
+
 /** Mount `node` under the shared StrictMode + ErrorBoundary root. */
 function mount(node: ReactNode): void {
   const container = document.getElementById("root");
@@ -56,14 +60,50 @@ function mount(node: ReactNode): void {
     throw new Error("Missing #root element. Check index.html.");
   }
   // Keep the HTML-first product heading visible while boot chunks load, then
-  // replace it immediately before Preact commits. It must never survive beside
-  // App's rendered document H1.
-  if (container.querySelector("[data-seo-boot]")) container.replaceChildren();
+  // clear it out of the root immediately before Preact commits. It must never
+  // survive *inside* the root: it can't stand beside App's rendered document
+  // H1, and Preact's `render` treats a container's existing children as excess
+  // DOM it may reuse or remove itself.
+  const shell = container.querySelector<HTMLElement>("[data-seo-boot]");
+  if (shell) container.replaceChildren();
   createRoot(container).render(
     <StrictMode>
       <ErrorBoundary>{node}</ErrorBoundary>
     </StrictMode>,
   );
+  if (shell) dismissBootShell(shell);
+}
+
+/**
+ * Hand the HTML-first shell over to the rendered app without a cut.
+ *
+ * Dropping it outright replaced a full-screen product title with a full-screen
+ * editor in one frame. On a warm load the shell is only up for ~70-200ms
+ * (measured), so that reads as a flash rather than as a page loading. Instead
+ * it is re-parented to <body> as an inert overlay above the app it just handed
+ * over to, and faded out there — the app is already rendered underneath, so
+ * nothing waits on this. Its background is the app's own chrome (see
+ * `.seo-boot` in global.css), which is what keeps the dissolve to the title
+ * alone instead of a cross-fade between two different-looking screens.
+ */
+function dismissBootShell(shell: HTMLElement): void {
+  // It carries an <h1> and briefly outlives App's own, so keep it out of the
+  // accessibility tree and out of the way of pointers for the ~220ms it lives.
+  shell.setAttribute("aria-hidden", "true");
+  shell.dataset.seoBootExit = "";
+  document.body.append(shell);
+  const onEnd = (event: AnimationEvent) => {
+    // Only our own dissolve ends the overlay — `animationend` bubbles, so a
+    // descendant animation finishing first would cut the fade short, which is
+    // the exact thing this exists to avoid.
+    if (event.target !== shell) return;
+    shell.removeEventListener("animationend", onEnd);
+    shell.remove();
+  };
+  shell.addEventListener("animationend", onEnd);
+  // `animationend` alone can't guarantee removal, and this element covers the
+  // app until it goes: a backgrounded tab never runs the animation at all.
+  globalThis.setTimeout(() => shell.remove(), BOOT_SHELL_EXIT_MS + 300);
 }
 
 async function bootActivity(): Promise<void> {

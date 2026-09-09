@@ -208,6 +208,33 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   SW-cached clients keep sending plain `boundary` for the unrepaired crash for weeks.
   Guarded by `src/core/dom/domGuard.test.ts` + the `domDesyncMessage` and
   `*_dom_desync` tests.
+- **The boot screen is handed over, not swapped — and it is what paints FCP** (2026-09-10).
+  `index.html` ships an HTML-first shell (`<main data-seo-boot>`: the product H1 plus a
+  loading line) that paints from the render-blocking stylesheet while the split app chunks
+  load. Measured, it is the **FCP element and the first LCP candidate**, so it stays fully
+  opaque from the first frame — delaying or hiding it to hide the handoff trades a real metric
+  for a cosmetic one. Smooth the *handoff* instead, which is three things. (1) **The shell
+  wears the chrome its own surface is about to commit to**: the web app's two pane tones
+  (`--app-bg-elevated` | `--app-preview-bg`, collapsing to one below the 900px single-column
+  breakpoint), the Activity's flat `--app-bg` splash background. Both surfaces boot the *same*
+  document, so an inline, parse-time script stamps `data-surface="activity"` from `frame_id` —
+  the same signal `isActivityMode()` reads, a second copy nothing links to the first, pinned by
+  `core/activity/bootSurface.test.ts`. Without it half the screen jumped from near-black to
+  `#313338` in the frame the editor appeared. The seam is deliberately **ramped** (41%→59%)
+  rather than reproduced as the pane divider: the card is centred on the viewport, so a hard
+  edge runs straight through the product title. (2) **`mount()` re-parents the shell to
+  `<body>` and dissolves it** there over the already-rendered app (`dismissBootShell`) rather
+  than deleting it — a warm load only shows it ~70-200ms, which as a hard cut reads as a flash
+  rather than as a page loading. It cannot simply stay inside `#root` for the fade: Preact's
+  `render` treats a container's existing children as excess DOM it may reuse or remove itself.
+  (3) **`.app-bootstrap` fades in after a beat**, like `.gallery-bootstrap__hint` — on a first
+  visit it is on screen ~100ms between the shell leaving and the gallery covering it, a third
+  flash inside a third of a second. `seo-boot-exit` is the **one animation exempt from the
+  blanket `prefers-reduced-motion` collapse** (`global.css`): it is opacity-only, and
+  collapsing it leaves the overlay sitting opaque over the mounted app until `animationend`
+  lands — ~230ms during the mount task — and then cuts, which is a longer wait ending in a
+  harder flash, not what that preference asks for. The delays in (3) are *kept* under reduced
+  motion, since a delay is not motion.
 - **Deploy skew self-heals — don't page for it.** GitHub Pages caches `index.html` ~10 min
   and every deploy purges the old hashed chunks, so a tab that isn't SW-controlled can hit a
   404 on a lazy `import()` ("Failed to fetch dynamically imported module" — this paged the

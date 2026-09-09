@@ -6,6 +6,28 @@
          header-less static mirrors and local preview still decode reliably. -->
     <meta charset="UTF-8" />
 
+    <!-- Surface stamp, before first paint. The embedded Discord Activity boots
+         THIS document too — Discord launches it at the domain root with
+         `frame_id` in the query (the same signal `isActivityMode()` reads) —
+         but the two surfaces open on different chrome: the Activity's first
+         screen is a flat `--app-bg` splash, the web app's is the two-pane
+         editor. The boot shell at the bottom of this file paints whichever one
+         its own surface is about to commit to (see `.seo-boot` in global.css),
+         so handing over to Preact changes the CONTENT of the screen and not its
+         background. This has to be inline and parse-time: the shell paints from
+         the render-blocking stylesheet, long before any module executes. -->
+    <script>
+      (function () {
+        try {
+          if (new URLSearchParams(location.search).has("frame_id")) {
+            document.documentElement.dataset.surface = "activity";
+          }
+        } catch (e) {
+          /* Unparseable query — the web chrome is the right default. */
+        }
+      })();
+    </script>
+
     <!-- Short-link early resolve: when this page load is a `/s/<id>` short
          link, start fetching the stored share token NOW — in parallel with the
          JS bundle download — instead of after the app boots. The app consumes
