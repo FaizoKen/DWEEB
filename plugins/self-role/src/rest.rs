@@ -30,7 +30,14 @@ pub enum ConnectError {
     BotNotInGuild,
     /// 429 — Discord is rate-limiting us. Transient.
     RateLimited,
-    /// Couldn't reach Discord, or it returned something unexpected.
+    /// Discord took the request but didn't answer inside the client deadline.
+    /// Transient, and not ours: nothing on this box makes Discord faster.
+    Timeout,
+    /// Discord answered 5xx, or the connection dropped mid-flight. Transient,
+    /// and theirs.
+    Upstream,
+    /// Couldn't connect to Discord at all (DNS, refused, TLS), or its reply
+    /// wasn't the shape we expect — this host's network, or our code.
     Network,
 }
 
@@ -46,15 +53,24 @@ impl ConnectError {
             ConnectError::RateLimited => {
                 "Discord is rate-limiting us right now — try again in a moment.".into()
             }
+            ConnectError::Timeout => {
+                "Discord is slow to answer right now — try again in a moment.".into()
+            }
+            ConnectError::Upstream => {
+                "Discord is having trouble right now — try again in a moment.".into()
+            }
             ConnectError::Network => "Couldn't reach Discord just now — try again in a moment.".into(),
         }
     }
 
-    /// The HTTP status `/api/connect` answers with. Only a fault **on our side**
-    /// may be 5xx: `TraceLayer`'s classifier turns any 5xx into an ERROR log,
-    /// which the ops alerter forwards to Discord. The config iframe auto-connects
-    /// on open, so an admin opening it for a server this plugin's bot was never
-    /// invited to is a routine, user-caused outcome — it must not page anyone.
+    /// The HTTP status `/api/connect` answers with — which is also the alerting
+    /// decision: `crate::trace::on_failure` pages on any 5xx except the 503/504
+    /// that mean "Discord, not us" (see `trace.rs`). A user-caused outcome is
+    /// 4xx and is never logged at all. The config iframe auto-connects on open,
+    /// so an admin opening it for a server this plugin's bot was never invited
+    /// to is routine — it must not page anyone. Neither may Discord merely being
+    /// slow: on 2026-08-20 one 2200 ms timeout on this route paged the maintainer
+    /// over nothing anyone could act on.
     pub fn status(&self) -> StatusCode {
         match self {
             // Our own credential is broken; every connect will fail until the
@@ -62,8 +78,12 @@ impl ConnectError {
             ConnectError::BadToken => StatusCode::INTERNAL_SERVER_ERROR,
             ConnectError::BotNotInGuild => StatusCode::NOT_FOUND,
             ConnectError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
-            // Discord unreachable or 5xx — a real upstream failure, rare enough
-            // to be worth an alert.
+            // Discord took the request and ran long: theirs — logged, not paged.
+            ConnectError::Timeout => StatusCode::GATEWAY_TIMEOUT,
+            // Discord answered 5xx or hung up mid-flight: theirs — logged, not paged.
+            ConnectError::Upstream => StatusCode::SERVICE_UNAVAILABLE,
+            // We couldn't even connect, or couldn't read the reply — this host's
+            // network or our code. Rare, and worth a page.
             ConnectError::Network => StatusCode::BAD_GATEWAY,
         }
     }
@@ -314,17 +334,46 @@ async fn get_json<T: for<'de> Deserialize<'de>>(
         .header("Authorization", auth(token))
         .send()
         .await
-        .map_err(|_| ConnectError::Network)?;
+        .map_err(transport_error)?;
     let status = resp.status();
     if status.is_success() {
-        return resp.json::<T>().await.map_err(|_| ConnectError::Network);
+        return resp.json::<T>().await.map_err(body_error);
     }
     Err(match status.as_u16() {
         401 => ConnectError::BadToken,
         403 | 404 => ConnectError::BotNotInGuild,
         429 => ConnectError::RateLimited,
+        500..=599 => ConnectError::Upstream,
         _ => ConnectError::Network,
     })
+}
+
+/// Classify a transport failure reaching Discord. `is_connect()` is checked
+/// first: a connect *timeout* answers true to both `is_connect()` and
+/// `is_timeout()` and belongs with the dial failures — the same ordering the
+/// dispatcher uses for its forward to a plugin. A dial that fails is this host
+/// unable to reach discord.com at all: ours. Anything after a connection is
+/// Discord taking the request and running long, or dropping it: theirs.
+fn transport_error(e: reqwest::Error) -> ConnectError {
+    if e.is_connect() || e.is_builder() {
+        ConnectError::Network
+    } else if e.is_timeout() {
+        ConnectError::Timeout
+    } else {
+        ConnectError::Upstream
+    }
+}
+
+/// A 2xx whose body couldn't be read or decoded. reqwest reports both a body
+/// that died mid-read and a body serde refuses under `is_decode()`, so the split
+/// is by the error's source: only serde refusing the shape is ours.
+fn body_error(e: reqwest::Error) -> ConnectError {
+    let wrong_shape = std::error::Error::source(&e).is_some_and(|s| s.is::<serde_json::Error>());
+    if wrong_shape {
+        ConnectError::Network
+    } else {
+        ConnectError::Upstream
+    }
 }
 
 /// Add one role to a member. `Ok(())` on success; on failure, [`RoleError`]
@@ -436,17 +485,22 @@ pub async fn post_webhook_log(http: &reqwest::Client, webhook_url: &str, content
 mod tests {
     use super::*;
 
-    /// A routine, user-caused connect outcome must never answer 5xx.
+    /// A routine, user-caused connect outcome must never answer 5xx, and a
+    /// transient Discord failure may answer 5xx but must never page.
     ///
-    /// `TraceLayer`'s default classifier reports every 5xx through `on_failure`
-    /// at ERROR level, and the ops alerter forwards backend ERRORs to Discord.
-    /// The config iframe auto-connects whenever it opens, so an admin opening it
-    /// for a server this plugin's bot was never invited to used to answer 502 and
-    /// page the maintainer for a non-event. Keep these four honest.
+    /// `TraceLayer` reports every 5xx through `on_failure`, and `crate::trace`
+    /// logs it at ERROR — which the ops alerter forwards to Discord — unless the
+    /// status is the 503/504 that means "Discord, not us". The config iframe
+    /// auto-connects whenever it opens, so an admin opening it for a server this
+    /// plugin's bot was never invited to used to answer 502 and page the
+    /// maintainer for a non-event; on 2026-08-20 a 2200 ms Discord timeout on the
+    /// same route paged over nothing anyone could act on. Keep all six honest.
     #[test]
-    fn only_our_own_faults_are_server_errors() {
+    fn only_our_own_faults_page() {
+        use crate::trace::status_pages;
+
         // Not a fault of ours — the caller named a guild we can't see, or Discord
-        // asked us to slow down. Neither may reach the alerter.
+        // asked us to slow down. Neither is even a server error.
         assert_eq!(ConnectError::BotNotInGuild.status(), StatusCode::NOT_FOUND);
         assert_eq!(
             ConnectError::RateLimited.status(),
@@ -459,16 +513,140 @@ mod tests {
             );
         }
 
-        // Genuinely broken: our credential is rejected, or Discord is unreachable.
-        // These *should* page.
+        // Discord being slow or briefly broken: honestly a server error to the
+        // caller, but nothing on this box can fix it — logged, never paged.
+        assert_eq!(ConnectError::Timeout.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            ConnectError::Upstream.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        for e in [ConnectError::Timeout, ConnectError::Upstream] {
+            assert!(
+                e.status().is_server_error(),
+                "{e:?} is still a server error"
+            );
+            assert!(!status_pages(e.status()), "{e:?} must not page");
+        }
+
+        // Genuinely broken: our credential is rejected, or we can't reach
+        // Discord at all. These *should* page.
         assert_eq!(
             ConnectError::BadToken.status(),
             StatusCode::INTERNAL_SERVER_ERROR
         );
         assert_eq!(ConnectError::Network.status(), StatusCode::BAD_GATEWAY);
         for e in [ConnectError::BadToken, ConnectError::Network] {
-            assert!(e.status().is_server_error(), "{e:?} should alert");
+            assert!(status_pages(e.status()), "{e:?} should page");
         }
+    }
+
+    /// The transport split, pinned against real reqwest errors: a server that
+    /// takes the request and never answers is a `Timeout`; a refused connection
+    /// is `Network`; a 200 whose body isn't the JSON we expect is `Network`; a
+    /// 200 cut off mid-body is `Upstream`. The last two both report
+    /// `is_decode()` — the error's source is what tells them apart.
+    #[tokio::test]
+    async fn transport_failures_are_split_by_what_actually_failed() {
+        use std::io::Write as _;
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        // Short deadline only for the deliberate stall. Everything else gets a
+        // patient client: Windows reports a refused loopback connect only after
+        // retransmitting the SYN (~1 s), and a total deadline that fires first
+        // is reported as a plain timeout — which would be the wrong verdict for
+        // the wrong reason.
+        let quick = reqwest::Client::builder()
+            .timeout(Duration::from_millis(400))
+            .build()
+            .unwrap();
+        let patient = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        let stall = TcpListener::bind("127.0.0.1:0").unwrap();
+        let stall_addr = stall.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (sock, _) = stall.accept().unwrap();
+            std::thread::sleep(Duration::from_secs(3));
+            drop(sock);
+        });
+        let e = quick
+            .get(format!("http://{stall_addr}/"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(matches!(transport_error(e), ConnectError::Timeout));
+
+        let refused_addr = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap()
+        };
+        let e = patient
+            .get(format!("http://{refused_addr}/"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(e.is_connect(), "{e}");
+        assert!(matches!(transport_error(e), ConnectError::Network));
+
+        let client = patient;
+        let junk = TcpListener::bind("127.0.0.1:0").unwrap();
+        let junk_addr = junk.local_addr().unwrap();
+        // A fake server must consume the request before answering and closing:
+        // closing with unread bytes in the receive buffer sends an RST, and the
+        // client then discards the response it already had (Windows, notably).
+        fn read_request(sock: &mut std::net::TcpStream) {
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let mut byte = [0u8; 1];
+            while !buf.ends_with(b"\r\n\r\n") {
+                if sock.read(&mut byte).unwrap() == 0 {
+                    break;
+                }
+                buf.push(byte[0]);
+            }
+        }
+        std::thread::spawn(move || {
+            let (mut sock, _) = junk.accept().unwrap();
+            read_request(&mut sock);
+            sock.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 8\r\nConnection: close\r\n\r\nnot json",
+            )
+            .unwrap();
+            sock.shutdown(std::net::Shutdown::Both).ok();
+        });
+        let e = client
+            .get(format!("http://{junk_addr}/"))
+            .send()
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap_err();
+        assert!(matches!(body_error(e), ConnectError::Network));
+
+        let cut = TcpListener::bind("127.0.0.1:0").unwrap();
+        let cut_addr = cut.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut sock, _) = cut.accept().unwrap();
+            read_request(&mut sock);
+            sock.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{\"a\":",
+            )
+            .unwrap();
+            sock.shutdown(std::net::Shutdown::Both).ok();
+        });
+        let e = client
+            .get(format!("http://{cut_addr}/"))
+            .send()
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap_err();
+        assert!(matches!(body_error(e), ConnectError::Upstream));
     }
 
     /// Every variant carries a human-readable message for the config UI, which
@@ -479,6 +657,8 @@ mod tests {
             ConnectError::BadToken,
             ConnectError::BotNotInGuild,
             ConnectError::RateLimited,
+            ConnectError::Timeout,
+            ConnectError::Upstream,
             ConnectError::Network,
         ] {
             assert!(!e.message().trim().is_empty(), "{e:?} has no message");

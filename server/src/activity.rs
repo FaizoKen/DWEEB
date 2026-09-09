@@ -45,7 +45,7 @@ use serde_json::{json, Value};
 use tokio::sync::{broadcast, OwnedSemaphorePermit};
 
 use crate::discord::{DiscordUser, UploadFile, Webhook};
-use crate::error::AppError;
+use crate::error::{AppError, Fault};
 use crate::routes::{
     authorize_activity_member, authorize_activity_webhooks, current_session, dispatcher_api,
     dispatcher_url_with_cap, ensure_channel_in_guild, is_snowflake, relay_dispatcher, spawn_revive,
@@ -2344,14 +2344,40 @@ pub async fn activity_plugin_fetch(
         buf.extend_from_slice(&chunk);
     }
 
-    let mut out = Response::new(Body::from(buf));
+    Ok(relayed_response(status, content_type, buf))
+}
+
+/// The relay's answer, carrying the plugin's status through untouched.
+///
+/// One marker rides along: a **503 or 504** from an allow-listed plugin host is
+/// that plugin's own verdict that *its* upstream — Discord — timed out or
+/// failed. Those are precisely the two statuses the six bot-token plugins
+/// reserve for that (`ConnectError::status`) and log at WARN themselves; the
+/// Activity's plugin config iframes reach `/api/connect` through this relay,
+/// so relayed bare they would be an unmarked 5xx to the proxy's classifier —
+/// ours, ERROR, a page — re-promoting exactly the class the plugins demoted.
+/// Every other 5xx from one of our hosts (500 = its own fault, 502 = it could
+/// not even connect to Discord) stays ours and pages, as does anything from a
+/// host that isn't ours at all.
+fn relayed_response(
+    status: StatusCode,
+    content_type: Option<HeaderValue>,
+    body: Vec<u8>,
+) -> Response {
+    let mut out = Response::new(Body::from(body));
     *out.status_mut() = status;
     if let Some(ct) = content_type {
         out.headers_mut().insert(header::CONTENT_TYPE, ct);
     }
     out.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    Ok(out)
+    if matches!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT
+    ) {
+        out.extensions_mut().insert(Fault::Upstream);
+    }
+    out
 }
 
 /// Insert the fetch-rewriting shim at the top of the page's `<head>` so it runs
@@ -3404,5 +3430,47 @@ mod tests {
         assert!(!redirect_host_blocked(
             &Url::parse("https://fastly.picsum.photos/x").unwrap()
         ));
+    }
+}
+
+#[cfg(test)]
+mod relay_fault_tests {
+    use super::*;
+
+    /// A plugin's "Discord, not us" statuses must not become a page of ours on
+    /// the way through the relay; its own faults, and anything else, must.
+    #[test]
+    fn a_relayed_503_or_504_is_the_plugins_upstream_verdict_not_our_fault() {
+        for status in [StatusCode::SERVICE_UNAVAILABLE, StatusCode::GATEWAY_TIMEOUT] {
+            let resp = relayed_response(status, None, Vec::new());
+            assert_eq!(resp.status(), status);
+            assert_eq!(
+                resp.extensions().get::<Fault>(),
+                Some(&Fault::Upstream),
+                "{status}"
+            );
+        }
+        for status in [
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_GATEWAY,
+            StatusCode::OK,
+            StatusCode::NOT_FOUND,
+        ] {
+            let resp = relayed_response(status, None, Vec::new());
+            assert!(resp.extensions().get::<Fault>().is_none(), "{status}");
+        }
+        let resp = relayed_response(
+            StatusCode::OK,
+            Some(HeaderValue::from_static("application/json")),
+            b"{}".to_vec(),
+        );
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        assert_eq!(
+            resp.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
     }
 }

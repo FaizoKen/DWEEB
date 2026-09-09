@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::Semaphore;
 
-use crate::error::AppError;
+use crate::error::{AppError, Fault};
 
 const API_BASE: &str = "https://discord.com/api/v10";
 
@@ -44,6 +44,15 @@ const MAX_RETRY_WAIT: Duration = Duration::from_secs(4);
 /// would then be bounding a transfer rather than a response: see
 /// [`upload_timeout`].
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a dial to discord.com may take before it counts as failed. Without
+/// it a black-holed SYN or a hanging resolver runs into the ten-second *total*
+/// deadline and is reported as a plain timeout — `is_connect()` false — so it
+/// would be filed as Discord's fault and never paged. A dial that fails is this
+/// host unable to reach discord.com at all, which is ours to know about; with
+/// this deadline reqwest reports the elapsed dial as a connect error. Generous:
+/// a healthy dial (DNS + TCP + TLS) from the VPS takes well under a second.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Deadline for a multipart call, which has to push the user's attachments to
 /// Discord before Discord can answer. Because reqwest's timeout is a *total*
@@ -292,6 +301,7 @@ impl Discord {
             // Discord asks every API client to identify itself.
             .user_agent("DWEEB-Proxy/0.2 (+https://github.com/)")
             .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .expect("failed to build HTTP client");
         Discord {
@@ -343,9 +353,10 @@ impl Discord {
             )
             .await?;
         if resp.status().is_success() {
-            return resp.json::<Vec<Webhook>>().await.map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<Vec<Webhook>>()
+                .await
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
         Err(webhook_error_from(resp).await)
     }
@@ -416,9 +427,10 @@ impl Discord {
             )
             .await?;
         if resp.status().is_success() {
-            return resp.json::<InviteCreated>().await.map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<InviteCreated>()
+                .await
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
         if resp.status().as_u16() == 403 {
             return Err(AppError::Status {
@@ -501,11 +513,13 @@ impl Discord {
         let url = format!("{API_BASE}/webhooks/{webhook_id}/{token}");
         let resp = send_with_retry(self.http.get(&url))
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            .map_err(transport_error)?;
         if resp.status().is_success() {
-            return resp.json::<Webhook>().await.map(Some).map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<Webhook>()
+                .await
+                .map(Some)
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
         if matches!(resp.status().as_u16(), 401 | 403 | 404) {
             return Ok(None);
@@ -525,7 +539,7 @@ impl Discord {
         let url = format!("{API_BASE}/webhooks/{webhook_id}/{token}");
         let resp = send_with_retry(self.http.delete(&url))
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            .map_err(transport_error)?;
         if resp.status().is_success() || resp.status() == StatusCode::NOT_FOUND {
             return Ok(());
         }
@@ -553,11 +567,13 @@ impl Discord {
         }
         let resp = send_with_retry(self.http.get(&url))
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            .map_err(transport_error)?;
         if resp.status().is_success() {
-            return resp.json::<Value>().await.map(Some).map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<Value>()
+                .await
+                .map(Some)
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
         if resp.status() == StatusCode::NOT_FOUND {
             return Ok(None);
@@ -584,7 +600,7 @@ impl Discord {
         );
         let resp = send_with_retry(self.http.patch(&url).json(&body))
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            .map_err(transport_error)?;
         if resp.status().is_success() {
             return Ok(());
         }
@@ -609,11 +625,12 @@ impl Discord {
             format!("{API_BASE}/webhooks/{webhook_id}/{token}?wait=true&with_components=true");
         let resp = send_with_retry(self.http.post(&url).json(payload))
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            .map_err(transport_error)?;
         if resp.status().is_success() {
-            return resp.json::<Value>().await.map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<Value>()
+                .await
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
         Err(webhook_error_from(resp).await)
     }
@@ -639,11 +656,12 @@ impl Discord {
         }
         let resp = send_with_retry(self.http.post(&url).json(payload))
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            .map_err(transport_error)?;
         if resp.status().is_success() {
-            return resp.json::<Value>().await.map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<Value>()
+                .await
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
         Err(webhook_error_from(resp).await)
     }
@@ -678,11 +696,12 @@ impl Discord {
                 .multipart(multipart_form(payload, files)),
         )
         .await
-        .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        .map_err(transport_error)?;
         if resp.status().is_success() {
-            return resp.json::<Value>().await.map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<Value>()
+                .await
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
         Err(webhook_error_from(resp).await)
     }
@@ -721,13 +740,12 @@ impl Discord {
                 .timeout(deadline)
                 .multipart(multipart_form(payload, files))
         };
-        let resp = send_with_retry(req)
-            .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+        let resp = send_with_retry(req).await.map_err(transport_error)?;
         if resp.status().is_success() {
-            return resp.json::<Value>().await.map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<Value>()
+                .await
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
         Err(webhook_error_from(resp).await)
     }
@@ -746,7 +764,9 @@ impl Discord {
             .await
             // A reqwest transport error can include its request URL. Never put
             // that error in an API response: this URL contains the webhook token.
-            .map_err(|_| AppError::BadGateway("could not reach Discord's webhook API".into()))?;
+            .map_err(|e| {
+                AppError::gateway(transport_fault(&e), "could not reach Discord's webhook API")
+            })?;
         if resp.status().is_success() {
             return Ok(());
         }
@@ -972,9 +992,10 @@ impl Discord {
     ) -> Result<T, AppError> {
         let resp = self.send_bot(method, path, Some(body), reason).await?;
         if resp.status().is_success() {
-            return resp.json::<T>().await.map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<T>()
+                .await
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
         Err(webhook_error_from(resp).await)
     }
@@ -1019,9 +1040,7 @@ impl Discord {
         if let Some(body) = body {
             req = req.json(&body);
         }
-        send_with_retry(req)
-            .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))
+        send_with_retry(req).await.map_err(transport_error)
     }
 
     // ── OAuth + user-token calls ───────────────────────────────────────────
@@ -1046,13 +1065,13 @@ impl Discord {
             ])
             .send()
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            .map_err(transport_error)?;
 
         if resp.status().is_success() {
             return resp
                 .json::<TokenResponse>()
                 .await
-                .map_err(|e| AppError::BadGateway(format!("bad token response: {e}")));
+                .map_err(|e| body_error("bad token response", e));
         }
         // A bad/expired code is the caller's problem, not ours.
         Err(AppError::Unauthorized(
@@ -1081,13 +1100,13 @@ impl Discord {
             ])
             .send()
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            .map_err(transport_error)?;
 
         if resp.status().is_success() {
             return resp
                 .json::<TokenResponse>()
                 .await
-                .map_err(|e| AppError::BadGateway(format!("bad token response: {e}")));
+                .map_err(|e| body_error("bad token response", e));
         }
         Err(AppError::Unauthorized(
             "Discord rejected the activity authorization (the code may have expired). Try again."
@@ -1123,13 +1142,14 @@ impl Discord {
         let url = format!("{API_BASE}{path}");
         let resp = send_with_retry(self.http.get(&url).header(AUTHORIZATION, auth))
             .await
-            .map_err(|e| AppError::BadGateway(format!("could not reach Discord: {e}")))?;
+            .map_err(transport_error)?;
 
         let status = resp.status();
         if status.is_success() {
-            return resp.json::<T>().await.map_err(|e| {
-                AppError::BadGateway(format!("unexpected response from Discord: {e}"))
-            });
+            return resp
+                .json::<T>()
+                .await
+                .map_err(|e| body_error("unexpected response from Discord", e));
         }
 
         // On 429 Discord tells us how long to wait; surface it to the caller.
@@ -1308,6 +1328,88 @@ fn parse_retry_after(raw: &str) -> Option<Duration> {
     Some(Duration::from_secs_f64(secs) + Duration::from_millis(50))
 }
 
+/// Whose fault a transport-level failure reaching Discord is — see
+/// `error::Fault`. A dial that fails — DNS, refused, TLS, or [`CONNECT_TIMEOUT`]
+/// elapsing (reqwest reports that as `is_connect()` too, which is the reason the
+/// deadline exists) — is this host unable to reach discord.com at all: our
+/// network, or a Discord edge outage, both rare and both worth a page. Anything
+/// after a connection is Discord taking the request and running long or
+/// dropping it: theirs, and the class behind every flat `latency=10002 ms` 502
+/// that paged in late August 2026.
+fn transport_fault(e: &reqwest::Error) -> Fault {
+    if e.is_connect() || e.is_builder() {
+        Fault::Ours
+    } else {
+        Fault::Upstream
+    }
+}
+
+/// The most a reqwest error contributes to a message bound for a log line and a
+/// JSON body.
+const MAX_CAUSE_CHARS: usize = 300;
+
+/// A reqwest error as one line that says what failed and never where.
+///
+/// reqwest's `Display` gets two things wrong for our purposes. It appends the
+/// request URL — and eight of these calls are `…/webhooks/{id}/{token}`, so the
+/// message would carry a sealed webhook token into the request span's `error`
+/// field (which `dweeb-alerts` forwards to Discord) and into the 502 body:
+/// `without_url` drops it. And it prints only the outermost kind ("error
+/// sending request"), leaving the actual reason in the `source()` chain — the
+/// unattributable sentence the dispatcher fixed on 2026-08-15 — so the chain is
+/// flattened onto the end. Control characters become spaces so the log stays
+/// one line, and the whole thing is clamped.
+fn describe(e: reqwest::Error) -> String {
+    let e = e.without_url();
+    let mut out = e.to_string();
+    let mut source = std::error::Error::source(&e);
+    while let Some(s) = source {
+        out.push_str(": ");
+        out.push_str(&s.to_string());
+        source = s.source();
+    }
+    let mut out: String = out
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if out.chars().count() > MAX_CAUSE_CHARS {
+        out = out.chars().take(MAX_CAUSE_CHARS).collect::<String>() + "…";
+    }
+    out
+}
+
+/// A transport failure reaching Discord, as the `AppError` it pages (or not) as.
+fn transport_error(e: reqwest::Error) -> AppError {
+    let fault = transport_fault(&e);
+    AppError::gateway(fault, format!("could not reach Discord: {}", describe(e)))
+}
+
+/// A 2xx from Discord whose body could not be read or decoded. `Response::json`
+/// reports both a body that died mid-read and a body serde refuses under
+/// `is_decode()`, so the split is by the error's source: only serde refusing
+/// the shape is ours (Discord changed something, or we did). Everything else —
+/// the connection closing early, a read timing out — is transport: theirs.
+fn body_error(what: &str, e: reqwest::Error) -> AppError {
+    let wrong_shape = std::error::Error::source(&e).is_some_and(|s| s.is::<serde_json::Error>());
+    let fault = if wrong_shape {
+        Fault::Ours
+    } else {
+        Fault::Upstream
+    };
+    AppError::gateway(fault, format!("{what}: {}", describe(e)))
+}
+
+/// An unhandled non-2xx status from Discord. Their 5xx is theirs; a 4xx we did
+/// not expect means our request was wrong, and stays ours.
+fn status_error(status: u16, message: String) -> AppError {
+    let fault = if status >= 500 {
+        Fault::Upstream
+    } else {
+        Fault::Ours
+    };
+    AppError::gateway(fault, message)
+}
+
 /// Translate Discord's status into something useful for the proxy's caller.
 ///
 /// For **bot-token** reads: 401/403 mean the proxy is misconfigured (bad token,
@@ -1340,7 +1442,7 @@ fn map_discord_error(
             message: "Rate limited by Discord — try again shortly.".into(),
             retry_after,
         },
-        other => AppError::BadGateway(format!("Discord error {other}: {message}")),
+        other => status_error(other, format!("Discord error {other}: {message}")),
     }
 }
 
@@ -1396,7 +1498,7 @@ async fn webhook_error_from(resp: reqwest::Response) -> AppError {
             message: format!("Discord rejected the request: {message}"),
             retry_after: None,
         },
-        other => AppError::BadGateway(format!("Discord error {other}: {message}")),
+        other => status_error(other, format!("Discord error {other}: {message}")),
     }
 }
 
@@ -1430,7 +1532,7 @@ async fn configured_webhook_error_from(resp: reqwest::Response) -> AppError {
         },
         400 => AppError::BadGateway("the feedback destination rejected the report".into()),
         401 | 403 | 404 => AppError::BadGateway("the feedback destination is unavailable".into()),
-        other => AppError::BadGateway(format!("feedback delivery failed (Discord {other})")),
+        other => status_error(other, format!("feedback delivery failed (Discord {other})")),
     }
 }
 
@@ -1532,5 +1634,176 @@ mod tests {
         // the caller surfaces it instead (the `> MAX_RETRY_WAIT` branch).
         let d = parse_retry_after("30").expect("parses");
         assert!(d > MAX_RETRY_WAIT);
+    }
+}
+
+#[cfg(test)]
+mod fault_tests {
+    use super::*;
+
+    use axum::response::IntoResponse;
+
+    /// Discord's own 5xx is theirs and must not page; a 4xx we didn't handle is
+    /// our request being wrong, and must. Our credential being rejected stays
+    /// ours whatever else changes.
+    #[test]
+    fn discords_5xx_is_theirs_and_our_bad_request_is_ours() {
+        assert_eq!(
+            status_error(502, "Discord error 502".into()).fault(),
+            Fault::Upstream
+        );
+        assert_eq!(status_error(503, "x".into()).fault(), Fault::Upstream);
+        assert_eq!(status_error(400, "x".into()).fault(), Fault::Ours);
+        assert_eq!(
+            map_discord_error(StatusCode::BAD_GATEWAY, "x".into(), None, false).fault(),
+            Fault::Upstream
+        );
+        assert_eq!(
+            map_discord_error(StatusCode::UNAUTHORIZED, "x".into(), None, false).fault(),
+            Fault::Ours
+        );
+        // The caller-facing contract is untouched: still a 502, still the message.
+        let resp = status_error(502, "Discord error 502: Discord returned an error".into())
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+    }
+
+    /// A fake server must consume the request before answering and closing:
+    /// closing with unread bytes in the receive buffer sends an RST, and the
+    /// client then discards the response it already had (Windows, notably).
+    fn read_request(sock: &mut std::net::TcpStream) {
+        use std::io::Read as _;
+        let mut buf = Vec::new();
+        let mut byte = [0u8; 1];
+        while !buf.ends_with(b"\r\n\r\n") {
+            if sock.read(&mut byte).unwrap() == 0 {
+                break;
+            }
+            buf.push(byte[0]);
+        }
+    }
+
+    /// The message must say what failed and never where: eight of these URLs
+    /// carry a webhook token, and the message lands in a log line that
+    /// `dweeb-alerts` forwards to Discord.
+    fn assert_says_what_not_where(msg: &str, what: &str) {
+        assert!(
+            msg.to_lowercase().contains(what),
+            "expected the cause ({what}) in: {msg}"
+        );
+        assert!(
+            !msg.contains("127.0.0.1") && !msg.contains("for url"),
+            "leaks the request URL: {msg}"
+        );
+    }
+
+    /// The transport split, pinned against real reqwest errors rather than our
+    /// reading of its docs: a server that takes the request and never answers is
+    /// theirs; a refused connection is ours; a 200 whose body is not the JSON we
+    /// expect is ours; a 200 whose body is cut off mid-read is theirs. The last
+    /// two both report `is_decode()` — the source is what tells them apart.
+    #[tokio::test]
+    async fn transport_and_body_faults_are_split_by_what_actually_failed() {
+        use std::io::Write as _;
+        use std::net::TcpListener;
+
+        // Short deadline only for the deliberate stall. Everything else gets a
+        // patient client: Windows reports a refused loopback connect only after
+        // retransmitting the SYN (~1 s), and a total deadline that fires first
+        // is reported as a plain timeout — the wrong verdict for the wrong reason.
+        let quick = reqwest::Client::builder()
+            .timeout(Duration::from_millis(400))
+            .build()
+            .unwrap();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .build()
+            .unwrap();
+
+        // Accepts, then never answers → the total deadline fires → theirs.
+        let stall = TcpListener::bind("127.0.0.1:0").unwrap();
+        let stall_addr = stall.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (sock, _) = stall.accept().unwrap();
+            std::thread::sleep(Duration::from_secs(3));
+            drop(sock);
+        });
+        let e = quick
+            .get(format!("http://{stall_addr}/"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(e.is_timeout() && !e.is_connect(), "{e}");
+        assert_eq!(transport_fault(&e), Fault::Upstream);
+        let err = transport_error(e);
+        assert_eq!(err.fault(), Fault::Upstream);
+        assert_says_what_not_where(&err.to_string(), "timed out");
+
+        // Nothing listening → refused at dial → ours (this host can't reach it).
+        let refused_addr = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap()
+        };
+        let e = client
+            .get(format!("http://{refused_addr}/"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(e.is_connect(), "{e}");
+        assert_eq!(transport_fault(&e), Fault::Ours);
+        let err = transport_error(e);
+        assert_eq!(err.fault(), Fault::Ours);
+        assert_says_what_not_where(&err.to_string(), "connect");
+
+        // 200 whose body serde refuses → ours.
+        let junk = TcpListener::bind("127.0.0.1:0").unwrap();
+        let junk_addr = junk.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut sock, _) = junk.accept().unwrap();
+            read_request(&mut sock);
+            sock.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 8\r\nConnection: close\r\n\r\nnot json",
+            )
+            .unwrap();
+            sock.shutdown(std::net::Shutdown::Both).ok();
+        });
+        let e = client
+            .get(format!("http://{junk_addr}/"))
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap_err();
+        assert!(e.is_decode(), "{e}");
+        let err = body_error("unexpected response from Discord", e);
+        assert_eq!(err.fault(), Fault::Ours);
+        assert_says_what_not_where(&err.to_string(), "expected");
+
+        // 200 whose body is cut off before the promised length → transport → theirs.
+        let cut = TcpListener::bind("127.0.0.1:0").unwrap();
+        let cut_addr = cut.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut sock, _) = cut.accept().unwrap();
+            read_request(&mut sock);
+            sock.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{\"a\":",
+            )
+            .unwrap();
+            sock.shutdown(std::net::Shutdown::Both).ok();
+        });
+        let e = client
+            .get(format!("http://{cut_addr}/"))
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap_err();
+        assert!(e.is_decode(), "{e}");
+        let err = body_error("unexpected response from Discord", e);
+        assert_eq!(err.fault(), Fault::Upstream);
+        assert!(!err.to_string().contains("127.0.0.1"), "{err}");
     }
 }

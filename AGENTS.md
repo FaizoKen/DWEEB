@@ -533,10 +533,29 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   ~230ms latency was the tell (a real `Network` failure takes the client's full 2.5s timeout).
   Mapping now lives in `ConnectError::status()`: `BotNotInGuild` → **404**, `RateLimited` (new,
   Discord 429) → **429**, `BadToken` → **500** (our credential is broken — this one *should*
-  page), `Network` → **502** (genuine upstream failure). The config UIs branch on `!res.ok` and
-  render `data.error`, so the copy is unchanged. Guarded by `only_our_own_faults_are_server_errors`
-  in each crate's `rest.rs`. When adding a plugin route, ask "would an ordinary user action reach
-  this branch?" — if yes it is 4xx, never 5xx.
+  page). The config UIs branch on `!res.ok` and render `data.error`, so the copy is unchanged.
+  When adding a plugin route, ask "would an ordinary user action reach this branch?" — if yes it
+  is 4xx, never 5xx.
+  **`Network` was then split by what actually failed** (2026-09-09), because a blanket
+  `Network → 502` paged the maintainer on 2026-08-20 for a self-role connect on which Discord
+  merely took longer than the 2200 ms client deadline — nothing anyone could act on. Now, in all
+  six bot-token plugins (self-role, tickets, giveaway, poll, quick-replies, directory):
+  `Timeout` (Discord took the request, didn't answer in time) → **504**, `Upstream` (Discord
+  answered 5xx, dropped the connection, or cut the body off) → **503**, and `Network` → **502**
+  means we couldn't even *connect* (DNS, refused, TLS) or the reply isn't the shape we expect —
+  this host's network or our code. Each crate's `trace::on_failure` (replacing tower-http's
+  default on the `TraceLayer`) logs **503/504 at WARN** (`upstream failed`, never pages) and
+  every other 5xx at ERROR with the exact line tower-http emitted, so `dweeb-alerts` and every
+  grep still match. Two traps: `is_connect()` is checked **before** `is_timeout()` (a connect
+  timeout answers true to both and is a dial failure, i.e. ours — same ordering as the
+  dispatcher's forward hop); and reqwest reports both a body cut off mid-read and a body serde
+  refuses as `is_decode()`, so `body_error` looks at the error's *source* — only a
+  `serde_json::Error` is ours. Guarded by `only_our_own_faults_page` +
+  `transport_failures_are_split_by_what_actually_failed` (real sockets: a stalling server, a
+  refused port, a non-JSON 200, a truncated 200) in each `rest.rs` and the `trace.rs` test.
+  A plugin never emits 503/504 for its own faults, which is what makes the status-based rule
+  safe there; the proxy has own-fault 503s (`/ready`, the avatar row cap) and so marks the
+  fault on the response instead — see the entry below.
 - **Every router answers an unroutable path *after* draining the request body** (`not_found`,
   wired with `.fallback()` in all 11 Rust `main.rs` files — proxy + dispatcher + 9 plugins).
   Axum's default fallback answers 404 without touching the body, so hyper can't reuse the
@@ -580,6 +599,81 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   and an upstream genuinely going down still pages three other ways — its own panic/tracing
   ERROR, Caddy's `dial tcp … connection refused`/DNS errors (which carry no abort wording and
   pass the filter), and Gatus on `/ready`. Don't widen that regex into a blanket Caddy mute.
+  **Over HTTP/3 a client hang-up is spelled `Application error 0x100 (remote)`** (0x100 =
+  H3_NO_ERROR, "closed, nothing wrong") or, generically, `APPLICATION_ERROR (remote)`, and it
+  paged eleven times between 2026-08-20 and 2026-09-03 — every one an `HTTP/3.0` GET of an
+  ordinary app route (`/api/capabilities`, `/auth/me`, `/api/guilds/…/library/origin/…`) from
+  Firefox/iOS Safari, ~2.0 s long, status 502. Two Caddy (v2.11.4) behaviours conspire: it
+  recognises a downstream cancel only as Go's `context.Canceled` / "operation was canceled"
+  (`statusError`, `proxyLoopIteration`), and quic-go cancels the request context with the QUIC
+  close as the *cause*, which is neither — so Caddy treats it as an upstream failure, **retries
+  the GET** (its default `lb_retry_match` for non-dial errors) every 200 ms against a client
+  that is gone until `lb_try_duration` (2 s) runs out, then logs a synthesised 502 at ERROR.
+  The ~2.0 s durations are that retry window, not backend latency. `CONN_ABORT_RE` now drops
+  both spellings; the `(remote)` anchor is load-bearing — a `(local)` application error is
+  *our* side aborting and still pages. Don't "fix" this by disabling GET retries: they are what
+  let an in-flight GET survive a container restart. **`dweeb-alerts` must also parse past the
+  request span** (2026-09-09): tracing renders the proxy's span *before* the target —
+  `ERROR http{method=… path=… error=…}: tower_http::trace::on_failure: response failed …` —
+  and the old `TRACING_RE` took `http` as the target and threw the braces away. So every proxy
+  502 page since 2026-08-12 still read `latency=… ms` with no route (the fields were in the
+  journal, never in the alert), and worse, `web_crash` warns — whose real target sits after the
+  same span — stopped matching `startswith("web_crash")`, so **FE crash beacons silently
+  stopped paging from 2026-08-12 to 2026-09-09**. The parser is now three-part (`TRACING_HEAD_RE`
+  → leading `SPAN_SEG_RE` segments, fields kept → `TARGET_RE`); an ERROR alert reads
+  `method=GET path=/api/… error=…  response failed classification=… latency=…` (fields first, so
+  they survive the 280-char clamp), and a span whose field value contains a brace is left
+  unstripped rather than dropped. `--parse-test` runs the classifier over real prod lines
+  offline; run it on the host before restarting the service (see the README).
+  Three refinements from the adversarial review (2026-09-10): the HTTP/3 mute is
+  **duration-gated** (`H3_ABANDON_MAX_SECS`, 15 s — a pure hang-up's fingerprint is
+  `duration` ≈ the 2 s retry window, so a client that gave up on a request our upstream had left
+  unanswered for far longer *pages*, naming method + path, never the query); the generic
+  `APPLICATION_ERROR (remote)` spelling is a close that arrived before the handshake completed
+  and carries no code, so it also covers an early close with any code; and the mechanism is a
+  property of the pinned stack (Caddy v2.11.4, quic-go v0.59.1, Go 1.25 — quic-go ≥0.60 turns it
+  into a scheduling race, so a partial recurrence after an image pull is not a new bug; the
+  Caddyfile's `upstream_retry` comment now states the real retry rule). Because every
+  Discord-side failure is now a WARN, **the alerter pages once on a sustained one**: ten
+  `upstream failed` warns from one service within five minutes post a single `UPSTREAM STORM`
+  alert (`ALERTS_UPSTREAM_BURST_COUNT/_SECS`), muted like any signature, so an outage reads as one
+  page plus "still occurring ×N". A `web_crash` behind a *fieldless* span (tracing renders it as
+  a bare `name:`) is also recognised, and `request_span` documents that it must always carry a
+  field.
+- **A 5xx pages only if it is ours — the proxy marks a dependency's transient failure
+  `Fault::Upstream`** (2026-09-09). Nine proxy 502s paged between 2026-08-23 and 2026-09-05
+  (`latency=10002/10001/10551 ms` = Discord not answering a JSON read inside the ten-second
+  client deadline; `14077` = a rate-limit wait then a timeout; `122/323` = a fast Discord 5xx
+  or a dropped connection), and not one was actionable. `error::Fault` is the alerting
+  decision: `AppError::into_response` attaches it to every 5xx as a response *extension*,
+  `trace::FaultClassifier` (which replaces `TraceLayer::new_for_http()`'s classifier) reads it
+  back, and `trace::on_failure` logs `Ours` at ERROR — byte-for-byte tower-http's line, under
+  its target — and `Upstream` at **WARN** (`upstream: upstream failed classification=… latency=…`,
+  inside the request span, so it still names the route and the recorded `error`). **Statuses
+  are untouched**: the caller still gets its 502, message, and `Retry-After`. What is upstream:
+  `discord.rs`'s `transport_error` (a reqwest error that isn't `is_connect()`/`is_builder()`),
+  `body_error` (a 2xx whose body died mid-read — but a body serde refuses is *ours*, found via
+  the error's source since reqwest reports both as `is_decode()`), and `status_error` (Discord's
+  own 5xx; an unexpected 4xx is our malformed request, ours), via `AppError::gateway(fault, msg)`
+  / `AppError::upstream(msg)`. Two traps the adversarial review closed (2026-09-10): the Discord
+  client now sets a **`connect_timeout`** (5 s), so a black-holed dial reports as `is_connect()`
+  — ours, paged — instead of a bare total timeout filed as Discord's; and the message is built by
+  `describe`, which **strips the request URL** (reqwest's `Display` appends it, and eight of these
+  calls carry `/webhooks/{id}/{token}` — the span's `error` field now reaches Discord) and
+  flattens the `source()` chain instead, the dispatcher's own lesson (pinned: no message may
+  contain `for url` or the peer address). The Activity plugin relay marks a plugin's **503/504
+  as `Upstream`** on the way through (`relayed_response` — those are the plugins' "Discord, not
+  us" statuses, and relayed bare they would page as ours). Deliberate capacity 503s (upload
+  permits, AI budget/busy, row caps) are `AppError::Status` and still page as ours — a decision
+  not taken here, recorded as such. What still pages, deliberately: a rejected bot token (401), the
+  bot lacking guild access (403), the dispatcher or one of our own allow-listed plugin hosts
+  unreachable, a Discord connect/DNS failure (this host can't reach discord.com at all), Stripe,
+  every `Internal`, and the AI relay's `Unavailable` (kept a paging 502 per the 2026-08-01
+  decision — flip `terminal_error`'s `Unavailable` arm to `AppError::Upstream` if that ever
+  proves noisy). A bare `StatusCode::INTERNAL_SERVER_ERROR.into_response()` carries no marker and
+  is treated as ours. No deploy ordering — nothing here is a contract with the FE or the
+  alerter. Guarded by `error.rs` + `trace.rs` tests and `discord.rs`'s `fault_tests`, which pin
+  the reqwest classification against real sockets rather than our reading of its docs.
 - **A failed forward must name what failed, and nested deadlines must not be equal**
   (2026-08-15). A page arrived reading, in full, `forward failed prefix="selfrole:"
   upstream=http://self-role:8092 err=error sending request for url (…)`. That sentence is

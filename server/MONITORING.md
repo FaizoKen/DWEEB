@@ -101,8 +101,19 @@ json-file driver (see its `logging:` block in `compose.yml`). json-file logs
 die with the container, and CD recreates the container on every deploy — which
 silently discarded the `activity_handshake` launch telemetry and `web_crash`
 reports between deploys. journald survives recreation, the host's journal is
-already capped (200M + the maintenance timer's vacuum), and `docker logs` /
+capped (`SystemMaxUse` in `/etc/systemd/journald.conf.d/` + the maintenance
+timer's `--vacuum-size`, both **1G** since 2026-09-09), and `docker logs` /
 Dozzle still work.
+
+**Retention is set by the sshd brute-force noise, not by the proxy.** The proxy
+writes ~25 KB/day; sshd logs ~38,000 failed-login entries/day, ~40 MB of journal
+once indexed. Under the original 200M cap that gave the *whole* host — proxy
+included — about four days, so on 2026-09-09 not one of the fourteen days of
+proxy 502s under investigation was still in the journal and the 14-day queries
+below were quietly impossible. 1G holds roughly three weeks; keep the two caps
+equal (the vacuum is the one that actually bites, daily), and check
+`journalctl CONTAINER_NAME=dweeb-proxy-1 -o short-iso | head -1` before trusting
+any `--since` window.
 
 Query history across deploys (any past container instance included):
 

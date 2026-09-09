@@ -567,7 +567,7 @@ fn retry_after_secs(resp: &reqwest::Response) -> i64 {
 /// hammering forever.
 fn hook_error_is_transient(e: &AppError) -> bool {
     match e {
-        AppError::BadGateway(_) | AppError::Internal(_) => true,
+        AppError::BadGateway(_) | AppError::Upstream(_) | AppError::Internal(_) => true,
         AppError::Status { status, .. } => status.is_server_error(),
         AppError::Unauthorized(_) | AppError::Forbidden(_) => false,
     }

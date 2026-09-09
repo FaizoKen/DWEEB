@@ -42,6 +42,7 @@ mod sqlite_pool;
 mod stripe;
 mod telemetry;
 mod topgg;
+mod trace;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -988,7 +989,14 @@ async fn run() {
         .merge(activity_plugin_routes())
         // Rate limiting runs outermost so rejected requests never touch a handler.
         .layer(from_fn_with_state(limiter, rate_limit))
-        .layer(TraceLayer::new_for_http().make_span_with(request_span))
+        // Tracing: the span names the route (`request_span`); the classifier +
+        // `on_failure` decide which 5xx pages (see `trace.rs` — a dependency's
+        // transient failure is logged at WARN, our own faults at ERROR).
+        .layer(
+            TraceLayer::new(trace::FaultClassifier::make())
+                .make_span_with(request_span)
+                .on_failure(trace::on_failure),
+        )
         .with_state(state);
 
     let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
@@ -1071,6 +1079,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// `error` starts empty and is filled in by `AppError::into_response` for 5xx, so
 /// the reason lands on the same line as the classification.
+///
+/// **This span must always carry at least one recorded field.** tracing renders
+/// a fieldless span as a bare `http:` — indistinguishable from a target — and
+/// `dweeb-alerts` peels spans by their `{…}` braces to reach the real target
+/// behind them (`web_crash`, `tower_http::trace::on_failure`). `method` and
+/// `path` are always present, which is what keeps that parser correct.
 fn request_span(req: &axum::http::Request<axum::body::Body>) -> tracing::Span {
     tracing::info_span!(
         "http",

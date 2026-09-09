@@ -22,6 +22,7 @@ mod reaper;
 mod rest;
 mod routes;
 mod store;
+mod trace;
 mod validate;
 
 use std::net::SocketAddr;
@@ -134,7 +135,7 @@ async fn run() {
         // permissive credential-less CORS policy is fine.
         .layer(CorsLayer::permissive())
         .layer(axum::extract::DefaultBodyLimit::max(256 * 1024))
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http().on_failure(trace::on_failure));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr)
