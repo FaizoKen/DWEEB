@@ -45,10 +45,12 @@ ssh contabo "python3 /usr/local/sbin/dweeb-log-alerts.py --parse-test"
 ssh contabo "systemctl daemon-reload && systemctl restart dweeb-alerts.service && sleep 3 && systemctl is-active dweeb-alerts.service && journalctl -u dweeb-alerts -n 3 --no-pager"
 ```
 
-Self-test (posts a ✅ message to the channel):
+Self-test (posts a ✅ message to the channel). Don't `source` the env file for this:
+it holds unquoted values with spaces (the Beszel public key), which a shell tries to
+execute; pass just the webhook.
 
 ```sh
-ssh contabo "set -a; . /opt/dweeb/.env; set +a; python3 /usr/local/sbin/dweeb-log-alerts.py --selftest"
+ssh contabo 'ALERTS_WEBHOOK="$(grep -E "^MONITORING_DISCORD_WEBHOOK=" /opt/dweeb/.env | cut -d= -f2-)" python3 /usr/local/sbin/dweeb-log-alerts.py --selftest'
 ```
 
 Tuning env (optional, in `/opt/dweeb/.env`): `ALERTS_SERVICES`, `ALERTS_FLUSH_SECS`,
