@@ -61,10 +61,11 @@ export interface CardData {
   /** Posted only — the never-expire toggle chip at the preview's top-left.
    *  One control carries both the status and the action: "off" is a
    *  hover-revealed "+ Never expire" (claims a slot on tap, no confirm), while
-   *  "on"/"paused" are always-visible status chips. On a mouse the chip flips to
-   *  a red "- Never expire" on hover; on touch it shows a persistent "✕". Either
-   *  way `run` opens a confirm before freeing (touch has no hover cue, so a bare
-   *  tap must never silently remove the slot). */
+   *  "on"/"paused" are always-visible status chips that keep stating the state
+   *  and carry a persistent "✕" as the release mark — on every device, so the
+   *  label never flips to something that reads like the opposite state. `run`
+   *  opens a confirm before freeing, so a bare tap never silently removes the
+   *  slot. */
   pin?: { state: "on" | "off" | "paused"; busy: boolean; title: string; run: () => void };
   /** Lowercased search haystack: the card's metadata plus text pulled from the
    *  message body (content, labels, …), so the card is findable by what the
@@ -193,10 +194,9 @@ export const GalleryCard = memo(function GalleryCard({
         {card.pin ? (
           // The never-expire toggle, top-left of the preview (delete sits
           // top-right). One chip = state AND action: "off" is a hover-revealed
-          // "+ Never expire"; "on"/"paused" stay visible as status. On a mouse
-          // the label flips to "- Never expire" on hover; on touch (no hover) a
-          // persistent "✕" marks it removable. Either way, tapping a held slot
-          // opens a confirm before it frees.
+          // "+ Never expire"; "on"/"paused" stay visible as status, with a
+          // persistent "✕" marking them removable (mouse and touch alike).
+          // Tapping a held slot opens a confirm before it frees.
           <button
             type="button"
             className={styles.pinToggle}
@@ -219,12 +219,9 @@ export const GalleryCard = memo(function GalleryCard({
                   : "+ Never expire"}
             </span>
             {card.pin.state !== "off" ? (
-              <>
-                <span className={styles.pinLabelHover}>- Never expire</span>
-                <span className={styles.pinRemoveGlyph} aria-hidden>
-                  ✕
-                </span>
-              </>
+              <span className={styles.pinRemoveGlyph} aria-hidden>
+                ✕
+              </span>
             ) : null}
           </button>
         ) : null}
