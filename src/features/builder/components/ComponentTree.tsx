@@ -303,7 +303,7 @@ function computeAllowedPositions(source: DragSource, target: RowData): DropPosit
   return out;
 }
 
-export function ComponentTree() {
+export function ComponentTree({ footer }: { footer?: ReactNode } = {}) {
   const components = useMessageStore((s) => s.message.components);
   const addTopLevelComponent = useMessageStore((s) => s.addTopLevelComponent);
   const addTopLevelSection = useMessageStore((s) => s.addTopLevelSection);
@@ -407,6 +407,7 @@ export function ComponentTree() {
                 ))}
               </ul>
             )}
+            {footer}
           </div>
 
           {/* The one validation indicator: a pill floating at the pane's

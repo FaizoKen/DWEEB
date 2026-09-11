@@ -1,0 +1,58 @@
+{
+  "/media/defaults/dweeb-default-thumbnail.jpg": {
+    "sourceSha256": "f849b2398deb1d659bc1a931dbfa6769f2eae497f1eb79af78455a360dc6f50f",
+    "previewSha256": "6cc5b735b9a5fe8bd7a0a91480667bff25dc89b7d3f71da6911cb1999908039d"
+  },
+  "/media/defaults/dweeb-default-gallery.jpg": {
+    "sourceSha256": "153f8943a0617412a88c9a96ef32eacea12762970c7a9ace1b358760bf4247af",
+    "previewSha256": "6068f4182e585a643128ccc006d747e6e656bce05422f44e924eeaba88baa09c"
+  },
+  "/media/defaults/dweeb-showcase-gallery-1.jpg": {
+    "sourceSha256": "8f931554e7c2f9335a5482b79529b12d74f16271b7b3de41c4fe2e977794358d",
+    "previewSha256": "bcf3dfb3359fbdfa7d9196c0d33934f07a0a4f10afd3941f2fe90560b05908f0"
+  },
+  "/media/defaults/dweeb-showcase-gallery-2.jpg": {
+    "sourceSha256": "f5298b0e5978bfd4dc58325960a0daf8e6ee2c290b80ee71c44bd5e4517e1f18",
+    "previewSha256": "487aa2b366759a747b3b7b2e4199786808891c1c166e006387327bf9931f2f0e"
+  },
+  "/media/defaults/dweeb-showcase-gallery-3.jpg": {
+    "sourceSha256": "864c78cb2e7c273f75901ec56859240561bfcdf79760b45e33ef9d0e33aa142a",
+    "previewSha256": "94471bf335fe61e4df333db4e351932682cfe5ff40a9551a74ac842811f5cf18"
+  },
+  "/media/defaults/dweeb-welcome-banner.jpg": {
+    "sourceSha256": "716d7540b97ce32d8a9f01659b06eee7a622590197c101f2a8ce86cc421eef1e",
+    "previewSha256": "ad648ce5342e568f9157fafec560bfb0cec73b67cbca1ff2e66ad03c110f1c4c"
+  },
+  "/media/defaults/dweeb-announcement-banner.jpg": {
+    "sourceSha256": "14397f1406c487356476684aac30e5678a85abd593bd74d6ab3918b98ea216fd",
+    "previewSha256": "213b6a6b1c29dbfe85c381c403ab736d9090c00fe2b907799273595bc60b932f"
+  },
+  "/media/defaults/dweeb-event-thumb.jpg": {
+    "sourceSha256": "62929454d446ac4a931f5a1b2ae4a242a39a6849e1ab9e614378beaab308689f",
+    "previewSha256": "bf78fe0c054e3a87131271ec21270f4cbd14b1065b764937e6b695e3bb9917eb"
+  },
+  "/media/defaults/dweeb-giveaway-prize.jpg": {
+    "sourceSha256": "e1b8dcd67bb7372634ba56f701c48d075f3c4ea5a33acb1b2c344ba7a3996084",
+    "previewSha256": "048f2b1f259b4544ed06fcf31a8156798226fcd3c33d15725fc2ca438cc2c0d8"
+  },
+  "/media/defaults/dweeb-product-hoodie.jpg": {
+    "sourceSha256": "259314ff7612756d002deb7f557ab16e2f2c328c8b6c61ddba406bd5fc24815c",
+    "previewSha256": "6eb5ae05b785f78a80d1be325b8bc2fbccf39a04bbd5e18fd3805078bb72d070"
+  },
+  "/media/defaults/dweeb-spotlight-1.jpg": {
+    "sourceSha256": "1fd295cd374e38501f5a1b4e82e7589dad281e8a1b81ac41f666c12ab194dbc8",
+    "previewSha256": "bc25ce94d13c0847379e744a0e8fc366662afb158bcb0eb615c27a761c42a182"
+  },
+  "/media/defaults/dweeb-spotlight-2.jpg": {
+    "sourceSha256": "55c7c34029130d943a4e449148ed762329e4ed088b836573c6c5a3a3cb76514a",
+    "previewSha256": "3677756a9fd523b5fe2111a1c36937852b4172dc65959dc08e76fca041f01a8d"
+  },
+  "/media/defaults/dweeb-spotlight-3.jpg": {
+    "sourceSha256": "d4d7025f17f94116db1eca418a09489807c3f687bf3c2af2d07e4da1c7f157c0",
+    "previewSha256": "5b368db1f460ad09501df28f7454437cc409d38457460b0932e26686b6be6d5d"
+  },
+  "/media/defaults/dweeb-spotlight-4.jpg": {
+    "sourceSha256": "6e5ba3441e699d07f7624a46a490d01d032f544f9ed98e3b51d7aa26d430f0a7",
+    "previewSha256": "47bd1e002af7b883b26763f066eaa7d3c5970f67a7c8c2bf8d1b1cce8026e7ba"
+  }
+}

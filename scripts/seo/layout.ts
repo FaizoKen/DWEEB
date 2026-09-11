@@ -19,6 +19,7 @@ import {
 } from "./content";
 import type { ResolvedFeature } from "./features";
 import { withClientParams } from "@/core/seo/clientParams";
+import type { TemplatePayload } from "./template-payload";
 
 const TEMPLATES_INDEX_PATH = "/templates/";
 const TEMPLATES_INDEX_URL = `${SITE.origin}${TEMPLATES_INDEX_PATH}`;
@@ -328,11 +329,10 @@ export function ratingSection(rating: {
 /**
  * `aggregateRating` for the canonical WebApplication entity.
  *
- * Emitted as a node carrying the same `@id` as the full definition on `/`
- * rather than a second, competing description of the app: consumers merge
- * nodes by `@id`, so this attaches the rating to the entity that already
- * exists instead of publishing a rival one. Only ever call this on a page that
- * also renders `ratingSection`.
+ * Keep the same `@id` as the root definition, but include the offer and app
+ * properties here too: a page's rich-result eligibility cannot depend on a
+ * consumer following an entity reference to another page. Only call this on
+ * a page that also renders `ratingSection` and the free-core description.
  */
 export function ratingLd(rating: { average: number; count: number; best: number }): object {
   return {
@@ -341,6 +341,17 @@ export function ratingLd(rating: { average: number; count: number; best: number 
     "@id": SITE.appId,
     name: SITE.name,
     url: `${SITE.origin}/`,
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "Web",
+    offers: {
+      "@type": "Offer",
+      url: `${SITE.origin}/`,
+      price: "0",
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      description:
+        "The complete core Discord message builder is free for noncommercial use and requires no account.",
+    },
     aggregateRating: {
       "@type": "AggregateRating",
       ratingValue: rating.average,
@@ -372,6 +383,7 @@ export function renderTemplatePage(
   messageHtml: string,
   related: ResolvedSeo[],
   relatedFeatures: ResolvedFeature[],
+  payload: TemplatePayload,
 ): string {
   const botBadge =
     seo.deliveryMode === "app-owned"
@@ -409,6 +421,22 @@ export function renderTemplatePage(
   const tips = `<section class="block"><h2>Tips</h2><ul class="ticks">${seo.tips
     .map((t) => `<li>${escapeHtml(t)}</li>`)
     .join("")}</ul></section>`;
+
+  const payloadSection = `<section class="block prose" id="template-json">
+    <h2>Template JSON and compatibility</h2>
+    <p>This example contains <strong>${payload.topLevel} top-level blocks</strong> and <strong>${payload.components} components including nested blocks</strong>. Its text fields use ${payload.characters} characters of the editor's message budget. The JSON below is exported from the same template that opens in DWEEB.</p>
+    <p>Import it through DWEEB's JSON panel, or adapt it for your own application. This is a Components V2 payload with <code>flags: 32768</code>, not a legacy <code>embeds</code> array. When executing a webhook yourself, include <code>with_components=true</code> in the request URL. See the <a href="/guides/discord-components-v2/">Components V2 JSON reference</a> for delivery requirements.</p>
+    <p>${
+      seo.deliveryMode === "app-owned"
+        ? "The custom IDs in this example are setup placeholders. Downloading JSON does not configure a running interaction handler: use the template's guided plugin setup in DWEEB, or connect your own handler to the application that owns the webhook."
+        : seo.deliveryMode === "external-link"
+          ? "The link buttons depend on the linked service's server setup. Importing the JSON copies the layout and links; it does not configure that service."
+          : "The layout can be sent through an ordinary incoming webhook. Link buttons open their URLs; they do not run a bot action."
+    }</p>
+    <p>Replace example text, images, links and any server placeholders before posting. Discord does not expand DWEEB placeholders when you send raw JSON from your own code. Review <a href="/guides/discord-webhook-mentions/">allowed mentions</a> before sending text that names users or roles.</p>
+    <p><a href="${attr(payload.path)}" type="application/json" download="${attr(seo.slug)}.json">Download ${escapeHtml(seo.h1.replace(/ Template$/, ""))} JSON</a></p>
+    <details class="faq-item"><summary>View the complete template JSON</summary><pre class="code-block" tabindex="0" aria-label="Template JSON"><code data-template-json>${escapeHtml(payload.json)}</code></pre></details>
+  </section>`;
 
   const steps = howToSteps(seo);
   const howto = `<section class="block"><h2>How to use this template</h2>
@@ -467,10 +495,11 @@ export function renderTemplatePage(
       ${whatsInside}
       ${tips}
       ${howto}
+      ${payloadSection}
 
       <section class="cta-band">
         <h2>Ready to use this template?</h2>
-        <p>Open it in the visual <a href="/discord-message-builder/">Discord message builder</a>, customize it for your server, and send it in under a minute.</p>
+        <p>Open it in the visual <a href="/discord-message-builder/">Discord message builder</a>, customize it for your server, and review the result before sending.</p>
         <a class="btn btn-primary btn-lg" href="${attr(seo.appUrl)}" data-analytics="template" data-analytics-id="${attr(seo.slug)}" data-analytics-location="body">Use “${escapeHtml(seo.h1.replace(/ Template$/, ""))}” →</a>
       </section>
 
@@ -498,6 +527,11 @@ export function renderTemplatePage(
     isPartOf: { "@type": "WebSite", "@id": SITE.websiteId },
     author: { "@id": SITE.orgId },
     publisher: { "@id": SITE.orgId },
+    encoding: {
+      "@type": "MediaObject",
+      contentUrl: `${SITE.origin}${payload.path}`,
+      encodingFormat: "application/json",
+    },
   };
 
   return htmlDocument({
@@ -636,9 +670,12 @@ export const PAGE_CSS = `
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
+:target{scroll-margin-top:8rem}
+:focus-visible{outline:2px solid #a6baff;outline-offset:4px}
 body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;font-size:16px}
 a{color:#00a8fc;text-decoration:none}
 a:hover{text-decoration:underline}
+.prose a,.lede a,.callout a,.cta-band p a,.block>p a,.steps a,.site-footer a{text-decoration:underline;text-underline-offset:3px}
 h1,h2,h3{line-height:1.25;color:#f2f3f5}
 img{max-width:100%}
 .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
@@ -691,6 +728,9 @@ h1{font-size:clamp(28px,5vw,40px);margin:6px 0 14px;letter-spacing:-.5px}
 
 .block{margin:30px 0;padding-top:6px}
 .block h2{font-size:22px;margin:0 0 14px}
+.page-contents{padding:18px 22px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);margin:26px 0}
+.page-contents ol{margin:8px 0 0;padding-left:22px;display:grid;gap:6px}
+#template-json .code-block{max-height:32rem}
 .ticks{list-style:none;padding:0;margin:0;display:grid;gap:10px}
 .ticks li{position:relative;padding-left:30px;color:var(--text)}
 .ticks li::before{content:"✓";position:absolute;left:0;top:0;color:var(--green);font-weight:800}

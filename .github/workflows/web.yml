@@ -136,12 +136,6 @@ jobs:
             exit 1
           fi
 
-      # GitHub Pages has no rewrite rules, so serve the SPA shell as the 404
-      # page — deep links (e.g. a stale `/s/<id>` short link) still load the
-      # app. Doubles as a smoke test that the build produced the entry point.
-      - name: Add SPA 404 fallback
-        run: test -d dist/assets && cp dist/index.html dist/404.html
-
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3

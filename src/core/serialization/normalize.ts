@@ -122,7 +122,7 @@ export function attachEditorFields(input: unknown): WebhookMessage {
 }
 
 function parseAllowedMentions(raw: unknown): AllowedMentions | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const o = raw as Record<string, unknown>;
   const out: AllowedMentions = {};
   if (Array.isArray(o.parse)) {
@@ -130,7 +130,9 @@ function parseAllowedMentions(raw: unknown): AllowedMentions | undefined {
       (v): v is "roles" | "users" | "everyone" =>
         v === "roles" || v === "users" || v === "everyone",
     );
-    if (parse.length > 0) out.parse = parse;
+    // An empty parse array explicitly disables mention parsing. Dropping it
+    // would restore Discord's user-mention default on import or share reload.
+    out.parse = parse;
   }
   if (Array.isArray(o.roles)) {
     const roles = o.roles.filter((v): v is string => typeof v === "string");
@@ -141,7 +143,9 @@ function parseAllowedMentions(raw: unknown): AllowedMentions | undefined {
     if (users.length > 0) out.users = users;
   }
   if (typeof o.replied_user === "boolean") out.replied_user = o.replied_user;
-  return Object.keys(out).length > 0 ? out : undefined;
+  // A supplied policy, including {}, is distinct from an omitted policy.
+  // Never broaden it to webhook defaults while stripping unknown fields.
+  return out;
 }
 
 function parseMessageReference(raw: unknown): MessageReference | undefined {

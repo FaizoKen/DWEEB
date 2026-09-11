@@ -6,6 +6,7 @@ import { CURRENT_VERSION, migrate } from "./version";
 import { FIXTURES, richMessage, simpleTextMessage } from "@/test/fixtures";
 import { ButtonStyle, ComponentType, type WebhookMessage } from "@/core/schema/types";
 import { validateMessage } from "@/core/schema/validation";
+import { summarizePings } from "@/core/schema/mentions";
 
 /** Narrow a DecodeResult to its ok branch or fail the test with the error. */
 function unwrap(result: DecodeResult): WebhookMessage {
@@ -247,6 +248,52 @@ describe("attachEditorFields — structurally incomplete payloads", () => {
     const original = richMessage();
     const attached = attachEditorFields(stripEditorFields(original));
     expect(stripEditorFields(attached)).toEqual(stripEditorFields(original));
+  });
+});
+
+describe("mention policy round-trips", () => {
+  const wireMessage = {
+    flags: 32768,
+    components: [
+      {
+        type: ComponentType.TextDisplay,
+        content: "@everyone <@&123456789012345678> <@234567890123456789>",
+      },
+    ],
+  };
+
+  it("keeps explicit no-ping JSON disabled after import, export and sharing", () => {
+    const imported = unwrap(
+      decodeJson(JSON.stringify({ ...wireMessage, allowed_mentions: { parse: [] } })),
+    );
+    const shared = unwrap(decodeShare(encodeShare(imported)));
+
+    for (const message of [imported, shared]) {
+      expect(message.allowed_mentions).toEqual({ parse: [] });
+      expect(summarizePings(message).willPing).toBe(false);
+      expect(JSON.parse(encodeJson(message)).allowed_mentions).toEqual({ parse: [] });
+    }
+  });
+
+  it("preserves a supplied empty policy instead of restoring omitted-policy defaults", () => {
+    const imported = attachEditorFields({ ...wireMessage, allowed_mentions: {} });
+    const shared = unwrap(decodeShare(encodeShare(imported)));
+
+    expect(imported.allowed_mentions).toEqual({});
+    expect(shared.allowed_mentions).toEqual({});
+    expect(JSON.parse(encodeJson(shared)).allowed_mentions).toEqual({});
+  });
+
+  it("keeps an omitted policy omitted and uses the webhook user-only default", () => {
+    const imported = attachEditorFields(wireMessage);
+
+    expect(imported.allowed_mentions).toBeUndefined();
+    expect(JSON.parse(encodeJson(imported))).not.toHaveProperty("allowed_mentions");
+    expect(summarizePings(imported)).toMatchObject({
+      everyone: false,
+      roleIds: [],
+      userIds: ["234567890123456789"],
+    });
   });
 });
 

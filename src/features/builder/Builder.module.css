@@ -20,6 +20,36 @@
   min-width: 0;
 }
 
+/* Help belongs after the message, inside the tree's existing scroll area, so
+   it remains available on repeat visits without shrinking the editor. */
+.resources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 20px 4px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--app-border);
+  font-size: var(--app-text-xs);
+}
+
+.resources a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--app-accent-text);
+  text-decoration: none;
+}
+
+.resources a:hover {
+  text-decoration: underline;
+}
+
+.resources a:focus-visible {
+  border-radius: var(--app-radius-sm);
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
 /* Styled to match the Activity bar (ActivityBar.module.css) so the web builder
    and the embedded Activity read as the same product chrome: hairline cluster
    dividers, icons over labels. Deliberately a touch taller than the Activity's

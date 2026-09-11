@@ -35,6 +35,7 @@ import {
 } from "@/features/builder/optionsReveal";
 import { LIMITS } from "@/core/schema/limits";
 import type { AllowedMentions } from "@/core/schema/types";
+import { mergeAllowedMentions, webhookMentionParse } from "@/core/schema/mentions";
 import { Disclosure } from "@/ui/Disclosure";
 import { Field } from "@/ui/Field";
 import { Switch } from "@/ui/Switch";
@@ -111,14 +112,12 @@ export function MessageOptions() {
   }, [revealToken, revealField]);
 
   const am = message.allowed_mentions;
+  const parseKinds = webhookMentionParse(am);
 
   // Whether each lane holds any non-default setting — drives the "configured"
   // dot + accent so the collapsed card tells you at a glance what you've touched.
   const notificationActive =
-    (message.suppress_notifications ?? false) ||
-    (message.tts ?? false) ||
-    (am != null &&
-      ((am.parse?.length ?? 0) > 0 || (am.roles?.length ?? 0) > 0 || (am.users?.length ?? 0) > 0));
+    (message.suppress_notifications ?? false) || (message.tts ?? false) || am != null;
   const forumActive =
     (message.thread_name?.trim().length ?? 0) > 0 || (message.applied_tags?.length ?? 0) > 0;
 
@@ -138,18 +137,14 @@ export function MessageOptions() {
   const notificationSeverity = laneSeverity(["mention_roles", "mention_users"]);
 
   const setParseKind = (kind: MentionKind, on: boolean) => {
-    const parse = new Set<MentionKind>(am?.parse ?? []);
+    const parse = new Set<MentionKind>(parseKinds);
     if (on) parse.add(kind);
     else parse.delete(kind);
-    updateAllowed({ parse: parse.size > 0 ? Array.from(parse) : undefined });
+    updateAllowed({ parse: Array.from(parse) });
   };
 
   const updateAllowed = (patch: Partial<AllowedMentions>) => {
-    const merged: AllowedMentions = { ...(am ?? {}), ...patch };
-    if (merged.parse && merged.parse.length === 0) delete merged.parse;
-    if (merged.roles && merged.roles.length === 0) delete merged.roles;
-    if (merged.users && merged.users.length === 0) delete merged.users;
-    setAllowed(Object.keys(merged).length > 0 ? merged : undefined);
+    setAllowed(mergeAllowedMentions(am, patch));
   };
 
   const onSnowflakeList = (raw: string): string[] | undefined => {
@@ -215,18 +210,18 @@ export function MessageOptions() {
           <Switch
             checked={message.suppress_notifications ?? false}
             onChange={(e) => setSuppress(e.currentTarget.checked)}
-            label="Send silently (no notifications)"
+            label="Send silently (no push notifications)"
           />
 
           {/* Allowed mentions */}
           <Field
             label="Allowed mentions"
-            hint="Pick which classes of mention may resolve. Off = no pings."
+            hint="Webhooks allow user mentions by default. Turn all chips off to suppress mentions, except any IDs you allow below."
           >
             {() => (
               <div className={styles.chipRow}>
                 {(Object.keys(MENTION_LABELS) as MentionKind[]).map((k) => {
-                  const active = am?.parse?.includes(k) ?? false;
+                  const active = parseKinds.includes(k);
                   return (
                     <button
                       key={k}

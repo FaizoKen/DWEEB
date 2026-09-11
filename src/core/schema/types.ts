@@ -412,7 +412,7 @@ export interface WebhookMessage {
   avatar_url?: string;
   /** Whether to read message content with TTS. */
   tts?: boolean;
-  /** Send silently — recipients see the message but get no notification. */
+  /** Send silently — no push notifications; notification badges may still appear. */
   suppress_notifications?: boolean;
   /** Mention-resolution policy. See `AllowedMentions`. */
   allowed_mentions?: AllowedMentions;

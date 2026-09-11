@@ -53,13 +53,12 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-07-26";
+export const TEMPLATES_LASTMOD = "2026-09-11";
 
-const DEFAULT_TEMPLATE_LASTMOD = "2026-07-15";
-const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {
-  poll: "2026-07-18",
-  "staff-directory": "2026-07-26",
-};
+// Every detail page gained its source-derived JSON and compatibility reference.
+// Future individual edits should use an override instead of refreshing this baseline.
+const DEFAULT_TEMPLATE_LASTMOD = "2026-09-11";
+const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {};
 
 /** Meaningful content date for one generated template page. */
 export function templateLastmod(id: string): string {

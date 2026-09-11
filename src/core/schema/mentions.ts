@@ -7,10 +7,9 @@
  *      placeholders, and the like never ping.
  *   2. The message's `allowed_mentions` policy, which whitelists which classes
  *      (or specific snowflakes) are allowed to resolve. When `allowed_mentions`
- *      is omitted entirely, Discord falls back to its permissive default: every
- *      mention in the content resolves. That default is exactly the footgun the
- *      pre-send confirmation exists to surface — an `@everyone` typed into a
- *      TextDisplay pings the whole channel unless mentions are restricted.
+ *      is omitted entirely, webhooks and interactions parse only user mentions.
+ *      This differs from regular bot messages, which parse every mention type.
+ *      An explicit policy only permits the classes or ids it lists.
  *
  * This module only inspects the message; it sends nothing. The Send panel's
  * confirmation dialog renders the result so the user sees the blast radius
@@ -18,7 +17,28 @@
  */
 
 import { walk } from "./traversal";
-import type { WebhookMessage } from "./types";
+import type { AllowedMentions, WebhookMessage } from "./types";
+
+/** Discord's webhook default applies only when the whole policy is omitted. */
+export function webhookMentionParse(
+  policy: AllowedMentions | undefined,
+): NonNullable<AllowedMentions["parse"]> {
+  return policy ? (policy.parse ?? []) : ["users"];
+}
+
+/** Preserve the effective policy when editing chips or explicit id lists. */
+export function mergeAllowedMentions(
+  policy: AllowedMentions | undefined,
+  patch: Partial<AllowedMentions>,
+): AllowedMentions {
+  const merged = { parse: [...webhookMentionParse(policy)], ...policy, ...patch };
+  // Empty lists are not a reason to omit the policy: parse: [] is an explicit
+  // request for no automatic pings, including after the last chip is disabled.
+  merged.parse ??= [];
+  if (!merged.roles?.length) delete merged.roles;
+  if (!merged.users?.length) delete merged.users;
+  return merged;
+}
 
 /** Mention tokens found verbatim in the message's text content. */
 export interface MentionScan {
@@ -122,7 +142,7 @@ export interface PingSummary {
  * Resolve the scanned mentions against the message's `allowed_mentions` policy.
  *
  * Resolution rules (mirroring Discord):
- *   - No `allowed_mentions` field → every mention resolves (permissive default).
+ *   - No `allowed_mentions` field → only user mentions resolve (webhook default).
  *   - `parse: ["everyone"]` lets `@everyone`/`@here` resolve.
  *   - `parse: ["roles"]` lets *all* role mentions resolve; otherwise only the
  *     snowflakes listed in `roles: [...]` do (the two are mutually exclusive on
@@ -133,10 +153,10 @@ export function summarizePings(message: WebhookMessage): PingSummary {
   const scan = scanMentions(message);
   const am = message.allowed_mentions;
 
-  // With no policy, Discord parses everything; with one, only what it whitelists.
-  const everyoneAllowed = am ? (am.parse?.includes("everyone") ?? false) : true;
-  const rolesParseAll = am ? (am.parse?.includes("roles") ?? false) : true;
-  const usersParseAll = am ? (am.parse?.includes("users") ?? false) : true;
+  const parse = webhookMentionParse(am);
+  const everyoneAllowed = parse.includes("everyone");
+  const rolesParseAll = parse.includes("roles");
+  const usersParseAll = parse.includes("users");
   const allowedRoleIds = new Set(am?.roles ?? []);
   const allowedUserIds = new Set(am?.users ?? []);
 

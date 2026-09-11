@@ -114,7 +114,30 @@ export function Builder({ onShare, onJson, onSend, onUpdate, onRestore, onAbout 
         />
       </div>
 
-      <ComponentTree />
+      <ComponentTree
+        footer={
+          // Keep help reachable after the first-visit gallery is dismissed.
+          // These links scroll with the draft and open separately so consulting
+          // a guide never navigates away from an in-progress message.
+          <nav className={styles.resources} aria-label="Explore DWEEB (opens in a new tab)">
+            <a href="/discord-message-builder/" target="_blank" rel="noopener">
+              Message builder
+            </a>
+            <a href="/templates/" target="_blank" rel="noopener">
+              Templates
+            </a>
+            <a href="/features/" target="_blank" rel="noopener">
+              Features
+            </a>
+            <a href="/guides/" target="_blank" rel="noopener">
+              Guides
+            </a>
+            <a href="/about/" target="_blank" rel="noopener">
+              About &amp; methodology
+            </a>
+          </nav>
+        }
+      />
     </div>
   );
 }

@@ -50,9 +50,31 @@ export function renderProse(text: string): string {
   );
 }
 
+function sectionIds(sections: readonly GuideSection[]): string[] {
+  const used = new Set<string>();
+  return sections.map((section, index) => {
+    const base = `section-${
+      section.heading
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || index + 1
+    }`;
+    let id = base;
+    for (let suffix = 2; used.has(id); suffix++) id = `${base}-${suffix}`;
+    used.add(id);
+    return id;
+  });
+}
+
+function tableOfContents(sections: readonly GuideSection[]): string {
+  const ids = sectionIds(sections);
+  return `<nav class="page-contents" aria-label="On this page"><strong>On this page</strong><ol>${sections.map((section, index) => `<li><a href="#${ids[index]}">${escapeHtml(section.heading)}</a></li>`).join("")}</ol></nav>`;
+}
+
 function renderSections(sections: readonly GuideSection[]): string {
+  const ids = sectionIds(sections);
   return sections
-    .map((section) => {
+    .map((section, index) => {
       const paragraphs = (section.paragraphs ?? [])
         .map((paragraph) => `<p>${renderProse(paragraph)}</p>`)
         .join("");
@@ -60,16 +82,16 @@ function renderSections(sections: readonly GuideSection[]): string {
         ? `<ul class="ticks">${section.bullets.map((item) => `<li>${renderProse(item)}</li>`).join("")}</ul>`
         : "";
       const code = section.code
-        ? `<pre class="code-block"><code>${escapeHtml(section.code)}</code></pre>`
+        ? `<pre class="code-block" tabindex="0" role="region" aria-label="${attr(section.heading)} code example"><code>${escapeHtml(section.code)}</code></pre>`
         : "";
       const table = section.table
-        ? `<div class="table-scroll"><table><caption class="sr-only">${escapeHtml(section.heading)}</caption><thead><tr>${section.table.headers
+        ? `<div class="table-scroll" tabindex="0" role="region" aria-label="${attr(section.heading)}"><table><caption class="sr-only">${escapeHtml(section.heading)}</caption><thead><tr>${section.table.headers
             .map((cell) => `<th scope="col">${escapeHtml(cell)}</th>`)
             .join("")}</tr></thead><tbody>${section.table.rows
             .map((row) => `<tr>${row.map((cell) => `<td>${renderProse(cell)}</td>`).join("")}</tr>`)
             .join("")}</tbody></table></div>`
         : "";
-      return `<section class="block prose"><h2>${escapeHtml(section.heading)}</h2>${paragraphs}${bullets}${table}${code}</section>`;
+      return `<section class="block prose" id="${ids[index]}"><h2>${escapeHtml(section.heading)}</h2>${paragraphs}${bullets}${table}${code}</section>`;
     })
     .join("");
 }
@@ -136,6 +158,7 @@ export function renderGuidePage(guide: GuidePage, all: GuidePage[]): string {
           <a class="btn btn-ghost" href="${GUIDES_INDEX_PATH}">All guides</a>
         </div>
       </header>
+      ${tableOfContents(guide.sections)}
       ${renderSections(guide.sections)}
       ${productContext(guide)}
       <section class="cta-band">

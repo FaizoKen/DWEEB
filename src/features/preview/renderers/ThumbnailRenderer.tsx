@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ThumbnailComponent } from "@/core/schema/types";
 import { useMessageStore } from "@/core/state/messageStore";
+import { defaultMediaPreviewUrl } from "@/core/media/defaultMedia";
 import { cn } from "@/lib/cn";
 import { BrokenImageIcon } from "./BrokenImageIcon";
 import { useResolvedMediaUrl } from "./useResolvedMediaUrl";
@@ -13,7 +14,7 @@ export function ThumbnailRenderer({ node }: { node: ThumbnailComponent }) {
   const selectedId = useMessageStore((s) => s.selectedId);
   const obscured = node.spoiler === true && selectedId !== node._id;
   const url = node.media.url ?? "";
-  const src = useResolvedMediaUrl(url);
+  const src = useResolvedMediaUrl(defaultMediaPreviewUrl(url));
   const priority = usePreviewMediaPriority(url);
   const [failed, setFailed] = useState(false);
   // A cached broken image can be `complete` (with zero natural size) before

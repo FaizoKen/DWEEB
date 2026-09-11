@@ -3,7 +3,7 @@
 import { LIMITS } from "@/core/schema/limits";
 import { SITE, type FaqEntry } from "./content";
 
-export const GUIDES_LASTMOD = "2026-08-20";
+export const GUIDES_LASTMOD = "2026-09-11";
 
 export interface GuideSection {
   heading: string;
@@ -55,7 +55,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Developer guide · Components V2",
     lede: "Components V2 turns a Discord message into a real layout tree: text, sections, thumbnails, media, separators, containers and interactive controls. This guide explains the model that Discord actually accepts and gives you an editable reference instead of a disconnected code fragment.",
     published: "2026-07-15",
-    modified: "2026-08-20",
+    modified: "2026-09-11",
     keywords: [
       "discord components v2",
       "discord components v2 example",
@@ -72,40 +72,60 @@ export const GUIDES: GuidePage[] = [
         ],
       },
       {
-        heading: "The component types that matter",
+        heading: "Message component type IDs and placement",
         table: {
           headers: ["Component", "Use it for", "Important rule"],
           rows: [
             [
-              "Text Display",
+              "Text Display (10)",
               "Markdown text, headings, lists and mentions",
               "Counts toward the message-wide character budget",
             ],
             [
-              "Section",
+              "Section (9)",
               "One to three text blocks beside a thumbnail or button",
               "Its accessory is part of the Section",
             ],
-            ["Thumbnail", "Compact media beside Section text", "Used as a Section accessory"],
+            ["Thumbnail (11)", "Compact media beside Section text", "Used as a Section accessory"],
             [
-              "Media Gallery",
+              "Media Gallery (12)",
               "One or more large images or media items",
               `Up to ${LIMITS.GALLERY_ITEMS} items`,
             ],
             [
-              "Separator",
+              "File (13)",
+              "A downloadable attachment card",
+              "Place at the top level or inside a Container",
+            ],
+            [
+              "Separator (14)",
               "A divider or deliberate vertical space",
               "Can use small or large spacing",
             ],
             [
-              "Container",
+              "Container (17)",
               "An embed-like group with an optional accent colour",
               "Containers cannot be nested",
             ],
             [
-              "Action Row",
+              "Action Row (1)",
               "Buttons or one select menu",
               `Up to ${LIMITS.ACTION_ROW_BUTTONS} buttons`,
+            ],
+            [
+              "Button (2)",
+              "A link or an application-handled action",
+              "Place in an Action Row or as a Section accessory",
+            ],
+            [
+              "String Select (3)",
+              "A dropdown with choices you define",
+              "One per Action Row; requires an interaction handler",
+            ],
+            [
+              "User / Role / Mentionable / Channel Select (5 / 6 / 7 / 8)",
+              "A dropdown of Discord entities",
+              "One per Action Row; Discord supplies its choices",
             ],
           ],
         },
@@ -181,7 +201,7 @@ export const GUIDES: GuidePage[] = [
             ],
             [
               "A library without Components V2 helpers",
-              "Send the raw object — every library accepts a plain payload somewhere",
+              "Use a documented raw-payload API, or call Discord's HTTP API directly",
               "Numeric type values are the contract; helper classes are convenience only",
             ],
             [
@@ -208,6 +228,7 @@ export const GUIDES: GuidePage[] = [
         ],
         paragraphs: [
           "The editable Components V2 showcase contains every major block and is a faster reference than assembling the numeric types by hand. Open it, select a component, and compare the visual tree with exported JSON.",
+          "If the API rejects a payload or drops a component, use the [webhook error guide](/guides/discord-webhook-errors/) to separate layout validation from delivery and app-ownership problems. For notification behavior, see [webhook mentions and allowed_mentions](/guides/discord-webhook-mentions/).",
         ],
       },
     ],
@@ -242,7 +263,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Practical guide · Discord webhooks",
     lede: "A Discord incoming webhook is the shortest path from a tool or script into one channel. It can set a display name and avatar and post rich Components V2 layouts, but its URL is also a credential. Set it up once, handle it like a password, and test with a message you can recognize.",
     published: "2026-07-15",
-    modified: "2026-07-17",
+    modified: "2026-09-11",
     keywords: [
       "how to create a discord webhook",
       "discord webhook url",
@@ -293,6 +314,10 @@ export const GUIDES: GuidePage[] = [
       },
       {
         heading: "Common failures",
+        paragraphs: [
+          "Keep the HTTP status, Discord's numeric error code and the field named in the response together. The [webhook troubleshooting guide](/guides/discord-webhook-errors/) maps those details to a fix; a 404 while restoring a message needs a different check from a 404 while sending a new one.",
+          "A forum or media channel also needs a post destination. Follow the [forum and thread workflow](/guides/discord-webhook-forum-threads/) to create a titled post or send into an existing thread.",
+        ],
         table: {
           headers: ["Symptom", "Likely cause", "What to check"],
           rows: [
@@ -565,7 +590,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Workflow guide · Restore and update",
     lede: "A typo should not force you to delete and repost an announcement. If you still control the webhook that created a message, DWEEB can restore the post into the visual editor and update the original message in place.",
     published: "2026-07-15",
-    modified: "2026-07-15",
+    modified: "2026-09-11",
     keywords: [
       "edit discord webhook message",
       "update discord webhook message",
@@ -598,7 +623,7 @@ export const GUIDES: GuidePage[] = [
       {
         heading: "Threads and forum posts",
         paragraphs: [
-          "A message link contains server, channel and message identifiers. Messages in threads and forum or media posts can also require the thread channel identifier when the webhook request is made. Paste the complete Discord link when possible so DWEEB can classify the target rather than forcing you to split the IDs by hand.",
+          "A message link contains server, channel and message identifiers. Messages in threads and forum or media posts can also require the thread channel identifier when the webhook request is made. Paste the complete Discord link when possible so DWEEB can classify the target rather than forcing you to split the IDs by hand. The [forum and thread guide](/guides/discord-webhook-forum-threads/) explains which ID belongs where and how creating a new post differs from updating one.",
         ],
       },
       {
@@ -663,7 +688,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Reference · Markdown & formatting",
     lede: "Discord's markdown looks familiar but behaves like no other dialect: italics care about spaces, ordered lists silently merge into bullet lists, and links trim their own punctuation. This reference covers the full syntax plus the edge cases DWEEB's preview parser is tested against real Discord clients for.",
     published: "2026-07-17",
-    modified: "2026-07-17",
+    modified: "2026-09-11",
     keywords: [
       "discord text formatting",
       "discord markdown",
@@ -686,7 +711,7 @@ export const GUIDES: GuidePage[] = [
             [
               "```lang```",
               "Code block",
-              "Multi-line; the language tag is kept but webhook messages get no highlighting",
+              "Multi-line; DWEEB preserves the language tag but its preview does not add syntax colours",
             ],
             ["> text", "Quote", ">>> quotes every following line"],
             ["# / ## / ### text", "Heading 1–3", "Must start the line"],
@@ -695,7 +720,7 @@ export const GUIDES: GuidePage[] = [
             [
               "[label](https://…)",
               "Masked link",
-              "Bot, webhook and embed text only — regular user chat posts it literally",
+              "Supported in regular chat, webhook text and embed descriptions",
             ],
           ],
         },
@@ -703,7 +728,7 @@ export const GUIDES: GuidePage[] = [
       {
         heading: "Quirks Discord actually enforces",
         paragraphs: [
-          "These are the rules that make a message render differently in Discord than in a generic markdown previewer. DWEEB's preview parser is verified against the live Discord client for each of them, so what you see in the editor is what the channel gets.",
+          "These are the rules that make a message render differently in Discord than in a generic markdown previewer. DWEEB's preview parser has regression tests based on live Discord checks. The preview still has documented differences such as native emoji artwork, font fallbacks and no code syntax highlighting; review the final message in its destination channel.",
         ],
         bullets: [
           "*italics* needs a non-space character right after the opening asterisk: `* text*` stays literal, which keeps math like 3 * 4 * 5 intact.",
@@ -741,12 +766,13 @@ export const GUIDES: GuidePage[] = [
         },
         paragraphs: [
           "A custom emoji whose ID does not resolve renders as plain :name: text, so test custom emoji in the destination server before a big announcement.",
+          "A mention's appearance and its notification are separate. Use [allowed_mentions to control webhook pings](/guides/discord-webhook-mentions/), especially when importing text that contains user or role tokens.",
         ],
       },
       {
         heading: "Where each rule works",
         paragraphs: [
-          "Regular user chat supports the core styles but not masked links. Webhook and bot messages support everything above, including masked links, in plain content and in Components V2 Text Displays. Legacy embed descriptions and fields support most inline styles and masked links, but headings and subtext belong to the modern surfaces.",
+          "Regular user chat supports masked links as well as the core styles. Webhook and bot messages can use the same link syntax in plain content and Components V2 Text Displays. Legacy embed descriptions and fields support many inline styles and masked links, but a legacy embed's title, footer and other named fields have their own rendering rules; do not assume every field is a full chat message.",
           "Components V2 Text Displays are the most capable text surface: headings, subtext, lists, quotes, code, mentions and timestamps all render, and DWEEB counts every character against the message-wide budget as you type.",
         ],
       },
@@ -886,7 +912,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Reference · Limits & rate limits",
     lede: "Webhook failures usually trace back to one of three separate ceilings: the size of a single message, the speed you call one webhook, and how fast one channel accepts webhook deliveries. Knowing which ceiling you hit turns a mystery 400 or 429 into a five-minute fix.",
     published: "2026-07-17",
-    modified: "2026-07-17",
+    modified: "2026-09-11",
     keywords: [
       "discord webhook rate limit",
       "discord character limit",
@@ -942,8 +968,8 @@ export const GUIDES: GuidePage[] = [
       {
         heading: "Rate limits and HTTP 429",
         paragraphs: [
-          "Discord rate-limits per route: every response carries X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset-After headers describing the bucket you just spent from, and exceeding it returns HTTP 429 with a retry_after value. Those headers are the only contractual numbers — treat them, not any fixed figure, as the source of truth.",
-          "In practice, executing one webhook is bucketed at roughly five requests per two seconds, and Discord has additionally described a delivery cap of around 30 webhook messages per minute into a single channel. Both can change without notice, which is exactly why well-behaved senders react to the headers instead of hardcoding a rate.",
+          "Discord applies route and global rate limits. Responses can include X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset-After and X-RateLimit-Bucket headers. An HTTP 429 response supplies Retry-After or retry_after in seconds. Read the values returned for your request instead of hardcoding a requests-per-second figure.",
+          "A rate limit is a delivery problem, not a reason to shorten valid message text. In DWEEB, stop retrying while the send countdown is active. If another tool uses the same webhook, coordinate its sending too. Use the [webhook error guide](/guides/discord-webhook-errors/) when the failure has a different HTTP status or a field-specific validation error.",
         ],
         code: `HTTP/1.1 429 Too Many Requests
 Retry-After: 1
@@ -1090,6 +1116,395 @@ X-RateLimit-Remaining: 0
       "discord-webhook-security",
     ],
     ctaLabel: "Set a webhook identity visually",
+    ctaPath: "/",
+  }),
+  guide({
+    slug: "discord-webhook-errors",
+    title: "Discord Webhook Errors: Fix 400, 401, 403, 404 & 429 | DWEEB",
+    h1: "Fix Discord Webhook Errors",
+    description:
+      "Diagnose Discord webhook errors by HTTP status, API code and field path. Fix invalid forms, unknown webhooks, missing components and failed updates.",
+    eyebrow: "Troubleshooting · Discord webhooks",
+    lede: "Start with the operation that failed, the HTTP status and Discord's numeric error code. A missing webhook, a missing message and an invalid Components V2 layout need different repairs. This guide turns the response into a next step without repeated test posts or unnecessary credential replacement.",
+    published: "2026-09-11",
+    modified: "2026-09-11",
+    keywords: [
+      "discord webhook not working",
+      "discord webhook errors",
+      "discord webhook invalid form body",
+      "discord unknown webhook 10015",
+      "discord webhook 400 401 403 404 429",
+    ],
+    sections: [
+      {
+        heading: "Find the status, code and failing field",
+        paragraphs: [
+          "First record whether you were sending a new post, restoring one, updating it or configuring a webhook. In DWEEB, the send error combines the response status with Discord's code and expands nested validation errors into readable paths. Keep those details together when diagnosing the failure.",
+          "For example, components[0].components[1].url means the URL on the second child inside the first top-level component. Array positions start at zero. Select that component in the builder and correct that field before changing the rest of the design. The editor's own issue list may already point to the same problem.",
+        ],
+      },
+      {
+        heading: "Discord webhook error codes and next steps",
+        table: {
+          headers: ["Response", "What it identifies", "Next check"],
+          rows: [
+            [
+              "400 / 50035",
+              "Payload or Content-Type validation",
+              "Read the nested field error; fix that field in the editor",
+            ],
+            [
+              "401 / 50027",
+              "Webhook token problem",
+              "Copy the complete current URL from your webhook settings",
+            ],
+            [
+              "403 / 50013",
+              "Insufficient permissions",
+              "Check the failed action and the app's access in that destination",
+            ],
+            ["404 / 10015", "Webhook not found", "Verify which saved webhook the send is using"],
+            [
+              "404 / 10008",
+              "Message not found",
+              "Verify the original webhook, message link and thread target",
+            ],
+            [
+              "10003",
+              "Channel not found",
+              "Check that the thread belongs to the webhook's parent channel",
+            ],
+            ["429", "Rate limit", "Wait for the indicated retry delay before trying again"],
+            [
+              "220001 / 220002",
+              "Missing or conflicting forum destination",
+              "Choose a new post title OR an existing Thread ID",
+            ],
+          ],
+        },
+        paragraphs: [
+          "HTTP status and JSON code are separate fields, not interchangeable numbers. The table lists useful combinations and individual API codes; the actual response is the evidence. A status alone cannot tell you which field or resource failed.",
+        ],
+      },
+      {
+        heading: "Fix 400 Invalid Form Body in a Components V2 message",
+        bullets: [
+          "Import the payload into the [Discord message builder](/discord-message-builder/) and resolve error-severity issues before another send.",
+          "For a V2 design, place visible text inside Text Displays and remove legacy top-level content and embeds. Use the [embed converter](/guides/discord-embed-to-components-v2/) when the source is a legacy embed.",
+          "Check that every Section has a button or thumbnail accessory, and inspect any empty media URLs, invalid link URLs or conflicting allowed-mentions settings named in the error.",
+          "If your own code sends the export, use its JSON body as JSON. When uploading files with FormData, let the browser set the multipart Content-Type and boundary.",
+        ],
+        paragraphs: [
+          "DWEEB's local validation catches supported layout and field constraints; Discord remains the final authority for current permissions, destination state and server-side rules. A clean local issue list narrows the investigation, but it cannot prove a remote post will succeed.",
+        ],
+      },
+      {
+        heading: "Why components disappear or buttons fail",
+        paragraphs: [
+          "When sending an exported design through your own webhook client, check the request URL as well as the payload. A person-created webhook needs with_components=true for Discord to respect its components. The JSON also needs the V2 flag. DWEEB's own send path supplies both; a script that copies only the components array can miss them.",
+          "A link button and a custom-ID button have different delivery requirements. If a static message works but an interactive control fails, review its setup badge and app-owned destination. A visually correct button does not create the application handler that responds to its click. The [Components V2 guide](/guides/discord-components-v2/) explains the ownership boundary.",
+        ],
+      },
+      {
+        heading: "Diagnose restore and update separately from new sends",
+        paragraphs: [
+          "If sending a new message works but Restore fails, start with the message target. Copy its complete Discord link, select the webhook that originally posted it and inspect the optional Thread ID. Creating a new webhook does not transfer ownership of old posts. Follow the [restore and update workflow](/guides/edit-discord-webhook-message/) before deciding to repost.",
+          "For forum and media channels, distinguish a new post title from an existing post's channel ID. In DWEEB, the Forum post fields create a post; the Send panel's Thread ID addresses an existing one. The [forum and thread guide](/guides/discord-webhook-forum-threads/) walks through both paths.",
+        ],
+      },
+      {
+        heading: "Handle rate limits, network failures and uncertain sends",
+        paragraphs: [
+          "On 429, wait for Discord's reported retry delay. DWEEB exposes that delay as a countdown. Stop other repeated sends using the same destination while you investigate, and consult the [webhook limits guide](/guides/discord-webhook-limits/) for automation design.",
+          "A browser network error means DWEEB did not receive a readable response; it does not prove Discord rejected the message. Check the destination channel before sending again, then inspect connectivity and extensions that block discord.com. A lost response after a successful post can otherwise turn one intended announcement into duplicates.",
+          "When asking for help, share the operation, status, code and a redacted field error. Remove webhook tokens, message content and private identifiers from screenshots and network logs. Keep a local draft of the design so the diagnostic process does not become a rebuild.",
+        ],
+      },
+    ],
+    sources: [
+      {
+        label: "Discord API: HTTP statuses and JSON error codes",
+        url: "https://docs.discord.com/developers/topics/opcodes-and-status-codes",
+      },
+      {
+        label: "Discord API: Execute and edit webhook messages",
+        url: "https://docs.discord.com/developers/resources/webhook",
+      },
+      {
+        label: "Discord API: Rate limit response handling",
+        url: "https://docs.discord.com/developers/topics/rate-limits",
+      },
+    ],
+    related: [
+      "discord-webhook-limits",
+      "edit-discord-webhook-message",
+      "discord-webhook-forum-threads",
+    ],
+    ctaLabel: "Check a webhook message visually",
+    ctaPath: "/",
+  }),
+  guide({
+    slug: "discord-webhook-mentions",
+    title: "Discord Webhook Mentions: Roles, Everyone & No Pings | DWEEB",
+    h1: "Control Discord Webhook Mentions and Pings",
+    description:
+      "Use allowed_mentions to ping a Discord role or user, allow everyone, or suppress webhook pings. Includes Components V2 JSON and visual setup.",
+    eyebrow: "Practical guide · Mentions and notifications",
+    lede: "A visible @mention is only part of the setup. The message's allowed_mentions policy controls which written mentions can notify, and Discord still applies permissions and recipient settings. Set that policy explicitly when importing announcements, choosing a role audience or sending a test message.",
+    published: "2026-09-11",
+    modified: "2026-09-11",
+    keywords: [
+      "discord webhook mention role",
+      "discord webhook ping everyone",
+      "discord allowed_mentions",
+      "discord webhook no ping",
+      "discord webhook mentions not working",
+    ],
+    sections: [
+      {
+        heading: "Webhook defaults and explicit mention policies",
+        paragraphs: [
+          "Discord documents different defaults for ordinary messages and webhook or interaction messages: omitting allowed_mentions on a webhook parses user mentions only. Do not copy an ordinary-chat default into a webhook script. An explicit policy makes the intended audience visible in the exported JSON.",
+        ],
+        table: {
+          headers: ["Intent", "allowed_mentions value", "Text required"],
+          rows: [
+            ["No mention pings", '{"parse":[]}', "Any mention text remains filtered"],
+            ["One role", '{"parse":[],"roles":["ROLE_ID"]}', "<@&ROLE_ID>"],
+            ["One user", '{"parse":[],"users":["USER_ID"]}', "<@USER_ID>"],
+            ["Everyone or here", '{"parse":["everyone"]}', "@everyone or @here"],
+          ],
+        },
+      },
+      {
+        heading: "A Components V2 message that mentions one role",
+        paragraphs: [
+          "Replace the example numeric ID in both places with your destination role's ID. Keep the ID as a JSON string. This example leaves user and everyone parsing disabled, so a later edit that adds a different mention does not automatically expand the configured audience.",
+        ],
+        code: `{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": [],
+    "roles": ["123456789012345678"]
+  },
+  "components": [
+    {
+      "type": 10,
+      "content": "## Event reminder\\n<@&123456789012345678> Our next session is ready."
+    }
+  ]
+}`,
+      },
+      {
+        heading: "Set the audience in DWEEB",
+        bullets: [
+          "Add the mention to a Text Display. Use the connected server's mention picker when available, or paste the correct user or role token.",
+          "Open Notifications in the message options. Choose the classes of mentions you intend to allow.",
+          "For a particular role or user, expand the additional options and fill Allowed role IDs or Allowed user IDs instead of enabling that whole class.",
+          "Review the live issues. The editor flags invalid IDs and a whole-class setting combined with an explicit list for that same class.",
+          "Open Send and review its mention summary together with the destination. A role selected from one server does not become the corresponding role in another server.",
+        ],
+        paragraphs: [
+          "Use the [Discord message builder](/discord-message-builder/) to preview the text and inspect JSON before delivery. If you are comparing several policies, start with one short Text Display so decoration does not obscure the audience settings. Save the reusable draft only after the destination and policy are correct.",
+        ],
+      },
+      {
+        heading: "Suppress all pings with parse: []",
+        paragraphs: [
+          "Use an explicit empty parse array with no allowed role or user IDs for a no-ping test. Removing the allowed_mentions field is a different instruction: it restores the webhook default. This matters when JSON is cleaned up by a script that deletes empty arrays.",
+          "For imported or model-written content, check both the Text Displays and the top-level policy. A message can look like a harmless documentation example while containing a real user token. In DWEEB, import the full payload through JSON rather than copying only its components if you also need its allowed_mentions settings.",
+        ],
+        code: `{
+  "flags": 32768,
+  "allowed_mentions": { "parse": [] },
+  "components": [
+    { "type": 10, "content": "Test only: @everyone <@123456789012345678>" }
+  ]
+}`,
+      },
+      {
+        heading: "Silent send and no mentions solve different problems",
+        paragraphs: [
+          "SUPPRESS_NOTIFICATIONS disables push notifications while mentions can still create badges. Recipient notification settings also affect delivery, so an allowed mention is not a guarantee that a phone will alert. Suppressing mentions uses allowed_mentions; silent delivery uses the separate message flag.",
+          "DWEEB exposes silent send alongside the audience controls. Choose it for an intentionally quiet announcement; use an explicit no-mentions policy when people should not be targeted at all. Review both settings when reusing a reminder template for an informational post.",
+        ],
+      },
+      {
+        heading: "Why a role mention is visible but does not notify",
+        bullets: [
+          "Check for the <@&ROLE_ID> token in a Text Display. Typing a role's display name or adding a role-select component is not the same as writing that token.",
+          "Compare the role ID in the text with the Allowed role IDs field. Names can match across servers while their IDs differ.",
+          "Review the server's role mentionability, the sending app's permissions and the recipient's notification settings.",
+          "Check whether silent send or an explicit no-mentions policy came from the draft you reused.",
+        ],
+        paragraphs: [
+          "When restoring an old message, review the policy again before Update. Discord reconstructs mentions using the edit request's policy; a missing policy does not inherit the original request's restrictions. Keep audience settings with the message design, and use the [editing guide](/guides/edit-discord-webhook-message/) for the complete restore workflow.",
+        ],
+      },
+    ],
+    sources: [
+      {
+        label: "Discord API: Allowed Mentions Object",
+        url: "https://docs.discord.com/developers/resources/message#allowed-mentions-object",
+      },
+      {
+        label: "Discord API: Message formatting tokens",
+        url: "https://docs.discord.com/developers/reference#message-formatting",
+      },
+      {
+        label: "Discord API: Editing webhook mentions",
+        url: "https://docs.discord.com/developers/resources/webhook#edit-webhook-message",
+      },
+    ],
+    related: [
+      "discord-text-formatting",
+      "edit-discord-webhook-message",
+      "discord-webhook-security",
+    ],
+    ctaLabel: "Build a message with controlled mentions",
+    ctaPath: "/",
+  }),
+  guide({
+    slug: "discord-webhook-forum-threads",
+    title: "Discord Webhooks in Forum Posts & Threads: Guide | DWEEB",
+    h1: "Send Discord Webhooks to Forum Posts and Threads",
+    description:
+      "Create a Discord forum post with thread_name, send into an existing thread with thread_id, add tags and restore webhook messages for editing.",
+    eyebrow: "Workflow guide · Forum posts and threads",
+    lede: "A forum post is a thread inside its parent channel. Choose whether you are creating a new post or adding a message to one that already exists before you send. DWEEB has separate controls for those operations, and the difference explains many otherwise confusing webhook errors.",
+    published: "2026-09-11",
+    modified: "2026-09-11",
+    keywords: [
+      "discord webhook forum channel",
+      "discord webhook thread_id",
+      "discord webhook thread_name",
+      "discord webhook forum post",
+      "discord webhook error 220001",
+    ],
+    sections: [
+      {
+        heading: "Choose a new post or an existing thread",
+        table: {
+          headers: ["Your goal", "DWEEB control", "Request field"],
+          rows: [
+            [
+              "Create a forum or media post",
+              "Forum post → Thread name",
+              "thread_name in the JSON body",
+            ],
+            [
+              "Send into an existing post or thread",
+              "Send → optional Thread ID",
+              "thread_id in the request query",
+            ],
+            [
+              "Change a message already posted",
+              "Restore, then Update",
+              "Original message ID and its thread target",
+            ],
+          ],
+        },
+        paragraphs: [
+          "For a forum or media destination, Discord requires a new post title or an existing thread target. Use one path at a time. The webhook belongs to the parent channel; the thread ID identifies a child destination within it.",
+          "Decide based on how members should find the information. Use a new post for a separate topic such as each release's notes. Use an existing thread for a follow-up on that topic. Use Update for a correction to the original message so readers do not have to reconstruct the current version from several posts.",
+        ],
+      },
+      {
+        heading: "Create a new forum post in DWEEB",
+        bullets: [
+          "Build the first message, then select the forum or media channel in the connected destination flow or supply that channel's webhook URL.",
+          "Open Forum post in the builder's message options and enter Thread name. This title is separate from any heading written inside your Text Display.",
+          "Add Applied tags if needed, using tag IDs from this destination's configured tags. DWEEB accepts comma- or space-separated IDs.",
+          "Leave the Send panel's optional Thread ID empty, review the destination and confirm the new post.",
+          "Keep the returned Discord message link. DWEEB records the new thread target after a successful send so an in-place update reaches the post you just created.",
+        ],
+        paragraphs: [
+          `The editor limits Thread name to ${LIMITS.THREAD_NAME} characters and Applied tags to ${LIMITS.APPLIED_TAGS} IDs. When a known forum destination is missing a title, its validation issue leads back to the Forum post fields. A tag belongs to a particular channel's configuration; copying a template's text does not create matching tags in another server.`,
+        ],
+      },
+      {
+        heading: "JSON example for a new forum post",
+        paragraphs: [
+          "This is a complete small V2 design you can import into DWEEB. The top-level thread_name creates the forum title, while the Text Display contains the post body. The mention policy makes it suitable for a first connectivity test without mention pings.",
+          "When sending from your own client, POST this JSON to the parent channel's webhook URL with with_components=true and wait=true. Keep the returned message ID and channel ID with your application record. Do not put a live webhook credential in a shared example or source file.",
+        ],
+        code: `{
+  "flags": 32768,
+  "thread_name": "Release notes: community update",
+  "allowed_mentions": { "parse": [] },
+  "components": [
+    {
+      "type": 10,
+      "content": "## Community update\\nShare feedback and questions in this post."
+    }
+  ]
+}`,
+      },
+      {
+        heading: "Send into an existing thread or forum post",
+        paragraphs: [
+          "In Discord with Developer Mode enabled, copy the thread's Channel ID. Open DWEEB's Send panel, expand the optional thread or forum-post control and paste it into Thread ID. Use a webhook for the parent channel, clear Thread name and any create-only tag settings, then review the send destination.",
+          "In your own code, thread_id belongs in the webhook URL's query string, not inside the components tree. Keep the normal exported V2 body, without thread_name. An ID from an unrelated text channel cannot be used to make the webhook post there; choose that channel's own destination instead.",
+        ],
+        code: "POST https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN?with_components=true&wait=true&thread_id=THREAD_ID",
+      },
+      {
+        heading: "Restore and edit a message inside a forum post",
+        paragraphs: [
+          "Copy the complete message link from inside the post and open Restore. Keep the original webhook selected and supply the thread target if the workflow needs it. After the message loads, edit the design and choose Update. Changing Text Display content edits that message; the Forum post title field is for creating a new post.",
+          "In the embedded Discord Activity, the collaboration room belongs to the server where the Activity launched. Restore can confirm a sibling-channel switch within that server. For a message in another server, open the draft on the web and choose the appropriate destination there. A server switch cannot travel with the original collaboration room.",
+          "See [editing webhook messages](/guides/edit-discord-webhook-message/) for ownership requirements. A fresh webhook URL is not a substitute for the webhook that sent the original message.",
+        ],
+      },
+      {
+        heading: "Troubleshoot forum and thread delivery",
+        table: {
+          headers: ["Problem", "Check in your design or destination"],
+          rows: [
+            [
+              "220001: no forum target",
+              "Enter a Thread name for a new post or the existing Thread ID",
+            ],
+            [
+              "220002: conflicting targets",
+              "Clear the target for the operation you are not performing",
+            ],
+            [
+              "10003: unknown channel",
+              "Check the thread's parent against the selected webhook's channel",
+            ],
+            [
+              "Repeated new posts",
+              "A new send still has Thread name; use an existing Thread ID or Update",
+            ],
+            [
+              "Missing or invalid tags",
+              "Use tag IDs configured for this forum, not role IDs or visible tag names",
+            ],
+          ],
+        },
+        paragraphs: [
+          "For an archived or locked thread, inspect its state and the access available to the posting app before retrying. A successful preview cannot determine whether the destination is currently writable. The [webhook troubleshooting guide](/guides/discord-webhook-errors/) covers the broader HTTP errors and how to read a field-specific response.",
+        ],
+      },
+    ],
+    sources: [
+      {
+        label: "Discord API: Webhook thread targets and forum parameters",
+        url: "https://docs.discord.com/developers/resources/webhook#execute-webhook",
+      },
+      { label: "Discord API: Threads", url: "https://docs.discord.com/developers/topics/threads" },
+      {
+        label: "Discord API: Forum and thread error codes",
+        url: "https://docs.discord.com/developers/topics/opcodes-and-status-codes",
+      },
+    ],
+    related: [
+      "how-to-create-a-discord-webhook",
+      "edit-discord-webhook-message",
+      "discord-webhook-errors",
+    ],
+    ctaLabel: "Build a forum post visually",
     ctaPath: "/",
   }),
 ];

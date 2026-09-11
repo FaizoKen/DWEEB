@@ -362,6 +362,16 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   reporting an empty field. `repairStructure` now fills both with `""` — the validator already
   says "Text display can't be empty" and "Link button needs a valid https:// URL" — and both
   derefs tolerate an absent value as the second layer.
+- **An empty mention policy is intentional, never an omitted default** (2026-09-11).
+  Discord's webhook/interaction default is user mentions only; the all-types default belongs
+  to regular bot messages. `webhookMentionParse` drives both the editor chips and pre-send
+  summary. `allowed_mentions: {parse: []}` disables automatic parsing, and an explicit `{}`
+  is also preserved through normalization rather than broadened to a missing field. Clearing
+  the last chip or allowed ID must retain an explicit empty policy (`mergeAllowedMentions`),
+  and JSON/share imports must preserve it. Dropping an empty array made a guide's "no pings"
+  example re-enable user mentions when imported. Covered by `mentions.test.ts` and the
+  JSON/share round-trip tests in `encode.test.ts`. Silent send suppresses **push**
+  notifications, not notification badges; keep the UI and guides precise about that distinction.
 - **The MCP server is Rust, and its agreement with the schema layer is generated
   and pinned, never remembered** (`server/src/mcp/`, added 2026-08-18; guide in
   `docs/mcp.md`). It serves MCP over HTTPS at `/mcp` so an AI client — claude.ai's **custom
@@ -846,6 +856,30 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   declarations, thin detail pages, and orphaned templates. Add new discovery routes to that
   generator rather than hand-writing unverified
   files in `dist/`; keep source-backed guide claims and `lastmod` dates honest.
+  **Reference artifacts come from the same sources as the tool** (2026-09-11).
+  Each template ships a visible JSON disclosure and a downloadable `message.json` derived
+  through `encodeJson`, with component/text counts from the schema traversal. Those examples
+  are starting points: plugin custom IDs and server placeholders are not configured by a
+  download. `scripts/seo/discovery.ts` generates `dist/llms.txt` from the live catalogues;
+  do not restore a separate handwritten public copy. It is an agent directory, not a Google
+  ranking mechanism. `artifact-audit.ts` verifies local downloads, section anchors, duplicate
+  IDs, example/export agreement and the directory's targets. The generator also creates
+  `404.html` **before auditing**: it preserves every executable app/short-link bootstrap script,
+  but declares `noindex` and removes canonical/schema claims. Never restore CI's post-audit
+  `cp index.html 404.html`. Pages still supplies the real HTTP 404 status.
+  Built-in preview media has WebP display variants (2026-09-11):
+  `defaultMediaPreviewUrl` rewrites only exact entries in `DEFAULT_MEDIA`, in image renderers
+  before Activity proxy resolution. Message JSON, posted URLs, file downloads and arbitrary
+  user URLs keep their originals. Keep the JPEGs: existing Discord posts hot-link them.
+  Regenerate with `bun add -d sharp`, `bun scripts/gen-preview-media.ts`, then `bun remove sharp`;
+  commit the WebPs and `scripts/seo/manifests/preview-media.json`. The artifact audit rejects
+  missing, stale or larger variants. This reduced the 14 samples from 433,676 to 78,056 bytes
+  without changing dimensions or the app's preview layout.
+  Rated software must define its zero-price `Offer`, category and OS on the same page as
+  its visible aggregate (`ratingLd` in layout.ts). A shared app `@id` does not make Google's
+  software rich-result validator fetch missing required fields from the home page. The audit
+  checks that local offer whenever a rating is emitted; the existing publication threshold
+  and visible-rating gate still apply.
   `bun run seo:lighthouse` adds a three-run mobile median over `/` and
   `/discord-message-builder/`; `web.yml` runs it after the build and gates Performance,
   Accessibility, Best Practices, SEO, LCP, TBT, and CLS. Keep `lighthouserc.json` in the workflow's
@@ -945,11 +979,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   context**, and without it those same-origin reads are refused as CSP violations — which
   Lighthouse reports as "robots.txt is not valid" (SEO 92) and "llms.txt does not follow
   recommendations" (Agentic Browsing 67). With it, every generated page scores 100/100/100/100.
-  **The home page's only crawlable internal links come from the auto-opening template gallery**
-  (`discoveryLinks` in `TemplateGallery.tsx`). That is fine for search — a crawler always
-  arrives with empty storage, so the gallery opens and the five links render, verified — but a
-  *returning* visitor's `/` exposes none. Keep those five anchors real `<a href>`s; if the
-  auto-open is ever removed, `/` becomes a crawl dead end and the links need another home.
+  **Home-page discovery must survive dismissal of the first-visit gallery** (2026-09-11).
+  The gallery's `discoveryLinks` remain real anchors, and `Builder` supplies five persistent
+  resource links through `ComponentTree`'s optional footer. They scroll after the message,
+  open separately to preserve the draft, and are web-only (the Activity supplies no footer).
+  Returning visitors and agents can therefore reach documentation without reopening a dialog.
   **A feature page's setup copy is derived, and `requiresBot` does not mean "plugin"**
   (2026-08-19). `resolveFeature` maps `requiresBot` to `deliveryMode: "bot-install"`, and every
   such feature was a plugin until the MCP connector, which needs the app in the server only

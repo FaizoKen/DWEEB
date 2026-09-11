@@ -35,3 +35,10 @@ export const DEFAULT_MEDIA = {
   spotlight3: defaultMediaUrl("dweeb-spotlight-3.jpg"),
   spotlight4: defaultMediaUrl("dweeb-spotlight-4.jpg"),
 } as const;
+
+const defaultUrls = new Set<string>(Object.values(DEFAULT_MEDIA));
+
+/** Smaller display copies for our own samples. Stored/exported URLs stay intact. */
+export function defaultMediaPreviewUrl(url: string): string {
+  return defaultUrls.has(url) ? url.replace(/\.jpg$/, ".webp") : url;
+}

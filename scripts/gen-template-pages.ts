@@ -16,7 +16,7 @@
  *   bun scripts/gen-template-pages.ts
  */
 
-import { mkdir, writeFile, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, access } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +36,8 @@ import {
   renderLandingPage,
 } from "./seo/guides-layout";
 import { HOME_LASTMOD } from "./seo/constants";
+import { templatePayload } from "./seo/template-payload";
+import { renderDiscoveryReference } from "./seo/discovery";
 import { isPublishable, loadRatings, MIN_RATINGS_TO_PUBLISH } from "./seo/ratings";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -166,8 +168,10 @@ async function main(): Promise<void> {
     const relatedFeatures = features.filter(
       (feature) => !!feature.pluginId && seo.pluginIds.includes(feature.pluginId),
     );
-    const html = renderTemplatePage(seo, messageHtml, related, relatedFeatures);
+    const payload = templatePayload(template, seo.path);
+    const html = renderTemplatePage(seo, messageHtml, related, relatedFeatures, payload);
     await writePage(join("templates", seo.slug, "index.html"), html);
+    await writeFile(join(DIST, payload.path.slice(1)), `${payload.json}\n`, "utf8");
   }
 
   // /templates index.
@@ -275,6 +279,18 @@ async function main(): Promise<void> {
     },
   ]);
   await writeFile(join(DIST, "sitemap.xml"), sitemap, "utf8");
+  await writeFile(join(DIST, "llms.txt"), renderDiscoveryReference(all, features), "utf8");
+
+  // Pages serves this with HTTP 404, but static mirrors may not. Keep shared
+  // /s/<id> bootstrap and every executable script intact while removing index
+  // claims from the fallback. Generate BEFORE the audit, never after it in CI.
+  const appHtml = await readFile(join(DIST, "index.html"), "utf8");
+  const fallback = appHtml
+    .replace(/(<meta\s+name="(?:robots|googlebot)"\s+content=")[^"]*(")/gi, "$1noindex, follow$2")
+    .replace(/<link\s+rel="(?:canonical|alternate)"[^>]*>\s*/gi, "")
+    .replace(/<meta\s+property="og:url"[^>]*>\s*/gi, "")
+    .replace(/<script\s+type="application\/ld\+json">[\s\S]*?<\/script>\s*/gi, "");
+  await writeFile(join(DIST, "404.html"), fallback, "utf8");
 
   const sectionPages = 4 + LANDINGS.length; // indexes + landings + about
   console.log(

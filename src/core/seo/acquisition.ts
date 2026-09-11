@@ -93,6 +93,9 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
     "discord-timestamp-format",
     "discord-webhook-limits",
     "discord-webhook-name-avatar",
+    "discord-webhook-errors",
+    "discord-webhook-mentions",
+    "discord-webhook-forum-threads",
   ]),
 };
 

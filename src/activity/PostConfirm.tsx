@@ -192,7 +192,7 @@ function PingSummaryView({ pings }: { pings: PingSummary }) {
       ) : null}
       {pings.suppressNotifications ? (
         <p className={styles.pingDetail}>
-          Silent send is on — recipients are mentioned but get no notification.
+          Silent send is on — recipients are mentioned but get no push notification.
         </p>
       ) : null}
     </div>

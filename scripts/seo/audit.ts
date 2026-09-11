@@ -16,6 +16,7 @@ import { SITE } from "./content";
 import { guideLandingOgSources, OG_CARD_HEIGHT, OG_CARD_WIDTH } from "./og-card-catalog";
 import { parseOgAssetManifest, sha256, type OgAssetManifest } from "./og-asset-manifest";
 import { ROOT_OG_SVG } from "./root-og-source";
+import { auditDiscoveryArtifacts } from "./artifact-audit";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DIST = join(ROOT, "dist");
@@ -331,6 +332,12 @@ async function main(): Promise<void> {
     },
   );
   if (!sitemapEntries.length) errors.push("sitemap.xml contains no URL entries");
+  errors.push(
+    ...(await auditDiscoveryArtifacts(
+      DIST,
+      sitemapEntries.map((entry) => entry.url),
+    )),
+  );
   if (new Set(sitemapEntries.map((entry) => entry.url)).size !== sitemapEntries.length) {
     errors.push("sitemap.xml contains duplicate page URLs");
   }
@@ -529,6 +536,18 @@ async function main(): Promise<void> {
           if (rating && typeof rating === "object") {
             const r = rating as Record<string, unknown>;
             ratingClaims.push({ value: r.ratingValue, count: r.ratingCount });
+            const offer = node.offers as { price?: unknown; priceCurrency?: unknown } | undefined;
+            if (
+              !offer ||
+              String(offer.price) !== "0" ||
+              offer.priceCurrency !== "USD" ||
+              node.applicationCategory !== "DeveloperApplication" ||
+              node.operatingSystem !== "Web"
+            ) {
+              errors.push(
+                `${entry.url}: rated software must define its free offer, category and platform on this page`,
+              );
+            }
           }
           if (node["@id"] !== SITE.websiteId) continue;
           websiteDefinitions += 1;
@@ -780,6 +799,7 @@ async function main(): Promise<void> {
     sitemapSha256: createHash("sha256").update(sitemap).digest("hex"),
     pages: pages.length,
     templates: templatePages.length,
+    templateJsonExamples: TEMPLATES.length,
     guides: pages.filter((page) => new URL(page.url).pathname.startsWith("/guides/")).length,
     totalWords: pages.reduce((sum, page) => sum + page.words, 0),
     jsonLdBlocks: pages.reduce((sum, page) => sum + page.jsonLdBlocks, 0),

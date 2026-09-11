@@ -1,6 +1,6 @@
 # SEO growth program
 
-Last reviewed: 2026-08-20
+Last reviewed: 2026-09-11
 
 ## Search positioning
 
@@ -53,7 +53,72 @@ boilerplate and fails the build if a template or feature page loses its contextu
 plus contextual exact-match anchors is the natural shape, and 66 identical sitewide exact-match
 links is the over-optimised one.
 
-## Release baseline
+## September 2026 audit and implementation
+
+The live audit on 2026-09-11 found 66 sitemap URLs and healthy sampled HTTP responses,
+canonicals and crawler access. The primary message-builder landing and several guides, features
+and templates now appear in search results. The August search observations below are historical;
+they are not evidence that those pages remain unindexed. No Search Console or Bing account metrics
+were available in this workspace, so this audit makes no claim about current ranking, CTR or traffic.
+
+The strategy is to make the existing tool and its reference material more useful, keep their claims
+consistent, and make the path from a search answer to a working message easy to follow.
+
+| Priority                   | Evidence                                                                                                     | Implemented response                                                                                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Template utility           | All 36 templates had previews but required opening the app to obtain JSON                                    | Every template now has an HTML JSON example, a downloadable `message.json`, source-derived component/text counts, and explicit placeholder/interaction compatibility guidance. Examples use the editor's serializer. |
+| Specific support intent    | Setup and limits pages did not fully answer delivery errors, mentions, or forum/thread destinations          | Three primary-source-backed guides explain error diagnosis, `allowed_mentions`, and forum/thread posting and restoration; related existing guides link to them.                                                      |
+| Reliable reference content | Guides repeated fixed rate-limit assumptions and an obsolete restriction on masked links                     | Rates now follow Discord's response headers, component IDs and placement are complete, and the formatting reference separates Discord behavior from preview limitations.                                             |
+| Discovery from the tool    | Closing the first-visit gallery removed all discovery links from the editor                                  | Five persistent links live at the end of the web editor's scroll area and open separately to preserve an in-progress draft.                                                                                          |
+| Long article navigation    | Guide sections lacked direct targets                                                                         | A native table of contents links to stable section IDs; code and table regions are keyboard scrollable.                                                                                                              |
+| Rating eligibility         | Landing rating markup referenced the homepage product but omitted the required local offer                   | Rated software now defines its free offer, application category and OS on the same page. Genuine ratings still require the existing threshold and visible block.                                                     |
+| Agent navigation           | The manually maintained `llms.txt` omitted specific guides and the MCP feature, and overstated share privacy | It is generated from the actual page catalogues, links to JSON examples, and explains fragment links, short-link storage and connector permissions accurately.                                                       |
+| Release correctness        | CI created its root-copy 404 after the SEO audit                                                             | The generator creates a `noindex` fallback before auditing, preserving executable short-link bootstrap scripts while removing canonical/schema claims.                                                               |
+
+Publishing the mentions guide exposed a product bug that had to be fixed with it: importing
+`allowed_mentions: {parse: []}` discarded the empty array, and disabling the final mention chip
+removed the policy. The editor now preserves explicit empty policies through JSON/share import and
+controls, and its pre-send summary uses Discord's webhook default (user mentions only). This keeps
+the documented example safe to use rather than merely correct on the page.
+
+The release audit now also checks downloadable JSON against both its visible example and editor
+export, linked local files, section targets, duplicate IDs, the generated agent directory, the 404
+bootstrap and same-page rated-software fields. New guide cards and their source fingerprints are
+committed; the generated HTML, JSON downloads, sitemap and `llms.txt` remain build outputs.
+
+The verified artifact has **69 indexable pages, 12 guides and 36 JSON examples**. JSON downloads are
+supporting resources, not extra sitemap landing pages. `dist/seo-report.json` records the exact
+verified artifact counts and transfer costs for each build.
+
+Lighthouse identified a concrete first-visit transfer opportunity in the built-in sample JPEGs.
+The preview now uses WebP display copies at the original dimensions: **433,676 → 78,056 bytes**
+across 14 files (82% smaller). The five large images observed in the initial mobile trace total
+**225,830 → 37,188 bytes**, saving 188,642 bytes. Exact known sample URLs are rewritten only when
+displayed; posted/exported JPEG URLs, file downloads and user-provided media remain unchanged.
+The audit pins original/variant hashes and rejects missing or larger variants. Inline prose links
+also gained visible underlines after Lighthouse found they depended on color alone.
+
+Final local validation on 2026-09-11 passed the full production build and artifact audit, all
+614 tests across 62 files, and 12 desktop/mobile browser scenarios. The browser checks cover
+JavaScript-disabled guide and template content, section navigation, downloadable JSON, and
+persistent editor links without overflow or runtime errors.
+The source formatting check passed. ESLint passed with zero errors and three existing
+`no-useless-assignment` warnings in the unchanged OAuth `popupFlow.ts`.
+
+Three mobile Lighthouse runs per configured URL produced these medians:
+
+| Page                        | Performance | Accessibility | Best practices | SEO | LCP    | TBT    | CLS |
+| --------------------------- | ----------- | ------------- | -------------- | --- | ------ | ------ | --- |
+| `/`                         | 87          | 100           | 100            | 100 | 1.22 s | 525 ms | 0   |
+| `/discord-message-builder/` | 99          | 100           | 100            | 100 | 1.06 s | 99 ms  | 0   |
+
+All configured median assertions passed. The standard local CLI hit a Windows Chrome-launcher
+temporary-directory cleanup error; the completed six-run check used the same installed Lighthouse
+version and repository configuration with a Puppeteer-managed browser. These are lab measurements,
+not field Core Web Vitals or evidence of ranking changes. Reports remain in the gitignored
+`.lighthouseci/` directory.
+
+## Historical release baseline (2026-08-20)
 
 The 2026-08-20 production build produces:
 
@@ -87,10 +152,12 @@ figures are a release smoke, not a substitute for that gate or field data. The r
 gate.
 
 The home-page `WebApplication` graph establishes one stable product entity and models the free core
-as an explicit zero-price `Offer`. It still does not qualify for Google's SoftwareApplication
-enhancement because there is no genuine review or aggregate-rating data. Never fabricate ratings.
-If independently attributable reviews become available, review the then-current eligibility rules
-before pursuing the enhancement.
+as an explicit zero-price `Offer`. The primary landing publishes first-party aggregate ratings only
+when at least 25 signed-in users have rated it. Its schema and visible score share the same gate;
+an unavailable aggregate means neither is published. The 2026-09-11 fix also defines the offer on
+that landing, since a cross-page entity reference does not supply the required local software
+fields. Eligibility is not a promise that Google will show stars. See Google's
+[software application requirements](https://developers.google.com/search/docs/appearance/structured-data/software-app).
 
 Visible FAQs remain useful for people and other consumers, but Google removed FAQ rich results in
 June 2026. Google also ignores `meta keywords` and says `llms.txt` has no positive or negative
@@ -122,6 +189,20 @@ event-field allowlists reject arbitrary values. CTA placement is held briefly in
 `sessionStorage`, revalidated, emitted after navigation, and immediately consumed so fast clicks are
 not lost while analytics is deliberately delayed.
 
+Track AI visibility separately from ordinary clicks where the account exposes it. Google's current
+[generative AI guide](https://developers.google.com/search/docs/fundamentals/ai-optimization-guide)
+documents the Search Console Generative AI performance report. Bing's
+[AI Performance report](https://blogs.bing.com/webmaster/February-2026/Introducing-AI-Performance-in-Bing-Webmaster-Tools-Public-Preview)
+provides citation totals, cited pages and sampled grounding queries. Citations are not visits or
+rankings; compare them with actual attributed builder use. Neither account report was inspected in
+this code audit.
+
+Preserve the current public crawler access and descriptive HTML. Google explicitly says `llms.txt`
+and special AI markup do not improve its rankings; the existing reference is maintained for other
+agents as a catalogue, not a ranking claim. Search visibility and model training are different
+controls. Do not add bot-specific blocks or overwrite the wildcard rules without evaluating the
+effect on search and user-requested browsing.
+
 GA property release checklist: keep Enhanced Measurement disabled for this data stream, especially
 outbound clicks (`link_url`), site search (`search_term`), and history-change pageviews. Those
 automatic events can inspect dynamic app URLs outside the repository's field allowlists. Review the
@@ -142,7 +223,7 @@ message builder`, `Discord embed builder`, and `Discord Components V2 builder`.
 
 Initial targets after deployment:
 
-- 66/66 sitemap URLs valid and indexable.
+- All sitemap URLs valid and indexable.
 - Mobile Core Web Vitals at the good threshold (LCP ≤2.5 s, INP ≤200 ms, CLS ≤0.1) at the 75th
   percentile once field volume is sufficient.
 - At least 8% organic landing-to-builder rate: matched `seo_builder_ready` events divided by Search
@@ -177,7 +258,7 @@ IndexNow on successful releases. Service-worker navigation fallback is allowlist
 shell and valid short-link routes, so static discovery pages keep their own HTML, title, schema,
 and canonical.
 
-## Current SERP and competitor opportunity
+## Historical SERP and competitor observations (August 2026)
 
 A 2026-08-19 search sample (not a neutral rank tracker) showed the deployed root around result 10
 for the exact head term while Google still displayed the old “Discord Components V2 Builder” title.
@@ -223,7 +304,8 @@ and successful on-site searches to choose the next work:
    ongoing UI-review ownership are available.
 3. Fair comparison/migration pages for established webhook tools, reviewed against their current
    product before every update.
-4. Template upgrades for the six highest-impression intents: unique variants, exact component
-   counts, copyable JSON, compatibility notes, and query-specific troubleshooting.
+4. Use template impressions and successful builder activations to select unique variants and
+   query-specific troubleshooting; component counts, JSON and compatibility notes now cover all
+   36 existing templates.
 5. Case studies with measured publishing outcomes and permission/setup detail; do not invent
    testimonials, ratings, review schema, or usage claims.

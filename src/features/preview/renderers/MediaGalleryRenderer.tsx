@@ -14,6 +14,7 @@
 import { useState } from "react";
 import type { EditorId, MediaGalleryComponent, MediaGalleryItem } from "@/core/schema/types";
 import { useMessageStore } from "@/core/state/messageStore";
+import { defaultMediaPreviewUrl } from "@/core/media/defaultMedia";
 import { useAiStore } from "@/core/ai/aiStore";
 import { cn } from "@/lib/cn";
 import { usePreviewClose } from "../previewCloseContext";
@@ -103,7 +104,7 @@ function GalleryItem({
   };
   const url = item.media.url ?? "";
   const priority = usePreviewMediaPriority(url);
-  const src = useResolvedMediaUrl(url);
+  const src = useResolvedMediaUrl(defaultMediaPreviewUrl(url));
   const usesAttachmentId = !item.media.url && typeof item.media.attachment_id === "string";
   const hasAlt = Boolean(item.description);
   // Galleries accept video items too — render a <video> for those so an mp4
