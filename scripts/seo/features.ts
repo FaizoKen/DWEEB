@@ -873,6 +873,6 @@ export function resolveAllFeatures(): ResolvedFeature[] {
 }
 
 /** Last time the feature catalogue was reviewed — used for sitemap `<lastmod>`. */
-export const FEATURES_LASTMOD = "2026-08-20";
+export const FEATURES_LASTMOD = "2026-09-12";
 
 export { ACCENT_BLURPLE };

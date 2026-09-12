@@ -303,7 +303,7 @@ function computeAllowedPositions(source: DragSource, target: RowData): DropPosit
   return out;
 }
 
-export function ComponentTree({ footer }: { footer?: ReactNode } = {}) {
+export function ComponentTree({ emptyHint }: { emptyHint?: ReactNode } = {}) {
   const components = useMessageStore((s) => s.message.components);
   const addTopLevelComponent = useMessageStore((s) => s.addTopLevelComponent);
   const addTopLevelSection = useMessageStore((s) => s.addTopLevelSection);
@@ -392,6 +392,7 @@ export function ComponentTree({ footer }: { footer?: ReactNode } = {}) {
             {components.length === 0 ? (
               <div className={styles.empty}>
                 <p>Nothing here yet. Add your first component to get started.</p>
+                {emptyHint}
               </div>
             ) : (
               <ul className={cn(styles.list, styles.topList)}>
@@ -407,7 +408,6 @@ export function ComponentTree({ footer }: { footer?: ReactNode } = {}) {
                 ))}
               </ul>
             )}
-            {footer}
           </div>
 
           {/* The one validation indicator: a pill floating at the pane's

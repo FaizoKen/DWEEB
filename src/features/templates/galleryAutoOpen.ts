@@ -40,7 +40,18 @@ const DRAFT_FRESH_MS = 24 * 60 * 60 * 1000; // 24 hours
 /** Read the last auto-open timestamp, or null if never / unreadable. */
 function readLastAutoOpen(): number | null {
   if (typeof localStorage === "undefined") return null;
-  const raw = localStorage.getItem(STORAGE_KEY);
+  // `getItem` itself throws (SecurityError) when site data is blocked rather
+  // than merely empty — the `typeof` guard only covers storage being absent.
+  // This is called from a `useState` initializer in `App`, so an escaping
+  // throw takes the whole app to the ErrorBoundary and pages the maintainer,
+  // for a browser setting. Unreadable reads as "never", which is exactly the
+  // first-visit answer, and matches what this module's header promises.
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
   if (!raw) return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;

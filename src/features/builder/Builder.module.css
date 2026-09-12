@@ -20,31 +20,45 @@
   min-width: 0;
 }
 
-/* Help belongs after the message, inside the tree's existing scroll area, so
-   it remains available on repeat visits without shrinking the editor. */
-.resources {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  margin: 20px 4px 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--app-border);
-  font-size: var(--app-text-xs);
+/* Orientation line inside the tree's empty-state card — ComponentTree renders
+   it there, and only while the message has no components, so it can never
+   dangle under a draft. It inherits the card's centring and muted colour; only
+   the two actions need their own treatment. The explicit margin is deliberate:
+   the card's own <p> keeps the UA's 1em margins, so leaving these to collapse
+   would make the gap depend on whichever rule happened to be larger. */
+.startHint {
+  margin: 10px 0 0;
+  font-size: var(--app-text-sm);
 }
 
-.resources a {
+/* One reopens the Message directory and the other opens /guides/ in a new tab,
+   but they read as one offer — so the button is stripped back to link looks
+   rather than letting the sentence mix a control with a link. `min-height`
+   keeps both at the 24px touch target the row this replaced reserved.
+   Underlined at rest, unlike the standalone row this replaced: inline in a
+   sentence, colour is the only other cue and `--app-accent-text` (#aeb6ff)
+   against the card's `--app-text-muted` (#aab1bf) is 1.12:1 — nowhere near the
+   3:1 WCAG 1.4.1 wants when colour alone carries the meaning, and a hover-only
+   underline reveals nothing on a touch screen. */
+.startLink {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   color: var(--app-accent-text);
-  text-decoration: none;
-}
-
-.resources a:hover {
   text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
-.resources a:focus-visible {
+.startLink:hover {
+  color: var(--app-text);
+}
+
+.startLink:focus-visible {
   border-radius: var(--app-radius-sm);
   outline: none;
   box-shadow: var(--app-focus-ring);

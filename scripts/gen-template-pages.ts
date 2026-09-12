@@ -24,7 +24,7 @@ import { TEMPLATES } from "@/data/presets";
 import { renderMessageHtml } from "./seo/render-message";
 import { resolveSeo, SITE, TEMPLATES_LASTMOD, type ResolvedSeo } from "./seo/content";
 import { renderIndexPage, renderTemplatePage } from "./seo/layout";
-import { resolveAllFeatures, FEATURES_LASTMOD } from "./seo/features";
+import { resolveAllFeatures, FEATURES_LASTMOD, type ResolvedFeature } from "./seo/features";
 import { renderFeaturePage, renderFeaturesIndexPage } from "./seo/features-layout";
 import { GUIDES, GUIDES_LASTMOD, LANDINGS } from "./seo/guides";
 import {
@@ -46,6 +46,7 @@ const DIST = join(ROOT, "dist");
 const PRIVACY_LASTMOD = "2026-07-15";
 const TERMS_LASTMOD = "2026-07-13";
 const MAX_RELATED = 4;
+const MAX_RELATED_FEATURES = 3;
 
 function xmlEscape(s: string): string {
   return s
@@ -110,6 +111,54 @@ function pickRelated(current: ResolvedSeo, all: ResolvedSeo[]): ResolvedSeo[] {
     picked.push(neighbour);
   }
   return picked.slice(0, MAX_RELATED);
+}
+
+/** The feature catalogue's own ring, mirroring `pickRelated` above. Measured on
+ * the 2026-09-11 build, no `/features/<slug>/` page received a contextual link
+ * from any other feature page: their only in-body inbound links were the hub
+ * card and, for the five paired with a plugin template, that template — so
+ * `/features/discord-latency-check/` had exactly one in the whole site while
+ * every template page had two to eight and a build gate to keep them. Same
+ * reserved-neighbour rotation, so the ring stays complete however the
+ * catalogue is reordered. */
+function pickRelatedFeatures(current: ResolvedFeature, all: ResolvedFeature[]): ResolvedFeature[] {
+  const meaningful = (keyword: string) =>
+    !["discord", "discord bot", "discord webhook", "discord message builder", "dweeb"].includes(
+      keyword,
+    );
+  const currentKeywords = new Set(current.keywords.filter(meaningful));
+  const ranked = all
+    .filter((candidate) => candidate.slug !== current.slug)
+    .map((candidate) => {
+      const sharedKeywords = candidate.keywords.filter(
+        (keyword) => meaningful(keyword) && currentKeywords.has(keyword),
+      ).length;
+      const score =
+        (candidate.category === current.category ? 12 : 0) +
+        sharedKeywords * 3 +
+        (candidate.deliveryMode === current.deliveryMode ? 1 : 0);
+      return { candidate, score, tie: stableHash(`${current.slug}|${candidate.slug}`) };
+    })
+    .sort((a, b) => b.score - a.score || a.tie - b.tie)
+    .map(({ candidate }) => candidate);
+  const index = all.findIndex((item) => item.slug === current.slug);
+  const neighbour = all[(index + 1) % all.length];
+  const picked = ranked.slice(0, MAX_RELATED_FEATURES - 1);
+  if (
+    neighbour &&
+    neighbour.slug !== current.slug &&
+    !picked.some((item) => item.slug === neighbour.slug)
+  ) {
+    picked.push(neighbour);
+  }
+  // Top up from the ranked tail when the reserved neighbour was already a
+  // similarity pick, so every page ships the same three-card grid instead of a
+  // ragged two on the pages whose neighbour happens to be a close match.
+  for (const candidate of ranked) {
+    if (picked.length >= MAX_RELATED_FEATURES) break;
+    if (!picked.some((item) => item.slug === candidate.slug)) picked.push(candidate);
+  }
+  return picked.slice(0, MAX_RELATED_FEATURES);
 }
 
 interface SitemapEntry {
@@ -188,7 +237,12 @@ async function main(): Promise<void> {
           .map((t) => seoById.get(t.id))
           .filter((s): s is ResolvedSeo => !!s)
       : [];
-    const html = renderFeaturePage(feature, previewHtml, related);
+    const html = renderFeaturePage(
+      feature,
+      previewHtml,
+      related,
+      pickRelatedFeatures(feature, features),
+    );
     await writePage(join("features", feature.slug, "index.html"), html);
   }
   await writePage(join("features", "index.html"), renderFeaturesIndexPage(features));

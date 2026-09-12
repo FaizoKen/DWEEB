@@ -97,6 +97,11 @@ interface BuilderProps {
 }
 
 export function Builder({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: BuilderProps) {
+  // For the empty-state hint below: reopening the Message directory beats
+  // linking the static catalogue, since the in-app one loads a template
+  // straight into this editor instead of a second tab.
+  const openGallery = useTemplateGalleryStore((s) => s.openGallery);
+
   return (
     <div className={styles.builder}>
       {/* ActionBar occupies the grid's first (auto) row; the tree fills the 1fr
@@ -115,27 +120,38 @@ export function Builder({ onShare, onJson, onSend, onUpdate, onRestore, onAbout 
       </div>
 
       <ComponentTree
-        footer={
-          // Keep help reachable after the first-visit gallery is dismissed.
-          // These links scroll with the draft and open separately so consulting
-          // a guide never navigates away from an in-progress message.
-          <nav className={styles.resources} aria-label="Explore DWEEB (opens in a new tab)">
-            <a href="/discord-message-builder/" target="_blank" rel="noopener">
-              Message builder
+        emptyHint={
+          // Two next steps for the one state that asks for them: an editor
+          // cleared to nothing (the store seeds DEFAULT_PRESET, so this is
+          // reached by Clear all rather than on arrival). It retires itself the
+          // moment a component exists, so the tree never carries a standing
+          // link row under a real draft. The template action reopens the
+          // in-app Message directory rather than linking the static catalogue
+          // — it loads a template straight into this editor — while the guides
+          // open in a new tab, since the meta header above may already hold a
+          // webhook URL, username and avatar worth keeping.
+          // Web-only: the Activity renders a bare <ComponentTree />.
+          <p className={styles.startHint}>
+            You can also{" "}
+            <button
+              type="button"
+              className={styles.startLink}
+              onClick={() => openGallery("Template")}
+            >
+              start from a template
+            </button>{" "}
+            or{" "}
+            <a
+              className={styles.startLink}
+              href="/guides/"
+              target="_blank"
+              rel="noopener"
+              aria-label="Read the guides (opens in a new tab)"
+            >
+              read the guides
             </a>
-            <a href="/templates/" target="_blank" rel="noopener">
-              Templates
-            </a>
-            <a href="/features/" target="_blank" rel="noopener">
-              Features
-            </a>
-            <a href="/guides/" target="_blank" rel="noopener">
-              Guides
-            </a>
-            <a href="/about/" target="_blank" rel="noopener">
-              About &amp; methodology
-            </a>
-          </nav>
+            .
+          </p>
         }
       />
     </div>

@@ -738,12 +738,39 @@ async function main(): Promise<void> {
   );
   const inbound = new Map(templatePages.map((page) => [new URL(page.url).pathname, 0]));
   for (const page of templatePages) {
+    // A page linking itself must not satisfy its own inbound requirement — the
+    // whole point of the gate is that losing the ring is loud, and a permalink
+    // or self-referential breadcrumb added later would otherwise silently
+    // credit every page with the one link it needs.
+    const own = new URL(page.url).pathname;
     for (const link of new Set(page.internalLinks)) {
-      if (inbound.has(link)) inbound.set(link, inbound.get(link)! + 1);
+      if (link !== own && inbound.has(link)) inbound.set(link, inbound.get(link)! + 1);
     }
   }
   for (const [path, count] of inbound) {
     if (count === 0) errors.push(`${path}: template has no contextual inbound detail-page link`);
+  }
+
+  // The feature cluster is the site's newest and, until 2026-09-12, its least
+  // linked: no `/features/<slug>/` page received a contextual link from another
+  // feature page, and `/features/discord-latency-check/` received exactly one
+  // in the whole site. `pickRelatedFeatures` gives them the same
+  // reserved-neighbour ring the templates got on 2026-08-20; losing it again
+  // would be just as invisible in review as losing that one would.
+  const featurePages = pages.filter((page) =>
+    /\/features\/[^/]+\/$/.test(new URL(page.url).pathname),
+  );
+  const featureInbound = new Map(featurePages.map((page) => [new URL(page.url).pathname, 0]));
+  for (const page of featurePages) {
+    const own = new URL(page.url).pathname;
+    for (const link of new Set(page.internalLinks)) {
+      if (link !== own && featureInbound.has(link)) {
+        featureInbound.set(link, featureInbound.get(link)! + 1);
+      }
+    }
+  }
+  for (const [path, count] of featureInbound) {
+    if (count === 0) errors.push(`${path}: feature has no contextual inbound detail-page link`);
   }
 
   // "Discord message builder" is the site's primary query, and `/` is a working

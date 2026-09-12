@@ -38,6 +38,7 @@ export function renderFeaturePage(
   feature: ResolvedFeature,
   previewHtml: string | null,
   relatedTemplates: ResolvedSeo[],
+  relatedFeatures: ResolvedFeature[],
 ): string {
   const ctaLabels: Record<string, string> = {
     "self-role": "Create a self-role menu",
@@ -139,6 +140,23 @@ export function renderFeaturePage(
           .join("")}</div></section>`
     : "";
 
+  // The feature cluster's own inbound ring. Every page names `/features/` in
+  // the nav and footer, but until 2026-09-12 nothing named an individual
+  // feature page except its hub card and — for the five with a plugin template
+  // — that one template, so the site's newest content mass had almost no
+  // descriptive inbound anchors. `audit.ts` now fails a feature page that
+  // receives none, exactly as it guards the template ring.
+  const moreFeatures = relatedFeatures.length
+    ? `<section class="block"><h2>Related features</h2>
+        <p>Other things DWEEB can add to the same server — or browse the full <a href="${FEATURES_INDEX_PATH}">feature catalogue</a>.</p>
+        <div class="card-grid">${relatedFeatures
+          .map(
+            (f) =>
+              `<a class="mini-card" href="${attr(f.path)}"><span class="mini-emoji" aria-hidden="true">${escapeHtml(f.emoji)}</span><span class="mini-body"><span class="mini-name">${escapeHtml(f.h1)}</span><span class="mini-cat">${escapeHtml(f.category)}</span></span></a>`,
+          )
+          .join("")}</div></section>`
+    : "";
+
   const partOfDweeb = `<section class="block"><h2>Part of DWEEB</h2>
     <p>${escapeHtml(feature.h1)} is one part of DWEEB, a free visual <a href="/discord-message-builder/">Discord message builder</a> for webhook messages and embed-style Components V2 layouts. Design the message itself, start from a <a href="${TEMPLATES_INDEX_PATH}">ready-made template</a>, or read the <a href="${GUIDES_INDEX_PATH}">guides</a>.</p></section>`;
 
@@ -178,6 +196,7 @@ export function renderFeaturePage(
 
       ${faqSection(feature.resolvedFaq)}
       ${relatedSection}
+      ${moreFeatures}
       ${partOfDweeb}
     </article>
   </main>`;

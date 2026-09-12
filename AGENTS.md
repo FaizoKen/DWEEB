@@ -1069,11 +1069,45 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   context**, and without it those same-origin reads are refused as CSP violations — which
   Lighthouse reports as "robots.txt is not valid" (SEO 92) and "llms.txt does not follow
   recommendations" (Agentic Browsing 67). With it, every generated page scores 100/100/100/100.
-  **Home-page discovery must survive dismissal of the first-visit gallery** (2026-09-11).
-  The gallery's `discoveryLinks` remain real anchors, and `Builder` supplies five persistent
-  resource links through `ComponentTree`'s optional footer. They scroll after the message,
-  open separately to preserve the draft, and are web-only (the Activity supplies no footer).
-  Returning visitors and agents can therefore reach documentation without reopening a dialog.
+  **Home-page discovery is the gallery's job — the editor never carries a standing link row**
+  (2026-09-12, replacing the 2026-09-11 arrangement). The first-visit gallery's `discoveryLinks`
+  (`TemplateGallery.tsx`) are real anchors and are the only thing a crawler renders on `/`:
+  a stateless renderer has no `dweeb.gallery.lastAutoOpen.v1` record, so `shouldAutoOpenGallery()`
+  is true, `deferEditorForInitialGallery` latches, and `App.tsx` renders `.app-bootstrap`
+  **instead of** `<Builder>` — the editor is never mounted for one. That read must stay
+  throw-safe: `localStorage.getItem` itself throws when site data is *blocked* rather than
+  merely empty, and `App` calls it from a `useState` initializer, so an escaping throw took
+  the whole app to the `ErrorBoundary` (and paged) over a browser setting — unreadable now
+  reads as "never", the first-visit answer, pinned by `storageSafety.test.ts`. The five-link nav `Builder`
+  used to pass through `ComponentTree`'s `footer` prop was therefore worth **nothing** to search
+  while reading as a dangling jump-link row under the draft; it is gone, and so is the prop
+  (measured before and after in a fresh browser context: `/`'s rendered internal anchor set is
+  identical). Don't re-add a persistent link row to the editor to "protect SEO" — it protects
+  none. What replaced it is `emptyHint`, rendered inside the tree's empty-state card only while
+  the message has no components — reached by **Clear all**, not on arrival, since the store seeds
+  `DEFAULT_PRESET` — offering the in-app Message directory (a button, not a `/templates/` link:
+  the directory loads a template straight into this editor) and `/guides/` in a new tab. Still
+  web-only: the Activity renders a bare `<ComponentTree />`. A visitor mid-draft reaches docs from
+  persistent chrome — the bar's Message directory icon reopens the gallery, More ▸ About opens the
+  About panel's `/about/`, `/privacy`, `/terms`. **Nothing gates a rendered anchor on `/`**: if the
+  auto-open rule ever changes so a fresh profile renders the Builder instead, `/`'s rendered
+  outbound link set drops to zero and no build gate will notice.
+  **The feature cluster has an inbound ring too, and it is now gated** (2026-09-12).
+  Templates got a build-enforced ring on 2026-08-20; features never did, and it showed — measured
+  on the 2026-09-11 build, **no** `/features/<slug>/` page received a contextual link from another
+  feature page, so `/features/discord-latency-check/` had exactly one in-body inbound link in the
+  whole site while template pages had two to eight. `pickRelatedFeatures`
+  (`gen-template-pages.ts`) mirrors `pickRelated` — similarity-ranked, one slot reserved for the
+  next catalogue entry so the ring is complete however the catalogue is reordered, then topped up
+  so every page ships the same three-card grid — and `renderFeaturePage` prints it as a
+  "Related features" block between the templates block and "Part of DWEEB". `audit.ts` fails a
+  feature detail page that receives no contextual inbound detail-page link, exactly as it does for
+  templates (both count `internalLinks` restricted to detail paths, which the sitewide nav/footer
+  never name — they only ever link the hubs). Result: 33 descriptive contextual links where there
+  were none. Two knock-on costs, recorded rather than glossed: each feature page's outbound
+  contextual count rises, marginally diluting what it forwards to `/discord-message-builder/`; and
+  `FEATURES_LASTMOD` is one constant driving the hub *and* all 11 children, so bumping it re-dates
+  a hub whose visible content didn't change — unavoidable given the hub-newer-than-child gate.
   **A feature page's setup copy is derived, and `requiresBot` does not mean "plugin"**
   (2026-08-19). `resolveFeature` maps `requiresBot` to `deliveryMode: "bot-install"`, and every
   such feature was a plugin until the MCP connector, which needs the app in the server only
