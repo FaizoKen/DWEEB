@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from "react";
 import { reportBoundaryError } from "@/core/telemetry/reporter";
 import { isStaleChunkMessage } from "@/core/telemetry/crashReport";
+import { isActivityMode } from "@/core/activity/runtime";
 
 interface State {
   error: Error | null;
@@ -108,7 +109,11 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
           type="button"
           onClick={() => {
             this.reset();
-            window.location.assign("/");
+            // Dropping the hash is the escape from a corrupt share payload. The
+            // Activity's query carries `frame_id`, though, and dropping *that*
+            // would boot the web surface inside Discord — reload in place there.
+            if (isActivityMode()) window.location.reload();
+            else window.location.assign("/");
           }}
           style={{
             background: "var(--app-accent)",

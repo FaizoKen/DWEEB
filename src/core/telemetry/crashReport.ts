@@ -16,29 +16,62 @@
  *     and a hard per-session cap bounds the total regardless.
  */
 
-/** Where the error surfaced. Beyond the three raw traps, `dom-desync` reports a
- *  crash the app *prevented* (see `core/dom/domGuard`: something rewrote the DOM
- *  under Preact and the guard repaired the placement instead of letting it
- *  throw) — counted, never paged. Three chunk-load refinements (see
- *  [`resolveCrashKind`] and [`chunkFailureKind`]) tell the proxy how bad the
- *  rest was:
+/** Where the error surfaced. Beyond the three raw traps, `boot` is a failure
+ *  the entry caught before the app could mount (`main.tsx`'s boot promise — the
+ *  shell showed a notice instead of sitting on "Loading…" forever), and
+ *  `dom-desync` reports a crash the app *prevented* (see `core/dom/domGuard`:
+ *  something rewrote the DOM under Preact and the guard repaired the placement
+ *  instead of letting it throw) — counted, never paged. Five chunk-load
+ *  refinements (see [`resolveCrashKind`] and [`chunkFailureKind`]) tell the
+ *  proxy how bad the rest was:
  *  `stale-chunk` = a lazy surface failed post-boot but was handled in place
  *  (the user got a refresh prompt, the app kept running — the proxy logs it
  *  below paging level); `chunk-unreachable` = the app went down on a chunk
  *  load, but re-requesting that chunk proved it is still being served (or the
  *  network couldn't be reached at all), so the fault is the visitor's
- *  connection, not our deploy — counted, never paged; `stale-chunk-fatal` =
- *  the same failure took the app down *and* the chunk is genuinely gone
- *  (the re-request 404'd) — that one still pages, because it means a broken
- *  deploy or an SW precache gap. */
+ *  connection, not our deploy — counted, never paged; `stale-shell` = the chunk
+ *  is genuinely gone (the re-request 404'd) AND the shell people are being
+ *  served right now is a *different* build from the one this tab booted — a
+ *  client whose cache outlived the deploy and could not reload past it; the
+ *  deploy itself is fine — counted, never paged; `shell-unverified` = the chunk
+ *  is gone but the live shell could not be read (timed out, blocked, carried no
+ *  entry script) — also never paged, but sent as its own kind so a regression in
+ *  that probe shows up as a count instead of as silence; `stale-chunk-fatal` =
+ *  the chunk is gone AND the live shell is *this* build, so the deploy visitors
+ *  receive right now references a chunk it doesn't serve — that one pages. */
 export type CrashKind =
   | "error"
   | "unhandledrejection"
   | "boundary"
+  | "boot"
   | "dom-desync"
   | "stale-chunk"
   | "chunk-unreachable"
+  | "stale-shell"
+  | "shell-unverified"
   | "stale-chunk-fatal";
+
+/** Every kind the client can send — pinned against [`KIND_MAX_LENGTH`] in
+ *  `crashReport.test.ts`. */
+export const CRASH_KINDS: readonly CrashKind[] = [
+  "error",
+  "unhandledrejection",
+  "boundary",
+  "boot",
+  "dom-desync",
+  "stale-chunk",
+  "chunk-unreachable",
+  "stale-shell",
+  "shell-unverified",
+  "stale-chunk-fatal",
+];
+
+/** The proxy clamps `kind` to this many characters (`KIND_MAX` in
+ *  `telemetry.rs`) by silent truncation. A longer kind would land as a different
+ *  string — and one that merely *started* with `stale-chunk-fatal` would be
+ *  demoted to routine by the truncation alone, since the proxy pages on the
+ *  exact string. Nothing enforces this at runtime; the test does. */
+export const KIND_MAX_LENGTH = 20;
 
 /** The content-free beacon sent to `POST /api/telemetry/crash`. */
 export interface CrashPayload {
@@ -222,12 +255,13 @@ export function isStaleChunkMessage(message: string): boolean {
  *    catching a post-boot lazy-surface failure): kept as-is. The proxy logs it
  *    below paging level — the user got a refresh prompt and the app kept
  *    running, but a spike still flags an SW precache gap.
- *  - Any other stale chunk (the top-level `ErrorBoundary`, a raw
- *    window trap): rewritten to `stale-chunk-fatal` — nothing recovered and
- *    nothing handled it, so the app went down. That is only a *provisional*
- *    answer: it says the failure was fatal, not that our deploy caused it. The
- *    reporter re-requests the chunk and downgrades to `chunk-unreachable`
- *    unless the server confirms it is gone (see [`chunkFailureKind`]).
+ *  - Any other stale chunk (the top-level `ErrorBoundary`, a raw window trap,
+ *    a `boot` failure the entry caught with no recovery step left): rewritten
+ *    to `stale-chunk-fatal` — nothing recovered and nothing handled it, so the
+ *    app went down. That is only a *provisional* answer: it says the failure
+ *    was fatal, not that our deploy caused it. The reporter re-requests the
+ *    chunk and reads the live shell, and only their agreement keeps this shape
+ *    (see [`chunkFailureKind`]).
  */
 export function resolveCrashKind(
   kind: CrashKind,
@@ -246,9 +280,17 @@ export function resolveCrashKind(
  *  `unknown` = we couldn't ask (no URL in the message, cross-origin, 5xx). */
 export type ChunkProbe = "missing" | "served" | "unreachable" | "unknown";
 
+/** What fetching the *live shell* (`/`) told us about the deploy visitors are
+ *  receiving right now, compared with the shell this tab booted from — judged by
+ *  the module entry script each references, which Vite hashes per build.
+ *  `same` = the live shell is this very build; `different` = it is another
+ *  build (the client cannot order builds, so not "newer"); `unknown` = it could
+ *  not be fetched or carried no module entry. */
+export type ShellProbe = "same" | "different" | "unknown";
+
 /**
- * Final kind for a chunk load that took the app down, given what the re-request
- * found. **Only `missing` pages.**
+ * Final kind for a chunk load that took the app down, given what the two probes
+ * found. **Only `missing` + `same` pages.**
  *
  * The wording engines use for a failed `import()` describes the *symptom*, and
  * the symptom of deploy skew is identical to the symptom of a visitor's flaky
@@ -256,23 +298,100 @@ export type ChunkProbe = "missing" | "served" | "unreachable" | "unknown";
  * on 2026-07-28: four `stale-chunk-fatal` beacons naming `acquisition-*.js` and
  * `useBarWidth-*.css`, both of which were being served, from the very build the
  * live `index.html` pointed at — the shell and its chunks were the same, current
- * deploy, and the fetches had simply failed. (Boot recovery had already spent its
- * one reload on the first failure; the retry lost the same way, which the
- * escalation rule reads as "recovery exhausted on a broken deploy".)
+ * deploy, and the fetches had simply failed. So the chunk probe: the fatal shape
+ * requires the server to *confirm* the chunk is gone. Everything else reports as
+ * `chunk-unreachable`: still counted at the proxy (the app did go down for that
+ * user, and a spike is worth seeing), never a page, because nothing we deploy
+ * could have prevented it.
  *
- * So the fatal shape now requires the server to *confirm* the chunk is gone.
- * Everything else reports as `chunk-unreachable`: still counted at the proxy
- * (the app did go down for that user, and a spike is worth seeing), never a
- * page, because nothing we deploy could have prevented it.
+ * A gone chunk is still not proof of a broken deploy — it paged the maintainer
+ * again on 2026-09-11: a tab booted a shell 42 hours older than the live deploy
+ * (build `e699a38eec` against a live `25373c3a08`), its chunks were long purged,
+ * and the boot recovery's one reload could not get it a fresher shell. The
+ * deploy everyone else was receiving was fine. The old rule read "recovery
+ * exhausted + chunk gone" as "broken deploy", but that shape is also exactly what
+ * a *stale client* produces. Hence the shell probe: the live `/` is fetched and
+ * its module entry compared with ours. `different` means the tab is the stale
+ * party (`stale-shell`, counted, never paged); only `same` — the shell people are
+ * served right now names a chunk it doesn't serve — is a broken deploy.
  *
- * Erring toward `chunk-unreachable` on `unknown` is deliberate. It covers the
- * cases where we have no evidence at all — Safari's "Importing a module script
- * failed." carries no URL, a cross-origin chunk isn't ours to probe — and a
- * genuinely broken deploy still pages through every other visitor whose engine
- * does name the URL, which is the large majority.
+ * Erring away from paging on either `unknown` is deliberate, and the same
+ * argument twice over. `chunk-unreachable` covers the cases where we have no
+ * evidence at all — Safari's "Importing a module script failed." carries no
+ * URL, a cross-origin chunk isn't ours to probe. `shell-unverified` covers a
+ * shell fetch that timed out on a slow link, was blocked, or carried no entry
+ * script: a genuinely broken deploy still pages through every other visitor
+ * whose probes complete, which is the large majority, and the one cause that
+ * would be *ours* — the parser no longer matching the shell Vite emits — is
+ * caught by the post-build audit gate (`scripts/seo/audit.ts`), not left to the
+ * paging channel. It is a distinct kind rather than folded into `stale-shell`
+ * so that a probe regression is visible as a count in the log, not as silence.
  */
-export function chunkFailureKind(probe: ChunkProbe): CrashKind {
-  return probe === "missing" ? "stale-chunk-fatal" : "chunk-unreachable";
+export function chunkFailureKind(probe: ChunkProbe, shell: ShellProbe): CrashKind {
+  if (probe !== "missing") return "chunk-unreachable";
+  switch (shell) {
+    case "same":
+      return "stale-chunk-fatal";
+    case "different":
+      return "stale-shell";
+    default:
+      return "shell-unverified";
+  }
+}
+
+/** One `<script …>` start tag, with its attribute soup captured. */
+const SCRIPT_START_TAG = /<script\b([^>]*)>/gi;
+/** `type="module"` (any quoting) inside a tag's attributes. The lookahead keeps
+ *  `type=modules` or `type="module-x"` from matching. */
+const MODULE_TYPE = /\btype\s*=\s*(?:"module"|'module'|module(?=[\s/>]|$))/i;
+/** The `src` attribute's value, in any quoting. */
+const SRC_ATTRIBUTE = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
+
+/**
+ * The `src` of the first `<script type="module">` in an HTML document — the
+ * shell's module entry, which Vite hashes per build — or `null` when there is
+ * none.
+ *
+ * A pure string scan on purpose: it runs in the crash reporter against a
+ * fetched shell, in Vitest (Node, no DOM), and in the post-build audit under
+ * Bun, so `DOMParser` is available in exactly none of the places that need to
+ * test it. Attribute order is not assumed — the shell Vite emits is
+ * `<script type="module" crossorigin src="…">`, `crossorigin` between the two
+ * attributes the scan cares about — and inline module scripts (no `src`) and
+ * the shell's classic/JSON-LD scripts are skipped.
+ */
+export function moduleEntryFromHtml(html: string): string | null {
+  for (const tag of html.matchAll(SCRIPT_START_TAG)) {
+    const attributes = tag[1] ?? "";
+    if (!MODULE_TYPE.test(attributes)) continue;
+    const src = SRC_ATTRIBUTE.exec(attributes);
+    if (!src) continue;
+    const value = (src[1] ?? src[2] ?? src[3] ?? "").trim();
+    if (value) return value.replace(/&amp;/g, "&");
+  }
+  return null;
+}
+
+/**
+ * Compare the module entry this tab booted from with the one the live shell
+ * names. Pathnames only: ours is absolute (`import.meta.url` of the entry
+ * chunk), the shell's is root-relative, and the origin is the same by
+ * construction. `unknown` when either side is missing or unparseable — which
+ * [`chunkFailureKind`] never pages on.
+ */
+export function shellProbeVerdict(
+  ownEntry: string | null,
+  liveEntry: string | null,
+  base: string,
+): ShellProbe {
+  if (!ownEntry || !liveEntry) return "unknown";
+  try {
+    const own = new URL(ownEntry, base).pathname;
+    const live = new URL(liveEntry, base).pathname;
+    return own === live ? "same" : "different";
+  } catch {
+    return "unknown";
+  }
 }
 
 /** An absolute `https?://…` in the message (Chromium/Firefox both append the

@@ -54,6 +54,28 @@ endpoints:
     alerts:
       - type: discord
 
+  # The public web shell (GitHub Pages — not this host, hence the literal URL).
+  # Crash telemetry can only report from a shell that runs our JavaScript: a
+  # deploy whose index.html answers non-200 or carries no module entry emits no
+  # beacon at all, and the one signal that does arrive — an old tab's stale-chunk
+  # probe finding no entry in the live shell — is deliberately never a page
+  # (`shell-unverified`). So this is the monitor for that failure: the shell must
+  # answer 200 and name a hashed module entry under /assets/. The pattern is
+  # attribute-order-tolerant on purpose, like the app's own parser
+  # (moduleEntryFromHtml in core/telemetry/crashReport.ts) — Gatus's pat()
+  # strips every "/" from both sides before filepath.Match, so each "*" spans
+  # the whole document. Known gap: a shell whose entry chunk itself 404s still
+  # passes here (the tag is present) and still runs nothing; nothing reports it.
+  - name: web shell (GitHub Pages)
+    group: edge
+    url: "https://dweeb.faizo.net/"
+    interval: 300s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY] == pat(*<script*type=\"module\"*src=\"/assets/index-*.js\"*)"
+    alerts:
+      - type: discord
+
   # Deep readiness for the proxy: /ready probes each SQLite store (shortlinks,
   # schedules, activity drafts, message library, Stripe mirror) with a SELECT 1,
   # so a wedged/unwritable data volume alerts even while /health still 200s. 503

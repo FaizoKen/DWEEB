@@ -128,6 +128,59 @@ html:not([data-surface="activity"]) .seo-boot {
   font-size: var(--app-text-md);
 }
 
+/* The shell's terminal states, authored by main.tsx when boot cannot complete
+ * (see core/pwa/bootFailure): `data-seo-boot-state="updating"` while a recovery
+ * navigation is in flight, `"failed"` once every automatic step is spent — the
+ * loading line becomes a notice with one primary action. Plain DOM and plain
+ * classes: the App chunk (and with it `ui/Button`) is exactly what didn't load,
+ * and the CSP allows no inline handlers. No animation, so nothing here needs
+ * exempting from the reduced-motion collapse. */
+.seo-boot__notice {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.seo-boot .seo-boot__lead {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.seo-boot .seo-boot__detail {
+  font-family: var(--app-font-mono);
+  font-size: var(--app-text-xs);
+  color: var(--app-text-subtle);
+  word-break: break-word;
+}
+
+.seo-boot__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+  height: var(--app-control-h);
+  padding: 8px 16px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-accent);
+  color: #fff;
+  font-size: var(--app-text-base);
+  font-weight: 600;
+}
+
+.seo-boot__action:hover:not(:disabled) {
+  background: var(--app-accent-hover);
+}
+
+.seo-boot__action:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
+.seo-boot__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: minmax(420px, 1fr) minmax(0, 1fr);

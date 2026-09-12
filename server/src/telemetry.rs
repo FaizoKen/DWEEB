@@ -38,10 +38,12 @@ use crate::routes::AppState;
 #[derive(Deserialize)]
 pub struct CrashBody {
     /// Where the error surfaced: `error` (window.onerror), `unhandledrejection`,
-    /// or `boundary` (the React error boundary), plus `dom-desync` (a crash the
-    /// client *prevented*) and the three chunk-load refinements the client
-    /// resolves for itself — `stale-chunk`, `chunk-unreachable`,
-    /// `stale-chunk-fatal`. A short enum-like tag.
+    /// `boundary` (the React error boundary) or `boot` (the entry's boot promise
+    /// — the app never mounted; the boot shell showed a notice), plus
+    /// `dom-desync` (a crash the client *prevented*) and the five chunk-load
+    /// refinements the client resolves for itself — `stale-chunk`,
+    /// `chunk-unreachable`, `stale-shell`, `shell-unverified`,
+    /// `stale-chunk-fatal`. A short enum-like tag; see [`KIND_MAX`].
     #[serde(default)]
     kind: String,
     /// The error message. Not user content — an exception string like
@@ -77,6 +79,11 @@ pub struct CrashBody {
 
 /// Field caps. A crash message and a handful of stack frames are the only fields
 /// with any length to speak of; the rest are short tags.
+///
+/// `KIND_MAX` clamps by silent truncation, and [`is_routine_stale_chunk`] pages
+/// on the *exact* string `stale-chunk-fatal` — so every kind the client sends
+/// must fit (the frontend pins the same list against the same number in
+/// `crashReport.test.ts`), and no future kind may start with the fatal string.
 const KIND_MAX: usize = 20;
 const MESSAGE_MAX: usize = 300;
 const STACK_MAX: usize = 800;
@@ -151,18 +158,31 @@ const BACKGROUND_ONLY_CHUNKS: [&str; 1] = ["virtual_pwa-register"];
 /// log alerter.
 ///
 /// Routine covers the frontend's non-fatal shapes — `stale-chunk` (a
-/// `ChunkErrorBoundary` showed a refresh prompt while the app kept running) and
+/// `ChunkErrorBoundary` showed a refresh prompt while the app kept running),
 /// `chunk-unreachable` (the app went down, but re-requesting the chunk proved
 /// our host is still serving it, so the visitor's connection failed, not our
-/// deploy) — *and* every legacy kind (`boundary`/`error`/`unhandledrejection`):
-/// pre-fix clients ship from service-worker caches for weeks and keep sending
-/// the old crash shape for what is the same self-healing skew event.
+/// deploy), `stale-shell` (the chunk is gone, but the shell our host serves
+/// *right now* is a different build from the one that tab booted: a client
+/// whose cache outlived the deploy and could not reload past it — the
+/// 2026-09-11 page, a tab 42 hours behind the live build) and
+/// `shell-unverified` (the chunk is gone and the live shell could not be read;
+/// its own kind so a regression in that probe shows up as a count rather than
+/// as silence) — *and* every legacy kind (`boundary`/`error`/
+/// `unhandledrejection`): pre-fix clients ship from service-worker caches for
+/// weeks and keep sending the old crash shape for what is the same self-healing
+/// skew event. `boot` (the entry's own trap, with no recovery rung left) is
+/// routine for the same reason a current client's would be: it is the same
+/// stale-chunk event, and the client settles its fatality with the probes.
 ///
 /// The one shape that stays `warn` (and pages) is `stale-chunk-fatal`: a
 /// current client whose app went down on a chunk the server confirmed is
-/// **gone** — a broken deploy or an SW precache gap. Its single exception is a
-/// chunk from [`BACKGROUND_ONLY_CHUNKS`], which no user-visible path can be
-/// waiting on.
+/// **gone** *and* whose live shell is the very build that referenced it — a
+/// broken deploy. Its single exception is a chunk from
+/// [`BACKGROUND_ONLY_CHUNKS`], which no user-visible path can be waiting on.
+/// Clients from before the shell probe cannot tell a stale client from a
+/// broken deploy and keep sending the fatal shape for a stale boot until they
+/// update; the `build` field beside the kind is the triage key — a build that
+/// is not the live deploy's is a stale client, not a broken deploy.
 fn is_routine_stale_chunk(kind: &str, message: &str) -> bool {
     let lower = message.to_lowercase();
     if !STALE_CHUNK_MESSAGES
@@ -273,11 +293,13 @@ pub async fn crash_report(
     // WARNs). See [`is_routine_stale_chunk`] for what still pages.
     if is_routine_stale_chunk(&kind, &message) {
         // Same target and level either way; only the wording differs, so a log
-        // reader isn't told "deploy skew" about someone's dropped connection.
-        let summary = if kind == "chunk-unreachable" {
-            "web app chunk unreachable (client network, chunk still served)"
-        } else {
-            "web app stale chunk (deploy skew)"
+        // reader isn't told "deploy skew" about someone's dropped connection,
+        // or "broken deploy" about a tab that merely outlived one.
+        let summary = match kind.as_str() {
+            "chunk-unreachable" => "web app chunk unreachable (client network, chunk still served)",
+            "stale-shell" => "web app stale shell (client outlived the deploy; live shell differs)",
+            "shell-unverified" => "web app stale chunk (live shell unverified, probe inconclusive)",
+            _ => "web app stale chunk (deploy skew)",
         };
         tracing::info!(
             target: "web_crash",
@@ -435,6 +457,73 @@ mod tests {
         assert!(is_routine_stale_chunk(
             "boundary",
             "Unable to preload CSS for /assets/App-abc.css"
+        ));
+    }
+
+    #[test]
+    fn a_stale_client_is_counted_never_paged() {
+        // The 2026-09-11 page verbatim: a tab on build e699a38eec, 42 hours
+        // behind the live deploy, whose purged boot chunk the recovery reload
+        // could not get past. The client now reads the live shell before
+        // reporting and, finding a different build, sends this kind.
+        let msg = "Failed to fetch dynamically imported module: \
+                   https://dweeb.faizo.net/assets/flows-B2W2FfFo.js";
+        assert!(is_routine_stale_chunk("stale-shell", msg));
+        // A shell read that could not complete is also never a page — but it
+        // is its own kind, so a probe regression is countable, not silent.
+        assert!(is_routine_stale_chunk("shell-unverified", msg));
+        // The entry's own trap, for the same chunk failure, on a client that
+        // had no recovery step left: routine like every non-fatal kind.
+        assert!(is_routine_stale_chunk("boot", msg));
+    }
+
+    #[test]
+    fn a_boot_failure_of_our_own_still_pages() {
+        // `boot` is the entry catching its own promise; when the message is not
+        // a chunk failure it is a bug in the boot path and must page as a crash.
+        assert!(!is_routine_stale_chunk(
+            "boot",
+            "Cannot destructure property 'App' of undefined"
+        ));
+        assert!(!is_repaired_dom_desync("boot"));
+        assert!(!is_foreign_code_error("boot", "boom", "@ @ Pk@"));
+    }
+
+    #[test]
+    fn every_client_kind_fits_kind_max_and_only_one_is_fatal() {
+        // `clamp_field` truncates silently, and the fatal rule matches the
+        // exact string: a kind longer than KIND_MAX would land as something
+        // else, and one that merely started with the fatal string would be
+        // demoted to routine by the truncation alone. Mirrors CRASH_KINDS in
+        // the frontend's crashReport.ts.
+        const CLIENT_KINDS: [&str; 10] = [
+            "error",
+            "unhandledrejection",
+            "boundary",
+            "boot",
+            "dom-desync",
+            "stale-chunk",
+            "chunk-unreachable",
+            "stale-shell",
+            "shell-unverified",
+            "stale-chunk-fatal",
+        ];
+        for kind in CLIENT_KINDS {
+            assert!(kind.len() <= KIND_MAX, "{kind} exceeds KIND_MAX");
+            assert_eq!(clamp_field(kind, KIND_MAX), kind);
+            assert_eq!(
+                kind.starts_with("stale-chunk-fatal"),
+                kind == "stale-chunk-fatal",
+                "{kind} would collide with the fatal rule"
+            );
+        }
+        // And the trap itself, pinned: a too-long fatal variant is clamped into
+        // a routine kind.
+        let clamped = clamp_field("stale-chunk-fatal-unverified", KIND_MAX);
+        assert_ne!(clamped, "stale-chunk-fatal");
+        assert!(is_routine_stale_chunk(
+            &clamped,
+            "Failed to fetch dynamically imported module: https://x/a.js"
         ));
     }
 

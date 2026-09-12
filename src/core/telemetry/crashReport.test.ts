@@ -5,6 +5,7 @@ import {
   buildCrashPayload,
   chunkFailureKind,
   chunkProbeUrl,
+  CRASH_KINDS,
   crashSignature,
   CrashThrottle,
   describeError,
@@ -12,7 +13,10 @@ import {
   isForeignCodeError,
   isNonCrashMessage,
   isStaleChunkMessage,
+  KIND_MAX_LENGTH,
+  moduleEntryFromHtml,
   resolveCrashKind,
+  shellProbeVerdict,
   topFrames,
   type CrashInput,
 } from "./crashReport";
@@ -220,28 +224,140 @@ describe("resolveCrashKind", () => {
     expect(resolveCrashKind("boundary", STALE, false)).toBe("stale-chunk-fatal");
     expect(resolveCrashKind("error", STALE, false)).toBe("stale-chunk-fatal");
     expect(resolveCrashKind("unhandledrejection", STALE, false)).toBe("stale-chunk-fatal");
+    // The entry's own trap takes the same road: provisional, then probed.
+    expect(resolveCrashKind("boot", STALE, false)).toBe("stale-chunk-fatal");
+  });
+
+  it("passes a boot failure that is not a chunk load through as itself", () => {
+    // A bug in the boot path pages as a plain crash — the entry never reaches
+    // the ErrorBoundary, so `boot` is its only trap.
+    expect(resolveCrashKind("boot", "Cannot destructure property 'App' of undefined", false)).toBe(
+      "boot",
+    );
   });
 });
 
 describe("chunkFailureKind", () => {
-  it("pages only when the server confirms the chunk is gone", () => {
-    expect(chunkFailureKind("missing")).toBe("stale-chunk-fatal");
+  it("pages only when the chunk is gone AND the live shell is this very build", () => {
+    // Both probes agree: the shell people receive right now names a chunk our
+    // host doesn't serve. That is a broken deploy.
+    expect(chunkFailureKind("missing", "same")).toBe("stale-chunk-fatal");
+  });
+
+  it("counts a gone chunk under a shell that has moved on as a stale client, never a page", () => {
+    // The 2026-09-11 page verbatim: build e699a38eec booted 42 hours after it
+    // was replaced, its `flows-*.js` long purged, the recovery reload unable to
+    // get past the cached shell. The live deploy was fine the whole time.
+    expect(chunkFailureKind("missing", "different")).toBe("stale-shell");
+  });
+
+  it("sends an unreadable live shell as its own non-paging kind", () => {
+    // A timed-out or blocked shell read is the visitor's link; the one cause
+    // that would be ours (the parser no longer matching the shell) is caught by
+    // the post-build audit gate. Distinct from `stale-shell` so a regression in
+    // the probe is a count in the log, not silence.
+    expect(chunkFailureKind("missing", "unknown")).toBe("shell-unverified");
   });
 
   it("blames the connection, not the deploy, when the chunk is still served", () => {
     // The 2026-07-28 page verbatim: `acquisition-*.js` and `useBarWidth-*.css`
     // were both being served, from the build the live index.html pointed at.
-    expect(chunkFailureKind("served")).toBe("chunk-unreachable");
+    // Whatever the shell said is irrelevant — the chunk was there.
+    expect(chunkFailureKind("served", "same")).toBe("chunk-unreachable");
+    expect(chunkFailureKind("served", "unknown")).toBe("chunk-unreachable");
   });
 
   it("treats an unreachable probe as the visitor's network", () => {
-    expect(chunkFailureKind("unreachable")).toBe("chunk-unreachable");
+    expect(chunkFailureKind("unreachable", "unknown")).toBe("chunk-unreachable");
+    expect(chunkFailureKind("unreachable", "same")).toBe("chunk-unreachable");
   });
 
   it("errs away from paging when there is nothing to check", () => {
     // Safari's "Importing a module script failed." carries no URL; a real
     // broken deploy still pages through every engine that does name one.
-    expect(chunkFailureKind("unknown")).toBe("chunk-unreachable");
+    expect(chunkFailureKind("unknown", "unknown")).toBe("chunk-unreachable");
+  });
+});
+
+describe("moduleEntryFromHtml", () => {
+  // The shell exactly as Vite emits it: `crossorigin` sits between `type` and
+  // `src`, classic and JSON-LD scripts precede it, an inline module has no src.
+  const SHELL = `<!doctype html>
+<html lang="en"><head>
+<script>(function(){try{if(new URLSearchParams(location.search).has("frame_id")){document.documentElement.dataset.surface="activity"}}catch(e){}})();</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication"}</script>
+<script type="module">console.log("inline")</script>
+<script defer src="/gtag-init.js"></script>
+<script type="module" crossorigin src="/assets/index-DcBtb6aN.js"></script>
+<link rel="stylesheet" crossorigin href="/assets/index-DLC0YOu0.css">
+</head><body><div id="root"><main class="seo-boot" data-seo-boot aria-busy="true"></main></div></body></html>`;
+
+  it("finds the module entry the shell actually carries", () => {
+    expect(moduleEntryFromHtml(SHELL)).toBe("/assets/index-DcBtb6aN.js");
+  });
+
+  it("does not care about attribute order or quoting", () => {
+    expect(moduleEntryFromHtml(`<script src="/a.js" type="module"></script>`)).toBe("/a.js");
+    expect(moduleEntryFromHtml(`<script src='/b.js' type='module'></script>`)).toBe("/b.js");
+    expect(moduleEntryFromHtml(`<script type=module src=/c.js></script>`)).toBe("/c.js");
+    expect(moduleEntryFromHtml(`<SCRIPT TYPE="module" SRC="/d.js"></SCRIPT>`)).toBe("/d.js");
+    expect(
+      moduleEntryFromHtml(`<script\n  type="module"\n  crossorigin\n  src="/e.js"\n></script>`),
+    ).toBe("/e.js");
+  });
+
+  it("skips scripts that are not module entries", () => {
+    expect(moduleEntryFromHtml(`<script src="/classic.js"></script>`)).toBe(null);
+    expect(moduleEntryFromHtml(`<script type="module">inline()</script>`)).toBe(null);
+    expect(moduleEntryFromHtml(`<script type="modules" src="/x.js"></script>`)).toBe(null);
+    expect(moduleEntryFromHtml(`<script type="text/javascript" src="/x.js"></script>`)).toBe(null);
+    expect(moduleEntryFromHtml("")).toBe(null);
+    expect(moduleEntryFromHtml("<html><body>Not a shell at all</body></html>")).toBe(null);
+  });
+
+  it("returns the first module entry when there are several", () => {
+    expect(
+      moduleEntryFromHtml(
+        `<script type="module" src="/first.js"></script><script type="module" src="/second.js"></script>`,
+      ),
+    ).toBe("/first.js");
+  });
+});
+
+describe("shellProbeVerdict", () => {
+  const ORIGIN = "https://dweeb.faizo.net";
+  const OWN = "https://dweeb.faizo.net/assets/index-CVox9PLO.js";
+
+  it("recognises its own build in the live shell", () => {
+    expect(shellProbeVerdict(OWN, "/assets/index-CVox9PLO.js", ORIGIN)).toBe("same");
+    expect(shellProbeVerdict(OWN, "https://dweeb.faizo.net/assets/index-CVox9PLO.js", ORIGIN)).toBe(
+      "same",
+    );
+  });
+
+  it("recognises another build — 'different', not 'newer': the client cannot order builds", () => {
+    expect(shellProbeVerdict(OWN, "/assets/index-DcBtb6aN.js", ORIGIN)).toBe("different");
+  });
+
+  it("is unknown when either side is missing or unparseable", () => {
+    expect(shellProbeVerdict(null, "/assets/index-DcBtb6aN.js", ORIGIN)).toBe("unknown");
+    expect(shellProbeVerdict(OWN, null, ORIGIN)).toBe("unknown");
+    expect(shellProbeVerdict("", "/assets/x.js", ORIGIN)).toBe("unknown");
+    expect(shellProbeVerdict(OWN, "/assets/x.js", "not a base")).toBe("unknown");
+  });
+});
+
+describe("CRASH_KINDS", () => {
+  it("all fit the proxy's kind clamp, and only one is the fatal string", () => {
+    // `telemetry.rs` clamps `kind` to KIND_MAX by silent truncation and pages
+    // on the exact string `stale-chunk-fatal`: a longer kind would land as
+    // something else, and one merely starting with the fatal string would be
+    // demoted to routine by the truncation alone.
+    for (const kind of CRASH_KINDS) {
+      expect(kind.length).toBeLessThanOrEqual(KIND_MAX_LENGTH);
+      expect(kind.startsWith("stale-chunk-fatal")).toBe(kind === "stale-chunk-fatal");
+    }
+    expect(new Set(CRASH_KINDS).size).toBe(CRASH_KINDS.length);
   });
 });
 

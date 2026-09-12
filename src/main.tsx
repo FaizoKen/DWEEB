@@ -5,10 +5,22 @@ import { isActivityMode } from "@/core/activity/runtime";
 import {
   installCrashReporter,
   reportBackgroundFailure,
+  reportBootFailure,
   reportDomDesync,
 } from "@/core/telemetry/reporter";
+import { describeError, isStaleChunkMessage } from "@/core/telemetry/crashReport";
 import { installDomDesyncGuard } from "@/core/dom/domGuard";
-import { installStaleChunkRecovery } from "@/core/pwa/staleChunkRecovery";
+import {
+  installStaleChunkRecovery,
+  recoverFromBootFailure,
+  refreshPastStaleShell,
+} from "@/core/pwa/staleChunkRecovery";
+import {
+  bootNoticeCopy,
+  markBootShellUpdating,
+  renderBootNotice,
+  type BootNoticeReason,
+} from "@/core/pwa/bootFailure";
 import { trackAnalytics } from "@/core/telemetry/analytics";
 import "@/styles/global.css";
 
@@ -26,11 +38,14 @@ installCrashReporter();
 // report needs the reporter installed above.
 installDomDesyncGuard(reportDomDesync);
 
-// Arm deploy-skew recovery before the first dynamic import below: a stale
-// cached shell whose hashed chunks were purged by a newer deploy gets one
-// automatic reload onto the fresh build instead of dying at boot (see
-// core/pwa/staleChunkRecovery). Must precede `bootActivity`/`bootWeb`, whose
-// imports are exactly the ones that fail in that state.
+// Arm deploy-skew recovery before the first dynamic import below: it strips the
+// refresh nonce a previous recovery navigation may have left in the URL (before
+// anything reads the URL for app state) and starts watching for the surface to
+// commit. The recovery itself runs from `onBootFailure`: a stale cached shell
+// whose hashed chunks were purged by a newer deploy climbs a short ladder of
+// navigations onto the fresh build instead of dying at boot, and a boot that
+// cannot be recovered ends in a notice, never a frozen "Loading…" (see
+// core/pwa/staleChunkRecovery and core/pwa/bootFailure).
 installStaleChunkRecovery();
 
 // Discord launches the Activity at our domain root with `?frame_id=…` in the
@@ -43,10 +58,72 @@ installStaleChunkRecovery();
 // wiring, the service-worker update prompt), and the public site never downloads
 // the Embedded App SDK. The always-run entry itself stays tiny — just the branch
 // decision — so the code split is the whole payload difference between surfaces.
+//
+// Both boots are caught: a rejection here used to fall into the global
+// `unhandledrejection` trap with the shell still saying "Loading…", which is how
+// the 2026-09-11 stale-shell crash reached the maintainer twice from one tab
+// while the visitor got nothing at all.
 if (isActivityMode()) {
-  void bootActivity();
+  void bootActivity().catch(onBootFailure);
 } else {
-  void bootWeb();
+  void bootWeb().catch(onBootFailure);
+}
+
+/**
+ * The boot promise rejected — a chunk didn't load, or the entry threw. Climb the
+ * recovery ladder if a rung is left (the shell says "Updating…" meanwhile);
+ * otherwise turn the shell into a notice and report. Runs for both surfaces.
+ */
+function onBootFailure(error: unknown): void {
+  console.error("[boot]", error);
+  const outcome = recoverFromBootFailure(error, () => showBootFailure(error));
+  if (outcome === "in-flight") return;
+  if (outcome === "navigating") {
+    markBootShellUpdating();
+    return;
+  }
+  showBootFailure(error);
+}
+
+let bootFailureReported = false;
+
+/** No automatic step left (or one never committed): the shell becomes the
+ *  notice, its button is the manual path, and the failure is reported once. */
+function showBootFailure(error: unknown): void {
+  const { message } = describeError(error);
+  const stale = isStaleChunkMessage(message);
+  const reason: BootNoticeReason = stale
+    ? navigator.onLine === false
+      ? "offline"
+      : "stale-chunk"
+    : "error";
+  const copy = bootNoticeCopy(
+    reason,
+    isActivityMode() ? "activity" : "web",
+    stale ? undefined : message,
+  );
+  const button = renderBootNotice(copy);
+  if (button) {
+    button.addEventListener("click", () => {
+      if (reason !== "stale-chunk") {
+        window.location.reload();
+        return;
+      }
+      // The bypass step on demand: fetch the shell afresh, past any worker. The
+      // button is disabled until the navigation commits or is declared stuck.
+      button.disabled = true;
+      button.textContent = "Refreshing…";
+      const restore = () => {
+        button.disabled = false;
+        button.textContent = copy.action;
+      };
+      if (!refreshPastStaleShell(restore)) restore();
+    });
+  }
+  if (!bootFailureReported) {
+    bootFailureReported = true;
+    reportBootFailure(error);
+  }
 }
 
 /** How long the outgoing boot shell takes to dissolve. Must match the
@@ -87,6 +164,13 @@ function mount(node: ReactNode): void {
  * alone instead of a cross-fade between two different-looking screens.
  */
 function dismissBootShell(shell: HTMLElement): void {
+  // A shell that already became the failure notice has nothing to hand over;
+  // dissolving it over a live app would flash the notice. (Not reachable today —
+  // a failed boot never mounts — but the invariant is cheap.)
+  if (shell.dataset.seoBootState === "failed") {
+    shell.remove();
+    return;
+  }
   // It carries an <h1> and briefly outlives App's own, so keep it out of the
   // accessibility tree and out of the way of pointers for the ~220ms it lives.
   shell.setAttribute("aria-hidden", "true");
@@ -120,6 +204,16 @@ async function bootWeb(): Promise<void> {
   const appPromise = import("@/app/App");
   const installPromptPromise = import("@/core/pwa/installPrompt");
   const acquisitionPromise = import("@/core/seo/acquisition");
+  // Side branches only — the originals are still awaited below, so a failure
+  // still surfaces once, through `onBootFailure`. Without these, a rejection
+  // in the popup-flow stage below leaves three un-awaited promises behind it,
+  // each of which reaches the global `unhandledrejection` trap on its own: the
+  // 2026-09-11 page was one dead boot reported twice (`flows-*.js`, then
+  // `App-*.js`). Never assign the result — a `.catch` in the chain would turn a
+  // 404 into `undefined` and the destructuring below into a different crash.
+  for (const speculative of [appPromise, installPromptPromise, acquisitionPromise]) {
+    void speculative.catch(() => {});
+  }
 
   // When we're an OAuth popup returning (webhook create / login / add-bot), hand
   // the result back to the window that opened us and close — never boot the full

@@ -225,7 +225,10 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   edge runs straight through the product title. (2) **`mount()` re-parents the shell to
   `<body>` and dissolves it** there over the already-rendered app (`dismissBootShell`) rather
   than deleting it — a warm load only shows it ~70-200ms, which as a hard cut reads as a flash
-  rather than as a page loading. It cannot simply stay inside `#root` for the fade: Preact's
+  rather than as a page loading. (One exception: a shell that has already become the
+  boot-failure notice, `data-seo-boot-state="failed"` — point 7 of the deploy-skew entry — is
+  removed outright, since dissolving a failure notice over a live app would flash it;
+  unreachable today, as a failed boot never mounts.) It cannot simply stay inside `#root` for the fade: Preact's
   `render` treats a container's existing children as excess DOM it may reuse or remove itself.
   (3) **`.app-bootstrap` fades in after a beat**, like `.gallery-bootstrap__hint` — on a first
   visit it is on screen ~100ms between the shell leaving and the gallery covering it, a third
@@ -239,17 +242,20 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   and every deploy purges the old hashed chunks, so a tab that isn't SW-controlled can hit a
   404 on a lazy `import()` ("Failed to fetch dynamically imported module" — this paged the
   maintainer repeatedly on 0.12.0, first at boot, then post-boot when an open tab's Template
-  gallery chunk vanished). Four layers, each with a reason to exist — keep all of them:
+  gallery chunk vanished). Several layers, each with a reason to exist — keep all of them:
   1. **SW precache + `clientsClaim`** (vite.config.ts): the precache protects controlled
      tabs across deploys, and `clientsClaim: true` closes the first-visit hole where the very
      session that installed the worker stayed uncontrolled to its end. Safe with
      `registerType: "prompt"`: an *updated* worker never skips waiting, so it can't activate
      (or claim) under an old tab.
-  2. **Boot**: `core/pwa/staleChunkRecovery.ts` (armed first thing in `main.tsx`) listens for
-     Vite's `vite:preloadError` and reloads once — guarded per **build** via sessionStorage so
-     it can never loop, and only **before** `dweeb:surface-ready` so an automatic reload can't
-     destroy a user's in-progress message. Keep new boot-path dynamic imports behind this
-     ordering. The guard key is `__BUILD_ID__`, not `__APP_VERSION__`: package.json has read
+  2. **Boot**: `core/pwa/staleChunkRecovery.ts` (armed first thing in `main.tsx`) recovers a
+     failed boot with a short ladder of navigations — since 2026-09-11 run from the boot
+     promise's `.catch`, no longer from Vite's `vite:preloadError` (point 7 has the ladder and
+     its guards) — recorded per **build** via sessionStorage so it can never loop, and only
+     **before** `dweeb:surface-ready` so an automatic navigation can't destroy a user's
+     in-progress message. Keep new boot-path dynamic imports inside `bootWeb`/`bootActivity`'s
+     awaited chain so that `.catch` sees them. The guard key is `__BUILD_ID__`, not
+     `__APP_VERSION__`: package.json has read
      `1.0.0` across every deploy since launch, so a version key turned "once per version, per
      tab" into "once per tab, ever" — a long-lived tab that recovered from one deploy's skew
      could never recover from the next and reported it as fatal instead (2026-07-28). Any
@@ -262,13 +268,15 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
      *and* any `*Mounted` latch) or the cached rejection rethrows forever. Never auto-reload
      post-boot. The top `ErrorBoundary` also has a stale-chunk branch (accurate copy,
      hash-preserving reload) for anything that still gets through.
-  4. **Reporting** (`resolveCrashKind` in crashReport.ts + `telemetry.rs`): dropped while the
-     boot reload is in flight; a boundary-handled failure reports as kind `stale-chunk`; an
-     unhandled one is escalated to `stale-chunk-fatal`. The proxy logs any stale-chunk message
-     that isn't `stale-chunk-fatal` at **info** (same `web_crash` target, still greppable) so
-     routine skew — including the long tail of pre-fix SW-cached clients — never pages;
-     `stale-chunk-fatal` stays a warn and pages, because a current client actually going down
-     means a broken deploy or SW precache gap. Don't "simplify" any of this into an
+  4. **Reporting** (`resolveCrashKind` in crashReport.ts + `telemetry.rs`): dropped while a
+     boot recovery navigation is in flight; a boundary-handled failure reports as kind
+     `stale-chunk`; an unhandled one (or a `boot` failure with no rung left) is escalated
+     *provisionally* to `stale-chunk-fatal` and settled by two probes (below, and point 7). The
+     proxy logs any stale-chunk message that isn't `stale-chunk-fatal` at **info** (same
+     `web_crash` target, still greppable) so routine skew — including the long tail of pre-fix
+     SW-cached clients — never pages; `stale-chunk-fatal` stays a warn and pages, because since
+     2026-09-11 it means the shell our host serves *right now* is this very build and names a
+     chunk it doesn't serve — a broken deploy. Don't "simplify" any of this into an
      unconditional drop, and deploy the server change before (or with) the web one — the old
      proxy logs every stale-chunk beacon at warn.
      **A chunk-load message is a symptom, not a diagnosis — the fatal shape must be verified**
@@ -280,12 +288,14 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
      was stale, the fetches had simply lost, and boot recovery's one reload lost the same way,
      which the escalation rule reads as "recovery exhausted on a broken deploy". So before the
      page-worthy shape goes out, `verifyChunkFailure` (reporter.ts) re-requests the failing
-     chunk same-origin (HEAD, `cache:"no-store"`, 4s abort) and `chunkFailureKind` decides:
-     a **4xx** confirms the chunk is gone → `stale-chunk-fatal`, pages; **200 / an unreachable
+     chunk same-origin (HEAD, `cache:"no-store"`, 4s abort) — and, concurrently, reads the
+     live shell (point 7) — and `chunkFailureKind` decides: a **4xx** *and* a live shell whose
+     module entry is ours → `stale-chunk-fatal`, pages; 4xx + a different live shell →
+     `stale-shell`; 4xx + an unreadable live shell → `shell-unverified`; **200 / an unreachable
      probe / nothing to ask** (Safari's message carries no URL, cross-origin, 5xx) →
-     `chunk-unreachable`, which the proxy logs at info under the same target. Err toward
-     `chunk-unreachable` — a genuinely broken deploy still pages through every visitor whose
-     engine names the URL. Probe the **unclamped** message: a URL cut by the 300-char cap would
+     `chunk-unreachable` — the last three all logged at info under the same target. Err toward
+     the non-paging kinds — a genuinely broken deploy still pages through every visitor whose
+     engine names the URL and whose probes complete. Probe the **unclamped** message: a URL cut by the 300-char cap would
      404 and manufacture a false page. The throttle slot is claimed synchronously *before* the
      probe so a crash loop can't fire one request per frame, and the probe must never reject —
      an escaping rejection lands back in our own `unhandledrejection` trap. This one is
@@ -317,6 +327,86 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
      chunk there only if it is reachable *solely* from fire-and-forget work, since the entry
      exempts it from paging for good. (`workbox-window` needs no entry: `manualChunks` folds it
      into `vendor`, which is already loaded, so its inner import can never 404.)
+  7. **A stale tab is not a broken deploy — the fatal shape needs both probes, a boot can't die
+     on "Loading…", and it never navigates more than twice per build (four per tab in ten
+     minutes)** (2026-09-11). Two `stale-chunk-fatal`
+     beacons paged from ONE tab on build `e699a38eec`, 42 h after `42e4218` replaced it: its boot
+     chunks (`flows-*.js`, then `App-*.js`) were long purged, the live shell was fine, and the one
+     recovery reload came back on the same stale shell — under a controlling service worker a
+     reload, and any `/?…` navigation, is answered from the precache (`SPA_NAVIGATION_ALLOWLIST`
+     admits root queries), so a reload can never escape a worker-served shell. The old rule read
+     "recovery exhausted + chunk 404" as "broken deploy"; a stale client produces the identical
+     shape, and the fatal kind had never once paged for a real broken deploy. Three changes:
+     (a) **`stale-chunk-fatal` now requires the live shell to be *this* build.** After the chunk
+     HEAD answers 4xx, `probeLiveShell` (reporter.ts) fetches `/?dweeb-probe=<nonce>` with
+     `cache:"no-store"` — an unknown query misses the SW precache and a `fetch()` is not a
+     navigation, so it reaches the network (but NOT past the Pages CDN, which keys on the path and
+     ignores the query; that copy is ≤10 min old, fresh enough) — and compares its module entry
+     with this document's first *same-origin* module script (`moduleEntryFromHtml`, an
+     attribute-order-tolerant string scan: Vite emits `type="module" crossorigin src=…`; the
+     origin check matters because extensions inject `chrome-extension://` module scripts ahead
+     of ours, and taking one as "ours" would read every live shell as `different`). Both probes
+     run concurrently so the beacon is out within 6 s. `same` → fatal (pages); `different` →
+     `stale-shell`; unreadable → `shell-unverified` (its own kind so a probe regression is a
+     count, not silence). One bounded residue stays: inside the ~10-minute post-deploy CDN
+     window an edge still serving the previous shell answers the probe with that same shell, so
+     a visitor who got it (chunks already purged) still pages as fatal although the deploy is
+     fine — the pre-existing 0.12.0 class, and nothing client-side can bust the CDN; the
+     `build` beside the kind (equal to the sha that was live minutes earlier) says which it was.
+     Both new kinds log at info on
+     the proxy and already did — `is_routine_stale_chunk` demotes every kind but the exact fatal
+     string — so no deploy ordering. Kinds are clamped to `KIND_MAX`=20 by silent truncation;
+     `CRASH_KINDS`/`KIND_MAX_LENGTH` and the Rust twin pin every kind's length and that only one
+     starts with the fatal string. `scripts/seo/audit.ts` runs `moduleEntryFromHtml` over the built
+     `dist/index.html` and fails the build if it doesn't return the manifest's entry: that gate,
+     not the paging channel, is where parser/markup drift must fail. Pre-fix SW-cached clients keep
+     sending the fatal shape for a stale boot until they update; `build` ≠ the live deploy's sha is
+     the triage key. The Gatus `web shell` check (hand-synced config) covers a shell that
+     answers non-200 or carries no hashed module entry — a deploy no beacon can report; a shell
+     whose entry chunk itself 404s still runs nothing and is reported by nothing, a known gap.
+     Server-side classification was considered
+     and rejected: the proxy has no deploy knowledge, and learning "newest build" from an
+     unauthenticated beacon would let one forged POST silence the paging channel.
+     (b) **The recovery is a ladder run from the boot promise's `.catch`, no longer from
+     `vite:preloadError`** (`recoverFromBootFailure` in staleChunkRecovery.ts; both boots in
+     main.tsx are caught, and the three speculative imports get side-branch `.catch`es so one dead
+     boot is one report, not one per un-awaited promise — never *assign* those, or a 404 becomes
+     `undefined` and a different, page-worthy crash). Per build, per tab: step 1 `location.reload()`;
+     step 2 "bypass" — unregister every service worker for the origin (web only; other tabs keep
+     theirs until they navigate; the app re-registers ~8 s after the next good boot) then
+     `location.replace` the same URL plus a `dweeb-refresh=<nonce>` query, built by verbatim string
+     surgery on `search`/`hash` (never a `URL` round trip — the Activity's `frame_id`/`instance_id`
+     and the share hash must survive byte-for-byte) and stripped again first thing in
+     `installStaleChunkRecovery`. Guards, each pinned by a test: a step runs only after a
+     read-back-verified `sessionStorage` record (no storage ⇒ no automatic step, as before); a boot
+     whose URL carried the nonce never bypasses again; an absolute per-tab cap
+     (`MAX_AUTOMATIC_NAVIGATIONS`=4 per 10 min, independent of the build key — two builds both
+     failing behind a CDN still serving the old shell would otherwise earn a fresh ladder per
+     alternation); never past `dweeb:surface-ready`; only for the stale-chunk message class (a bug
+     in the entry boots identically every time); never into the void (the bypass never runs
+     offline, and a reload runs offline only under a controlling worker, which may serve it). A
+     20 s watchdog — cancelled by `pagehide`, re-triggered by a persisted `pageshow`, i.e. a
+     back/forward-cache restore after the user left mid-recovery — hands a navigation that never
+     commits back to the notice, otherwise the tab is frozen *and* the reporter muted; it is
+     long on purpose, since a slow link's navigation commits late and must not be declared
+     stuck. Keep step 1 unconditional (`serviceWorker.controller` doesn't
+     prove the shell came from the worker, and a reload preserves a healthy precache) and keep the
+     ladder off `vite:preloadError`, which also fires for post-boot lazy failures in the Activity —
+     which never dispatches `surface-ready` — and used to auto-reload them mid-session.
+     (c) **A boot that cannot be recovered ends in a notice, never a frozen "Loading…"**
+     (`core/pwa/bootFailure.ts`): the shell is stamped `data-seo-boot-state="updating"` (its
+     loading line says so) while a navigation is in flight, and becomes a `role="alert"` notice
+     (`failed`) with one button after — plain DOM and `global.css` classes, since the App chunk is
+     exactly what didn't load and the CSP allows no inline handlers; the product H1 is untouched
+     (it stays the page's only `<h1>`). Copy says the app has *probably* been updated (an offline
+     tab produces the same error); the stale-chunk notice's button is the bypass on demand
+     (storage-free, idempotent, disabled until the navigation commits or is declared stuck),
+     while the offline and error notices reload in place. The failure reports as kind
+     `boot` — a chunk message takes the probe road above, anything else pages as our own crash —
+     because the entry never reaches the `ErrorBoundary`. Only a shell still inside `#root` is
+     rewritten; once `mount()` re-parents it, it is the app's. `ErrorBoundary`'s generic "Reload
+     editor" now reloads in place in the Activity — `assign("/")` dropped `frame_id` and rebooted
+     the web surface inside Discord.
 - **`Field` rewrites the caller's element tree — it must never descend into a render prop.**
   `ui/Field`'s `wireControl` walks the tree its render-prop child returns and clones
   `aria-describedby`/`aria-errormessage`/`aria-invalid` onto the element carrying the control id.

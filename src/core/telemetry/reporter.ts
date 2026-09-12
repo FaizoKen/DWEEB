@@ -36,10 +36,13 @@ import {
   domDesyncMessage,
   isForeignCodeError,
   isNonCrashMessage,
+  moduleEntryFromHtml,
   resolveCrashKind,
+  shellProbeVerdict,
   type ChunkProbe,
   type CrashKind,
   type CrashPayload,
+  type ShellProbe,
 } from "./crashReport";
 
 /** `__APP_VERSION__` is injected at build time by Vite's `define` (declared in
@@ -173,6 +176,21 @@ export function reportBackgroundFailure(error: unknown): void {
   report(backgroundFailureKind(describeError(error).message), error);
 }
 
+/**
+ * Report a failure the entry caught before the app could mount: `main.tsx`'s
+ * boot promise rejected and no automatic recovery step was left (see
+ * `core/pwa/staleChunkRecovery`), so the boot shell became a notice. Sent as
+ * `boot`. A chunk-load failure then takes the same road as any other fatal
+ * stale chunk — `resolveCrashKind` escalates it provisionally and the two
+ * probes below settle it, so it pages only when the live shell is this very
+ * build. Anything else is a fault of ours in the boot path and pages as a plain
+ * crash: the entry never reaches the `ErrorBoundary`, so this is its only trap.
+ */
+export function reportBootFailure(error: unknown): void {
+  if (!enabled()) return;
+  report("boot", error);
+}
+
 /** Shared path: build → throttle → beacon. Never throws. */
 function report(kind: CrashKind, error: unknown): void {
   try {
@@ -227,23 +245,116 @@ function report(kind: CrashKind, error: unknown): void {
  *  while the page is alive. */
 const PROBE_TIMEOUT_MS = 4_000;
 
+/** How long the live-shell read gets. The shell is ~7 KB gzipped, so this is
+ *  generous; a slower link answers `unknown`, which never pages. */
+const SHELL_PROBE_TIMEOUT_MS = 6_000;
+
+/** Query parameter that makes the shell read miss the browser's HTTP cache and
+ *  the service worker's precache — an unknown parameter matches no precached
+ *  URL, and a `fetch()` is not a navigation, so the SPA fallback route ignores
+ *  it — and so reach the network. (The Pages CDN keys on the path and ignores
+ *  it; that copy is at most ten minutes old, which is fresh for this purpose.) */
+const SHELL_PROBE_PARAM = "dweeb-probe";
+
 /**
- * Re-request the chunk that failed and send the beacon with the kind its answer
- * justifies (see [`chunkFailureKind`]). Deliberately delays the beacon by up to
- * `PROBE_TIMEOUT_MS`: telemetry is best-effort and losing a report to a closed
- * tab costs far less than paging the maintainer about a visitor's dropped
- * connection. Never throws and never rejects — an escaping rejection here would
- * land straight back in our own `unhandledrejection` trap.
+ * Re-request the chunk that failed, read the live shell, and send the beacon
+ * with the kind their answers justify (see [`chunkFailureKind`]). Both probes
+ * start at once so the beacon is out within one timeout: a visitor may press the
+ * boot notice's button at any moment, and a beacon that hasn't started by then
+ * is lost with the page. The shell read is abandoned as soon as the chunk turns
+ * out not to be missing, since only a missing chunk makes it matter.
+ *
+ * Deliberately delays the beacon by up to `SHELL_PROBE_TIMEOUT_MS`: telemetry
+ * is best-effort and losing a report to a closed tab costs far less than paging
+ * the maintainer about a visitor's dropped connection or a tab that outlived a
+ * deploy. Never throws and never rejects — an escaping rejection here would land
+ * straight back in our own `unhandledrejection` trap.
  */
 async function verifyChunkFailure(payload: CrashPayload, rawMessage: string): Promise<void> {
   try {
     const origin = typeof location !== "undefined" ? location.origin : "";
     const url = origin ? chunkProbeUrl(rawMessage, origin) : null;
-    payload.kind = chunkFailureKind(url === null ? "unknown" : await probeChunk(url));
+    if (url === null) {
+      payload.kind = chunkFailureKind("unknown", "unknown");
+    } else {
+      const shellAbort = new AbortController();
+      // `probeLiveShell` never rejects by construction; the `.catch` is the
+      // belt to those braces, because this promise is left unobserved on the
+      // not-missing branch and a rejection there would land in our own trap.
+      const shell = probeLiveShell(origin, shellAbort.signal).catch((): ShellProbe => "unknown");
+      const chunk = await probeChunk(url);
+      if (chunk === "missing") {
+        payload.kind = chunkFailureKind(chunk, await shell);
+      } else {
+        shellAbort.abort();
+        payload.kind = chunkFailureKind(chunk, "unknown");
+      }
+    }
   } catch {
-    payload.kind = chunkFailureKind("unknown");
+    payload.kind = chunkFailureKind("unknown", "unknown");
   }
   send(payload);
+}
+
+/**
+ * Ask our own host which shell it is serving *right now*, and whether it is the
+ * one this tab booted from. The answer is what separates a stale client (the
+ * live shell has moved on — the 2026-09-11 page) from a broken deploy (the live
+ * shell is ours and names a chunk that is gone). Same-origin, credential-free,
+ * never throws.
+ */
+async function probeLiveShell(origin: string, abort: AbortSignal): Promise<ShellProbe> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const own = ownModuleEntry(origin);
+    if (own === null) return "unknown";
+    const controller = new AbortController();
+    timer = globalThis.setTimeout(() => controller.abort(), SHELL_PROBE_TIMEOUT_MS);
+    abort.addEventListener("abort", () => controller.abort(), { once: true });
+    const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    const res = await fetch(`${origin}/?${SHELL_PROBE_PARAM}=${nonce}`, {
+      method: "GET",
+      cache: "no-store",
+      mode: "same-origin",
+      credentials: "omit",
+      signal: controller.signal,
+    });
+    if (!res.ok) return "unknown";
+    return shellProbeVerdict(own, moduleEntryFromHtml(await res.text()), origin);
+  } catch {
+    return "unknown";
+  } finally {
+    if (timer !== null) globalThis.clearTimeout(timer);
+  }
+}
+
+/**
+ * The module entry this document booted from — the first same-origin `<script
+ * type="module" src>` in it, read the same way `moduleEntryFromHtml` reads the
+ * live shell so the two compare like with like. Same-origin matters: browser
+ * extensions inject `chrome-extension://…` module scripts at document start,
+ * ahead of ours, and taking one of those as "ours" would read every live shell
+ * as `different` — silencing a real broken deploy for that visitor. Falls back
+ * to this module's own URL: it is statically imported by the entry, so under
+ * Vite's chunking that is the entry chunk's URL, hashed per build.
+ */
+function ownModuleEntry(origin: string): string | null {
+  try {
+    if (typeof document !== "undefined") {
+      for (const script of Array.from(document.scripts)) {
+        if (script.type !== "module" || !script.getAttribute("src")) continue;
+        if (new URL(script.src, origin).origin !== origin) continue;
+        return script.src;
+      }
+    }
+  } catch {
+    /* fall through to the module's own URL */
+  }
+  try {
+    return typeof import.meta.url === "string" && import.meta.url ? import.meta.url : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Ask our own host whether `url` is still served. Same-origin by construction

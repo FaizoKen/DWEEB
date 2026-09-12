@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { parseSeoEntry } from "../../src/core/seo/acquisition";
 import { readFeatureIntent } from "../../src/app/featureIntent";
 import { readClientParam, SEO_CLIENT_PARAM_KEYS } from "../../src/core/seo/clientParams";
+import { moduleEntryFromHtml } from "../../src/core/telemetry/crashReport";
 import { TEMPLATES } from "../../src/data/presets";
 import { SITE } from "./content";
 import { guideLandingOgSources, OG_CARD_HEIGHT, OG_CARD_WIDTH } from "./og-card-catalog";
@@ -124,12 +125,13 @@ function validDate(value: string): boolean {
   );
 }
 
-async function webBootAssets(): Promise<string[]> {
+async function webBootAssets(): Promise<{ assets: string[]; entryFile: string | null }> {
   const manifest = JSON.parse(
     await readFile(join(DIST, ".vite", "manifest.json"), "utf8"),
   ) as Record<string, ViteManifestChunk>;
   const assets = new Set<string>();
   const visited = new Set<string>();
+  let entryFile: string | null = null;
 
   function visit(key: string): void {
     if (visited.has(key)) return;
@@ -155,6 +157,7 @@ async function webBootAssets(): Promise<string[]> {
       );
       continue;
     }
+    if (root.source === "index.html") entryFile = candidates[0]![1].file;
     visit(candidates[0]![0]);
   }
 
@@ -162,7 +165,7 @@ async function webBootAssets(): Promise<string[]> {
   // so it is intentionally outside Vite's module graph but still a request
   // every ordinary web visit makes.
   assets.add("gtag-init.js");
-  return [...assets].sort();
+  return { assets: [...assets].sort(), entryFile };
 }
 
 /**
@@ -763,7 +766,26 @@ async function main(): Promise<void> {
   // bundle or above-fold proof asset growing before noisy lab timing does. The
   // thresholds leave headroom over the 2026-08-20 baseline while still making
   // an accidental large dependency/image fail the build.
-  const criticalAssetNames = await webBootAssets();
+  const { assets: criticalAssetNames, entryFile: webEntryFile } = await webBootAssets();
+
+  // The crash reporter decides whether a stale-chunk crash pages by reading the
+  // live shell's module entry with `moduleEntryFromHtml` and comparing it with
+  // its own (core/telemetry/reporter.ts). That parser is the one part of the
+  // paging decision that can rot silently — Vite changing how it emits the
+  // entry tag would turn every such crash into the never-paging
+  // `shell-unverified` — so the build proves, on the real shell it just wrote,
+  // that the parser still finds the entry the manifest names. This gate, not
+  // the paging channel, is where that drift must fail.
+  const rootShellHtml = await readFile(join(DIST, "index.html"), "utf8");
+  const parsedWebEntry = moduleEntryFromHtml(rootShellHtml);
+  if (webEntryFile === null) {
+    errors.push("Vite manifest names no chunk for index.html, so the shell's entry cannot be checked");
+  } else if (parsedWebEntry !== `/${webEntryFile}`) {
+    errors.push(
+      `/: moduleEntryFromHtml read ${parsedWebEntry ?? "no module entry"} from the shell; the manifest names /${webEntryFile}`,
+    );
+  }
+
   const criticalBuffers = await Promise.all(
     criticalAssetNames.map((name) => readFile(join(DIST, name))),
   );
