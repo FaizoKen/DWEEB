@@ -33,3 +33,8 @@ certs/
 # Private cross-tool agent context (deployment/ops facts) — public repo, never commit.
 AGENTS.local.md
 CLAUDE.local.md
+
+# Python bytecode from running the log alerter's offline `--parse-test`
+# (server/ops/alerts/), which `server.yml` now runs on every server change.
+__pycache__/
+*.pyc

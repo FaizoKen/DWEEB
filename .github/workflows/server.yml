@@ -73,3 +73,13 @@ jobs:
       # over real HTTP. Nothing here talks to Discord.
       - name: MCP endpoint smoke test
         run: bash ops/mcp-smoke.sh ./target/debug/dweeb-proxy
+
+      # The log alerter decides which of this service's log lines wake the
+      # maintainer, so a regression in it is *silent* — the 2026-08-12 parser
+      # change stopped every frontend crash beacon from paging and nobody found
+      # out for four weeks. It is the only component on the paging path that had
+      # no automated gate at all (it ships by hand, not through CD), yet its
+      # `--parse-test` is stdlib-only, offline, and runs in under a second. There
+      # is no reason for it not to run here.
+      - name: Log-alerter parse test
+        run: python3 ops/alerts/dweeb-log-alerts.py --parse-test

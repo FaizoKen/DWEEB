@@ -84,6 +84,20 @@ TRACING_HEAD_RE = re.compile(r"^\S+Z\s+(?P<level>ERROR|WARN)\s+(?P<rest>.*)$")
 SPAN_SEG_RE = re.compile(r"^(?P<name>[\w:.\-]+)\{(?P<fields>[^{}]*)\}:\s*")
 TARGET_RE = re.compile(r"^(?P<target>[\w:.\-]+):\s?(?P<msg>.*)$", re.DOTALL)
 PANIC_RE = re.compile(r"panicked at|thread '.*' panicked", re.IGNORECASE)
+# A line the service deliberately logged *below* WARN. The whole demotion
+# strategy rests on this being unpageable: the proxy answers routine deploy
+# skew, a stale client, a foreign-code error and a repaired DOM desync by
+# logging at `info` under the same `web_crash` target rather than by dropping
+# the report (server/src/telemetry.rs). Those lines render the beacon's
+# `message=`/`stack=` **verbatim, from an unauthenticated endpoint**, so any
+# content-matching rule evaluated ahead of the level turns a visitor's error
+# text into a page — and lets anyone fire one on demand. `PANIC_RE` was exactly
+# such a rule. It stays a content match, because a real Rust panic is written by
+# the panic hook straight to stderr with no tracing prefix at all and so matches
+# nothing here; it simply may no longer overrule a level the service chose.
+# ERROR and WARN lines are unaffected — they still alert on their own merits,
+# panic wording or not.
+NON_PAGING_LEVEL_RE = re.compile(r"^\S+Z\s+(?:INFO|DEBUG|TRACE)\s")
 
 # Caddy logs a connection that ended early at ERROR — and ERROR is the paging
 # channel. These are network reality, not a backend fault, so they are dropped:
@@ -176,7 +190,7 @@ def classify(rest: str) -> tuple[str, str] | None:
     itself logged at WARN. It never pages on its own — the reader hands it to
     `Collector.note_upstream`, which pages once when they come in a burst.
     """
-    if PANIC_RE.search(rest):
+    if not NON_PAGING_LEVEL_RE.match(rest) and PANIC_RE.search(rest):
         return ("PANIC", rest.strip())
     head = TRACING_HEAD_RE.match(rest)
     if head:
@@ -552,11 +566,37 @@ def parse_test() -> int:
             failures += 1
             log(f"FAIL: expected {expect_label!r} with {needles}\n      got {got!r}\n      for {line[:160]}")
 
+    checks = 0
+
     def check(name: str, ok: bool, detail: str = "") -> None:
-        nonlocal failures
+        nonlocal failures, checks
+        checks += 1
         if not ok:
             failures += 1
             log(f"FAIL: {name} {detail}")
+
+    # A demoted beacon must not be able to page on its own text. The crash route
+    # is unauthenticated and renders the client's message verbatim, so this is
+    # both a noise fix and the reason nobody can fire a page on demand.
+    for level in ("INFO", "DEBUG", "TRACE"):
+        demoted = (
+            f"2026-09-13T05:23:00.000000Z  {level} http{{method=POST path=/api/telemetry/crash}}: "
+            "web_crash: web app stale client (chunk gone, but this build is not the live one) "
+            "kind=stale-chunk-fatal build=e699a38eec live_build=619d058a00 "
+            "message=TypeError: thread 'main' panicked at nice try"
+        )
+        check(f"a {level} line never pages on panic wording", classify(demoted) is None,
+              repr(classify(demoted)))
+
+    # …while a real panic — written by the panic hook, with no tracing prefix —
+    # still pages, and so does panic wording on a line the service logged loudly.
+    real = "thread 'tokio-runtime-worker' panicked at src/routes.rs:12:5:\nindex out of bounds"
+    check("an unprefixed panic still pages", (classify(real) or ("", ""))[0] == "PANIC")
+    loud = (
+        "2026-09-13T05:23:00.000000Z ERROR dweeb_proxy::routes: recovered a worker that "
+        "panicked at src/schedule_worker.rs:88"
+    )
+    check("an ERROR mentioning a panic still pages", (classify(loud) or ("", ""))[0] == "PANIC")
 
     # A paged HTTP/3 hang-up must never carry the query string.
     late = next(c[0] for c in PARSE_CASES if '"duration":31.2' in c[0])
@@ -610,7 +650,12 @@ def parse_test() -> int:
     ]
     check("hits spread past the window never fire", not any(slow), repr(slow))
 
-    total = len(PARSE_CASES) + 7
+    # Counted, not hand-maintained: the literal `+ 7` here had drifted behind the
+    # `check()` calls below it and printed 27/27 for 28 assertions. Harmless to
+    # the exit code, which follows `failures` — but the README tells an operator
+    # to read this line as the gate, and a gate that under-reports what it ran is
+    # worse than no number at all.
+    total = len(PARSE_CASES) + checks
     log(f"parse-test: {total - failures}/{total} passed")
     return 1 if failures else 0
 

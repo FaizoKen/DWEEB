@@ -821,6 +821,23 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   page plus "still occurring ×N". A `web_crash` behind a *fieldless* span (tracing renders it as
   a bare `name:`) is also recognised, and `request_span` documents that it must always carry a
   field.
+  **No content match may be evaluated ahead of the level — a demoted line must be unpageable**
+  (2026-09-13). `classify` tested `PANIC_RE` *first*, before `TRACING_HEAD_RE` had even read the
+  level, so the match ran against every line the services emit at every level. That is a hole
+  straight through the whole demotion strategy: `/api/telemetry/crash` is **unauthenticated** and
+  its `info` branches render the beacon's `message=`/`stack=` **verbatim**, so a visitor whose
+  error text happened to contain "panicked at" paged as `PANIC` despite the proxy having
+  deliberately logged it at `info` — and anyone could fire a page on demand by POSTing one.
+  `NON_PAGING_LEVEL_RE` now skips the panic check for `INFO`/`DEBUG`/`TRACE` lines only. The
+  check stays a *content* match, which is safe precisely because a real Rust panic is written by
+  the panic hook straight to stderr with **no tracing prefix at all** and therefore matches no
+  level; ERROR and WARN are untouched and still page on panic wording. Anything added to this
+  file that decides by text — a new keyword, a new service's format — must sit **after** the
+  level parse for the same reason. `--parse-test` covers all three demoted levels, an unprefixed
+  real panic, and an ERROR mentioning one (verified to fail 3/3 without the fix); its printed
+  total is now counted from the assertions rather than a hand-maintained `+ 7` that had drifted
+  and reported 27/27 for 28. Remember this file is **hand-scp'd, not CD-deployed** — run
+  `--parse-test` on the host before restarting the service.
 - **A 5xx pages only if it is ours — the proxy marks a dependency's transient failure
   `Fault::Upstream`** (2026-09-09). Nine proxy 502s paged between 2026-08-23 and 2026-09-05
   (`latency=10002/10001/10551 ms` = Discord not answering a JSON read inside the ten-second
