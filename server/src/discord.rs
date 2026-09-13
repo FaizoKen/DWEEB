@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::Semaphore;
 
+use crate::dns;
 use crate::error::{AppError, Fault};
 
 const API_BASE: &str = "https://discord.com/api/v10";
@@ -52,7 +53,45 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// host unable to reach discord.com at all, which is ours to know about; with
 /// this deadline reqwest reports the elapsed dial as a connect error. Generous:
 /// a healthy dial (DNS + TCP + TLS) from the VPS takes well under a second.
+///
+/// The DNS lookup runs inside it, and the host's resolver chain stalls for four
+/// seconds or more whenever an upstream query is dropped — which spent this
+/// whole deadline and paged on 2026-09-13 as "operation timed out" while
+/// Discord was perfectly reachable (see `crate::dns`). A stalled lookup now
+/// hands over to the last good answer after [`DNS_FRESH_WAIT`], so what still
+/// reaches this deadline is a dial that genuinely failed.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a fresh lookup of discord.com may run before the dial goes ahead on
+/// the address from the last good one. A healthy lookup on the VPS answers in
+/// under 30 ms (measured 2026-09-13: 4–29 ms through Docker's resolver, 13–23 ms
+/// when systemd-resolved has to ask upstream); a stalled one runs four seconds or
+/// more, because that is when Docker gives up on it. A second sits clear of both.
+const DNS_FRESH_WAIT: Duration = Duration::from_secs(1);
+
+/// How long a lookup may run when there is no earlier answer to fall back on (a
+/// fresh process) before the dial fails. Inside [`CONNECT_TIMEOUT`], so the
+/// failure is reported as DNS, naming the host, rather than as the connect
+/// deadline's bare "operation timed out".
+const DNS_DEADLINE: Duration = Duration::from_secs(4);
+
+/// The oldest remembered answer that may stand in for a stalled lookup. RFC 8767
+/// suggests one to three days. Any lookup that answers replaces it, so this only
+/// bounds how long DNS may stay broken before dials start failing outright.
+const DNS_MAX_STALE: Duration = Duration::from_secs(24 * 60 * 60);
+
+const DNS_TIMING: dns::Timing = dns::Timing {
+    fresh_wait: DNS_FRESH_WAIT,
+    deadline: DNS_DEADLINE,
+    max_stale: DNS_MAX_STALE,
+};
+
+const _: () = assert!(
+    DNS_FRESH_WAIT.as_millis() < DNS_DEADLINE.as_millis()
+        && DNS_DEADLINE.as_millis() < CONNECT_TIMEOUT.as_millis(),
+    "each DNS deadline must end strictly inside the one waiting on it — otherwise \
+     the connect timeout fires first and a DNS stall reads as 'operation timed out' again"
+);
 
 /// Deadline for a multipart call, which has to push the user's attachments to
 /// Discord before Discord can answer. Because reqwest's timeout is a *total*
@@ -302,6 +341,8 @@ impl Discord {
             .user_agent("DWEEB-Proxy/0.2 (+https://github.com/)")
             .timeout(REQUEST_TIMEOUT)
             .connect_timeout(CONNECT_TIMEOUT)
+            // Dial the last good address when the host's DNS stalls.
+            .dns_resolver(Arc::new(dns::ServeStaleResolver::system(DNS_TIMING)))
             .build()
             .expect("failed to build HTTP client");
         Discord {
@@ -1329,10 +1370,12 @@ fn parse_retry_after(raw: &str) -> Option<Duration> {
 }
 
 /// Whose fault a transport-level failure reaching Discord is — see
-/// `error::Fault`. A dial that fails — DNS, refused, TLS, or [`CONNECT_TIMEOUT`]
-/// elapsing (reqwest reports that as `is_connect()` too, which is the reason the
-/// deadline exists) — is this host unable to reach discord.com at all: our
-/// network, or a Discord edge outage, both rare and both worth a page. Anything
+/// `error::Fault`. A dial that fails — DNS with no earlier answer to fall back
+/// on, refused, TLS, or [`CONNECT_TIMEOUT`] elapsing (reqwest reports that as
+/// `is_connect()` too, which is the reason the deadline exists) — is this host
+/// unable to reach discord.com at all: our network, or a Discord edge outage,
+/// both rare and both worth a page. A lookup that merely stalls never gets here:
+/// it dials the last good address instead (`crate::dns`). Anything
 /// after a connection is Discord taking the request and running long or
 /// dropping it: theirs, and the class behind every flat `latency=10002 ms` 502
 /// that paged in late August 2026.
@@ -1805,5 +1848,102 @@ mod fault_tests {
         let err = body_error("unexpected response from Discord", e);
         assert_eq!(err.fault(), Fault::Upstream);
         assert!(!err.to_string().contains("127.0.0.1"), "{err}");
+    }
+
+    /// A client that dials the way `Discord::new`'s does, over a scripted lookup,
+    /// with every request dialling afresh — and so looking its host up afresh.
+    fn client_over(lookup: dns::Lookup, timing: dns::Timing) -> reqwest::Client {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .pool_max_idle_per_host(0)
+            .dns_resolver(Arc::new(dns::ServeStaleResolver::with_lookup(
+                timing, lookup,
+            )))
+            .build()
+            .unwrap()
+    }
+
+    const QUICK_DNS: dns::Timing = dns::Timing {
+        fresh_wait: Duration::from_millis(100),
+        deadline: Duration::from_millis(300),
+        max_stale: Duration::from_secs(60),
+    };
+
+    /// The 2026-09-13 page end to end: Discord perfectly reachable, the lookup in
+    /// front of it stalled. The dial goes ahead on the address the last good
+    /// lookup gave, well inside the connect timeout that failed it that day.
+    #[tokio::test]
+    async fn a_dns_stall_dials_the_last_good_address() {
+        use std::io::Write as _;
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = server.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut sock, _) = server.accept().unwrap();
+                read_request(&mut sock);
+                sock.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                )
+                .unwrap();
+                sock.shutdown(std::net::Shutdown::Both).ok();
+            }
+        });
+
+        let stalled = Arc::new(AtomicBool::new(false));
+        let lookup: dns::Lookup = {
+            let stalled = Arc::clone(&stalled);
+            Arc::new(move |_host| -> dns::LookupFuture {
+                let stall = stalled.load(Ordering::SeqCst);
+                Box::pin(async move {
+                    if stall {
+                        std::future::pending::<()>().await;
+                    }
+                    Ok(vec![std::net::SocketAddr::from(([127, 0, 0, 1], 0))])
+                })
+            })
+        };
+        let client = client_over(lookup, QUICK_DNS);
+        let url = format!("http://discord.test:{port}/");
+
+        assert_eq!(client.get(&url).send().await.unwrap().status(), 200);
+
+        stalled.store(true, Ordering::SeqCst);
+        let started = std::time::Instant::now();
+        let resp = client
+            .get(&url)
+            .send()
+            .await
+            .expect("dials the remembered address");
+        assert_eq!(resp.status(), 200);
+        assert!(
+            started.elapsed() < CONNECT_TIMEOUT,
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// With nothing to fall back on — a fresh process — a stalled lookup still
+    /// fails the dial and still pages: it is this host's resolver, ours. But the
+    /// message now says it was DNS and names the host; on 2026-09-13 it read
+    /// "operation timed out", which points at the network path or Discord instead.
+    #[tokio::test]
+    async fn a_cold_dns_stall_pages_as_ours_and_says_it_was_dns() {
+        let lookup: dns::Lookup =
+            Arc::new(|_host| -> dns::LookupFuture { Box::pin(std::future::pending()) });
+        let client = client_over(lookup, QUICK_DNS);
+
+        let e = client.get("http://discord.test/").send().await.unwrap_err();
+        assert!(e.is_connect(), "{e}");
+        assert_eq!(transport_fault(&e), Fault::Ours);
+        let msg = transport_error(e).to_string();
+        assert!(
+            msg.contains("dns error: no answer for discord.test within 300ms"),
+            "{msg}"
+        );
+        assert!(!msg.contains("operation timed out"), "{msg}");
     }
 }

@@ -21,6 +21,7 @@ mod avatar;
 mod cache;
 mod config;
 mod discord;
+mod dns;
 mod entitlement;
 mod error;
 mod feedback;

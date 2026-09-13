@@ -865,13 +865,48 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   permits, AI budget/busy, row caps) are `AppError::Status` and still page as ours — a decision
   not taken here, recorded as such. What still pages, deliberately: a rejected bot token (401), the
   bot lacking guild access (403), the dispatcher or one of our own allow-listed plugin hosts
-  unreachable, a Discord connect/DNS failure (this host can't reach discord.com at all), Stripe,
+  unreachable, a Discord connect failure (this host can't reach discord.com at all) or a DNS
+  failure with no earlier answer to fall back on (a merely *stalled* lookup no longer fails the
+  dial — next entry), Stripe,
   every `Internal`, and the AI relay's `Unavailable` (kept a paging 502 per the 2026-08-01
   decision — flip `terminal_error`'s `Unavailable` arm to `AppError::Upstream` if that ever
   proves noisy). A bare `StatusCode::INTERNAL_SERVER_ERROR.into_response()` carries no marker and
   is treated as ours. No deploy ordering — nothing here is a contract with the FE or the
   alerter. Guarded by `error.rs` + `trace.rs` tests and `discord.rs`'s `fault_tests`, which pin
   the reqwest classification against real sockets rather than our reading of its docs.
+- **A DNS stall is the host's, not Discord's — the Discord client dials the last good answer
+  through it** (`server/src/dns.rs`, 2026-09-13). A page read `GET /api/guilds/…/webhooks
+  error=could not reach Discord: … client error (Connect): operation timed out … latency=5001 ms`
+  while Discord was fine: a second earlier dockerd had logged `[resolver] failed to query external
+  DNS server … 127.0.0.53:53: i/o timeout question=discord.com`. Containers resolve through glibc
+  (no cache) → Docker's embedded DNS (no cache; **abandons a forwarded query after 4 s**) → the
+  host's systemd-resolved (caches only for the TTL; on systemd 255 it re-sends an unanswered UDP
+  query only after a **fixed 5 s**, `DNS_TIMEOUT_USEC` = 120 s / 24 attempts) → the VPS provider's
+  two resolvers. So one dropped datagram stalls every lookup behind it past 4 s, and the Discord
+  client's 5 s `CONNECT_TIMEOUT` — which covers DNS + TCP + TLS — is spent by the lookup alone.
+  The journal held **61 such stalls in 8 days** (7 for discord.com; `resolvectl statistics`
+  counted 76 upstream timeouts), and the same stall failed a quick-replies config connect four
+  minutes later (504 at 2501 ms). `ServeStaleResolver` (RFC 8767 "serve stale") is now the Discord
+  client's `dns_resolver`: every dial still looks its host up and an answer always wins, but after
+  `DNS_FRESH_WAIT` (1 s — healthy lookups measured 4–29 ms, stalls are ≥ 4 s) with no answer, or on
+  an outright failure, it dials the address from the last good lookup (at most `DNS_MAX_STALE`,
+  24 h, old), logged at **info** under target `dns`, and the lookup keeps running on its own task
+  so a late answer still refreshes the memory. Safe because **TLS verifies the certificate against
+  the name on every connection**: a stale address can fail to connect, never reach anyone else.
+  With nothing remembered (a fresh process) a stall still fails the dial and **still pages** — it
+  is our host's resolver — but at `DNS_DEADLINE` (4 s, inside the connect timeout) as `dns error:
+  no answer for discord.com within 4s, and no earlier answer to fall back on` rather than a bare
+  "operation timed out" that points at the network or Discord. A `const` assert pins
+  `DNS_FRESH_WAIT < DNS_DEADLINE < CONNECT_TIMEOUT`. Don't answer a recurrence by raising
+  `CONNECT_TIMEOUT` past the stall (every stall becomes a 5 s+ wait, and this one outlasted glibc's
+  retry — its second query timed out too) or by demoting connect failures to `Upstream`. Only the
+  Discord client needed this: the scheduler (15 s total) and the AI relay (10 s dial) ride a stall
+  out late instead of failing, but the plugins' 2.2–2.5 s clients can't, and those are the host
+  resolver's to fix (`AGENTS.local.md`). Diagnose on the host with
+  `journalctl -u docker.service | grep 'failed to query external DNS'`, and in the proxy's journal
+  with `grep ' dns: '`. No deploy ordering. Guarded by `dns.rs`'s paused-clock tests and
+  `discord.rs`'s `a_dns_stall_dials_the_last_good_address` /
+  `a_cold_dns_stall_pages_as_ours_and_says_it_was_dns`, both verified to fail without the fix.
 - **A failed forward must name what failed, and nested deadlines must not be equal**
   (2026-08-15). A page arrived reading, in full, `forward failed prefix="selfrole:"
   upstream=http://self-role:8092 err=error sending request for url (…)`. That sentence is

@@ -141,6 +141,16 @@ journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat | grep web_crash
 # never paged; a spike here means an SW precache gap even though nothing broke)
 journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
   | grep web_crash | grep 'stale chunk'
+
+# Dials to Discord that rode out a DNS stall on the last good address (INFO,
+# never paged — see server/src/dns.rs)
+journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat | grep ' dns: '
+
+# The stalls themselves, for every container: Docker's embedded DNS giving up
+# on the host resolver after 4 s. Per day, then the host resolver's own count.
+journalctl -u docker.service -o short-iso | grep 'failed to query external DNS' \
+  | cut -c1-10 | uniq -c
+resolvectl statistics | grep -A2 'Failure Transactions'
 ```
 
 ## Off-host dead-man's switch (recommended)
