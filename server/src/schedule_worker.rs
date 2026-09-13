@@ -366,8 +366,7 @@ async fn process(
         Err(e) => {
             // Network/timeout — transient.
             let retry_at = now + backoff_secs(job.attempts);
-            let reason = format!("Couldn't reach Discord: {e}");
-            transient(store, &job, now, retry_at, None, &reason).await;
+            transient(store, &job, now, retry_at, None, &unreachable_reason(e)).await;
         }
     }
 }
@@ -583,6 +582,14 @@ fn summarize(code: u16, body: &str) -> String {
     }
 }
 
+/// The run detail for a post that never got an answer. Never `{e}`: reqwest's
+/// `Display` appends the request URL, and this one is the webhook's execute URL,
+/// token and all — the credential the row keeps sealed — while `last_error` is
+/// stored in plaintext and handed to the browser by the list view.
+fn unreachable_reason(e: reqwest::Error) -> String {
+    format!("Couldn't reach Discord: {}", crate::discord::describe(e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -677,5 +684,33 @@ mod tests {
             .map(|group| group.iter().map(|job| job.id.as_str()).collect())
             .collect();
         assert_eq!(ids, vec![vec!["a1", "a2"], vec!["b1", "b2"], vec!["c1"]]);
+    }
+
+    /// A post that can't reach Discord records why — and never the URL it was
+    /// going to, which is the webhook's execute URL with its token.
+    #[tokio::test]
+    async fn an_unreachable_post_never_records_the_webhook_token() {
+        // Nothing listening: refused at the dial, like a network failure.
+        let refused = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap()
+        };
+        let e = reqwest::Client::new()
+            .post(format!(
+                "http://{refused}/api/webhooks/123/SEKRIT-token?with_components=true&wait=true"
+            ))
+            .send()
+            .await
+            .unwrap_err();
+        // The hazard itself: formatted as-is, the error carries the token.
+        assert!(e.to_string().contains("SEKRIT-token"), "{e}");
+
+        let reason = unreachable_reason(e);
+        assert!(
+            !reason.contains("SEKRIT-token") && !reason.contains("for url"),
+            "{reason}"
+        );
+        assert!(reason.starts_with("Couldn't reach Discord: "), "{reason}");
+        assert!(reason.to_lowercase().contains("connect"), "{reason}");
     }
 }

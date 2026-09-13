@@ -1611,6 +1611,18 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   concurrently up to the small SQLite-pool-derived cap, but rows for one webhook remain serial and
   in due order. This avoids head-of-line blocking without racing Discord's per-webhook rate limit.
   Missed interval ticks use `Skip`, so an upstream slowdown never triggers a catch-up burst.
+- **A reqwest error is never formatted with `{e}` when its URL carries a credential** (2026-09-13).
+  reqwest's `Display` appends ` for url (…)`, and a webhook's execute URL *is* its token. The
+  scheduled-post worker recorded a failed post as `format!("Couldn't reach Discord: {e}")`, so
+  the token the row keeps sealed landed in plaintext in `last_error` — which `schedule::view`
+  (documented as never including the token) serves to the per-server list, and which the gallery
+  shows on a failed series. Build such messages with `discord::describe`, which drops the URL
+  and keeps the cause chain (`unreachable_reason` in schedule_worker.rs). `ScheduleStore::open`
+  scrubs any pre-fix reason on every boot (cuts from ` for url (`; idempotent, logs and carries
+  on if it fails) so self-hosted deployments are cleaned too; prod held none when this shipped.
+  The plugins' token-URL calls (followups, `@original` edits) discard their errors and were
+  checked clean. Guarded by `an_unreachable_post_never_records_the_webhook_token` and
+  `opening_scrubs_webhook_urls_from_stored_errors`.
 - **Browser upload hydration follows reachability.** Startup collects `session://` ids from the
   live message, undo/redo, and named browser saves, reads only those IndexedDB blobs, and deletes
   orphan keys with a key-only cursor (never materializing stale file bytes). Those orphan deletes

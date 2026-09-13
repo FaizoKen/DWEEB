@@ -364,6 +364,23 @@ impl ScheduleStore {
             conn.execute_batch("ALTER TABLE scheduled_posts ADD COLUMN channel_id TEXT;")
                 .map_err(|e| format!("migrate channel_id: {e}"))?;
         }
+        // Scrub webhook tokens out of `last_error`. Until 2026-09-13 the worker
+        // recorded a post's transport failure as the reqwest error verbatim, whose
+        // `Display` ends ` for url (<execute URL>)` — the token this row keeps
+        // sealed, in plaintext, served by the list view. Every such reason ended
+        // with that clause, so cutting it off drops the URL and nothing else; a
+        // clean table matches nothing. Hygiene, not schema: a failure is logged
+        // and retried next boot rather than refusing to start.
+        match conn.execute(
+            "UPDATE scheduled_posts \
+             SET last_error = substr(last_error, 1, instr(last_error, ' for url (') - 1) \
+             WHERE instr(last_error, ' for url (') > 0",
+            [],
+        ) {
+            Ok(0) => {}
+            Ok(rows) => tracing::info!(rows, "scrubbed webhook URLs out of stored schedule errors"),
+            Err(e) => tracing::warn!(error = %e, "couldn't scrub stored schedule errors"),
+        }
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM scheduled_posts", [], |r| r.get(0))
             .map_err(|e| format!("count: {e}"))?;
@@ -1806,6 +1823,42 @@ mod tests {
         // New rows can set + be listed by guild.
         store.create(&sample("new", "222", 100)).unwrap();
         assert_eq!(store.list_for_guild("guild-9", 100).unwrap().len(), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A reason written before 2026-09-13 ends in reqwest's ` for url (…)` —
+    /// the webhook's execute URL, token included. Opening the store cuts that
+    /// clause off and leaves the reason, and every other reason, as it was.
+    #[test]
+    fn opening_scrubs_webhook_urls_from_stored_errors() {
+        let (store, path) = temp_store("scrub");
+        store.create(&sample("leaky", "111", 100)).unwrap();
+        store.create(&sample("plain", "222", 100)).unwrap();
+        store
+            .record_permanent_fail(
+                "leaky",
+                200,
+                None,
+                "Gave up after 5 attempts. Last error: Couldn't reach Discord: error sending \
+                 request for url (https://discord.com/api/webhooks/111/SEKRIT-token\
+                 ?with_components=true&wait=true)",
+            )
+            .unwrap();
+        store
+            .record_permanent_fail("plain", 200, Some(404), "Discord returned 404: gone")
+            .unwrap();
+        drop(store);
+
+        let store = ScheduleStore::open(path.to_str().unwrap(), 1000, 3, 100).unwrap();
+        assert_eq!(
+            store.get("leaky").unwrap().unwrap().last_error.as_deref(),
+            Some("Gave up after 5 attempts. Last error: Couldn't reach Discord: error sending request")
+        );
+        assert_eq!(
+            store.get("plain").unwrap().unwrap().last_error.as_deref(),
+            Some("Discord returned 404: gone")
+        );
+        drop(store);
         let _ = std::fs::remove_file(path);
     }
 

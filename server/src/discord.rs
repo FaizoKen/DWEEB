@@ -1401,8 +1401,9 @@ const MAX_CAUSE_CHARS: usize = 300;
 /// sending request"), leaving the actual reason in the `source()` chain — the
 /// unattributable sentence the dispatcher fixed on 2026-08-15 — so the chain is
 /// flattened onto the end. Control characters become spaces so the log stays
-/// one line, and the whole thing is clamped.
-fn describe(e: reqwest::Error) -> String {
+/// one line, and the whole thing is clamped. The scheduled-post worker uses it
+/// too: its POST goes to a webhook's execute URL, and its reason is stored.
+pub(crate) fn describe(e: reqwest::Error) -> String {
     let e = e.without_url();
     let mut out = e.to_string();
     let mut source = std::error::Error::source(&e);
