@@ -75,6 +75,17 @@ pub struct CrashBody {
     /// would carry the share payload (i.e. the user's message).
     #[serde(default)]
     path: String,
+    /// Set by a client that read the live shell **itself, at crash time**, and
+    /// found it to be its own build — so its `stale-chunk-fatal` verdict is
+    /// first-hand and must not be second-guessed by [`crate::live_build`]'s
+    /// cached read, which is minutes behind by construction.
+    ///
+    /// Absent from every client predating it, which is precisely the cohort the
+    /// build comparison exists for. It grants no new power to a forged beacon:
+    /// a forgery that sets it pages, and a forged fatal beacon pages today
+    /// anyway — the route is unauthenticated and always has been.
+    #[serde(default, rename = "shellVerified")]
+    shell_verified: bool,
 }
 
 /// Field caps. A crash message and a handful of stack frames are the only fields
@@ -164,7 +175,8 @@ const BACKGROUND_ONLY_CHUNKS: [&str; 1] = ["virtual_pwa-register"];
 /// deploy), `stale-shell` (the chunk is gone, but the shell our host serves
 /// *right now* is a different build from the one that tab booted: a client
 /// whose cache outlived the deploy and could not reload past it — the
-/// 2026-09-11 page, a tab 42 hours behind the live build) and
+/// 2026-09-11 page, a tab **22 days** behind the live build — not the 42 hours
+/// once recorded here, which is the age of the deploy that replaced it) and
 /// `shell-unverified` (the chunk is gone and the live shell could not be read;
 /// its own kind so a regression in that probe shows up as a count rather than
 /// as silence) — *and* every legacy kind (`boundary`/`error`/
@@ -179,24 +191,87 @@ const BACKGROUND_ONLY_CHUNKS: [&str; 1] = ["virtual_pwa-register"];
 /// **gone** *and* whose live shell is the very build that referenced it — a
 /// broken deploy. Its single exception is a chunk from
 /// [`BACKGROUND_ONLY_CHUNKS`], which no user-visible path can be waiting on.
-/// Clients from before the shell probe cannot tell a stale client from a
-/// broken deploy and keep sending the fatal shape for a stale boot until they
-/// update; the `build` field beside the kind is the triage key — a build that
-/// is not the live deploy's is a stale client, not a broken deploy.
+///
+/// A client older than that shell probe cannot tell a stale client from a
+/// broken deploy at all, and keeps sending the fatal shape for a stale boot for
+/// as long as its tab stays open — 24 days, in the case that motivated
+/// [`crate::live_build`]. That is why the handler re-asks the question the
+/// beacon could not: see [`pages_as_broken_deploy`], which is applied *before*
+/// this function and demotes a fatal beacon whose build is not the one the live
+/// shell declares — but only one that did not already answer it for itself
+/// (`shellVerified`), since that client's read was live and ours is cached.
 fn is_routine_stale_chunk(kind: &str, message: &str) -> bool {
-    let lower = message.to_lowercase();
-    if !STALE_CHUNK_MESSAGES
-        .iter()
-        .any(|known| lower.contains(known))
-    {
+    if !is_stale_chunk_message(message) {
         return false;
     }
     if kind == "stale-chunk-fatal" {
+        let lower = message.to_lowercase();
         return BACKGROUND_ONLY_CHUNKS
             .iter()
             .any(|chunk| lower.contains(&chunk.to_lowercase()));
     }
     true
+}
+
+/// Whether the message is any engine's wording for a failed lazy-chunk load.
+/// Mirrors `isStaleChunkMessage` in `src/core/telemetry/crashReport.ts`.
+fn is_stale_chunk_message(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    STALE_CHUNK_MESSAGES
+        .iter()
+        .any(|known| lower.contains(known))
+}
+
+/// Whether this beacon is the one shape that reaches the paging channel: a
+/// chunk-load failure the client settled as fatal, and that none of the existing
+/// exemptions already demote. Only these are worth asking the shell about — a
+/// beacon that was never going to page needs no liveness check, and must not
+/// spend a request or be re-described in the log as something it isn't.
+fn pages_as_broken_deploy(kind: &str, message: &str) -> bool {
+    kind == "stale-chunk-fatal"
+        && is_stale_chunk_message(message)
+        && !is_routine_stale_chunk(kind, message)
+}
+
+/// What an absent `build` field is logged as. The field shipped on 2026-07-28,
+/// in the same change as the fatal kind, so a beacon without one is at least
+/// that old.
+const MISSING_BUILD: &str = "pre-build-id";
+
+/// What the *client* sends when it cannot read its own `__BUILD_ID__` —
+/// `buildId()`'s catch fallback in `core/telemetry/reporter.ts`.
+const UNIDENTIFIED_BUILD: &str = "unknown";
+
+/// Whether `build` names a bundle specifically enough to be compared with the
+/// live one.
+///
+/// The two non-builds are **not** symmetric, and leaving that to string
+/// inequality would get one of them badly wrong:
+///
+///  - [`MISSING_BUILD`] is a client too old to carry the field at all, which is
+///    at least as old as the fatal kind itself. It cannot be the build we are
+///    serving, so comparing it is meaningful and it is demoted. Stated here
+///    rather than left to emerge.
+///  - [`UNIDENTIFIED_BUILD`] is the opposite: a *current* bundle whose
+///    `__BUILD_ID__` define went missing (nothing gates that — the shell's
+///    marker is stamped from a different constant and would still be correct).
+///    Reading "I don't know which build I am" as "not the live build" would
+///    silence a genuinely broken deploy for the life of that bundle — weeks,
+///    given the service-worker cache — so it takes the fail-open path and pages
+///    like any other answer we don't have.
+fn build_is_comparable(build: &str) -> bool {
+    build != UNIDENTIFIED_BUILD
+}
+
+/// The build the public shell declares right now, or `None` when we could not
+/// find out — the shell is unreachable, or predates the marker.
+///
+/// `None` is "don't know", and every caller must fail toward its old behaviour
+/// on it: the point of this check is to *remove* a page that cannot be acted
+/// on, never to withhold one on a guess. See [`crate::live_build`] for why the
+/// server has to answer this rather than the client.
+async fn live_build(st: &AppState) -> Option<String> {
+    st.live_build.as_ref()?.current().await
 }
 
 /// The kind a client sends for a crash it *prevented*: something rewrote the
@@ -263,12 +338,19 @@ fn is_foreign_code_error(kind: &str, message: &str, stack: &str) -> bool {
 /// `POST /api/telemetry/crash` — record one frontend crash.
 ///
 /// See the module docs for why this is unauthenticated and content-free. The
-/// handler's whole job is to clamp and log: it never touches Discord, never
-/// reads state, and always answers `204` so the beacon can't perturb the app
-/// that emitted it. Known browser non-errors (see [`NON_CRASH_MESSAGES`]) are
-/// accepted and dropped — same `204`, no log line.
+/// handler's job is to clamp and log, and it always answers `204` so the beacon
+/// can't perturb the app that emitted it. Known browser non-errors (see
+/// [`NON_CRASH_MESSAGES`]) are accepted and dropped — same `204`, no log line.
+///
+/// **It is no longer I/O-free.** The one beacon shape that pages consults
+/// [`crate::live_build`], which on a cache miss makes a bounded outbound GET of
+/// our own public shell (never of anything a caller supplied) before answering.
+/// It still touches neither Discord nor any store, and a client that has already
+/// verified the live shell itself skips the read entirely, so in practice this
+/// happens the handful of times a month an old client reports a fatal chunk
+/// load. Don't reintroduce an assumption that this handler cannot await.
 pub async fn crash_report(
-    State(_st): State<AppState>,
+    State(st): State<AppState>,
     Json(body): Json<CrashBody>,
 ) -> Result<Response, AppError> {
     if is_non_crash(&body.message) {
@@ -282,11 +364,55 @@ pub async fn crash_report(
     // Older clients don't send this at all; say so explicitly rather than
     // logging an empty field, since "which bundle?" is the question it answers.
     let build = match clamp_field(&body.build, BUILD_MAX) {
-        b if b.is_empty() => "pre-build-id".to_string(),
+        b if b.is_empty() => MISSING_BUILD.to_string(),
         b => b,
     };
     let surface = clamp_field(&body.surface, SURFACE_MAX);
     let path = clamp_field(&body.path, PATH_MAX);
+
+    // The one shape that pages is `stale-chunk-fatal`, and it is evidence of a
+    // broken deploy only if the client that sent it is running the build
+    // visitors are being served. Clients too old to check that for themselves
+    // cannot be fixed — they ship from a service-worker cache — so ask the
+    // shell (never the beacon) before letting one through. `None` means we
+    // could not find out, which must leave the beacon exactly as loud as it
+    // was — as must a beacon that cannot say which bundle it came from, see
+    // [`build_is_comparable`].
+    //
+    // A client that already checked for itself is left alone: its read was live,
+    // at crash time, while ours is a cached read of an edge-cached shell and so
+    // is minutes behind. Overruling the fresher answer with the staler one would
+    // trade the noise this removes for the far worse failure of silencing a real
+    // broken deploy — every visitor of which reports from a *current* bundle and
+    // therefore sets the flag. See [`pages_as_broken_deploy`] and
+    // [`crate::live_build`].
+    if pages_as_broken_deploy(&kind, &message)
+        && build_is_comparable(&build)
+        && !body.shell_verified
+    {
+        if let Some(live) = live_build(&st).await {
+            // Clamped like every other field before it is compared or logged:
+            // it comes from a document we fetched, so a hostile origin must not
+            // be able to forge log lines through it — and an unclamped value
+            // over `BUILD_MAX` could never equal a beacon's clamped `build`.
+            let live = clamp_field(&live, BUILD_MAX);
+            if live != build {
+                tracing::info!(
+                    target: "web_crash",
+                    %kind,
+                    %surface,
+                    %version,
+                    %build,
+                    live_build = %live,
+                    %path,
+                    %message,
+                    %stack,
+                    "web app stale client (chunk gone, but this build is not the live one)",
+                );
+                return Ok(StatusCode::NO_CONTENT.into_response());
+            }
+        }
+    }
 
     // Routine deploy skew stays greppable under the same target but at `info`,
     // below the log alerter's paging threshold (which fires on `web_crash`
@@ -462,10 +588,13 @@ mod tests {
 
     #[test]
     fn a_stale_client_is_counted_never_paged() {
-        // The 2026-09-11 page verbatim: a tab on build e699a38eec, 42 hours
+        // The 2026-09-11 page verbatim: a tab on build e699a38eec, 22 days
         // behind the live deploy, whose purged boot chunk the recovery reload
         // could not get past. The client now reads the live shell before
-        // reporting and, finding a different build, sends this kind.
+        // reporting and, finding a different build, sends this kind — but only
+        // if it is new enough to do so. The same build paged again on
+        // 2026-09-13, by then 24 days old, which is what `pages_as_broken_deploy`
+        // is for.
         let msg = "Failed to fetch dynamically imported module: \
                    https://dweeb.faizo.net/assets/flows-B2W2FfFo.js";
         assert!(is_routine_stale_chunk("stale-shell", msg));
@@ -535,6 +664,105 @@ mod tests {
             "stale-chunk-fatal",
             "Failed to fetch dynamically imported module: https://x/a.js"
         ));
+    }
+
+    /// Only a beacon that would actually reach the paging channel is worth
+    /// asking the live shell about. Anything already demoted must not spend an
+    /// outbound request, and must keep the log wording it had.
+    #[test]
+    fn the_live_build_is_only_consulted_for_a_beacon_that_would_page() {
+        const GONE: &str = "Failed to fetch dynamically imported module: https://x/flows-a.js";
+        assert!(pages_as_broken_deploy("stale-chunk-fatal", GONE));
+
+        // Every kind the client settles as non-fatal decides on its own.
+        for kind in [
+            "stale-chunk",
+            "stale-shell",
+            "shell-unverified",
+            "chunk-unreachable",
+            "boot",
+            "boundary",
+            "error",
+            "unhandledrejection",
+        ] {
+            assert!(!pages_as_broken_deploy(kind, GONE), "{kind}");
+        }
+
+        // A background-only chunk is exempt for good; liveness cannot change it.
+        assert!(!pages_as_broken_deploy(
+            "stale-chunk-fatal",
+            "Failed to fetch dynamically imported module: https://x/virtual_pwa-register-a.js"
+        ));
+
+        // A fatal kind on a message that is not a chunk failure at all: a
+        // malformed or forged beacon, left to the ordinary crash path rather
+        // than relabelled "stale client".
+        assert!(!pages_as_broken_deploy("stale-chunk-fatal", "Boom"));
+        assert!(!pages_as_broken_deploy("stale-chunk-fatal", ""));
+    }
+
+    /// The flag that spares a self-verified client the build comparison is one
+    /// JSON key agreed across two languages, and a mismatch is **silent** — the
+    /// field would simply default to false and every current client would be
+    /// back under an override it does not need. So pin the wire name against the
+    /// exact object `buildCrashPayload` produces.
+    #[test]
+    fn the_self_verified_flag_is_read_from_the_key_the_client_sends() {
+        let verified: CrashBody = serde_json::from_str(
+            r#"{"kind":"stale-chunk-fatal","message":"Failed to fetch dynamically imported module",
+                "stack":"","version":"1.1.0","build":"619d058a00","surface":"web","path":"/",
+                "shellVerified":true}"#,
+        )
+        .expect("payload shape");
+        assert!(verified.shell_verified);
+        assert_eq!(verified.build, "619d058a00");
+
+        // Omitted by every client older than the flag — the cohort the build
+        // comparison exists for — and by every non-fatal report.
+        let legacy: CrashBody = serde_json::from_str(
+            r#"{"kind":"stale-chunk-fatal","message":"x","build":"e699a38eec"}"#,
+        )
+        .expect("payload shape");
+        assert!(!legacy.shell_verified);
+
+        // The snake_case spelling is NOT the wire name; accepting it silently
+        // would hide a client that had drifted to it.
+        let wrong: CrashBody =
+            serde_json::from_str(r#"{"kind":"x","shell_verified":true}"#).expect("payload shape");
+        assert!(!wrong.shell_verified);
+    }
+
+    /// The two `build` values that name no bundle pull in opposite directions,
+    /// and the difference is the whole fail-open invariant: a client that cannot
+    /// read its own build must never be *silenced* by a comparison it cannot
+    /// take part in, or a broken deploy whose bundle lost `__BUILD_ID__` would
+    /// go unreported for the weeks that bundle stays in service-worker caches.
+    #[test]
+    fn a_beacon_that_cannot_name_its_bundle_fails_open_rather_than_silent() {
+        // Too old to carry the field: at least as old as the fatal kind itself,
+        // so it definitively is not the build we serve — compare, and demote.
+        assert!(build_is_comparable(MISSING_BUILD));
+        // A real build id, obviously comparable.
+        assert!(build_is_comparable("619d058a00"));
+        assert!(build_is_comparable("619d058a00-dirty"));
+        // The client's own "I could not tell" — never comparable, so it keeps
+        // the page it would have had before any of this existed.
+        assert!(!build_is_comparable(UNIDENTIFIED_BUILD));
+        // The two sentinels must stay distinct, or the split collapses.
+        assert_ne!(MISSING_BUILD, UNIDENTIFIED_BUILD);
+    }
+
+    /// Both messages from the 2026-09-13 page, from a bundle 24 days behind the
+    /// live one. Each is the page-worthy shape — so each is exactly what the
+    /// build comparison must be given the chance to demote.
+    #[test]
+    fn the_2026_09_13_beacons_are_the_shape_the_build_check_guards() {
+        for message in [
+            "Failed to fetch dynamically imported module: https://dweeb.faizo.net/assets/flows-B2W2FfFo.js",
+            "Unable to preload CSS for /assets/App-DELGwkAR.css",
+        ] {
+            assert!(pages_as_broken_deploy("stale-chunk-fatal", message), "{message}");
+        }
     }
 
     #[test]

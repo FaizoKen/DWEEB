@@ -364,9 +364,11 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
      the triage key. The Gatus `web shell` check (hand-synced config) covers a shell that
      answers non-200 or carries no hashed module entry — a deploy no beacon can report; a shell
      whose entry chunk itself 404s still runs nothing and is reported by nothing, a known gap.
-     Server-side classification was considered
+     Server-side classification **learned from beacons** was considered
      and rejected: the proxy has no deploy knowledge, and learning "newest build" from an
-     unauthenticated beacon would let one forged POST silence the paging channel.
+     unauthenticated beacon would let one forged POST silence the paging channel. That
+     rejection is scoped by those words and does not cover **point 8**, added 2026-09-13, where
+     the proxy reads its own configured origin instead and nothing is learned from the POST.
      (b) **The recovery is a ladder run from the boot promise's `.catch`, no longer from
      `vite:preloadError`** (`recoverFromBootFailure` in staleChunkRecovery.ts; both boots in
      main.tsx are caught, and the three speculative imports get side-branch `.catch`es so one dead
@@ -407,6 +409,58 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
      rewritten; once `mount()` re-parents it, it is the app's. `ErrorBoundary`'s generic "Reload
      editor" now reloads in place in the Activity — `assign("/")` dropped `frame_id` and rebooted
      the web surface inside Discord.
+  8. **A beacon from a build we no longer serve cannot be evidence about the deploy — and only
+     the server can tell** (2026-09-13). Point 7 fixed the *client's* judgement, which fixes
+     every client running it and **no other**: the app ships from a service-worker cache and
+     `registerType: "prompt"` deliberately never forces an update, so a tab keeps its bundle —
+     and its reporter — for as long as someone leaves it open. Two `stale-chunk-fatal` beacons
+     paged from `e699a38eec`, a **24-day-old** bundle whose `chunkFailureKind(probe)` took only
+     the chunk probe and had no concept of a live shell. Both were genuine: their boot chunks
+     (`flows-B2W2FfFo.js`, then `App-DELGwkAR.css` — note the second is the root-relative form,
+     which `CHUNK_URL_PATTERNS` does probe) really did 404, while the live shell was healthy and
+     seven commits newer. That population never drains, so "wait for clients to update" is not a
+     plan and the fix cannot live anywhere a stale client can veto it. The proxy now asks the
+     question the beacon could not: `stampBuildMeta` stamps `<meta name="dweeb-build">` into
+     `index.html` from the same `__BUILD_ID__` the beacon carries, `server/src/live_build.rs`
+     reads it off `FRONTEND_URL` (5 min TTL on success / 60 s on failure, single-flighted by
+     holding the cache mutex across the fetch, 4 s deadline, 64 KiB bounded read), and
+     `pages_as_broken_deploy` demotes any fatal beacon whose `build` differs to an **info**
+     `web app stale client` line naming both builds. Load-bearing: (i) **this is not the
+     beacon-learned classification point 7 rejected** — nothing is learned from the POST; the
+     proxy fetches its own configured origin, so a forged beacon can at most *claim* to be the
+     live build, which pages, which is the status quo; (ii) **every failure fails open to
+     paging** — unreachable host, unreadable shell, or a shell older than the marker all answer
+     `None` = "don't know" = exactly the old behaviour, so the server change is **inert until
+     the web deploy lands and needs no deploy ordering**; (iii) only a beacon that *would* page
+     is asked about, so a `BACKGROUND_ONLY_CHUNKS` exemption still decides on its own and spends
+     no request; (iv) the marker lives in `index.html`, not a side-car file, because the shell is
+     definitionally what visitors receive — a separate file could be fresh while the shell is
+     stale; (v) the marker is the one input a **hijacked origin** controls and it is compared
+     *and logged*, so both parsers refuse anything not shaped like a build id (a newline would
+     forge a log line), the value is `clamp_field`ed like every other field before use, and the
+     reader follows **no redirects at all** (`Policy::none()` — the fetch target is
+     operator-configured, but a 302 would hand a hijacked origin a blind GET from inside the
+     compose network, the same hazard `image_client` guards in activity.rs). Every one of those
+     refusals answers `None`, so a hostile origin can only make the channel *louder*.
+     **The proxy's answer must never overrule a client's own** (vi): a beacon carrying
+     `shellVerified` came from a client that fetched the live shell itself *at crash time* and
+     found it to be its own build, which is strictly fresher than our cached read of an
+     edge-cached shell — so the build comparison is skipped for it entirely. Without that, a
+     cached read up to `FRESH_FOR` + the CDN window stale would speak for **everybody** and could
+     silence a genuinely broken deploy globally, which is the opposite direction and a wider
+     scope than point 7's per-visitor false page. With it the override reaches only clients that
+     had no opinion — every visitor of a broken deploy runs a *current* bundle and therefore sets
+     the flag — so the mechanism self-narrows to nothing as old bundles drain, and the only
+     residue left is that an old client's beacon may be judged against a ≤~15-min-stale build,
+     which for that cohort is not actionable either way. Don't "fix" the residue by trusting the
+     beacon's build, and don't try remembering which builds were once live: a 24-day-old build
+     was never in this process's memory, which is exactly the case being fixed.
+     Marker drift must fail at the **audit**, not through the paging channel —
+     `scripts/seo/audit.ts` runs `buildMetaFromHtml` over the built `dist/index.html` and fails
+     the build when the marker is missing or still the unstamped `dev` placeholder (both verified
+     to fail). Guarded by `live_build.rs`'s parser tests (including a truncation sweep, since the
+     bounded read can cut the last tag), the `pages_as_broken_deploy` tests in telemetry.rs, and
+     `buildMetaFromHtml` in `crashReport.test.ts`.
 - **`Field` rewrites the caller's element tree — it must never descend into a render prop.**
   `ui/Field`'s `wireControl` walks the tree its render-prop child returns and clones
   `aria-describedby`/`aria-errormessage`/`aria-invalid` onto the element carrying the control id.

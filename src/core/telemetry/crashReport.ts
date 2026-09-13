@@ -83,6 +83,24 @@ export interface CrashPayload {
   build: string;
   surface: string;
   path: string;
+  /**
+   * Set only on a `stale-chunk-fatal` report, and only because this client read
+   * the live shell itself, at crash time, and found it to be this very build
+   * (see `probeLiveShell`). It says "my fatality verdict is first-hand", and it
+   * exists for the proxy's benefit rather than ours.
+   *
+   * The proxy keeps its own answer to the same question, because clients too old
+   * to ask it cannot be fixed — they ship from a service-worker cache and keep
+   * their reporter for as long as their tab stays open (`server/src/live_build.rs`).
+   * But that answer is a cached read of an edge-cached shell, so it can be some
+   * minutes behind, while this one is a live fetch made at the moment the app
+   * died. Without this flag the staler opinion would silently overrule the
+   * fresher one and a genuinely broken deploy could go unreported for the length
+   * of that window. With it, the proxy speaks only for the clients that had no
+   * opinion — so the override narrows to nothing as old bundles drain, which is
+   * exactly the population it was added for.
+   */
+  shellVerified?: boolean;
 }
 
 /** Everything the pure builder needs; the glue reads these from the environment. */
@@ -305,8 +323,11 @@ export type ShellProbe = "same" | "different" | "unknown";
  * could have prevented it.
  *
  * A gone chunk is still not proof of a broken deploy — it paged the maintainer
- * again on 2026-09-11: a tab booted a shell 42 hours older than the live deploy
- * (build `e699a38eec` against a live `25373c3a08`), its chunks were long purged,
+ * again on 2026-09-11: a tab booted a shell 22 days older than the live deploy
+ * (build `e699a38eec` of 2026-08-20 against a live `25373c3a08` — the 42 hours
+ * often quoted is the age of the *replacement*, not of the tab, and reading it
+ * as the tab's age is what made this look like an edge case rather than the
+ * norm it is), its chunks were long purged,
  * and the boot recovery's one reload could not get it a fresher shell. The
  * deploy everyone else was receiving was fine. The old rule read "recovery
  * exhausted + chunk gone" as "broken deploy", but that shape is also exactly what
@@ -368,6 +389,48 @@ export function moduleEntryFromHtml(html: string): string | null {
     if (!src) continue;
     const value = (src[1] ?? src[2] ?? src[3] ?? "").trim();
     if (value) return value.replace(/&amp;/g, "&");
+  }
+  return null;
+}
+
+/** The `<meta name="dweeb-build">` stamped into the shell by `stampBuildMeta`
+ *  (vite.config.ts). Attribute order is not assumed, and `name` is matched
+ *  exactly so a longer name can't be taken for this one. */
+const BUILD_META_TAG = /<meta\b([^>]*)>/gi;
+// `(?:^|[\s/])` rather than `\b`: JS word boundaries match after a hyphen, so
+// `\bname=` also matches `data-name=` — which would read an attribute that is
+// not the marker. The Rust twin requires the same preceding character, and this
+// pair has to agree, since the audit gate below runs only the TypeScript one.
+const BUILD_META_NAME =
+  /(?:^|[\s/])name\s*=\s*(?:"dweeb-build"|'dweeb-build'|dweeb-build(?=[\s/>]|$))/i;
+const BUILD_META_CONTENT = /(?:^|[\s/])content\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
+/** Everything `vite.config.ts`'s `buildId()` can produce — a short sha, with an
+ *  optional `-dirty`, or a `t<base36>` timestamp — and nothing a hostile origin
+ *  could use to forge a log line on the proxy. Kept in step with
+ *  `is_plausible_build` in `server/src/live_build.rs`. */
+const BUILD_META_VALUE = /^[A-Za-z0-9\-_.]{1,32}$/;
+
+/**
+ * The build id an HTML shell declares — the `__BUILD_ID__` of the bundle it
+ * belongs to — or `null` when it carries none.
+ *
+ * Nothing in the browser reads this: the *proxy* does, off the live shell, as
+ * the authority for "is the client reporting this crash running the build we
+ * are serving right now?" (`server/src/live_build.rs`, which mirrors this
+ * scan). It lives here beside [`moduleEntryFromHtml`] because it is the same
+ * kind of thing — a pure string scan over a shell, part of the paging decision,
+ * and testable in Vitest and in the post-build audit, neither of which has a
+ * DOM. The audit runs it over the real `dist/index.html` so markup drift fails
+ * the build rather than silently un-gating the paging channel.
+ */
+export function buildMetaFromHtml(html: string): string | null {
+  for (const tag of html.matchAll(BUILD_META_TAG)) {
+    const attributes = tag[1] ?? "";
+    if (!BUILD_META_NAME.test(attributes)) continue;
+    const content = BUILD_META_CONTENT.exec(attributes);
+    if (!content) continue;
+    const value = (content[1] ?? content[2] ?? content[3] ?? "").trim();
+    if (BUILD_META_VALUE.test(value)) return value;
   }
   return null;
 }

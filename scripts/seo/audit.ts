@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { parseSeoEntry } from "../../src/core/seo/acquisition";
 import { readFeatureIntent } from "../../src/app/featureIntent";
 import { readClientParam, SEO_CLIENT_PARAM_KEYS } from "../../src/core/seo/clientParams";
-import { moduleEntryFromHtml } from "../../src/core/telemetry/crashReport";
+import { buildMetaFromHtml, moduleEntryFromHtml } from "../../src/core/telemetry/crashReport";
 import { TEMPLATES } from "../../src/data/presets";
 import { SITE } from "./content";
 import { guideLandingOgSources, OG_CARD_HEIGHT, OG_CARD_WIDTH } from "./og-card-catalog";
@@ -811,6 +811,21 @@ async function main(): Promise<void> {
     errors.push(
       `/: moduleEntryFromHtml read ${parsedWebEntry ?? "no module entry"} from the shell; the manifest names /${webEntryFile}`,
     );
+  }
+
+  // The other half of that paging decision: the proxy demotes a
+  // `stale-chunk-fatal` beacon whose build is not the one the live shell
+  // declares, because a client running a bundle we no longer serve cannot be
+  // evidence about the deploy visitors receive. A shell that lost its marker
+  // would leave every such beacon unclassifiable — which fails *open*, back to
+  // paging for every stale tab — so prove the marker is on the shell we just
+  // wrote, and that the build stamped it (an unstamped `dev` would compare
+  // equal to nothing and never demote).
+  const parsedBuildMeta = buildMetaFromHtml(rootShellHtml);
+  if (parsedBuildMeta === null) {
+    errors.push('/: the shell carries no readable <meta name="dweeb-build"> build marker');
+  } else if (parsedBuildMeta === "dev") {
+    errors.push('/: the shell\'s build marker is still the unstamped "dev" placeholder');
   }
 
   const criticalBuffers = await Promise.all(

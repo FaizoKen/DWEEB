@@ -92,6 +92,12 @@ pub struct AppState {
     /// is off, which is the default — `/mcp` and the OAuth endpoints then
     /// answer 501 and nothing about this deployment is internet-authorizable.
     pub mcp: Option<Arc<crate::mcp::store::McpStore>>,
+    /// Which build the public shell is serving right now (see `live_build.rs`).
+    /// Read only by the crash-beacon handler, and only to decide whether a
+    /// chunk-load crash came from the deploy visitors are receiving or from a
+    /// tab that outlived it. `None` when no reader could be built, which leaves
+    /// that decision exactly where it was before this existed.
+    pub live_build: Option<Arc<crate::live_build::LiveBuild>>,
     /// Master key for encrypting/decrypting cookies.
     pub key: Key,
 }

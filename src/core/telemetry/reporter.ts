@@ -284,7 +284,12 @@ async function verifyChunkFailure(payload: CrashPayload, rawMessage: string): Pr
       const shell = probeLiveShell(origin, shellAbort.signal).catch((): ShellProbe => "unknown");
       const chunk = await probeChunk(url);
       if (chunk === "missing") {
-        payload.kind = chunkFailureKind(chunk, await shell);
+        const verdict = await shell;
+        payload.kind = chunkFailureKind(chunk, verdict);
+        // Tell the proxy this verdict is first-hand, so its own (necessarily
+        // staler) read of the live shell doesn't overrule it. See
+        // `CrashPayload.shellVerified`.
+        if (verdict === "same") payload.shellVerified = true;
       } else {
         shellAbort.abort();
         payload.kind = chunkFailureKind(chunk, "unknown");

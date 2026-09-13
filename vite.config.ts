@@ -248,6 +248,19 @@ function stampBuildMeta(): Plugin {
           `$1${HOME_LASTMOD}T00:00:00Z$2`,
           "og:updated_time",
         );
+        // The shell says which bundle it is, so the proxy can tell a client
+        // reporting from *this* deploy from one whose cache outlived it. That
+        // distinction is the whole of `stale-chunk-fatal`: a chunk-load crash
+        // pages only when the build that crashed is the build visitors are
+        // being served. The server cannot ask the client — the clients that get
+        // it wrong are by definition the ones running code we can no longer
+        // change — so it asks the shell instead (`server/src/live_build.rs`).
+        out = stamp(
+          out,
+          /(<meta name="dweeb-build" content=")[^"]*(")/,
+          `$1${BUILD_ID}$2`,
+          "dweeb-build",
+        );
         return out;
       },
     },
@@ -280,6 +293,18 @@ export default defineConfig(({ mode }) => ({
     // just-purged old chunk. The waiting worker surfaces a persistent
     // Discord-style "Update" button (see `UpdatePrompt`); clicking it activates
     // it and reloads onto the new build (otherwise it applies on next cold start).
+    //
+    // That guarantee is `registerType: "prompt"`'s alone, and it ends the moment
+    // the update is *applied*: `cleanupOutdatedCaches` has the new worker delete
+    // the previous precache outright, so any OTHER tab still running the old
+    // bundle (claimed by the activating worker) loses the chunks its shell
+    // names. It is bounded — every such lazy import is wrapped in
+    // `ui/ChunkErrorBoundary`, which offers a lossless refresh — but don't read
+    // the paragraph above as covering it. The mirror case is the one that keeps
+    // paging: a tab that *never* applies an update keeps its bundle, and its
+    // crash reporter, indefinitely (24 days, 2026-09-13). That is why the proxy,
+    // not the client, is the authority on which build is live — see
+    // `server/src/live_build.rs`.
     //
     // `manifest: false` keeps the existing hand-tuned `public/manifest.webmanifest`
     // (and its `<link rel="manifest">` in index.html) as the single source of truth.

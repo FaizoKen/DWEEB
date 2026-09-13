@@ -14,6 +14,7 @@ import {
   isNonCrashMessage,
   isStaleChunkMessage,
   KIND_MAX_LENGTH,
+  buildMetaFromHtml,
   moduleEntryFromHtml,
   resolveCrashKind,
   shellProbeVerdict,
@@ -321,6 +322,76 @@ describe("moduleEntryFromHtml", () => {
         `<script type="module" src="/first.js"></script><script type="module" src="/second.js"></script>`,
       ),
     ).toBe("/first.js");
+  });
+});
+
+describe("buildMetaFromHtml", () => {
+  // The head exactly as `index.html` carries it after `stampBuildMeta` has run,
+  // with the neighbours that must not be mistaken for it.
+  const SHELL = `<!doctype html>
+<html lang="en"><head>
+<meta charset="UTF-8" />
+<meta name="color-scheme" content="dark" />
+<meta name="dweeb-build" content="619d058a00" />
+<meta property="og:updated_time" content="2026-08-20T00:00:00Z" />
+</head><body></body></html>`;
+
+  it("reads the build the shell declares", () => {
+    expect(buildMetaFromHtml(SHELL)).toBe("619d058a00");
+  });
+
+  it("does not care about attribute order or quoting", () => {
+    expect(buildMetaFromHtml(`<meta content="a1" name="dweeb-build">`)).toBe("a1");
+    expect(buildMetaFromHtml(`<meta name='dweeb-build' content='b2'>`)).toBe("b2");
+    expect(buildMetaFromHtml(`<meta name=dweeb-build content=c3>`)).toBe("c3");
+    expect(buildMetaFromHtml(`<META NAME="dweeb-build" CONTENT="d4" />`)).toBe("d4");
+    expect(buildMetaFromHtml(`<meta\n  name="dweeb-build"\n  content="e5"\n/>`)).toBe("e5");
+  });
+
+  it("carries a local build's -dirty marker through verbatim", () => {
+    // A hand-deployed shell must compare equal to the beacons from the bundle
+    // it shipped, `-dirty` and all — they come from the same `BUILD_ID`.
+    expect(buildMetaFromHtml(`<meta name="dweeb-build" content="619d058a00-dirty">`)).toBe(
+      "619d058a00-dirty",
+    );
+  });
+
+  it("matches the name exactly, and tolerates a shell that has none", () => {
+    expect(buildMetaFromHtml(`<meta name="dweeb-build-id" content="x">`)).toBe(null);
+    expect(buildMetaFromHtml(`<meta name="dweeb" content="x">`)).toBe(null);
+    expect(buildMetaFromHtml(`<meta property="dweeb-build" content="x">`)).toBe(null);
+    expect(buildMetaFromHtml(`<meta name="dweeb-build">`)).toBe(null);
+    expect(buildMetaFromHtml(`<meta name="dweeb-build" content="">`)).toBe(null);
+    expect(buildMetaFromHtml("")).toBe(null);
+    expect(buildMetaFromHtml("<html><body>Not a shell at all</body></html>")).toBe(null);
+  });
+
+  it("reads an attribute name whole — `data-name=` is not `name=`", () => {
+    // A JS word boundary matches after a hyphen, so the obvious `\bname=` reads
+    // `data-name=` as the marker. The Rust twin (`server/src/live_build.rs`)
+    // requires the same preceding character, and only this side is gated by the
+    // post-build audit, so a divergence here would go unnoticed.
+    expect(buildMetaFromHtml(`<meta data-name="dweeb-build" content="stolen">`)).toBe(null);
+    expect(buildMetaFromHtml(`<meta name="dweeb-build" data-content="stolen">`)).toBe(null);
+  });
+
+  it("refuses anything not shaped like a build id", () => {
+    // The marker is the one input a hijacked origin controls, and the proxy
+    // compares *and logs* it — a newline would forge a whole log line there.
+    // Refusing reads as absent, which is the fail-open-to-paging path.
+    for (const hostile of [
+      "a\n2026-09-13T10:00:00.000000Z ERROR forged: on fire",
+      "a\r\nERROR forged",
+      "has spaces",
+      "0123456789012345678901234567890123456789",
+      "a;b",
+    ]) {
+      expect(buildMetaFromHtml(`<meta name="dweeb-build" content="${hostile}">`)).toBe(null);
+    }
+    // …while everything vite.config.ts's buildId() can produce still reads.
+    for (const real of ["619d058a00", "619d058a00-dirty", "tm1k2j3h", "a_b.c-d"]) {
+      expect(buildMetaFromHtml(`<meta name="dweeb-build" content="${real}">`)).toBe(real);
+    }
   });
 });
 

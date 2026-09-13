@@ -66,6 +66,15 @@
     <meta name="theme-color" content="#1e1f22" />
     <meta name="color-scheme" content="dark" />
 
+    <!-- Which bundle this shell belongs to, stamped at build by `stampBuildMeta`
+         (vite.config.ts) from the same `__BUILD_ID__` the app puts in a crash
+         beacon. The proxy reads it off the *live* shell to answer the one
+         question that decides whether a stale-chunk crash pages: is the
+         reporting client running the build visitors are being served right now,
+         or is it a tab that outlived a deploy? See `server/src/live_build.rs`.
+         Stays `dev` under a dev server, which never reports. -->
+    <meta name="dweeb-build" content="dev" />
+
     <title>Discord Message Builder — Free Visual Webhook Editor | DWEEB</title>
     <meta
       name="description"

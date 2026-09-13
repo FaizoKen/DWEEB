@@ -25,6 +25,7 @@ mod entitlement;
 mod error;
 mod feedback;
 mod library;
+mod live_build;
 mod mcp;
 mod ratelimit;
 mod rating;
@@ -575,6 +576,11 @@ async fn run() {
         entitlements,
         stripe,
         ai,
+        // Reads `FRONTEND_URL` — the builder's own shell — so a crash beacon can
+        // be told apart from a stale tab's. Constructed here because it is
+        // stateless and inert until the first fatal-shaped beacon asks it
+        // anything; a `None` reader simply leaves that classification alone.
+        live_build: crate::live_build::LiveBuild::new(&config.frontend_url).map(Arc::new),
         key,
         config: Arc::new(config),
     };
