@@ -142,6 +142,16 @@ journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat | grep web_crash
 journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
   | grep web_crash | grep 'stale chunk'
 
+# Someone else's code crashing in visitors' pages (INFO, never paged), counted
+# by whose: frames=extension is a browser extension (MetaMask & co.);
+# frames=none names no location at all — a userscript/console stack, a muted
+# cross-origin `Script error.`, or a V8 header-only stack (which can be ours:
+# see AGENTS.md). The proxy's fields are ANSI-coloured (`frames` and `=` wear
+# separate escape codes), so strip the colour before matching `frames=`.
+journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat \
+  | sed 's/\x1b\[[0-9;]*m//g' \
+  | grep web_crash | grep 'foreign-code' | grep -o 'frames=[a-z]*' | sort | uniq -c
+
 # Dials to Discord that rode out a DNS stall on the last good address (INFO,
 # never paged — see server/src/dns.rs)
 journalctl CONTAINER_NAME=dweeb-proxy-1 --since -14d -o cat | grep ' dns: '

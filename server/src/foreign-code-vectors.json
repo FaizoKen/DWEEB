@@ -1,0 +1,453 @@
+{
+  "about": "Hand-written spec for which crash beacons report someone else's code: browser extensions, userscripts, muted cross-origin scripts. server/src/telemetry.rs judges every case as its handler does, through clamp_field (control characters turned into spaces); src/core/telemetry/crashReport.test.ts judges it twice, as written (the client's newline-joined stack) and flattened that same way, since the client must reach the proxy's verdict from either. 'frames' is frameOrigin / frame_origin; 'error' and 'unhandledrejection' are isForeignCodeError / is_foreign_code_error for that kind. Every other kind is never foreign, for any of these stacks. The verdicts ARE the policy: edit this file first, then both implementations, and never regenerate it from either one. See AGENTS.md, 'A crash beacon must be *our* crash before it may page'.",
+  "extensionSchemes": [
+    "chrome-extension",
+    "moz-extension",
+    "safari-extension",
+    "safari-web-extension",
+    "webkit-masked-url"
+  ],
+  "geckoMainWorld": "<anonymous code>",
+  "cases": [
+    {
+      "name": "2026-09-14 page: MetaMask's rejection exactly as build e699a38eec sent it",
+      "message": "Failed to connect to MetaMask",
+      "stack": "i: Failed to connect to MetaMask\nat Object.connect (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:7:84292)",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "2026-09-14 page as the proxy logged it (the newline already a space)",
+      "message": "Failed to connect to MetaMask",
+      "stack": "i: Failed to connect to MetaMask at Object.connect (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:7:84292)",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "an older MetaMask build: connect plus an async frame",
+      "message": "Failed to connect to MetaMask",
+      "stack": "i: Failed to connect to MetaMask\nat Object.connect (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:63510)\nat async s (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:64111)",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "two wallets fighting over window.ethereum: the location-less top frame is ignored",
+      "message": "Cannot redefine property: ethereum",
+      "stack": "TypeError: Cannot redefine property: ethereum\nat Object.defineProperty (<anonymous>)\nat r.inject (chrome-extension://bfnaelmomeimhlpmgjnjophhpkkoljpa/evmAsk.js:15:5093)",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "V8's async Promise.all frame names no location and is ignored",
+      "message": "probe",
+      "stack": "Error: probe\nat allMember (chrome-extension://blahfnhaalbmhochneoddocblhebcidm/main-world.js:40:15)\nat async Promise.all (index 0)",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "a V8 eval origin inside an extension script",
+      "message": "boom",
+      "stack": "EvalError: boom\nat eval (eval at f (chrome-extension://blahfnhaalbmhochneoddocblhebcidm/main-world.js:23:5), <anonymous>:1:1)",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "a header that names only an extension URL, with no frames at all",
+      "message": "Failed to load chrome-extension://abcdefghijklmnopabcdefghijklmnop/x.js",
+      "stack": "TypeError: Failed to load chrome-extension://abcdefghijklmnopabcdefghijklmnop/x.js",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "Firefox: an extension script the page loads by URL",
+      "message": "boom",
+      "stack": "warThrow@moz-extension://f476649a-0b16-4ee3-89c7-1ede428c8c09/war.js:5:11",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "Firefox: the MetaMask rejection from a page-world script, which Gecko names <anonymous code>",
+      "message": "Failed to connect to MetaMask",
+      "stack": "connect@<anonymous code>:7:84292",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "Firefox: a page-world extension throw, two frames",
+      "message": "probe",
+      "stack": "thrower@<anonymous code>:4:11\ntimerCb@<anonymous code>:7:5",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "Firefox: eval inside a page-world extension script",
+      "message": "boom",
+      "stack": "evalInner@<anonymous code> line 23 > eval:1:30",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "Safari 16+: an extension URL, masked (the 1Password iOS shape)",
+      "message": "undefined is not an object (evaluating 'n.features')",
+      "stack": "@webkit-masked-url://hidden/:42:68938",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "Safari 16+: a masked frame beside a native one",
+      "message": "Failed to connect to MetaMask",
+      "stack": "connect@webkit-masked-url://hidden/:7:84292\n[native code]",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "Safari 14-15: an unmasked web extension",
+      "message": "boom",
+      "stack": "p_@safari-web-extension://46434E60-F5BD-48A4-80C8-A422C5D16897/scripts/content-script.js:29:33314",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "a legacy Safari extension",
+      "message": "boom",
+      "stack": "isClaimed@safari-extension://com.grammarly.safari.extension.ext2-W8F64X92K3/ee7759dd/Grammarly.js:2:929865",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "CRLF line endings read like any other layout",
+      "message": "boom",
+      "stack": "Error: boom\r\nat a (chrome-extension://abcdefghijklmnopabcdefghijklmnop/a.js:1:2)\r\n",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "the Gecko token split by a control character is read as the proxy reads it (control characters are spaces)",
+      "message": "boom",
+      "stack": "Error: boom <anonymous\ncode>",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "…but not when split by a character the proxy keeps (U+2028 is no control character)",
+      "message": "boom",
+      "stack": "Error: boom <anonymous\u2028code>",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": false
+    },
+    {
+      "name": "schemes compare ASCII-case-insensitively (RFC 3986)",
+      "message": "boom",
+      "stack": "Error: boom\nat x (CHROME-EXTENSION://abcdefghijklmnopabcdefghijklmnop/x.js:1:2)",
+      "frames": "extension",
+      "error": true,
+      "unhandledrejection": true
+    },
+    {
+      "name": "an extension frame above our own (web origin)",
+      "message": "boom",
+      "stack": "Error: boom\nat hook (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:2)\nat Xk (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:1:2)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an extension frame above our own (Activity origin)",
+      "message": "boom",
+      "stack": "Error: boom\nat hook (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:2)\nat Xk (https://1511769679096447016.discordsays.com/.proxy/assets/index-abc.js:1:2)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an extension frame above our own (vite preview origin)",
+      "message": "boom",
+      "stack": "Error: boom\nat hook (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:2)\nat Xk (http://localhost:4173/assets/index-abc.js:1:2)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "blob:https reads as https",
+      "message": "boom",
+      "stack": "Error: boom\nat hook (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:2)\nat blob:https://dweeb.faizo.net/5e0c1b2a:1:2",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "our awaited fetch through an async extension wrapper",
+      "message": "Failed to fetch",
+      "stack": "TypeError: Failed to fetch\nat fetch (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:3:76)\nat async ourFetchAwait (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:2:66)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "our own pushState misuse through an extension's history hook",
+      "message": "Failed to execute 'pushState' on 'History': f() {} could not be cloned.",
+      "stack": "DataCloneError: Failed to execute 'pushState' on 'History': f() {} could not be cloned.\nat History.pushState (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:5:66)\nat ourPush (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:4:49)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an extension's DOM write under our domGuard patch",
+      "message": "The new child element contains the parent.",
+      "stack": "HierarchyRequestError: The new child element contains the parent.\nat Node.insertBefore (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:1:5000)\nat inject (chrome-extension://abcdefghijklmnopabcdefghijklmnop/content-main.js:1:99)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "Firefox: a page-world extension wrapper that our own call went through",
+      "message": "Failed to fetch",
+      "stack": "wrappedFetch@<anonymous code>:67:54\npageCallsWrapped@https://dweeb.faizo.net/assets/index-DcBtb6aN.js:6:8",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an https URL in an extension's message keeps it paging (accepted)",
+      "message": "RPC endpoint https://mainnet.infura.io/v3 failed",
+      "stack": "Error: RPC endpoint https://mainnet.infura.io/v3 failed\nat r (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:2)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a URL inside an extension URL's query is still a URL",
+      "message": "boom",
+      "stack": "Error: boom\nat a (chrome-extension://abcdefghijklmnopabcdefghijklmnop/a.js?u=https://dweeb.faizo.net/assets/index-DcBtb6aN.js:1:2)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "the Gecko token cannot outvote a frame of ours",
+      "message": "saw <anonymous code> in a report",
+      "stack": "Error: saw <anonymous code> in a report\nat Xk (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:1:2)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an empty scheme counts as ours",
+      "message": "boom",
+      "stack": "Error: boom\nat a (chrome-extension://abcdefghijklmnopabcdefghijklmnop/a.js:1:2)\nat b (://y:1:2)",
+      "frames": "mixed",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "only our own frames",
+      "message": "Cannot read properties of undefined (reading 'id')",
+      "stack": "TypeError: Cannot read properties of undefined (reading 'id')\nat Ks (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:41:9528)\nat HTMLButtonElement.onClick (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:40:100)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a third-party script we load on purpose (gtag)",
+      "message": "boom",
+      "stack": "Error: boom\nat Xn (https://www.googletagmanager.com/gtag/js?id=G-GQRDJZRCTS:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: an https host named like an extension",
+      "message": "boom",
+      "stack": "Error: boom\nat x (https://chrome-extension.example/x.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: an asset path that says extension",
+      "message": "boom",
+      "stack": "Error: boom\nat x (https://dweeb.faizo.net/assets/extension-helper-a1.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: the scheme is the WHOLE run before :// (digit-led)",
+      "message": "boom",
+      "stack": "Error: boom\nat a (1chrome-extension://abcdefghijklmnopabcdefghijklmnop/a.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: the scheme is the WHOLE run before :// (letter-prefixed)",
+      "message": "boom",
+      "stack": "Error: boom\nat a (xchrome-extension://abcdefghijklmnopabcdefghijklmnop/a.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: the scheme is the WHOLE run before :// ('.'-joined)",
+      "message": "boom",
+      "stack": "Error: boom\nat a (x.chrome-extension://abcdefghijklmnopabcdefghijklmnop/a.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: the scheme is the WHOLE run before :// ('+'-joined)",
+      "message": "boom",
+      "stack": "Error: boom\nat a (x+chrome-extension://abcdefghijklmnopabcdefghijklmnop/a.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: ms-browser-extension is not listed (EdgeHTML cannot boot DWEEB)",
+      "message": "boom",
+      "stack": "Error: boom\nat a (ms-browser-extension://abc/a.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: a bare extension:// is no browser's scheme (Edge prints chrome-extension://)",
+      "message": "boom",
+      "stack": "Error: boom\nat a (extension://abc/a.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "decoy: webkit-extension is not listed (masked by default, never seen)",
+      "message": "boom",
+      "stack": "Error: boom\nat a (webkit-extension://abc/a.js:1:2)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an extension script renamed by //# sourceURL is not recognisable",
+      "message": "boom",
+      "stack": "Error: boom\nat extWebpack (webpack-internal:///./src/inpage.js:1:68)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a wasm frame is not an extension",
+      "message": "boom",
+      "stack": "Error: boom\nat mod.fn (wasm://wasm/0012abcd:wasm-function[12]:0x5aeb)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a data: frame whose source holds an https URL",
+      "message": "boom",
+      "stack": "Error: boom\nat d (data:text/javascript,fetch('https://x.example/y'):1:1)",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a muted-looking message beside a frame of ours",
+      "message": "Script error.",
+      "stack": "x@https://dweeb.faizo.net/assets/index-DcBtb6aN.js:1:2",
+      "frames": "page",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a header-only V8 stack: unattributed for error (pre-existing, not widened), never for a rejection, since our own failed fetch rejects exactly so",
+      "message": "Failed to fetch",
+      "stack": "TypeError: Failed to fetch",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": false
+    },
+    {
+      "name": "V8 code with no script URL (executeScript func, a built-in wallet)",
+      "message": "provider not ready",
+      "stack": "Error: provider not ready\nat <anonymous>:1:230\nat new Promise (<anonymous>)",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": false
+    },
+    {
+      "name": "2026-07-24 page: an unattributed Safari stack",
+      "message": "Maximum call stack size exceeded.",
+      "stack": "@\n@\n@\nPk@\nNk@\nPk@",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": false
+    },
+    {
+      "name": "V8's eval wording is equally unattributed",
+      "message": "Maximum call stack size exceeded",
+      "stack": "RangeError: Maximum call stack size exceeded\nat Pk (<anonymous>)\nat Nk (<anonymous>)",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": false
+    },
+    {
+      "name": "the muted cross-origin error, a window-error shape only",
+      "message": "Script error.",
+      "stack": "",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": false
+    },
+    {
+      "name": "the muted error behind a control character, which the proxy reads as a space and trims",
+      "message": "\u0001Script error.",
+      "stack": "",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": false
+    },
+    {
+      "name": "the muted error behind a byte-order mark, trimmed on both sides alike",
+      "message": "\ufeffScript error.",
+      "stack": "",
+      "frames": "none",
+      "error": true,
+      "unhandledrejection": false
+    },
+    {
+      "name": "a stackless rejection (an EIP-1193 object, a bare string) names nobody",
+      "message": "User rejected the request.",
+      "stack": "",
+      "frames": "none",
+      "error": false,
+      "unhandledrejection": false
+    },
+    {
+      "name": "an ordinary message with no stack is ours (throw \"string\")",
+      "message": "invalid share token",
+      "stack": "",
+      "frames": "none",
+      "error": false,
+      "unhandledrejection": false
+    }
+  ]
+}

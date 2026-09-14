@@ -155,24 +155,81 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   non-errors (the RO loop notice) are dropped by the crash reporter (`core/telemetry/crashReport.ts`)
   _and_ by the proxy's `/api/telemetry/crash` (`telemetry.rs`) — the FE ships from a service-worker
   cache, so stale clients keep beaconing long after a fix.
-- **A crash beacon must be *our* crash before it may page** (2026-07-24). `window.onerror` hears
-  every uncaught error in the page context, including code we never shipped — extension scripts
-  injected into the page, userscripts, bookmarklets, console experiments. One paged the maintainer:
-  a Safari user's foreign script overflowed its own stack ("Maximum call stack size exceeded.",
+- **A crash beacon must be *our* crash before it may page** (2026-07-24; extension frames
+  2026-09-14). The `error` and `unhandledrejection` traps hear everything thrown or dropped in the
+  page's own JS world, including code we never shipped — extension scripts that run in the page's
+  world (a wallet must, to define `window.ethereum`; an isolated-world content script never reaches
+  page listeners), userscripts, bookmarklets, console experiments. Two have paged. 2026-07-24: a
+  Safari user's foreign script overflowed its own stack ("Maximum call stack size exceeded.",
   frames `@`/`Pk@`/`Nk@` with **no source URL** — JSC's rendering of code that has no script URL);
   rebuilding every deployed 1.0.0 bundle proved no DWEEB build contained those symbols (prod-vs-local
   identifier histograms match, so local rebuilds are name-faithful — a reusable diagnosis trick).
-  Policy (`isForeignCodeError` in crashReport.ts, mirrored as `is_foreign_code_error` in
-  telemetry.rs, which is the authority since SW-stale clients keep the old reporter for weeks):
-  a `kind=error` beacon whose stack has frames but no `://` anywhere (nothing we serve produces
-  URL-less frames), or the muted cross-origin `Script error.` + empty stack, is foreign — the client
-  doesn't send it and the proxy logs it at **info** (`web app foreign-code error`, still greppable
-  under `web_crash`). Deliberately narrow: `boundary`/`unhandledrejection` keep paging even with
-  foreign-looking stacks (the 6-frame cut can hide our deeper frames), an empty stack with an
-  ordinary message keeps paging (our code can `throw "string"`), and extension frames that carry a
-  URL keep paging. `clamp_field` now replaces control chars with spaces so a multi-line stack stays
-  legible in the one-line log (`@ @ @ Pk@` instead of the fused `@@@Pk@` that made this incident
-  cryptic) without weakening the log-injection guarantee.
+  2026-09-14: MetaMask's page-world `inpage.js` dropped its own connection promise (`i: Failed to
+  connect to MetaMask`, one frame at `chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/…`, kind
+  `unhandledrejection` — a fire-and-forget warm-up that rejects after a 10 s extension-detection
+  timeout; DWEEB never touches `window.ethereum`), reported by build `e699a38eec`, ~25 days stale in
+  an SW cache, so **only the proxy could stop it**. Policy: `isForeignCodeError` (crashReport.ts)
+  and `is_foreign_code_error` (telemetry.rs — the authority, since SW-stale clients keep their
+  reporter for weeks), both pinned to the hand-written `server/src/foreign-code-vectors.json`. Both
+  judge the text as the proxy reads it — `clamp_field` turns control characters into spaces, and
+  the client maps them the same way first (`asProxyReads`) — so newline vs space, or a `\n` inside
+  a token, can never split the verdict; the Rust suite runs each case through `clamp_field`, the
+  TS suite both as written *and* flattened, and both trim the muted-error check alike. A stack's
+  **locations** are each `://` read with the **whole** `[A-Za-z0-9+.-]` run before it, compared
+  whole and ASCII-case-insensitively — so `blob:https`, `webpack-internal`, `wasm` and any empty or
+  malformed run count as ours, the paging side — plus Firefox's `<anonymous code>`, its deliberate
+  name for every page-world extension script and for nothing else (without it the Gecko rendering of
+  the same MetaMask rejection names no location and pages); location-less frames (`<anonymous>`,
+  `[native code]`, `async Promise.all (index 0)`) are ignored. Foreign = (1) **every** location an
+  extension's — `chrome-extension` (every Chromium browser, Edge included), `moz-extension`,
+  `safari-web-extension`, `safari-extension`, `webkit-masked-url` (Safari 16+ masks every extension
+  script URL and never an http(s)/blob one) — for `error` *and* `unhandledrejection`; (2) `error`
+  only, frames that name no location; (3) `error` only, the muted `Script error.` + empty stack.
+  The client drops these before the throttle; the proxy logs them at **info** (`web app
+  foreign-code error`, still under `web_crash`). Both that line and the paging `web app crash` carry
+  `frames=none|page|extension|mixed` right after `kind` — on a page, `frames=mixed` says an
+  extension was in the stack beside ours. Deliberately narrow: **all** locations, never the top
+  frame (Sentry's rule — it would silence our own misuse of an API a page-world extension wraps,
+  since `History.pushState (chrome-extension://…)` sits *above* our frame); **at least one**
+  location (a location-less rejection pages: our own failed `fetch` rejects with a header-only
+  `TypeError`); only the two window traps (`boundary`/`boot` page whatever the stack — an
+  extension-only stack there is a real outage, as a 2024 1Password iOS bug proved on another web
+  app); an https URL in an extension's message pages; no message lists (Trust Wallet's `Cannot read
+  properties of null (reading 'type')` is word-for-word a DWEEB bug). **The client judges the full
+  stack and sends evidence, never a verdict.** The wire carries ≤6 lines / ≤800 units and V8 spends
+  line 1 on its `Name: message` header, so a multi-line or huge message (zod's pretty-printed
+  errors, a `DataCloneError` quoting source code) used to push every frame out and the unattributed
+  rule silenced our own Chromium crash — and an extension's frame above ours, with the rest of the
+  window naming nothing, would now do the same. So `reporter.ts` judges `topFrames(stack,
+  Infinity)` with the *resolved* kind, and `wireStack` promotes the first http(s) location (else any
+  non-extension location) into a window that lacks one — head lines, a `... N lines skipped ...`
+  marker when any were left out, then that line — budgeted first so no clamp can cut its
+  location (a scheme run too long to keep whole is dropped, never front-trimmed, since a trimmed run
+  could spell an extension's scheme). The search starts *below* line 1, V8's header, so a frame is
+  promoted rather than a message's tail, and line 1 always leads — a header whose only URL lies past
+  the window used to send that URL's tail alone. A seeded property test pins "client says ours ⇒
+  proxy says ours", `reporter.test.ts` pins the full stack and the resolved kind, and a log-capture
+  test (`log_crash`) pins the lines themselves — `INFO … foreign-code error … frames=extension` vs
+  `WARN … web app crash … frames=mixed`. Don't replace promotion with a client-set "ours" flag (the
+  `shellVerified` pattern): a verdict would freeze each bundle's policy into its beacons for as long
+  as the bundle lives in SW caches, where evidence leaves the policy with the proxy. Residue,
+  accepted: a pre-promotion bundle's window is its first six lines / 800 units whatever they hold,
+  and only locations count, so a single extension frame hides ours whenever the rest of that window
+  names nothing of ours — a long or multi-line V8 message, or URL-less lines such as V8's builtins
+  (`at Array.forEach (<anonymous>)`) — but a fault of ours hidden that way still pages from every
+  current bundle, which judges the full stack and promotes our frame; a later line
+  of a multi-line message can be promoted in place of a frame (the verdict is the same); an
+  extension that catches our error and throws its own, or an async wrapper whose
+  rejection carries only its own frame, is demoted for the visitors running it (the same bug pages
+  from everyone else); a V8 header-only `kind=error` (a parse error in a classic script,
+  `Error.stackTraceLimit = 0`) still reads as unattributed (pre-existing; Firefox/JSC report it with
+  an empty stack, which pages). Add a scheme only on evidence (a page naming it), to both lists
+  **and** the vector file — and never http(s): promotion relies on an http(s) location staying ours.
+  The client's clamps never split a surrogate pair: the orphan serializes as a `\udXXX` escape
+  serde refuses, losing the whole beacon. No deploy ordering (no new field or kind). `clamp_field`
+  replaces control chars with spaces so a multi-line stack stays legible in the one-line log
+  (`@ @ @ Pk@` instead of the fused `@@@Pk@` that made the first incident cryptic) without
+  weakening the log-injection guarantee.
 - **Preact must survive a DOM something else rewrote — an in-page translator is the
   known rewriter** (2026-07-29). Preact places a node with
   `parentDom.insertBefore(newNode, oldDom)`, where `oldDom` is the sibling it remembers;

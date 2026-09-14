@@ -28,6 +28,9 @@ on:
       - "lighthouserc.json"
       - "eslint.config.js"
       - ".prettierrc.json"
+      # The crash-attribution spec lives beside its Rust twin, but Vitest runs
+      # it too: a spec-only edit must test (and ship) the client as well.
+      - "server/src/foreign-code-vectors.json"
       - ".github/workflows/web.yml"
   pull_request:
     branches: [main]

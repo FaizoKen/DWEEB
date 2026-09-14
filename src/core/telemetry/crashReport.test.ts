@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import foreignSpec from "../../../server/src/foreign-code-vectors.json";
 import {
   backgroundFailureKind,
   buildCrashPayload,
+  canBeForeign,
   chunkFailureKind,
   chunkProbeUrl,
   CRASH_KINDS,
@@ -10,6 +12,9 @@ import {
   CrashThrottle,
   describeError,
   domDesyncMessage,
+  EXTENSION_SCHEMES,
+  frameOrigin,
+  GECKO_MAIN_WORLD,
   isForeignCodeError,
   isNonCrashMessage,
   isStaleChunkMessage,
@@ -19,8 +24,65 @@ import {
   resolveCrashKind,
   shellProbeVerdict,
   topFrames,
+  wireStack,
   type CrashInput,
+  type FrameOrigin,
 } from "./crashReport";
+
+/** One case of `server/src/foreign-code-vectors.json` — the hand-written spec
+ *  this suite and `telemetry.rs` both obey. */
+interface ForeignCase {
+  name: string;
+  message: string;
+  stack: string;
+  frames: FrameOrigin;
+  error: boolean;
+  unhandledrejection: boolean;
+}
+
+/** A stack as the proxy reads it: `clamp_field` turns every control character
+ *  (Unicode Cc: U+0000–U+001F and U+007F–U+009F) into a space. A loop rather
+ *  than a control-character regex, which ESLint's no-control-regex refuses. */
+function asProxyReadsIt(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    out += code < 0x20 || (code >= 0x7f && code <= 0x9f) ? " " : ch;
+  }
+  return out;
+}
+
+/** Whether `text` holds no lone surrogate — the half of a pair that
+ *  `JSON.stringify` escapes and serde_json refuses. */
+function isWellFormed(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      i++;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** An http(s) location, read as a whole scheme run the way `frameOrigin`
+ *  reads one. */
+const WEB_LOCATION = /(?:^|[^A-Za-z0-9+.-])https?:\/\//;
+
+/** The 2026-09-14 page's one frame, and one of ours. */
+const METAMASK_FRAME =
+  "at Object.connect (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:7:84292)";
+const OUR_FRAME = "at Ks (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:41:9528)";
+
+/** An Error whose stack is exactly `lines`, V8-style (4-space frame indent). */
+function errorWithStack(message: string, lines: string[]): Error {
+  const error = new Error(message);
+  error.stack = lines.map((line, i) => (i === 0 ? line : `    ${line}`)).join("\n");
+  return error;
+}
 
 describe("describeError", () => {
   it("pulls message and stack from an Error", () => {
@@ -133,6 +195,19 @@ describe("buildCrashPayload", () => {
     const p = buildCrashPayload({ ...base, error: err });
     expect(p.stack.split("\n").length).toBeLessThanOrEqual(6);
     expect(p.stack.length).toBeLessThanOrEqual(800);
+  });
+
+  it("never splits a surrogate pair when it clamps", () => {
+    // A cut between the halves of an emoji leaves a lone surrogate, which
+    // serializes as an escape serde_json refuses — the proxy would reject the
+    // whole beacon (pinned in telemetry.rs). Both caps back off one unit.
+    // Unit 300 of the message, and unit 800 of the stack, is a high surrogate.
+    const err = new Error(`${"x".repeat(299)}🦊 and more`);
+    err.stack = `${"y".repeat(799)}🦊\n    at f (f.js:1:1)`;
+    const p = buildCrashPayload({ ...base, error: err });
+    expect(p.message).toBe("x".repeat(299));
+    expect(p.stack).toBe("y".repeat(799));
+    expect(JSON.stringify(p)).not.toMatch(/\\ud[89ab]/i);
   });
 
   it("carries only the path it is handed (never a hash)", () => {
@@ -520,7 +595,7 @@ describe("isForeignCodeError", () => {
     ).toBe(false);
   });
 
-  it("keeps any stack that carries a script URL", () => {
+  it("keeps any stack that carries a script URL of ours", () => {
     expect(
       isForeignCodeError(
         "error",
@@ -528,23 +603,334 @@ describe("isForeignCodeError", () => {
         "Pk@https://dweeb.faizo.net/assets/useBarWidth-abc.js:41:9528",
       ),
     ).toBe(false);
-    // Extension frames with a URL are identifiable — deliberately still kept.
-    expect(isForeignCodeError("error", "boom", "hook@safari-web-extension://x/inject.js:1:2")).toBe(
-      false,
-    );
+    // …even beneath an extension's frame: a page-world wrapper sits on top of
+    // our own call, and that misuse of ours must page. Every location counts,
+    // never just the top frame.
+    const wrapped = [
+      "DataCloneError: Failed to execute 'pushState' on 'History': f() {} could not be cloned.",
+      "at History.pushState (chrome-extension://abcdefghijklmnopabcdefghijklmnop/hook.js:5:66)",
+      "at ourPush (https://dweeb.faizo.net/assets/index-DcBtb6aN.js:4:49)",
+    ].join("\n");
+    expect(isForeignCodeError("error", "boom", wrapped)).toBe(false);
+    expect(isForeignCodeError("unhandledrejection", "boom", wrapped)).toBe(false);
+  });
+
+  it("classifies a stack naming only an extension's code as foreign, on both window traps", () => {
+    // The 2026-09-14 page: MetaMask's page-world inpage.js dropping its own
+    // promise, built through the real payload path.
+    const error = errorWithStack("Failed to connect to MetaMask", [
+      "i: Failed to connect to MetaMask",
+      METAMASK_FRAME,
+    ]);
+    error.name = "i";
+    const p = buildCrashPayload({
+      kind: "unhandledrejection",
+      error,
+      path: "/",
+      surface: "web",
+      version: "1.1.0",
+      build: "e699a38eec",
+    });
+    expect(p.stack).toBe(`i: Failed to connect to MetaMask\n${METAMASK_FRAME}`);
+    expect(isForeignCodeError("unhandledrejection", p.message, p.stack)).toBe(true);
+    expect(isForeignCodeError("error", p.message, p.stack)).toBe(true);
+    // One frame of ours anywhere in it, and it is ours to hear about.
+    const ours = `${p.stack}\n${OUR_FRAME}`;
+    expect(isForeignCodeError("unhandledrejection", p.message, ours)).toBe(false);
   });
 
   it("keeps an empty stack with an ordinary message (our code can throw strings)", () => {
     expect(isForeignCodeError("error", "invalid share token", "")).toBe(false);
   });
 
-  it("never classifies boundary or rejection reports as foreign", () => {
-    // A boundary crash took the app down; a rejection dropped real work. Both
-    // keep flowing even when the 6-frame cut leaves a foreign-looking stack.
+  it("never classifies a boundary report, or a rejection that names no location, as foreign", () => {
+    // A boundary crash took the app down, whatever its stack. A rejection that
+    // names no location may be ours: our own failed fetch rejects with a
+    // header-only TypeError, so the location-less shapes stay window-error only.
     expect(isForeignCodeError("boundary", "boom", "@\n@\nPk@")).toBe(false);
+    expect(isForeignCodeError("boundary", "boom", `i: boom\n${METAMASK_FRAME}`)).toBe(false);
     expect(isForeignCodeError("unhandledrejection", "boom", "@\n@\nPk@")).toBe(false);
+    expect(
+      isForeignCodeError("unhandledrejection", "Failed to fetch", "TypeError: Failed to fetch"),
+    ).toBe(false);
     expect(isForeignCodeError("boundary", "Script error.", "")).toBe(false);
+    expect(isForeignCodeError("unhandledrejection", "Script error.", "")).toBe(false);
   });
+});
+
+describe("foreign-code spec (shared with telemetry.rs)", () => {
+  const cases = foreignSpec.cases as ForeignCase[];
+
+  it("lists exactly the extension evidence the spec does", () => {
+    expect([...EXTENSION_SCHEMES].sort()).toEqual([...foreignSpec.extensionSchemes].sort());
+    expect(GECKO_MAIN_WORLD).toBe(foreignSpec.geckoMainWorld);
+  });
+
+  // Each case as written (the client's newline-joined stack) and as the proxy
+  // reads it (newlines turned into spaces); telemetry.rs runs the same file.
+  it.each(cases)("$name", (c) => {
+    for (const stack of [c.stack, asProxyReadsIt(c.stack)]) {
+      expect(frameOrigin(stack)).toBe(c.frames);
+      expect(isForeignCodeError("error", c.message, stack)).toBe(c.error);
+      expect(isForeignCodeError("unhandledrejection", c.message, stack)).toBe(c.unhandledrejection);
+    }
+  });
+
+  it("never lets any other kind be foreign, whatever the stack", () => {
+    for (const kind of CRASH_KINDS) {
+      expect(canBeForeign(kind)).toBe(kind === "error" || kind === "unhandledrejection");
+      if (canBeForeign(kind)) continue;
+      for (const c of cases) {
+        expect(isForeignCodeError(kind, c.message, c.stack), `${kind}: ${c.name}`).toBe(false);
+      }
+    }
+  });
+});
+
+describe("wireStack", () => {
+  const extensionFrame = (i: number) =>
+    `at hook${i} (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:11:${i})`;
+
+  /** What the proxy does with a wire stack: judge it, flattened. */
+  const proxyDemotes = (wire: string) =>
+    isForeignCodeError("error", "m", asProxyReadsIt(wire)) ||
+    isForeignCodeError("unhandledrejection", "m", asProxyReadsIt(wire));
+
+  const expectBounded = (wire: string) => {
+    expect(wire.split("\n").length).toBeLessThanOrEqual(6);
+    expect(wire.length).toBeLessThanOrEqual(800);
+    expect(isWellFormed(wire)).toBe(true);
+  };
+
+  it("leaves a window that already names a frame of ours exactly as it was", () => {
+    const stack = ["TypeError: x", extensionFrame(1), OUR_FRAME, extensionFrame(2)].join("\n");
+    expect(wireStack(stack)).toBe(topFrames(stack));
+  });
+
+  it("leaves an extension-only or location-less stack as the plain window", () => {
+    const extensionOnly = ["i: x", ...Array.from({ length: 9 }, (_, i) => extensionFrame(i))];
+    expect(wireStack(extensionOnly.join("\n"))).toBe(topFrames(extensionOnly.join("\n")));
+    const nowhere = "@\n@\n@\nPk@\nNk@\nPk@\nQk@\nRk@";
+    expect(wireStack(nowhere)).toBe(topFrames(nowhere));
+  });
+
+  it("promotes our frame from under five extension frames", () => {
+    // Before promotion the proxy saw the header and five extension frames, and
+    // demoted a crash whose throwing call was ours.
+    const stack = [
+      "DataCloneError: x",
+      ...Array.from({ length: 7 }, (_, i) => extensionFrame(i)),
+      OUR_FRAME,
+    ];
+    const wire = wireStack(stack.join("\n"));
+    expectBounded(wire);
+    expect(wire.split("\n")).toEqual([
+      "DataCloneError: x",
+      extensionFrame(0),
+      extensionFrame(1),
+      extensionFrame(2),
+      "... 4 lines skipped ...",
+      OUR_FRAME,
+    ]);
+    expect(proxyDemotes(topFrames(stack.join("\n")))).toBe(true);
+    expect(proxyDemotes(wire)).toBe(false);
+  });
+
+  it("promotes our frame past a message that filled the window", () => {
+    // V8 spends line 1 on `Name: message`, so a multi-line message pushed every
+    // frame out of the window and the unattributed rule silenced our crash.
+    const zod = [
+      "ZodError: [",
+      ...Array.from({ length: 12 }, (_, i) => `"issue${i}": "invalid_type",`),
+      "]",
+      OUR_FRAME,
+    ].join("\n");
+    const fromZod = wireStack(zod);
+    expectBounded(fromZod);
+    expect(fromZod.split("\n")[0]).toBe("ZodError: [");
+    expect(fromZod.split("\n").at(-1)).toBe(OUR_FRAME);
+    expect(isForeignCodeError("error", "m", asProxyReadsIt(topFrames(zod)))).toBe(true);
+    expect(proxyDemotes(fromZod)).toBe(false);
+    // A DataCloneError quotes the offending function's source: one line longer
+    // than the whole budget. It is cut; our frame is not.
+    const clone = [`DataCloneError: ${"s".repeat(1000)} could not be cloned.`, OUR_FRAME].join(
+      "\n",
+    );
+    const fromClone = wireStack(clone);
+    expectBounded(fromClone);
+    expect(fromClone.startsWith("DataCloneError: sss")).toBe(true);
+    expect(fromClone.endsWith(`\n${OUR_FRAME}`)).toBe(true);
+    expect(proxyDemotes(fromClone)).toBe(false);
+  });
+
+  it("rescues our frame when the plain clamp would cut it before its '://'", () => {
+    // Four long extension lines put our frame on line 6, where 800 units end
+    // just before its "://" — the plain window names no location of ours.
+    const stack = [
+      "E: m",
+      ...Array.from({ length: 4 }, (_, i) => `${extensionFrame(i)}${"x".repeat(110)}`),
+      OUR_FRAME,
+    ].join("\n");
+    expect(topFrames(stack).slice(0, 800).endsWith("\nat Ks (http")).toBe(true);
+    expect(WEB_LOCATION.test(topFrames(stack).slice(0, 800))).toBe(false);
+    const wire = wireStack(stack);
+    expectBounded(wire);
+    expect(wire.endsWith(OUR_FRAME)).toBe(true);
+    expect(proxyDemotes(wire)).toBe(false);
+  });
+
+  it("keeps an oversized frame of ours from its URL on", () => {
+    const giant = `at Xk (eval at f (${"q".repeat(400)} https://dweeb.faizo.net/assets/index-a.js:1:2), <anonymous>:1:1)`;
+    const stack = ["E: m", ...Array.from({ length: 6 }, (_, i) => extensionFrame(i)), giant].join(
+      "\n",
+    );
+    const wire = wireStack(stack);
+    expectBounded(wire);
+    expect(
+      wire.split("\n").at(-1)?.startsWith("https://dweeb.faizo.net/assets/index-a.js:1:2)"),
+    ).toBe(true);
+    expect(proxyDemotes(wire)).toBe(false);
+  });
+
+  it("prefers an http(s) frame to an earlier location of another scheme", () => {
+    // A future scheme added to the extension list can never demote http(s).
+    const stack = [
+      "E: m",
+      ...Array.from({ length: 5 }, (_, i) => extensionFrame(i)),
+      "at w (webpack-internal:///./src/a.js:1:1)",
+      OUR_FRAME,
+    ].join("\n");
+    expect(wireStack(stack).split("\n").at(-1)).toBe(OUR_FRAME);
+    // …and within one oversized line it keeps the http(s) location too, not
+    // the first non-extension one, which would leave the clamp to cut it off.
+    const giant = `at Xk (eval at w (webpack-internal:///./src/a.js:1:1) ${"q".repeat(300)} https://dweeb.faizo.net/assets/index-a.js:1:2)`;
+    const inLine = wireStack(
+      ["E: m", ...Array.from({ length: 5 }, (_, i) => extensionFrame(i)), giant].join("\n"),
+    );
+    expect(inLine.split("\n").at(-1)?.startsWith("https://dweeb.faizo.net/")).toBe(true);
+  });
+
+  it("keeps the header leading, and promotes a frame, when the header's own URL lies past the window", () => {
+    // A long message holding a URL past unit 800 — a DataCloneError quoting
+    // source that mentions one — used to send that URL's tail alone: no header,
+    // no frame of ours, and crashSignature keyed on the fragment.
+    const header = `Error: Discord rejected the payload: ${"d".repeat(820)} (see https://discord.com/developers/docs)`;
+    const withFrames = wireStack([header, OUR_FRAME, extensionFrame(1)].join("\n"));
+    expectBounded(withFrames);
+    expect(withFrames.startsWith("Error: Discord rejected the payload: ddd")).toBe(true);
+    expect(withFrames.split("\n").at(-1)).toBe(OUR_FRAME);
+    // With no frame to promote, the header still leads and its URL follows it.
+    const alone = wireStack(header);
+    expectBounded(alone);
+    expect(alone.startsWith("Error: Discord rejected the payload: ddd")).toBe(true);
+    expect(alone.split("\n").at(-1)).toBe("https://discord.com/developers/docs)");
+  });
+
+  it("never lets the clamp take a promoted location's '://' with it", () => {
+    // With no http(s) anywhere, any location that isn't an extension's is
+    // promoted — even a malformed run too long to keep whole. Dropping the run
+    // keeps its '://', an empty run, which reads as ours on both sides; trimming
+    // the run's front instead could have left an extension scheme.
+    const longRun = `at y (${"a".repeat(300)}chrome-extension://abc/y.js:1:2)`;
+    const stack = [
+      "Error: x",
+      ...Array.from({ length: 6 }, (_, i) => extensionFrame(i)),
+      longRun,
+    ].join("\n");
+    expect(isForeignCodeError("unhandledrejection", "x", topFrames(stack, Infinity))).toBe(false);
+    const wire = wireStack(stack);
+    expectBounded(wire);
+    expect(wire.split("\n").at(-1)).toBe("://abc/y.js:1:2)");
+    expect(proxyDemotes(wire)).toBe(false);
+  });
+
+  it("never splits a surrogate pair at either cut promotion adds", () => {
+    // A lone surrogate costs the whole beacon (serde refuses it). Beyond the
+    // plain window's cut, promotion cuts the promoted line and line 1.
+    const url = "https://dweeb.faizo.net/assets/index-a.js:1:2) ";
+    const oversized = `at Xk (${url}${"q".repeat(239 - url.length)}${"🦊".repeat(10)}`;
+    const promotedCut = wireStack(
+      ["E: m", ...Array.from({ length: 5 }, (_, i) => extensionFrame(i)), oversized].join("\n"),
+    );
+    expectBounded(promotedCut);
+    expect(promotedCut.split("\n").at(-1)?.startsWith("https://dweeb.faizo.net/")).toBe(true);
+    // Line 1 exactly one unit longer than the head's budget, ending in an emoji.
+    const header = `Err: ${"m".repeat(800 - OUR_FRAME.length - 34 - 6)}🦊`;
+    const headCut = wireStack(
+      [header, ...Array.from({ length: 5 }, (_, i) => extensionFrame(i)), OUR_FRAME].join("\n"),
+    );
+    expectBounded(headCut);
+    expect(headCut.startsWith("Err: mmm")).toBe(true);
+    expect(headCut.split("\n").at(-1)).toBe(OUR_FRAME);
+  });
+
+  it("never lets the proxy demote what the full stack showed to be ours", () => {
+    // Random stacks from every piece the three engine families print, under
+    // headers of up to 900 units that may carry a URL past the window, seeded
+    // so a failure reproduces.
+    const pieces = [
+      OUR_FRAME,
+      "at e (https://1511769679096447016.discordsays.com/.proxy/assets/A-X.js:1:2)",
+      METAMASK_FRAME,
+      "w@<anonymous code>:1:1",
+      "y@webkit-masked-url://hidden/:2:2930760",
+      "at w (webpack://x/./a.js:1:1)",
+      "at z (wasm://wasm/0012abcd:wasm-function[1]:0x5)",
+      "at d (data:text/javascript,foo:1:1)",
+      "at b (://y:1:2)",
+      `at y (${"a".repeat(300)}chrome-extension://abc/y.js:1:2)`,
+      "at Array.map (<anonymous>)",
+      "at async Promise.all (index 0)",
+      // Adjacent, these two spell the Gecko token across a newline.
+      "tail <anonymous",
+      "code> head",
+      '  "issue": "invalid_type",',
+      "x".repeat(300),
+      "🦊".repeat(120),
+    ];
+    const headerTails = [
+      "",
+      "🦊",
+      " (see https://discord.com/developers/docs)",
+      " at chrome-extension://abc/h.js:1:1",
+    ];
+    let seed = 7;
+    const next = (n: number) => {
+      seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+      return seed % n;
+    };
+    const pick = <T>(from: readonly T[]): T => from[next(from.length)] as T;
+    const failures: string[] = [];
+    for (let run = 0; run < 20_000 && failures.length === 0; run++) {
+      const header = `Err: ${"m".repeat(next(900))}${pick(headerTails)}`;
+      const lines = [header];
+      for (let k = next(14); k > 0; k--) lines.push(pick(pieces));
+      const full = lines.join("\n");
+      const wire = wireStack(full);
+      const judged = topFrames(full, Infinity);
+      for (const kind of ["error", "unhandledrejection"] as const) {
+        if (
+          !isForeignCodeError(kind, "m", judged) &&
+          isForeignCodeError(kind, "m", asProxyReadsIt(wire))
+        ) {
+          failures.push(`${kind} demoted: ${JSON.stringify(full)}`);
+        }
+      }
+      if (WEB_LOCATION.test(full) && !WEB_LOCATION.test(wire)) {
+        failures.push(`http(s) lost: ${JSON.stringify(full)}`);
+      }
+      if (wire.length > 800 || wire.split("\n").length > 6 || !isWellFormed(wire)) {
+        failures.push(`out of bounds: ${JSON.stringify(full)}`);
+      }
+      const first = wire.split("\n")[0] ?? "";
+      if (first.length === 0 || !header.trim().startsWith(first)) {
+        failures.push(`line 1 lost: ${JSON.stringify(full)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+    // ~1-3 s locally; a cold, busy runner has come within reach of Vitest's
+    // 5 s default, and a flaky guard is one nobody trusts.
+  }, 30_000);
 });
 
 describe("domDesyncMessage", () => {

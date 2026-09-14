@@ -183,10 +183,15 @@ export function topFrames(stack: string, n: number = STACK_FRAMES): string {
     .join("\n");
 }
 
-/** Truncate to at most `max` characters (never mid-surrogate-pair concerns here —
- *  the server clamps by `char` too, and these are ASCII-ish code paths). */
+/** Truncate to at most `max` UTF-16 units without ever splitting a surrogate
+ *  pair. A cut between the two halves of an emoji leaves a lone surrogate,
+ *  which `JSON.stringify` writes as a `\ud83d`-style escape that serde_json
+ *  refuses to decode — so the proxy would reject the whole beacon and the crash
+ *  would be lost, not merely shortened. */
 function clamp(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max) : s;
+  if (s.length <= max) return s;
+  const last = s.charCodeAt(max - 1);
+  return s.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
 }
 
 /**
@@ -530,39 +535,288 @@ export function domDesyncMessage(
 }
 
 /**
- * Whether a `window.onerror` report describes someone else's code, not ours.
+ * URL schemes a browser gives only to code from an extension package — never
+ * to anything a web origin serves, so a frame carrying one cannot be ours.
+ * Each is evidenced (2026-09-14 research): `chrome-extension` is every
+ * Chromium browser, Edge included (verified first-hand in Chrome 152 and Edge
+ * 153); `moz-extension` is Firefox, for extension scripts a page loads by URL;
+ * `safari-web-extension` and `safari-extension` are Safari's web and legacy
+ * extensions; `webkit-masked-url` is Safari 16+, which prints every extension
+ * script's URL as `webkit-masked-url://hidden/` and never masks an http(s) or
+ * blob one.
  *
- * The global `error` trap hears every uncaught exception in the page context —
- * including code we never shipped: extension scripts injected into the page,
- * userscripts, bookmarklets, devtools-console experiments. One of those paged
- * the maintainer on 2026-07-24: a Safari user's foreign script blew its own
- * stack ("Maximum call stack size exceeded.", frames `@`/`Pk@`/`Nk@` with no
- * source URL — JSC's rendering of code that has no script URL), and no deployed
- * DWEEB bundle ever contained those symbols.
+ * Mirrored as `EXTENSION_SCHEMES` in `telemetry.rs`; both are pinned by
+ * `server/src/foreign-code-vectors.json`. Add a scheme only on evidence that it
+ * reaches a page's stacks on an engine DWEEB can boot on — and never http(s):
+ * [`wireStack`] promotes an http(s) frame precisely because no change to this
+ * list can ever count one as foreign.
+ */
+export const EXTENSION_SCHEMES: readonly string[] = [
+  "chrome-extension",
+  "moz-extension",
+  "safari-extension",
+  "safari-web-extension",
+  "webkit-masked-url",
+];
+
+/**
+ * Firefox (128+) names no page-world extension script by URL: it compiles every
+ * one as `<anonymous code>`, deliberately, so pages cannot read them
+ * (`ExtensionContent.sys.mjs`), and it uses that name for nothing else. So the
+ * token counts as an extension location — without it, Firefox's rendering of
+ * the very MetaMask rejection below (`connect@<anonymous code>:7:84292`) would
+ * name no location at all and keep paging. Not to be confused with V8's
+ * `<anonymous>`, which is any code that has no URL.
+ */
+export const GECKO_MAIN_WORLD = "<anonymous code>";
+
+/** Whose code a stack names — see [`frameOrigin`]. Also logged by the proxy
+ *  (`frames=`) on the two crash lines that turn on it: the foreign-code line it
+ *  demotes and the `web app crash` line it pages. */
+export type FrameOrigin = "none" | "page" | "extension" | "mixed";
+
+/** Every control character (Unicode Cc — exactly what Rust's `char::is_control`
+ *  means). */
+const CONTROL_CHARACTER = /\p{Cc}/gu;
+
+/**
+ * `text` as the proxy reads it: `clamp_field` (`telemetry.rs`) turns every
+ * control character into a space before anything is judged. The client judges
+ * that same text, so the two cannot disagree over layout — a `\n` inside the
+ * Gecko token, or before "Script error", reads as the space the proxy will see.
+ * (No scheme run or `://` can contain either, so it changes no URL location.)
+ */
+function asProxyReads(text: string): string {
+  return text.replace(CONTROL_CHARACTER, " ");
+}
+
+/** `[A-Za-z0-9+.-]`: the characters a URL scheme is made of (RFC 3986). */
+function isSchemeChar(code: number): boolean {
+  return (
+    (code >= 0x61 && code <= 0x7a) ||
+    (code >= 0x41 && code <= 0x5a) ||
+    (code >= 0x30 && code <= 0x39) ||
+    code === 0x2b ||
+    code === 0x2d ||
+    code === 0x2e
+  );
+}
+
+/** One `://` in a text: the whole scheme run before it, lowercased (possibly
+ *  empty), where that run starts, and where the `://` itself starts. */
+interface UrlLocation {
+  scheme: string;
+  start: number;
+  at: number;
+}
+
+/** Every `://` in `text`, left to right, each with the whole scheme run before
+ *  it. A hand scan, not a regex, so it yields exactly the runs `telemetry.rs`'s
+ *  byte scan does — the empty run included, which a letter-anchored regex would
+ *  skip. Scheme characters are ASCII, so UTF-16 and UTF-8 agree. */
+function locations(text: string): UrlLocation[] {
+  const found: UrlLocation[] = [];
+  for (let at = text.indexOf("://"); at !== -1; at = text.indexOf("://", at + 3)) {
+    let start = at;
+    while (start > 0 && isSchemeChar(text.charCodeAt(start - 1))) start--;
+    found.push({ scheme: text.slice(start, at).toLowerCase(), start, at });
+  }
+  return found;
+}
+
+function isExtensionScheme(scheme: string): boolean {
+  return EXTENSION_SCHEMES.includes(scheme);
+}
+
+function isWebScheme(scheme: string): boolean {
+  return scheme === "http" || scheme === "https";
+}
+
+/**
+ * Whose code a stack names, judged from every location in it.
  *
- * Two shapes qualify, both only for the `error` kind (the one trap foreign
- * page-context code lands in without involving the app):
+ * A location is each `://`, read with the **whole** run of scheme characters
+ * before it and compared whole, ASCII-case-insensitively, against
+ * [`EXTENSION_SCHEMES`] — so a malformed run (`1chrome-extension`, or none at
+ * all) counts as ours, the paging side — plus each [`GECKO_MAIN_WORLD`] token.
+ * Frames that name no location (`<anonymous>`, `[native code]`,
+ * `async Promise.all (index 0)`, a bare `fn@`) are ignored, and so is layout:
+ * the text is judged as the proxy reads it ([`asProxyReads`]), so a stack
+ * reaches the same answer whether its lines are joined by newlines or spaces.
  *
- *  - **Unattributed stack**: frames exist but none carries a script URL (no
- *    `://` anywhere). Every engine prints absolute URLs for frames from real
- *    scripts, so a stack with none cannot be code we served.
- *  - **Muted cross-origin error**: the literal "Script error." shape with an
- *    empty stack — the browser withheld everything about a non-CORS
- *    cross-origin script's failure, leaving nothing to act on.
+ * `none` = no location at all; `page` = locations, none an extension's;
+ * `extension` = locations, every one an extension's; `mixed` = both.
+ */
+export function frameOrigin(stack: string): FrameOrigin {
+  const text = asProxyReads(stack);
+  let extension = text.includes(GECKO_MAIN_WORLD);
+  let page = false;
+  for (const { scheme } of locations(text)) {
+    if (isExtensionScheme(scheme)) extension = true;
+    else page = true;
+  }
+  if (extension) return page ? "mixed" : "extension";
+  return page ? "page" : "none";
+}
+
+/** The kinds [`isForeignCodeError`] may ever claim: the two window traps. */
+export function canBeForeign(kind: CrashKind): boolean {
+  return kind === "error" || kind === "unhandledrejection";
+}
+
+/**
+ * Whether a report describes someone else's code, not ours.
  *
- * Deliberately narrow, like [`isNonCrashMessage`]: `boundary` and
- * `unhandledrejection` reports keep flowing even with a foreign-looking stack
- * (the app actually went down / real work was dropped, and the 6-frame cut can
- * hide our deeper frames), an empty stack with an ordinary message keeps
- * flowing (our own code can `throw "string"`), and extension frames that do
- * carry a URL (`safari-web-extension://…`) keep flowing too. The proxy applies
- * the same rule server-side (`telemetry.rs`) — it is the authority, because
- * SW-cached clients without this filter keep beaconing for weeks.
+ * The two window traps hear everything thrown or dropped in the page's own JS
+ * world — including code we never shipped: extension scripts that run in the
+ * page's world (a wallet has to, to define `window.ethereum`), userscripts,
+ * bookmarklets, devtools-console experiments. (An extension's isolated-world
+ * scripts never reach them.) Two of those paged the maintainer:
+ *
+ *  - 2026-07-24: a Safari user's foreign script blew its own stack ("Maximum
+ *    call stack size exceeded.", frames `@`/`Pk@`/`Nk@` with no source URL —
+ *    JSC's rendering of code that has no script URL); no deployed DWEEB bundle
+ *    ever contained those symbols.
+ *  - 2026-09-14: MetaMask's page-world `inpage.js` left its own connection
+ *    promise unhandled — `i: Failed to connect to MetaMask`, one frame, at
+ *    `chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js`.
+ *    DWEEB never touches `window.ethereum`.
+ *
+ * Three shapes qualify:
+ *
+ *  - **Extension-only** (`error` and `unhandledrejection`): the stack names at
+ *    least one location and every one is an extension's ([`frameOrigin`] =
+ *    `extension`). Every one, not just the top frame: an extension wrapping an
+ *    API we call sits *above* our own frame, and that misuse of ours pages.
+ *  - **Unattributed** (`error` only): frames exist but none names a location.
+ *  - **Muted cross-origin error** (`error` only): the literal "Script error."
+ *    with an empty stack — the browser withheld everything about it.
+ *
+ * Deliberately narrow, like [`isNonCrashMessage`]: `boundary` and `boot` mean
+ * the app went down and keep flowing whatever their stack (an extension-only
+ * stack there is a real outage); a rejection that names no location keeps
+ * flowing (our own failed `fetch` rejects with a header-only `TypeError`); an
+ * empty stack with an ordinary message keeps flowing (our code can
+ * `throw "string"`).
+ *
+ * The reporter passes the error's **full** stack — V8 keeps up to ten frames,
+ * the wire only six lines, the first of them V8's `Name: message` header — and
+ * [`wireStack`] builds the wire so any location this counted as ours reaches
+ * it. The proxy applies the same rule to the wire (`telemetry.rs`), where it is
+ * the authority, because SW-cached clients keep beaconing for weeks; with the
+ * wire built that way, and both the stack and the message judged as the proxy
+ * reads them ([`asProxyReads`]), it can never demote what this judged ours.
+ * Both sides are pinned to `server/src/foreign-code-vectors.json`.
  */
 export function isForeignCodeError(kind: CrashKind, message: string, stack: string): boolean {
+  if (!canBeForeign(kind)) return false;
+  const origin = frameOrigin(stack);
+  if (origin === "extension") return true;
   if (kind !== "error") return false;
-  if (stack.length > 0 && !stack.includes("://")) return true;
-  return stack.length === 0 && message.trimStart().startsWith("Script error");
+  if (stack.length > 0 && origin === "none") return true;
+  return stack.length === 0 && asProxyReads(message).trimStart().startsWith("Script error");
+}
+
+/** The longest line [`wireStack`] promotes whole; a longer one is kept from its
+ *  URL on. Well under [`STACK_MAX`], so a head always fits beside it. */
+const PROMOTED_LINE_MAX = 240;
+/** Room kept for the gap marker ("... 99999 lines skipped ..." is 27 units). */
+const MARKER_RESERVE = 32;
+
+/**
+ * Keep `line` whole if it is short enough, else from its first location that
+ * `pick` accepts — the part [`wireStack`] promoted it for — onwards. A scheme
+ * run too long to keep whole goes, rather than being trimmed: the bare `://`
+ * left behind still reads as ours (an empty run) on both sides, whereas cutting
+ * the run's front could leave an extension's scheme standing.
+ */
+function fitPromoted(line: string, pick: (scheme: string) => boolean): string {
+  if (line.length <= PROMOTED_LINE_MAX) return line;
+  const location = locations(line).find(({ scheme }) => pick(scheme));
+  if (location === undefined) return clamp(line, PROMOTED_LINE_MAX);
+  const keepsRun = location.at + 3 - location.start <= PROMOTED_LINE_MAX;
+  return clamp(line.slice(keepsRun ? location.start : location.at), PROMOTED_LINE_MAX);
+}
+
+/**
+ * The stack as sent: its top [`STACK_FRAMES`] lines within [`STACK_MAX`] units —
+ * plus, when that window names no http(s) location but the full stack does, the
+ * line that does promoted into the window as its last. (With no http(s)
+ * location anywhere, the same goes for any location that is not an
+ * extension's.)
+ *
+ * This carries *evidence*, never a verdict. The proxy classifies the wire alone
+ * (it is the authority for every client, current or SW-cached), so a location
+ * the reporter counted as ours on the full stack must reach it — or the proxy
+ * would demote a crash the client judged to be ours. Without any extension
+ * involved that used to happen outright: V8 spends line 1 on its
+ * `Name: message` header, a multi-line or very long message (zod's
+ * pretty-printed errors, a `DataCloneError` quoting source code) filled the
+ * window with text, and the unattributed rule silenced our own crash on
+ * Chromium. An extension's frame above ours would do the same now, whenever the
+ * rest of the window — the header, V8's URL-less builtin frames — names nothing.
+ *
+ * An http(s) location is promoted in preference to any other, since no change
+ * to [`EXTENSION_SCHEMES`] can ever reclassify one. The search starts below
+ * line 1 — in V8 the `Name: message` header — so a frame is promoted rather than
+ * the tail of a message; line 1 is the source only when no later line names
+ * such a location. (A later line of a multi-line message still reads as a
+ * frame; the verdict is the same either way.) The promoted line is budgeted
+ * first and the head trimmed to fit it, so no clamp can cut its location; lines
+ * left out are replaced by a `... N lines skipped ...` marker, which names no
+ * location. Line 1 always leads, cut to fit if it must be — even ahead of its
+ * own promoted tail — so [`crashSignature`] still keys on it. Whenever the
+ * window already names an http(s) location — the normal crash of ours — the
+ * result is the plain window, exactly as it was before promotion existed.
+ */
+export function wireStack(stack: string): string {
+  const lines = stack
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const plain = clamp(lines.slice(0, STACK_FRAMES).join("\n"), STACK_MAX);
+  const hasWeb = (text: string) => locations(text).some(({ scheme }) => isWebScheme(scheme));
+  const hasPage = (text: string) =>
+    locations(text).some(({ scheme }) => !isExtensionScheme(scheme));
+  // The first line below line 1 that `has` accepts, else line 1 itself if it
+  // does, else -1.
+  const sourceLine = (has: (text: string) => boolean) => {
+    const later = lines.findIndex((line, i) => i > 0 && has(line));
+    return later === -1 && has(lines[0] ?? "") ? 0 : later;
+  };
+  if (hasWeb(plain)) return plain;
+  let pick = isWebScheme;
+  let at = sourceLine(hasWeb);
+  if (at === -1) {
+    if (hasPage(plain)) return plain;
+    pick = (scheme: string) => !isExtensionScheme(scheme);
+    at = sourceLine(hasPage);
+  }
+  const target = lines[at]; // `at` is -1, and this undefined, when nothing matched
+  if (target === undefined) return plain;
+  const promoted = fitPromoted(target, pick);
+  // Newlines before the marker and the promoted line, plus the marker itself.
+  const budget = STACK_MAX - promoted.length - 2 - MARKER_RESERVE;
+  // Line 1 always leads, even ahead of its own promoted tail. Otherwise up to
+  // five head lines when the promoted one is line 6 (no marker needed if they
+  // all fit), else four, so the marker and it still make six.
+  const maxHead = at === 0 ? 1 : at <= STACK_FRAMES - 1 ? at : STACK_FRAMES - 2;
+  const head: string[] = [];
+  let used = 0;
+  for (const [i, line] of lines.slice(0, maxHead).entries()) {
+    const cost = (head.length > 0 ? 1 : 0) + line.length;
+    if (used + cost <= budget) {
+      head.push(line);
+      used += cost;
+      continue;
+    }
+    if (i === 0) head.push(clamp(line, budget));
+    break;
+  }
+  const skipped = at - head.length; // negative when line 1 is its own source
+  if (skipped > 0) head.push(`... ${skipped} line${skipped === 1 ? "" : "s"} skipped ...`);
+  head.push(promoted);
+  return head.join("\n");
 }
 
 /** Build the content-free wire payload from an untrusted thrown value. */
@@ -571,7 +825,7 @@ export function buildCrashPayload(input: CrashInput): CrashPayload {
   return {
     kind: input.kind,
     message: clamp(message, MESSAGE_MAX),
-    stack: clamp(topFrames(stack), STACK_MAX),
+    stack: wireStack(stack),
     version: input.version,
     build: input.build,
     surface: input.surface,
