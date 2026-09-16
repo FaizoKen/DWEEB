@@ -14,6 +14,12 @@
       "width": 1200,
       "height": 630
     },
+    "/guides-og/discord-server-rules.png": {
+      "sourceSvgSha256": "1f57db335704985b09abff0e5d54c964f5d3c0ec2959be5be4f3271fd0ba733a",
+      "pngSha256": "ce21573f05af03369485b748be5c9fc734dfaa085da47e7359697d69b2730c52",
+      "width": 1200,
+      "height": 630
+    },
     "/guides-og/discord-text-formatting.png": {
       "sourceSvgSha256": "c8c1727ce1955d8dae8d53c12b853dc5f8d73355f8226784dc156e7c6defb006",
       "pngSha256": "4888479f5aa4c6758e8f6dbf0a964146e1d6bbc2bd2fc0f7189953d3f2a27928",
@@ -69,8 +75,8 @@
       "height": 630
     },
     "/guides-og/guides.png": {
-      "sourceSvgSha256": "d66939b1578e0530fa5561853ffdfaf82128c3109645c2af8c7179c4ea2c76e5",
-      "pngSha256": "7165de143536c9d6fbc775038ccf49c25fbf566dfe3ff1c8c659c1cdf8f2d8ef",
+      "sourceSvgSha256": "afb2364cc90fe17b94708ce287f9674cfc2c0b53e2b7f6e2fba6857b2e5ef81a",
+      "pngSha256": "f50d208ec5551681ed5315fd85c7ee916e92134721894d7c592b92680ca8a214",
       "width": 1200,
       "height": 630
     },

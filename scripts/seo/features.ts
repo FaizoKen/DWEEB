@@ -162,7 +162,7 @@ export const FEATURES: FeatureSeo[] = [
     emoji: "🎫",
     category: "Support",
     accent: 0x3ba55d,
-    title: "Discord Ticket Bot: Private Support Panels | DWEEB",
+    title: "Discord Ticket Bot: Free Support Ticket Panel | DWEEB",
     h1: "Discord Ticket Bot",
     tagline: "Open a private support ticket from a button or topic menu.",
     description:
@@ -873,6 +873,6 @@ export function resolveAllFeatures(): ResolvedFeature[] {
 }
 
 /** Last time the feature catalogue was reviewed — used for sitemap `<lastmod>`. */
-export const FEATURES_LASTMOD = "2026-09-12";
+export const FEATURES_LASTMOD = "2026-09-16";
 
 export { ACCENT_BLURPLE };

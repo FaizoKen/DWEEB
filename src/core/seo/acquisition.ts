@@ -96,6 +96,7 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
     "discord-webhook-errors",
     "discord-webhook-mentions",
     "discord-webhook-forum-threads",
+    "discord-server-rules",
   ]),
 };
 

@@ -48,6 +48,37 @@ const TERMS_LASTMOD = "2026-07-13";
 const MAX_RELATED = 4;
 const MAX_RELATED_FEATURES = 3;
 
+/**
+ * Old site-relative paths → the page that replaced them. Keys and values are
+ * directory paths with a trailing slash; a value must be a page this build
+ * emits (the audit's link check verifies that through the stub's anchor).
+ */
+const LEGACY_REDIRECTS: Readonly<Record<string, string>> = {
+  // The "welcome hub" template was retired in 7e5288e (2026-07-03); its page
+  // kept ranking for onboarding queries the welcome message now serves.
+  "/templates/discord-onboarding-panel/": "/templates/discord-welcome-message/",
+};
+
+function legacyRedirectPage(from: string, to: string): string {
+  const target = `${SITE.origin}${to}`;
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Moved to ${xmlEscape(to)}</title>
+    <meta name="robots" content="noindex, follow" />
+    <meta http-equiv="refresh" content="0; url=${xmlEscape(target)}" />
+    <link rel="canonical" href="${xmlEscape(target)}" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <p>This page moved to <a href="${xmlEscape(to)}">${xmlEscape(target)}</a>.</p>
+    <!-- ${xmlEscape(from)} was retired; see scripts/gen-template-pages.ts LEGACY_REDIRECTS. -->
+  </body>
+</html>
+`;
+}
+
 function xmlEscape(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -208,6 +239,7 @@ async function main(): Promise<void> {
   const all: ResolvedSeo[] = TEMPLATES.map(resolveSeo);
   const byId = new Map(TEMPLATES.map((t) => [t.id, t]));
   const features = resolveAllFeatures();
+  const guideBySlug = new Map(GUIDES.map((guide) => [guide.slug, guide]));
 
   // Per-template pages.
   for (const seo of all) {
@@ -217,10 +249,37 @@ async function main(): Promise<void> {
     const relatedFeatures = features.filter(
       (feature) => !!feature.pluginId && seo.pluginIds.includes(feature.pluginId),
     );
+    const relatedGuides = seo.guides.map((slug) => {
+      const guide = guideBySlug.get(slug);
+      if (!guide) {
+        throw new Error(
+          `Template "${seo.id}" names unknown guide "${slug}" in its "Read next" row (scripts/seo/content.ts).`,
+        );
+      }
+      return guide;
+    });
     const payload = templatePayload(template, seo.path);
-    const html = renderTemplatePage(seo, messageHtml, related, relatedFeatures, payload);
+    const html = renderTemplatePage(
+      seo,
+      messageHtml,
+      related,
+      relatedFeatures,
+      payload,
+      relatedGuides,
+    );
     await writePage(join("templates", seo.slug, "index.html"), html);
     await writeFile(join(DIST, payload.path.slice(1)), `${payload.json}\n`, "utf8");
+  }
+
+  // Retired URLs that search engines still hold. GitHub Pages cannot answer a
+  // real 301, and a plain 404 throws away whatever ranking the old address had
+  // (Search Console showed `/templates/discord-onboarding-panel/` still earning
+  // impressions two months after 7e5288e removed that template). A zero-delay
+  // meta refresh is the redirect signal Google documents for static hosts; the
+  // stub is `noindex` so the audit's orphan check treats it as deliberate and
+  // so the old address itself never competes with its target.
+  for (const [from, to] of Object.entries(LEGACY_REDIRECTS)) {
+    await writePage(join(from.slice(1), "index.html"), legacyRedirectPage(from, to));
   }
 
   // /templates index.

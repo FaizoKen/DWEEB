@@ -378,12 +378,20 @@ export function faqLd(faq: FaqEntry[]): object {
 // Per-template page
 // ────────────────────────────────────────────────────────────────────────────
 
+/** The subset of a guide a template page needs for its "Read next" row. */
+export interface TemplateGuideLink {
+  path: string;
+  h1: string;
+  eyebrow: string;
+}
+
 export function renderTemplatePage(
   seo: ResolvedSeo,
   messageHtml: string,
   related: ResolvedSeo[],
   relatedFeatures: ResolvedFeature[],
   payload: TemplatePayload,
+  relatedGuides: TemplateGuideLink[] = [],
 ): string {
   const botBadge =
     seo.deliveryMode === "app-owned"
@@ -464,6 +472,17 @@ export function renderTemplatePage(
         .join("")}</div></section>`
     : "";
 
+  // Contextual links from the site's most-crawled detail pages into the guide
+  // cluster — see `TemplateSeoOverride.guides` in content.ts for why.
+  const guideSection = relatedGuides.length
+    ? `<section class="block"><h2>Read next</h2><div class="card-grid">${relatedGuides
+        .map(
+          (guide) =>
+            `<a class="mini-card" href="${attr(guide.path)}"><span class="mini-emoji" aria-hidden="true">📘</span><span class="mini-body"><span class="mini-name">${escapeHtml(guide.h1)}</span><span class="mini-cat">${escapeHtml(guide.eyebrow)}</span></span></a>`,
+        )
+        .join("")}</div></section>`
+    : "";
+
   const body = `<main id="main-content" class="wrap">
     ${breadcrumbNav([
       { name: "Home", url: "/" },
@@ -505,6 +524,7 @@ export function renderTemplatePage(
 
       ${faqSection(seo.faq)}
       ${featureSection}
+      ${guideSection}
       ${relatedSection}
     </article>
   </main>`;

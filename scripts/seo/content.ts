@@ -53,11 +53,12 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-09-11";
+export const TEMPLATES_LASTMOD = "2026-09-16";
 
-// Every detail page gained its source-derived JSON and compatibility reference.
+// 2026-09-11: every detail page gained its source-derived JSON and compatibility
+// reference. 2026-09-16: every detail page gained the "Read next" guide row.
 // Future individual edits should use an override instead of refreshing this baseline.
-const DEFAULT_TEMPLATE_LASTMOD = "2026-09-11";
+const DEFAULT_TEMPLATE_LASTMOD = "2026-09-16";
 const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {};
 
 /** Meaningful content date for one generated template page. */
@@ -90,7 +91,29 @@ export interface TemplateSeoOverride {
   faq?: FaqEntry[];
   /** Optional extra keywords, merged with the ones derived from tags. */
   keywords?: string[];
+  /**
+   * Guide slugs shown as a "Read next" card row under the template. Added
+   * 2026-09-16: Search Console listed the newer guides (`edit-discord-webhook-
+   * message`, `discord-webhook-name-avatar`, `discord-timestamp-format`) as
+   * "Discovered – currently not indexed" two months after publication, while
+   * the template pages were the site's most-crawled detail pages. This gives
+   * every guide contextual inbound links from those pages. Unset falls back to
+   * `DEFAULT_TEMPLATE_GUIDES`; the generator resolves slugs against `GUIDES`
+   * and throws on an unknown one.
+   */
+  guides?: string[];
 }
+
+/**
+ * Guides every template page links to unless it names its own. Both apply to
+ * every webhook post: a template is sent through a webhook, and the message it
+ * produces is the one people later need to edit.
+ */
+export const DEFAULT_TEMPLATE_GUIDES: readonly string[] = [
+  "how-to-create-a-discord-webhook",
+  "edit-discord-webhook-message",
+  "discord-webhook-name-avatar",
+];
 
 /** Per-category blurb for the `/templates` index page. */
 export const CATEGORY_BLURB: Record<string, string> = {
@@ -122,10 +145,10 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
   },
   welcome: {
     slug: "discord-welcome-message",
-    title: "Discord Welcome Message Template — free, no bot needed | DWEEB",
+    title: "Discord Welcome Message Template — Copy & Paste | DWEEB",
     h1: "Discord Welcome Message Template",
     description:
-      "A clean Discord welcome message template with a banner and a 3-step get-started guide. Free, no bot required — customize it and send through any webhook.",
+      "Discord welcome message template with a banner and a 3-step get-started guide. Copy the text or customize the card, then send through any webhook. Free, no bot.",
     intro:
       "Greet every new member with a polished welcome message instead of a wall of text. This template leads with a banner image, then points newcomers straight to your rules, roles and general chat in three quick steps — everything they need to settle in fast.",
     whenToUse: [
@@ -133,20 +156,58 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Onboarding new members with a clear first action",
       "Replacing a plain-text greeting with a branded card",
     ],
+    faq: [
+      {
+        q: "Can I copy and paste this welcome message?",
+        a: 'Yes. The text is plain Discord markdown — a heading, a short greeting and three numbered steps — so you can copy it from the template and paste it into any channel. Posting it through a webhook instead keeps the banner image, the accent colour and a named sender such as "Welcome" rather than a personal account.',
+      },
+      {
+        q: "What should a Discord welcome message say?",
+        a: "Three things: who the server is for, the first action to take (read the rules, pick a role, say hello), and where to go with questions. Keep it under a screen tall. Long welcome messages get scrolled past; a banner plus three steps gets read.",
+      },
+    ],
+    keywords: ["discord welcome message copy and paste", "welcome message discord template"],
+    guides: ["discord-server-rules", "discord-webhook-name-avatar", "edit-discord-webhook-message"],
   },
   rules: {
     slug: "discord-server-rules-template",
-    title: "Discord Server Rules Template — clean & numbered | DWEEB",
+    title: "Discord Server Rules Template — Numbered Rules Card | DWEEB",
     h1: "Discord Server Rules Template",
     description:
-      "A clear, numbered Discord rules template with a consequences note. Free and no bot needed — edit the rules, preview live, and post through any webhook.",
+      "Numbered Discord server rules template with a consequences note. Copy the rules or paste your own, preview live and post through any webhook. Free, no bot needed.",
     intro:
-      "Lay out your community's rules so they actually get read. This template gives you a clean, numbered rulebook inside an accent container, with a short note on what happens when the rules are broken — easy to scan, easy to enforce, easy to pin.",
+      "Lay out your community's rules so they actually get read. This template gives you a clean, numbered rulebook inside an accent container, with a short note on what happens when the rules are broken — easy to scan, easy to enforce, easy to pin. The six starter rules cover the conduct nearly every server needs; swap in your own, or paste a full rule set from the copy-and-paste rules guide linked below.",
     whenToUse: [
       "Pinning the rules in your #rules channel",
       "Standardizing conduct before members get access",
       "Refreshing an old rules post into something readable",
+      'Posting rules as a named "Server Rules" sender instead of a personal account',
     ],
+    tips: [
+      "Keep one rule per line and put the key phrase in bold — it is the part people remember and the part moderators quote.",
+      "Rules change: restore the posted message and update it in place so the pin and every link to it survive.",
+    ],
+    faq: [
+      {
+        q: "Can I copy and paste these Discord server rules?",
+        a: "Yes. Open the template, copy the text from the rules block, and paste it anywhere — the bold numbers, quote block and subtext are plain Discord markdown, so they render the same in a normal message. For longer rule sets written for gaming, creator and study servers, use the copy-and-paste server rules guide linked on this page.",
+      },
+      {
+        q: "How many rules should a Discord server have?",
+        a: "Five to ten. Small servers do well with five; large public servers can justify ten plus short add-on blocks for voice chat or age-restricted channels. Past that, members stop reading. Cut any rule you would not actually enforce.",
+      },
+      {
+        q: "Does this replace Discord's Rules Screening?",
+        a: "No, they work together. Rules Screening is a Community-server feature that shows a short list new members must accept before they can talk. Keep that list to the essentials and keep the full, formatted rules pinned in your #rules channel with this template.",
+      },
+    ],
+    keywords: [
+      "discord server rules template",
+      "discord rules template",
+      "discord rules copy and paste",
+      "discord server rules examples",
+    ],
+    guides: ["discord-server-rules", "edit-discord-webhook-message", "discord-text-formatting"],
   },
   "channel-guide": {
     slug: "discord-channel-guide-template",
@@ -651,6 +712,8 @@ export interface ResolvedSeo {
   pluginIds: string[];
   pairsWith?: string;
   componentKinds: string[];
+  /** Guide slugs for the "Read next" row; see `TemplateSeoOverride.guides`. */
+  guides: string[];
 }
 
 /** De-duplicate while preserving order. */
@@ -758,6 +821,7 @@ export function resolveSeo(template: MessageTemplate): ResolvedSeo {
     pluginIds,
     pairsWith: template.pairsWith,
     componentKinds,
+    guides: uniq([...(o.guides ?? []), ...DEFAULT_TEMPLATE_GUIDES]).slice(0, 3),
   };
 }
 

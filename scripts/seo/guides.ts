@@ -3,7 +3,7 @@
 import { LIMITS } from "@/core/schema/limits";
 import { SITE, type FaqEntry } from "./content";
 
-export const GUIDES_LASTMOD = "2026-09-11";
+export const GUIDES_LASTMOD = "2026-09-16";
 
 export interface GuideSection {
   heading: string;
@@ -48,14 +48,14 @@ function guide(input: GuideInput): GuidePage {
 export const GUIDES: GuidePage[] = [
   guide({
     slug: "discord-components-v2",
-    title: "Discord Components V2 Guide: Types, JSON & Limits | DWEEB",
+    title: "Discord Components V2 Guide: JSON Example & Limits | DWEEB",
     h1: "Discord Components V2: Complete Guide",
     description:
-      "Learn Discord Components V2 types, nesting rules, JSON, webhook behavior and current limits, with a working example you can edit visually.",
+      "Every Discord Components V2 type with its numeric ID, nesting rules, a minimal webhook JSON example, current limits and an editable example you can open.",
     eyebrow: "Developer guide · Components V2",
     lede: "Components V2 turns a Discord message into a real layout tree: text, sections, thumbnails, media, separators, containers and interactive controls. This guide explains the model that Discord actually accepts and gives you an editable reference instead of a disconnected code fragment.",
     published: "2026-07-15",
-    modified: "2026-09-11",
+    modified: "2026-09-16",
     keywords: [
       "discord components v2",
       "discord components v2 example",
@@ -263,7 +263,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Practical guide · Discord webhooks",
     lede: "A Discord incoming webhook is the shortest path from a tool or script into one channel. It can set a display name and avatar and post rich Components V2 layouts, but its URL is also a credential. Set it up once, handle it like a password, and test with a message you can recognize.",
     published: "2026-07-15",
-    modified: "2026-09-11",
+    modified: "2026-09-16",
     keywords: [
       "how to create a discord webhook",
       "discord webhook url",
@@ -288,6 +288,49 @@ export const GUIDES: GuidePage[] = [
         ],
         paragraphs: [
           "Discord's labels can move between clients, but the canonical control remains under the server's Integrations and Webhooks settings. On a managed server, role and channel overrides can both affect whether you can see or manage it.",
+        ],
+      },
+      {
+        heading: "Create a webhook on mobile",
+        paragraphs: [
+          "The mobile app exposes the same control. Open the server, tap its name to reach Server Settings, choose Integrations, then Webhooks, and create the webhook exactly as on desktop. Copying the URL on a phone is the risky step: the clipboard is shared with every app, so paste it straight into the tool that needs it and clear it afterwards rather than leaving it in a notes app or a chat draft.",
+          "A channel-level shortcut also exists on desktop: open the channel's settings, choose Integrations and create the webhook there. It is the same object, already pointed at that channel.",
+        ],
+      },
+      {
+        heading: "What the webhook URL contains",
+        paragraphs: [
+          "A webhook URL has two parts after the fixed prefix: a numeric webhook id and a long token. The id is public information — it appears in API responses and identifies the webhook. The token is the secret: anyone who has the full URL can post as that webhook without being a member of the server, edit or delete the messages it sent, and change its name and avatar. There is no separate password, which is why the URL is treated as a credential throughout these guides.",
+          "Discord does not offer a regenerate-token button. If the URL has leaked or you simply want to rotate it, delete the webhook and create a new one; messages it already posted stay in the channel and can still be restored from their message link by the new owner of that channel's webhooks.",
+        ],
+        code: `https://discord.com/api/webhooks/<webhook id>/<webhook token>
+                                   public          secret`,
+      },
+      {
+        heading: "What a webhook can and cannot do",
+        table: {
+          headers: ["A webhook can", "A webhook cannot"],
+          rows: [
+            [
+              "Post to its channel with any display name and avatar, including Components V2 layouts, embeds and file attachments",
+              "Read messages, react, or reply to anything in the channel",
+            ],
+            [
+              "Edit and delete the messages it posted, using the message id and its own token",
+              "Delete or edit messages posted by people or other webhooks",
+            ],
+            [
+              "Post into an existing thread, or create a forum or media post, with the thread parameters",
+              "Send direct messages, assign roles, or run slash commands",
+            ],
+            [
+              "Carry link buttons that open a URL",
+              "Own custom-ID buttons or select menus unless an application created it — those need an interaction handler",
+            ],
+          ],
+        },
+        paragraphs: [
+          "That last row is the one that surprises most people. A webhook is a one-way door into one channel: perfect for announcements, rules, status posts and anything else that does not need a response. When members must click something and have a bot react, the destination has to be a webhook owned by an application that receives the click — DWEEB's plugins and the [interaction features](/features/) exist for exactly that case.",
         ],
       },
       {
@@ -688,7 +731,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Reference · Markdown & formatting",
     lede: "Discord's markdown looks familiar but behaves like no other dialect: italics care about spaces, ordered lists silently merge into bullet lists, and links trim their own punctuation. This reference covers the full syntax plus the edge cases DWEEB's preview parser is tested against real Discord clients for.",
     published: "2026-07-17",
-    modified: "2026-09-11",
+    modified: "2026-09-16",
     keywords: [
       "discord text formatting",
       "discord markdown",
@@ -774,6 +817,7 @@ export const GUIDES: GuidePage[] = [
         paragraphs: [
           "Regular user chat supports masked links as well as the core styles. Webhook and bot messages can use the same link syntax in plain content and Components V2 Text Displays. Legacy embed descriptions and fields support many inline styles and masked links, but a legacy embed's title, footer and other named fields have their own rendering rules; do not assume every field is a full chat message.",
           "Components V2 Text Displays are the most capable text surface: headings, subtext, lists, quotes, code, mentions and timestamps all render, and DWEEB counts every character against the message-wide budget as you type.",
+          "The classic use of all of this at once is a pinned rules post — a heading, bold rule names, a quote block for consequences and a subtext footer. The [server rules templates](/guides/discord-server-rules/) are written in exactly that markdown and can be pasted as they are.",
         ],
       },
       {
@@ -793,7 +837,12 @@ export const GUIDES: GuidePage[] = [
         url: "https://docs.discord.com/developers/reference#message-formatting",
       },
     ],
-    related: ["discord-timestamp-format", "discord-components-v2", "discord-webhook-limits"],
+    related: [
+      "discord-timestamp-format",
+      "discord-server-rules",
+      "discord-components-v2",
+      "discord-webhook-limits",
+    ],
     ctaLabel: "Try the formatting live",
     ctaPath: "/",
   }),
@@ -905,14 +954,14 @@ export const GUIDES: GuidePage[] = [
   }),
   guide({
     slug: "discord-webhook-limits",
-    title: "Discord Webhook Rate Limits & Message Limits | DWEEB",
+    title: "Discord Webhook Limits: Rate Limits, 429s & Caps | DWEEB",
     h1: "Discord Webhook Limits: Rate, Size and Components",
     description:
       "The limits every Discord webhook hits: rate limits and 429 handling, character caps, embed totals and Components V2 ceilings the editor enforces for you.",
     eyebrow: "Reference · Limits & rate limits",
     lede: "Webhook failures usually trace back to one of three separate ceilings: the size of a single message, the speed you call one webhook, and how fast one channel accepts webhook deliveries. Knowing which ceiling you hit turns a mystery 400 or 429 into a five-minute fix.",
     published: "2026-07-17",
-    modified: "2026-09-11",
+    modified: "2026-09-16",
     keywords: [
       "discord webhook rate limit",
       "discord character limit",
@@ -1506,6 +1555,229 @@ X-RateLimit-Remaining: 0
     ],
     ctaLabel: "Build a forum post visually",
     ctaPath: "/",
+  }),
+  // Added 2026-09-16 from Search Console data: the server-rules template page
+  // was earning ~1,000 impressions a quarter across "discord server rules
+  // template", "discord rules copy and paste" and dozens of variants, but sat
+  // at position 22-50 with a 0.5% CTR — searchers want rule TEXT they can paste,
+  // which a short six-rule preview card never satisfied. This guide carries the
+  // text; the template page carries the visual card, and they cross-link.
+  guide({
+    slug: "discord-server-rules",
+    title: "Discord Server Rules Template: Copy & Paste Examples | DWEEB",
+    h1: "Discord Server Rules Templates You Can Copy and Paste",
+    description:
+      "Copy-and-paste Discord server rules templates for general, gaming, creator and study servers, plus voice and age-restricted add-ons and formatting tips.",
+    eyebrow: "Community guide · Server rules",
+    lede: "Good rules are short, numbered and impossible to miss. This guide gives you complete rule sets you can paste into your #rules channel today — a general template, versions for gaming, creator and study servers, add-ons for voice chat and age-restricted channels — plus the formatting that makes them readable and a way to keep them editable after you post.",
+    published: "2026-09-16",
+    modified: "2026-09-16",
+    keywords: [
+      "discord server rules template",
+      "discord rules template",
+      "discord rules copy and paste",
+      "discord server rules examples",
+      "rules for discord server",
+    ],
+    sections: [
+      {
+        heading: "What a good rules message does",
+        paragraphs: [
+          "A rules post has one job: let a new member understand what is expected in under a minute, and give moderators something specific to point at later. Everything below is built around that, so each template keeps rules short, numbers them, states the consequences once, and names where to go with questions.",
+          "Paste the block that fits your server, delete what does not apply, and change the wording to sound like your community. A rule nobody can picture breaking is dead weight — cut it.",
+        ],
+        bullets: [
+          "One idea per rule, one line per rule. Long paragraphs get skimmed and forgotten.",
+          'Number the rules so staff can say "rule 3" instead of quoting a paragraph.',
+          "State consequences once, at the end, in a quote block — not after every rule.",
+          "Say where to appeal or ask: a ticket, a mod DM, a channel.",
+          "Date the post. A rules message with no date reads as abandoned.",
+        ],
+      },
+      {
+        heading: "General Discord server rules template (copy and paste)",
+        paragraphs: [
+          "This is the all-purpose set. It works for a friend group, a hobby community or a public server, and it is the same wording the [server rules template](/templates/discord-server-rules-template/) in DWEEB starts from, expanded to ten rules. Discord markdown is already applied: the heading, bold rule names, the quote for consequences and the small subtext line all render as-is.",
+        ],
+        code: `# 📜 Server Rules
+Being here means you agree to follow these.
+
+**1. Be respectful.** No harassment, hate speech, slurs or personal attacks.
+**2. Keep it civil.** Disagree with ideas, not people. No flame wars.
+**3. No spam.** No flooding, mass mentions, copy-paste chains or wall-to-wall caps.
+**4. Stay on topic.** Use the right channel and read the channel description first.
+**5. Keep it safe for work.** No NSFW, gore or shock content outside channels marked age-restricted.
+**6. No advertising.** No unsolicited invites, self-promotion or DM ads.
+**7. Protect privacy.** Never share someone else's personal information.
+**8. No impersonation.** Do not pose as staff, other members or public figures.
+**9. Follow Discord's rules.** Discord's Terms of Service and Community Guidelines apply here too.
+**10. Staff decisions are final.** Take disputes to a ticket or a mod DM, not public chat.
+
+> Breaking a rule can mean a warning, a timeout, a kick or a ban depending on severity. Repeat offences escalate.
+-# Last updated September 2026 · Questions? Open a ticket or ask a moderator.`,
+      },
+      {
+        heading: "Short rules template for a small server",
+        paragraphs: [
+          "A server with thirty people does not need ten rules. Five is enough to set the tone without reading like a legal notice.",
+        ],
+        code: `# Rules
+**1.** Be kind. No harassment, hate or personal attacks.
+**2.** No spam, mass pings or advertising.
+**3.** Keep NSFW and shock content out.
+**4.** Respect people's privacy — no doxxing, no leaking DMs.
+**5.** If a mod asks you to stop, stop.
+
+> Warnings first. Repeat it and you're out.`,
+      },
+      {
+        heading: "Gaming server rules template",
+        paragraphs: [
+          "Gaming communities need the general rules plus a few that only come up around matches, voice chat and account trading. Keep the game-specific etiquette in its own block so casual members can skip it.",
+        ],
+        code: `# 🎮 Server Rules
+**1. Respect everyone.** No harassment, slurs, hate speech or personal attacks — in text or in voice.
+**2. Good sportsmanship.** No rage-quitting mid-match, griefing teammates or trash talk that crosses into abuse.
+**3. No cheating or exploits.** Discussing, sharing or selling cheats, hacks or exploits is an instant ban.
+**4. No account trading.** No buying, selling or sharing accounts, items or currency for real money.
+**5. Use LFG channels for LFG.** Post team requests in #looking-for-group, not in general chat.
+**6. Mark spoilers.** Use spoiler tags for story content from the last 30 days.
+**7. Keep voice clean.** No mic spam, soundboards, music or screaming; push-to-talk if you have background noise.
+**8. Stay on topic.** Clips go in #clips, memes in #memes, bugs and complaints in #feedback.
+**9. No advertising.** No server invites, stream links or referral codes outside #self-promo.
+**10. Follow Discord's rules and staff direction.** Discord's Terms and Community Guidelines apply; staff decisions are final.
+
+> Timeout first, then a kick, then a ban. Cheating and account selling skip straight to a ban.`,
+      },
+      {
+        heading: "Creator and community server rules template",
+        paragraphs: [
+          "A creator's server has two audiences — fans who want to hang out, and people who want something from the creator. The rules should protect the first group from the second without making the place feel policed.",
+        ],
+        code: `# ✨ Community Rules
+**1. Be respectful to everyone,** including the creator, the mods and each other. No harassment, hate speech or drama.
+**2. No begging or demanding.** Don't ask for follows, shout-outs, free stuff, DMs or replies.
+**3. Self-promo only where allowed.** Share your own content in #self-promo, never in general or in DMs.
+**4. Don't leak private content.** No screenshots of members-only posts, streams or DMs outside this server.
+**5. No spam or mass pings.** One message, not five. Never @everyone.
+**6. Keep it safe for work.** Nothing you wouldn't want on a stream.
+**7. Respect the schedule.** Stream and upload times are posted in #announcements — please don't ask when the next one is.
+**8. Stay on topic.** Use the channel names; #off-topic exists for everything else.
+**9. Follow Discord's Terms and Community Guidelines.**
+**10. Mods have the final say.** Questions and appeals go to a ticket.
+
+> Rule breaks get a warning, then a timeout, then removal. Leaks and harassment are an immediate ban.`,
+      },
+      {
+        heading: "Study, class or professional server rules template",
+        paragraphs: [
+          "Servers built around a course, a study group or a professional community need rules about honesty and shared material more than rules about memes.",
+        ],
+        code: `# 📚 Server Rules
+**1. Be professional and respectful.** Disagree with arguments, not people.
+**2. No academic dishonesty.** Don't ask for or share answers to graded work. Explaining a concept is fine; posting a solution is not.
+**3. Respect copyright.** No pirated textbooks, paid course material or paywalled papers.
+**4. Stay on topic.** Subject channels are for that subject; #lounge is for everything else.
+**5. Search before you ask.** Check the pinned FAQ and use the search bar — repeat questions get redirected.
+**6. No recording.** Do not record or screenshot voice sessions or study rooms without everyone's consent.
+**7. Protect privacy.** No sharing of names, emails, grades or personal details that aren't yours.
+**8. No advertising or recruiting** for paid services, tutoring or other servers without staff approval.
+**9. Follow Discord's Terms and Community Guidelines.**
+**10. Staff direction is final.** Appeals through a ticket.
+
+> Warnings for minor issues; dishonesty, piracy and privacy violations are removed on the first offence.`,
+      },
+      {
+        heading: "Add-on rules for voice chat and age-restricted channels",
+        paragraphs: [
+          "Two situations regularly need their own short block. Paste either one under the main rules, or pin it inside the channel it applies to.",
+          "Age-restricted content on Discord may only be posted in channels marked age-restricted, and Discord's Community Guidelines still apply inside them. A server rule can be stricter than Discord's policy; it can never be looser.",
+        ],
+        code: `## 🎙️ Voice chat
+**1.** No mic spam, soundboards, music bots in talk channels, or screaming.
+**2.** Push-to-talk if your background is noisy.
+**3.** No recording without asking the channel first.
+**4.** Don't hop between channels to interrupt conversations.
+**5.** AFK and sleep channels are for AFK and sleep — mute yourself.
+
+## 🔞 Age-restricted channels
+**1.** Only post here — never in general channels, avatars, statuses or nicknames.
+**2.** Nothing illegal, nothing involving minors, nothing non-consensual. Zero tolerance.
+**3.** Discord's Community Guidelines apply inside this channel too.
+**4.** Mark anything shocking with a spoiler tag.`,
+      },
+      {
+        heading: "Format the rules so people actually read them",
+        paragraphs: [
+          "Every template above uses the same five pieces of Discord markdown. They are the difference between a rules post that gets read and one that gets scrolled past. The [text formatting reference](/guides/discord-text-formatting/) covers every rule and the quirks around them.",
+          'Bold numbers are used instead of Discord\'s list syntax on purpose. A "1." list renders, but Discord numbers the items itself and merges them into any bullet list sitting directly above, so the numbers you typed are not the numbers people see — bold text stays exactly as you wrote it.',
+        ],
+        table: {
+          headers: ["Element", "Markdown", "Why it helps"],
+          rows: [
+            ["Heading", "# Server Rules", "Largest text on the page; the eye lands on it first."],
+            [
+              "Rule name",
+              "**1. Be respectful.**",
+              "The bold fragment is the part people remember.",
+            ],
+            [
+              "Consequences",
+              "> Breaking a rule can mean …",
+              "A quote block sets it apart from the rules themselves.",
+            ],
+            ["Footnote", "-# Last updated …", "Subtext keeps dates and contacts out of the way."],
+            ["Sub-heading", "## Voice chat", "Groups add-on rules without a second message."],
+          ],
+        },
+      },
+      {
+        heading: "Post it as a pinned card, then keep it editable",
+        paragraphs: [
+          'Pasting the text into #rules as a normal message works, but it is tied to whoever posted it and it cannot carry an accent colour or dividers. Posting it through a webhook with the [server rules template](/templates/discord-server-rules-template/) gives you a card with a coloured stripe, separators between the header, the rules and the consequences, and a named sender such as "Server Rules" instead of a personal account. Open the template, paste your rules into the middle text block, check the preview and send.',
+          "Rules change. Instead of deleting the post and losing the pin, [restore the message and update it in place](/guides/edit-discord-webhook-message/) — the message link stays the same, so nothing that points at it breaks. If the rules mention a role or a user, review [allowed mentions](/guides/discord-webhook-mentions/) first so an edit does not ping anyone.",
+          "On a Community server, Discord's Rules Screening feature shows a short list of rules that new members must accept before they can talk. Keep that list to the essentials and keep the full text in #rules; the screening prompt is deliberately compact, and the channel is where people will actually look things up.",
+        ],
+      },
+      {
+        heading: "How many rules should a Discord server have?",
+        paragraphs: [
+          "Five to ten. Small servers do well with five; a large public server can justify ten plus a couple of add-on blocks. Past that, split the post with sub-headings or move channel-specific etiquette into the channels themselves — a twenty-rule wall is a signal that nobody expects members to read it.",
+          'Cut any rule that is really a mood ("no drama"), any rule already covered by a more specific one, and any rule you would not actually enforce. If a situation comes up twice and no rule covers it, add one then.',
+        ],
+      },
+      {
+        heading: "The rules you must keep whatever you write",
+        paragraphs: [
+          "Discord's Terms of Service and Community Guidelines apply to every server on the platform. Your rules can be stricter than them and often should be, but a rule that permits something Discord forbids protects nobody, and Discord can act on the server regardless of what your #rules channel says. That is why every template above includes one line pointing at Discord's own rules.",
+          "Two things are worth stating explicitly because they come up constantly: content that is not safe for work belongs only in channels marked age-restricted, and anything involving minors or non-consensual material is a platform-level violation, not a server-level one. Report it to Discord as well as removing it.",
+        ],
+      },
+    ],
+    sources: [
+      { label: "Discord Community Guidelines", url: "https://discord.com/guidelines" },
+      { label: "Discord Terms of Service", url: "https://discord.com/terms" },
+      {
+        label: "Discord support: Rules Screening FAQ",
+        url: "https://support.discord.com/hc/en-us/articles/1500000466882-Rules-Screening-FAQ",
+      },
+      {
+        label: "Discord support: Enabling your Community server",
+        url: "https://support.discord.com/hc/en-us/articles/360047132851-Enabling-Your-Community-Server",
+      },
+      {
+        label: "Discord support: Markdown Text 101",
+        url: "https://support.discord.com/hc/en-us/articles/210298617-Markdown-Text-101-Chat-Formatting-Bold-Italic-Underline",
+      },
+    ],
+    related: [
+      "discord-text-formatting",
+      "edit-discord-webhook-message",
+      "discord-webhook-mentions",
+      "how-to-create-a-discord-webhook",
+    ],
+    ctaLabel: "Open the rules template",
+    ctaPath: "/#template=rules",
   }),
 ];
 

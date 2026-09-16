@@ -102,6 +102,7 @@ function productContext(guide: GuidePage): string {
     "discord-components-v2",
     "discord-text-formatting",
     "discord-timestamp-format",
+    "discord-server-rules",
   ].includes(guide.slug);
   const href = embedGuide
     ? "/discord-embed-builder/"

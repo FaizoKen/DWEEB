@@ -1099,6 +1099,32 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   `bun add -d sharp && bun scripts/gen-template-og.ts && bun remove sharp` (run from the
   repo root; expect the new card **plus** `templates-og/templates.png`, the catalogue hub
   card, to change — every other card stays byte-identical).
+- **SEO changes are driven from Search Console, and three mechanisms exist because of what it
+  showed** (2026-09-16; the GSC/GA MCP servers cannot see DWEEB's properties — read them through
+  the maintainer's signed-in browser, ids in `AGENTS.local.md`). The 3-month picture: 328 clicks
+  / 7.16K impressions / avg position 19.3, rising; `/` wins the "components v2 builder" family at
+  position 4–7 with 12–27% CTR (leave it alone), while the **server-rules cluster** was the largest
+  untapped one — `/templates/discord-server-rules-template/` had ~1,000 impressions at position
+  22–50 and 0.5% CTR across "discord server rules template", "discord rules copy and paste" and
+  ~60 variants, because searchers want pasteable rule *text* and a six-rule preview card never
+  satisfied that. (1) `/guides/discord-server-rules/` carries that text (five full rule sets,
+  add-ons, formatting, Rules Screening); the template page keeps the visual card and they
+  cross-link — don't merge or redirect one into the other. (2) **Every template page carries a
+  "Read next" guide row** (`TemplateSeoOverride.guides`, default `DEFAULT_TEMPLATE_GUIDES`,
+  resolved against `GUIDES` by the generator, which throws on an unknown slug): the three newest
+  guides sat "Discovered – currently not indexed" two months after publication while template
+  pages are the most-crawled detail pages, so this is the guide cluster's inbound ring — keep it
+  when restyling template pages. (3) **A retired URL gets a redirect stub, never a bare 404**:
+  `LEGACY_REDIRECTS` in `gen-template-pages.ts` writes a `noindex` zero-delay `meta refresh` +
+  canonical stub (GitHub Pages cannot 301; a zero-delay refresh is the redirect signal Google
+  documents for static hosts, and `noindex` is what lets the audit's orphan check accept an HTML
+  file outside the sitemap). `/templates/discord-onboarding-panel/` (template retired in
+  7e5288e) was still earning impressions as a 404 — add the next retired slug there. Two things in
+  the indexing report are *correct* and need no fix: the `/?entry=…` / `/?template=…` rows under
+  "Page with redirect" / "Crawled – not indexed" are the pre-fragment CTA form and non-canonical
+  by design, and the 13 RoleLogic role templates being un-crawled is crawl-budget prioritisation
+  on a young domain, not a markup fault. The audit warns on titles over 65 characters and
+  descriptions over 160 — keep new copy under both, since Google truncates around there anyway.
 - **Static discovery is a build contract.** `scripts/gen-template-pages.ts` generates the
   template and feature catalogues, `/guides/*`, the product landing pages, and the image
   sitemap. Build-critical generator code is covered by `tsconfig.seo.json`; `bun run build` then
