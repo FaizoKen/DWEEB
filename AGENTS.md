@@ -20,6 +20,10 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 - `bun run dev` — web FE (Vite). `bun run dev:activity` — Activity mode. `bun run dev:server` — Rust proxy.
 - `bun run build` — typecheck + Vite build + SEO template pages (`scripts/gen-template-pages.ts`).
 - `bun run test` — Vitest (core logic, stores, and feature contracts). `bun run typecheck`, `bun run format:check`.
+- `bun run verify:codegen` — runs every code-export target (`src/core/codegen`) against the real
+  discord.js / discord.py / requests / curl and compares the result with the source payload. Needs
+  the libraries installed somewhere (`CODEGEN_VERIFY_NODE_DIR`, `CODEGEN_VERIFY_PYTHON`; header of
+  `scripts/verify-codegen.ts`); on-demand, never a CI gate. Run it after touching a generator.
 - `bun run gen:mcp` — regenerates the data + pinning corpus the Rust MCP server serves
   (`server/src/mcp/*.json`). Also run by `bun run build`, and `web.yml` fails on a resulting
   diff, so a stale catalog cannot be committed. See `docs/mcp.md`.
@@ -36,6 +40,9 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
 
 ## Structure
 
+- `src/core/codegen` — the code export (discord.js, discord.py, cURL, fetch, Python requests), a
+  pure function of the wire payload; used by the Share dialog's Code tab and by the static-site
+  generator for every code sample on the site.
 - `src/core` — non-UI application logic (stores, serialization, validation, API clients,
   telemetry). `src/features` — UI features. `src/activity` — Discord Activity entry.
 - `server/src` — Rust API proxy: Discord/OAuth auth, plain-SQLite shortlinks, and
@@ -1214,6 +1221,16 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   this query is visual-tool pages with the phrase in their title, competing with discord.js's
   `MessageBuilder` docs for the same words. The two sibling landings stay narrower on purpose
   (webhook workflow, embed conversion) so all three do not chase one query.
+  **But "Components V2" must stay in the root `<title>` beside the head term** (2026-09-18).
+  The 2026-08-19 retitle dropped it ("Discord Message Builder — Free Visual Webhook Editor"),
+  and Search Console's before/after is unambiguous: over the 28 days before, the
+  components-v2-builder cluster gave `/` 54 clicks from ~394 impressions (13.7% CTR; "components
+  v2 builder" 14.8% at 5.1); over the 28 days after, 25 clicks from ~250 (10%; "components v2
+  builder" **2.3% at 3.6** — ranked higher and clicked less, because the snippet no longer said the
+  words the searcher typed). The head term it was traded for had earned 12 impressions and 0
+  clicks. The title is now "Discord Message Builder — Components V2 & Webhook Editor | DWEEB"
+  (64 chars): head term first, exact-match token restored. Judge any future retitle the same way —
+  per-query CTR on `/` in GSC, 28 days either side — not by which phrase sounds more like a product.
   **The head-term landing has to be linked *to*, contextually, and an audit gate keeps it that
   way** (2026-08-20). Its inbound links were 126 nav/footer anchors reading "Message builder" and
   nine contextual ones: the 47 template and feature pages — the site's largest content mass and
@@ -1365,7 +1382,49 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   exact allowlists. Keep GA Enhanced Measurement disabled (especially outbound clicks, site search,
   and history pageviews), because those automatic events bypass the repository's field filters.
   Never add message content, webhook URLs/tokens, guild/app/message ids, share payloads, or
-  free-form text to analytics.
+  free-form text to analytics. **Never name an event parameter `source`, `medium`, `campaign`,
+  `term` or `content`** (2026-09-18): GA4 reads those on *any* event as a manual campaign
+  override, and `template_applied { source: "gallery" }` re-attributed 565 of 3,279 sessions (17%,
+  the whole "Unassigned" channel) to traffic sources named `gallery` and `seo`, overwriting the
+  search engine or AI assistant that really sent them. The field is `applied_from` now;
+  `trackAnalytics` refuses the five names and `analytics.test.ts` pins every allowlist clear of
+  them. Channel data before 2026-09-18 undercounts Organic Search and AI Assistant accordingly.
+- **Code export is generated from the wire payload and proven by running it** (2026-09-18).
+  Why it exists: Search Console (90 days) shows the one query family DWEEB wins is "components v2
+  builder" — a developer's phrase — and `/guides/discord-components-v2/` drew 1,227 impressions in
+  28 days at position 8.8 with 2% CTR, nearly all behind queries too rare to be named (the long,
+  specific searches of someone writing a bot). GA4 puts ChatGPT referrals (452 sessions) level with
+  Google organic (554). The rival in that niche (discord.builders) exports library code; DWEEB
+  could only hand a developer JSON. Now More ▸ **Export as code** (Share dialog **Code** tab,
+  `#intent=code`) renders the current message for five targets — discord.js 14.19+ builders,
+  discord.py 2.6+ `LayoutView`, and cURL / `fetch` / Python `requests` webhook posts — from
+  `src/core/codegen`, a pure function of the same wire payload the JSON tab exports
+  (`prepareCodegenInput`: `stripEditorFields`, then `session://` uploads and hand-typed
+  `attachment://` URLs become one `attachments` list every target turns into the matching upload
+  code, and restored-media metadata is dropped). Load-bearing: (1) **correctness is proven, not
+  remembered** — `scripts/verify-codegen.ts` runs all 36 templates + edge cases through the real
+  packages (builders' `toJSON()`, `view.to_components()`, and a local capture server for the HTTP
+  targets, which checks `with_components=true` and the body byte-for-byte) — run it after touching
+  a generator; the unit tests only pin the *printed* form; (2) the printer breaks lines like a
+  formatter (88 cols, hugged single calls, one arg per line otherwise) because the export is read
+  before it is run; keep new targets on it; (3) **every code sample on the static site is
+  generated at build time** (`scripts/seo/code-samples.ts`): the 5 developer guides
+  (`scripts/seo/code-guides.ts` — discord.js, discord.py, webhook in Python / JavaScript / cURL),
+  `/features/discord-code-generator/` (`codeSamples`), and the "Use this template in a bot"
+  section on all 36 template pages (discord.js + discord.py, collapsed; cURL/fetch/Python are one
+  click away in the editor via `#template=<id>&intent=code`) — never hand-write builder code into
+  a page; (4) a template link that also names a surface (`template=` + `intent=`) skips the Send
+  coach mark and the plugin checklist (`useTemplateDeepLink` reads the intent at first render,
+  before App strips it), since the CTA promised the Code tab and both would land on top of it;
+  (5) the generated discord.py builds the view inside `build_view()` for paste-ability, not because
+  construction needs a running loop (it doesn't in 2.7); (6) analytics event `code_exported`
+  carries `language` + `action` only. Library facts in the guides were checked against the
+  discord.js guide (display-components), the 14.19.0 release notes, discord.py's whats_new/API
+  reference, and the installed packages (`withComponents` → `with_components`; discord.py adds
+  `with_components` itself when `view=` is passed to a webhook; a bare button in a `LayoutView`
+  serialises top-level and Discord refuses it). The `// Designed in DWEEB (https://dweeb.faizo.net)`
+  header comment is deliberate: code travels into repos, gists and answers, and a mention there is
+  how the next developer — and the AI assistants that now send 14% of sessions — finds the tool.
 - **The service worker has a narrow navigation allowlist.** Only `/` and valid `/s/<id>` routes
   may fall back to the SPA shell (`src/core/seo/navigationRoutes.ts`). Every current or future
   discovery/legal route must receive its real static HTML. Registration has a real post-paint

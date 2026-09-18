@@ -39,6 +39,7 @@ import { HOME_LASTMOD } from "./seo/constants";
 import { templatePayload } from "./seo/template-payload";
 import { renderDiscoveryReference } from "./seo/discovery";
 import { isPublishable, loadRatings, MIN_RATINGS_TO_PUBLISH } from "./seo/ratings";
+import { sample } from "./seo/code-samples";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
@@ -266,6 +267,10 @@ async function main(): Promise<void> {
       relatedFeatures,
       payload,
       relatedGuides,
+      [
+        { label: "discord.js", code: sample(template.message, "discordjs") },
+        { label: "discord.py", code: sample(template.message, "discordpy") },
+      ],
     );
     await writePage(join("templates", seo.slug, "index.html"), html);
     await writeFile(join(DIST, payload.path.slice(1)), `${payload.json}\n`, "utf8");

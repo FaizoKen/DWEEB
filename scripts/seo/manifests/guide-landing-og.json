@@ -14,6 +14,18 @@
       "width": 1200,
       "height": 630
     },
+    "/guides-og/discord-js-components-v2.png": {
+      "sourceSvgSha256": "34e18e2e6487a414f6619afa03365c3f0f53754f0c27f48d3cf83660be905d43",
+      "pngSha256": "7a0780f84a30d84721483ddef29782d267103c67da440bf53161f40f5343a176",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/discord-py-components-v2.png": {
+      "sourceSvgSha256": "7a5507a122c02a2e8172b55a8bbd795290d73aada0e988cf4f8a165b32ef8be3",
+      "pngSha256": "6c198d07b74cf600e79493a053f5698bb7f0353668e8c1295ddc3157f95406e9",
+      "width": 1200,
+      "height": 630
+    },
     "/guides-og/discord-server-rules.png": {
       "sourceSvgSha256": "1f57db335704985b09abff0e5d54c964f5d3c0ec2959be5be4f3271fd0ba733a",
       "pngSha256": "ce21573f05af03369485b748be5c9fc734dfaa085da47e7359697d69b2730c52",
@@ -32,6 +44,12 @@
       "width": 1200,
       "height": 630
     },
+    "/guides-og/discord-webhook-curl.png": {
+      "sourceSvgSha256": "59bda0d02334f07706ee3500d0e4d679de96cf0b45acd57805ea2b466765bddc",
+      "pngSha256": "aea49cdf97822382f2549161622a66150be75a32109fd8b6e7e9d5bbb96196f8",
+      "width": 1200,
+      "height": 630
+    },
     "/guides-og/discord-webhook-errors.png": {
       "sourceSvgSha256": "d7b4a1e8b8e4a263381940084b103edfe28d9863eb8fb51d6fe83a87da1eaf6d",
       "pngSha256": "49b92c537c01fc31d6a5f159ca61ec73ef5f9a8a5d1a52ec5f12fafdc3b2fb48",
@@ -41,6 +59,12 @@
     "/guides-og/discord-webhook-forum-threads.png": {
       "sourceSvgSha256": "3b6153c43dada8f483ce0a0df37b4d3744122b261d04008b15da204eb1147aec",
       "pngSha256": "679d4f1bd07c3e8f8b131bbc78581896fcd2d081d4e7bc0a0a8189bb0b684bf0",
+      "width": 1200,
+      "height": 630
+    },
+    "/guides-og/discord-webhook-javascript.png": {
+      "sourceSvgSha256": "e4dfcdf8abe6050eb62d44079fb180cd14e5ab43b4a07d2e279e72f4b92eb1c9",
+      "pngSha256": "a405682ef82b7bfa9e8576170d0917c5f134dc9c2e38b3ec72641532f5d90b8e",
       "width": 1200,
       "height": 630
     },
@@ -62,6 +86,12 @@
       "width": 1200,
       "height": 630
     },
+    "/guides-og/discord-webhook-python.png": {
+      "sourceSvgSha256": "f5bcf6844a71912f6a76368b236ef757433eeab570ed187d8d28960a02b0284c",
+      "pngSha256": "107e2be08075c94e464dbed693927cf7e84a5a61281051e2651d88e505d46162",
+      "width": 1200,
+      "height": 630
+    },
     "/guides-og/discord-webhook-security.png": {
       "sourceSvgSha256": "ad260e0849ef0efe25a386002a83afb5894001cbeac421776389aaebaf64ed59",
       "pngSha256": "56df1e9c0343ee46da12eeb947e741ecf5e7bc68c440a758f701cbaa98462fb8",
@@ -75,8 +105,8 @@
       "height": 630
     },
     "/guides-og/guides.png": {
-      "sourceSvgSha256": "afb2364cc90fe17b94708ce287f9674cfc2c0b53e2b7f6e2fba6857b2e5ef81a",
-      "pngSha256": "f50d208ec5551681ed5315fd85c7ee916e92134721894d7c592b92680ca8a214",
+      "sourceSvgSha256": "7f1b124f69198638cfc294f62b35f8029268825b7823037f30170e09007be3c2",
+      "pngSha256": "61f81b36b0b06c9b4230179f695949e6934819a75f630036482a569234b7afef",
       "width": 1200,
       "height": 630
     },

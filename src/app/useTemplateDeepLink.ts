@@ -21,6 +21,7 @@ import { useTemplateSetupStore } from "@/features/templates/templateSetupStore";
 import { pushToast } from "@/ui/Toast";
 import { trackAnalytics } from "@/core/telemetry/analytics";
 import { readClientParam, withoutClientParams } from "@/core/seo/clientParams";
+import { readFeatureIntent } from "./featureIntent";
 
 /** The client-side `template=<id>` value, validated to the id shape templates use. */
 export function readTemplateParam(search: string, hash = ""): string | null {
@@ -45,6 +46,12 @@ function stripTemplateParam(): void {
 export function useTemplateDeepLink(enabled = true, onSettled?: () => void): void {
   const replaceMessage = useMessageStore((s) => s.replaceMessage);
   const ran = useRef(false);
+  // Read during the first render: App's own effect strips `intent` from the
+  // address bar, and effect order must not decide whether this hook still sees it.
+  const opensSurface = useRef(
+    typeof window !== "undefined" &&
+      readFeatureIntent(window.location.search, window.location.hash) !== null,
+  );
 
   useEffect(() => {
     if (!enabled || ran.current) return;
@@ -69,7 +76,7 @@ export function useTemplateDeepLink(enabled = true, onSettled?: () => void): voi
         }
 
         replaceMessage(template.message);
-        trackAnalytics("template_applied", { template_id: template.id, source: "seo" });
+        trackAnalytics("template_applied", { template_id: template.id, applied_from: "seo" });
 
         // Mirror the gallery's pick behaviour: a template with a resolvable
         // plugin slot (interactive or link) hands off to the guided setup;
@@ -77,6 +84,14 @@ export function useTemplateDeepLink(enabled = true, onSettled?: () => void): voi
         const canSetup =
           !!template.pluginSlots?.length &&
           template.pluginSlots.some((slot) => isRegisteredPluginId(slot.pluginId));
+        //
+        // A link that also names a surface — "see this template as code" — has
+        // already said what happens next, and App is opening that dialog. The
+        // Send coach mark or the plugin checklist would land on top of it.
+        if (opensSurface.current) {
+          pushToast(`Loaded the “${template.name}” template.`, "success");
+          return;
+        }
         if (canSetup) {
           useTemplateSetupStore.getState().begin(template.id, preferredPluginId ?? undefined);
         } else {

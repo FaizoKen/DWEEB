@@ -1,9 +1,17 @@
 /** Safe, non-mutating UI intents carried by static feature-page CTAs. */
 import { readClientParam, withoutClientParams } from "@/core/seo/clientParams";
-export type FeatureIntent = "ai" | "json" | "manage-webhooks" | "mcp" | "restore" | "schedule";
+export type FeatureIntent =
+  | "ai"
+  | "code"
+  | "json"
+  | "manage-webhooks"
+  | "mcp"
+  | "restore"
+  | "schedule";
 
 const INTENTS = new Set<FeatureIntent>([
   "ai",
+  "code",
   "json",
   "manage-webhooks",
   "mcp",

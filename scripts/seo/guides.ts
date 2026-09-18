@@ -2,8 +2,9 @@
 
 import { LIMITS } from "@/core/schema/limits";
 import { SITE, type FaqEntry } from "./content";
+import { CODE_GUIDE_INPUTS } from "./code-guides";
 
-export const GUIDES_LASTMOD = "2026-09-16";
+export const GUIDES_LASTMOD = "2026-09-18";
 
 export interface GuideSection {
   heading: string;
@@ -33,7 +34,7 @@ export interface GuidePage {
   ogImage: string;
 }
 
-type GuideInput = Omit<GuidePage, "path" | "url" | "ogImage">;
+export type GuideInput = Omit<GuidePage, "path" | "url" | "ogImage">;
 
 function guide(input: GuideInput): GuidePage {
   const path = `/guides/${input.slug}/`;
@@ -1779,6 +1780,9 @@ Being here means you agree to follow these.
     ctaLabel: "Open the rules template",
     ctaPath: "/#template=rules",
   }),
+  // The developer cluster — sending a Components V2 message from code — lives
+  // in its own file; every code block in it is generated at build time.
+  ...CODE_GUIDE_INPUTS.map(guide),
 ];
 
 /** A commercial-intent product landing page generated at the site root. */

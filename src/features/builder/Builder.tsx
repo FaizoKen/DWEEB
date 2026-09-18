@@ -32,6 +32,7 @@ import { IconButton } from "@/ui/IconButton";
 import {
   BookmarkIcon,
   BracesIcon,
+  CodeIcon,
   ExternalLinkIcon,
   FilmIcon,
   HistoryIcon,
@@ -86,6 +87,8 @@ interface BuilderProps {
   onShare: () => void;
   /** Opens the Share / Export dialog on the combined JSON import/export tab. */
   onJson: () => void;
+  /** Opens the Share / Export dialog on the Code tab (discord.js, discord.py, cURL…). */
+  onCode: () => void;
   /** Opens the Share / Export dialog focused on the Send panel (post as new). */
   onSend: () => void;
   /** Opens the Share / Export dialog on the Update tab (edit in place). */
@@ -96,7 +99,15 @@ interface BuilderProps {
   onAbout: () => void;
 }
 
-export function Builder({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: BuilderProps) {
+export function Builder({
+  onShare,
+  onJson,
+  onCode,
+  onSend,
+  onUpdate,
+  onRestore,
+  onAbout,
+}: BuilderProps) {
   // For the empty-state hint below: reopening the Message directory beats
   // linking the static catalogue, since the in-app one loads a template
   // straight into this editor instead of a second tab.
@@ -112,6 +123,7 @@ export function Builder({ onShare, onJson, onSend, onUpdate, onRestore, onAbout 
         <ActionBar
           onShare={onShare}
           onJson={onJson}
+          onCode={onCode}
           onSend={onSend}
           onUpdate={onUpdate}
           onRestore={onRestore}
@@ -158,7 +170,15 @@ export function Builder({ onShare, onJson, onSend, onUpdate, onRestore, onAbout 
   );
 }
 
-function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: BuilderProps) {
+function ActionBar({
+  onShare,
+  onJson,
+  onCode,
+  onSend,
+  onUpdate,
+  onRestore,
+  onAbout,
+}: BuilderProps) {
   const undo = useMessageStore((s) => s.undo);
   const redo = useMessageStore((s) => s.redo);
   const canUndo = useMessageStore((s) => s.past.length > 0);
@@ -609,6 +629,15 @@ function ActionBar({ onShare, onJson, onSend, onUpdate, onRestore, onAbout }: Bu
                   }}
                 >
                   Import / export JSON
+                </MenuItem>
+                <MenuItem
+                  icon={<CodeIcon />}
+                  onSelect={() => {
+                    close();
+                    onCode();
+                  }}
+                >
+                  Export as code
                 </MenuItem>
                 <MenuItem
                   icon={<TrashIcon />}

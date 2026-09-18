@@ -81,6 +81,7 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
     "discord-webhook-manager",
     "ai-discord-message-writer",
     "discord-mcp-server",
+    "discord-code-generator",
   ]),
   guide: new Set([
     "index",
@@ -97,6 +98,11 @@ const ENTRY_IDS: Record<SeoEntry["sourceType"], ReadonlySet<string>> = {
     "discord-webhook-mentions",
     "discord-webhook-forum-threads",
     "discord-server-rules",
+    "discord-js-components-v2",
+    "discord-py-components-v2",
+    "discord-webhook-python",
+    "discord-webhook-javascript",
+    "discord-webhook-curl",
   ]),
 };
 

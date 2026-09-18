@@ -20,6 +20,7 @@
 
 import { SITE, type FaqEntry } from "./content";
 import { withClientParams } from "@/core/seo/clientParams";
+import { REFERENCE_CARD, sample } from "./code-samples";
 
 /** Display order of feature categories on the `/features` index. */
 export const FEATURE_CATEGORIES = [
@@ -82,6 +83,12 @@ export interface FeatureSeo {
   previewTemplateId?: string;
   /** Builder deep-link path. Client-only state belongs in the URL fragment. */
   appPath?: string;
+  /**
+   * Code blocks rendered on the page, generated at build time. Only the code
+   * generator feature carries them: a page about exporting code has to show
+   * the export, and a preview message would show the wrong thing.
+   */
+  codeSamples?: { label: string; code: string }[];
 }
 
 export const FEATURES: FeatureSeo[] = [
@@ -801,6 +808,87 @@ export const FEATURES: FeatureSeo[] = [
     previewTemplateId: "announcement",
     appPath: "/#intent=mcp",
   },
+
+  // ── Utilities ─────────────────────────────────────────────────────────────
+  {
+    id: "code-export",
+    slug: "discord-code-generator",
+    emoji: "💻",
+    category: "Utilities",
+    accent: 0xfee75c,
+    title: "Discord Code Generator: discord.js, discord.py & cURL | DWEEB",
+    h1: "Discord Message Code Generator",
+    tagline: "Design the message visually, export it as working code.",
+    description:
+      "Turn a message you design visually into discord.js or discord.py code, or a cURL, fetch or Python webhook request. Components V2, verified against the libraries.",
+    intro:
+      "Writing a Components V2 layout by hand means nesting builder calls you cannot see until the bot sends them. DWEEB works the other way round: build the message in the visual editor against a live Discord-accurate preview, then open the Code tab and copy it as discord.js, discord.py, cURL, JavaScript fetch or Python requests. The export carries the imports, the flag, the send call and every attachment reference, so it runs as pasted.",
+    howItWorks: [
+      {
+        name: "Build the message",
+        text: "Start from a blank canvas, a template or a message restored from Discord, and shape it in the visual editor with the live preview beside you.",
+      },
+      {
+        name: "Pick where it will run",
+        text: "Open More → Export as code. Choose a bot library — discord.js or discord.py — or a plain webhook request in cURL, JavaScript or Python.",
+      },
+      {
+        name: "Copy it into your project",
+        text: "Copy or download the file. The code rebuilds exactly the message you previewed; edit the text in place whenever the announcement changes.",
+      },
+    ],
+    configurable: [
+      "discord.js: builder classes for every Components V2 component, sent with channel.send() and the IsComponentsV2 flag",
+      "discord.py: a LayoutView with ui.Container, ui.Section, ui.TextDisplay and friends, sent with channel.send(view=…)",
+      "cURL, JavaScript fetch and Python requests: a webhook POST that already carries with_components=true and the V2 flag",
+      "Uploaded images and files become attachment:// references plus the matching upload code in every target",
+      "Silent send, allowed mentions and forum thread settings carried through where the target supports them",
+      "A note on the design's webhook-only settings when a bot library cannot express them",
+    ],
+    whenToUse: [
+      "Prototyping a bot's announcement, help or status message before writing it in code",
+      "Handing a designer's approved layout to the developer who has to ship it",
+      "Posting from a script, a CI pipeline or a cron job without running a bot",
+      "Learning what the Components V2 builders look like from a working example",
+    ],
+    faq: [
+      {
+        q: "Which libraries and languages are supported?",
+        a: "Two bot libraries — discord.js 14.19 or newer and discord.py 2.6 or newer, the versions that added Components V2 — and three ways to call a webhook URL directly: cURL, JavaScript with fetch, and Python with the requests library. All five produce the same message.",
+      },
+      {
+        q: "Is the generated code correct?",
+        a: "Every generator is checked by running its output against the published library and comparing the result with the message it came from: discord.js builders' toJSON(), discord.py's view.to_components(), and the request body the webhook variants actually send. The code samples on this site are produced by the same generator.",
+      },
+      {
+        q: "Does it handle buttons and select menus?",
+        a: "Yes. Link buttons work anywhere. Buttons and menus with a custom ID are exported too, but they only do something once your bot handles the interaction; the export says so in a comment, and a plain webhook cannot carry them at all.",
+      },
+      {
+        q: "What about images I uploaded in the editor?",
+        a: "An uploaded file becomes an attachment:// reference, and the export includes the matching upload — an AttachmentBuilder, a discord.File, or a multipart files[0] part — under the same filename. Put the file next to the script and it resolves.",
+      },
+      {
+        q: "Can I go the other way, from code to the editor?",
+        a: "Paste the JSON payload your code sends into the JSON tab and it opens in the editor. A legacy embed payload is converted to Components V2 on the way in, with a report of anything that could not be mapped.",
+      },
+    ],
+    keywords: [
+      "discord code generator",
+      "discord.js code generator",
+      "discord.py code generator",
+      "discord components v2 code generator",
+      "discord embed code generator",
+      "discord webhook code generator",
+      "discord message to code",
+    ],
+    requiresBot: false,
+    appPath: "/#template=showcase&intent=code",
+    codeSamples: [
+      { label: "discord.js", code: sample(REFERENCE_CARD, "discordjs") },
+      { label: "discord.py", code: sample(REFERENCE_CARD, "discordpy") },
+    ],
+  },
 ];
 
 /** Fully resolved, render-ready SEO data for one feature. */
@@ -873,6 +961,6 @@ export function resolveAllFeatures(): ResolvedFeature[] {
 }
 
 /** Last time the feature catalogue was reviewed — used for sitemap `<lastmod>`. */
-export const FEATURES_LASTMOD = "2026-09-16";
+export const FEATURES_LASTMOD = "2026-09-18";
 
 export { ACCENT_BLURPLE };

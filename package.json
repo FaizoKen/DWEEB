@@ -21,7 +21,8 @@
     "gen:golden": "bun scripts/gen-golden-fixtures.ts",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
-    "gen:mcp": "bun scripts/gen-mcp-catalog.ts"
+    "gen:mcp": "bun scripts/gen-mcp-catalog.ts",
+    "verify:codegen": "bun scripts/verify-codegen.ts"
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",

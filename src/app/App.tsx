@@ -170,7 +170,7 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   // though they reuse the same dialog.
   const [shareOpen, setShareOpen] = useState(false);
   const [shareInitialTab, setShareInitialTab] = useState<
-    "send" | "update" | "share" | "restore" | "json" | "about"
+    "send" | "update" | "share" | "restore" | "json" | "code" | "about"
   >("send");
   const [shareInitialWhen, setShareInitialWhen] = useState<"now" | "later">("now");
   // Latches true on first open so the lazy chunk is fetched once and the dialog
@@ -420,7 +420,7 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
       void ensureMcpAvailability().then((available) => {
         if (available) useMcpStore.getState().openMcp();
       });
-    } else if (intent === "json" || intent === "restore") {
+    } else if (intent === "json" || intent === "restore" || intent === "code") {
       openShareDialog(intent);
     } else {
       openShareDialog("send", intent === "schedule" ? "later" : "now");
@@ -455,6 +455,7 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
             <Builder
               onShare={() => openShareDialog("share")}
               onJson={() => openShareDialog("json")}
+              onCode={() => openShareDialog("code")}
               onSend={() => openShareDialog("send")}
               onUpdate={() => openShareDialog("update")}
               onRestore={() => openShareDialog("restore")}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { trackAnalytics } from "./analytics";
+import { ALLOWED_ANALYTICS_PARAMS, RESERVED_CAMPAIGN_PARAMS, trackAnalytics } from "./analytics";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -57,5 +57,42 @@ describe("trackAnalytics", () => {
 
   it("is a no-op when privacy gating omitted gtag", () => {
     expect(() => trackAnalytics("builder_ready", { boot_ms: 10 })).not.toThrow();
+  });
+
+  it("records where a template was applied from without naming a traffic source", () => {
+    const gtag = vi.fn();
+    vi.stubGlobal("window", { gtag });
+    // `source` is what this field used to be called, and GA4 took it for one.
+    trackAnalytics("template_applied", {
+      template_id: "welcome",
+      applied_from: "gallery",
+      source: "gallery",
+    });
+    expect(gtag).toHaveBeenCalledWith("event", "template_applied", {
+      template_id: "welcome",
+      applied_from: "gallery",
+    });
+  });
+
+  it("keeps every allowlist clear of GA4's campaign-override parameter names", () => {
+    for (const [event, allowed] of Object.entries(ALLOWED_ANALYTICS_PARAMS)) {
+      for (const reserved of RESERVED_CAMPAIGN_PARAMS) {
+        expect(allowed.has(reserved), `${event} allows "${reserved}"`).toBe(false);
+      }
+    }
+  });
+
+  it("records a code export by language and action only", () => {
+    const gtag = vi.fn();
+    vi.stubGlobal("window", { gtag });
+    trackAnalytics("code_exported", {
+      language: "discordjs",
+      action: "copy",
+      code: "await channel.send(...)",
+    });
+    expect(gtag).toHaveBeenCalledWith("event", "code_exported", {
+      language: "discordjs",
+      action: "copy",
+    });
   });
 });

@@ -52,6 +52,7 @@ export function renderFeaturePage(
     "webhook-manager": "Manage webhooks",
     "ai-assistant": "Draft with AI",
     "mcp-connector": "Connect an AI client",
+    "code-export": "Open the builder and export code",
   };
   const ctaLabel = ctaLabels[feature.id] ?? "Build this in DWEEB";
   const deliveryBadge =
@@ -111,6 +112,8 @@ export function renderFeaturePage(
   const ctaNotes: Record<string, string> = {
     "mcp-connector":
       "Open DWEEB, copy the connector address, and add it to your AI client — then ask it for your first message.",
+    "code-export":
+      "Open the Components V2 showcase with the Code tab already showing, pick your library or language, and copy the result.",
   };
   const ctaInstructions =
     ctaNotes[feature.id] ??
@@ -126,6 +129,21 @@ export function renderFeaturePage(
     ? `<section class="preview-block" aria-label="Example message">
         <div class="preview-head">Example message</div>
         <div class="discord-frame">${previewHtml}</div>
+      </section>`
+    : "";
+
+  // Generated at build time by the same generator the Code tab uses, so the
+  // page shows the export rather than a description of it.
+  const codeSamples = feature.codeSamples?.length
+    ? `<section class="block prose" id="code-samples"><h2>What the export looks like</h2>
+        <p>The same message — an accent-striped container with a heading, a divider and a link button — as each bot library receives it. The <a href="/guides/discord-components-v2/">Components V2 reference</a> shows the JSON form of this exact card.</p>
+        ${feature.codeSamples
+          .map(
+            (item) =>
+              `<h3>${escapeHtml(item.label)}</h3><pre class="code-block" tabindex="0" role="region" aria-label="${attr(item.label)} export"><code>${escapeHtml(item.code)}</code></pre>`,
+          )
+          .join("")}
+        <p>Read the full walkthroughs: <a href="/guides/discord-js-components-v2/">Components V2 in discord.js</a>, <a href="/guides/discord-py-components-v2/">Components V2 in discord.py</a>, and the webhook senders in <a href="/guides/discord-webhook-python/">Python</a>, <a href="/guides/discord-webhook-javascript/">JavaScript</a> and <a href="/guides/discord-webhook-curl/">cURL</a>.</p>
       </section>`
     : "";
 
@@ -183,6 +201,7 @@ export function renderFeaturePage(
 
       ${botCallout}
       ${preview}
+      ${codeSamples}
 
       ${howItWorks}
       ${configurable}

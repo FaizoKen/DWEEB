@@ -146,6 +146,59 @@
   color: var(--app-danger);
 }
 
+/* Code tab — the target picker reads as two short labelled rows (where the code
+ * runs), not one long strip of five unrelated words. */
+.codeTargets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+.codeGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.codeGroupLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--app-text-muted);
+}
+.codeGroupOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+}
+.codeTarget {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-text-muted);
+  border-radius: var(--app-radius-sm);
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+.codeTarget:hover {
+  color: var(--app-text);
+  background: var(--app-bg-hover);
+}
+.codeTargetActive {
+  background: var(--app-bg-elevated);
+  color: var(--app-text);
+}
+/* Code is scanned sideways as often as down: never wrap a line, scroll it. */
+.codeBlock {
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+
 /* Shared with SendPanel — kept here so the Restore tab styles without
  * cross-importing a sibling feature's stylesheet. */
 .urlRow {

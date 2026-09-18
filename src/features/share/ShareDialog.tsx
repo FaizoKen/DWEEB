@@ -10,6 +10,8 @@
  *  - Share link  : compressed URL containing the entire message state.
  *  - JSON        : the wire-format payload — copy/download to export, or edit /
  *                  paste over it (JSON, share token, or V1 payload) to import.
+ *  - Code        : the same message as paste-ready discord.js / discord.py
+ *                  builders, or a cURL / fetch / Python webhook request.
  *
  * The dialog is stateless w.r.t. the message — it reads from the store on
  * open and pushes the parsed message back through `replaceMessage` (or
@@ -55,13 +57,14 @@ import { validateMessage } from "@/core/schema/validation";
 import { cn } from "@/lib/cn";
 import { SendPanel } from "./SendPanel";
 import { JsonPanel } from "./JsonPanel";
+import { CodePanel } from "./CodePanel";
 import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
 import { Callout } from "./Callout";
 import styles from "./ShareDialog.module.css";
 
-type Tab = "send" | "update" | "restore" | "share" | "json" | "about";
+type Tab = "send" | "update" | "restore" | "share" | "json" | "code" | "about";
 
 const SHARE_TABS: readonly { id: Tab; label: string }[] = [
   { id: "send", label: "Send" },
@@ -69,6 +72,7 @@ const SHARE_TABS: readonly { id: Tab; label: string }[] = [
   { id: "restore", label: "Restore" },
   { id: "share", label: "Share link" },
   { id: "json", label: "JSON" },
+  { id: "code", label: "Code" },
   { id: "about", label: "About" },
 ];
 
@@ -180,6 +184,7 @@ export function ShareDialog({
         {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}
         {tab === "share" ? <ShareLinkPanel /> : null}
         {tab === "json" ? <JsonPanel onDone={onClose} /> : null}
+        {tab === "code" ? <CodePanel /> : null}
         {tab === "about" ? <AboutPanel onClose={onClose} /> : null}
       </div>
     </Modal>

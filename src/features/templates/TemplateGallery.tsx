@@ -656,7 +656,7 @@ export function TemplateGallery() {
         ),
         onPick: () => {
           replaceMessage(t.message);
-          trackAnalytics("template_applied", { template_id: t.id, source: "gallery" });
+          trackAnalytics("template_applied", { template_id: t.id, applied_from: "gallery" });
           closeGallery();
           // A template with plugin slots still has setup to finish — wiring an
           // interactive component's plugin, or completing a link plugin's

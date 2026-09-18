@@ -7,6 +7,7 @@ describe("feature CTA intents", () => {
     expect(readFeatureIntent("?intent=schedule")).toBe("schedule");
     expect(readFeatureIntent("?intent=restore")).toBe("restore");
     expect(readFeatureIntent("?intent=mcp")).toBe("mcp");
+    expect(readFeatureIntent("", "#intent=code")).toBe("code");
     expect(readFeatureIntent("?intent=post-now")).toBeNull();
     expect(readFeatureIntent("?intent=ai%0Asecret")).toBeNull();
     expect(readFeatureIntent("", "#intent=json")).toBe("json");
