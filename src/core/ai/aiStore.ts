@@ -310,7 +310,11 @@ export const useAiStore = create<AiState>((set, get) => ({
     // records an undo-history entry. Called after every pass (including repair)
     // has resolved, so the user gets the final, best message in a single undo.
     const commitMessage = (analysis: Analysis) => {
-      if (analysis.message) useMessageStore.getState().replaceMessage(analysis.message);
+      if (!analysis.message) return;
+      useMessageStore.getState().replaceMessage(analysis.message);
+      // Remember what landed in the editor so the bubble can offer Undo for
+      // exactly as long as this edit is still the current message.
+      lastApplied = { chatMessageId: assistantId, message: useMessageStore.getState().message };
     };
 
     // Stream one provider turn into the assistant bubble; returns the result and
@@ -501,3 +505,35 @@ export const useAiStore = create<AiState>((set, get) => ({
     set({ messages: [], thinking: false, error: null });
   },
 }));
+
+/**
+ * The last AI edit committed to the editor: which assistant bubble it belongs
+ * to and the exact message object `replaceMessage` produced. Module-level (not
+ * part of the transcript) — it only needs to answer "is that edit still what's
+ * in the editor?", and a reload legitimately forgets it.
+ */
+let lastApplied: { chatMessageId: string; message: WebhookMessage } | null = null;
+
+/**
+ * Whether the edit an assistant bubble applied is still the editor's current
+ * message — i.e. the user hasn't touched it since. While true the bubble offers
+ * Undo; the moment any edit lands (theirs or a later AI turn) it withdraws, so
+ * the button can never silently revert newer work.
+ */
+export function useAiEditIsCurrent(chatMessageId: string): boolean {
+  return useMessageStore(
+    (s) => lastApplied?.chatMessageId === chatMessageId && s.message === lastApplied.message,
+  );
+}
+
+/**
+ * Undo the AI edit that is currently the editor's message. Each turn collapses
+ * to a single history frame (see `commitMessage`), so one undo restores the
+ * whole pre-turn message.
+ */
+export function undoAiEdit(): void {
+  if (!lastApplied) return;
+  const store = useMessageStore.getState();
+  if (store.message !== lastApplied.message) return;
+  store.undo();
+}

@@ -8,6 +8,14 @@
  * `customId` shape against the plugin's declared prefix — so a stale or spoofed
  * frame can't drive the editor.
  *
+ * Every one of those refusals is *visible* — a rejected `save` becomes
+ * `saveError`, an incompatible iframe `compatibilityError` — because the host
+ * renders none of the form and a silent drop is indistinguishable from a dead
+ * Save button. For the same reason the handshake is on a deadline
+ * ({@link PLUGIN_FRAME_READY_TIMEOUT_MS}): a plugin origin that is down paints
+ * an empty frame forever, so `frameState` gives the modal something to show and
+ * `retry()` gives the user something to do.
+ *
  * The hook is mounted fresh per open by `PluginConfigModal` (keyed on the
  * binding), so the nonce and listeners reset cleanly each time.
  */
@@ -92,12 +100,34 @@ interface Args {
   onCancel: () => void;
 }
 
+/**
+ * Where the framed config UI is in its handshake:
+ *
+ *  - `loading` — mounted, but the iframe hasn't said `ready` yet. A
+ *    cross-origin frame paints nothing until its own document loads, so the
+ *    host must render something over it or the user stares at an empty box.
+ *  - `ready` — the iframe answered the handshake; it owns the surface now.
+ *  - `timeout` — {@link PLUGIN_FRAME_READY_TIMEOUT_MS} elapsed with no `ready`
+ *    (origin down, blocked, or serving a page that doesn't speak the protocol).
+ *    A late `ready` still flips this back to `ready`: if the plugin does turn
+ *    up, showing it beats keeping the failure notice.
+ */
+export type PluginFrameState = "loading" | "ready" | "timeout";
+
 interface Result {
   iframeRef: RefObject<HTMLIFrameElement>;
   /** Height the iframe last requested, or null before any resize. */
   height: number | null;
   /** Visible reason the host refused to initialize an incompatible iframe. */
   compatibilityError: string | null;
+  /** Visible reason the host refused a `save` the iframe sent back. */
+  saveError: string | null;
+  /** Handshake state of the framed config UI. */
+  frameState: PluginFrameState;
+  /** Remount key for the iframe — bumped by {@link Result.retry}. */
+  frameKey: number;
+  /** Discard the current frame, mount a fresh one and restart the timer. */
+  retry(): void;
   /** Cancels document-bound credential prompts whenever the iframe reloads. */
   onIframeLoad(): void;
   /** One selected webhook awaiting an explicit host-side sharing decision. */
@@ -121,6 +151,14 @@ interface PendingCredentialRequest {
 const MIN_HEIGHT = 160;
 const MAX_HEIGHT = 2000;
 
+/**
+ * How long the host waits for the iframe's `ready` before declaring the plugin
+ * unreachable. Generous on purpose: a cold plugin host behind TLS can take a
+ * few seconds, and a false "didn't respond" on a frame that is merely slow is
+ * worse than a few more seconds of an honest "Loading…".
+ */
+export const PLUGIN_FRAME_READY_TIMEOUT_MS = 8000;
+
 /** A returned custom_id must fit Discord's cap and carry the plugin's prefix. */
 function isValidCustomId(manifest: PluginManifest, customId: string): boolean {
   return (
@@ -128,6 +166,32 @@ function isValidCustomId(manifest: PluginManifest, customId: string): boolean {
     customId.length <= LIMITS.BUTTON_CUSTOM_ID &&
     customId.startsWith(manifest.customIdPrefix)
   );
+}
+
+/**
+ * Copy for a `save` the host refused. It names the plugin because the failure
+ * is the plugin's, and it points at the manual escape hatch (the inspector's
+ * own action-id field) so the user is never simply stuck.
+ */
+export function pluginSaveRejectedMessage(pluginName: string): string {
+  return `${pluginName} sent back an action ID DWEEB can't use. Try again, or close this and set the ID manually.`;
+}
+
+/** Copy for a config frame that never completed the `ready` handshake. */
+export function pluginFrameTimeoutMessage(pluginName: string): string {
+  return `${pluginName} didn't respond. Retry, or close this and set the action ID manually.`;
+}
+
+/**
+ * The visible reason to refuse this `save`, or `null` when it's adoptable.
+ *
+ * A custom_id that doesn't match the plugin's prefix would route nowhere, so it
+ * must be rejected — but silently dropping it (which is what the host used to
+ * do outside DEV) reads to the user as a dead Save button. Exported so the
+ * refusal rule and its copy stay pinned by tests without a DOM.
+ */
+export function pluginSaveRejection(manifest: PluginManifest, customId: string): string | null {
+  return isValidCustomId(manifest, customId) ? null : pluginSaveRejectedMessage(manifest.name);
 }
 
 export function usePluginConfig({
@@ -142,6 +206,9 @@ export function usePluginConfig({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState<number | null>(null);
   const [compatibilityError, setCompatibilityError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [frameState, setFrameState] = useState<PluginFrameState>("loading");
+  const [frameKey, setFrameKey] = useState(0);
   const [credentialRequest, setCredentialRequest] = useState<SavedWebhookMetadata | null>(null);
   const pendingCredentialRef = useRef<PendingCredentialRequest | null>(null);
   const loadGenerationRef = useRef(0);
@@ -156,6 +223,15 @@ export function usePluginConfig({
   const onCancelRef = useRef(onCancel);
   onSaveRef.current = onSave;
   onCancelRef.current = onCancel;
+
+  // Declare the frame unreachable once the handshake window passes. Restarting
+  // on `frameKey` is what makes Retry a real retry: a fresh frame gets a fresh
+  // deadline. Leaving `loading` cancels the timer through the cleanup.
+  useEffect(() => {
+    if (frameState !== "loading") return;
+    const timer = setTimeout(() => setFrameState("timeout"), PLUGIN_FRAME_READY_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [frameState, frameKey]);
 
   useEffect(() => {
     // Inside a real Activity the plugin is served same-origin through the proxy
@@ -176,6 +252,10 @@ export function usePluginConfig({
       const data = event.data;
 
       if (isReadyMessage(data)) {
+        // The frame is up and talking, whatever the version negotiation below
+        // decides — an incompatibility is its own visible error, not a blank
+        // box, so the loading/timeout cover comes off either way.
+        setFrameState("ready");
         const declaredVersion = manifest.apiVersion ?? 1;
         const iframeVersion =
           typeof data.apiVersion === "number" &&
@@ -224,9 +304,12 @@ export function usePluginConfig({
       }
 
       if (isSaveMessage(data, nonce)) {
-        if (!isValidCustomId(manifest, data.customId)) {
+        const rejection = pluginSaveRejection(manifest, data.customId);
+        if (rejection) {
           // A custom_id that doesn't match the plugin's prefix would route
-          // nowhere — reject rather than silently mis-bind the component.
+          // nowhere — reject rather than silently mis-bind the component. The
+          // refusal has to be *visible*: dropping it silently left the user
+          // clicking the plugin's own Save button to no effect at all.
           if (import.meta.env.DEV) {
             console.warn("[plugins] rejected save: custom_id does not match prefix", {
               plugin: manifest.id,
@@ -234,8 +317,10 @@ export function usePluginConfig({
               got: data.customId,
             });
           }
+          setSaveError(rejection);
           return;
         }
+        setSaveError(null);
         // Edit access is browser-local and never becomes part of the save
         // result applied to the Discord component. Only a negotiated v2 iframe
         // may populate it, and only in the canonical 256-bit format.
@@ -382,6 +467,18 @@ export function usePluginConfig({
     pendingCredentialRef.current?.port.close();
     pendingCredentialRef.current = null;
     setCredentialRequest(null);
+    // A new document can't have sent the save we refused; the complaint is stale.
+    setSaveError(null);
+  };
+
+  const retry = () => {
+    setCompatibilityError(null);
+    setSaveError(null);
+    // The replacement frame reports its own height; until it does, fall back to
+    // the default so the cover doesn't sit on a box sized for the dead frame.
+    setHeight(null);
+    setFrameState("loading");
+    setFrameKey((key) => key + 1);
   };
 
   const respondToCredentialRequest = (approved: boolean) => {
@@ -423,6 +520,10 @@ export function usePluginConfig({
     iframeRef,
     height,
     compatibilityError,
+    saveError,
+    frameState,
+    frameKey,
+    retry,
     onIframeLoad,
     credentialRequest,
     respondToCredentialRequest,

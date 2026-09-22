@@ -249,7 +249,9 @@ TypeScript will flag any place you forgot.
 
 ## Sending, restoring, and updating
 
-The **Send** tab in *Share / Send / Export* posts the current message to a
+The **Send** tab of the Send dialog (the toolbar's Send button; the same dialog
+also holds Update, Restore, Share link, JSON, Code and About, and is titled by
+whichever tab is active) posts the current message to a
 Discord webhook directly from the browser (Discord allows CORS on the
 webhook execute endpoint). On this path the webhook URL goes straight to Discord
 and never passes through a DWEEB backend; history is opt-in per submission and

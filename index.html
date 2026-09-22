@@ -62,7 +62,14 @@
          That loader also honors browser privacy signals before contacting Google. -->
     <script defer src="/gtag-init.js"></script>
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- interactive-widget=resizes-content: on Android Chrome the on-screen keyboard
+         shrinks the layout viewport (the pre-Chrome-108 behaviour) instead of only
+         the visual one, so bottom-anchored surfaces (the AI composer, modal footers)
+         rise above the keyboard rather than sitting behind it. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta name="theme-color" content="#1e1f22" />
     <meta name="color-scheme" content="dark" />
 

@@ -27,6 +27,7 @@ import { readPlansParam } from "@/app/usePlansDeepLink";
 import { readCustomBotParam } from "@/core/guild/customBotLink";
 import { pushToast } from "@/ui/Toast";
 import { welcomeAutoDecision, writeWelcomeRecord } from "./welcomeGate";
+import { useWelcomeStore } from "./welcomeStore";
 
 /** Let the initial layout + gallery entrance settle before the quiet prompt. */
 const ANNOUNCE_DELAY_MS = 1500;
@@ -43,19 +44,34 @@ function isDeepLinkedLoad(): boolean {
   );
 }
 
-export function useWelcomeAutoOpen(suppress = false): void {
+/**
+ * @param suppress a deliberate handoff (SEO CTA) that must not be interrupted
+ * @param ready whether the editor is on screen — the prompt waits while the
+ *   landing gallery is up. It used to fire 1.5 s into a first visit, i.e. over
+ *   the full-screen gallery, telling a newcomer to look under a More menu that
+ *   wasn't mounted yet, and stamped its one-shot record regardless.
+ */
+export function useWelcomeAutoOpen(suppress = false, ready = true): void {
   // Decided once per load, during first render — before App's mount effects
   // run (in particular before the gallery auto-open stamps its own record,
   // which the gate reads as "evidence of prior use").
   const [decision] = useState(() => welcomeAutoDecision(suppress));
 
   useEffect(() => {
-    if (suppress || decision === "no" || isDeepLinkedLoad()) return;
+    if (suppress || !ready || decision === "no" || isDeepLinkedLoad()) return;
 
     const t = setTimeout(() => {
+      // Written only now, with the editor (and its More menu) actually on
+      // screen — the record means "the offer was made", not "a timer fired".
       writeWelcomeRecord("announced");
-      pushToast('Want a quick tour? Choose "Watch the intro" under More.', "info");
+      pushToast("New here? A 90-second intro shows how DWEEB works.", "info", {
+        // One tap plays it; the More menu's "Watch the intro" covers replays.
+        action: {
+          label: "Watch the intro",
+          onClick: () => useWelcomeStore.getState().openWelcome(),
+        },
+      });
     }, ANNOUNCE_DELAY_MS);
     return () => clearTimeout(t);
-  }, [decision, suppress]);
+  }, [decision, ready, suppress]);
 }

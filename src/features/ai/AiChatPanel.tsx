@@ -14,7 +14,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { IconButton } from "@/ui/IconButton";
 import { CloseIcon, SendIcon, SettingsIcon, SparkleIcon, TrashIcon } from "@/ui/Icon";
-import { useAiStore } from "@/core/ai/aiStore";
+import { undoAiEdit, useAiEditIsCurrent, useAiStore } from "@/core/ai/aiStore";
 import { PROVIDERS } from "@/core/ai/providerMeta";
 import { useAiUsageStore } from "@/core/ai/usageStore";
 import type { ChatMessage } from "@/core/ai/types";
@@ -317,6 +317,7 @@ function EmptyState({ provider, onPick }: { provider: string; onPick: (v: string
 }
 
 function MessageBubble({ message }: { message: ChatMessage }) {
+  const editIsCurrent = useAiEditIsCurrent(message.id);
   const mine = message.role === "user";
   const streaming = message.streaming;
   return (
@@ -345,6 +346,19 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                 ? ` · ${message.issueCount} validation issue${message.issueCount === 1 ? "" : "s"}`
                 : ""}
             </span>
+            {/* Offered only while this edit is still the editor's current
+                message — on a phone the bar's Undo sits in an inert pane while
+                the assistant is open, and Ctrl+Z is ignored in the composer. */}
+            {editIsCurrent ? (
+              <button
+                type="button"
+                className={styles.appliedUndo}
+                onClick={undoAiEdit}
+                aria-label="Undo this AI edit"
+              >
+                Undo
+              </button>
+            ) : null}
           </div>
         ) : message.failedEdit ? (
           // The reply promised an edit but nothing importable arrived — say so,

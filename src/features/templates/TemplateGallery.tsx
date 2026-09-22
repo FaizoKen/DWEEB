@@ -673,6 +673,10 @@ export function TemplateGallery() {
             // Nothing to wire — skip straight to the editor and point the user at
             // Send with the same coach-mark (and raise the mobile preview), so a
             // static template lands the same place an interactive one finishes.
+            // The toast is the guaranteed acknowledgement: on a first visit the
+            // gallery closes over an editor that is only now mounting, so the
+            // coach-mark alone is easy to miss — same wording as the deep link.
+            pushToast(`Loaded the “${t.name}” template — make it yours, then Send.`, "success");
             useSendNudgeStore.getState().nudge();
           }
         },

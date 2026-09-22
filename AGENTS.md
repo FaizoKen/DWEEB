@@ -1795,6 +1795,73 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   custom-bot, and emoji work before publishing anonymous state, and generation guards reject late
   responses from the prior account. Cross-guild emoji fetches share a process-global four-request
   permit pool and merge one batch at a time. Add any new account-scoped cache to this reset path.
+- **Destructive editor actions acknowledge themselves with an Undo toast, and toasts can carry
+  one action** (2026-09-22 UX batch, from a full audit — the remaining findings are in the
+  maintainer's notes). `pushToast(message, tone, { action, durationMs })` renders a pill button;
+  a toast with an action lives 7 s, an error 5 s, plain feedback 3 s. `features/builder/undoToast`
+  wraps it for the editor: capture `useMessageStore.getState().message` *before* the store action,
+  and its Undo fires only while that snapshot is still the top of `past` — otherwise it says the
+  message has changed since, so a stale Undo can never revert newer work. Used by "Clear current
+  message" and by deleting a node with anything nested (the toast names the count). The AI
+  panel's "Updated the message" chip offers Undo the same way (`useAiEditIsCurrent` /
+  `undoAiEdit` in aiStore, a module-level "what did we last commit" record) — on a phone the
+  bar's Undo sits in an `inert` pane while the assistant is open, and Ctrl+Z is ignored in the
+  composer, so the chip is the only reachable undo there.
+- **Every new button/select is given a unique `custom_id` by the store, never by the factory**
+  (`uniqueCustomId` + `uniquifyCustomIds` in messageStore, applied on every add path, on
+  `setSectionAccessoryKind`, and on `duplicate`). The factories keep their readable defaults
+  (`btn_action`, `select_option`…) so templates, the MCP catalog and the golden fixtures stay
+  deterministic; the store suffixes on insert (`btn_action_2`, an existing `_N` is bumped, never
+  stacked). Before this the second button anyone added was instantly invalid on both rows, with
+  the fix folded behind the Action panel's "Set the ID manually". Plugin bindings
+  (`prefix:instance`, anything with a `:`) are copied verbatim on Duplicate — renaming one would
+  route the click to an instance that doesn't exist; the validator still reports the duplicate
+  and the user picks which copy keeps the binding. Pinned in `messageStore.test.ts`.
+- **A Section's accessory row renders no Duplicate/Delete** — `remove`/`duplicate` only walk
+  child lists, so both were silent no-ops there (verified on prod); the inspector swaps the
+  accessory kind instead. Clicking a tree row also calls `revealTreeRowEditor` (scrollTreeRow.ts):
+  a row in the lower ~45% of its scroller scrolls to the top so the inline editor that unfolds
+  under it isn't below the fold; rows higher up stay put, since a click must not yank the list.
+  The header issue chip hides when `EMPTY_MESSAGE` is the only issue (the empty-state card
+  already says it, and the chip's jump had nowhere to land).
+- **First-visit feedback: the gallery template pick toasts, the coach-mark waits for its anchor,
+  and the intro offer waits for the editor.** On a first visit the landing gallery closes over an
+  editor that mounts a beat later, so (1) every gallery template pick pushes the deep-link toast
+  ("Loaded the “X” template — make it yours, then Send."), (2) `SendCoachMark` polls for
+  `#builder-send-action` for up to 4 s instead of no-oping when it isn't there yet, and (3)
+  `useWelcomeAutoOpen(suppress, ready)` only starts its 1.5 s timer once `ready` (App passes
+  "no gallery, editor mounted") — it used to toast "look under More" over a modal that hid More
+  and stamp its one-shot record regardless. The toast now carries a "Watch the intro" action
+  (`useWelcomeStore.openWelcome`); the record is written when the offer is actually shown.
+- **Focus rings are full-strength, and forced-colors gets a real outline** (`tokens.css`,
+  `global.css`). `--app-focus-ring` is the accent at full opacity (~3.9:1 on the elevated
+  surface; the old 55% alpha ring measured ~2:1, under WCAG 2.2's 3:1), and
+  `--app-focus-ring-on-accent` (surface-coloured gap + ring) is for accent-filled controls —
+  primary buttons and the Collab/AI FABs — where the plain ring vanished. Nearly every control
+  replaces the reset's `outline` with that box-shadow, and Windows High Contrast drops box-shadows,
+  so `global.css` ends with an `@media (forced-colors: active) :focus-visible { outline … !important }`
+  rule; keep it, and don't add `outline: none` without a box-shadow ring behind it.
+  `index.html`'s viewport meta carries `interactive-widget=resizes-content` so Android Chrome's
+  keyboard shrinks the layout viewport and bottom-anchored surfaces (AI composer, modal footers)
+  rise above it.
+- **Plugin config frames fail visibly** (`features/plugins`). A `save` the host refuses (prefix or
+  URL mismatch) sets a visible `saveError` instead of silently returning — outside DEV that read
+  as a dead Save button. The iframe has a `frameState` (loading → ready → timeout): a "Loading
+  {plugin}…" cover until the `ready` handshake, and after `PLUGIN_FRAME_READY_TIMEOUT_MS` (8 s)
+  a retryable notice with Close/Retry in the modal's only footer (a live plugin renders its own
+  Save/Cancel, so the footer exists only in the timeout state); Retry remounts the iframe by key.
+  Copy and refusal rules are pinned in `configRejection.test.ts`.
+- **The Share dialog keeps a hand-typed webhook across its tabs and names itself by intent**
+  (`core/webhook/webhookDraft.ts`, `features/share/sendCopy.ts`). Each tab mounts its own panel,
+  so the pasted URL — even after "Done — use this webhook" — died on a tab switch and Update needed
+  it pasted again; the draft store holds the raw field text + expanded flag for one dialog open
+  and resets on close (hand-entered URLs only: a picker/recents pick clears it, and it is never
+  persisted — "Save" is the recents path). `sendCopy.ts` owns the state-dependent claims:
+  signed-out lead copy, "Ready to send — we'll check this webhook when you post." until a
+  verify/known entry exists (never "All set" for a URL only the regex has seen), the disabled-Send
+  hint, and the friendly update-404 text. The modal title follows the tab ("Send message", "Update
+  a posted message", …) instead of "Share / Send / Export", and the send receipt's Done closes the
+  dialog on the new-post path so the first send doesn't end on the Send panel.
 
 ## CI
 

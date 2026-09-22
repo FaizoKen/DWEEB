@@ -36,7 +36,12 @@ import { createPortal } from "react-dom";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useNodeEditors, type NodeEditor } from "@/core/activity/presence";
 import { Avatar } from "@/activity/Avatar";
-import { addThenScroll, scrollPreviewNodeIntoView } from "@/features/builder/scrollTreeRow";
+import {
+  addThenScroll,
+  revealTreeRowEditor,
+  scrollPreviewNodeIntoView,
+} from "@/features/builder/scrollTreeRow";
+import { toastWithUndo } from "@/features/builder/undoToast";
 import {
   COMPONENT_META,
   CONTAINER_PICKER,
@@ -991,6 +996,18 @@ function PresenceCluster({ editors }: { editors: NodeEditor[] }) {
   );
 }
 
+/** The node plus everything nested in it (children, accessory, gallery items). */
+function subtreeSize(node: AnyComponent): number {
+  let n = 1;
+  const children = (node as { components?: unknown }).components;
+  if (Array.isArray(children)) for (const c of children as AnyComponent[]) n += subtreeSize(c);
+  const accessory = (node as { accessory?: AnyComponent }).accessory;
+  if (accessory) n += subtreeSize(accessory);
+  const items = (node as { items?: unknown }).items;
+  if (Array.isArray(items)) n += items.length;
+  return n;
+}
+
 function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }: TreeNodeProps) {
   // Subscribe to just this row's selected state so changing the selection only
   // re-renders the two rows whose highlight flips, not every row in the tree.
@@ -1125,12 +1142,29 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
       }
       // Click an unselected row to select it, then (desktop only) scroll the
       // preview to the matching rendered component — the mirror of the
-      // preview→tree scroll in ComponentRenderer.
+      // preview→tree scroll in ComponentRenderer — and keep the row itself on
+      // screen so the inline editor that unfolds under it isn't below the fold.
       select(node._id);
       scrollPreviewNodeIntoView(node._id);
+      revealTreeRowEditor(node._id);
     },
     [consumeJustDragged, isSelected, node._id, select],
   );
+
+  const onDelete = useCallback(() => {
+    // One click removes the whole subtree. Anything nested gets a "— Undo"
+    // toast: the bar's Undo icon is the only other way back, and Ctrl+Z is
+    // inert while focus sits in a text field.
+    const nested = subtreeSize(node) - 1;
+    const before = useMessageStore.getState().message;
+    remove(node._id);
+    if (nested > 0) {
+      toastWithUndo(
+        `Deleted ${meta.label} and ${nested} nested component${nested === 1 ? "" : "s"}`,
+        before,
+      );
+    }
+  }, [meta.label, node, remove]);
 
   return (
     <li>
@@ -1202,12 +1236,19 @@ function TreeNode({ node, parentKind, parentId, parentSiblingIds, siblingIndex }
               <ArrowDownIcon size={12} />
             </IconButton>
           ) : null}
-          <IconButton size="sm" label="Duplicate" onClick={() => duplicate(node._id)}>
-            <CopyIcon size={12} />
-          </IconButton>
-          <IconButton size="sm" variant="danger" label="Delete" onClick={() => remove(node._id)}>
-            <TrashIcon size={12} />
-          </IconButton>
+          {/* A Section's accessory isn't a list entry: `duplicate`/`remove` only
+              walk child lists, so on that row both buttons were silent no-ops.
+              Its inspector swaps the accessory kind instead. */}
+          {isReorderable ? (
+            <>
+              <IconButton size="sm" label="Duplicate" onClick={() => duplicate(node._id)}>
+                <CopyIcon size={12} />
+              </IconButton>
+              <IconButton size="sm" variant="danger" label="Delete" onClick={onDelete}>
+                <TrashIcon size={12} />
+              </IconButton>
+            </>
+          ) : null}
         </div>
       </div>
 

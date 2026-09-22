@@ -5,11 +5,19 @@
  * postMessage handshake (`usePluginConfig`). DWEEB renders no part of the
  * config form — it only frames it, validates what comes back, and hands the
  * resulting `custom_id` to the caller.
+ *
+ * Rendering none of the form means every host-side failure has to be stated
+ * here or it reads as the plugin being broken in an unhelpful way: a cover over
+ * the frame while the handshake is outstanding, a retryable notice (plus the
+ * only footer this dialog ever grows) once it times out, and the hook's
+ * `compatibilityError` / `saveError` under it. A working plugin renders its own
+ * Save and Cancel, so the footer stays absent in the normal case.
  */
 
 import { useEffect } from "react";
 import { Modal } from "@/ui/Modal";
 import { Button } from "@/ui/Button";
+import { cn } from "@/lib/cn";
 import {
   PLUGIN_IFRAME_SANDBOX,
   PLUGIN_IFRAME_SANDBOX_PROXIED,
@@ -19,7 +27,11 @@ import { isActivityProxiedPlugins, proxiedPluginConfigUrl } from "@/core/activit
 import type { PluginManifest } from "@/core/plugins/manifest";
 import { PLUGIN_RESOURCE_LABELS } from "@/core/plugins/resources";
 import type { PluginTarget } from "@/core/plugins/targets";
-import { usePluginConfig, type PluginSaveResult } from "./usePluginConfig";
+import {
+  pluginFrameTimeoutMessage,
+  usePluginConfig,
+  type PluginSaveResult,
+} from "./usePluginConfig";
 import styles from "./PluginConfigModal.module.css";
 
 interface Props {
@@ -51,6 +63,10 @@ export function PluginConfigModal({ manifest, target, customId, preset, onSave, 
     iframeRef,
     height,
     compatibilityError,
+    saveError,
+    frameState,
+    frameKey,
+    retry,
     onIframeLoad,
     credentialRequest,
     respondToCredentialRequest,
@@ -77,6 +93,13 @@ export function PluginConfigModal({ manifest, target, customId, preset, onSave, 
   // opaque-origin sandbox (see the constants). Everywhere else: load it directly.
   const proxied = isActivityProxiedPlugins();
 
+  const onRetry = () => {
+    retry();
+    // The Retry control unmounts with the failure notice it belongs to, so hand
+    // focus to the replacement frame rather than letting it fall to <body>.
+    requestAnimationFrame(() => iframeRef.current?.focus());
+  };
+
   const credentialDestination = credentialRequest
     ? [
         credentialRequest.channelName ? `#${credentialRequest.channelName}` : null,
@@ -88,9 +111,30 @@ export function PluginConfigModal({ manifest, target, customId, preset, onSave, 
 
   return (
     <>
-      <Modal open title={`Configure ${manifest.name}`} onClose={onClose}>
+      <Modal
+        open
+        title={`Configure ${manifest.name}`}
+        onClose={onClose}
+        footer={
+          // Only a frame that never answered needs host-rendered controls — a
+          // live plugin renders its own Save/Cancel inside the iframe.
+          frameState === "timeout" ? (
+            <>
+              <Button variant="secondary" onClick={onClose}>
+                Close
+              </Button>
+              <Button variant="primary" onClick={onRetry}>
+                Retry
+              </Button>
+            </>
+          ) : undefined
+        }
+      >
         <div className={styles.frameWrap}>
           <iframe
+            // Bumped by Retry: a new element is the only way to re-request a
+            // document the browser already failed (or cached) for this src.
+            key={frameKey}
             ref={iframeRef}
             className={styles.frame}
             src={proxiedPluginConfigUrl(manifest.configUrl)}
@@ -102,10 +146,28 @@ export function PluginConfigModal({ manifest, target, customId, preset, onSave, 
             // through the audited postMessage channel.
             referrerPolicy="no-referrer"
           />
+          {frameState !== "ready" ? (
+            <div className={styles.frameCover}>
+              {frameState === "loading" ? (
+                <p className={styles.frameCoverText} role="status">
+                  Loading {manifest.name}…
+                </p>
+              ) : (
+                <p className={cn(styles.frameCoverText, styles.frameCoverFailed)} role="alert">
+                  {pluginFrameTimeoutMessage(manifest.name)}
+                </p>
+              )}
+            </div>
+          ) : null}
         </div>
         {compatibilityError ? (
-          <p className={styles.compatibilityError} role="alert">
+          <p className={styles.error} role="alert">
             {compatibilityError}
+          </p>
+        ) : null}
+        {saveError ? (
+          <p className={styles.error} role="alert">
+            {saveError}
           </p>
         ) : null}
         <p className={styles.note}>

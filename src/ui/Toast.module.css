@@ -63,6 +63,28 @@
   min-width: 0;
 }
 
+/* The optional follow-up (Undo, Watch the intro…): a compact accent pill that
+   reads as the toast's one action without competing with its message. */
+.action {
+  flex-shrink: 0;
+  margin-left: 4px;
+  padding: 6px 10px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--app-accent-text);
+  background: var(--app-accent-soft);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.action:hover {
+  background: color-mix(in srgb, var(--app-accent-soft) 70%, var(--app-accent) 30%);
+}
+.action:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
 .info .icon {
   background: var(--app-accent-soft);
   color: var(--app-accent-text);

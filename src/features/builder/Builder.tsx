@@ -15,6 +15,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useMessageStore, type RestoredOrigin } from "@/core/state/messageStore";
+import { toastWithUndo } from "@/features/builder/undoToast";
 import { useSendTargetStore } from "@/core/state/sendTargetStore";
 import { usePostDestinationStore } from "@/core/state/postDestinationStore";
 import { useGuildStore } from "@/core/guild/guildStore";
@@ -643,7 +644,11 @@ function ActionBar({
                   icon={<TrashIcon />}
                   onSelect={() => {
                     close();
+                    // One click wipes the draft and every message-level option;
+                    // the toast's Undo is the acknowledgement that it's recoverable.
+                    const before = useMessageStore.getState().message;
                     clearAll();
+                    toastWithUndo("Message cleared", before);
                   }}
                 >
                   Clear current message

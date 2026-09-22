@@ -49,6 +49,11 @@
 .variant-primary:hover:not(:disabled) {
   background: var(--app-accent-hover);
 }
+/* The fill is the ring's own colour, so tabbing onto Send/Update showed almost
+   nothing; the on-accent ring keeps a surface-coloured gap between the two. */
+.variant-primary:focus-visible {
+  box-shadow: var(--app-focus-ring-on-accent);
+}
 
 .variant-secondary {
   background: var(--app-bg-input);

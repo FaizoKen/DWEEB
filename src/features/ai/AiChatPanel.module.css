@@ -186,6 +186,27 @@
   background: rgba(35, 165, 89, 0.14);
 }
 
+/* Undo sits inside the "Updated the message" chip as a small link-style
+   button, in the chip's own colour so it reads as part of the same receipt. */
+.appliedUndo {
+  margin-left: 4px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.appliedUndo:hover {
+  background: rgba(35, 165, 89, 0.18);
+}
+.appliedUndo:focus-visible {
+  outline: none;
+  box-shadow: var(--app-focus-ring);
+}
+
 .notApplied {
   display: inline-flex;
   align-items: center;

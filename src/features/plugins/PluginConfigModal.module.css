@@ -1,5 +1,9 @@
 .frameWrap {
   width: 100%;
+  /* Anchors `.frameCover`, which sits over the iframe until the plugin answers
+     the handshake. Covering rather than replacing keeps the frame loading (and
+     lets a late `ready` simply reveal it) instead of restarting the fetch. */
+  position: relative;
   /* Size to the iframe's reported height (the hook clamps that, so a
      misbehaving plugin can't grow unbounded). Do NOT cap height here — the
      Modal's own body handles scrolling, so capping with overflow:hidden would
@@ -28,6 +32,31 @@
   transition: height 120ms ease;
 }
 
+/* Opaque, so a cross-origin frame that has painted nothing (or half a form)
+   never shows through the loading state. */
+.frameCover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--app-space-5);
+  background: var(--app-bg-input);
+  text-align: center;
+}
+
+.frameCoverText {
+  margin: 0;
+  max-width: 46ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.frameCoverFailed {
+  color: var(--app-danger-text);
+}
+
 .note {
   margin: 10px 2px 0;
   font-size: 12px;
@@ -35,7 +64,7 @@
   color: var(--app-text-muted);
 }
 
-.compatibilityError {
+.error {
   margin: 10px 2px 0;
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--app-danger) 50%, transparent);

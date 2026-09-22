@@ -302,6 +302,77 @@ export interface MessageState {
   canRedo(): boolean;
 }
 
+/** Visit a node and everything nested in it (children, accessory), depth-first. */
+function forEachNode(node: AnyComponent, fn: (n: AnyComponent) => void): void {
+  fn(node);
+  const children = (node as { components?: unknown }).components;
+  if (Array.isArray(children)) for (const c of children as AnyComponent[]) forEachNode(c, fn);
+  const accessory = (node as { accessory?: AnyComponent }).accessory;
+  if (accessory) forEachNode(accessory, fn);
+}
+
+/** Every `custom_id` currently used somewhere in the message. */
+function takenCustomIds(message: WebhookMessage): Set<string> {
+  const taken = new Set<string>();
+  for (const top of message.components) {
+    forEachNode(top, (n) => {
+      const cid = (n as { custom_id?: unknown }).custom_id;
+      if (typeof cid === "string" && cid) taken.add(cid);
+    });
+  }
+  return taken;
+}
+
+/**
+ * Pick a `custom_id` that no other component in the message uses.
+ *
+ * Discord requires custom_ids to be unique per message, and the factories hand
+ * every new button/select the same readable default (`btn_action`,
+ * `select_option`…) — so without this, the second button added to a message is
+ * instantly invalid on both rows, with the fix folded away behind the Action
+ * panel's "Set the ID manually" disclosure. A numeric suffix keeps the default
+ * readable (`btn_action_2`); an existing `_N` suffix is bumped rather than
+ * stacked (`btn_action_2` → `btn_action_3`, never `btn_action_2_2`).
+ */
+export function uniqueCustomId(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  const stem = base.replace(/_\d+$/, "");
+  for (let n = 2; ; n++) {
+    const candidate = `${stem}_${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/**
+ * Whether a `custom_id` is a plugin binding (`giveaway:abc`, `selfrole:…`) rather
+ * than a free-form id. Those name a stored instance on the plugin's side, so a
+ * copy must keep the id verbatim — renaming it would route the click to an
+ * instance that doesn't exist. The validator still reports the duplicate, so
+ * the user decides which copy keeps the binding.
+ */
+function isPluginBoundCustomId(customId: string): boolean {
+  return customId.includes(":");
+}
+
+/**
+ * Give every interactive component in `node` (itself and anything nested) a
+ * custom_id that is unique against `taken`, mutating the nodes in place —
+ * callers pass freshly created or freshly cloned nodes only. Each assigned id
+ * is added to `taken`, so a subtree holding several interactive components
+ * comes out with distinct ids among themselves too.
+ */
+function uniquifyCustomIds<T extends AnyComponent>(node: T, taken: Set<string>): T {
+  forEachNode(node, (n) => {
+    const holder = n as { custom_id?: unknown };
+    const cid = holder.custom_id;
+    if (typeof cid !== "string" || !cid || isPluginBoundCustomId(cid)) return;
+    const next = uniqueCustomId(cid, taken);
+    holder.custom_id = next;
+    taken.add(next);
+  });
+  return node;
+}
+
 /** Stamps every component (and every nested component) with a fresh id. */
 function reassignIds(message: WebhookMessage): WebhookMessage {
   const stamp = <T extends AnyComponent>(node: T): T => {
@@ -575,13 +646,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // edit — the inner button/select/thumbnail, not its generated wrapper.
       let node: TopLevelComponent;
       let selectId: EditorId;
+      const taken = takenCustomIds(s.message);
       if (type === ComponentType.Button) {
-        const btn = createButton();
+        const btn = uniquifyCustomIds(createButton(), taken);
         const row: ActionRowComponent = { ...createActionRow(), components: [btn] };
         node = row;
         selectId = btn._id;
       } else if (isSelectComponentType(type)) {
-        const sel = createSelect(type);
+        const sel = uniquifyCustomIds(createSelect(type), taken);
         const row: ActionRowComponent = { ...createActionRow(), components: [sel] };
         node = row;
         selectId = sel._id;
@@ -604,7 +676,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   addTopLevelSection(accessoryKind) {
     set((s) => {
       const base = createSection();
-      const accessory = accessoryKind === "button" ? createButton() : base.accessory;
+      const accessory =
+        accessoryKind === "button"
+          ? uniquifyCustomIds(createButton(), takenCustomIds(s.message))
+          : base.accessory;
       const section: SectionComponent = { ...base, accessory };
       return {
         ...pushHistory(s),
@@ -635,13 +710,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // container-child factory. `selectId` targets the inner element to edit.
       let child: ContainerChild;
       let selectId: EditorId;
+      const taken = takenCustomIds(s.message);
       if (type === ComponentType.Button) {
-        const btn = createButton();
+        const btn = uniquifyCustomIds(createButton(), taken);
         const row: ActionRowComponent = { ...createActionRow(), components: [btn] };
         child = row;
         selectId = btn._id;
       } else if (isSelectComponentType(type)) {
-        const sel = createSelect(type);
+        const sel = uniquifyCustomIds(createSelect(type), taken);
         const row: ActionRowComponent = { ...createActionRow(), components: [sel] };
         child = row;
         selectId = sel._id;
@@ -663,7 +739,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   addContainerSection(containerId, accessoryKind) {
     set((s) => {
       const base = createSection();
-      const accessory = accessoryKind === "button" ? createButton() : base.accessory;
+      const accessory =
+        accessoryKind === "button"
+          ? uniquifyCustomIds(createButton(), takenCustomIds(s.message))
+          : base.accessory;
       const section: SectionComponent = { ...base, accessory };
       return {
         ...pushHistory(s),
@@ -692,7 +771,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   addRowButton(rowId) {
     set((s) => {
-      const btn = createButton();
+      const btn = uniquifyCustomIds(createButton(), takenCustomIds(s.message));
       let nextSelection: EditorId | null = null;
       const message = updateById<ActionRowComponent>(s.message, rowId, (row) => {
         // Refuse if the row already holds a select — buttons and selects can't mix.
@@ -714,7 +793,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   addRowSelect(rowId, type) {
     set((s) => {
-      const sel = createSelect(type);
+      const sel = uniquifyCustomIds(createSelect(type), takenCustomIds(s.message));
       let nextSelection: EditorId | null = null;
       const message = updateById<ActionRowComponent>(s.message, rowId, (row) => {
         // Only empty rows accept a select — a row already holding a button OR
@@ -934,7 +1013,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set((s) => ({
       ...pushHistory(s),
       message: updateById<SectionComponent>(s.message, sectionId, (sec) => {
-        const accessory: SectionAccessory = kind === "button" ? createButton() : createThumbnail();
+        const accessory: SectionAccessory =
+          kind === "button"
+            ? uniquifyCustomIds(createButton(), takenCustomIds(s.message))
+            : createThumbnail();
         return { ...sec, accessory };
       }),
     }));
@@ -1128,11 +1210,16 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         return next;
       };
 
+      // A copy must not inherit the original's custom_ids — Discord rejects a
+      // message reusing one, and the validator would flag both rows. Plugin
+      // bindings (`prefix:instance`) are the exception; see `uniquifyCustomIds`.
+      const takenIds = takenCustomIds(s.message);
+
       // Duplicate at top-level if applicable.
       const topIndex = s.message.components.findIndex((c) => c._id === id);
       if (topIndex >= 0) {
         const original = s.message.components[topIndex]!;
-        const clone = cloneWithIds(original);
+        const clone = uniquifyCustomIds(cloneWithIds(original), takenIds);
         const next = s.message.components.slice();
         next.splice(topIndex + 1, 0, clone);
         return {
@@ -1148,7 +1235,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         const dupArr = <T extends { _id: EditorId }>(arr: T[]): T[] | null => {
           const idx = arr.findIndex((c) => c._id === id);
           if (idx < 0) return null;
-          const clone = cloneWithIds(arr[idx]! as unknown as AnyComponent) as unknown as T;
+          const clone = uniquifyCustomIds(
+            cloneWithIds(arr[idx]! as unknown as AnyComponent),
+            takenIds,
+          ) as unknown as T;
           newSelection = (clone as { _id: EditorId })._id;
           const next = arr.slice();
           next.splice(idx + 1, 0, clone);

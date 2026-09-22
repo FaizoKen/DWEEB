@@ -961,7 +961,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     try {
       // The sandboxed iframe can't open discord.com itself — hand it to the host.
       await openExternalLink(url);
-      pushToast('Add DWEEB in the window that opened, then tap "Check again".', "info");
+      // No "check" button to name here: the bar re-detects the bot on its own
+      // once the member is back (see ActivityBar's auto-recheck effect).
+      pushToast("Add DWEEB in the window that opened — it'll appear here once you do.", "info");
     } catch {
       // The web app / dev URL-override aren't sandboxed, so a plain open works
       // there when the SDK path can't.
@@ -1075,8 +1077,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
  *  failed / the guild isn't in the list) we stay optimistic and load the
  *  bootstrap anyway, exactly as before — the proxy is the real guard.
  *
- *  Pass `force` (the "Check again" re-check) to bypass the proxy's cached guild
- *  list, since a just-added bot may not show in it yet. */
+ *  Pass `force` (the bar's automatic re-check after an add-bot round trip) to
+ *  bypass the proxy's cached guild list, since a just-added bot may not show in
+ *  it yet. */
 async function loadTargetGuildMeta(
   set: (partial: Partial<ActivityState>) => void,
   guildId: string,
@@ -1108,7 +1111,7 @@ async function loadTargetGuildMeta(
     set({ targetGuildMetaLoading: false });
     // Load the server's data unless we know the bot's missing (that fetch just
     // 404s, and the "Add DWEEB" CTA covers the case). This also wires up the
-    // preview/picker when a "Check again" finds the bot was finally added.
+    // preview/picker when the automatic re-check finds the bot was finally added.
     if (botPresent) void useGuildStore.getState().connect(guildId);
   }
 }

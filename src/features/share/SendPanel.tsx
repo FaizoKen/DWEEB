@@ -111,6 +111,11 @@ import {
   type WebhookOwner,
   type WebhookOwnerKind,
 } from "@/core/webhook";
+import {
+  readWebhookDraft,
+  setWebhookDraftOpen,
+  setWebhookDraftUrl,
+} from "@/core/webhook/webhookDraft";
 import { getPlugins } from "@/core/plugins/registry";
 import { pluginBoundComponents } from "@/core/plugins/targets";
 import { collectMessagePlaceholders, substituteMessage } from "@/core/plugins/placeholders";
@@ -162,6 +167,13 @@ import { SendSuccess } from "./SendSuccess";
 import { armRatingPrompt } from "@/core/rating/ratingStore";
 import type { PermanentStatusProps } from "./PermanentStatus";
 import { Callout } from "./Callout";
+import {
+  sendDestinationCopy,
+  sendDisabledHint,
+  sendLeadCopy,
+  updateFailureMessage,
+} from "./sendCopy";
+import { type ShareTab } from "./tabs";
 import styles from "./SendPanel.module.css";
 
 type SendState =
@@ -256,6 +268,7 @@ export function SendPanel({
   onRequestRemoveInteractive,
   initialWebhook,
   onCloseDialog,
+  onSwitchTab,
   initialWhen = "now",
 }: {
   /**
@@ -285,6 +298,12 @@ export function SendPanel({
    * the gallery's Posted tab.
    */
   onCloseDialog?: () => void;
+  /**
+   * Switches the host dialog to another tab. Used by the update-failure notice
+   * to offer "Post as a new message" — the same message, posted fresh, when the
+   * one it was editing is gone.
+   */
+  onSwitchTab?: (tab: ShareTab) => void;
   /** Initial send timing for an explicit Schedule landing-page intent. */
   initialWhen?: "now" | "later";
 } = {}) {
@@ -293,8 +312,15 @@ export function SendPanel({
   const setRestoreOrigin = useMessageStore((s) => s.setRestoreOrigin);
 
   // Prefill from a just-created webhook (the `webhook.incoming` return) first,
-  // else the restore origin; otherwise start empty.
-  const [url, setUrl] = useState(() => initialWebhook?.url ?? restoredFrom?.webhookUrl ?? "");
+  // then a URL hand-entered elsewhere in this dialog open (each tab mounts its
+  // own panel, so without the shared draft a pasted webhook is lost the moment
+  // the user glances at another tab), then the restore origin; otherwise start
+  // empty. The draft leads the origin because it is the more recent decision —
+  // update mode re-applies its own origin right after mount anyway (below).
+  const [url, setUrl] = useState(() => {
+    const draft = readWebhookDraft();
+    return initialWebhook?.url ?? (draft.url || restoredFrom?.webhookUrl || "");
+  });
   const [threadId, setThreadId] = useState(() => restoredFrom?.threadId ?? "");
   const [messageIdInput, setMessageIdInput] = useState(() => restoredFrom?.messageId ?? "");
   const [revealUrl, setRevealUrl] = useState(false);
@@ -306,7 +332,9 @@ export function SendPanel({
   // primary flow is "create a webhook for me", so the paste field stays
   // collapsed behind a toggle until the user opts in (or a URL is already
   // loaded). `urlInputRef` lets the toggle focus the field when it opens.
-  const [pasteMode, setPasteMode] = useState(false);
+  // Seeded from the shared draft so a field the user already collapsed with
+  // "Done" comes back collapsed (and an open one comes back open).
+  const [pasteMode, setPasteMode] = useState(() => readWebhookDraft().open);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const [history, setHistory] = useState<WebhookHistoryEntry[]>(() => loadHistory());
   const [state, setState] = useState<SendState>({ kind: "idle" });
@@ -475,6 +503,17 @@ export function SendPanel({
     if (!parsedUrl) return undefined;
     return history.find((e) => e.id === parsedUrl.id)?.avatar ?? undefined;
   }, [parsedUrl, history]);
+
+  // Whether anything actually *knows* this webhook, as opposed to the string
+  // merely looking like one: a verify GET in this session, or a saved entry
+  // (recents, the picker, an earlier send, an OAuth create). `parseWebhookUrl`
+  // is a regex, so without this the panel would claim "All set" for a URL no
+  // one has ever asked Discord about.
+  const knownWebhook = useMemo(() => {
+    if (verified) return true;
+    if (!parsedUrl) return false;
+    return history.some((e) => e.id === parsedUrl.id);
+  }, [verified, parsedUrl, history]);
 
   // Where the webhook posts — from a fresh verify or a saved entry. Shown in the
   // confirm dialog so the destination is explicit; undefined until verified for
@@ -1396,7 +1435,17 @@ export function SendPanel({
       } else {
         setState({
           kind: "error",
-          message: result.error,
+          // A webhook PATCH 404s for one reason users actually hit — the
+          // message is gone, or it was posted by a different webhook — and
+          // "Discord (404, code 10008): Unknown Message" explains neither.
+          message:
+            mode === "update"
+              ? updateFailureMessage({
+                  status: result.status,
+                  error: result.error,
+                  body: result.body,
+                })
+              : result.error,
           retryAfter: result.retryAfter,
           status: result.status,
           body: result.body,
@@ -1562,15 +1611,34 @@ export function SendPanel({
   const proxyOn = isProxyConfigured();
   // Open the URL field, revealed and focused — used by both "Paste it instead"
   // and "Edit URL". Revealing matches intent: you asked to see/change the URL.
+  // Whatever the field holds becomes the dialog-scoped hand-entered draft, so
+  // editing it and switching tabs doesn't throw the work away.
   const openUrlField = () => {
     setRevealUrl(true);
     setPasteMode(true);
+    setWebhookDraftOpen(true);
+    setWebhookDraftUrl(url);
     requestAnimationFrame(() => urlInputRef.current?.focus());
   };
   // Collapse the field back to the summary (keeps the URL) and re-mask it.
   const closeUrlField = () => {
     setPasteMode(false);
     setRevealUrl(false);
+    setWebhookDraftOpen(false);
+  };
+  // Typing in the credential field. Mirrored into the shared draft so the URL
+  // (and the fact that it was committed with "Done") survives a tab switch.
+  const setTypedUrl = (next: string) => {
+    setUrl(next);
+    setWebhookDraftUrl(next);
+  };
+  // Choosing a webhook from the picker or from recents supersedes anything
+  // typed by hand: drop the draft so a stale URL can't win back on the next
+  // mount. Both paths re-resolve themselves there (the picker auto-resolves the
+  // action bar's channel; recents render from storage).
+  const setPickedUrl = (next: string) => {
+    setUrl(next);
+    setWebhookDraftUrl("");
   };
 
   // The auto-detect picker (the connected guild's webhooks, when the bot and the
@@ -1611,7 +1679,7 @@ export function SendPanel({
       channelName,
       guildName,
     });
-    setUrl(parsed.url);
+    setPickedUrl(parsed.url);
     setHistory(loadHistory());
     closeUrlField();
     setState({ kind: "idle" });
@@ -1645,14 +1713,36 @@ export function SendPanel({
         }
       : undefined;
 
+  // What the collapsed destination line may honestly claim (see `sendCopy.ts`).
+  const destinationCopy = sendDestinationCopy({
+    known: knownWebhook,
+    channelName: knownChannelName,
+    guildName: knownGuildName,
+  });
+
+  // The primary button is disabled with no destination chosen, and nothing on
+  // screen said why: the "Enter a valid Discord webhook URL." error comes from
+  // the click handler, which a disabled button never runs.
+  const disabledHint = sendDisabledHint({
+    mode,
+    hasDestination: parsedUrl != null,
+    hasBlockingIssues: blockingIssues.length > 0,
+    busy: sending || saving || scheduling,
+    primaryIsSignIn: scheduleMode && authStatus !== "authed",
+  });
+
   return (
     <>
       <p className={styles.lead}>
-        {mode === "new"
-          ? pickerActive && destinationPicked
-            ? "Check the channel below and hit send — your message goes straight from this browser to Discord. We never see or store it."
-            : "Pick a channel below and hit send — your message goes straight from this browser to Discord. We never see or store it."
-          : "Your edit goes straight from this browser to Discord — we never see or store it."}
+        {sendLeadCopy({
+          mode,
+          pickerActive,
+          destinationPicked,
+          // A signed-out visitor has no channel list at all — they get the
+          // create cards and "Paste it instead" — so "pick a channel below"
+          // pointed at nothing. Gated on a proxy, or signing in isn't possible.
+          signedOut: authStatus === "anon" && proxyOn,
+        })}
       </p>
 
       {/* Send now vs. schedule for later — pinned to the top of the Send screen
@@ -1809,7 +1899,7 @@ export function SendPanel({
           history={history}
           activeId={parsedUrl?.id ?? null}
           onUse={(entry) => {
-            setUrl(entry.url);
+            setPickedUrl(entry.url);
             // Picking a saved entry collapses to the summary — the recents row
             // already shows what's active, so drop out of any manual edit mode.
             closeUrlField();
@@ -1937,9 +2027,22 @@ export function SendPanel({
             </button>
           ) : (
             <p className={styles.urlSet}>
-              {knownChannelName ? (
+              {/* "All set" is a claim about a webhook that exists; a pasted URL
+                  has only matched a regex, so it gets the honest version until
+                  something has actually asked Discord about it. */}
+              {destinationCopy.kind === "unchecked" ? (
+                destinationCopy.text
+              ) : destinationCopy.channelName ? (
                 <>
-                  All set — your message will post to <strong>#{knownChannelName}</strong>.
+                  All set — your message will post to{" "}
+                  <strong>#{destinationCopy.channelName}</strong>
+                  {destinationCopy.guildName ? (
+                    <>
+                      {" "}
+                      on <strong>{destinationCopy.guildName}</strong>
+                    </>
+                  ) : null}
+                  .
                 </>
               ) : (
                 <>All set — posting straight to your channel.</>
@@ -1976,7 +2079,7 @@ export function SendPanel({
               history={history}
               activeId={parsedUrl?.id ?? null}
               onUse={(entry) => {
-                setUrl(entry.url);
+                setPickedUrl(entry.url);
                 closeUrlField();
                 setState({ kind: "idle" });
               }}
@@ -1997,7 +2100,7 @@ export function SendPanel({
                     type="button"
                     className={styles.pasteBack}
                     onClick={() => {
-                      setUrl("");
+                      setTypedUrl("");
                       setState({ kind: "idle" });
                       requestAnimationFrame(() => urlInputRef.current?.focus());
                     }}
@@ -2020,7 +2123,7 @@ export function SendPanel({
                   masked={!revealUrl}
                   spellCheck={false}
                   value={url}
-                  onChange={(e) => setUrl(e.currentTarget.value)}
+                  onChange={(e) => setTypedUrl(e.currentTarget.value)}
                   invalid={urlInvalid}
                   placeholder="https://discord.com/api/webhooks/…"
                 />
@@ -2122,7 +2225,7 @@ export function SendPanel({
                   return;
                 }
                 setHistory(loadHistory());
-                setUrl("");
+                setTypedUrl("");
                 setState({ kind: "idle" });
                 pushToast("Webhook removed from this browser.", "info");
               }}
@@ -2292,6 +2395,22 @@ export function SendPanel({
               ) : null}
             </div>
           ) : null}
+          {/* There is no fixing a message that no longer exists, so offer the
+              only move left: post this same draft as a new message. */}
+          {mode === "update" && state.status === 404 && onSwitchTab ? (
+            <div className={styles.errorActions}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setState({ kind: "idle" });
+                  onSwitchTab("send");
+                }}
+              >
+                Post as a new message
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -2309,6 +2428,7 @@ export function SendPanel({
           label="Posting to"
         />
         <div className={styles.floatingActions}>
+          {disabledHint ? <span className={styles.actionHint}>{disabledHint}</span> : null}
           {sending ? (
             <Button variant="secondary" onClick={handleCancel}>
               Cancel
@@ -2427,7 +2547,7 @@ export function SendPanel({
         editOnResend={success?.editOnResend ?? false}
         messageId={success?.messageId}
         permanentStatus={success?.permanentStatus}
-        onClose={() => {
+        onClose={(reason) => {
           setSuccess(null);
           // Armed as the receipt is dismissed, not as it opens: the prompt is a
           // separate surface, and stacking it under a modal the user is still
@@ -2435,6 +2555,12 @@ export function SendPanel({
           // silently no-ops unless the deployment runs ratings, the user is
           // signed in, and they have neither rated nor dismissed before.
           armRatingPrompt();
+          // The post landed, so the Send screen underneath has nothing left to
+          // say — dismissing the receipt ends the whole flow. Only the explicit
+          // dismissal does: "Open in Discord" hands off to another app and the
+          // dialog is what the user comes back to. An update leaves the dialog
+          // open too, since the panel is still pointed at the live message.
+          if (mode === "new" && reason !== "open-link") onCloseDialog?.();
         }}
       />
     </>

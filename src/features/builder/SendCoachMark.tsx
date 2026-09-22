@@ -43,6 +43,14 @@ const EDGE = 8;
 const HOLE_PAD = 6;
 /** Fallback dismissal so the hint never lingers if the user walks away. */
 const AUTO_DISMISS_MS = 11_000;
+/**
+ * How long a nudge keeps looking for the Send button before giving up. On a
+ * first visit the landing gallery closes over an editor that hasn't mounted
+ * yet (`App` renders a placeholder behind the gallery and only then mounts the
+ * Builder, whose chunk may still be loading), so the button can arrive a few
+ * frames — or, on a slow link, a couple of seconds — after the nudge.
+ */
+const LOCATE_BUDGET_MS = 4000;
 
 export function SendCoachMark() {
   const token = useSendNudgeStore((s) => s.token);
@@ -51,18 +59,27 @@ export function SendCoachMark() {
   const [pane, setPane] = useState<Rect | null>(null);
 
   // Activate on each nudge: find the Send button and snapshot its rect, plus the
-  // editor section's. A missing button (shouldn't happen — the action bar is
-  // always mounted) just no-ops, so the flow degrades to "no hint" rather than
-  // throwing. A missing pane falls back to a callout with no dim, clamped to the
-  // viewport.
+  // editor section's. The button may not exist yet (see `LOCATE_BUDGET_MS`), so
+  // keep looking frame by frame for a bounded while; a button that never shows
+  // up just no-ops, so the flow degrades to "no hint" rather than throwing. A
+  // missing pane falls back to a callout with no dim, clamped to the viewport.
   useEffect(() => {
     if (token === 0) return;
-    const el = document.getElementById(SEND_BUTTON_ID);
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setAnchor({ top: r.top, left: r.left, width: r.width, height: r.height });
-    const p = document.querySelector(EDITOR_PANE_SELECTOR)?.getBoundingClientRect();
-    setPane(p ? { top: p.top, left: p.left, width: p.width, height: p.height } : null);
+    const started = Date.now();
+    let raf = 0;
+    const locate = () => {
+      const el = document.getElementById(SEND_BUTTON_ID);
+      if (!el) {
+        if (Date.now() - started < LOCATE_BUDGET_MS) raf = requestAnimationFrame(locate);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      setAnchor({ top: r.top, left: r.left, width: r.width, height: r.height });
+      const p = document.querySelector(EDITOR_PANE_SELECTOR)?.getBoundingClientRect();
+      setPane(p ? { top: p.top, left: p.left, width: p.width, height: p.height } : null);
+    };
+    locate();
+    return () => cancelAnimationFrame(raf);
   }, [token]);
 
   const dismiss = useCallback(() => {

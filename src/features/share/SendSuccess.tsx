@@ -9,6 +9,9 @@
  *
  * Purely presentational: the panel resolves the destination + link and passes
  * them in; "Done" just closes it, "Open in Discord" opens the link and closes.
+ * Both report *why* they closed, because the host treats a dismissal as the end
+ * of the send flow (it closes the Share dialog behind the receipt) while a
+ * hand-off to Discord leaves it standing.
  *
  * Like `SendConfirm`, it renders through `Modal`'s body portal, so stacking it
  * above the Share dialog's own modal is fine.
@@ -61,8 +64,17 @@ export interface SendSuccessProps {
    * components never expire on this deployment).
    */
   permanentStatus?: Omit<PermanentStatusProps, "messageId">;
-  onClose: () => void;
+  /**
+   * Closes the receipt. The reason separates a plain dismissal (Done, the
+   * close button, Escape, the backdrop) from "Open in Discord", which also
+   * closes it but hands off to another app — the host reads it to decide
+   * whether the whole send flow is over.
+   */
+  onClose: (reason: SendSuccessCloseReason) => void;
 }
+
+/** Why {@link SendSuccess} closed. */
+export type SendSuccessCloseReason = "dismiss" | "open-link";
 
 export function SendSuccess({
   open,
@@ -99,13 +111,13 @@ export function SendSuccess({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={() => onClose("dismiss")}
       size="sm"
       title={mode === "update" ? "Message updated" : "Message posted"}
       footer={
         discordUrl ? (
           <>
-            <Button variant="secondary" onClick={onClose}>
+            <Button variant="secondary" onClick={() => onClose("dismiss")}>
               Done
             </Button>
             <Button
@@ -114,14 +126,14 @@ export function SendSuccess({
                 // Prefer the desktop app (falls back to the web link); on mobile
                 // the https link is itself an app link. See openDiscordLink.
                 openDiscordLink(discordUrl);
-                onClose();
+                onClose("open-link");
               }}
             >
               Open in Discord ↗
             </Button>
           </>
         ) : (
-          <Button variant="primary" onClick={onClose}>
+          <Button variant="primary" onClick={() => onClose("dismiss")}>
             Done
           </Button>
         )

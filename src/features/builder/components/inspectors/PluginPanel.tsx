@@ -24,7 +24,7 @@
  * `custom_id` field — the editor looks exactly as it did before plugins existed.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import { useMessageStore } from "@/core/state/messageStore";
 import { useAuthStore } from "@/core/auth/authStore";
 import { useGuildStore } from "@/core/guild/guildStore";
@@ -64,8 +64,21 @@ import {
 import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
 import { AlertTriangleIcon, ChevronRightIcon, PuzzleIcon } from "@/ui/Icon";
-import { PluginConfigModal } from "@/features/plugins/PluginConfigModal";
-import { LinkPluginConfigModal } from "@/features/plugins/LinkPluginConfigModal";
+import { ChunkErrorBoundary } from "@/ui/ChunkErrorBoundary";
+
+// The plugin config dialogs (their hosts, handshake state and CSS) are opened
+// on demand from an inspector that ships in the boot bundle — loading them
+// lazily keeps ~16 kB of dialog code out of every visit's critical path. Like
+// every lazy surface they sit inside a ChunkErrorBoundary whose dismissal fully
+// unmounts them (see AGENTS.md, "Deploy skew self-heals").
+const PluginConfigModal = lazy(() =>
+  import("@/features/plugins/PluginConfigModal").then((m) => ({ default: m.PluginConfigModal })),
+);
+const LinkPluginConfigModal = lazy(() =>
+  import("@/features/plugins/LinkPluginConfigModal").then((m) => ({
+    default: m.LinkPluginConfigModal,
+  })),
+);
 import { PluginIcon } from "@/features/plugins/PluginIcon";
 import { PluginLibraryModal } from "@/features/plugins/PluginLibraryModal";
 import type { PluginSaveResult } from "@/features/plugins/usePluginConfig";
@@ -530,25 +543,33 @@ export function PluginPanel({ node }: Props) {
       ) : null}
 
       {configuring ? (
-        <PluginConfigModal
-          key={`${configuring.manifest.id}:${configuring.customId ?? configuring.preset ?? "new"}`}
-          manifest={configuring.manifest}
-          target={target}
-          customId={configuring.customId}
-          preset={configuring.preset}
-          onSave={handleSave(configuring)}
-          onClose={() => setConfiguring(null)}
-        />
+        <ChunkErrorBoundary onDismiss={() => setConfiguring(null)}>
+          <Suspense fallback={null}>
+            <PluginConfigModal
+              key={`${configuring.manifest.id}:${configuring.customId ?? configuring.preset ?? "new"}`}
+              manifest={configuring.manifest}
+              target={target}
+              customId={configuring.customId}
+              preset={configuring.preset}
+              onSave={handleSave(configuring)}
+              onClose={() => setConfiguring(null)}
+            />
+          </Suspense>
+        </ChunkErrorBoundary>
       ) : null}
 
       {configuringLink && isBtn ? (
-        <LinkPluginConfigModal
-          key={`link:${configuringLink.manifest.id}`}
-          manifest={configuringLink.manifest}
-          linkUrl={linkStyle ? finishedLinkUrl(configuringLink.manifest, node.url) : undefined}
-          onSave={handleLinkSave(configuringLink)}
-          onClose={() => setConfiguringLink(null)}
-        />
+        <ChunkErrorBoundary onDismiss={() => setConfiguringLink(null)}>
+          <Suspense fallback={null}>
+            <LinkPluginConfigModal
+              key={`link:${configuringLink.manifest.id}`}
+              manifest={configuringLink.manifest}
+              linkUrl={linkStyle ? finishedLinkUrl(configuringLink.manifest, node.url) : undefined}
+              onSave={handleLinkSave(configuringLink)}
+              onClose={() => setConfiguringLink(null)}
+            />
+          </Suspense>
+        </ChunkErrorBoundary>
       ) : null}
     </div>
   );

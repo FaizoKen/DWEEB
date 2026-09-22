@@ -42,7 +42,7 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
           _id: id(),
           type: ComponentType.TextDisplay,
           content:
-            "# 🧩 The Components V2 starter kit\nA hands-on tour of every block DWEEB gives you — and it's all live. **Click any component on the left to edit it**, watch the preview update instantly, then hit **Send** or **Share** when it looks right.",
+            "# 🧩 The Components V2 starter kit\nA hands-on tour of every block DWEEB gives you — and it's all live. **Click any component in the editor to edit it**, watch the preview update instantly, then hit **Send** or **Share** when it looks right.",
         },
         {
           _id: id(),
@@ -152,7 +152,7 @@ export const SHOWCASE_MESSAGE: WebhookMessage = {
       _id: id(),
       type: ComponentType.TextDisplay,
       content:
-        "-# 💡 **Posts through any webhook:** text, layout, media, and link buttons. Interactive pieces — clickable buttons and select menus — need a **bot or app** to own the webhook; a plain user webhook will reject them.\n-# Reopen this tour any time from the **Template Gallery**, or hit **Reset** (top-left) to start fresh.",
+        "-# 💡 **Posts through any webhook:** text, layout, media, and link buttons. Interactive pieces — clickable buttons and select menus — need a **bot or app** to own the webhook; a plain user webhook will reject them.\n-# Reopen this tour any time from the **Message directory**, or choose **Clear current message** under More to start fresh.",
     },
   ],
 };

@@ -33,6 +33,12 @@ import {
   isShortLinkConfigured,
 } from "@/core/serialization";
 import {
+  readWebhookDraft,
+  resetWebhookDraft,
+  setWebhookDraftOpen,
+  setWebhookDraftUrl,
+} from "@/core/webhook/webhookDraft";
+import {
   classifyWebhookOwner,
   fetchWebhookMessage,
   loadHistory,
@@ -62,9 +68,25 @@ import { WebhookRecents } from "./WebhookRecents";
 import { GuildWebhookPicker } from "./GuildWebhookPicker";
 import { GuildIdentity } from "./GuildIdentity";
 import { Callout } from "./Callout";
+import { type ShareTab } from "./tabs";
 import styles from "./ShareDialog.module.css";
 
-type Tab = "send" | "update" | "restore" | "share" | "json" | "code" | "about";
+type Tab = ShareTab;
+
+/**
+ * The dialog's heading. One title for all seven tabs ("Share / Send / Export")
+ * named the toolbox rather than the job the user came to do, and a dialog's
+ * title is the one line a screen reader announces on open.
+ */
+const TAB_TITLES: Readonly<Record<Tab, string>> = {
+  send: "Send message",
+  update: "Update a posted message",
+  restore: "Restore a posted message",
+  share: "Share link",
+  json: "Import / export JSON",
+  code: "Export as code",
+  about: "About DWEEB",
+};
 
 const SHARE_TABS: readonly { id: Tab; label: string }[] = [
   { id: "send", label: "Send" },
@@ -117,8 +139,17 @@ export function ShareDialog({
   useEffect(() => {
     if (open) setTab(initialTab);
   }, [open, initialTab]);
+
+  // A hand-entered webhook URL outlives the panel that took it (each tab mounts
+  // its own), but never the dialog: the cleanup runs when `open` goes false or
+  // the dialog unmounts, so the credential can't turn up in the next open.
+  useEffect(() => {
+    if (!open) return;
+    return () => resetWebhookDraft();
+  }, [open]);
+
   return (
-    <Modal open={open} onClose={onClose} title="Share / Send / Export">
+    <Modal open={open} onClose={onClose} title={TAB_TITLES[tab]}>
       <div
         className={styles.tabs}
         role="tablist"
@@ -171,6 +202,7 @@ export function ShareDialog({
             onRequestRemoveInteractive={onRequestRemoveInteractive}
             initialWebhook={initialWebhook}
             onCloseDialog={onClose}
+            onSwitchTab={setTab}
             initialWhen={initialSendWhen}
           />
         ) : null}
@@ -179,6 +211,7 @@ export function ShareDialog({
             mode="update"
             onRequestRemoveInteractive={onRequestRemoveInteractive}
             onCloseDialog={onClose}
+            onSwitchTab={setTab}
           />
         ) : null}
         {tab === "restore" ? <RestorePanel onDone={onClose} /> : null}
@@ -415,12 +448,15 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   // Prefill from an already-restored message, else from a pending "Edit in
   // DWEEB" origin (which knows everything but the webhook URL).
   const prefill = restoredFrom ?? pendingEditOrigin;
-  const [url, setUrl] = useState(() => restoredFrom?.webhookUrl ?? "");
+  // Falls back to a URL hand-entered on another tab of this same dialog open —
+  // the panels are mounted per tab, so without the shared draft a webhook the
+  // user just pasted on Send has to be pasted again here.
+  const [url, setUrl] = useState(() => restoredFrom?.webhookUrl || readWebhookDraft().url || "");
   const [revealUrl, setRevealUrl] = useState(false);
   // Manual URL entry is the secondary path once the auto-detect picker is
   // available: the full credential field stays collapsed behind a summary until
   // the user opts in (or a typed URL needs fixing). `urlInputRef` focuses it.
-  const [pasteMode, setPasteMode] = useState(false);
+  const [pasteMode, setPasteMode] = useState(() => readWebhookDraft().open);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const [idInput, setIdInput] = useState(() => prefill?.messageId ?? "");
   const [threadId, setThreadId] = useState(() => prefill?.threadId ?? "");
@@ -469,11 +505,25 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
   const openUrlField = () => {
     setRevealUrl(true);
     setPasteMode(true);
+    setWebhookDraftOpen(true);
+    setWebhookDraftUrl(url);
     requestAnimationFrame(() => urlInputRef.current?.focus());
   };
   const closeUrlField = () => {
     setPasteMode(false);
     setRevealUrl(false);
+    setWebhookDraftOpen(false);
+  };
+  // Typing goes into the dialog-scoped draft too, so the URL survives a tab
+  // switch; a pick from the picker or recents supersedes it (and drops it, so a
+  // stale typed URL can't win back when this panel next mounts).
+  const setTypedUrl = (next: string) => {
+    setUrl(next);
+    setWebhookDraftUrl(next);
+  };
+  const setPickedUrl = (next: string) => {
+    setUrl(next);
+    setWebhookDraftUrl("");
   };
 
   const handlePickWebhook = (w: GuildWebhook) => {
@@ -491,7 +541,7 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
       channelName,
       guildName,
     });
-    setUrl(parsed.url);
+    setPickedUrl(parsed.url);
     setHistory(loadHistory());
     closeUrlField();
     setError(null);
@@ -665,7 +715,7 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
             history={history}
             activeId={parsedUrl?.id ?? null}
             onUse={(entry) => {
-              setUrl(entry.url);
+              setPickedUrl(entry.url);
               closeUrlField();
             }}
             onChange={() => setHistory(loadHistory())}
@@ -685,7 +735,7 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
                     type="button"
                     className={styles.pasteBack}
                     onClick={() => {
-                      setUrl("");
+                      setTypedUrl("");
                       requestAnimationFrame(() => urlInputRef.current?.focus());
                     }}
                   >
@@ -707,7 +757,7 @@ function RestorePanel({ onDone }: { onDone: () => void }) {
                   masked={!revealUrl}
                   spellCheck={false}
                   value={url}
-                  onChange={(e) => setUrl(e.currentTarget.value)}
+                  onChange={(e) => setTypedUrl(e.currentTarget.value)}
                   invalid={urlInvalid}
                   placeholder="https://discord.com/api/webhooks/…"
                 />

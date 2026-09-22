@@ -31,6 +31,13 @@ export function HeaderIssueChip({ view }: { view: ValidationView }) {
   const { errorCount, warningCount, firstErrorNodeId, firstWarningNodeId, messageIssues } = view;
   const total = errorCount + warningCount;
   if (total === 0) return null;
+  // An empty message is an "error" the validator reports, but the tree's own
+  // empty-state card already says "add your first component" — a red pill on
+  // top of it (whose jump lands on the Message options card, since the issue
+  // owns no node) reads as something broken right after the user hit Clear.
+  const onlyEmptyMessage =
+    view.byNode.size === 0 && messageIssues.every((i) => i.code === "EMPTY_MESSAGE");
+  if (onlyEmptyMessage) return null;
 
   // Errors dominate the tint and the jump target; only when there are none does
   // a warning-only message colour the chip amber and point at the first warning.

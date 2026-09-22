@@ -312,6 +312,14 @@
   color: var(--app-text-muted);
 }
 
+/* The one move left after a failure — e.g. posting a vanished message anew. */
+.errorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .errorRaw {
   margin-top: 8px;
 }
@@ -365,9 +373,18 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   /* Push the button to the right; with no guild chip it still hugs the edge. */
   margin-left: auto;
+}
+
+/* Why the primary button is disabled, when no callout above says it. */
+.actionHint {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--app-text-subtle);
+  text-align: right;
 }
 
 .modeToggle {

@@ -89,8 +89,14 @@
   --app-radius: 10px;
   --app-radius-lg: 14px;
 
-  /* Consistent, visible keyboard-focus ring used by every control. */
-  --app-focus-ring: 0 0 0 2px rgba(88, 101, 242, 0.55);
+  /* Consistent, visible keyboard-focus ring used by every control. Full-strength
+     accent: the old 55% alpha ring measured ~2:1 against the surfaces, under
+     the 3:1 a focus indicator needs (WCAG 2.2 SC 1.4.11) — at full opacity it
+     reads ~3.9:1 on the elevated surface and ~4.2:1 on the app background. */
+  --app-focus-ring: 0 0 0 2px var(--app-border-focus);
+  /* For controls filled with the accent itself (primary buttons, the FABs),
+     where an accent ring would vanish: a surface-coloured gap then the ring. */
+  --app-focus-ring-on-accent: 0 0 0 2px var(--app-bg-elevated), 0 0 0 4px var(--app-border-focus);
 
   --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --app-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);

@@ -141,7 +141,6 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   useAttachmentGc();
   // First-visit onboarding: plays the intro film once, layered over the
   // landing gallery; see the hook for the gating.
-  useWelcomeAutoOpen(Boolean(seoEntry));
 
   // Decide the first-visit gallery before the first editor render. The gallery
   // still opens from an effect (state ownership stays in its store), but the
@@ -223,6 +222,12 @@ export function App({ seoEntry = null }: { seoEntry?: SeoEntry | null }) {
   const openGallery = useTemplateGalleryStore((s) => s.openGallery);
   const closeGallery = useTemplateGalleryStore((s) => s.closeGallery);
   const backgroundSuppressed = bootstrapPending || deferEditorForInitialGallery;
+  // The intro-film offer waits until the editor is actually on screen: behind
+  // the landing gallery there is no More menu for the toast to point at.
+  useWelcomeAutoOpen(
+    Boolean(seoEntry),
+    !galleryOpen && !initialGalleryOpening && !backgroundSuppressed,
+  );
   useEffect(() => {
     if (deferEditorForInitialGallery && !initialGalleryOpening && !galleryOpen) {
       setDeferEditorForInitialGallery(false);
