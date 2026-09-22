@@ -39,8 +39,8 @@
       "height": 630
     },
     "/guides-og/discord-timestamp-format.png": {
-      "sourceSvgSha256": "9ceb239c8d6af9b54f563c8fe26d5b58b7a9eb6a48bcc7e41ed3b75506ef8966",
-      "pngSha256": "fd585f7ea16d7088a29fc781e00b5eb2dd09f7f0d1fa4f7c41e808f0f26fbfe9",
+      "sourceSvgSha256": "d66da431ff89a30a55395aa841e00f4c64951ecdce2543096201975f78327b1a",
+      "pngSha256": "9c23f7c3c081cbc79c8744147cbd4dbb5828cea5fd9bf55b6304950c136b6ca1",
       "width": 1200,
       "height": 630
     },
@@ -51,8 +51,8 @@
       "height": 630
     },
     "/guides-og/discord-webhook-errors.png": {
-      "sourceSvgSha256": "d7b4a1e8b8e4a263381940084b103edfe28d9863eb8fb51d6fe83a87da1eaf6d",
-      "pngSha256": "49b92c537c01fc31d6a5f159ca61ec73ef5f9a8a5d1a52ec5f12fafdc3b2fb48",
+      "sourceSvgSha256": "6cada13b32d5f48587a2b9d08bd243d14e084cc60081580be1862d683df4d238",
+      "pngSha256": "9ed7b5cb7c3d8dc225a19bc2fd12434e8b74653f9465e4389b309565906831d4",
       "width": 1200,
       "height": 630
     },
@@ -98,6 +98,12 @@
       "width": 1200,
       "height": 630
     },
+    "/guides-og/discord-welcome-messages.png": {
+      "sourceSvgSha256": "da84d3c3f9e578e41ef94bf8be8db75d7df8ff15aa61a66293d621cadbc5e06c",
+      "pngSha256": "aab30f694adcfae36c6df7b2f108786fc1f45ee96f354ef2a83b005e2d4fa427",
+      "width": 1200,
+      "height": 630
+    },
     "/guides-og/edit-discord-webhook-message.png": {
       "sourceSvgSha256": "b89551c9ac37cb68b1d685439e1367bf8ea839fae3567cc0d11f84d44f8925af",
       "pngSha256": "7cae79e6dabf20d50e98ac66dc5fb814ca5660983902aa951d0b055f175c0355",
@@ -105,14 +111,14 @@
       "height": 630
     },
     "/guides-og/guides.png": {
-      "sourceSvgSha256": "7f1b124f69198638cfc294f62b35f8029268825b7823037f30170e09007be3c2",
-      "pngSha256": "61f81b36b0b06c9b4230179f695949e6934819a75f630036482a569234b7afef",
+      "sourceSvgSha256": "7122f5135680c15a46d1c6438d849b760a7cb68d2d417faf870f8131836c885d",
+      "pngSha256": "4db1c384dde6b96c62c5ceff43d3233702340d20a03bec022138ae21d113e6f7",
       "width": 1200,
       "height": 630
     },
     "/guides-og/how-to-create-a-discord-webhook.png": {
-      "sourceSvgSha256": "97790f170b0619afcb4a72a71f1dfe7be006a22b81a2021fdef0cb4ab628d707",
-      "pngSha256": "764a107b54c5aeea60d62d506feec6403bd8cdab4a7beb36f0e082d4a725bc52",
+      "sourceSvgSha256": "65944816d089bcfb4c4c0449620b5b3058ba446981165afca2f588b6a902197e",
+      "pngSha256": "f3b03b3db702c27958e77bcd50b5a13760492a4a32fcc0118eea99e3d1efe5a0",
       "width": 1200,
       "height": 630
     },

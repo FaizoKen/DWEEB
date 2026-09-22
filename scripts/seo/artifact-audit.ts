@@ -82,12 +82,23 @@ export async function auditDiscoveryArtifacts(
     );
     if (!ids.includes(id)) errors.push(`${from}: missing section target (${href})`);
   };
+  // First-party scripts a generated page loads — the analytics loader and any
+  // guide tool bundled by `tools/bundle.ts`. A tool page whose bundle is
+  // missing still renders its static example, so nothing else would notice.
+  const scriptSources = new Set<string>();
   for (const [path, html] of documents) {
     for (const match of html.matchAll(/<a\s+[^>]*href="([^"]+)"/g)) {
       inspectLink(decodeHtml(match[1]!), `${SITE.origin}${path}`);
     }
+    for (const match of html.matchAll(/<script\b[^>]*\ssrc="([^"]+)"/g)) {
+      const url = new URL(decodeHtml(match[1]!), `${SITE.origin}${path}`);
+      if (url.origin === SITE.origin) scriptSources.add(url.pathname);
+    }
     const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]!);
     if (new Set(ids).size !== ids.length) errors.push(`${path}: duplicate HTML IDs`);
+  }
+  for (const path of scriptSources) {
+    if (!(await fileExists(path))) errors.push(`Missing first-party script: ${path}`);
   }
 
   const reference = await readFile(join(dist, "llms.txt"), "utf8");

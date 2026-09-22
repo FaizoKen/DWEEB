@@ -20,6 +20,8 @@
  * isolation later.
  */
 
+import { DEFAULT_TIMESTAMP_STYLE } from "./timestamp";
+
 export type InlineNode =
   | { kind: "text"; value: string }
   | { kind: "bold"; children: InlineNode[] }
@@ -499,13 +501,14 @@ function parseAngleToken(token: string): InlineNode | null {
     };
   }
 
-  // Timestamp <t:unix> / <t:unix:style>
-  m = /^t:(-?\d+)(?::([tTdDfFR]))?$/.exec(token);
+  // Timestamp <t:unix> / <t:unix:style> — all nine of Discord's style letters,
+  // including the later `s`/`S` (see timestamp.ts).
+  m = /^t:(-?\d+)(?::([tTdDfFsSR]))?$/.exec(token);
   if (m) {
     return {
       kind: "timestamp",
       unix: Number.parseInt(m[1]!, 10),
-      style: m[2] ?? "f",
+      style: m[2] ?? DEFAULT_TIMESTAMP_STYLE,
     };
   }
 

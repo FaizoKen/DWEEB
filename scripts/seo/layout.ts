@@ -146,6 +146,10 @@ export function htmlDocument(opts: {
   section?: string;
   jsonLd: string[];
   body: string;
+  /** Page-specific rules appended to the shared stylesheet (a guide tool's). */
+  extraCss?: string;
+  /** First-party module scripts (a guide tool's bundle); deferred by type. */
+  moduleScripts?: string[];
 }): string {
   const csp = [
     "default-src 'self'",
@@ -205,9 +209,10 @@ export function htmlDocument(opts: {
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <script defer src="/gtag-init.js"></script>
+    ${(opts.moduleScripts ?? []).map((src) => `<script type="module" src="${attr(src)}"></script>`).join("\n    ")}
 
     ${[...identityLd().map(jsonLd), ...opts.jsonLd].join("\n    ")}
-    <style>${PAGE_CSS}</style>
+    <style>${PAGE_CSS}${opts.extraCss ?? ""}</style>
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -273,14 +278,14 @@ export function breadcrumbNav(trail: { name: string; url?: string }[]): string {
   return `<nav class="crumbs" aria-label="Breadcrumb">${parts.join('<span class="crumb-sep" aria-hidden="true">›</span>')}</nav>`;
 }
 
-export function faqSection(faq: FaqEntry[]): string {
+export function faqSection(faq: FaqEntry[], id?: string): string {
   const items = faq
     .map(
       (f) =>
         `<details class="faq-item"><summary>${escapeHtml(f.q)}</summary><div class="faq-a"><p>${escapeHtml(f.a)}</p></div></details>`,
     )
     .join("");
-  return `<section class="block"><h2>Frequently asked questions</h2>${items}</section>`;
+  return `<section class="block"${id ? ` id="${attr(id)}"` : ""}><h2>Frequently asked questions</h2>${items}</section>`;
 }
 
 /**
@@ -785,7 +790,7 @@ h1{font-size:clamp(28px,5vw,40px);margin:6px 0 14px;letter-spacing:-.5px}
 .steps strong{color:#f2f3f5}
 .prose p{color:var(--muted);max-width:74ch;margin:0 0 14px}
 .prose p+p{margin-top:12px}
-.table-scroll{overflow-x:auto;margin:16px 0 20px;border:1px solid var(--border);border-radius:12px}
+.table-scroll{position:relative;overflow-x:auto;margin:16px 0 20px;border:1px solid var(--border);border-radius:12px}
 table{width:100%;border-collapse:collapse;min-width:620px;background:var(--panel);font-size:14px}
 th,td{text-align:left;vertical-align:top;padding:11px 13px;border-bottom:1px solid var(--border)}
 th{color:#f2f3f5;background:#292b30}

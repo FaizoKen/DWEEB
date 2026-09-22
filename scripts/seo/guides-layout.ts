@@ -16,6 +16,31 @@ import {
   ratingSection,
 } from "./layout";
 import { isPublishable, type RatingAggregate } from "./ratings";
+import {
+  TIMESTAMP_TOOL_CSS,
+  TIMESTAMP_TOOL_SCRIPT,
+  timestampGeneratorHtml,
+} from "./tools/timestamp-generator";
+
+/**
+ * Interactive tools a guide can carry (`GuidePage.tool`): the static markup,
+ * the bundled script (`tools/bundle.ts`) and page-only styles. The markup is
+ * rendered above the table of contents — a searcher who came for the tool
+ * should not have to scroll past the article to reach it.
+ */
+const GUIDE_TOOLS: Record<
+  NonNullable<GuidePage["tool"]>,
+  { html: () => string; script: string; css: string }
+> = {
+  "timestamp-generator": {
+    html: timestampGeneratorHtml,
+    script: TIMESTAMP_TOOL_SCRIPT,
+    css: TIMESTAMP_TOOL_CSS,
+  },
+};
+
+/** Anchor of a guide's FAQ block, listed last in its table of contents. */
+const GUIDE_FAQ_ID = "faq";
 
 export const GUIDES_INDEX_PATH = "/guides/";
 export const GUIDES_INDEX_URL = `${SITE.origin}${GUIDES_INDEX_PATH}`;
@@ -66,9 +91,11 @@ function sectionIds(sections: readonly GuideSection[]): string[] {
   });
 }
 
-function tableOfContents(sections: readonly GuideSection[]): string {
+function tableOfContents(sections: readonly GuideSection[], withFaq = false): string {
   const ids = sectionIds(sections);
-  return `<nav class="page-contents" aria-label="On this page"><strong>On this page</strong><ol>${sections.map((section, index) => `<li><a href="#${ids[index]}">${escapeHtml(section.heading)}</a></li>`).join("")}</ol></nav>`;
+  const entry = (id: string, heading: string) =>
+    `<li><a href="#${id}">${escapeHtml(heading)}</a></li>`;
+  return `<nav class="page-contents" aria-label="On this page"><strong>On this page</strong><ol>${sections.map((section, index) => entry(ids[index]!, section.heading)).join("")}${withFaq ? entry(GUIDE_FAQ_ID, "Frequently asked questions") : ""}</ol></nav>`;
 }
 
 function renderSections(sections: readonly GuideSection[]): string {
@@ -127,6 +154,8 @@ export function renderGuidePage(guide: GuidePage, all: GuidePage[]): string {
     .map((slug) => all.find((candidate) => candidate.slug === slug))
     .filter((candidate): candidate is GuidePage => !!candidate);
   const cta = trackedAppPath(guide.ctaPath, "guide", guide.slug);
+  const tool = guide.tool ? GUIDE_TOOLS[guide.tool] : null;
+  const faq = guide.faq?.length ? guide.faq : null;
   const sources = `<section class="block sources"><h2>Primary sources</h2><ul>${guide.sources
     .map(
       (source) =>
@@ -159,8 +188,10 @@ export function renderGuidePage(guide: GuidePage, all: GuidePage[]): string {
           <a class="btn btn-ghost" href="${GUIDES_INDEX_PATH}">All guides</a>
         </div>
       </header>
-      ${tableOfContents(guide.sections)}
+      ${tool ? tool.html() : ""}
+      ${tableOfContents(guide.sections, !!faq)}
       ${renderSections(guide.sections)}
+      ${faq ? faqSection(faq, GUIDE_FAQ_ID) : ""}
       ${productContext(guide)}
       <section class="cta-band">
         <h2>Put the guide into practice</h2>
@@ -213,15 +244,17 @@ export function renderGuidePage(guide: GuidePage, all: GuidePage[]): string {
         ]),
       ),
       jsonLd(article),
+      ...(faq ? [jsonLd(faqLd(faq))] : []),
     ],
     body,
+    ...(tool ? { extraCss: tool.css, moduleScripts: [tool.script] } : {}),
   });
 }
 
 export function renderGuidesIndexPage(all: GuidePage[]): string {
   const title = "Discord Webhook & Components V2 Guides | DWEEB";
   const description =
-    "Practical Discord webhook guides: Components V2 JSON and limits, webhook setup and security, embed conversion, restoring and editing messages.";
+    "Practical Discord guides: webhooks and Components V2, error fixes, a timestamp generator, and copy-and-paste server rules and welcome messages.";
   const cards = all
     .map(
       (guide) => `<a class="tpl-card" href="${attr(guide.path)}">
@@ -236,7 +269,7 @@ export function renderGuidesIndexPage(all: GuidePage[]): string {
     <header class="hero">
       <span class="chip">📘 Guides</span>
       <h1>Discord Webhook &amp; Components V2 Guides</h1>
-      <p class="lede">Fact-checked, practical references built around the workflows DWEEB actually supports. Learn the current Discord model, see exact limits and payloads, then open the relevant example in the <a href="/discord-message-builder/">visual Discord message builder</a>.</p>
+      <p class="lede">Fact-checked, practical references built around the workflows DWEEB actually supports. Learn the current Discord model, see exact limits, payloads and error messages, generate <a href="/guides/discord-timestamp-format/">Discord timestamps</a>, then open the relevant example in the <a href="/discord-message-builder/">visual Discord message builder</a>.</p>
       <div class="cta-row"><a class="btn btn-primary" href="${attr(withClientParams("/", { entry: "guide:index" }))}" data-analytics="guide" data-analytics-id="index" data-analytics-location="hero">Open the builder →</a></div>
     </header>
     <section class="cat-block"><h2 class="cat-title">Start here</h2><div class="card-grid">${cards}</div></section>

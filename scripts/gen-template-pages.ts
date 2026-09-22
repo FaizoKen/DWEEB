@@ -40,6 +40,7 @@ import { templatePayload } from "./seo/template-payload";
 import { renderDiscoveryReference } from "./seo/discovery";
 import { isPublishable, loadRatings, MIN_RATINGS_TO_PUBLISH } from "./seo/ratings";
 import { sample } from "./seo/code-samples";
+import { bundleGuideTools } from "./seo/tools/bundle";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
@@ -312,6 +313,9 @@ async function main(): Promise<void> {
   await writePage(join("features", "index.html"), renderFeaturesIndexPage(features));
 
   // ── Search-led guide cluster + core commercial-intent landing page ───────
+  // A guide tool's script is bundled from src/ first, so the page that loads
+  // it is never published without it (the audit checks every <script src>).
+  const tools = await bundleGuideTools(DIST);
   for (const guide of GUIDES) {
     await writePage(join("guides", guide.slug, "index.html"), renderGuidePage(guide, GUIDES));
   }
@@ -413,7 +417,8 @@ async function main(): Promise<void> {
   const sectionPages = 4 + LANDINGS.length; // indexes + landings + about
   console.log(
     `[seo] generated ${all.length} templates + ${features.length} features + ${GUIDES.length} guides ` +
-      `+ ${sectionPages} section/landing pages + home/legal + sitemap.xml (${all.length + features.length + GUIDES.length + sectionPages + 3} urls)`,
+      `+ ${sectionPages} section/landing pages + home/legal + sitemap.xml (${all.length + features.length + GUIDES.length + sectionPages + 3} urls)` +
+      ` + ${tools.length} guide tool script(s)`,
   );
 }
 

@@ -4,7 +4,7 @@ import { LIMITS } from "@/core/schema/limits";
 import { SITE, type FaqEntry } from "./content";
 import { CODE_GUIDE_INPUTS } from "./code-guides";
 
-export const GUIDES_LASTMOD = "2026-09-18";
+export const GUIDES_LASTMOD = "2026-09-23";
 
 export interface GuideSection {
   heading: string;
@@ -25,6 +25,20 @@ export interface GuidePage {
   modified: string;
   keywords: string[];
   sections: GuideSection[];
+  /**
+   * Visible Q&A rendered after the sections and mirrored as FAQPage JSON-LD —
+   * one field driving both, as on the landings, so the schema can only ever
+   * describe text a reader can see. Answers are plain text (escaped, never
+   * link-rendered) because they are reused verbatim in the schema.
+   */
+  faq?: FaqEntry[];
+  /**
+   * An interactive tool rendered above the table of contents, with its
+   * build-bundled script (see `GUIDE_TOOLS` in guides-layout.ts). The page must
+   * still read as a complete guide without it: the tool's static markup is a
+   * worked example, and the script only makes it live.
+   */
+  tool?: "timestamp-generator";
   sources: { label: string; url: string }[];
   related: string[];
   ctaLabel: string;
@@ -56,7 +70,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Developer guide · Components V2",
     lede: "Components V2 turns a Discord message into a real layout tree: text, sections, thumbnails, media, separators, containers and interactive controls. This guide explains the model that Discord actually accepts and gives you an editable reference instead of a disconnected code fragment.",
     published: "2026-07-15",
-    modified: "2026-09-16",
+    modified: "2026-09-23",
     keywords: [
       "discord components v2",
       "discord components v2 example",
@@ -233,6 +247,32 @@ export const GUIDES: GuidePage[] = [
         ],
       },
     ],
+    faq: [
+      {
+        q: "What are Discord Components V2?",
+        a: "Discord's layout system for messages. With the IS_COMPONENTS_V2 flag (32768) set, a message is a tree of components — Text Displays, Sections, Thumbnails, Media Galleries, Files, Separators and Containers, plus buttons and select menus — instead of a content string and embeds.",
+      },
+      {
+        q: "Can a webhook send Components V2 messages?",
+        a: "Yes. Set flags to 32768 and add with_components=true to the webhook URL, or Discord ignores the components. A webhook you created yourself can send every non-interactive component and link buttons; buttons and menus that run an action need a webhook owned by an application that handles the click.",
+      },
+      {
+        q: "Do Components V2 replace embeds?",
+        a: "Within a V2 message, yes: content and embeds cannot be used, and a Container gives you the card with an accent colour that an embed used to. Messages without the flag still use content and embeds, so both formats keep working.",
+      },
+      {
+        q: "What is a Container in Components V2?",
+        a: "Component type 17: a card that groups other components, with an optional accent colour stripe and an optional spoiler blur. It is the V2 equivalent of an embed's box, but it can hold sections, galleries, separators and buttons in any order.",
+      },
+      {
+        q: "How many components can a Components V2 message have?",
+        a: `Up to ${LIMITS.TOTAL_COMPONENTS} components in total, counting every nested one, with at most ${LIMITS.TOP_LEVEL_COMPONENTS} at the top level and ${LIMITS.TOTAL_CHARACTERS.toLocaleString("en-US")} characters of text across the whole message. DWEEB counts both live as you build.`,
+      },
+      {
+        q: "How do I send Components V2 from discord.js or discord.py?",
+        a: "discord.js 14.19 and later has builder classes such as ContainerBuilder and TextDisplayBuilder, sent with the MessageFlags.IsComponentsV2 flag; discord.py 2.6 and later uses a LayoutView with ui.Container and ui.TextDisplay. DWEEB's code export writes either one from a design, and the dedicated discord.js and discord.py guides walk through both.",
+      },
+    ],
     sources: [
       {
         label: "Discord: Components overview",
@@ -257,22 +297,35 @@ export const GUIDES: GuidePage[] = [
   }),
   guide({
     slug: "how-to-create-a-discord-webhook",
-    title: "How to Create a Discord Webhook & Send a Message | DWEEB",
-    h1: "How to Create and Use a Discord Webhook",
+    // 2026-09-23: the page's queries are the generic cluster — "discord
+    // webhook", "webhook discord", "connect discord to webhook", "discord to
+    // webhook", "webhooks discord integration" — ~1,500 impressions a quarter
+    // at position 30-40. It answered "create" and "send" but never "what is
+    // one" or "connect a service to one", which is half of what those searches
+    // ask; both are now covered, with an FAQ for the definitional questions.
+    title: "Discord Webhooks: How to Create, Connect & Send Messages | DWEEB",
+    h1: "How to Create, Connect and Use a Discord Webhook",
     description:
-      "Create a Discord webhook URL, keep it secure, build a message visually and send it safely. Includes permissions and Components V2 caveats.",
+      "Create a Discord webhook URL on desktop or mobile, connect it to an app, service or script, and send a first message safely. Includes limits and permissions.",
     eyebrow: "Practical guide · Discord webhooks",
-    lede: "A Discord incoming webhook is the shortest path from a tool or script into one channel. It can set a display name and avatar and post rich Components V2 layouts, but its URL is also a credential. Set it up once, handle it like a password, and test with a message you can recognize.",
+    lede: "A Discord incoming webhook is the shortest path from a tool or script into one channel. It can set a display name and avatar and post rich Components V2 layouts, but its URL is also a credential. Set it up once, connect the service that needs it, handle the URL like a password, and test with a message you can recognize.",
     published: "2026-07-15",
-    modified: "2026-09-16",
+    modified: "2026-09-23",
     keywords: [
       "how to create a discord webhook",
+      "discord webhook",
+      "connect discord to webhook",
       "discord webhook url",
       "send discord webhook message",
-      "discord webhook setup",
-      "discord webhook builder",
     ],
     sections: [
+      {
+        heading: "What is a Discord webhook?",
+        paragraphs: [
+          "A Discord webhook is a URL that lets another app post messages into one channel — no bot account, no login and no code running inside Discord. Anything that can send an HTTP request can use it: a GitHub repository announcing commits, a monitoring service raising an alert, a form sending each response, a store posting new orders, or a script sending a daily report.",
+          "The trade-off is that a webhook only talks. It posts, edits and deletes its own messages, and that is all: it cannot read the channel, react, reply or respond to a button click. When you need any of those, you need a bot or an application — the table further down lists exactly where the line falls.",
+        ],
+      },
       {
         heading: "Before you start",
         paragraphs: [
@@ -306,6 +359,33 @@ export const GUIDES: GuidePage[] = [
         ],
         code: `https://discord.com/api/webhooks/<webhook id>/<webhook token>
                                    public          secret`,
+      },
+      {
+        heading: "Connect an app or service to the webhook",
+        paragraphs: [
+          "Connecting a service to Discord almost always means giving it this URL. Look for a Discord, webhook or notification setting in the other product, paste the URL, and send its test notification if it has one. Three variations cover nearly everything else:",
+        ],
+        bullets: [
+          "GitHub: in the repository's Settings → Webhooks, add a webhook whose payload URL is the Discord URL with /github on the end, and set the content type to application/json — the form-encoded default is a common cause of a 400.",
+          "Services that only speak Slack's webhook format can use Discord's Slack-compatible endpoint: the same URL with /slack on the end.",
+          "Automation platforms, form builders and your own scripts post JSON straight to the plain URL. The [cURL](/guides/discord-webhook-curl/), [Python](/guides/discord-webhook-python/) and [JavaScript](/guides/discord-webhook-javascript/) guides show a complete, working request in each.",
+        ],
+        table: {
+          headers: ["Sender", "URL to give it", "Body it sends"],
+          rows: [
+            [
+              "Your own script or automation tool",
+              "https://discord.com/api/webhooks/ID/TOKEN",
+              "Discord's JSON: content, embeds or Components V2",
+            ],
+            ["GitHub", "https://discord.com/api/webhooks/ID/TOKEN/github", "GitHub's event JSON"],
+            [
+              "A Slack-style integration",
+              "https://discord.com/api/webhooks/ID/TOKEN/slack",
+              "Slack's webhook JSON",
+            ],
+          ],
+        },
       },
       {
         heading: "What a webhook can and cannot do",
@@ -395,6 +475,32 @@ export const GUIDES: GuidePage[] = [
         ],
       },
     ],
+    faq: [
+      {
+        q: "Where do I find my Discord webhook URL?",
+        a: "Open Server Settings, choose Integrations, then Webhooks, select the webhook and press Copy Webhook URL. The same list is reachable from a channel's own settings under Integrations. If Integrations is missing, your role does not have Manage Webhooks.",
+      },
+      {
+        q: "Do I need a bot to use a Discord webhook?",
+        a: "No. The URL alone is enough to post, edit and delete the webhook's own messages. A bot or application is only needed to read messages, reply, react, or respond when someone clicks a button or picks from a menu.",
+      },
+      {
+        q: "How many webhooks can a Discord server have?",
+        a: "Discord allows 15 webhooks per channel and 1,000 per server. Past either cap, creating another fails with “Maximum number of webhooks reached”, so delete webhooks you no longer use.",
+      },
+      {
+        q: "Why can't I see the Webhooks option in Integrations?",
+        a: "Creating and managing webhooks needs the Manage Webhooks permission in that channel, or Administrator. Ask a server admin to grant it to your role for the channel, or to create the webhook for you.",
+      },
+      {
+        q: "Can a Discord webhook read messages or send DMs?",
+        a: "No. A webhook is one-way into a single channel: it can post and manage its own messages there, but it cannot read the channel, message users directly, assign roles or run commands.",
+      },
+      {
+        q: "How do I test a Discord webhook?",
+        a: "Send one short, recognizable message — with the curl command above, or by pasting the URL into DWEEB and sending a draft after checking the preview — and confirm it appears in the right channel. Then delete the test post or keep it as your first real message.",
+      },
+    ],
     sources: [
       {
         label: "Discord support: Intro to Webhooks",
@@ -405,14 +511,18 @@ export const GUIDES: GuidePage[] = [
         url: "https://docs.discord.com/developers/resources/webhook",
       },
       {
-        label: "Discord API: Execute Webhook",
+        label: "Discord API: Execute Webhook, Slack- and GitHub-compatible endpoints",
         url: "https://docs.discord.com/developers/resources/webhook#execute-webhook",
+      },
+      {
+        label: "Discord API: Webhook caps and JSON error codes",
+        url: "https://docs.discord.com/developers/topics/opcodes-and-status-codes",
       },
     ],
     related: [
       "discord-webhook-security",
       "discord-webhook-name-avatar",
-      "discord-webhook-limits",
+      "discord-webhook-errors",
       "edit-discord-webhook-message",
     ],
     ctaLabel: "Build your first webhook message",
@@ -732,7 +842,7 @@ export const GUIDES: GuidePage[] = [
     eyebrow: "Reference · Markdown & formatting",
     lede: "Discord's markdown looks familiar but behaves like no other dialect: italics care about spaces, ordered lists silently merge into bullet lists, and links trim their own punctuation. This reference covers the full syntax plus the edge cases DWEEB's preview parser is tested against real Discord clients for.",
     published: "2026-07-17",
-    modified: "2026-09-16",
+    modified: "2026-09-23",
     keywords: [
       "discord text formatting",
       "discord markdown",
@@ -804,7 +914,12 @@ export const GUIDES: GuidePage[] = [
             [
               "<t:unix:style>",
               "Dynamic timestamp",
-              "Shown in each reader's own timezone — see the timestamp guide",
+              "Shown in each reader's own timezone — make one with the [timestamp generator](/guides/discord-timestamp-format/)",
+            ],
+            [
+              "<id:customize>, <id:browse>, <id:guide>",
+              "Links to Channels & Roles, Browse Channels and the Server Guide",
+              "No ID needed; they lead somewhere only on a Community server with Onboarding",
             ],
           ],
         },
@@ -818,7 +933,7 @@ export const GUIDES: GuidePage[] = [
         paragraphs: [
           "Regular user chat supports masked links as well as the core styles. Webhook and bot messages can use the same link syntax in plain content and Components V2 Text Displays. Legacy embed descriptions and fields support many inline styles and masked links, but a legacy embed's title, footer and other named fields have their own rendering rules; do not assume every field is a full chat message.",
           "Components V2 Text Displays are the most capable text surface: headings, subtext, lists, quotes, code, mentions and timestamps all render, and DWEEB counts every character against the message-wide budget as you type.",
-          "The classic use of all of this at once is a pinned rules post — a heading, bold rule names, a quote block for consequences and a subtext footer. The [server rules templates](/guides/discord-server-rules/) are written in exactly that markdown and can be pasted as they are.",
+          "The classic use of all of this at once is a pinned rules post — a heading, bold rule names, a quote block for consequences and a subtext footer. The [server rules templates](/guides/discord-server-rules/) are written in exactly that markdown and can be pasted as they are, and the [copy-and-paste welcome messages](/guides/discord-welcome-messages/) use the same pieces plus channel links.",
         ],
       },
       {
@@ -849,61 +964,134 @@ export const GUIDES: GuidePage[] = [
   }),
   guide({
     slug: "discord-timestamp-format",
-    title: "Discord Timestamp Format: All Styles & How to Use | DWEEB",
-    h1: "Discord Timestamps: Every Format Code Explained",
+    // Retitled 2026-09-23 around the generator the page now carries: its
+    // queries ("discord timestamp generator", "…format", "…syntax", "…code")
+    // are tool-intent, and Discord's reference had grown from seven styles to
+    // nine (s and S) while this page still said seven.
+    title: "Discord Timestamp Generator & All 9 Format Codes | DWEEB",
+    h1: "Discord Timestamp Generator and Format Codes",
     description:
-      "Use Discord's <t:unix:style> timestamps to show any date in each reader's own timezone. All seven style codes with examples, plus a visual picker.",
-    eyebrow: "Reference · Dynamic timestamps",
-    lede: 'A Discord timestamp token like <t:1767225600:F> renders as a real date in every reader\'s own timezone and language — no more "8 PM EST / 1 AM UTC" tables in event posts. There are seven display styles, and the only input you need is a unix timestamp in seconds.',
+      "Free Discord timestamp generator: pick a date and copy the <t:unix:style> code for all nine styles, including the newer s and S, shown in your own timezone.",
+    eyebrow: "Tool and reference · Dynamic timestamps",
+    lede: 'A Discord timestamp token like <t:1767225600:F> renders as a real date in every reader\'s own timezone and language — no more "8 PM EST / 1 AM UTC" tables in event posts. Pick a moment in the generator below and copy a code; the reference after it explains all nine styles, how to produce the number in code, and the mistakes that break a timestamp.',
     published: "2026-07-17",
-    modified: "2026-07-17",
+    modified: "2026-09-23",
     keywords: [
+      "discord timestamp generator",
       "discord timestamp format",
       "discord timestamp",
-      "discord dynamic timestamp",
-      "discord timestamp generator",
       "discord relative time",
+      "discord unix timestamp",
     ],
+    tool: "timestamp-generator",
     sections: [
       {
         heading: "How Discord timestamps work",
         paragraphs: [
-          "The token is <t:UNIX> or <t:UNIX:STYLE>, where UNIX is a count of seconds since 1970-01-01 UTC and STYLE is one of seven single-letter codes. Discord replaces the token at render time using the viewer's locale and timezone, so the same message reads correctly in Tokyo and Toronto. When you omit the style, Discord uses f (short date/time).",
-          "Timestamps work in normal chat, webhook content, embed text and Components V2 Text Displays. Inside a code block the token is shown literally — that is the standard way to show someone the syntax itself.",
+          "The token is <t:UNIX> or <t:UNIX:STYLE>, where UNIX is a count of seconds since 1970-01-01 UTC and STYLE is one of nine single-letter codes. Discord replaces the token at render time using the viewer's locale and timezone, so the same message reads correctly in Tokyo and Toronto. When you omit the style, Discord uses f (long date with a short time).",
+          "Timestamps work in normal chat, webhook messages, embed descriptions and Components V2 Text Displays. Inside a code block the token is shown literally — that is the standard way to show someone the syntax itself.",
         ],
       },
       {
-        heading: "All seven timestamp styles",
+        heading: "All nine timestamp styles",
         paragraphs: [
-          "Examples below use 1767225600 (2026-01-01 00:00 UTC) as seen by an en-US reader in UTC. Every reader sees their own language and timezone.",
+          "Examples use 1767225600 (2026-01-01 00:00 UTC) as an en-US reader in UTC sees it; every reader gets their own language and timezone. The names are the ones in Discord's formatting reference. The s and S styles were added after the original seven, so older references list only seven.",
         ],
         table: {
-          headers: ["Style", "Name", "Example output"],
+          headers: ["Code", "Discord's name", "Example output", "Best for"],
           rows: [
-            ["<t:1767225600:t>", "Short time", "12:00 AM"],
-            ["<t:1767225600:T>", "Long time", "12:00:00 AM"],
-            ["<t:1767225600:f>", "Short date/time (default)", "January 1, 2026 12:00 AM"],
-            ["<t:1767225600:F>", "Long date/time", "Thursday, January 1, 2026 12:00 AM"],
-            ["<t:1767225600:d>", "Short date", "1/1/2026"],
-            ["<t:1767225600:D>", "Long date", "January 1, 2026"],
-            ["<t:1767225600:R>", "Relative", "“in 3 days” / “2 hours ago” — updates live"],
+            ["<t:1767225600:t>", "Short time", "12:00 AM", "Daily schedules, doors-open times"],
+            [
+              "<t:1767225600:T>",
+              "Medium time",
+              "12:00:00 AM",
+              "Launches and drops where seconds matter",
+            ],
+            ["<t:1767225600:d>", "Short date", "1/1/2026", "Compact dates in lists and tables"],
+            ["<t:1767225600:D>", "Long date", "January 1, 2026", "Deadlines and due dates"],
+            [
+              "<t:1767225600:f>",
+              "Long date, short time (default)",
+              "January 1, 2026 at 12:00 AM",
+              "Event announcements",
+            ],
+            [
+              "<t:1767225600:F>",
+              "Full date, short time",
+              "Thursday, January 1, 2026 at 12:00 AM",
+              "Events where the weekday matters",
+            ],
+            [
+              "<t:1767225600:s>",
+              "Short date, short time",
+              "1/1/2026, 12:00 AM",
+              "Date and time together in a changelog or log line",
+            ],
+            [
+              "<t:1767225600:S>",
+              "Short date, medium time",
+              "1/1/2026, 12:00:00 AM",
+              "Incident timelines that need seconds",
+            ],
+            [
+              "<t:1767225600:R>",
+              "Relative",
+              "“in 3 days” / “2 hours ago” — updates live",
+              "Countdowns and “last updated” notes",
+            ],
           ],
         },
       },
       {
-        heading: "Get the unix timestamp",
-        bullets: [
-          "In DWEEB, use the clock button in the text toolbar: pick a date, time and style, preview each style live, and the token is inserted for you.",
-          "Terminal: date +%s prints the current unix time.",
-          "JavaScript: Math.floor(Date.now() / 1000).",
-          "Python: int(time.time()).",
-        ],
+        heading: "Combine an absolute time with a countdown",
         paragraphs: [
-          "DWEEB's picker previews every style with the same formatter its message preview uses, so the row you click is exactly what the channel will show.",
+          "Two tokens for the same moment read better than one in an announcement: the full date for people planning ahead, the relative one for people checking right before it starts. Discord renders each token independently, so the pair stays correct in every timezone and the countdown ticks over to “ago” once the moment passes.",
+          "Keep relative timestamps out of posts that stay pinned for months — “8 months ago” on a rules post reads as neglect. Use an absolute style there, and restore and update the message when the date itself changes; the [editing guide](/guides/edit-discord-webhook-message/) walks through that without reposting.",
+        ],
+        code: `## 🎮 Community game night
+Starts <t:1767225600:F> — that's <t:1767225600:R>.
+-# Times show in your own timezone.`,
+      },
+      {
+        heading: "Get the unix timestamp in code",
+        paragraphs: [
+          "Every language counts unix time in seconds from 1970-01-01 UTC, but several return milliseconds by default — the source of the year-57,000 bug below. Both bot libraries also ship a formatter that builds the whole token for you.",
+        ],
+        code: `// JavaScript (browser, Node.js, Deno, Bun) — seconds, not milliseconds
+Math.floor(Date.now() / 1000)
+Math.floor(new Date("2026-01-01T00:00:00Z").getTime() / 1000) // 1767225600
+
+// discord.js builds the token itself
+import { time, TimestampStyles } from "discord.js";
+time(new Date("2026-01-01T00:00:00Z"), TimestampStyles.RelativeTime) // "<t:1767225600:R>"
+
+# Python
+import time
+from datetime import datetime, timezone
+int(time.time())
+int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp())  # 1767225600
+
+# discord.py builds the token itself
+discord.utils.format_dt(datetime(2026, 1, 1, tzinfo=timezone.utc), style="R")  # "<t:1767225600:R>"
+
+# macOS / Linux terminal
+date +%s
+
+# PowerShell
+[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+
+# Excel or Google Sheets, for a UTC date and time in A1
+=ROUND((A1 - DATE(1970,1,1)) * 86400, 0)`,
+        bullets: [
+          "In DWEEB, the clock button in the text toolbar opens the same picker as the generator above and inserts the token where your cursor is.",
+          "In your own code, build the token as <t:SECONDS:STYLE> with an integer — a decimal such as 1767225600.5 is not a valid timestamp.",
         ],
       },
       {
         heading: "A timestamp in a real webhook payload",
+        paragraphs: [
+          "Timestamps are plain text inside a message, so a webhook needs nothing special to send one. This Components V2 payload posts an event notice with both an absolute and a relative time; import it into the [Discord message builder](/discord-message-builder/) to preview it, or send it from a script as shown in the [cURL webhook guide](/guides/discord-webhook-curl/).",
+        ],
         code: `{
   "flags": 32768,
   "components": [
@@ -922,12 +1110,17 @@ export const GUIDES: GuidePage[] = [
             [
               "A date in the year 57,000",
               "Milliseconds were pasted instead of seconds",
-              "Divide by 1000 and round down",
+              "Divide by 1000 and round down — a 13-digit number is milliseconds",
             ],
             [
               "The literal <t:…> text shows in chat",
-              "The token is inside a code block or inline code",
-              "Move it out of the code span",
+              "The token is inside a code block or inline code, or the style letter is wrong",
+              "Move it out of the code span; use one of t T d D f F s S R — the letter is case-sensitive",
+            ],
+            [
+              "The time is off by some hours",
+              "A local time was converted as if it were UTC",
+              "Pick the moment in your own timezone in the generator, or convert from UTC explicitly",
             ],
             [
               "Time is wrong for some readers",
@@ -943,13 +1136,43 @@ export const GUIDES: GuidePage[] = [
         },
       },
     ],
+    faq: [
+      {
+        q: "How do I make a timestamp in Discord?",
+        a: "Convert the moment to a unix timestamp in seconds and write it as <t:SECONDS:STYLE>, for example <t:1767225600:F>. The generator at the top of this page does the conversion from your own timezone and gives you a code to copy for every style.",
+      },
+      {
+        q: "What timezone do Discord timestamps use?",
+        a: "The reader's. The number inside the token is a moment in UTC seconds, and Discord shows it in each viewer's own timezone and language, so you never need to write a timezone next to it.",
+      },
+      {
+        q: "Why does my Discord timestamp show the wrong date or time?",
+        a: "Usually one of three things: a 13-digit millisecond value was pasted instead of seconds, a local time was converted as if it were UTC, or a hardcoded timezone was written next to the token. Paste the number into the generator's decode box to see exactly which moment it points at.",
+      },
+      {
+        q: "How do I make a countdown in Discord?",
+        a: "Use the relative style, <t:SECONDS:R>. It shows text such as “in 2 hours”, updates while the message is on screen, and switches to “2 hours ago” once the moment has passed. Pair it with an absolute style for readers who plan ahead.",
+      },
+      {
+        q: "What are the s and S timestamp styles?",
+        a: "They are the two newest styles. s shows a short date with a short time, such as 1/1/2026, 12:00 AM for an en-US reader, and S adds seconds: 1/1/2026, 12:00:00 AM. Current Discord clients render them anywhere the other seven styles work.",
+      },
+      {
+        q: "Do Discord timestamps work in webhooks, embeds and Components V2?",
+        a: "Yes. A timestamp is plain text, so it renders in webhook message content, embed descriptions and fields, and Components V2 Text Displays. Only a code block or inline code shows it literally.",
+      },
+    ],
     sources: [
       {
         label: "Discord API: Message formatting — timestamp styles",
         url: "https://docs.discord.com/developers/reference#message-formatting-timestamp-styles",
       },
+      {
+        label: "discord.py: discord.utils.format_dt",
+        url: "https://discordpy.readthedocs.io/en/stable/api.html#discord.utils.format_dt",
+      },
     ],
-    related: ["discord-text-formatting", "discord-components-v2"],
+    related: ["discord-text-formatting", "discord-components-v2", "edit-discord-webhook-message"],
     ctaLabel: "Insert a timestamp with the visual picker",
     ctaPath: "/",
   }),
@@ -1170,22 +1393,204 @@ X-RateLimit-Remaining: 0
   }),
   guide({
     slug: "discord-webhook-errors",
+    // 2026-09-23: 214 impressions a quarter at position 7.4 and not one click —
+    // the queries behind them are mostly anonymized, and the named ones are
+    // pasted error text ("discord api error 400", "missing permissions"). The
+    // page listed codes but never the messages people search for, so it now
+    // quotes each one exactly, as the API and both bot libraries print it.
     title: "Discord Webhook Errors: Fix 400, 401, 403, 404 & 429 | DWEEB",
-    h1: "Fix Discord Webhook Errors",
+    h1: "Fix Discord Webhook Errors: Every Message and Code",
     description:
-      "Diagnose Discord webhook errors by HTTP status, API code and field path. Fix invalid forms, unknown webhooks, missing components and failed updates.",
+      "Every common Discord webhook error, quoted exactly: Invalid Form Body (50035), Unknown Webhook (10015), Missing Permissions (50013), 429 rate limits and more.",
     eyebrow: "Troubleshooting · Discord webhooks",
-    lede: "Start with the operation that failed, the HTTP status and Discord's numeric error code. A missing webhook, a missing message and an invalid Components V2 layout need different repairs. This guide turns the response into a next step without repeated test posts or unnecessary credential replacement.",
+    lede: "Start with the operation that failed, the HTTP status and Discord's numeric error code. A missing webhook, a missing message and an invalid Components V2 layout need different repairs. The reference below quotes each common message exactly as Discord, discord.js and discord.py print it, so you can match the line in your logs and go straight to the fix.",
     published: "2026-09-11",
-    modified: "2026-09-11",
+    modified: "2026-09-23",
     keywords: [
       "discord webhook not working",
       "discord webhook errors",
-      "discord webhook invalid form body",
+      "discord invalid form body",
       "discord unknown webhook 10015",
       "discord webhook 400 401 403 404 429",
+      "discord missing permissions 50013",
     ],
     sections: [
+      {
+        heading: "Every common webhook error, quoted exactly",
+        paragraphs: [
+          'Discord answers a failed request with an HTTP status and a JSON body such as {"message": "Unknown Webhook", "code": 10015}. The message is the text to search for; the code is the stable number behind it. Find yours in the table, then read the matching section below for the details.',
+        ],
+        table: {
+          headers: ["Message", "Code", "HTTP", "What it means", "Fix"],
+          rows: [
+            [
+              "Invalid Form Body",
+              "50035",
+              "400",
+              "A field failed validation; the errors object names which one",
+              "Read the nested path in errors and fix that field",
+            ],
+            [
+              "The request body contains invalid JSON.",
+              "50109",
+              "400",
+              "The body is not valid JSON",
+              "Fix quoting or trailing commas; send Content-Type: application/json",
+            ],
+            [
+              "Cannot send an empty message",
+              "50006",
+              "400",
+              "Nothing visible was left to post",
+              "Add content — or, for Components V2, add ?with_components=true to the URL",
+            ],
+            [
+              "Unknown Webhook",
+              "10015",
+              "404",
+              "The webhook was deleted, or the ID in the URL is wrong",
+              "Copy the current URL from Integrations → Webhooks",
+            ],
+            [
+              "Invalid Webhook Token",
+              "50027",
+              "401",
+              "The token half of the URL is wrong or cut off",
+              "Copy the whole URL again; never retype it",
+            ],
+            [
+              "Unknown Message",
+              "10008",
+              "404",
+              "Editing a message this webhook did not send, or one that was deleted",
+              "Check the message ID, the webhook that sent it and its thread_id",
+            ],
+            [
+              "Unknown Channel",
+              "10003",
+              "404",
+              "The thread_id is not under this webhook's channel",
+              "Use the parent channel's webhook and a thread from that channel",
+            ],
+            [
+              "Missing Access",
+              "50001",
+              "403",
+              "The app cannot see the channel or thread",
+              "Give the app access to that channel",
+            ],
+            [
+              "Missing Permissions",
+              "50013",
+              "403",
+              "The action needs a permission the caller lacks, such as Manage Webhooks",
+              "Grant that permission in the channel, or ask a server admin",
+            ],
+            [
+              "Maximum number of webhooks reached (15)",
+              "30007",
+              "400",
+              "A channel holds at most 15 webhooks",
+              "Delete unused webhooks in that channel",
+            ],
+            [
+              "Maximum number of webhooks per guild reached (1000)",
+              "30058",
+              "400",
+              "The server-wide webhook cap",
+              "Remove webhooks the server no longer uses",
+            ],
+            [
+              "Request entity too large",
+              "40005",
+              "413",
+              "The upload is over the size limit",
+              "Compress, resize or split the attachments",
+            ],
+            [
+              "You are being rate limited.",
+              "—",
+              "429",
+              "Too many requests for this webhook or route",
+              "Wait retry_after seconds, then send more slowly",
+            ],
+            [
+              "Webhooks posted to forum channels must have a thread_name or thread_id",
+              "220001",
+              "400",
+              "The webhook is in a forum or media channel and the request named no post",
+              "See [forum posts and threads](/guides/discord-webhook-forum-threads/)",
+            ],
+            [
+              "405: Method Not Allowed",
+              "0",
+              "405",
+              "The HTTP method is wrong for that URL",
+              "POST to send; PATCH …/messages/ID to edit",
+            ],
+          ],
+        },
+      },
+      {
+        heading: "Components V2 errors inside Invalid Form Body",
+        paragraphs: [
+          "A Components V2 payload that Discord rejects usually comes back as Invalid Form Body with a second, more specific error nested under the field at fault. The top-level message is the same for every validation failure; the nested code is what tells you what to change. This response comes from sending content together with the V2 flag:",
+        ],
+        code: `{
+  "message": "Invalid Form Body",
+  "code": 50035,
+  "errors": {
+    "content": {
+      "_errors": [
+        {
+          "code": "MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2",
+          "message": "The 'content' field cannot be used when using MessageFlags.IS_COMPONENTS_V2"
+        }
+      ]
+    }
+  }
+}`,
+        table: {
+          headers: ["Nested code", "Message", "Fix"],
+          rows: [
+            [
+              "MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2",
+              "The 'content' field cannot be used when using MessageFlags.IS_COMPONENTS_V2",
+              "Remove content and embeds; put the text in a Text Display component",
+            ],
+            [
+              "UNION_TYPE_CHOICES",
+              'Value of field "type" must be one of (1,).',
+              "V2 components were sent without the IS_COMPONENTS_V2 flag — add flags: 32768",
+            ],
+            [
+              "BASE_TYPE_REQUIRED",
+              "This field is required",
+              "A required field is missing at the path shown, such as a Section's accessory",
+            ],
+            [
+              "BASE_TYPE_MAX_LENGTH",
+              "Must be 2000 or fewer in length.",
+              "Legacy content is capped at 2,000 characters; shorten it or move the text into Text Displays",
+            ],
+          ],
+        },
+      },
+      {
+        heading: "The same errors in discord.js and discord.py",
+        paragraphs: [
+          "Bot libraries wrap the same response in their own exception, so the text in your terminal looks different from the raw JSON while carrying the same two facts. The number in brackets, or after “error code”, is the JSON code from the tables above; the text after the colon is Discord's message.",
+        ],
+        code: `# discord.js — DiscordAPIError[code]: message
+DiscordAPIError[50035]: Invalid Form Body
+DiscordAPIError[10015]: Unknown Webhook
+DiscordAPIError[50013]: Missing Permissions
+
+# discord.py — status (error code: code): message
+discord.errors.HTTPException: 400 Bad Request (error code: 50035): Invalid Form Body
+discord.errors.NotFound: 404 Not Found (error code: 10015): Unknown Webhook
+discord.errors.Forbidden: 403 Forbidden (error code: 50013): Missing Permissions`,
+      },
       {
         heading: "Find the status, code and failing field",
         paragraphs: [
@@ -1269,6 +1674,32 @@ X-RateLimit-Remaining: 0
           "A browser network error means DWEEB did not receive a readable response; it does not prove Discord rejected the message. Check the destination channel before sending again, then inspect connectivity and extensions that block discord.com. A lost response after a successful post can otherwise turn one intended announcement into duplicates.",
           "When asking for help, share the operation, status, code and a redacted field error. Remove webhook tokens, message content and private identifiers from screenshots and network logs. Keep a local draft of the design so the diagnostic process does not become a rebuild.",
         ],
+      },
+    ],
+    faq: [
+      {
+        q: "What does Invalid Form Body mean on a Discord webhook?",
+        a: "A field in the request failed Discord's validation. The response's errors object names the path — for example components.0.components.1.url is the URL on the second child of the first component — and a nested code says which rule it broke. Fix that one field and send again.",
+      },
+      {
+        q: "Why does my Discord webhook return 404?",
+        a: "For a new message, Unknown Webhook (10015): the webhook was deleted or the URL is wrong. When editing or deleting, Unknown Message (10008): the message ID is wrong, the message is gone, or it sits inside a thread and the request left out thread_id.",
+      },
+      {
+        q: "Why does my Discord webhook return 401 Invalid Webhook Token?",
+        a: "The token half of the URL is incomplete or out of date, often because the URL was cut off when copied or the webhook was deleted and recreated. Copy the whole URL again from the channel's Integrations settings.",
+      },
+      {
+        q: "What causes Missing Permissions (50013) with webhooks?",
+        a: "Sending through a webhook needs no permission — the token in the URL is the credential. The error comes from managing webhooks, which needs Manage Webhooks in that channel, or from an app acting in a channel where its role lacks the permission the action requires.",
+      },
+      {
+        q: "Why does Discord say “Cannot send an empty message” when I send components?",
+        a: "Discord ignored the components, so nothing visible was left. Webhooks respect the components field only when the URL includes with_components=true, and a Components V2 body also needs the flag 32768. Add the query parameter and check the flag.",
+      },
+      {
+        q: "How long should I wait after a 429 from a Discord webhook?",
+        a: "Exactly as long as Discord says: the retry_after value in the response body, also sent as a Retry-After header. Then resume at a slower pace and queue sends per webhook, so a burst does not trigger the limit again.",
       },
     ],
     sources: [
@@ -1416,22 +1847,83 @@ X-RateLimit-Remaining: 0
   }),
   guide({
     slug: "discord-webhook-forum-threads",
-    title: "Discord Webhooks in Forum Posts & Threads: Guide | DWEEB",
+    // 2026-09-23: Search Console showed ~370 impressions a quarter at position
+    // 7.4 and a 0.8% CTR, almost all behind anonymized long-tail queries; the
+    // one named query was Discord's error text verbatim. Developers paste the
+    // error, and the page never printed it — so it now leads with the exact
+    // message and the one-line fix.
+    title: "Fix Discord Forum Webhooks: thread_name or thread_id | DWEEB",
     h1: "Send Discord Webhooks to Forum Posts and Threads",
     description:
-      "Create a Discord forum post with thread_name, send into an existing thread with thread_id, add tags and restore webhook messages for editing.",
+      'Fix "Webhooks posted to forum channels must have a thread_name or thread_id" (220001): create a forum post with thread_name, or reply in one with thread_id.',
     eyebrow: "Workflow guide · Forum posts and threads",
-    lede: "A forum post is a thread inside its parent channel. Choose whether you are creating a new post or adding a message to one that already exists before you send. DWEEB has separate controls for those operations, and the difference explains many otherwise confusing webhook errors.",
+    lede: 'If Discord answered "Webhooks posted to forum channels must have a thread_name or thread_id", your webhook belongs to a forum or media channel and the request did not say which post to use. A forum post is a thread inside its parent channel: add thread_name to create a new post, or add thread_id to the URL to reply inside an existing one. This guide shows both — in a raw request, in an automation tool and in DWEEB.',
     published: "2026-09-11",
-    modified: "2026-09-11",
+    modified: "2026-09-23",
     keywords: [
+      "webhooks posted to forum channels must have a thread_name or thread_id",
       "discord webhook forum channel",
       "discord webhook thread_id",
       "discord webhook thread_name",
       "discord webhook forum post",
-      "discord webhook error 220001",
     ],
     sections: [
+      {
+        heading: "Fix “must have a thread_name or thread_id” (error 220001)",
+        paragraphs: [
+          "A text channel accepts webhook messages directly. A forum or media channel does not: everything in it lives inside a post, so Discord needs to know which post a message belongs to. Pick one of the two fixes below — never both, or the request fails the other way.",
+          'Add "thread_name" to the JSON body to create a new post titled with that text, or add ?thread_id=POST_ID to the webhook URL to send into a post that already exists. The table lists every thread-related error with the exact message Discord returns, so you can match the one in your logs.',
+        ],
+        table: {
+          headers: ["Discord's message", "Code", "What it means", "Fix"],
+          rows: [
+            [
+              "Webhooks posted to forum channels must have a thread_name or thread_id",
+              "220001",
+              "The webhook's channel is a forum or media channel and the request named no post",
+              'Add "thread_name" to the body for a new post, or ?thread_id= to the URL for an existing one',
+            ],
+            [
+              "Webhooks posted to forum channels cannot have both a thread_name and thread_id",
+              "220002",
+              "The request asked to create a post and reply in one at the same time",
+              "Remove thread_name when replying; remove thread_id when creating",
+            ],
+            [
+              "Webhooks can only create threads in forum channels",
+              "220003",
+              "thread_name was sent to a webhook in an ordinary text channel",
+              "Drop thread_name; to post inside an existing thread there, use ?thread_id=",
+            ],
+            [
+              "Unknown Channel",
+              "10003",
+              "The thread_id is not a thread under this webhook's channel, or it was deleted",
+              "Copy the ID from inside the post and use that channel's own webhook",
+            ],
+          ],
+        },
+      },
+      {
+        heading: "Fix it in a script or an automation tool",
+        paragraphs: [
+          "Both fixes are one change to the request you already send. The first command creates a new forum post; the second replies inside an existing post. Add wait=true when you need the response: the message it returns carries the new post's ID as its channel_id, which is the thread_id for every later reply to that post.",
+          "In a no-code tool that only lets you paste a URL — a CI job, a monitoring alert, a form service — append ?thread_id=POST_ID to the webhook URL, and every message that tool sends lands in that one post. A tool that lets you add JSON fields can create posts instead by adding thread_name. The [cURL guide](/guides/discord-webhook-curl/) and the [Python](/guides/discord-webhook-python/) and [JavaScript](/guides/discord-webhook-javascript/) guides cover the rest of each request.",
+        ],
+        code: `# Create a new forum post (thread_name in the JSON body)
+curl -H "Content-Type: application/json" \\
+  -d '{"thread_name": "Release notes: 2.4", "content": "What changed this week"}' \\
+  "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN?wait=true"
+
+# Reply inside an existing post or thread (thread_id in the URL)
+curl -H "Content-Type: application/json" \\
+  -d '{"content": "Hotfix 2.4.1 is out"}' \\
+  "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN?thread_id=POST_ID"
+
+# Python requests: the same two calls
+requests.post(url, params={"wait": "true"}, json={"thread_name": "Release notes: 2.4", "content": "What changed"})
+requests.post(url, params={"thread_id": post_id}, json={"content": "Hotfix 2.4.1 is out"})`,
+      },
       {
         heading: "Choose a new post or an existing thread",
         table: {
@@ -1495,8 +1987,16 @@ X-RateLimit-Remaining: 0
         paragraphs: [
           "In Discord with Developer Mode enabled, copy the thread's Channel ID. Open DWEEB's Send panel, expand the optional thread or forum-post control and paste it into Thread ID. Use a webhook for the parent channel, clear Thread name and any create-only tag settings, then review the send destination.",
           "In your own code, thread_id belongs in the webhook URL's query string, not inside the components tree. Keep the normal exported V2 body, without thread_name. An ID from an unrelated text channel cannot be used to make the webhook post there; choose that channel's own destination instead.",
+          "An archived post is not a dead end: Discord unarchives the thread automatically when a webhook sends into it with thread_id. A locked thread is different — check its state and the posting app's access before retrying.",
         ],
         code: "POST https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN?with_components=true&wait=true&thread_id=THREAD_ID",
+      },
+      {
+        heading: "Add forum tags with applied_tags",
+        paragraphs: [
+          'A new post can carry the forum\'s tags: send "applied_tags" beside "thread_name" as an array of tag IDs, for example "applied_tags": ["1234567890123456789"]. Tags only apply when creating a post, and only in forum and media channels.',
+          "Use the tag's ID, not its visible name. Tag IDs are part of the forum channel's own configuration — the available_tags list on the channel object — so the same tag name in another server, or in another forum of the same server, has a different ID.",
+        ],
       },
       {
         heading: "Restore and edit a message inside a forum post",
@@ -1524,18 +2024,44 @@ X-RateLimit-Remaining: 0
               "Check the thread's parent against the selected webhook's channel",
             ],
             [
-              "Repeated new posts",
-              "A new send still has Thread name; use an existing Thread ID or Update",
+              "Every send creates another post",
+              "The request still has thread_name; send follow-ups with the first post's thread_id, or Update the original",
             ],
             [
               "Missing or invalid tags",
               "Use tag IDs configured for this forum, not role IDs or visible tag names",
             ],
+            [
+              "Message lands in the wrong post",
+              "The thread_id is from another post; copy the ID from inside the post you want",
+            ],
           ],
         },
         paragraphs: [
-          "For an archived or locked thread, inspect its state and the access available to the posting app before retrying. A successful preview cannot determine whether the destination is currently writable. The [webhook troubleshooting guide](/guides/discord-webhook-errors/) covers the broader HTTP errors and how to read a field-specific response.",
+          "For a locked thread, inspect its state and the access available to the posting app before retrying. A successful preview cannot determine whether the destination is currently writable. The [webhook troubleshooting guide](/guides/discord-webhook-errors/) covers the broader HTTP errors, with every common error message quoted exactly, and how to read a field-specific response.",
         ],
+      },
+    ],
+    faq: [
+      {
+        q: "What does “Webhooks posted to forum channels must have a thread_name or thread_id” mean?",
+        a: "The webhook belongs to a forum or media channel, where every message has to live inside a post, and the request did not say which one. Add thread_name to the JSON body to create a new post, or add ?thread_id=POST_ID to the webhook URL to send into an existing post.",
+      },
+      {
+        q: "How do I send a Discord webhook to a specific thread?",
+        a: "Append ?thread_id=THREAD_ID to the webhook URL and send the message as usual. The webhook must belong to the thread's parent channel, and Discord unarchives an archived thread automatically when the message arrives.",
+      },
+      {
+        q: "How do I create a forum post with a webhook?",
+        a: "Send the message to the forum channel's webhook with a thread_name field in the JSON body; that text becomes the post title. Add applied_tags with the forum's tag IDs if the post should carry tags.",
+      },
+      {
+        q: "Can a webhook create a thread in a normal text channel?",
+        a: "No. thread_name only creates posts in forum and media channels; in a text channel Discord answers with error 220003. A webhook can still post inside an existing thread there by adding thread_id to the URL.",
+      },
+      {
+        q: "Why does my forum webhook create a new post every time?",
+        a: "Every request that includes thread_name creates a new post. Send the first message with wait=true, keep the channel_id from the response — that is the new post's ID — and send later messages with it as thread_id.",
       },
     ],
     sources: [
@@ -1572,7 +2098,7 @@ X-RateLimit-Remaining: 0
     eyebrow: "Community guide · Server rules",
     lede: "Good rules are short, numbered and impossible to miss. This guide gives you complete rule sets you can paste into your #rules channel today — a general template, versions for gaming, creator and study servers, add-ons for voice chat and age-restricted channels — plus the formatting that makes them readable and a way to keep them editable after you post.",
     published: "2026-09-16",
-    modified: "2026-09-16",
+    modified: "2026-09-23",
     keywords: [
       "discord server rules template",
       "discord rules template",
@@ -1738,6 +2264,7 @@ Being here means you agree to follow these.
           'Pasting the text into #rules as a normal message works, but it is tied to whoever posted it and it cannot carry an accent colour or dividers. Posting it through a webhook with the [server rules template](/templates/discord-server-rules-template/) gives you a card with a coloured stripe, separators between the header, the rules and the consequences, and a named sender such as "Server Rules" instead of a personal account. Open the template, paste your rules into the middle text block, check the preview and send.',
           "Rules change. Instead of deleting the post and losing the pin, [restore the message and update it in place](/guides/edit-discord-webhook-message/) — the message link stays the same, so nothing that points at it breaks. If the rules mention a role or a user, review [allowed mentions](/guides/discord-webhook-mentions/) first so an edit does not ping anyone.",
           "On a Community server, Discord's Rules Screening feature shows a short list of rules that new members must accept before they can talk. Keep that list to the essentials and keep the full text in #rules; the screening prompt is deliberately compact, and the channel is where people will actually look things up.",
+          "New members usually read the rules straight after a welcome message, so write the two together. The [copy-and-paste welcome messages](/guides/discord-welcome-messages/) use the same formatting and come in versions for the same kinds of server as the rule sets above.",
         ],
       },
       {
@@ -1772,13 +2299,342 @@ Being here means you agree to follow these.
       },
     ],
     related: [
+      "discord-welcome-messages",
       "discord-text-formatting",
       "edit-discord-webhook-message",
       "discord-webhook-mentions",
-      "how-to-create-a-discord-webhook",
     ],
     ctaLabel: "Open the rules template",
     ctaPath: "/#template=rules",
+  }),
+  // Added 2026-09-23 from Search Console data: ~20 welcome-message queries
+  // ("discord welcome message template copy and paste", "welcome message for
+  // discord server copy and paste", "discord welcome message examples", PT "bem
+  // vindo discord copiar") land on the welcome template page at position 6-9,
+  // but the searcher wants TEXT to paste — the gap the server-rules guide
+  // closed on 2026-09-16. This guide carries the text; the template page
+  // carries the visual card, and they cross-link.
+  guide({
+    slug: "discord-welcome-messages",
+    title: "Discord Welcome Message Examples: Copy & Paste Templates | DWEEB",
+    h1: "Discord Welcome Messages You Can Copy and Paste",
+    description:
+      "Copy-and-paste Discord welcome messages for general, gaming, creator, study and support servers, plus channel links, onboarding tips and formatting.",
+    eyebrow: "Community guide · Welcome messages",
+    lede: "A welcome message is the first thing a new member reads, so it has one job: take someone from “just joined” to “knows where to go” in a few seconds. Below are complete welcome messages you can paste into your #welcome channel today — general, short, gaming, creator, study and support versions, plus lines in other languages — with the syntax that turns channel names into real links and a plain map of what Discord's own welcome features already do.",
+    published: "2026-09-23",
+    modified: "2026-09-23",
+    keywords: [
+      "discord welcome message",
+      "discord welcome message template copy and paste",
+      "welcome message for discord server",
+      "discord welcome message examples",
+      "discord greeting message",
+    ],
+    sections: [
+      {
+        heading: "What a good welcome message does",
+        paragraphs: [
+          "A welcome post is read once by everyone who joins and then hardly ever again, so it has to work on the first read. Every template below does the same three jobs, in the same order.",
+          "Everything else — server history, the full channel list, bot commands — belongs in its own post, such as a [channel guide](/templates/discord-channel-guide-template/) that maps the server. Link to it from the welcome message instead of pasting it in; a welcome that scrolls for two screens gets skipped. Pair it with a pinned rules post from the [server rules guide](/guides/discord-server-rules/) and a way to pick roles, and the first minute in your server is covered.",
+        ],
+        bullets: [
+          "Say who the server is for. One line is enough to tell a newcomer they are in the right place.",
+          "Give one first action. Read the rules, pick a role or say hello — a single clear next step beats a menu of ten.",
+          "Say where to ask. Name the channel or the people who answer questions, so nobody leaves because they got stuck.",
+        ],
+      },
+      {
+        heading: "General Discord welcome message (copy and paste)",
+        paragraphs: [
+          "This is the all-purpose version. It is the wording the [welcome message template](/templates/discord-welcome-message/) in DWEEB starts from, with a line about the server added at the top. Discord markdown is already applied: the heading, the bold step label, the bullets and the small subtext line all render as-is. Replace the bracketed parts and the channel names with your own.",
+        ],
+        code: `# 👋 Welcome to [Server Name]!
+We're really glad you found us. This is a community for [who the server is for], and here's everything you need to settle in.
+
+**Get started in three steps**
+- 📜 Read the **#rules** so everyone stays on the same page
+- 🎭 Pick up your roles in **#get-roles**
+- 💬 Say hi and introduce yourself in **#general**
+
+Stuck on anything? A friendly mod is only a message away — just ask in **#help**.
+-# Know someone who'd like it here? Invite them: [your invite link]`,
+      },
+      {
+        heading: "Short welcome message for a small server",
+        paragraphs: [
+          "A server of friends or a small hobby group does not need a checklist. Three lines set the tone and point at the one channel that matters.",
+        ],
+        code: `# Welcome! 👋
+Glad you're here. Have a quick look at #rules, then come say hi in #general.
+-# Questions? Any of the mods can help.`,
+      },
+      {
+        heading: "Gaming server welcome message",
+        paragraphs: [
+          "New members of a gaming community usually want to find people to play with, fast. Lead with the group-finding channel and the game roles, and keep the etiquette to a single line that points at the rules.",
+        ],
+        code: `# 🎮 Welcome to [Server Name]!
+You made it. Here's how to find people to play with.
+
+**Before you queue up**
+- 📜 Read **#rules** — cheating and toxicity are an instant ban
+- 🎭 Grab your game and platform roles in **#roles**
+- 🔎 Post in **#looking-for-group** to find a squad
+- 🎙️ Jump into any open voice channel — push-to-talk if it's noisy
+
+Clips go in **#clips**, bugs and feedback in **#feedback**.
+-# Need a hand? Tag a moderator or ask in #support.`,
+      },
+      {
+        heading: "Creator and fan community welcome message",
+        paragraphs: [
+          "A creator's server welcomes fans, so the message should sound like the creator and set expectations early: when new content lands, which pings are optional, and where self-promotion is allowed.",
+        ],
+        code: `# ✨ Welcome to the [Creator Name] community!
+This is the place to hang out between streams and uploads — thank you for being here.
+
+**Start here**
+- 📜 The **#rules** keep this place friendly, so please read them
+- 🔔 Pick your notification roles in **#roles** so you only get the pings you want
+- 📅 Stream and upload times are posted in **#announcements**
+- 🎨 Share your own work in **#self-promo** — everywhere else, keep it to chat
+
+Say hi in **#general** — we'd love to know how you found us.
+-# Members-only content stays in this server. Please don't share it outside.`,
+      },
+      {
+        heading: "Study, class or professional server welcome message",
+        paragraphs: [
+          "Servers built around a course, a study group or a profession need less decoration and more direction: where the material is, where to ask, and which honesty rules apply.",
+        ],
+        code: `# 📚 Welcome to [Server Name]
+A shared space for [course, subject or profession]. Here's how it's organized.
+
+**Getting started**
+- 📜 Read **#rules**, especially the part about academic honesty
+- 🗂️ Course material and schedules are pinned in **#resources**
+- ❓ Ask questions in **#help** — search first, someone may have asked already
+- 👋 Introduce yourself in **#introductions**: your name, what you're studying and what you'd like help with
+
+Study sessions run in the voice channels; check **#schedule** for times.
+-# Stuck? Message any moderator. Office hours are listed in #schedule.`,
+      },
+      {
+        heading: "Support or product community welcome message",
+        paragraphs: [
+          "A server for a product, an open-source project or a paid community is mostly a help desk. The welcome message should route people to the right channel before a bug report lands in general chat.",
+        ],
+        code: `# 👋 Welcome to the [Product] community
+Thanks for joining! This is where users swap tips, get help and hear about updates first.
+
+**Find the right place**
+- 📣 Release notes and news: **#announcements**
+- 🛠️ Something broken? Post in **#support** with your version and what you tried
+- 💡 Ideas and feature requests go in **#suggestions**
+- 📖 Most answers are already in **#faq**, so it's worth a look first
+
+Please don't DM staff for support; answers in public channels help the next person too.
+-# Found a security issue? Report it privately to [contact] instead of posting it.`,
+      },
+      {
+        heading: "Link channels, roles and onboarding",
+        paragraphs: [
+          "In a message posted through a webhook, a plain #rules is only text — nothing happens when someone taps it. Discord's message formatting has a form for each thing a welcome message points at, and each renders as a real link. Replace the uppercase placeholder with the real ID: turn on Developer Mode in Discord's User Settings, then right-click the channel or role and copy its ID.",
+          "The three <id:…> links open parts of Discord's Onboarding and Server Guide, so they only lead somewhere useful on a Community server that has those features switched on. On any other server, stick to channel links.",
+        ],
+        table: {
+          headers: ["To link", "Write", "What members see"],
+          rows: [
+            ["A channel", "<#CHANNEL_ID>", "The channel's name as a tappable link"],
+            [
+              "A role",
+              "<@&ROLE_ID>",
+              "A coloured role pill. It can notify that role, so check [allowed mentions](/guides/discord-webhook-mentions/) before you post",
+            ],
+            [
+              "Channels & Roles",
+              "<id:customize>",
+              "The Channels & Roles tab with your Onboarding questions",
+            ],
+            ["Browse Channels", "<id:browse>", "The Browse Channels list"],
+            ["Server Guide", "<id:guide>", "The Server Guide, when it is enabled"],
+            [
+              "A date or time",
+              "<t:UNIX:F>",
+              "The moment in each reader's own timezone — see the [timestamp guide](/guides/discord-timestamp-format/)",
+            ],
+          ],
+        },
+        code: `# 👋 Welcome to [Server Name]!
+- 📜 Start with the rules: <#RULES_CHANNEL_ID>
+- 🎭 Choose your roles and channels: <id:customize>
+- 🧭 See every channel: <id:browse>
+- 💬 Say hi: <#GENERAL_CHANNEL_ID>`,
+      },
+      {
+        heading: "Short welcome lines in other languages",
+        paragraphs: [
+          "Multilingual servers often add one short line per language under the main message. These keep the same three steps; rename the channels to match your server.",
+        ],
+        code: `**Español** — ¡Bienvenido/a! Lee las reglas en #reglas, elige tus roles en #roles y saluda en #general.
+**Português** — Bem-vindo(a)! Leia as regras em #regras, escolha seus cargos em #cargos e diga oi em #geral.
+**Français** — Bienvenue ! Lis les règles dans #règles, choisis tes rôles dans #rôles et dis bonjour dans #général.
+**Deutsch** — Willkommen! Lies die Regeln in #regeln, hol dir deine Rollen in #rollen und sag Hallo in #allgemein.`,
+      },
+      {
+        heading: "A pinned welcome post vs Discord's built-in welcome features",
+        paragraphs: [
+          "Discord already has several welcome features, and a pinned message works alongside them rather than instead of them. Knowing what each one does keeps you from writing the same thing three times. Onboarding needs at least seven default channels, five of which everyone can view and send messages in, before it can be switched on.",
+          "The one thing a pinned post cannot do is react to each arrival. A message sent through a webhook — which is how DWEEB posts — is written once and stays the same when someone joins. Discord's new member messages greet each person by name with a random line you cannot reword; a greeting in your own words at join time needs a bot that listens for new members. DWEEB builds the message people read, not per-join greetings.",
+        ],
+        table: {
+          headers: ["Feature", "What it does", "Where to set it up"],
+          rows: [
+            [
+              "Pinned welcome post",
+              "Your own words, links, images and buttons in one message that stays at the top of #welcome",
+              "Post it as a normal message or through a webhook, then pin it",
+            ],
+            [
+              "New member messages",
+              "Discord posts a random join line naming the new member, with an optional prompt to reply with a wave sticker. The text cannot be customized",
+              "Server Settings, under System Messages (needs Manage Server)",
+            ],
+            [
+              "Onboarding",
+              "Community servers: default channels plus questions that let new members pick their own roles and channels",
+              "Server Settings → Onboarding",
+            ],
+            [
+              "Server Guide",
+              "Part of Onboarding: an admin-written welcome sign, three to five new-member to-dos and resource pages",
+              "Server Settings → Onboarding, after default channels and questions",
+            ],
+            [
+              "Welcome Screen",
+              "The older Community welcome panel. It is now a legacy feature that can no longer be edited, and Discord recommends Onboarding instead",
+              "Replaced by Onboarding",
+            ],
+          ],
+        },
+      },
+      {
+        heading: "Format the welcome so people read it",
+        paragraphs: [
+          "The templates above use a handful of Discord markdown pieces, chosen because they survive a quick skim. The [text formatting reference](/guides/discord-text-formatting/) covers every rule and the quirks behind them.",
+          "Leave @everyone and @here out: a welcome post is read by people arriving over weeks, so pinging the whole server when you post it only annoys the members who already know their way around. If the text includes a role or user mention, set allowed mentions so it renders without notifying anyone.",
+        ],
+        table: {
+          headers: ["Element", "Markdown", "Why it helps"],
+          rows: [
+            [
+              "Heading",
+              "# 👋 Welcome to …",
+              "The largest text in the message; the eye lands there first.",
+            ],
+            [
+              "Step label",
+              "**Get started in three steps**",
+              "Tells the reader the message is short before they start.",
+            ],
+            [
+              "Steps",
+              "- 📜 Read the **#rules**",
+              "One action per line, each starting with a verb.",
+            ],
+            ["Emoji", "📜 🎭 💬", "One per line works as an icon; more than that is noise."],
+            [
+              "Subtext",
+              "-# Questions? Ask a mod",
+              "Small grey text keeps contacts and invite links out of the way.",
+            ],
+          ],
+        },
+      },
+      {
+        heading: "Post it as a card, then keep it editable",
+        paragraphs: [
+          "Pasting the text into #welcome as a normal message works, but it shows as a post from your personal account and cannot carry an accent colour, dividers or buttons. Posting it through a webhook with the [welcome message template](/templates/discord-welcome-message/) gives you a card with a banner image, a coloured stripe, link buttons and a named sender such as “Welcome” — the [webhook name and avatar guide](/guides/discord-webhook-name-avatar/) shows how to set both. Open the template, paste your text into its blocks, check the live preview and send, or build your own layout from scratch in the [Discord message builder](/discord-message-builder/).",
+          "Welcome messages go stale: a channel gets renamed, a role changes, the server grows a new section. Instead of deleting the post and losing the pin, [restore the message and update it in place](/guides/edit-discord-webhook-message/). The message link stays the same, so anything that points at it keeps working.",
+        ],
+      },
+      {
+        heading: "How long should a Discord welcome message be?",
+        paragraphs: [
+          "Short enough to read on a phone without scrolling: a heading, a sentence or two, three to five steps and a footnote — the size of every template above. Each is a few hundred characters, far inside the 2,000 characters Discord allows in a message without Nitro. Anything longer is usually a rules post, a channel guide or an FAQ in disguise, and belongs in its own message.",
+          "Test it the way a newcomer would: open the channel on a phone, read only the heading and the bold lines, and check that you still know what to do first.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What should a Discord welcome message say?",
+        a: "Three things, in this order: who the server is for, the first thing a new member should do (read the rules, pick a role or say hello), and where to go with questions. Everything else belongs in its own post that the welcome message links to.",
+      },
+      {
+        q: "How long should a Discord welcome message be?",
+        a: "Short enough to read on a phone without scrolling: a heading, a sentence or two, three to five steps and a footnote. Move anything longer into a rules post, a channel guide or an FAQ.",
+      },
+      {
+        q: "Can I copy and paste these welcome messages into any channel?",
+        a: "Yes. Every example is plain Discord markdown, so it renders the same pasted as a normal message or posted through a webhook. Swap in your own server and channel names first.",
+      },
+      {
+        q: "How do I link a channel in a Discord welcome message?",
+        a: "Write it as <#CHANNEL_ID> with the channel's numeric ID, which you can copy after turning on Developer Mode in Discord's User Settings. On a Community server with Onboarding, <id:customize> opens Channels & Roles and <id:browse> opens Browse Channels.",
+      },
+      {
+        q: "Can a welcome message greet each new member by name?",
+        a: "Not a pinned post, because it is one static message. Discord's built-in new member messages greet each person by name with a random line you cannot reword; a greeting in your own words at join time needs a bot. DWEEB builds the message people read, not per-join greetings.",
+      },
+      {
+        q: "Where should I post my Discord welcome message?",
+        a: "In a #welcome or #start-here channel that new members can read and only staff can post in, pinned so it stays easy to find. If Discord's join messages are on, send them to a different channel so they do not bury the welcome post.",
+      },
+      {
+        q: "Do I need a bot to post a welcome message?",
+        a: "No. Paste the text as a normal message, or post it through a webhook for a named sender, an accent colour, images and link buttons. A bot is only needed for things that happen automatically when someone joins.",
+      },
+    ],
+    sources: [
+      {
+        label: "Discord support: New Member Messages",
+        url: "https://support.discord.com/hc/en-us/articles/115001156852-New-Member-Messages",
+      },
+      {
+        label: "Discord support: Community Onboarding FAQ",
+        url: "https://support.discord.com/hc/en-us/articles/11074987197975-Community-Onboarding-FAQ",
+      },
+      {
+        label: "Discord support: Server Guide FAQ",
+        url: "https://support.discord.com/hc/en-us/articles/13497665141655-Server-Guide-FAQ",
+      },
+      {
+        label: "Discord support: Community Server Welcome Screen",
+        url: "https://support.discord.com/hc/en-us/articles/360043913591-Community-Server-Welcome-Screen",
+      },
+      {
+        label: "Discord API: Message formatting — channel, role and guild navigation links",
+        url: "https://docs.discord.com/developers/reference#message-formatting",
+      },
+      {
+        label: "Discord support: Where can I find my User/Server/Message ID?",
+        url: "https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID",
+      },
+      {
+        label: "Discord support: Markdown Text 101",
+        url: "https://support.discord.com/hc/en-us/articles/210298617-Markdown-Text-101-Chat-Formatting-Bold-Italic-Underline",
+      },
+    ],
+    related: [
+      "discord-server-rules",
+      "discord-text-formatting",
+      "edit-discord-webhook-message",
+      "discord-webhook-name-avatar",
+    ],
+    ctaLabel: "Open the welcome template",
+    ctaPath: "/#template=welcome",
   }),
   // The developer cluster — sending a Components V2 message from code — lives
   // in its own file; every code block in it is generated at build time.
@@ -1864,20 +2720,24 @@ function landing(input: LandingInput): LandingPage {
 
 const WEBHOOK_BUILDER_LANDING = landing({
   slug: "discord-webhook-builder",
-  title: "Discord Webhook Message Builder — Live Preview | DWEEB",
+  // 2026-09-23: "discord webhook sender / tester / maker / creator" searches
+  // sat at position 40-50 with the page saying none of those words; the tool
+  // does all of them, so the snippet now says so.
+  title: "Discord Webhook Builder & Sender with Live Preview | DWEEB",
   h1: "Discord Webhook Message Builder",
   breadcrumb: "Discord Webhook Message Builder",
   chip: "🛠️ Visual builder",
-  lede: "Use a visual Discord webhook message builder to design, preview, send, restore and schedule Components V2 messages from one editor.",
+  lede: "Use a visual Discord webhook message builder to design, preview, test, send, restore and schedule Components V2 messages from one editor.",
   description:
-    "Build Discord webhook messages visually. Preview, import JSON, send, restore and edit with no account; sign in to schedule.",
+    "Build, test and send Discord webhook messages visually: live preview, JSON import and export, and restore-and-edit — free, no account. Sign in to schedule.",
   keywords: [
     "discord webhook message builder",
     "discord webhook builder",
+    "discord webhook sender",
     "discord webhook generator",
     "discord components v2 builder",
   ],
-  modified: "2026-08-20",
+  modified: "2026-09-23",
   ctaLabel: "Open the webhook message builder",
   ogCategory: "Visual editor · Free core builder",
   ogKicker: "Build · Preview · Send · Edit · Schedule",

@@ -53,7 +53,7 @@ export const SITE = {
  * meaningfully revise templates — keeping it stable (rather than "now" on every
  * deploy) avoids signalling false freshness to search engines.
  */
-export const TEMPLATES_LASTMOD = "2026-09-22";
+export const TEMPLATES_LASTMOD = "2026-09-23";
 
 // 2026-09-11: every detail page gained its source-derived JSON and compatibility
 // reference. 2026-09-16: every detail page gained the "Read next" guide row.
@@ -62,7 +62,17 @@ export const TEMPLATES_LASTMOD = "2026-09-22";
 // placeholder glyph that read as a broken picture.
 // Future individual edits should use an override instead of refreshing this baseline.
 const DEFAULT_TEMPLATE_LASTMOD = "2026-09-22";
-const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {};
+// 2026-09-23: the welcome page gained the welcome-messages guide (intro, FAQ,
+// "Read next"), and the channel guide's row leads with it; the announcement,
+// event and giveaway pages now lead their "Read next" row with the timestamp
+// generator.
+const TEMPLATE_LASTMOD_OVERRIDES: Readonly<Record<string, string>> = {
+  welcome: "2026-09-23",
+  "channel-guide": "2026-09-23",
+  announcement: "2026-09-23",
+  event: "2026-09-23",
+  "giveaway-button": "2026-09-23",
+};
 
 /** Meaningful content date for one generated template page. */
 export function templateLastmod(id: string): string {
@@ -153,7 +163,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     description:
       "Discord welcome message template with a banner and a 3-step get-started guide. Copy the text or customize the card, then send through any webhook. Free, no bot.",
     intro:
-      "Greet every new member with a polished welcome message instead of a wall of text. This template leads with a banner image, then points newcomers straight to your rules, roles and general chat in three quick steps — everything they need to settle in fast.",
+      "Greet every new member with a polished welcome message instead of a wall of text. This template leads with a banner image, then points newcomers straight to your rules, roles and general chat in three quick steps — everything they need to settle in fast. For longer and themed versions — gaming, creator, study and support servers — use the copy-and-paste welcome messages guide linked below.",
     whenToUse: [
       "Posting a warm intro in your #welcome channel",
       "Onboarding new members with a clear first action",
@@ -162,7 +172,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
     faq: [
       {
         q: "Can I copy and paste this welcome message?",
-        a: 'Yes. The text is plain Discord markdown — a heading, a short greeting and three numbered steps — so you can copy it from the template and paste it into any channel. Posting it through a webhook instead keeps the banner image, the accent colour and a named sender such as "Welcome" rather than a personal account.',
+        a: 'Yes. The text is plain Discord markdown — a heading, a short greeting and three numbered steps — so you can copy it from the template and paste it into any channel. Posting it through a webhook instead keeps the banner image, the accent colour and a named sender such as "Welcome" rather than a personal account. The welcome messages guide linked on this page has ready-to-paste versions for gaming, creator, study and support servers.',
       },
       {
         q: "What should a Discord welcome message say?",
@@ -170,7 +180,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       },
     ],
     keywords: ["discord welcome message copy and paste", "welcome message discord template"],
-    guides: ["discord-server-rules", "discord-webhook-name-avatar", "edit-discord-webhook-message"],
+    guides: ["discord-welcome-messages", "discord-server-rules", "discord-webhook-name-avatar"],
   },
   rules: {
     slug: "discord-server-rules-template",
@@ -225,6 +235,7 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Cutting down on 'where do I post this?' questions",
       "Pairing with your welcome and rules messages",
     ],
+    guides: ["discord-welcome-messages", "discord-server-rules", "discord-text-formatting"],
   },
   verify: {
     slug: "discord-verification-message",
@@ -449,6 +460,11 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Posting a broadcast that needs to stand out",
       "Sharing news with a clear call-to-action link",
     ],
+    guides: [
+      "discord-timestamp-format",
+      "discord-webhook-mentions",
+      "edit-discord-webhook-message",
+    ],
   },
   "patch-notes": {
     slug: "discord-changelog-template",
@@ -566,6 +582,12 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Pinging confirmed attendees when the event starts",
     ],
     keywords: ["rsvp button", "attendee role", "event signup"],
+    // An event's time is the one line every reader needs in their own zone.
+    guides: [
+      "discord-timestamp-format",
+      "edit-discord-webhook-message",
+      "discord-webhook-mentions",
+    ],
   },
   poll: {
     slug: "discord-poll-template",
@@ -596,6 +618,11 @@ export const TEMPLATE_SEO: Record<string, TemplateSeoOverride> = {
       "Drawing a fair winner automatically",
     ],
     keywords: ["discord giveaway bot", "giveaway message", "raffle", "prize draw"],
+    guides: [
+      "discord-timestamp-format",
+      "how-to-create-a-discord-webhook",
+      "discord-webhook-mentions",
+    ],
   },
   "help-center": {
     slug: "discord-help-center-template",

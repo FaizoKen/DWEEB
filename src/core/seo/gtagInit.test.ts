@@ -7,7 +7,7 @@ const loaderSource = readFileSync(new URL("../../../public/gtag-init.js", import
 function runLoader(
   href: string,
   options: { canonical?: string; appShell?: boolean; referrer?: string } = {},
-): { pageLocation: string; pageReferrer: string; delays: number[] } {
+): { pageLocation: string; pageReferrer: string; delays: number[]; calls: unknown[][] } {
   const dataLayer: IArguments[] = [];
   const delays: number[] = [];
   const location = new URL(href);
@@ -43,8 +43,10 @@ function runLoader(
     },
   });
 
-  const config = dataLayer.map((args) => Array.from(args)).find((args) => args[0] === "config");
+  const calls = dataLayer.map((args) => Array.from(args));
+  const config = calls.find((args) => args[0] === "config");
   return {
+    calls,
     pageLocation: (config?.[2] as { page_location?: string } | undefined)?.page_location ?? "",
     pageReferrer: (config?.[2] as { page_referrer?: string } | undefined)?.page_referrer ?? "",
     delays,
@@ -77,6 +79,20 @@ describe("analytics page-location privacy", () => {
 
   it("keeps third-party analytics behind the app-shell paint window", () => {
     expect(runLoader("https://dweeb.faizo.net/", { appShell: true }).delays).toContain(8000);
+  });
+
+  it("opts the tag out of Google signals and ad personalization before config", () => {
+    // The privacy policy promises no advertising or cross-site tracking; the
+    // page opts out itself rather than trusting the property's admin toggles.
+    const { calls } = runLoader("https://dweeb.faizo.net/guides/discord-components-v2/");
+    const setIndex = calls.findIndex(
+      (args) =>
+        args[0] === "set" &&
+        (args[1] as Record<string, unknown>).allow_google_signals === false &&
+        (args[1] as Record<string, unknown>).allow_ad_personalization_signals === false,
+    );
+    expect(setIndex).toBeGreaterThanOrEqual(0);
+    expect(setIndex).toBeLessThan(calls.findIndex((args) => args[0] === "config"));
   });
 
   it("keeps only the HTTP referrer's origin", () => {

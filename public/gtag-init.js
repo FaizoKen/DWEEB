@@ -24,6 +24,17 @@
     window.dataLayer.push(arguments);
   };
   window.gtag("js", new Date());
+  // The privacy policy promises no advertising or cross-site tracking, so the
+  // tag opts out of Google signals and ad personalization itself instead of
+  // relying on the property's admin toggles; set before `config` so it applies
+  // to the tag's hits (they carry npa=1 since). The stream's linked destination
+  // still attempts a stats.g.doubleclick.net beacon of its own: the generated
+  // pages' CSP refuses it (a console error when GA loads there), and the GA
+  // property's Google-signals setting is what governs it.
+  window.gtag("set", {
+    allow_google_signals: false,
+    allow_ad_personalization_signals: false,
+  });
   var pageType = document.documentElement.getAttribute("data-page-type") || "app";
   var isAppShell = document.documentElement.hasAttribute("data-app-shell");
 

@@ -1132,6 +1132,44 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   by design, and the 13 RoleLogic role templates being un-crawled is crawl-budget prioritisation
   on a young domain, not a markup fault. The audit warns on titles over 65 characters and
   descriptions over 160 — keep new copy under both, since Google truncates around there anyway.
+- **Guides quote Discord's error messages verbatim, can carry an FAQ and an interactive tool,
+  and the timestamp reference covers all nine styles** (2026-09-23 pass; Search Console +
+  Bing Webmaster Tools read through the maintainer's signed-in browser). Growth was real —
+  impressions tripled in two weeks (~550/day, average position 25 → 8) — but the guides that
+  took most of it earned almost no clicks: `/guides/discord-webhook-forum-threads/` (~370
+  impressions at 7.4, 0.8% CTR) and `/guides/discord-webhook-errors/` (214 at 7.4, zero clicks),
+  both fed by anonymized long-tail queries whose named members were **pasted error text**
+  ("webhooks posted to forum channels must have a thread_name or thread_id", "discord api error
+  400", "missing permissions") that neither page ever printed. (1) **Error pages now quote each
+  message exactly** — the API's own casing ("Unknown Webhook", "Missing Permissions", "Invalid
+  Form Body"), the nested Components V2 codes (`MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2`,
+  `UNION_TYPE_CHOICES` = V2 components sent without flag 32768) and the discord.js /
+  discord.py renderings (`DiscordAPIError[50013]: Missing Permissions`, `403 Forbidden (error
+  code: 50013)`). Verify a new string against Discord's docs or a real response before adding it;
+  a paraphrase matches nothing anyone searches. Deliberately left out as unverified: what
+  triggers 220004, and whether the `/github` endpoint accepts `thread_id` for a forum channel.
+  (2) **`GuidePage.faq`** renders a visible FAQ and `FAQPage` JSON-LD from one array, like the
+  landings; answers are plain text (they are the schema text, so no inline links). (3)
+  **`GuidePage.tool`** adds an interactive block above the table of contents. Its script is a
+  `scripts/seo/tools/*.client.ts` that imports straight from `src/` and is bundled by
+  `tools/bundle.ts` with **Bun.build** at generation time (the generator already runs under Bun;
+  bun-types is not a dependency, hence the typed shim) — never a hand-written copy under
+  `public/`, which would drift from the editor. The tool's static markup must be a complete worked
+  example on its own (no-JS readers and non-rendering crawlers get the reference table), and
+  `artifact-audit.ts` now fails any generated page whose first-party `<script src>` is missing.
+  The first tool is the Discord timestamp generator on `/guides/discord-timestamp-format/`
+  (retitled around it), built from the same `features/preview/markdown/timestamp.ts` the preview
+  and the toolbar picker use. (4) **Discord has nine timestamp styles** — `s` (short date, short
+  time) and `S` (short date, medium time) joined the original seven; the preview parser used to
+  accept only `[tTdDfFR]`, so `<t:…:s>` rendered as raw text in DWEEB while Discord showed a
+  date. `t`/`T` are Intl's `timeStyle` short/medium — Discord's own names, and the same short time
+  `f` ends with (a forced 2-digit hour read "09:05 AM" beside `f`'s "9:05 AM"). (5) **A
+  `.table-scroll` is `position: relative`**: an absolutely positioned `sr-only` header at a wide
+  table's far edge otherwise escapes the scroll container's clip and widens the whole page on a
+  phone (found at 390px; mobile-first indexing reads that layout). (6) The welcome-message cluster
+  (~20 "copy and paste" variants landing on the template page) got `/guides/discord-welcome-messages/`,
+  the same guide-carries-the-text / template-carries-the-card split as the rules pair, which moved
+  the rules template from position ~28 to ~10 within a week of 2026-09-16.
 - **Static discovery is a build contract.** `scripts/gen-template-pages.ts` generates the
   template and feature catalogues, `/guides/*`, the product landing pages, and the image
   sitemap. Build-critical generator code is covered by `tsconfig.seo.json`; `bun run build` then
@@ -1381,6 +1419,15 @@ plus 9 interaction-plugin crates) and an embedded Discord Activity (collaborativ
   the controlled canonical plus a referrer's origin; acquisition ids and product-event fields use
   exact allowlists. Keep GA Enhanced Measurement disabled (especially outbound clicks, site search,
   and history pageviews), because those automatic events bypass the repository's field filters.
+  `gtag-init.js` also sets `allow_google_signals: false` and `allow_ad_personalization_signals:
+  false` before `config` (2026-09-23): the privacy policy promises no advertising or cross-site
+  tracking, and the page should not depend on the property's admin toggles for that (hits carry
+  `npa=1` since). It does **not** silence everything: the web stream's linked destination
+  still attempts a `stats.g.doubleclick.net` beacon — allowed by the app shell's
+  broad `connect-src`, refused by every generated page's narrow one, which logs a CSP console
+  error whenever GA loads there (a throttled Lighthouse run scored Best Practices 93 for it). The
+  property's Google-signals setting (GA Admin → Data collection) governs that beacon; don't widen
+  the generated pages' CSP to make the error go away.
   Never add message content, webhook URLs/tokens, guild/app/message ids, share payloads, or
   free-form text to analytics. **Never name an event parameter `source`, `medium`, `campaign`,
   `term` or `content`** (2026-09-18): GA4 reads those on *any* event as a manual campaign

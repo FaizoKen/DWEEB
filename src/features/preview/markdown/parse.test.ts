@@ -106,3 +106,22 @@ describe("bold across lines", () => {
     expect(kinds(out)).toContain("bold");
   });
 });
+
+describe("timestamps", () => {
+  it("parses all nine of Discord's style letters, including the later s and S", () => {
+    for (const style of ["t", "T", "d", "D", "f", "F", "s", "S", "R"]) {
+      const out = parseInline(`<t:1767225600:${style}>`);
+      expect(out).toEqual([{ kind: "timestamp", unix: 1767225600, style }]);
+    }
+  });
+
+  it("defaults a style-less token to f, like Discord", () => {
+    expect(parseInline("<t:1767225600>")).toEqual([
+      { kind: "timestamp", unix: 1767225600, style: "f" },
+    ]);
+  });
+
+  it("leaves an unknown style letter as literal text", () => {
+    expect(kinds(parseInline("<t:1767225600:x>"))).not.toContain("timestamp");
+  });
+});
